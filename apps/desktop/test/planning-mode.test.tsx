@@ -2079,6 +2079,52 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     expect(await within(dock()).findByText(/Noted:/)).toBeTruthy();
   });
 
+  it("keeps saying it is working through a pause it takes mid-turn", async () => {
+    // The pause that reads as something having gone wrong: the session says a
+    // line, then goes quiet to read the repository before it says the next.
+    // The lines alone cannot tell that from a session that has finished.
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+
+    await previewBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: plan.id });
+    await previewBridge.request({
+      kind: "interviewTurn",
+      id: plan.id,
+      text: "what is this piece of work for?",
+    });
+    expect((await within(dock()).findAllByText("Thinking…")).length).toBeGreaterThan(0);
+
+    // It speaks, and then says nothing for a while. The turn is not over, so
+    // the dock is still saying so — which is the whole point: the lines alone
+    // would read as a session that had finished.
+    await within(dock()).findByText(/I'll look at what's already here/);
+    expect((await within(dock()).findAllByText("Thinking…")).length).toBeGreaterThan(0);
+
+    // The rest of the turn lands, and only then does it stop saying it.
+    await within(dock()).findByText(/Noted:/);
+    await waitFor(() => expect(within(dock()).queryAllByText("Thinking…")).toHaveLength(0));
+  });
+
+  it("stops saying it is working when the interview is stopped mid-turn", async () => {
+    // Something going wrong, or the person deciding not to wait, is the one
+    // case the indicator must not sit through: nothing is coming.
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    await previewBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: plan.id });
+    await previewBridge.request({ kind: "interviewTurn", id: plan.id, text: "why two nodes?" });
+    expect((await within(dock()).findAllByText("Thinking…")).length).toBeGreaterThan(0);
+
+    await previewBridge.request({ kind: "interviewStop", id: plan.id });
+    await waitFor(() => expect(within(dock()).queryAllByText("Thinking…")).toHaveLength(0));
+    // And the turn it was in the middle of still lands without bringing it back.
+    await within(dock()).findByText(/Noted:/);
+    expect(within(dock()).queryAllByText("Thinking…")).toHaveLength(0);
+  });
+
   it("says the interview is working until its answer lands", async () => {
     const plan = await planning();
     location.hash = `planning/${plan.id}/spec`;

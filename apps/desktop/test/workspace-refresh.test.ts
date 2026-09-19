@@ -72,13 +72,14 @@ describe("workspace refresh interface", () => {
       running,
       entry: { n, at: "2026-01-01T00:00:00.000Z", line: { kind: "said", text: "line " + String(n) } },
       asking: null,
+      working: false,
     });
     for (let n = 1; n <= 40; n++) f.emit(line(n, true));
     expect(f.requests).toEqual([]);
     expect(f.client.getQueryData<Snapshot>(["workspace"])!.interviews).toEqual([sessionId]);
     expect(f.client.getQueryData<Snapshot>(["workspace"])!.refreshingRepos ?? []).toEqual([]);
     // And the one that says it has gone takes it off the list.
-    f.emit({ kind: "interview", sequence: 41, sessionId, running: false, entry: null, asking: null });
+    f.emit({ kind: "interview", sequence: 41, sessionId, running: false, entry: null, asking: null, working: false });
     expect(f.client.getQueryData<Snapshot>(["workspace"])!.interviews).toEqual([]);
     expect(f.requests).toEqual([]);
   });

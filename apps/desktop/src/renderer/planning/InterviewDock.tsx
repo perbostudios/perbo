@@ -71,6 +71,10 @@ export function InterviewDock({
   // session, because the editor holds a re-read back while a save of its own is
   // in flight and the card would come and go with that.
   const [pushed, setPushed] = useState<Asking | null | undefined>(undefined);
+  // Whether the session is working, as the host last pushed it. Held here for
+  // the reason the asking is: the editor holds a re-read back while a save is
+  // in flight, and a pause is exactly when this has to be right.
+  const [busyTurn, setBusyTurn] = useState<boolean | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [text, setText] = useState("");
@@ -79,6 +83,7 @@ export function InterviewDock({
   useEffect(() => {
     setLive([]);
     setPushed(undefined);
+    setBusyTurn(null);
     setFailure(null);
   }, [id]);
   useEffect(
@@ -86,6 +91,7 @@ export function InterviewDock({
       bridge.subscribe((change: Change) => {
         if (change.kind !== "interview" || change.sessionId !== id) return;
         setPushed(change.asking);
+        setBusyTurn(change.working);
         const entry = change.entry;
         if (entry === null) return;
         setLive((held) => (held.some((line) => line.n === entry.n) ? held : [...held, entry]));
@@ -204,12 +210,22 @@ export function InterviewDock({
   // Not gated on `running`: that is read from the snapshot and lags a turn
   // that has only just started the interview, which is exactly when the person
   // is first waiting. A stopped interview says so as a note, which ends this.
+  // What the session is doing while it says nothing, or null where the next
+  // word is the person's.
+  //
+  // Read from the session's own report of finishing a turn rather than from the
+  // last line: a session that has just said something and gone quiet to read
+  // the repository looks, from the lines alone, exactly like one that has
+  // finished — and the pause that follows is the one that reads as something
+  // having gone wrong (D-NEW-the-interview-says-when-it-is-working).
   const working = useMemo(() => {
+    // Until something is pushed, what the snapshot says: a dock opened part way
+    // through a turn missed the change that said so.
+    const busy = busyTurn === null ? (workspace.working ?? []).includes(id ?? "") : busyTurn;
+    if (!busy) return null;
     const last = conversation.at(-1)?.line.kind;
-    if (last === "turn") return "Thinking…";
-    if (last === "tool") return "Working…";
-    return null;
-  }, [conversation]);
+    return last === "tool" ? "Working…" : "Thinking…";
+  }, [busyTurn, workspace.working, id, conversation]);
 
   const dropped = (conversation[0]?.n ?? 1) - 1;
   return (

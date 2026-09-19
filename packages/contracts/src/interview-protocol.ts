@@ -137,6 +137,20 @@ export const InterviewAskedSchema = z.strictObject({
   groups: z.array(InterviewQuestionGroupSchema).min(1).max(MAX_QUESTION_GROUPS),
 });
 
+/**
+ * The session has said all it is going to for now, and the next word is the
+ * person's.
+ *
+ * Every transport knows when its provider's turn is done and none of them say
+ * it the same way, so it is said here in one shape, as the session's own words
+ * are ({@link interviewSaidMessage}). What it is for is the waiting: a reader
+ * cannot tell a session thinking from a session finished, and without this the
+ * only honest thing to show is nothing, which reads as something being wrong.
+ */
+export const InterviewIdleSchema = z.strictObject({
+  type: z.literal("idle"),
+});
+
 /** The session is over. */
 export const InterviewEndedSchema = z.strictObject({
   type: z.literal("ended"),
@@ -150,6 +164,7 @@ export const InterviewEventSchema = z.discriminatedUnion("type", [
   InterviewRefusedSchema,
   InterviewToolSchema,
   InterviewAskedSchema,
+  InterviewIdleSchema,
   InterviewEndedSchema,
 ]);
 export type InterviewEvent = z.infer<typeof InterviewEventSchema>;

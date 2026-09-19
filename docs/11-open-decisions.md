@@ -611,6 +611,27 @@ This is the one home for the decisions that govern Perbo. Every other document c
   conversation's cap; and the dock's card, which puts one group with its parts lettered, holds Send
   until every part is answered, and sends the options' own words.
 
+### D-NEW-the-interview-says-when-it-is-working — A pause says which pause it is
+
+- Owner: Founder
+- Decision: the dock says the interview is working for as long as it owes the person a word, and
+  says nothing once the next word is theirs. Which it is comes from the session's own report that
+  its turn has ended — every transport knows this and each says it differently, so it is carried in
+  one shape (`idle`) as the session's words are. A turn the person sends starts the waiting; the
+  turn ending, the session ending, the child going and the person stopping it each end it, because
+  a pause nothing is coming out of is not a pause to sit through. Turns in flight are counted
+  rather than flagged: a person who sends a second before the first is answered is owed two.
+- Why: a session that says a line and then reads the repository before saying the next looks, from
+  the conversation alone, exactly like one that has finished or fallen over. Read from the last
+  line's kind the dock went quiet at the very moment the person most needed telling that something
+  was still coming, and a person who thinks a tool has hung stops it.
+- Built: the `idle` event on the interview's protocol, emitted by the Claude transport when the SDK
+  reports a turn's result and by the Codex transport when a turn ends however it ended; the host
+  counting what each planning is owed and carrying it on the interview's change beside the asking,
+  clearing it when the child closes, the session ends or the person stops it; the snapshot listing
+  the plannings mid-turn, so a dock opened part way through one knows it; and the dock's own line,
+  which says *Working…* while a tool is the last thing to have happened and *Thinking…* otherwise.
+
 ### D-118 — An untitled planning is named by its first turn
 
 - Owner: Founder

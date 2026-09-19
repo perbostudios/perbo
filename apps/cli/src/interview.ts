@@ -1759,6 +1759,11 @@ export interface InterviewStreamed {
   message?: Record<string, unknown>;
   /** Why the session ended, on the last one. */
   reason?: string;
+  /**
+   * The provider has finished this turn and the next word is the person's.
+   * Each transport knows this in its own terms and says it in this one.
+   */
+  idle?: boolean;
 }
 
 /**
@@ -1895,6 +1900,7 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
   for await (const streamed of transport.run(session)) {
     if (streamed.session_id !== undefined) announce(streamed.session_id);
     if (streamed.message !== undefined) emit({ type: "message", message: streamed.message });
+    if (streamed.idle === true) emit({ type: "idle" });
     if (streamed.reason !== undefined) reason = streamed.reason;
   }
   if (!started) announce(sessionId.length > 0 ? sessionId : "unknown");
