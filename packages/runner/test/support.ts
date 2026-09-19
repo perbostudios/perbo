@@ -259,13 +259,26 @@ export function fakeAgent(
   const calls = join(dir, "invocations.json");
   const source = `#!/usr/bin/env node
 "use strict";
-const { existsSync, mkdirSync, readFileSync, writeFileSync } = require("node:fs");
+const { existsSync, mkdirSync, readFileSync, writeFileSync, writeSync } = require("node:fs");
 const { dirname, join } = require("node:path");
+
+// process.exit does not wait for writes still queued on process.stdout or
+// process.stderr, so every line is written out before the process can exit.
+const writeAll = (fd, text) => {
+  const bytes = Buffer.from(text);
+  for (let offset = 0; offset < bytes.length; ) {
+    try {
+      offset += writeSync(fd, bytes, offset);
+    } catch (error) {
+      if (error.code !== "EAGAIN") throw error;
+    }
+  }
+};
 
 // The runner fingerprints the binary before it runs it; answering the version
 // is not an invocation.
 if (process.argv.includes("--version")) {
-  process.stdout.write("fake-agent 1.0.0\\n");
+  writeAll(1, "fake-agent 1.0.0\\n");
   process.exit(0);
 }
 
@@ -277,7 +290,7 @@ const behaviour = BEHAVIOURS[Math.min(seen.length, BEHAVIOURS.length - 1)];
 seen.push({ cwd: process.cwd() });
 writeFileSync(CALLS, JSON.stringify(seen));
 
-const emit = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
+const emit = (event) => writeAll(1, JSON.stringify(event) + "\\n");
 
 emit({
   type: "system",
@@ -298,7 +311,7 @@ if (behaviour.kind === "overloaded") {
     error: { type: "overloaded_error", message: "Overloaded" },
   });
   for (let attempt = 1; attempt <= retries; attempt += 1) {
-    process.stderr.write(
+    writeAll(2, 
       "API Error (" + status + " " + payload + ") · Retrying in 1 seconds… (attempt " +
         attempt + "/" + retries + ")\\n",
     );
@@ -323,7 +336,7 @@ if (behaviour.kind === "session_limit") {
     error: { type: "rate_limit_error", message: behaviour.message },
   });
   for (let attempt = 1; attempt <= retries; attempt += 1) {
-    process.stderr.write(
+    writeAll(2, 
       "API Error (429 " + payload + ") · Retrying in 1 seconds… (attempt " +
         attempt + "/" + retries + ")\\n",
     );
@@ -348,7 +361,7 @@ if (behaviour.kind === "recovered_blip") {
   // One 529, retried and served — the agent went on working — and then a
   // failure of its own. The transport is in the transcript, but it is not
   // what ended the attempt.
-  process.stderr.write(
+  writeAll(2, 
     "API Error (529 " + payload + ") · Retrying in 1 seconds… (attempt 1/10)\\n",
   );
   emit({

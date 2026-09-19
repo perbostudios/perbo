@@ -53,7 +53,7 @@ jobs:
       - name: corpus
         run: node scripts/check.mjs corpus
 
-  # The documentation, backlog and diagram validators, and the
+  # The documentation and diagram validators, and the
   # rejection-path tests that prove each one can fail. Every check here
   # corresponds to a mistake that was actually made.
   validate:

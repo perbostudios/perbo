@@ -51,9 +51,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-076 — Perbo is developed in the public repository
 
 - Owner: Founder
-- Decision: `perbostudios/perbo` is where Perbo is developed: its branches, pull requests, issues and releases. Nothing in it is assembled from anywhere else. A private archive holds what stays private: the ticket store's records from before the release, the spend ledger and the dated evaluation records, the design boards and the planning-mode prototype until the co-founder agrees to publish them, and the control plane's design (D-016): its decisions, its backlog entries with their milestone and the labels only they use, and its eight ADRs. The archive is not synced from this repository. Ticket records a run writes under `.perbo/tickets/` stay on the machine that wrote them; `.perbo/config.json` is committed, and so is `.perbo/principles.md` once a person records one.
+- Decision: `perbostudios/perbo` is where Perbo is developed: its branches, pull requests, issues and releases. Nothing in it is assembled from anywhere else. A private repository holds what stays private: the backlog of open work, whose entries the `SCP-` ids here name; the ticket store's records from before the release; the spend ledger and the dated evaluation records; the design boards and the planning-mode prototype until the co-founder agrees to publish them; and the control plane's design (D-016): its decisions and its eight ADRs. It is not synced from this repository. Ticket records a run writes under `.perbo/tickets/` stay on the machine that wrote them; `.perbo/config.json` is committed, and so is `.perbo/principles.md` once a person records one.
 - Why: one repository is one source of truth, a checkout that holds nothing private cannot leak it, and real use is the evidence (D-099).
-- Changes if: the archive's material has to change in step with the code, which would call for a private repository that depends on this one rather than one this one is filtered from.
+- Changes if: the private material has to change in step with the code.
 
 ### D-098 — The product is Perbo everywhere
 
@@ -556,13 +556,13 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-113 — The repository carries everything an agent needs
 
 - Owner: Founder
-- Decision: whatever a person or an agent must know to work here is in this repository: decisions in this register, architecture in the ADRs, terms in `CONTEXT.md`, open work in the backlog, and the way of working, the environment and its traps in `AGENTS.md`. A session's own memory, a chat or a bundle beside the repository is a cache and never a source, so anything a session learns that a later one would need is written here in the same change. A handoff is a pointer to this repository. A session that cannot find what it needs here records the gap as a defect instead of working from a private note.
+- Decision: whatever a person or an agent must know to work here is in this repository: decisions in this register, architecture in the ADRs, terms in `CONTEXT.md`, and the way of working, the environment and its traps in `AGENTS.md`; open work is the one thing kept elsewhere, in the private backlog (D-076). A session's own memory, a chat or a bundle beside the repository is a cache and never a source, so anything a session learns that a later one would need is written here in the same change. A handoff is a pointer to this repository. A session that cannot find what it needs here records the gap as a defect instead of working from a private note.
 - Why: in the founder's words, the repository is the source of truth and must hold everything needed. Knowledge kept in one machine's session memory is invisible to every other person, agent and account, and a decision nobody can read is not a decision.
 
 ### D-110 — Identifiers are numbered at merge
 
 - Owner: Founder
-- Decision: a branch writes new decisions, ADRs and backlog entries as `D-NEW-<label>`, `ADR-NEW-<label>` (in `adr/NEW-<label>.md`) and `SCP-NEW-<label>`. Whoever merges runs `scripts/assign_ids.py --apply` as the last commit, which numbers them after the highest ids `main` and the branch have ever held, so a deleted entry's number is never reused, rewrites every reference, and validates the result strictly.
+- Decision: a branch writes new decisions and ADRs as `D-NEW-<label>` and `ADR-NEW-<label>` (in `adr/NEW-<label>.md`). Whoever merges runs `scripts/assign_ids.py --apply` as the last commit, which numbers them after the highest ids `main` and the branch have ever held, so a deleted entry's number is never reused, rewrites every reference, and validates the result strictly.
 - Why: sessions working in parallel minted the same numbers on their own branches.
 
 ### D-111 — The repository keeps a source of truth only

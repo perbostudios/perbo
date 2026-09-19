@@ -1,6 +1,6 @@
 # Roadmap
 
-What comes next, in order. A step is done when its condition holds; the [backlog](../backlog/issues.json) holds the tickets.
+What comes next, in order. A step is done when its condition holds, and the private backlog holds the tickets ([D-076](11-open-decisions.md)).
 
 1. **The records finish their cleanup.** The evaluation records and the measurement programme's code are removed, and code comments citing removed decisions are rewritten ([D-111](11-open-decisions.md), [D-099](11-open-decisions.md)).
 2. **Release.** Perbo is developed in `perbostudios/perbo` ([D-076](11-open-decisions.md)), which carries everything that runs on one machine ([D-075](11-open-decisions.md)), and every corpus fixture is published in `plantedbugs`: **82 defective fixtures across seven classes and 28 clean**. The product-regulation artefacts come with it ([D-048](11-open-decisions.md)).

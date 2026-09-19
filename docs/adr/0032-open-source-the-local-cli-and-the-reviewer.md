@@ -20,7 +20,7 @@ Perbo runs on one machine, with the person's own subscriptions or keys. What a t
 
 **Commercial:** anything hosted or shared across people, which is the control plane ([D-016](../11-open-decisions.md)).
 
-`perbostudios/perbo` is where Perbo is developed ([D-076](../11-open-decisions.md)); a private archive holds the material that stays private.
+`perbostudios/perbo` is where Perbo is developed ([D-076](../11-open-decisions.md)); a private repository holds the material that stays private.
 
 ## Consequences
 

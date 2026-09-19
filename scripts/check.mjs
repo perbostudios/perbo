@@ -116,7 +116,7 @@ export const STAGES = [
   },
   {
     name: "validators",
-    summary: "the documentation, backlog, diagram and fixture validators, and their own tests",
+    summary: "the documentation, diagram and fixture validators, and their own tests",
     run(ctx) {
       const python = ctx.python;
       try {
@@ -131,7 +131,6 @@ export const STAGES = [
         }
         throw error;
       }
-      ctx.run([python, "scripts/validate_backlog.py"]);
       ctx.run([python, "scripts/validate_docs.py"]);
       ctx.run([python, "scripts/validate_diagrams.py"]);
       ctx.run([python, "scripts/validate_fixture_diffs.py"]);
