@@ -16,7 +16,6 @@ review time — so they are skipped, which is checked rather than assumed.
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
@@ -36,13 +35,20 @@ def generate(fixture: Path) -> str:
     abbreviates them to is not the diff's: it follows `core.abbrev`, and past
     that it lengthens a prefix another object in the enclosing repository
     shares, so the same trees would print differently in two checkouts. The
-    machine's own git settings are left out for the same reason: a prefix
-    style, a diff algorithm or a context size would each change the diff.
+    diff's shape is pinned by flags for the same reason, since a person's own
+    settings for the prefixes, the algorithm, the context or its heuristics
+    would each change it. Their configuration is otherwise read as it is,
+    because `core.autocrlf` is what turns a Windows checkout's line endings
+    back into the ones the diff was made from.
     """
     result = subprocess.run(
-        ["git", "diff", "--no-index", "--no-color", "--no-ext-diff", "--full-index", "before", "after"],
+        [
+            "git", "diff", "--no-index", "--no-color", "--no-ext-diff", "--full-index",
+            "--src-prefix=a/", "--dst-prefix=b/", "--unified=3", "--diff-algorithm=myers",
+            "--indent-heuristic", "--inter-hunk-context=0",
+            "before", "after",
+        ],
         cwd=fixture,
-        env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull},
         capture_output=True,
         text=True,
         encoding="utf-8",

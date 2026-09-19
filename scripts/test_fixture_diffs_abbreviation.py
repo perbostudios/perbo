@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parent
+FIXTURES = SCRIPTS.parent / "packages/evaluation/corpus/fixtures"
+
+sys.path.insert(0, str(SCRIPTS))
+from validate_fixture_diffs import generate  # noqa: E402
 
 
 class Abbreviation(unittest.TestCase):
@@ -36,11 +43,13 @@ class Abbreviation(unittest.TestCase):
 
     def test_every_authored_fixture_matches_under_a_persons_own_git_settings(self) -> None:
         # Each of these changes a generated diff on its own: the prefixes, the
-        # hunks the algorithm finds, the context around them, the hash length.
+        # hunks the algorithm finds, the context around them and between them,
+        # the heuristic that places a hunk, the hash length.
         with tempfile.TemporaryDirectory() as home:
             config = Path(home) / "gitconfig"
             config.write_text(
                 "[diff]\n\tnoprefix = true\n\tmnemonicPrefix = true\n\talgorithm = histogram\n\tcontext = 5\n"
+                "\tinterHunkContext = 10\n\tindentHeuristic = false\n\texternal = false-external-diff\n"
                 "[core]\n\tabbrev = 12\n",
                 encoding="utf-8",
             )
@@ -54,6 +63,27 @@ class Abbreviation(unittest.TestCase):
                 timeout=300,
             )
         self.assertEqual(result.returncode, 0, (result.stdout + result.stderr)[-2000:])
+
+
+    def test_a_windows_checkout_matches_where_git_turns_its_line_endings_back(self) -> None:
+        # Git for Windows sets core.autocrlf in its system configuration, and a
+        # checkout's text files then end their lines in CRLF on disk.
+        fixture = next(
+            directory
+            for directory in sorted(FIXTURES.iterdir())
+            if (directory / "change.diff").is_file() and b"\r\n" not in (directory / "change.diff").read_bytes()
+        )
+        with tempfile.TemporaryDirectory() as home:
+            copy = Path(home) / fixture.name
+            shutil.copytree(fixture, copy)
+            for path in [*(copy / "before").rglob("*"), *(copy / "after").rglob("*")]:
+                if path.is_file():
+                    path.write_bytes(re.sub(rb"(?<!\r)\n", b"\r\n", path.read_bytes()))
+            system = Path(home) / "gitconfig"
+            system.write_text("[core]\n\tautocrlf = true\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"GIT_CONFIG_SYSTEM": str(system)}):
+                generated = generate(copy)
+        self.assertEqual(generated, (fixture / "change.diff").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
