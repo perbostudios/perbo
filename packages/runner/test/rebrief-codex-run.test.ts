@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +20,7 @@ import { briefRecords, SPAWN_TEST_TIMEOUT_MS } from "./support.js";
 
 const roots: string[] = [];
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -33,6 +34,9 @@ function fixture(answer: Answer = "late"): { worktree: string; binary: string; l
   const home = join(root, "codex-home");
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "auth.json"), "{}");
+  // The adapter looks for the login under this process's CODEX_HOME, never the child's
+  // environment, so the fake login is pointed at there; unset, it would be the machine's own.
+  vi.stubEnv("CODEX_HOME", home);
   const log = join(root, "protocol.jsonl");
   const binary = join(root, "codex-fixture");
   writeFileSync(
