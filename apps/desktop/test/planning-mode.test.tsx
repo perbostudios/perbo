@@ -461,13 +461,13 @@ describe("the Spec pane (SCP-336)", () => {
     await write(SPEC);
 
     await screen.findByText("specs/a-light-colour-mode/spec.md");
-    const listed = await screen.findByRole("list", { name: "Requirements" });
-    const rows = within(listed).getAllByRole("listitem").map((row) => row.textContent ?? "");
-    expect(rows).toHaveLength(3);
-    expect(rows[0]).toContain("R1");
-    expect(rows[2]).toContain("R3");
-    // Nothing has been drafted, so no requirement has landed in a node.
-    expect(rows.every((row) => row.includes("none yet"))).toBe(true);
+    // The ids are written into the section they were typed in.
+    const written = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
+    await waitFor(() => expect(written.value).toContain("R1:"));
+    expect(written.value).toContain("R3:");
+    // Nothing has been drafted, so no requirement has landed in a node, and the
+    // list of where they landed is a column of "none yet" — so it is not there.
+    expect(screen.queryByRole("list", { name: "Requirements" })).toBeNull();
   });
 
   it("keeps a requirement's id when its text is edited, and gives the next one to a new one", async () => {
@@ -488,22 +488,20 @@ describe("the Spec pane (SCP-336)", () => {
       },
     });
     fireEvent.blur(requirements);
-    const rows = async (): Promise<string[]> =>
-      within(await screen.findByRole("list", { name: "Requirements" }))
-        .getAllByRole("listitem")
-        .map((row) => row.textContent ?? "");
-    await waitFor(async () => expect(await rows()).toHaveLength(2));
-    const after = await rows();
+    // The ids are read where they are written, the list of nodes being absent
+    // until there is a plan for a requirement to have landed in.
+    await waitFor(() => expect(requirements.value).toContain("R4:"));
+    const after = requirements.value.split("\n").filter((line) => /R\d+:/.test(line));
+    expect(after).toHaveLength(2);
     expect(after[0]).toContain("R1");
     // Its text changed and its id did not. The text is read in the box it is
     // edited in; the list beside it says where each id landed, and saying the
     // sentence twice is what made the pane twice as long as the spec.
     expect(requirements.value).toContain("R1: A person can choose");
-    expect(after[0]).not.toContain("A person can choose");
     // R2 and R3 were each used once, so the new requirement is R4.
     expect(after[1]).toContain("R4");
-    expect(after.join(" ")).not.toContain("R2");
-    expect(after.join(" ")).not.toContain("R3");
+    expect(after.join(" ")).not.toContain("R2:");
+    expect(after.join(" ")).not.toContain("R3:");
   });
 
   it("offers Generate plan once the spec has a title and an outcome, not before", async () => {
@@ -2050,12 +2048,41 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     // the dot on the line that says the asking happened.
     expect(second.queryByText("Where does the split go?")).toBeNull();
     expect(askedInTranscript()).toContain("Where does the split go?");
-    // Every part carries a way out of choosing, and the composer stays live.
-    expect(second.getAllByRole("radio")).toHaveLength(3);
+    // Its own two answers, the way out of choosing between them, and the way
+    // out of the card altogether.
+    expect(second.getAllByRole("radio")).toHaveLength(4);
     expect(second.getByText("Let the interview decide")).toBeTruthy();
-    expect((composer() as HTMLTextAreaElement).disabled).toBe(false);
+    expect(second.getByText("Something else")).toBeTruthy();
+    // The card is the only way to answer while one is up.
+    expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(true);
+    fireEvent.click(second.getByRole("radio", { name: /Something else/ }));
+    await waitFor(() =>
+      expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false),
+    );
 
     await waitFor(() => expect(within(dock()).getAllByText(/Noted:/)).toHaveLength(1));
+  });
+
+  it("puts the session's own recommendation at the top of a part's answers", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const card = within(
+      await within(dock()).findByRole("group", { name: "How the queue is split" }),
+    );
+
+    // The sample offers "Split at the read" second-to-none but marks it the
+    // recommendation; a person reads the top of a list, so it is put there.
+    const first = card.getAllByRole("radio")[0]!;
+    expect(first.closest("label")?.textContent).toContain("Split at the read");
+    expect(first.closest("label")?.textContent).toContain("recommended");
+    // The two standing answers come last, in that order.
+    const labels = card.getAllByRole("radio").map((radio) => radio.closest("label")?.textContent ?? "");
+    expect(labels.at(-2)).toContain("Let the interview decide");
+    expect(labels.at(-1)).toContain("Something else");
   });
 
   it("takes the questions away once the person says something of their own", async () => {
@@ -2070,6 +2097,13 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await within(dock()).findByRole("group", { name: "How the queue is split" });
 
+    // The box is behind the card, and "Something else" is how it comes back.
+    fireEvent.click(
+      within(dock()).getAllByRole("radio", { name: /Something else/ })[0]!,
+    );
+    await waitFor(() =>
+      expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false),
+    );
     fireEvent.change(composer(), { target: { value: "what do you mean by split?" } });
     fireEvent.click(within(dock()).getAllByRole("button", { name: "Send" }).at(-1)!);
 

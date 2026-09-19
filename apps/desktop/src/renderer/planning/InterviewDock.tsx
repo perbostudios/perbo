@@ -71,6 +71,11 @@ export function InterviewDock({
   // session, because the editor holds a re-read back while a save of its own is
   // in flight and the card would come and go with that.
   const [pushed, setPushed] = useState<Asking | null | undefined>(undefined);
+  // Whether the card in front of the person has asked for the box back. While
+  // a card is up the box is not: every answer it wants is on the card, and a
+  // box beside it is a second way to do one thing. "Something else" is how the
+  // person says their answer is not there, and it brings the box back.
+  const [typing, setTyping] = useState(false);
   // Whether the session is working, as the host last pushed it. Held here for
   // the reason the asking is: the editor holds a re-read back while a save is
   // in flight, and a pause is exactly when this has to be right.
@@ -83,6 +88,7 @@ export function InterviewDock({
   useEffect(() => {
     setLive([]);
     setPushed(undefined);
+    setTyping(false);
     setBusyTurn(null);
     setFailure(null);
   }, [id]);
@@ -297,10 +303,13 @@ export function InterviewDock({
           of={asking.of}
           busy={busy}
           onSend={(answer) => sendText(answer)}
+          onOwnWords={setTyping}
         />
       )}
       {failure !== null && <Notice tone="danger">{failure}</Notice>}
-      <div className="composer">
+      {/* The card is the only way to answer while one is up, unless the person
+          has said their answer is not on it. */}
+      <div className="composer" hidden={asking !== null && !typing}>
         <div className="composer-box">
           <textarea
             aria-label="Message the interview"
@@ -345,9 +354,37 @@ type Choice = Extract<
  * the session rather than picking one of its options to get past the question.
  * Added here rather than asked of the session, so it is always there.
  */
+/**
+ * What each of the interview's tools is called in the chat.
+ *
+ * The tool's own name is an argument in a protocol; what the person is
+ * following is the work. A name not here is shown as it is, so a tool added
+ * later reads as itself rather than as nothing.
+ */
+const TOOL_NAMES: Record<string, string> = {
+  ask_options: "Questions",
+  generate_plan: "Draft the plan",
+  edit_plan: "Change the plan",
+  undo_edit: "Undo a change",
+  read_plan: "Read the plan",
+};
+
 const LEAVE_IT: Choice = {
   label: LEAVE_IT_TO_THE_INTERVIEW,
   detail: "Its own recommendation, or its judgement where it made none.",
+  recommended: false,
+};
+
+/**
+ * The answer that is none of the offered ones.
+ *
+ * Picking it is not an answer, it is asking for the box back: a person whose
+ * answer is not on the card should not have to pick the nearest wrong one, and
+ * a card that offers no way out is a form rather than a question.
+ */
+const SOMETHING_ELSE: Choice = {
+  label: "Something else",
+  detail: "Answer in your own words instead.",
   recommended: false,
 };
 
@@ -370,21 +407,35 @@ function QuestionCard({
   of,
   busy,
   onSend,
+  onOwnWords,
 }: {
   group: Extract<InterviewEntry["line"], { kind: "asked" }>["groups"][number];
   number: number;
   of: number;
   busy: boolean;
   onSend: (answer: string) => void;
+  /** Whether the person has asked for the box back on this group. */
+  onOwnWords: (wanted: boolean) => void;
 }) {
   const [picked, setPicked] = useState<Record<number, number>>({});
+  // The session's recommendation first, because a person reading a list of
+  // answers reads the top of it, and the one it would pick is the one most of
+  // them want. Its own order is kept under that.
   const choicesOf = (part: (typeof group.parts)[number]): readonly Choice[] => [
-    ...part.options,
+    ...[...part.options].sort(
+      (left, right) => Number(right.recommended) - Number(left.recommended),
+    ),
     LEAVE_IT,
+    SOMETHING_ELSE,
   ];
+  // Whether the person has asked for the box back on any part of this group.
+  const ownWords = group.parts.some(
+    (part, index) => choicesOf(part)[picked[index] ?? -1]?.label === SOMETHING_ELSE.label,
+  );
+  useEffect(() => onOwnWords(ownWords), [ownWords, onOwnWords]);
   const answered = group.parts.every((_part, index) => picked[index] !== undefined);
   const send = (): void => {
-    if (!answered || busy) return;
+    if (!answered || busy || ownWords) return;
     const chosen = group.parts.map((part, index) => choicesOf(part)[picked[index]!]!.label);
     // One part is the person's sentence whole; several are lettered as they
     // were read, so the answers arrive in the shape the question was put.
@@ -435,14 +486,18 @@ function QuestionCard({
       ))}
       <div className="asked-foot">
         <span className="small muted">
-          {answered
-            ? "Sent in the options' own words."
-            : "Pick an answer to each, or answer in your own words below."}
+          {ownWords
+            ? "Answer in the box below."
+            : answered
+              ? "Sent in the options' own words."
+              : "Pick an answer to each."}
         </span>
         <span className="spacer" />
-        <Button variant="primary" disabled={!answered || busy} onClick={send}>
-          Send
-        </Button>
+        {!ownWords && (
+          <Button variant="primary" disabled={!answered || busy} onClick={send}>
+            Send
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -550,7 +605,10 @@ function ToolCard({
   return (
     <div className={cx("tool-card", !line.ok && "tool-card--failed")}>
       <div className="tool-head">
-        <b>{line.tool}</b>
+        {/* What the tool is for, rather than what it is called: a person
+            reading the chat is following the work, and `ask_options` is the
+            name of a thing they never call. */}
+        <b>{TOOL_NAMES[line.tool] ?? line.tool}</b>
         <span className="small muted">
           {line.ok
             ? "done"
@@ -561,7 +619,9 @@ function ToolCard({
         {/* What the tool said is read when it is asked for: the name and the
             word beside it are what the card is for, and the account underneath
             them was most of the dock. */}
-        {line.ok && <InfoHint text={line.detail} label={`What ${line.tool} did`} />}
+        {line.ok && (
+          <InfoHint text={line.detail} label={`What ${TOOL_NAMES[line.tool] ?? line.tool} did`} />
+        )}
       </div>
       {/* What a tool did is read when it is asked for; why one was refused is
           read without asking, because it is the thing to act on. */}

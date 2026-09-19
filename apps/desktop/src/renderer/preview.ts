@@ -1447,6 +1447,15 @@ const sampleInterviews = new Set<string>();
 /** The sample sessions working on what they will say next, as the host tracks. */
 const sampleWorking = new Set<string>();
 const sampleTurns = new Map<string, number>();
+/** Whether this planning is still there to be spoken to. */
+function stillThere(id: string): boolean {
+  try {
+    editing.read(id);
+    return true;
+  } catch {
+    return false;
+  }
+}
 /** The asking this planning is putting, or null where it holds none or has gone. */
 function askingOf(id: string): { entry: number; answered: number } | null {
   try {
@@ -1539,6 +1548,7 @@ function startSampleInterview(id: string): InterviewStatus {
  * Graph pane uses and lands in the same history as the interview's.
  */
 function answerSampleTurn(id: string, text: string): void {
+  if (!stillThere(id)) return;
   const turns = (sampleTurns.get(id) ?? 0) + 1;
   sampleTurns.set(id, turns);
   // Asking with options, as the real session does through ask_options: two
@@ -1645,6 +1655,10 @@ function answerSampleTurn(id: string, text: string): void {
   // pause the dock has to keep saying it is working through.
   converse(id, { kind: "said", text: "I'll look at what's already here before I answer." });
   setTimeout(() => {
+    // The rest of a turn can land after the planning it belongs to has gone —
+    // a pane left, a test ended — and a sample session speaking into a session
+    // that is not there throws where nothing is waiting to catch it.
+    if (!stillThere(id)) return;
     converse(id, {
       kind: "said",
       text: `Noted: “${text}”. This is the sample workspace, so nothing here reaches a provider.`,

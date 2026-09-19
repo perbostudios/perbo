@@ -586,8 +586,10 @@ This is the one home for the decisions that govern Perbo. Every other document c
   returns without waiting — a tool returns to the model, and one that waited on a person would hold
   the turn open — and the dock puts one group at a time, so what the session may ask cheaply the
   person is not asked cheaply. Every part offers at least two answers, may carry the session's own
-  recommendation, and always carries leaving the choice to the interview; the composer stays open, so
-  answering in the person's own words is never closed off. Picking sends the options' own wording as
+  recommendation — which is put first, a person reading a list of answers reading the top of it — and
+  always carries two of the reader's own: leaving the choice to the interview, and saying the answer is
+  none of these, which brings the box back. While a group is in front of the person the box is not, so
+  there is one way to answer rather than two; their own words are never closed off, they are asked for. Picking sends the options' own wording as
   an ordinary turn. How much of an asking has been answered is recorded on the planning rather than
   counted back out of the turns, which cannot tell an answer from a question the person typed
   instead: a turn that is not the group's answer ends the asking, because the session is about to
