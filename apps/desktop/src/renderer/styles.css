@@ -5010,6 +5010,12 @@ kbd {
   top: 0;
   left: 0;
   z-index: 40;
+  /* Stated here as well as placed from `InfoHint.tsx`, so the panel already has
+     its width when its height is measured: a shrink-to-fit box measured across
+     the whole window is shorter than the one that gets drawn, and the first
+     open would be placed from a height it never has. */
+  width: 360px;
+  max-width: calc(100vw - 16px);
   max-height: 260px;
   overflow: auto;
   overscroll-behavior: contain;

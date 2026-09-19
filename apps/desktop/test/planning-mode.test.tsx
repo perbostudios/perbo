@@ -1930,7 +1930,15 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     fireEvent.pointerEnter(dot);
     await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("true"));
     expect(within(said).getByRole("tooltip").className).toContain("info-hint-body--open");
+    // Crossing the gap to the panel keeps it open: the panel hangs against the
+    // window, so the space between the two is neither of them, and shutting at
+    // once would close the thing the pointer is travelling to.
     fireEvent.pointerLeave(dot);
+    fireEvent.pointerEnter(within(said).getByRole("tooltip"));
+    await new Promise((settle) => setTimeout(settle, 220));
+    expect(dot.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.pointerLeave(within(said).getByRole("tooltip"));
     await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("false"));
 
     // A keyboard reaches it too: it is not a hover-only affordance.
