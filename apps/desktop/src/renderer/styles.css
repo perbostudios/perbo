@@ -4837,11 +4837,13 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* A group at the size the protocol allows is taller than the dock, and this
-     sits outside the chat's own scroll: without a bound of its own the Send
-     below it cannot be reached. */
-  max-height: 45vh;
-  overflow-y: auto;
+  /* The height is the person's, dragged on `.asked-handle` and remembered, and
+     it arrives as an inline style. It does not change with what is in it: the
+     answers scroll inside `.asked-body`, and the box that opens underneath
+     takes its room from the conversation rather than from the answers. */
+  flex: none;
+  min-height: 0;
+  overflow: hidden;
   padding: 12px 13px;
   border: 1.5px solid var(--line);
   border-radius: 12px 10px 13px 10px;
@@ -4873,17 +4875,61 @@ kbd {
   font: calc(11px * var(--text-scale)) var(--mono);
   color: var(--muted);
 }
+/* The answers, and the only part of the card that scrolls. What is cut off at
+   its bottom edge is the next answer, which is how a person knows there is
+   one. */
+.asked-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* Below the scroll rather than inside it, so it sits on the bottom edge
+   whatever the group's length and never has to be scrolled to. */
 .asked-foot {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* The card scrolls when a group is long, and Send is the one control in it
-     that must never be the thing below the fold. */
-  position: sticky;
-  bottom: 0;
-  margin-top: auto;
+  flex: none;
   padding-top: 8px;
-  background: var(--paper);
+  border-top: 1px solid var(--line);
+}
+/* The bar on the card's top edge: the dock's own edge turned on its side. */
+.asked-handle {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  height: 3px;
+  margin-bottom: -3px;
+  cursor: row-resize;
+  touch-action: none;
+}
+.asked-handle::before {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+.asked-handle-grip {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  transition: background var(--duration-fast, 120ms) ease;
+}
+.asked-handle:hover .asked-handle-grip,
+.asked-handle:focus-visible .asked-handle-grip,
+.asked-handle--dragging .asked-handle-grip {
+  background: var(--accent, var(--line));
+}
+.asked-handle:focus-visible {
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .asked-handle-grip {
+    transition: none;
+  }
 }
 
 /* What the interview is doing, under the last line it wrote: the mark pulses

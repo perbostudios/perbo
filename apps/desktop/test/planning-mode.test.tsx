@@ -8,6 +8,7 @@ import { HomePage } from "../src/renderer/tasks/HomePage.js";
 import { previewBridge } from "../src/renderer/preview.js";
 import { bridge } from "../src/renderer/data.js";
 import { resetRailSize } from "../src/renderer/shell/rail-size.js";
+import { DEFAULT_ASKED_HEIGHT, resetAskedHeight } from "../src/renderer/shell/asked-size.js";
 import {
   DEFAULT_DOCK_WIDTH,
   MAX_DOCK_WIDTH,
@@ -61,6 +62,7 @@ describe("Create in the rail (SCP-334)", () => {
   it("reads Create, Home, Archive, Settings, bound to ⌘1 to ⌘4 in that order, with ⌘N still creating", async () => {
     resetRailSize();
     resetDockWidth();
+    resetAskedHeight();
     mount();
     await screen.findByRole("heading", { name: /Hi, / });
     const names = railNames();
@@ -2061,6 +2063,33 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     );
 
     await waitFor(() => expect(within(dock()).getAllByText(/Noted:/)).toHaveLength(1));
+  });
+
+  it("keeps the questions a size of their own, which the bar on its edge sets", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const card = await within(dock()).findByRole("group", { name: "How the queue is split" });
+    expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT}px`);
+
+    // Asking for the box back does not make the card taller: the room comes
+    // from the conversation above it.
+    fireEvent.click(within(card).getAllByRole("radio", { name: /Something else/ })[0]!);
+    await waitFor(() =>
+      expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false),
+    );
+    expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT}px`);
+
+    // The bar on its top edge sets the height; dragging up makes it taller.
+    const bar = within(dock()).getByRole("separator", { name: "Resize the questions" });
+    fireEvent.keyDown(bar, { key: "ArrowUp" });
+    await waitFor(() => expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT + 16}px`));
+    fireEvent.keyDown(bar, { key: "ArrowDown" });
+    await waitFor(() => expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT}px`));
+    expect(localStorage.getItem("perbo:asked")).toBe(String(DEFAULT_ASKED_HEIGHT));
   });
 
   it("puts the session's own recommendation at the top of a part's answers", async () => {

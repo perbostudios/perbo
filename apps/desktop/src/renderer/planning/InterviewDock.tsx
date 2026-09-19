@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { bridge, errorMessage } from "../data.js";
 import { graphHistory, latestUndoable } from "./history.js";
 import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS } from "../../shared/contract-editing.js";
+import { AskedHandle } from "./AskedHandle.js";
+import { askedHeightLimit, useAskedHeight } from "../shell/asked-size.js";
 import { InfoHint } from "../InfoHint.js";
 import { ThinkingStatus } from "../Screen.js";
 import { INTERVIEW_CONVERSATION_CAP } from "../../shared/protocol.js";
@@ -76,6 +78,26 @@ export function InterviewDock({
   // box beside it is a second way to do one thing. "Something else" is how the
   // person says their answer is not there, and it brings the box back.
   const [typing, setTyping] = useState(false);
+  // How tall the card is, and the most the dock can give it: the conversation
+  // above it keeps a little, and what is left over is the card's.
+  const stored = useAskedHeight();
+  const [room, setRoom] = useState(0);
+  const dockRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const held = dockRef.current;
+    if (held === null) return;
+    const measure = (): void => setRoom(held.getBoundingClientRect().height - 180);
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(held);
+    return () => observer.disconnect();
+  }, []);
+  const askedLimit = askedHeightLimit(room);
+  const asked = Math.min(stored, askedLimit);
   // Whether the session is working, as the host last pushed it. Held here for
   // the reason the asking is: the editor holds a re-read back while a save is
   // in flight, and a pause is exactly when this has to be right.
@@ -235,7 +257,7 @@ export function InterviewDock({
 
   const dropped = (conversation[0]?.n ?? 1) - 1;
   return (
-    <aside className="dock" aria-label="Interview" style={{ width }}>
+    <aside className="dock" aria-label="Interview" style={{ width }} ref={dockRef}>
       <div className="dock-head">
         <div className="dock-session">
           <span className={cx("prov-dot", models.draftingProvider === "codex-cli" && "prov-dot--codex")} />
@@ -243,12 +265,18 @@ export function InterviewDock({
           <span className="mono">{models.executorModel}</span>
           <span className="spacer" />
           <span className="small muted">{running ? "running" : "not running"}</span>
+          {/* What the session may do is the same paragraph on every planning,
+              read once and then in the way: it is behind the dot. */}
+          <InfoHint
+            label="What this session may do"
+            text={
+              "Your own session. It reads anything, writes only this spec's folder, CONTEXT.md " +
+              "and the ADR folder, and cannot approve, publish or merge. Anything else is refused " +
+              "rather than put to you."
+            }
+          />
         </div>
-        <p className="write-scope">
-          Your own session. It reads anything, writes only this spec&rsquo;s folder,{" "}
-          <b>CONTEXT.md</b> and the ADR folder, and cannot approve, publish or merge. Anything else
-          is refused rather than put to you.
-        </p>
+
         <div className="dock-acts">
           <button type="button" className="text-button small" aria-expanded={historyOpen} onClick={onHistory}>
             History
@@ -296,15 +324,19 @@ export function InterviewDock({
         )}
       </div>
       {asking !== null && (
-        <QuestionCard
-          key={asking.key}
-          group={asking.group}
-          number={asking.number}
-          of={asking.of}
-          busy={busy}
-          onSend={(answer) => sendText(answer)}
-          onOwnWords={setTyping}
-        />
+        <>
+          <AskedHandle height={asked} limit={askedLimit} />
+          <QuestionCard
+            key={asking.key}
+            group={asking.group}
+            number={asking.number}
+            of={asking.of}
+            busy={busy}
+            height={asked}
+            onSend={(answer) => sendText(answer)}
+            onOwnWords={setTyping}
+          />
+        </>
       )}
       {failure !== null && <Notice tone="danger">{failure}</Notice>}
       {/* The card is the only way to answer while one is up, unless the person
@@ -406,6 +438,7 @@ function QuestionCard({
   number,
   of,
   busy,
+  height,
   onSend,
   onOwnWords,
 }: {
@@ -413,6 +446,8 @@ function QuestionCard({
   number: number;
   of: number;
   busy: boolean;
+  /** How tall the person has dragged it, from the shell's own record. */
+  height: number;
   onSend: (answer: string) => void;
   /** Whether the person has asked for the box back on this group. */
   onOwnWords: (wanted: boolean) => void;
@@ -446,7 +481,12 @@ function QuestionCard({
     );
   };
   return (
-    <div className="asked-card" role="group" aria-label={group.title ?? `Question ${number}`}>
+    <div
+      className="asked-card"
+      role="group"
+      aria-label={group.title ?? `Question ${number}`}
+      style={{ height }}
+    >
       <div className="asked-head">
         <b>{group.title ?? "The interview asks"}</b>
         {of > 1 && (
@@ -455,7 +495,8 @@ function QuestionCard({
           </span>
         )}
       </div>
-      {group.parts.map((part, index) => (
+      <div className="asked-body">
+        {group.parts.map((part, index) => (
         <fieldset className="asked-part" key={index}>
           <legend>
             {group.parts.length > 1 && (
@@ -482,8 +523,9 @@ function QuestionCard({
               {option.detail !== null && <p>{option.detail}</p>}
             </label>
           ))}
-        </fieldset>
-      ))}
+          </fieldset>
+        ))}
+      </div>
       <div className="asked-foot">
         <span className="small muted">
           {ownWords
