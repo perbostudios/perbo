@@ -315,28 +315,41 @@ export function renderSpec(
     return [{ id, text: draft.text }];
   };
 
-  // Walked in the order it was written, so a heading keeps the requirements it
-  // groups: the ids are the file's, the arrangement is the person's.
+  // Walked in the order it was written, and gathered into the groups the
+  // headings make, so a heading keeps the requirements under it: the ids are
+  // the file's, the arrangement is the person's.
   const requirements: SpecRequirement[] = [];
-  const written: string[] = [];
-  // A requirement is deduplicated by its id; a heading has none, so it is
-  // deduplicated by what it says. "Keep both" hands this function the file's
-  // text and the person's whole, one after the other, and without this every
-  // heading in the section arrives twice — the second copy with nothing under
-  // it, because its requirements deduplicated away.
-  const headings = new Set<string>();
+  const groups: { heading: string | null; lines: string[] }[] = [{ heading: null, lines: [] }];
   for (const line of lines) {
     if ("heading" in line) {
-      if (headings.has(line.heading)) continue;
-      headings.add(line.heading);
-      if (written.length > 0) written.push("");
-      written.push(line.heading, "");
+      groups.push({ heading: line.heading, lines: [] });
       continue;
     }
     for (const requirement of numbered(line.draft)) {
       requirements.push(requirement);
-      written.push(`- ${requirement.id}: ${requirement.text}`);
+      groups.at(-1)!.lines.push(`- ${requirement.id}: ${requirement.text}`);
     }
+  }
+
+  // A heading already written, with nothing of its own under it, is the second
+  // copy "Keep both" made: that join hands this function the file's text and
+  // the person's one after the other, and the repeat's requirements
+  // deduplicate away by id, leaving the heading standing over nothing.
+  //
+  // Emptiness is what tells the two apart. A person who writes `### Desktop`,
+  // `### CLI` and `### Desktop` again means the third one, and it has
+  // requirements under it — dropping it would move them under `### CLI`, which
+  // is worse than the repetition it was meant to clean up.
+  const headings = new Set<string>();
+  const written: string[] = [];
+  for (const group of groups) {
+    if (group.heading !== null) {
+      if (headings.has(group.heading) && group.lines.length === 0) continue;
+      headings.add(group.heading);
+      if (written.length > 0) written.push("");
+      written.push(group.heading, "");
+    }
+    written.push(...group.lines);
   }
   // A heading with nothing under it leaves a blank line at the end of its own.
   while (written.at(-1) === "") written.pop();

@@ -736,25 +736,85 @@ describe("how deep a heading in Requirements may be", () => {
 });
 
 /**
- * "Keep both" hands the renderer the file's text and the person's one after the
- * other. A requirement repeated that way is deduplicated by its id; a heading
- * has no id, so it is deduplicated by what it says.
+ * "Keep both" hands the renderer the file's text and the person's one after
+ * the other. A requirement repeated that way is deduplicated by its id; a
+ * heading has none, and what tells a conflict's copy from a heading the person
+ * meant twice is whether anything is under it.
  */
 describe("a section whose text arrives twice", () => {
-  it("writes each heading once, with every requirement still under one", () => {
-    const section = "### The page\n- R1: It is one file.\n\n### Measuring\n- R2: It counts visible time.";
-    const both: SpecText = {
-      ...EMPTY_SPEC_TEXT,
-      title: "A screen time page",
-      outcome: "A page counts the time it is looked at.",
-      requirements: `${section}\n${section}\n- It resets at midnight.`,
-    };
-    const { markdown, requirements } = renderSpec(both, { highWater: 2 });
-    const written = markdown.split("## Requirements\n\n")[1]!.split("\n## ")[0]!;
+  const section = [
+    "### The page",
+    "- R1: It is one file.",
+    "",
+    "### Measuring",
+    "- R2: It counts visible time.",
+  ].join("\n");
+  const twice = (requirements: string): SpecText => ({
+    ...EMPTY_SPEC_TEXT,
+    title: "A screen time page",
+    outcome: "A page counts the time it is looked at.",
+    requirements,
+  });
+  /** The section's own lines, without the id mark the file keeps at the end of it. */
+  const sectionOf = (markdown: string): string =>
+    markdown
+      .split("## Requirements\n\n")[1]!
+      .split("\n## ")[0]!
+      .replace(/<!--[^>]*-->/g, "")
+      .trimEnd();
+
+  it("writes each heading once when the same text arrives twice", () => {
+    const { markdown, requirements } = renderSpec(twice(`${section}\n${section}`), {
+      highWater: 2,
+    });
+    const written = sectionOf(markdown);
     expect(written.match(/### The page/g)).toHaveLength(1);
     expect(written.match(/### Measuring/g)).toHaveLength(1);
+    expect(requirements.map((each) => each.id)).toEqual(["R1", "R2"]);
+    // No heading left standing over nothing.
+    expect(written.trimEnd().endsWith("- R2: It counts visible time.")).toBe(true);
+  });
+
+  it("keeps the repeat that has a new requirement under it, where the person put it", () => {
+    const { markdown, requirements } = renderSpec(
+      twice(`${section}\n${section}\n- It resets at midnight.`),
+      { highWater: 2 },
+    );
+    const written = sectionOf(markdown);
+    // The page's copy is empty and goes; Measuring's holds the new line and stays.
+    expect(written.match(/### The page/g)).toHaveLength(1);
+    expect(written.match(/### Measuring/g)).toHaveLength(2);
     expect(requirements.map((each) => each.id)).toEqual(["R1", "R2", "R3"]);
-    // No heading left standing with nothing under it.
-    expect(written).not.toMatch(/### Measuring\n\n\n/);
+    expect(written.trimEnd().endsWith("- R3: It resets at midnight.")).toBe(true);
+  });
+
+  // A heading a person meant twice is not a conflict's leftover, and dropping
+  // it would move its requirements under the group before it.
+  it("keeps a heading the person repeated on purpose, with its own requirements", () => {
+    const { markdown, requirements } = renderSpec(
+      twice(
+        [
+          "### Desktop",
+          "- The dock resizes.",
+          "### CLI",
+          "- The command takes --json.",
+          "### Desktop",
+          "- The rail remembers its width.",
+        ].join("\n"),
+      ),
+    );
+    const written = sectionOf(markdown);
+    expect(written.match(/### Desktop/g)).toHaveLength(2);
+    expect(requirements.map((each) => each.text)).toEqual([
+      "The dock resizes.",
+      "The command takes --json.",
+      "The rail remembers its width.",
+    ]);
+    // The third group's requirement stays under the heading it was written
+    // under, rather than sliding up into the CLI group above it.
+    expect(written.indexOf("The rail remembers its width.")).toBeGreaterThan(
+      written.lastIndexOf("### Desktop"),
+    );
+    expect(written.lastIndexOf("### Desktop")).toBeGreaterThan(written.indexOf("### CLI"));
   });
 });
