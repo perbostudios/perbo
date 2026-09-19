@@ -30,7 +30,7 @@
     "the runner always protects: the review policy and the corpus (D-045). They are declared here",
     "rather than in the runner because they are a property of this repository, not of every one.",
     "",
-    "check_docs and check_backlog are the repository's own validators, pinned so a documentation or decision ticket (D-072) has a deterministic check to pass rather than only a review."
+    "check_docs is the repository's own validator, pinned so a documentation or decision ticket (D-072) has a deterministic check to pass rather than only a review."
   ],
   "checks": [
     {
@@ -88,17 +88,6 @@
       ],
       "timeout_ms": 300000,
       "definition_path": "scripts/validate_docs.py"
-    },
-    {
-      "check_id": "check_backlog",
-      "name": "backlog",
-      "kind": "other",
-      "command": [
-        "python3",
-        "scripts/validate_backlog.py"
-      ],
-      "timeout_ms": 300000,
-      "definition_path": "scripts/validate_backlog.py"
     }
   ],
   "protected_tests": [

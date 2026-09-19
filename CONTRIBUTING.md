@@ -68,8 +68,7 @@ goes; `pnpm check --list` names the stages, and `pnpm check --filter
 `.github/workflows/build.yml` runs the same stages as steps on every pull
 request, so what passes on your machine is what passes there. The Python
 validators need `scripts/requirements-validation.txt` installed; they check the
-backlog's ids, labels and dependency graph, and the documentation's links, ADR
-numbering and lifecycle states.
+documentation's links, ADR numbering and lifecycle states.
 
 The working rules the project holds itself to — how a change is proven, what a
 comment is for, what never becomes an action parameter — are in
@@ -222,10 +221,6 @@ comparison.
   path, command or pull-request target comes from model output. The reviewer has
   no process-execution surface at all except two named provider transports, and
   the runner and the workspace pass argv, never a shell string.
-
-## Maintainer-only scripts
-
-`pnpm issues:dry-run` and `pnpm issues:apply` reconcile `backlog/issues.json` against the GitHub issues of whichever repository the checkout's `origin` remote names — in a fork, that is your fork, and `issues:apply` would open an issue there for every backlog entry. They are a maintainer's tools for keeping one repository's issues in step with the backlog, not part of the contribution workflow above.
 
 ## Licence
 
