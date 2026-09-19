@@ -495,8 +495,11 @@ describe("the Spec pane (SCP-336)", () => {
     await waitFor(async () => expect(await rows()).toHaveLength(2));
     const after = await rows();
     expect(after[0]).toContain("R1");
-    // Its text changed and its id did not.
-    expect(after[0]).toContain("A person can choose");
+    // Its text changed and its id did not. The text is read in the box it is
+    // edited in; the list beside it says where each id landed, and saying the
+    // sentence twice is what made the pane twice as long as the spec.
+    expect(requirements.value).toContain("R1: A person can choose");
+    expect(after[0]).not.toContain("A person can choose");
     // R2 and R3 were each used once, so the new requirement is R4.
     expect(after[1]).toContain("R4");
     expect(after.join(" ")).not.toContain("R2");

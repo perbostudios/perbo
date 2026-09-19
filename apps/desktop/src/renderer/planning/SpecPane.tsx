@@ -451,11 +451,15 @@ export function SpecPane({
                 onCommit={(text) => commit(text === undefined ? undefined : { [field]: text })}
               >
                 {field === "requirements" && (
+                  // The requirements are in the box above, each with the id it
+                  // was given. What this adds is where each one landed, so it
+                  // says the id and the node and not the sentence again: the
+                  // same words twice, once to edit and once to read, is a pane
+                  // twice as long saying one thing.
                   <ul className="spec-requirements" aria-label="Requirements">
                     {(view?.requirements ?? []).map((requirement, index) => (
                       <li key={requirement.id ?? index}>
                         <span className="mono">{requirement.id ?? "—"}</span>
-                        <span className="spec-requirement-text">{requirement.text}</span>
                         <span className="small muted">
                           {requirement.nodes.length > 0 ? requirement.nodes.join(", ") : "none yet"}
                         </span>

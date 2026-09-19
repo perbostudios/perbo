@@ -4017,14 +4017,7 @@ kbd {
   font-size: 12px;
   color: var(--muted);
 }
-.spec-requirement-text {
-  flex: 1;
-  min-width: 0;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+
 .spec-generate {
   display: flex;
   align-items: center;

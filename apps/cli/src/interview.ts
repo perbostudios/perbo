@@ -1348,9 +1348,10 @@ function ticketFromSpec(context: InterviewContext): string | null {
  * The two are separated because they read differently to a person: a plan that
  * does not exist yet is written by generating one, and a plan that has been
  * approved is immutable (ADR-0016) and saying nothing was drafted would be
- * false. Where two tickets record one spec and neither is open — which
- * `generate_plan` refuses to produce, though `admit --from-spec` run twice by
- * hand does — the oldest is taken, `listTickets` being in admission order.
+ * false. Where two tickets record one spec and neither is open — which nothing
+ * admits any more, `admit --from-spec` refusing a second beside a live one, but
+ * which a store written before it did may hold — the oldest is taken,
+ * `listTickets` being in admission order.
  */
 function draftedFromSpec(
   context: InterviewContext,
