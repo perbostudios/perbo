@@ -89,7 +89,7 @@ Every change to the reviewer is scored against a public corpus of seeded defects
 
 ## Contributing
 
-Contributions are welcome under the Developer Certificate of Origin: sign off every commit, with no contributor licence agreement. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are welcome, under Apache-2.0 and with no contributor licence agreement. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 

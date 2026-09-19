@@ -1,59 +1,5 @@
 # Contributing
 
-## Sign your work — the Developer Certificate of Origin
-
-There is no contributor licence agreement. Instead every commit carries a
-`Signed-off-by` line, which is your statement of the certificate below:
-
-```bash
-git commit -s -m "..."
-```
-
-The line must use your real name and an address you can be reached at:
-
-```text
-Signed-off-by: Jane Doe <jane@example.com>
-```
-
-A pull request whose commits are not signed off cannot be merged. The
-certificate, verbatim:
-
-```text
-Developer Certificate of Origin
-Version 1.1
-
-Copyright (C) 2004, 2006 The Linux Foundation and its contributors.
-
-Everyone is permitted to copy and distribute verbatim copies of this
-license document, but changing it is not allowed.
-
-
-Developer's Certificate of Origin 1.1
-
-By making a contribution to this project, I certify that:
-
-(a) The contribution was created in whole or in part by me and I
-    have the right to submit it under the open source license
-    indicated in the file; or
-
-(b) The contribution is based upon previous work that, to the best
-    of my knowledge, is covered under an appropriate open source
-    license and I have the right under that license to submit that
-    work with modifications, whether created in whole or in part
-    by me, under the same license (unless I am permitted to submit
-    under a different license), as indicated in the file; or
-
-(c) The contribution was provided directly to me by some other
-    person who certified (a), (b) or (c) and I have not modified
-    it.
-
-(d) I understand and agree that this project and the contribution
-    are public and that a record of the contribution (including all
-    personal information I submit with it, including my sign-off) is
-    maintained indefinitely and may be redistributed consistent with
-    this project or the open source license(s) involved.
-```
-
 ## Before you open a pull request
 
 Run the gate and see it green:
@@ -79,16 +25,11 @@ or agent, and they apply to a contributor exactly as they apply to a maintainer.
 ## Working with a coding agent
 
 Most pull requests here are written by the maintainer's own agent sessions, and
-yours may be too. Two things follow from the certificate above
-([D-114](docs/11-open-decisions.md)):
-
-- The `Signed-off-by` line is yours. Only a person can certify the Developer
-  Certificate of Origin, so an agent never adds it; you review what it wrote,
-  and you sign it off.
-- A commit an agent wrote carries the trailer `Assisted-by: LLM`, the Linux
-  kernel's convention, and no `Co-Authored-By` naming a model. The checked-in
-  `.claude/settings.json` sets that trailer for Claude Code sessions in this
-  repository.
+yours may be too. A commit an agent wrote carries the trailer
+`Assisted-by: LLM`, the Linux kernel's convention, and no `Co-Authored-By`
+naming a model ([D-114](docs/11-open-decisions.md)); the checked-in
+`.claude/settings.json` sets that trailer for Claude Code sessions in this
+repository.
 
 Before a session merges an agent-authored pull request, a separate agent run
 reads the whole diff against `AGENTS.md` and the `AGENTS.md` of each package it
@@ -224,5 +165,6 @@ comparison.
 
 ## Licence
 
-Apache-2.0; see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). By signing off a
-commit you submit your contribution under that licence.
+Apache-2.0; see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). A contribution you
+submit is under that licence by its section 5, and there is no contributor
+licence agreement.

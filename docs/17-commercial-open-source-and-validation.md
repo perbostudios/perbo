@@ -16,7 +16,7 @@ Everything that runs on one machine is open source. Anything hosted or shared ac
 
 ## Licences
 
-- **Code:** Apache-2.0. Contributions carry a Developer Certificate of Origin sign-off; there is no contributor licence agreement.
+- **Code:** Apache-2.0. A contribution is under the same licence, and there is no contributor licence agreement.
 - **The corpus, `plantedbugs`:** the fixture format under Apache-2.0 and the fixtures under CC-BY-4.0. Every fixture is public from the release.
 - **Code from other projects** is never copied without reviewing its licence first. Paseo's design is followed, and its code is not copied ([D-102](11-open-decisions.md)). Vendored code keeps its licence and a pinned source.
 - **Trademarks and patents:** Apache-2.0's own terms and nothing beyond them. It grants no trademark rights and carries its own patent licence. The Perbo name, logo and artwork are not licensed under Apache-2.0; `NOTICE` says which files ([D-112](11-open-decisions.md)).
