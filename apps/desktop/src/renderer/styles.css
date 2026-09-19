@@ -3897,6 +3897,140 @@ kbd {
   text-decoration-skip-ink: none;
   text-underline-offset: 3px;
 }
+/* The reading view of a section (`SpecReading.tsx`). Its box is the editor's
+   box — same fill, same radius, same padding — so opening one under the pointer
+   moves nothing but the letters, and the person reading and the person typing
+   are looking at the same shape on the page. What carries colour here is what
+   the writer marked: a reference, a piece of code, their own emphasis, and the
+   id the spec gave a requirement. Nothing is coloured for its meaning. */
+.spec-read {
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  min-height: 52px;
+  line-height: 1.7;
+  color: var(--text);
+  cursor: text;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.spec-read:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+.spec-read--empty {
+  justify-content: center;
+}
+.spec-read-placeholder,
+.spec-read-p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.spec-read-placeholder {
+  color: var(--faint);
+}
+/* A heading inside a section is a heading of a section, so it is small: it
+   groups the lines under it and does not compete with the section's own name. */
+.spec-read-h {
+  margin: 4px 0 -2px;
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.spec-read-h-text {
+  min-width: 0;
+}
+.spec-read-h::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.spec-read-h3,
+.spec-read-h4 {
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-size: calc(12.5px * var(--text-scale));
+  color: var(--ink);
+}
+.spec-read-h4 {
+  font-weight: 500;
+  color: var(--muted);
+}
+.spec-read-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+/* The mark in its own column, so every line's first word starts at the same
+   place however wide its mark is, and a wrapped line hangs under that word
+   rather than under the mark. */
+.spec-read-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 9px;
+}
+.spec-read-text {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+.spec-bullet {
+  color: var(--amber);
+  font-size: 1.05em;
+  line-height: 1;
+  text-align: right;
+  min-width: 1.1em;
+}
+/* The id a criterion cites, kept and shown, but as a quiet chip beside the line
+   rather than as the first four characters of its sentence. */
+.spec-req-id {
+  font: 500 calc(10px * var(--text-scale)) var(--mono);
+  color: var(--amber-text);
+  background: var(--amber-paper);
+  border: 1px solid rgba(var(--amber-rgb), 0.35);
+  border-radius: 999px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  transform: translateY(-1px);
+}
+.spec-code {
+  font: calc(11.5px * var(--text-scale)) var(--mono);
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.5px 4px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+/* The highlighter: a wash rather than a fill, so it reads as one in both
+   palettes — the paper colours are a hair off the surface in the dark one and
+   the mark would not be there at all. The shadow is what makes it a stroke of
+   highlighter instead of a box: it spreads the same colour past the glyphs
+   without moving them. */
+.spec-strong {
+  font-weight: 600;
+  color: var(--ink);
+  background: rgba(var(--green-rgb), 0.22);
+  box-shadow: 0 0 0 2.5px rgba(var(--green-rgb), 0.22);
+  border-radius: 2px;
+}
+.spec-em {
+  font-style: italic;
+  color: var(--blue);
+}
 .spec-missing {
   color: var(--red);
 }

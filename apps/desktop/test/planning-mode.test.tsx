@@ -425,6 +425,22 @@ describe("the Explorer pane's preview (SCP-318)", () => {
  * assigns requirement ids with `@perbo/planning`'s own code.
  */
 describe("the Spec pane (SCP-336)", () => {
+  /**
+   * A section's editor, opened first.
+   *
+   * The pane shows a section as it reads until somebody asks to type in it, so
+   * the textarea a test writes into is not on the page until something opens
+   * it — which is what a person does by clicking, and what this does too.
+   * Re-asked every time rather than held, because leaving a section closes its
+   * editor and the next write needs the one that is open now.
+   */
+  const specField = (label: string): HTMLTextAreaElement => {
+    const shown = screen.getByLabelText(label);
+    if (shown instanceof HTMLTextAreaElement) return shown;
+    fireEvent.mouseDown(shown);
+    return screen.getByLabelText(label) as HTMLTextAreaElement;
+  };
+
   const startPlanning = async (repo = /example\/webstore/): Promise<void> => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Create" }));
@@ -439,7 +455,7 @@ describe("the Spec pane (SCP-336)", () => {
     fireEvent.blur(title);
     for (const [label, value] of Object.entries(sections)) {
       if (label === "title") continue;
-      const field = screen.getByLabelText(label);
+      const field = specField(label);
       fireEvent.change(field, { target: { value } });
       fireEvent.blur(field);
       await waitFor(() => expect((field as HTMLTextAreaElement).value).toBe(value));
@@ -464,9 +480,8 @@ describe("the Spec pane (SCP-336)", () => {
 
     await screen.findByText("specs/a-light-colour-mode/spec.md");
     // The ids are written into the section they were typed in.
-    const written = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
-    await waitFor(() => expect(written.value).toContain("R1:"));
-    expect(written.value).toContain("R3:");
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R1:"));
+    expect(specField("Spec Requirements").value).toContain("R3:");
     // Nothing has been drafted, so no requirement has landed in a node, and the
     // list of where they landed is a column of "none yet" — so it is not there.
     expect(screen.queryByRole("list", { name: "Requirements" })).toBeNull();
@@ -475,8 +490,8 @@ describe("the Spec pane (SCP-336)", () => {
   it("keeps a requirement's id when its text is edited, and gives the next one to a new one", async () => {
     await startPlanning();
     await write(SPEC);
-    const requirements = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
-    await waitFor(() => expect(requirements.value).toContain("R1:"));
+    const requirements = specField("Spec Requirements") as HTMLTextAreaElement;
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R1:"));
     // R2 and R3 both go — the highest id with them — and one is written.
     fireEvent.change(requirements, {
       target: {
@@ -492,18 +507,53 @@ describe("the Spec pane (SCP-336)", () => {
     fireEvent.blur(requirements);
     // The ids are read where they are written, the list of nodes being absent
     // until there is a plan for a requirement to have landed in.
-    await waitFor(() => expect(requirements.value).toContain("R4:"));
-    const after = requirements.value.split("\n").filter((line) => /R\d+:/.test(line));
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R4:"));
+    const after = specField("Spec Requirements")
+      .value.split("\n")
+      .filter((line) => /R\d+:/.test(line));
     expect(after).toHaveLength(2);
     expect(after[0]).toContain("R1");
     // Its text changed and its id did not. The text is read in the box it is
     // edited in; the list beside it says where each id landed, and saying the
     // sentence twice is what made the pane twice as long as the spec.
-    expect(requirements.value).toContain("R1: A person can choose");
+    expect(specField("Spec Requirements").value).toContain("R1: A person can choose");
     // R2 and R3 were each used once, so the new requirement is R4.
     expect(after[1]).toContain("R4");
     expect(after.join(" ")).not.toContain("R2:");
     expect(after.join(" ")).not.toContain("R3:");
+  });
+
+  it("shows a section as it reads, and opens the editor where it is clicked", async () => {
+    await startPlanning();
+    await write({
+      title: SPEC.title,
+      "Spec Requirements": "### The page\n\n- The rail follows the mode.",
+    });
+    await screen.findByText("specs/a-light-colour-mode/spec.md");
+
+    // The section is not an editor until somebody asks for one.
+    const reading = screen.getByLabelText("Spec Requirements");
+    expect(reading.tagName).toBe("DIV");
+    // The marks the file uses to say a thing are not the thing: the heading is
+    // a heading, the requirement's id is beside its line, and neither `###` nor
+    // `R1:` is in the words.
+    const heading = within(reading).getByText("The page");
+    expect(heading.textContent).not.toContain("#");
+    await waitFor(() => expect(within(reading).getByText("R1").className).toBe("spec-req-id"));
+    const item = within(reading).getByText("The rail follows the mode.");
+    expect(item.textContent).not.toContain("R1:");
+
+    // Clicking gives back the editor, with the file's own characters in it.
+    fireEvent.mouseDown(reading);
+    const editor = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
+    expect(editor.tagName).toBe("TEXTAREA");
+    expect(editor.value).toContain("### The page");
+    expect(editor.value).toContain("R1:");
+    expect(document.activeElement).toBe(editor);
+
+    // And leaving it goes back to reading, without asking for a second save.
+    fireEvent.blur(editor);
+    await waitFor(() => expect(screen.getByLabelText("Spec Requirements").tagName).toBe("DIV"));
   });
 
   it("offers Generate plan once the spec has a title and an outcome, not before", async () => {
@@ -515,7 +565,7 @@ describe("the Spec pane (SCP-336)", () => {
     const generate = (): HTMLButtonElement =>
       screen.getByRole("button", { name: "Generate plan" }) as HTMLButtonElement;
     expect(generate().disabled).toBe(true);
-    const outcome = screen.getByLabelText("Spec Outcome");
+    const outcome = specField("Spec Outcome");
     fireEvent.change(outcome, { target: { value: SPEC["Spec Outcome"] } });
     fireEvent.blur(outcome);
     await waitFor(() => expect(generate().disabled).toBe(false));
@@ -535,7 +585,7 @@ describe("the Spec pane (SCP-336)", () => {
       await screen.findByText(/exported TS symbols/);
     };
     const notes = (): HTMLTextAreaElement =>
-      screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
+      specField("Spec Notes") as HTMLTextAreaElement;
     const type = (value: string): void => {
       fireEvent.change(notes(), { target: { value } });
     };
@@ -750,7 +800,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
 
@@ -778,7 +828,7 @@ describe("the Spec pane (SCP-336)", () => {
       await startPlanning();
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       const notice = (await screen.findByText(/Nothing was saved/)).closest(
@@ -786,7 +836,7 @@ describe("the Spec pane (SCP-336)", () => {
       ) as HTMLElement;
 
       fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-      await waitFor(() => expect(outcome.value).toBe("The interview's sentence."));
+      await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's sentence."));
       expect(screen.queryByText(/Nothing was saved/)).toBeNull();
       const written =
         (JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>)[
@@ -800,14 +850,14 @@ describe("the Spec pane (SCP-336)", () => {
       await startPlanning();
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await screen.findByText(/Nothing was saved/);
 
       // Another section left while the refusal stands. Writing it would write
       // the whole spec, and carry the refused Outcome over the interview's.
-      const notes = screen.getByLabelText("Spec Notes");
+      const notes = specField("Spec Notes");
       fireEvent.change(notes, { target: { value: "A note typed meanwhile." } });
       fireEvent.blur(notes);
       const written = (): string =>
@@ -832,7 +882,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await screen.findByText(/Nothing was saved/);
@@ -846,12 +896,13 @@ describe("the Spec pane (SCP-336)", () => {
       // Notes is not part of the conflict, so it follows the refetch either
       // way — waiting for it is waiting for the new view to have actually
       // landed, rather than finding the notice still up from before it did.
-      const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
-      await waitFor(() => expect(notes.value).toBe("Written while the card was open."));
+      await waitFor(() =>
+        expect(specField("Spec Notes").value).toBe("Written while the card was open."),
+      );
 
       // The card survived that refetch, with the person's text still in it —
       // not replaced by the further change underneath.
-      expect(outcome.value).toBe("The person's sentence.");
+      expect(specField("Spec Outcome").value).toBe("The person's sentence.");
       const notice = screen.getByText(/Nothing was saved/).closest(".notice") as HTMLElement;
       expect(within(notice).getByText("The interview's sentence.")).toBeTruthy();
       expect(within(notice).getByText("The person's sentence.")).toBeTruthy();
@@ -871,14 +922,14 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await screen.findByText(/Nothing was saved/);
 
       // Typed while the card is open, and never committed — `commit` bails
       // while `conflict` is set, so nothing has gone out for it yet.
-      const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
+      const notes = specField("Spec Notes") as HTMLTextAreaElement;
       fireEvent.change(notes, { target: { value: "Typed while the card was open." } });
       fireEvent.blur(notes);
 
@@ -936,7 +987,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       const notice = (await screen.findByText(/Nothing was saved/)).closest(".notice") as HTMLElement;
@@ -946,14 +997,14 @@ describe("the Spec pane (SCP-336)", () => {
       // not survive past this, or it becomes what the next save is read
       // against instead of the file this pane has since followed.
       fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-      await waitFor(() => expect(outcome.value).toBe("The interview's sentence."));
+      await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's sentence."));
       expect(screen.queryByText(/Nothing was saved/)).toBeNull();
 
       // The file moves again, in a section the settled refusal never named.
       await elsewhere({ notes: "Written while the card was open." });
       await client.invalidateQueries({ queryKey: ["spec", sessionId()] });
-      const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
-      await waitFor(() => expect(notes.value).toBe("Written while the card was open."));
+      const notes = specField("Spec Notes") as HTMLTextAreaElement;
+      await waitFor(() => expect(specField("Spec Notes").value).toBe("Written while the card was open."));
 
       // Built on what is now shown, which already is the file's own text.
       fireEvent.change(notes, {
@@ -976,7 +1027,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's first sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       const notice = (await screen.findByText(/Nothing was saved/)).closest(".notice") as HTMLElement;
@@ -999,7 +1050,7 @@ describe("the Spec pane (SCP-336)", () => {
 
       // Taking the file's side takes what the card showed.
       fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-      await waitFor(() => expect(outcome.value).toBe("The interview's first sentence."));
+      await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's first sentence."));
     });
 
     it("keeps the held refusal through a save that errors while its card is still open", async () => {
@@ -1020,7 +1071,7 @@ describe("the Spec pane (SCP-336)", () => {
         await write(SPEC);
         await elsewhere({ outcome: "The interview's first sentence." });
 
-        const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+        const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
         fireEvent.change(outcome, { target: { value: "The person's sentence." } });
         fireEvent.blur(outcome);
         const notice = (await screen.findByText(/Nothing was saved/)).closest(
@@ -1054,7 +1105,7 @@ describe("the Spec pane (SCP-336)", () => {
         // Taking the file's side takes what the card showed, not the
         // file's later move.
         fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-        await waitFor(() => expect(outcome.value).toBe("The interview's first sentence."));
+        await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's first sentence."));
       } finally {
         asked.mockRestore();
       }
@@ -1075,7 +1126,7 @@ describe("the Spec pane (SCP-336)", () => {
         await write(SPEC);
         await elsewhere({ outcome: "The interview's first sentence." });
 
-        const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+        const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
         fireEvent.change(outcome, { target: { value: "The person's sentence." } });
         fireEvent.blur(outcome);
         const notice = (await screen.findByText(/Nothing was saved/)).closest(
@@ -1106,8 +1157,8 @@ describe("the Spec pane (SCP-336)", () => {
         // The file moves again, in a section the settled refusal never named.
         await elsewhere({ notes: "Written after the errored resend." });
         await client.invalidateQueries({ queryKey: ["spec", sessionId()] });
-        const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
-        await waitFor(() => expect(notes.value).toBe("Written after the errored resend."));
+        const notes = specField("Spec Notes") as HTMLTextAreaElement;
+        await waitFor(() => expect(specField("Spec Notes").value).toBe("Written after the errored resend."));
 
         // Built on what is now shown, which already is the file's own text —
         // refused only if the held view outlived the card that showed it.
@@ -1132,7 +1183,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ notes: "The interview's note." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await waitFor(() => {
@@ -1168,7 +1219,7 @@ describe("the Spec pane (SCP-336)", () => {
       // The person, still on the read from before the interview wrote, adds a
       // different one of their own — typed into the textarea as it already
       // shows the three original lines, ids included.
-      const requirements = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
+      const requirements = specField("Spec Requirements") as HTMLTextAreaElement;
       fireEvent.change(requirements, {
         target: { value: `${requirements.value}\n- The person's own requirement.` },
       });
@@ -1241,13 +1292,13 @@ describe("the Spec pane (SCP-336)", () => {
     const watched = watchBridge();
     try {
       // An outcome typed and not yet left: Generate plan must save it first.
-      const outcome = screen.getByLabelText("Spec Outcome");
+      const outcome = specField("Spec Outcome");
       fireEvent.change(outcome, { target: { value: "A changed outcome." } });
       watched.hold();
       fireEvent.click(screen.getByRole("button", { name: "Generate plan" }));
       await waitFor(() => expect(watched.events).toContain("specSave:called"));
       // Left while that save is out: it goes before the drafter reads the file.
-      const noGos = screen.getByLabelText("Spec No-Gos");
+      const noGos = specField("Spec No-Gos");
       fireEvent.change(noGos, { target: { value: "- Left while the save was out." } });
       fireEvent.blur(noGos);
       watched.let();
@@ -1278,7 +1329,7 @@ describe("the Spec pane (SCP-336)", () => {
     const watched = watchBridge();
     try {
       watched.hold();
-      const notes = screen.getByLabelText("Spec Notes");
+      const notes = specField("Spec Notes");
       fireEvent.change(notes, { target: { value: "Written with the dialog open." } });
       fireEvent.blur(notes);
       await waitFor(() => expect(startOver().disabled).toBe(true));
@@ -1296,21 +1347,21 @@ describe("the Spec pane (SCP-336)", () => {
     const title = await screen.findByLabelText("Spec title");
     fireEvent.change(title, { target: { value: SPEC.title } });
     fireEvent.blur(title);
-    const outcome = screen.getByLabelText("Spec Outcome");
+    const outcome = specField("Spec Outcome");
     fireEvent.change(outcome, { target: { value: SPEC["Spec Outcome"] } });
     fireEvent.blur(outcome);
-    const requirements = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
+    const requirements = specField("Spec Requirements") as HTMLTextAreaElement;
     fireEvent.change(requirements, {
       target: { value: "- The person can choose Light, Dark or System.\n- Text meets WCAG AA contrast." },
     });
     fireEvent.blur(requirements);
 
     await screen.findByText("specs/a-light-colour-mode/spec.md");
-    await waitFor(() => expect(requirements.value).toContain("R2:"));
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R2:"));
     await screen.findByText("Saved in the repository — the file is the spec");
-    expect(requirements.value).toContain("- R1: The person can choose Light, Dark or System.");
-    expect(requirements.value).toContain("- R2: Text meets WCAG AA contrast.");
-    expect(requirements.value).not.toContain("R3:");
+    expect(specField("Spec Requirements").value).toContain("- R1: The person can choose Light, Dark or System.");
+    expect(specField("Spec Requirements").value).toContain("- R2: Text meets WCAG AA contrast.");
+    expect(specField("Spec Requirements").value).not.toContain("R3:");
     const stored = JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>;
     expect(stored["a-light-colour-mode"]).toContain("perbo:requirement-ids through R2");
     expect(stored["a-light-colour-mode"]).toContain(SPEC["Spec Outcome"]);
@@ -1339,7 +1390,7 @@ describe("the Spec pane (SCP-336)", () => {
     mount();
     await screen.findByLabelText("Spec title");
     await waitFor(() =>
-      expect((screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement).value).toContain(
+      expect((specField("Spec Requirements") as HTMLTextAreaElement).value).toContain(
         "written elsewhere",
       ),
     );

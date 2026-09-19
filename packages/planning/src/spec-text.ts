@@ -168,27 +168,61 @@ export function specTitleFromMessage(message: string): string {
 }
 
 /**
- * The requirements a section's text states, each with the id it already
- * carries.
+ * A heading inside a section, which is the one thing there that states no
+ * requirement.
+ *
+ * Three hashes at least, because `#` and `##` are the spec file's own
+ * delimiters: {@link readSpecSections} splits on them, so a `##` line written
+ * inside `## Requirements` would open a new section on the next read and take
+ * every requirement under it out of the file. A line at those two depths stays
+ * what it has always been — a requirement, written back with an id — which
+ * reads oddly and loses nothing.
+ */
+const SECTION_HEADING = /^#{3,6}\s+\S/;
+
+/**
+ * One line of the Requirements section: a requirement, or a heading grouping
+ * the ones under it.
+ */
+type RequirementLine = { heading: string } | { draft: SpecRequirementDraft };
+
+/**
+ * The Requirements section read line by line, each requirement with the id it
+ * already carries.
  *
  * A line that is not a list item is a requirement too, and is written back as
  * one. Dropping it would lose a person's sentence silently, which is the one
  * outcome an editor may not have.
+ *
+ * A heading is the exception, and has to be: `parseSpec` reads list items in
+ * this section and nothing else, so it has always passed headings over. An
+ * editor that numbered them instead would make the two readers of one file
+ * disagree — and the first save after an interview wrote "### The page" would
+ * turn that line into a requirement, shift every id after it, and leave the
+ * person's spec saying something they did not write.
  */
-function parseRequirementLines(text: string): SpecRequirementDraft[] {
+function parseRequirementSection(text: string): RequirementLine[] {
   return text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !MARK.test(line))
-    .map((line) => {
+    .flatMap((line): RequirementLine[] => {
+      if (SECTION_HEADING.test(line)) return [{ heading: line }];
       const item = LIST_ITEM.exec(line);
       const body = (item ? item[1]! : line).trim();
       const match = REQUIREMENT.exec(body);
-      return match
+      const draft = match
         ? { id: match[1]!, text: match[2]!.trim() }
         : { id: null, text: body };
-    })
-    .filter((requirement) => requirement.text.length > 0);
+      return draft.text.length > 0 ? [{ draft }] : [];
+    });
+}
+
+/** The requirements alone, for a reader that wants no structure with them. */
+function parseRequirementLines(text: string): SpecRequirementDraft[] {
+  return parseRequirementSection(text).flatMap((line) =>
+    "draft" in line ? [line.draft] : [],
+  );
 }
 
 /** The list items a section's text states, for No-Gos and Rabbit holes. */
@@ -233,7 +267,8 @@ export function renderSpec(
   if (title.length === 0) {
     throw new PlanningError("a spec's first heading is the title of the work it states");
   }
-  const drafts = parseRequirementLines(text.requirements);
+  const lines = parseRequirementSection(text.requirements);
+  const drafts = lines.flatMap((line) => ("draft" in line ? [line.draft] : []));
   let highWater = Math.max(
     options.highWater ?? 0,
     0,
@@ -253,7 +288,7 @@ export function renderSpec(
   // requirement said twice, not two requirements sharing an id, and only the
   // second reading tells them apart.
   const seen = new Map<string, string>();
-  const requirements: SpecRequirement[] = drafts.flatMap((draft) => {
+  const numbered = (draft: SpecRequirementDraft): SpecRequirement[] => {
     if (draft.id !== null) {
       const already = seen.get(draft.id);
       if (already !== undefined) {
@@ -278,12 +313,38 @@ export function renderSpec(
     const id = `R${highWater}`;
     seen.set(id, draft.text);
     return [{ id, text: draft.text }];
-  });
+  };
+
+  // Walked in the order it was written, so a heading keeps the requirements it
+  // groups: the ids are the file's, the arrangement is the person's.
+  const requirements: SpecRequirement[] = [];
+  const written: string[] = [];
+  // A requirement is deduplicated by its id; a heading has none, so it is
+  // deduplicated by what it says. "Keep both" hands this function the file's
+  // text and the person's whole, one after the other, and without this every
+  // heading in the section arrives twice — the second copy with nothing under
+  // it, because its requirements deduplicated away.
+  const headings = new Set<string>();
+  for (const line of lines) {
+    if ("heading" in line) {
+      if (headings.has(line.heading)) continue;
+      headings.add(line.heading);
+      if (written.length > 0) written.push("");
+      written.push(line.heading, "");
+      continue;
+    }
+    for (const requirement of numbered(line.draft)) {
+      requirements.push(requirement);
+      written.push(`- ${requirement.id}: ${requirement.text}`);
+    }
+  }
+  // A heading with nothing under it leaves a blank line at the end of its own.
+  while (written.at(-1) === "") written.pop();
 
   const body: Record<(typeof SPEC_HEADINGS)[number], string> = {
     Outcome: text.outcome.trim(),
     Requirements: [
-      ...requirements.map((requirement) => `- ${requirement.id}: ${requirement.text}`),
+      ...written,
       // No mark until an id has been given: a file that numbered nothing carries nothing.
       ...(highWater === 0 ? [] : ["", markLine(highWater)]),
     ].join("\n"),

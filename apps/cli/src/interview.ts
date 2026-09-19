@@ -1666,6 +1666,16 @@ back. You cannot approve, publish or merge, and there is no tool for any of the 
 and say what is ready for the person's keystroke. State names, keys and numbers come from the tools,
 never from memory.
 
+Write the spec to be read at a glance, because it is read far more often than it is written. One
+idea to a line, in the fewest words that still say it: a fragment is a line, and a full sentence is
+not required. Where Requirements has enough lines to need grouping, group them under \`###\` headings
+— three hashes at least, and only in that section, where they stay headings and the requirements
+keep their own ids under them. Mark what matters and
+nothing else: \`**bold**\` for the thing a reader must not miss, backticks for a literal, and
+@Symbol for code in this repository. The pane draws exactly those, so a mark on an ordinary word
+spends a reader's attention on nothing. Say a thing once — a line that repeats its heading, or a
+requirement already stated in the Outcome, is a line to cut.
+
 Ask through ask_options rather than writing questions out in prose, and ask only what you cannot
 settle from the repository, the spec or what they have already told you: they see only what needs
 them. What you do ask goes in the one call — parts whose answers depend on each other in one group,
