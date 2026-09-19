@@ -9,20 +9,29 @@ import {
   symbolOptions,
 } from "@perbo/planning/spec-text";
 import { caretPoint } from "./caret.js";
+import { SpecReading } from "./SpecReading.js";
 import type { ExportedName } from "../../shared/protocol.js";
 
 /**
  * One section of the spec, with the `@Symbol` completion and marking over it
  * (D-015, SCP-321).
  *
- * The text is a plain textarea, because a spec is written as prose and an
- * editor that intercepted typing would get in the way of writing one. The marks
- * are drawn behind it: a second copy of the same text, in the same box and the
- * same font, with each reference wrapped — so the textarea keeps every
+ * Two views of the same text, because a spec is read far more often than it is
+ * written. Until somebody types in it a section is shown as it reads
+ * ({@link ./SpecReading.tsx}): headings as headings, bullets as bullets, a
+ * requirement's id beside its line rather than in front of its first word.
+ * Clicking or tabbing in opens the editor, and leaving it goes back.
+ *
+ * The editor itself is a plain textarea, because prose is written in one and
+ * anything that intercepted typing would get in the way of writing it. The
+ * marks are drawn behind it: a second copy of the same text, in the same box
+ * and the same font, with each reference wrapped — so the textarea keeps every
  * behaviour a person expects of one and the marks land on the words. That only
  * holds while the two lay out identically, which is why the runs put the text
  * back together exactly and why the field grows to its content rather than
- * scrolling.
+ * scrolling. It is also why the reading view is a view of its own and not a
+ * prettier backdrop: a bullet, a chip and a heading all move the words, and a
+ * caret has to land where the eye says it will.
  */
 
 /** How many names the popup offers at once: enough to choose from, few enough to read. */
@@ -76,6 +85,10 @@ export function SpecSection({
   const area = useRef<HTMLTextAreaElement | null>(null);
   const box = useRef<HTMLDivElement | null>(null);
   const [popup, setPopup] = useState<Popup | null>(null);
+  // Which of the two views is showing. Reading until somebody asks to type,
+  // and back to reading when they leave: the editor is the exception, not the
+  // resting state of a document that is mostly read.
+  const [editing, setEditing] = useState(false);
   // Where the caret goes after an insertion, which cannot be set until React
   // has put the new text in the textarea.
   const caret = useRef<number | null>(null);
@@ -92,7 +105,9 @@ export function SpecSection({
     // text: a textarea that scrolled would slide every mark off its word.
     element.style.height = "auto";
     if (element.scrollHeight > 0) element.style.height = `${element.scrollHeight}px`;
-  }, [value]);
+    // `editing` as well as `value`: opening the editor mounts the textarea with
+    // a caret waiting for it, and nothing about the text has changed.
+  }, [value, editing]);
 
   // Held across renders: measuring one name against every exported name is the
   // most expensive thing on this path, and a section being typed in renders on
@@ -126,11 +141,26 @@ export function SpecSection({
     });
   };
 
+  /** Show the editor with the caret at `at`, held inside the text. */
+  const open = (at: number): void => {
+    caret.current = Math.max(0, Math.min(value.length, at));
+    setEditing(true);
+  };
+
   const insert = (chosen: string): void => {
     if (popup === null) return;
     const written = completeSymbol({ text: value, from: popup.from, to: popup.to, name: chosen });
-    caret.current = written.caret;
     setPopup(null);
+    if (written.text === value) {
+      // Completing a reference that was already whole writes nothing, so
+      // nothing re-renders and the effect that places the caret never runs. A
+      // caret left armed here would be applied to the next change instead, and
+      // the next character a person typed would land where this one meant to
+      // go. It is placed now, because now is when it is wanted.
+      area.current?.setSelectionRange(written.caret, written.caret);
+      return;
+    }
+    caret.current = written.caret;
     onChange(written.text);
   };
 
@@ -171,97 +201,109 @@ export function SpecSection({
     [names, unknown.join(",")],
   );
 
+  const placeholder = field === "requirements" ? "One per line, shortest first." : "Nothing yet.";
   return (
     <div className="spec-section">
       <div className="spec-h">
         <h3>{name}</h3>
         <span className="hint">{hint}</span>
       </div>
-      <div className="spec-field" ref={box}>
-        <div className="spec-backdrop" aria-hidden="true">
-          {markSpecSymbols(value).map((run, index) =>
-            run.name === null ? (
-              run.text
-            ) : (
-              <span
-                // The runs are positional: two references to the same name are
-                // two marks, and the index is what tells them apart.
-                key={index}
-                className={known !== null && !known.has(run.name) ? "sym sym--unknown" : "sym"}
-              >
-                {run.text}
-              </span>
-            ),
-          )}
-          {/* A trailing newline collapses in a block, and the caret would sit a
-              line above the mark it belongs to. */}
-          {"\n"}
-        </div>
-        <textarea
-          ref={area}
-          className="spec-input"
-          aria-label={`Spec ${name}`}
-          spellCheck={false}
-          rows={1}
+      {!editing ? (
+        <SpecReading
           value={value}
-          maxLength={12_000}
-          placeholder={field === "requirements" ? "- When …, the app shall …" : "Nothing yet."}
-          onChange={(event) => {
-            onChange(event.target.value);
-            detect(event.target);
-          }}
-          onClick={(event) => detect(event.currentTarget)}
-          onKeyUp={(event) => {
-            // An arrow the popup took moved the selection in it, not the caret
-            // in the text: asking again here would answer the same reference
-            // and put the selection back on the first name.
-            if (popup !== null && options.length > 0 && CHOOSING.includes(event.key)) return;
-            if (MOVES_THE_CARET.includes(event.key)) detect(event.currentTarget);
-          }}
-          onKeyDown={onKeyDown}
-          onBlur={() => {
-            setPopup(null);
-            onCommit();
-          }}
+          label={`Spec ${name}`}
+          placeholder={placeholder}
+          known={known}
+          onOpen={open}
         />
-        {popup !== null && (
-          <div
-            className="sym-pop"
-            role="listbox"
-            aria-label="Exported symbols"
-            style={{ left: `${popup.x}px`, top: `${popup.y}px` }}
-          >
-            <div className="sym-pop-head">
-              <span>exported symbols</span>
-              <span className="spacer" />
-              <span>↵ insert</span>
-            </div>
-            {options.length > 0 ? (
-              options.map((option, index) => (
-                <button
-                  key={`${option.path}:${option.name}`}
-                  type="button"
-                  role="option"
-                  aria-selected={index === popup.at}
-                  className={index === popup.at ? "sym-opt active" : "sym-opt"}
-                  // The field keeps the focus, so choosing with the mouse does
-                  // not blur it and commit a half-typed reference on the way.
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => insert(option.name)}
+      ) : (
+        <div className="spec-field" ref={box}>
+          <div className="spec-backdrop" aria-hidden="true">
+            {markSpecSymbols(value).map((run, index) =>
+              run.name === null ? (
+                run.text
+              ) : (
+                <span
+                  // The runs are positional: two references to the same name are
+                  // two marks, and the index is what tells them apart.
+                  key={index}
+                  className={known !== null && !known.has(run.name) ? "sym sym--unknown" : "sym"}
                 >
-                  <b>@{option.name}</b>
-                  <i>{option.kind}</i>
-                  <small>{option.path}</small>
-                </button>
-              ))
-            ) : (
-              <div className="sym-empty">
-                No exported symbol matches “{popup.query}”. It will be marked until it resolves.
-              </div>
+                  {run.text}
+                </span>
+              ),
             )}
+            {/* A trailing newline collapses in a block, and the caret would sit a
+                line above the mark it belongs to. */}
+            {"\n"}
           </div>
-        )}
-      </div>
+          <textarea
+            ref={area}
+            className="spec-input"
+            aria-label={`Spec ${name}`}
+            spellCheck={false}
+            rows={1}
+            value={value}
+            maxLength={12_000}
+            placeholder={placeholder}
+            onChange={(event) => {
+              onChange(event.target.value);
+              detect(event.target);
+            }}
+            onClick={(event) => detect(event.currentTarget)}
+            onKeyUp={(event) => {
+              // An arrow the popup took moved the selection in it, not the caret
+              // in the text: asking again here would answer the same reference
+              // and put the selection back on the first name.
+              if (popup !== null && options.length > 0 && CHOOSING.includes(event.key)) return;
+              if (MOVES_THE_CARET.includes(event.key)) detect(event.currentTarget);
+            }}
+            onKeyDown={onKeyDown}
+            onBlur={() => {
+              setPopup(null);
+              setEditing(false);
+              onCommit();
+            }}
+          />
+          {popup !== null && (
+            <div
+              className="sym-pop"
+              role="listbox"
+              aria-label="Exported symbols"
+              style={{ left: `${popup.x}px`, top: `${popup.y}px` }}
+            >
+              <div className="sym-pop-head">
+                <span>exported symbols</span>
+                <span className="spacer" />
+                <span>↵ insert</span>
+              </div>
+              {options.length > 0 ? (
+                options.map((option, index) => (
+                  <button
+                    key={`${option.path}:${option.name}`}
+                    type="button"
+                    role="option"
+                    aria-selected={index === popup.at}
+                    className={index === popup.at ? "sym-opt active" : "sym-opt"}
+                    // The field keeps the focus, so choosing with the mouse does
+                    // not blur it and commit a half-typed reference on the way.
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => insert(option.name)}
+                  >
+                    <b>@{option.name}</b>
+                    <i>{option.kind}</i>
+                    <small>{option.path}</small>
+                  </button>
+                ))
+              ) : (
+                <div className="sym-empty">
+                  No exported symbol matches “{popup.query}”. It will be marked until it resolves.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {unknown.map((missing) => (
         <div className="spec-warn" key={missing}>
           <span>@{missing} is not an exported symbol here, so the index cannot check it.</span>

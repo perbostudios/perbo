@@ -1014,6 +1014,15 @@ export interface Snapshot {
    * screen that asked for it (D-095), so this is what says it is still there.
    */
   interviews?: string[];
+  /**
+   * The editing sessions whose interview is working on what it will say next.
+   *
+   * Beside the live ones for the same reason they are here: a dock opened part
+   * way through a turn has to know it is mid-pause, and the change that said so
+   * went out before it was listening
+   * (D-119).
+   */
+  working?: string[];
 }
 export interface RepositorySnapshot {
   repository: Repository;
@@ -1061,6 +1070,17 @@ export const ChangeSchema = z.discriminatedUnion("kind", [
      * happened to be saving something (D-117).
      */
     asking: AskingSchema.nullable().default(null),
+    /**
+     * Whether the session is working on what it will say next, as against
+     * waiting on the person.
+     *
+     * It is the pauses this answers. A session reading the repository before it
+     * asks anything says nothing for a while, and a reader cannot tell that
+     * from a session that has finished or fallen over — so the dock says which
+     * it is, from the turn the session itself reports finishing
+     * (D-119).
+     */
+    working: z.boolean().default(false),
   }),
   z.object({ kind: z.literal("power"), sequence: z.number().int().nonnegative(), power: PowerStateSchema }),
 ]);

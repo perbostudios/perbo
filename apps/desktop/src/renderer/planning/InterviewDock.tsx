@@ -4,6 +4,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { bridge, errorMessage } from "../data.js";
 import { graphHistory, latestUndoable } from "./history.js";
 import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS } from "../../shared/contract-editing.js";
+import { AskedHandle } from "./AskedHandle.js";
+import { askedHeightLimit, useAskedHeight } from "../shell/asked-size.js";
+import { InfoHint } from "../InfoHint.js";
 import { ThinkingStatus } from "../Screen.js";
 import { INTERVIEW_CONVERSATION_CAP } from "../../shared/protocol.js";
 import type {
@@ -52,11 +55,14 @@ export function InterviewDock({
   editor,
   historyOpen,
   onHistory,
+  width,
 }: {
   workspace: Snapshot;
   editor: Editor;
   historyOpen: boolean;
   onHistory: () => void;
+  /** How wide the person has dragged it, from the shell's own record. */
+  width: number;
 }) {
   const client = useQueryClient();
   const session = editor.session;
@@ -67,6 +73,35 @@ export function InterviewDock({
   // session, because the editor holds a re-read back while a save of its own is
   // in flight and the card would come and go with that.
   const [pushed, setPushed] = useState<Asking | null | undefined>(undefined);
+  // Whether the card in front of the person has asked for the box back. While
+  // a card is up the box is not: every answer it wants is on the card, and a
+  // box beside it is a second way to do one thing. "Something else" is how the
+  // person says their answer is not there, and it brings the box back.
+  const [typing, setTyping] = useState(false);
+  // How tall the card is, and the most the dock can give it: the conversation
+  // above it keeps a little, and what is left over is the card's.
+  const stored = useAskedHeight();
+  const [room, setRoom] = useState(0);
+  const dockRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const held = dockRef.current;
+    if (held === null) return;
+    const measure = (): void => setRoom(held.getBoundingClientRect().height - 180);
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(held);
+    return () => observer.disconnect();
+  }, []);
+  const askedLimit = askedHeightLimit(room);
+  const asked = Math.min(stored, askedLimit);
+  // Whether the session is working, as the host last pushed it. Held here for
+  // the reason the asking is: the editor holds a re-read back while a save is
+  // in flight, and a pause is exactly when this has to be right.
+  const [busyTurn, setBusyTurn] = useState<boolean | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [text, setText] = useState("");
@@ -75,6 +110,8 @@ export function InterviewDock({
   useEffect(() => {
     setLive([]);
     setPushed(undefined);
+    setTyping(false);
+    setBusyTurn(null);
     setFailure(null);
   }, [id]);
   useEffect(
@@ -82,6 +119,7 @@ export function InterviewDock({
       bridge.subscribe((change: Change) => {
         if (change.kind !== "interview" || change.sessionId !== id) return;
         setPushed(change.asking);
+        setBusyTurn(change.working);
         const entry = change.entry;
         if (entry === null) return;
         setLive((held) => (held.some((line) => line.n === entry.n) ? held : [...held, entry]));
@@ -200,16 +238,26 @@ export function InterviewDock({
   // Not gated on `running`: that is read from the snapshot and lags a turn
   // that has only just started the interview, which is exactly when the person
   // is first waiting. A stopped interview says so as a note, which ends this.
+  // What the session is doing while it says nothing, or null where the next
+  // word is the person's.
+  //
+  // Read from the session's own report of finishing a turn rather than from the
+  // last line: a session that has just said something and gone quiet to read
+  // the repository looks, from the lines alone, exactly like one that has
+  // finished — and the pause that follows is the one that reads as something
+  // having gone wrong (D-119).
   const working = useMemo(() => {
+    // Until something is pushed, what the snapshot says: a dock opened part way
+    // through a turn missed the change that said so.
+    const busy = busyTurn === null ? (workspace.working ?? []).includes(id ?? "") : busyTurn;
+    if (!busy) return null;
     const last = conversation.at(-1)?.line.kind;
-    if (last === "turn") return "Thinking…";
-    if (last === "tool") return "Working…";
-    return null;
-  }, [conversation]);
+    return last === "tool" ? "Working…" : "Thinking…";
+  }, [busyTurn, workspace.working, id, conversation]);
 
   const dropped = (conversation[0]?.n ?? 1) - 1;
   return (
-    <aside className="dock" aria-label="Interview">
+    <aside className="dock" aria-label="Interview" style={{ width }} ref={dockRef}>
       <div className="dock-head">
         <div className="dock-session">
           <span className={cx("prov-dot", models.draftingProvider === "codex-cli" && "prov-dot--codex")} />
@@ -217,12 +265,18 @@ export function InterviewDock({
           <span className="mono">{models.executorModel}</span>
           <span className="spacer" />
           <span className="small muted">{running ? "running" : "not running"}</span>
+          {/* What the session may do is the same paragraph on every planning,
+              read once and then in the way: it is behind the dot. */}
+          <InfoHint
+            label="What this session may do"
+            text={
+              "Your own session. It reads anything, writes only this spec's folder, CONTEXT.md " +
+              "and the ADR folder, and cannot approve, publish or merge. Anything else is refused " +
+              "rather than put to you."
+            }
+          />
         </div>
-        <p className="write-scope">
-          Your own session. It reads anything, writes only this spec&rsquo;s folder,{" "}
-          <b>CONTEXT.md</b> and the ADR folder, and cannot approve, publish or merge. Anything else
-          is refused rather than put to you.
-        </p>
+
         <div className="dock-acts">
           <button type="button" className="text-button small" aria-expanded={historyOpen} onClick={onHistory}>
             History
@@ -270,17 +324,24 @@ export function InterviewDock({
         )}
       </div>
       {asking !== null && (
-        <QuestionCard
-          key={asking.key}
-          group={asking.group}
-          number={asking.number}
-          of={asking.of}
-          busy={busy}
-          onSend={(answer) => sendText(answer)}
-        />
+        <>
+          <AskedHandle height={asked} limit={askedLimit} />
+          <QuestionCard
+            key={asking.key}
+            group={asking.group}
+            number={asking.number}
+            of={asking.of}
+            busy={busy}
+            height={asked}
+            onSend={(answer) => sendText(answer)}
+            onOwnWords={setTyping}
+          />
+        </>
       )}
       {failure !== null && <Notice tone="danger">{failure}</Notice>}
-      <div className="composer">
+      {/* The card is the only way to answer while one is up, unless the person
+          has said their answer is not on it. */}
+      <div className="composer" hidden={asking !== null && !typing}>
         <div className="composer-box">
           <textarea
             aria-label="Message the interview"
@@ -325,9 +386,37 @@ type Choice = Extract<
  * the session rather than picking one of its options to get past the question.
  * Added here rather than asked of the session, so it is always there.
  */
+/**
+ * What each of the interview's tools is called in the chat.
+ *
+ * The tool's own name is an argument in a protocol; what the person is
+ * following is the work. A name not here is shown as it is, so a tool added
+ * later reads as itself rather than as nothing.
+ */
+const TOOL_NAMES: Record<string, string> = {
+  ask_options: "Questions",
+  generate_plan: "Draft the plan",
+  edit_plan: "Change the plan",
+  undo_edit: "Undo a change",
+  read_plan: "Read the plan",
+};
+
 const LEAVE_IT: Choice = {
   label: LEAVE_IT_TO_THE_INTERVIEW,
   detail: "Its own recommendation, or its judgement where it made none.",
+  recommended: false,
+};
+
+/**
+ * The answer that is none of the offered ones.
+ *
+ * Picking it is not an answer, it is asking for the box back: a person whose
+ * answer is not on the card should not have to pick the nearest wrong one, and
+ * a card that offers no way out is a form rather than a question.
+ */
+const SOMETHING_ELSE: Choice = {
+  label: "Something else",
+  detail: "Answer in your own words instead.",
   recommended: false,
 };
 
@@ -349,22 +438,39 @@ function QuestionCard({
   number,
   of,
   busy,
+  height,
   onSend,
+  onOwnWords,
 }: {
   group: Extract<InterviewEntry["line"], { kind: "asked" }>["groups"][number];
   number: number;
   of: number;
   busy: boolean;
+  /** How tall the person has dragged it, from the shell's own record. */
+  height: number;
   onSend: (answer: string) => void;
+  /** Whether the person has asked for the box back on this group. */
+  onOwnWords: (wanted: boolean) => void;
 }) {
   const [picked, setPicked] = useState<Record<number, number>>({});
+  // The session's recommendation first, because a person reading a list of
+  // answers reads the top of it, and the one it would pick is the one most of
+  // them want. Its own order is kept under that.
   const choicesOf = (part: (typeof group.parts)[number]): readonly Choice[] => [
-    ...part.options,
+    ...[...part.options].sort(
+      (left, right) => Number(right.recommended) - Number(left.recommended),
+    ),
     LEAVE_IT,
+    SOMETHING_ELSE,
   ];
+  // Whether the person has asked for the box back on any part of this group.
+  const ownWords = group.parts.some(
+    (part, index) => choicesOf(part)[picked[index] ?? -1]?.label === SOMETHING_ELSE.label,
+  );
+  useEffect(() => onOwnWords(ownWords), [ownWords, onOwnWords]);
   const answered = group.parts.every((_part, index) => picked[index] !== undefined);
   const send = (): void => {
-    if (!answered || busy) return;
+    if (!answered || busy || ownWords) return;
     const chosen = group.parts.map((part, index) => choicesOf(part)[picked[index]!]!.label);
     // One part is the person's sentence whole; several are lettered as they
     // were read, so the answers arrive in the shape the question was put.
@@ -375,7 +481,12 @@ function QuestionCard({
     );
   };
   return (
-    <div className="asked-card" role="group" aria-label={group.title ?? `Question ${number}`}>
+    <div
+      className="asked-card"
+      role="group"
+      aria-label={group.title ?? `Question ${number}`}
+      style={{ height }}
+    >
       <div className="asked-head">
         <b>{group.title ?? "The interview asks"}</b>
         {of > 1 && (
@@ -384,7 +495,8 @@ function QuestionCard({
           </span>
         )}
       </div>
-      {group.parts.map((part, index) => (
+      <div className="asked-body">
+        {group.parts.map((part, index) => (
         <fieldset className="asked-part" key={index}>
           <legend>
             {group.parts.length > 1 && (
@@ -411,18 +523,23 @@ function QuestionCard({
               {option.detail !== null && <p>{option.detail}</p>}
             </label>
           ))}
-        </fieldset>
-      ))}
+          </fieldset>
+        ))}
+      </div>
       <div className="asked-foot">
         <span className="small muted">
-          {answered
-            ? "Sent in the options' own words."
-            : "Pick an answer to each, or answer in your own words below."}
+          {ownWords
+            ? "Answer in the box below."
+            : answered
+              ? "Sent in the options' own words."
+              : "Pick an answer to each."}
         </span>
         <span className="spacer" />
-        <Button variant="primary" disabled={!answered || busy} onClick={send}>
-          Send
-        </Button>
+        {!ownWords && (
+          <Button variant="primary" disabled={!answered || busy} onClick={send}>
+            Send
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -461,26 +578,32 @@ function Line({
   // are written out here as well. A person who says something of their own
   // takes the rest off the card — the session is about to answer what they
   // said — so what was asked has to stay somewhere they can still read it.
-  if (line.kind === "asked")
+  if (line.kind === "asked") {
+    const parts = line.groups.reduce((count, group) => count + group.parts.length, 0);
     return (
-      <div className="asked-said" role="note" aria-label="Asked">
-        {line.groups.map((group, number) => (
-          <div className="asked-said-group" key={number}>
-            {group.title !== null && <b>{group.title}</b>}
-            {group.parts.map((part, index) => (
-              <p key={index}>
-                <span className="asked-letter">
-                  {number + 1}
-                  {group.parts.length > 1 ? `${PART_LETTERS[index] ?? index + 1})` : ")"}
-                </span>
-                {part.question}{" "}
-                <span className="muted">{part.options.map((option) => option.label).join(" · ")}</span>
-              </p>
-            ))}
-          </div>
-        ))}
-      </div>
+      <p className="msg msg--note asked-said">
+        Asked {parts === 1 ? "one question" : `${parts} questions`}
+        {line.groups.length > 1 && `, in ${line.groups.length} groups`}.
+        <InfoHint
+          label="The questions that were asked"
+          text={line.groups
+            .map((group, number) =>
+              [
+                group.title === null ? null : group.title,
+                ...group.parts.map(
+                  (part, index) =>
+                    `${number + 1}${group.parts.length > 1 ? (PART_LETTERS[index] ?? index + 1) : ""}) ` +
+                    `${part.question}\n   ${part.options.map((option) => option.label).join(" · ")}`,
+                ),
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            )
+            .join("\n\n")}
+        />
+      </p>
     );
+  }
   if (line.kind === "refused")
     return (
       <div className="refusal" role="note" aria-label="Refused">
@@ -490,6 +613,9 @@ function Line({
           {line.target !== null && <code className="refusal-target">{line.target}</code>}
         </div>
         <p>{line.reason}</p>
+        {/* No hint here, and no control of any kind: a refusal carries nothing
+            to answer, and D-102 is that it is never put to the person as a
+            question. The rule that refused it is part of the report. */}
         <p className="small muted">
           {line.rule} · this session is never asked to allow something; a call outside what it may
           do is refused and told to you.
@@ -521,7 +647,10 @@ function ToolCard({
   return (
     <div className={cx("tool-card", !line.ok && "tool-card--failed")}>
       <div className="tool-head">
-        <b>{line.tool}</b>
+        {/* What the tool is for, rather than what it is called: a person
+            reading the chat is following the work, and `ask_options` is the
+            name of a thing they never call. */}
+        <b>{TOOL_NAMES[line.tool] ?? line.tool}</b>
         <span className="small muted">
           {line.ok
             ? "done"
@@ -529,10 +658,17 @@ function ToolCard({
               ? "refused by the edit path"
               : "refused"}
         </span>
+        {/* What the tool said is read when it is asked for: the name and the
+            word beside it are what the card is for, and the account underneath
+            them was most of the dock. */}
+        {line.ok && (
+          <InfoHint text={line.detail} label={`What ${TOOL_NAMES[line.tool] ?? line.tool} did`} />
+        )}
       </div>
-      {edit === null ? (
-        <pre className="tool-detail">{line.detail}</pre>
-      ) : (
+      {/* What a tool did is read when it is asked for; why one was refused is
+          read without asking, because it is the thing to act on. */}
+      {!line.ok && <p className="tool-why">{line.detail}</p>}
+      {edit !== null && (
         <>
           <div className="edit-title">
             Edit {edit.n} · {edit.summary}
@@ -545,9 +681,9 @@ function ToolCard({
             <span className="ba-label">after</span>
             <span>{keys(edit.after)}</span>
           </div>
-          <p className="small muted">
-            It changed those and nothing else. {edit.undoes !== null && `It undid edit ${edit.undoes}. `}
-          </p>
+          {edit.undoes !== null && (
+            <p className="small muted">It undid edit {edit.undoes}.</p>
+          )}
           {onUndo !== null && undoable === edit.n && (
             <button
               type="button"

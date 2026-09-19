@@ -121,7 +121,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-103 — A spec is a folder in the repository, committed first
 
 - Owner: Founder
-- Decision: a spec lives at `specs/<slug>/spec.md` (the folder is configurable), under the headings Outcome, Requirements, No-Gos, Rabbit holes and Notes, naming code as `@Symbol` or by path. Each requirement carries an id, `R1` upward, written into the spec when the requirement is written and never reused. A criterion records the requirement it was drafted from, so the node a requirement lands in is derived from its criteria rather than written down a second time, and is shown beside the requirement. The folder also holds a page per node, `specs/<slug>/nodes/<node>.md`, generated from the spec and the graph: the node's title, the requirements derived to it, its criteria and their verification, its paths, and the spec's No-Gos. A node's page is regenerated whenever either changes, and the Notes section in it is written by hand and survives that. Only `spec.md` is drafted from. The drafter drafts from it as it drafts from an issue, and also reads the repository's `CONTEXT.md`, its ADR titles and `principles.md` as data. Admission records the spec's path and content hash. The loop commits the spec folder, with the interview's `CONTEXT.md` and ADR changes, as the first commit on the ticket's branch, and review reads the diff after that commit. `specs/**` is a standing prohibited path for the executor. A spec edited after approval, or naming code that no longer exists, is stale: a ticket that has not started returns to `plan_invalid`, and a running one is flagged and continues.
+- Decision: a spec lives at `specs/<slug>/spec.md` (the folder is configurable), under the headings Outcome, Requirements, No-Gos, Rabbit holes and Notes, naming code as `@Symbol` or by path. Each requirement carries an id, `R1` upward, written into the spec when the requirement is written and never reused. A criterion records the requirement it was drafted from, so the node a requirement lands in is derived from its criteria rather than written down a second time, and is shown beside the requirement's id, the requirement itself being read in the section it is written in. The folder also holds a page per node, `specs/<slug>/nodes/<node>.md`, generated from the spec and the graph: the node's title, the requirements derived to it, its criteria and their verification, its paths, and the spec's No-Gos. A node's page is regenerated whenever either changes, and the Notes section in it is written by hand and survives that. Only `spec.md` is drafted from. The drafter drafts from it as it drafts from an issue, and also reads the repository's `CONTEXT.md`, its ADR titles and `principles.md` as data. Admission records the spec's path and content hash. The loop commits the spec folder, with the interview's `CONTEXT.md` and ADR changes, as the first commit on the ticket's branch, and review reads the diff after that commit. `specs/**` is a standing prohibited path for the executor. A spec edited after approval, or naming code that no longer exists, is stale: a ticket that has not started returns to `plan_invalid`, and a running one is flagged and continues.
 - Why: a spec is intent upstream of the contract, and its staleness is detected rather than kept in step by hand ([ADR-0016](adr/0016-minimal-machine-maintained-planning.md)). A node reads on its own without giving a requirement a second place to be written, which would drift, and a re-draft moves a requirement between nodes with no edit to the spec.
 - Built: the spec folder and the slug the title takes, minted from the person's first turn to the interview where they have not titled the planning themselves (D-118), created when missing, with the folder itself `specs` unless `.perbo/config.json` names another under `specs`; the writer that gives each requirement its id and hands out no id twice; `perbo admit --from-spec <path>`, which reads `spec.md` under those headings, drafts from it as it drafts from an issue, records on the admission record the spec's path, its content hash and every file the loop commits with it — the spec's whole folder, and the `CONTEXT.md` and the files under the ADR folder (`docs/adr` unless `.perbo/config.json` names another under `adr`) that the checkout has changed — and takes the No-Gos from its own heading, with `--start-over <KEY>` re-drafting a ticket in `plan_review` from the same spec; a criterion recording the requirement id it was drafted from; the page per node, regenerated whenever the spec or the graph changes and keeping the Notes written in it by hand; the requirement's node beside it in the Spec pane, which writes the spec into the repository; the spec folder as a standing prohibited path for the executor; and the loop committing those recorded files as the branch's first commit past the contract's base, before the executor runs and with its own `Attempt:` trailer, refusing the run where one of them has changed or gone, and keeping every file that commit holds out of the change set the checks, the review, the verification and the pull request read. Staleness is read from the spec's own bytes against the hash approval recorded — approval and not admission, because D-103 makes an edit *after approval* the stale one and the spec is ordinarily edited in `plan_review` while the draft is read, with admission's hash — and the files the loop commits with it — left standing on a spec approval could not read — and from the `@Symbol` and path names in it against the names approval recorded the repository as having — which is what separates a name the repository has lost from one the plan is for and the work has yet to write — answered against `perbo index` and the checkout, every path judged after it resolves; `perbo run --ticket` reads it before it moves the ticket or makes a worktree and leaves a stale ticket at `plan_invalid`, `perbo inspect` prints it for every ticket drafted from a spec so a run in flight is flagged and not interrupted, a name the index cannot answer for is reported unjudged rather than refusing a run, a ticket approved before the recorded names existed has every name in its spec reported unjudged, only a path git tracks is recorded so a build output in one checkout cannot make a clone read the spec as stale, and approval over a tree the index cannot be believed against records no symbol at all — for the life of the ticket, and records that it happened, so every later reading of it reports the spec's `@Symbol` names as unjudged and names `perbo index` rather than calling the spec current. The reading says which moment it took the spec's bytes from: approval for a contract that has been approved, admission for a ticket still in `plan_review`.
 
@@ -586,13 +586,17 @@ This is the one home for the decisions that govern Perbo. Every other document c
   returns without waiting — a tool returns to the model, and one that waited on a person would hold
   the turn open — and the dock puts one group at a time, so what the session may ask cheaply the
   person is not asked cheaply. Every part offers at least two answers, may carry the session's own
-  recommendation, and always carries leaving the choice to the interview; the composer stays open, so
-  answering in the person's own words is never closed off. Picking sends the options' own wording as
+  recommendation — which is put first, a person reading a list of answers reading the top of it — and
+  always carries two of the reader's own: leaving the choice to the interview, and saying the answer is
+  none of these, which brings the box back. While a group is in front of the person the box is not, so
+  there is one way to answer rather than two; their own words are never closed off, they are asked for. Picking sends the options' own wording as
   an ordinary turn. How much of an asking has been answered is recorded on the planning rather than
   counted back out of the turns, which cannot tell an answer from a question the person typed
   instead: a turn that is not the group's answer ends the asking, because the session is about to
   answer what was said and a card left standing would answer a question nobody is asking any more.
-  The questions stay in the conversation to be read either way. This is not a permission prompt: a call the guard refused is still reported and
+  The conversation keeps the questions either way, behind the line that says they were asked: a
+  card holds what has to be read and what it wrote is there for the asking, so a chat of long
+  accounts is a chat nobody reads. This is not a permission prompt: a call the guard refused is still reported and
   never asked (D-102).
 - Why: a person sees only what needs them (D-001), and prose questions arriving five at a time are
   read as a wall and answered as one. Metering them is the reader's job rather than the session's,
@@ -608,6 +612,27 @@ This is the one home for the decisions that govern Perbo. Every other document c
   moved on by an answer and ended by anything else or by the line itself falling out of the
   conversation's cap; and the dock's card, which puts one group with its parts lettered, holds Send
   until every part is answered, and sends the options' own words.
+
+### D-119 — A pause says which pause it is
+
+- Owner: Founder
+- Decision: the dock says the interview is working for as long as it owes the person a word, and
+  says nothing once the next word is theirs. Which it is comes from the session's own report that
+  its turn has ended — every transport knows this and each says it differently, so it is carried in
+  one shape (`idle`) as the session's words are. A turn the person sends starts the waiting; the
+  turn ending, the session ending, the child going and the person stopping it each end it, because
+  a pause nothing is coming out of is not a pause to sit through. Turns in flight are counted
+  rather than flagged: a person who sends a second before the first is answered is owed two.
+- Why: a session that says a line and then reads the repository before saying the next looks, from
+  the conversation alone, exactly like one that has finished or fallen over. Read from the last
+  line's kind the dock went quiet at the very moment the person most needed telling that something
+  was still coming, and a person who thinks a tool has hung stops it.
+- Built: the `idle` event on the interview's protocol, emitted by the Claude transport when the SDK
+  reports a turn's result and by the Codex transport when a turn ends however it ended; the host
+  counting what each planning is owed and carrying it on the interview's change beside the asking,
+  clearing it when the child closes, the session ends or the person stops it; the snapshot listing
+  the plannings mid-turn, so a dock opened part way through one knows it; and the dock's own line,
+  which says *Working…* while a tool is the last thing to have happened and *Thinking…* otherwise.
 
 ### D-118 — An untitled planning is named by its first turn
 

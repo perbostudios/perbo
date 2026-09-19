@@ -1444,7 +1444,18 @@ editing.recover();
  * and behaves the same when it reaches one.
  */
 const sampleInterviews = new Set<string>();
+/** The sample sessions working on what they will say next, as the host tracks. */
+const sampleWorking = new Set<string>();
 const sampleTurns = new Map<string, number>();
+/** Whether this planning is still there to be spoken to. */
+function stillThere(id: string): boolean {
+  try {
+    editing.read(id);
+    return true;
+  } catch {
+    return false;
+  }
+}
 /** The asking this planning is putting, or null where it holds none or has gone. */
 function askingOf(id: string): { entry: number; answered: number } | null {
   try {
@@ -1455,12 +1466,26 @@ function askingOf(id: string): { entry: number; answered: number } | null {
 }
 /** Say what the asking is now, with no line to add — the host's own push. */
 function askingChanged(id: string): void {
-  emit({ kind: "interview", sessionId: id, running: sampleInterviews.has(id), entry: null, asking: askingOf(id) });
+  emit({
+    kind: "interview",
+    sessionId: id,
+    running: sampleInterviews.has(id),
+    entry: null,
+    asking: askingOf(id),
+    working: sampleWorking.has(id),
+  });
 }
 /** Kept as the host keeps it, so the conversation survives a reload here too. */
 function converse(id: string, line: InterviewEntry["line"]): InterviewEntry {
   const entry = editing.converse(id, line, new Date().toISOString());
-  emit({ kind: "interview", sessionId: id, running: sampleInterviews.has(id), entry, asking: askingOf(id) });
+  emit({
+    kind: "interview",
+    sessionId: id,
+    running: sampleInterviews.has(id),
+    entry,
+    asking: askingOf(id),
+    working: sampleWorking.has(id),
+  });
   return entry;
 }
 function interviewStatus(id: string): InterviewStatus {
@@ -1508,7 +1533,7 @@ function startSampleInterview(id: string): InterviewStatus {
     throw new Error(INTERVIEW_NEEDS_A_TITLE);
   const provider = interviewProviderFor(session.form.models);
   sampleInterviews.add(id);
-  emit({ kind: "interview", sessionId: id, running: true, entry: null, asking: askingOf(id) });
+  emit({ kind: "interview", sessionId: id, running: true, entry: null, asking: askingOf(id), working: sampleWorking.has(id) });
   editing.recordInterview(id, "sample-session", provider);
   converse(id, {
     kind: "note",
@@ -1523,6 +1548,7 @@ function startSampleInterview(id: string): InterviewStatus {
  * Graph pane uses and lands in the same history as the interview's.
  */
 function answerSampleTurn(id: string, text: string): void {
+  if (!stillThere(id)) return;
   const turns = (sampleTurns.get(id) ?? 0) + 1;
   sampleTurns.set(id, turns);
   // Asking with options, as the real session does through ask_options: two
@@ -1570,6 +1596,8 @@ function answerSampleTurn(id: string, text: string): void {
     // The session closes the turn it asked in, as both transports do: the card
     // has to survive this.
     converse(id, { kind: "said", text: "Questions are with you — the first group is above." });
+    sampleWorking.delete(id);
+    askingChanged(id);
     return;
   }
   if (turns === 1)
@@ -1622,10 +1650,22 @@ function answerSampleTurn(id: string, text: string): void {
     });
     emit({ kind: "records", repoId: ticketRow(key).repoId, key });
   }
-  converse(id, {
-    kind: "said",
-    text: `Noted: “${text}”. This is the sample workspace, so nothing here reaches a provider.`,
-  });
+  // A line, then a pause before the rest of the same turn — which is the shape
+  // a real session takes when it reads the repository before answering, and the
+  // pause the dock has to keep saying it is working through.
+  converse(id, { kind: "said", text: "I'll look at what's already here before I answer." });
+  setTimeout(() => {
+    // The rest of a turn can land after the planning it belongs to has gone —
+    // a pane left, a test ended — and a sample session speaking into a session
+    // that is not there throws where nothing is waiting to catch it.
+    if (!stillThere(id)) return;
+    converse(id, {
+      kind: "said",
+      text: `Noted: “${text}”. This is the sample workspace, so nothing here reaches a provider.`,
+    });
+    sampleWorking.delete(id);
+    askingChanged(id);
+  }, 60);
 }
 
 async function previewRequest<T extends Request>(request: T, owner?: EditingOwner): Promise<ReplyMap[T["kind"]]> {
@@ -1681,7 +1721,7 @@ async function previewRequest<T extends Request>(request: T, owner?: EditingOwne
       case "editingDiscard":
         result = editing.discard(request.id, request.revision);
         sampleInterviews.delete(request.id);
-        emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id) });
+        emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id), working: false });
         break;
       case "interviewStart": {
         const session = editing.read(request.id);
@@ -1695,6 +1735,9 @@ async function previewRequest<T extends Request>(request: T, owner?: EditingOwne
           nameSpecFromTurn(request.id, request.text);
           startSampleInterview(request.id);
         }
+        // The turn is with the session: it is working until it has answered,
+        // as the host reports of a real one.
+        sampleWorking.add(request.id);
         converse(request.id, { kind: "turn", text: request.text });
         editing.answerAsking(request.id, request.text);
         askingChanged(request.id);
@@ -1705,7 +1748,8 @@ async function previewRequest<T extends Request>(request: T, owner?: EditingOwne
       }
       case "interviewStop":
         sampleInterviews.delete(request.id);
-        emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id) });
+        sampleWorking.delete(request.id);
+        emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id), working: false });
         converse(request.id, { kind: "note", text: "The interview ended: you stopped it." });
         result = interviewStatus(request.id);
         break;
@@ -1814,6 +1858,7 @@ async function previewRequest<T extends Request>(request: T, owner?: EditingOwne
           ...structuredClone(snapshot),
           drafts: openDrafts(editingRecords()),
           interviews: [...sampleInterviews],
+          working: [...sampleWorking],
         };
         break;
       case "repositorySnapshot": {

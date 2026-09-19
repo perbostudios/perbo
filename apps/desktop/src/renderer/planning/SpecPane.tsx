@@ -450,19 +450,29 @@ export function SpecPane({
                 onChange={(value) => setEdited((current) => ({ ...current, [field]: value }))}
                 onCommit={(text) => commit(text === undefined ? undefined : { [field]: text })}
               >
-                {field === "requirements" && (
-                  <ul className="spec-requirements" aria-label="Requirements">
-                    {(view?.requirements ?? []).map((requirement, index) => (
-                      <li key={requirement.id ?? index}>
-                        <span className="mono">{requirement.id ?? "—"}</span>
-                        <span className="spec-requirement-text">{requirement.text}</span>
-                        <span className="small muted">
-                          {requirement.nodes.length > 0 ? requirement.nodes.join(", ") : "none yet"}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                {field === "requirements" &&
+                  (view?.requirements ?? []).some(
+                    (requirement) => requirement.nodes.length > 0,
+                  ) && (
+                    // Only once there is a plan for them to have landed in. The
+                    // requirements themselves are read in the box above, so what
+                    // this adds is where each one went — and before a draft that
+                    // is "none yet" on every line, which is a column of nothing
+                    // under the thing it is about.
+                    <ul className="spec-requirements" aria-label="Requirements">
+                      {(view?.requirements ?? []).map((requirement, index) => (
+                        <li key={requirement.id ?? index}>
+                          <span className="mono">{requirement.id ?? "—"}</span>
+                          <span className="small muted">
+                            {requirement.nodes.length > 0
+                              ? requirement.nodes.join(", ")
+                              : "none yet"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
               </SpecSection>
             ))}
           </div>

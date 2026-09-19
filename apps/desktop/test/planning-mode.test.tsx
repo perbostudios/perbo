@@ -8,6 +8,13 @@ import { HomePage } from "../src/renderer/tasks/HomePage.js";
 import { previewBridge } from "../src/renderer/preview.js";
 import { bridge } from "../src/renderer/data.js";
 import { resetRailSize } from "../src/renderer/shell/rail-size.js";
+import { DEFAULT_ASKED_HEIGHT, resetAskedHeight } from "../src/renderer/shell/asked-size.js";
+import {
+  DEFAULT_DOCK_WIDTH,
+  MAX_DOCK_WIDTH,
+  MIN_DOCK_WIDTH,
+  resetDockWidth,
+} from "../src/renderer/shell/dock-size.js";
 import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests } from "../src/shared/shortcuts.js";
 import { withDraft } from "../src/renderer/shell/create.js";
 import { SpecSection } from "../src/renderer/planning/SpecSection.js";
@@ -54,6 +61,8 @@ const railNames = (): string[] =>
 describe("Create in the rail (SCP-334)", () => {
   it("reads Create, Home, Archive, Settings, bound to ⌘1 to ⌘4 in that order, with ⌘N still creating", async () => {
     resetRailSize();
+    resetDockWidth();
+    resetAskedHeight();
     mount();
     await screen.findByRole("heading", { name: /Hi, / });
     const names = railNames();
@@ -416,6 +425,22 @@ describe("the Explorer pane's preview (SCP-318)", () => {
  * assigns requirement ids with `@perbo/planning`'s own code.
  */
 describe("the Spec pane (SCP-336)", () => {
+  /**
+   * A section's editor, opened first.
+   *
+   * The pane shows a section as it reads until somebody asks to type in it, so
+   * the textarea a test writes into is not on the page until something opens
+   * it — which is what a person does by clicking, and what this does too.
+   * Re-asked every time rather than held, because leaving a section closes its
+   * editor and the next write needs the one that is open now.
+   */
+  const specField = (label: string): HTMLTextAreaElement => {
+    const shown = screen.getByLabelText(label);
+    if (shown instanceof HTMLTextAreaElement) return shown;
+    fireEvent.mouseDown(shown);
+    return screen.getByLabelText(label) as HTMLTextAreaElement;
+  };
+
   const startPlanning = async (repo = /example\/webstore/): Promise<void> => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Create" }));
@@ -430,7 +455,7 @@ describe("the Spec pane (SCP-336)", () => {
     fireEvent.blur(title);
     for (const [label, value] of Object.entries(sections)) {
       if (label === "title") continue;
-      const field = screen.getByLabelText(label);
+      const field = specField(label);
       fireEvent.change(field, { target: { value } });
       fireEvent.blur(field);
       await waitFor(() => expect((field as HTMLTextAreaElement).value).toBe(value));
@@ -454,20 +479,19 @@ describe("the Spec pane (SCP-336)", () => {
     await write(SPEC);
 
     await screen.findByText("specs/a-light-colour-mode/spec.md");
-    const listed = await screen.findByRole("list", { name: "Requirements" });
-    const rows = within(listed).getAllByRole("listitem").map((row) => row.textContent ?? "");
-    expect(rows).toHaveLength(3);
-    expect(rows[0]).toContain("R1");
-    expect(rows[2]).toContain("R3");
-    // Nothing has been drafted, so no requirement has landed in a node.
-    expect(rows.every((row) => row.includes("none yet"))).toBe(true);
+    // The ids are written into the section they were typed in.
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R1:"));
+    expect(specField("Spec Requirements").value).toContain("R3:");
+    // Nothing has been drafted, so no requirement has landed in a node, and the
+    // list of where they landed is a column of "none yet" — so it is not there.
+    expect(screen.queryByRole("list", { name: "Requirements" })).toBeNull();
   });
 
   it("keeps a requirement's id when its text is edited, and gives the next one to a new one", async () => {
     await startPlanning();
     await write(SPEC);
-    const requirements = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
-    await waitFor(() => expect(requirements.value).toContain("R1:"));
+    const requirements = specField("Spec Requirements") as HTMLTextAreaElement;
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R1:"));
     // R2 and R3 both go — the highest id with them — and one is written.
     fireEvent.change(requirements, {
       target: {
@@ -481,19 +505,55 @@ describe("the Spec pane (SCP-336)", () => {
       },
     });
     fireEvent.blur(requirements);
-    const rows = async (): Promise<string[]> =>
-      within(await screen.findByRole("list", { name: "Requirements" }))
-        .getAllByRole("listitem")
-        .map((row) => row.textContent ?? "");
-    await waitFor(async () => expect(await rows()).toHaveLength(2));
-    const after = await rows();
+    // The ids are read where they are written, the list of nodes being absent
+    // until there is a plan for a requirement to have landed in.
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R4:"));
+    const after = specField("Spec Requirements")
+      .value.split("\n")
+      .filter((line) => /R\d+:/.test(line));
+    expect(after).toHaveLength(2);
     expect(after[0]).toContain("R1");
-    // Its text changed and its id did not.
-    expect(after[0]).toContain("A person can choose");
+    // Its text changed and its id did not. The text is read in the box it is
+    // edited in; the list beside it says where each id landed, and saying the
+    // sentence twice is what made the pane twice as long as the spec.
+    expect(specField("Spec Requirements").value).toContain("R1: A person can choose");
     // R2 and R3 were each used once, so the new requirement is R4.
     expect(after[1]).toContain("R4");
-    expect(after.join(" ")).not.toContain("R2");
-    expect(after.join(" ")).not.toContain("R3");
+    expect(after.join(" ")).not.toContain("R2:");
+    expect(after.join(" ")).not.toContain("R3:");
+  });
+
+  it("shows a section as it reads, and opens the editor where it is clicked", async () => {
+    await startPlanning();
+    await write({
+      title: SPEC.title,
+      "Spec Requirements": "### The page\n\n- The rail follows the mode.",
+    });
+    await screen.findByText("specs/a-light-colour-mode/spec.md");
+
+    // The section is not an editor until somebody asks for one.
+    const reading = screen.getByLabelText("Spec Requirements");
+    expect(reading.tagName).toBe("DIV");
+    // The marks the file uses to say a thing are not the thing: the heading is
+    // a heading, the requirement's id is beside its line, and neither `###` nor
+    // `R1:` is in the words.
+    const heading = within(reading).getByText("The page");
+    expect(heading.textContent).not.toContain("#");
+    await waitFor(() => expect(within(reading).getByText("R1").className).toBe("spec-req-id"));
+    const item = within(reading).getByText("The rail follows the mode.");
+    expect(item.textContent).not.toContain("R1:");
+
+    // Clicking gives back the editor, with the file's own characters in it.
+    fireEvent.mouseDown(reading);
+    const editor = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
+    expect(editor.tagName).toBe("TEXTAREA");
+    expect(editor.value).toContain("### The page");
+    expect(editor.value).toContain("R1:");
+    expect(document.activeElement).toBe(editor);
+
+    // And leaving it goes back to reading, without asking for a second save.
+    fireEvent.blur(editor);
+    await waitFor(() => expect(screen.getByLabelText("Spec Requirements").tagName).toBe("DIV"));
   });
 
   it("offers Generate plan once the spec has a title and an outcome, not before", async () => {
@@ -505,7 +565,7 @@ describe("the Spec pane (SCP-336)", () => {
     const generate = (): HTMLButtonElement =>
       screen.getByRole("button", { name: "Generate plan" }) as HTMLButtonElement;
     expect(generate().disabled).toBe(true);
-    const outcome = screen.getByLabelText("Spec Outcome");
+    const outcome = specField("Spec Outcome");
     fireEvent.change(outcome, { target: { value: SPEC["Spec Outcome"] } });
     fireEvent.blur(outcome);
     await waitFor(() => expect(generate().disabled).toBe(false));
@@ -525,7 +585,7 @@ describe("the Spec pane (SCP-336)", () => {
       await screen.findByText(/exported TS symbols/);
     };
     const notes = (): HTMLTextAreaElement =>
-      screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
+      specField("Spec Notes") as HTMLTextAreaElement;
     const type = (value: string): void => {
       fireEvent.change(notes(), { target: { value } });
     };
@@ -740,7 +800,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
 
@@ -768,7 +828,7 @@ describe("the Spec pane (SCP-336)", () => {
       await startPlanning();
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       const notice = (await screen.findByText(/Nothing was saved/)).closest(
@@ -776,7 +836,7 @@ describe("the Spec pane (SCP-336)", () => {
       ) as HTMLElement;
 
       fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-      await waitFor(() => expect(outcome.value).toBe("The interview's sentence."));
+      await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's sentence."));
       expect(screen.queryByText(/Nothing was saved/)).toBeNull();
       const written =
         (JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>)[
@@ -790,14 +850,14 @@ describe("the Spec pane (SCP-336)", () => {
       await startPlanning();
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await screen.findByText(/Nothing was saved/);
 
       // Another section left while the refusal stands. Writing it would write
       // the whole spec, and carry the refused Outcome over the interview's.
-      const notes = screen.getByLabelText("Spec Notes");
+      const notes = specField("Spec Notes");
       fireEvent.change(notes, { target: { value: "A note typed meanwhile." } });
       fireEvent.blur(notes);
       const written = (): string =>
@@ -822,7 +882,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await screen.findByText(/Nothing was saved/);
@@ -836,12 +896,13 @@ describe("the Spec pane (SCP-336)", () => {
       // Notes is not part of the conflict, so it follows the refetch either
       // way — waiting for it is waiting for the new view to have actually
       // landed, rather than finding the notice still up from before it did.
-      const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
-      await waitFor(() => expect(notes.value).toBe("Written while the card was open."));
+      await waitFor(() =>
+        expect(specField("Spec Notes").value).toBe("Written while the card was open."),
+      );
 
       // The card survived that refetch, with the person's text still in it —
       // not replaced by the further change underneath.
-      expect(outcome.value).toBe("The person's sentence.");
+      expect(specField("Spec Outcome").value).toBe("The person's sentence.");
       const notice = screen.getByText(/Nothing was saved/).closest(".notice") as HTMLElement;
       expect(within(notice).getByText("The interview's sentence.")).toBeTruthy();
       expect(within(notice).getByText("The person's sentence.")).toBeTruthy();
@@ -861,14 +922,14 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await screen.findByText(/Nothing was saved/);
 
       // Typed while the card is open, and never committed — `commit` bails
       // while `conflict` is set, so nothing has gone out for it yet.
-      const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
+      const notes = specField("Spec Notes") as HTMLTextAreaElement;
       fireEvent.change(notes, { target: { value: "Typed while the card was open." } });
       fireEvent.blur(notes);
 
@@ -926,7 +987,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       const notice = (await screen.findByText(/Nothing was saved/)).closest(".notice") as HTMLElement;
@@ -936,14 +997,14 @@ describe("the Spec pane (SCP-336)", () => {
       // not survive past this, or it becomes what the next save is read
       // against instead of the file this pane has since followed.
       fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-      await waitFor(() => expect(outcome.value).toBe("The interview's sentence."));
+      await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's sentence."));
       expect(screen.queryByText(/Nothing was saved/)).toBeNull();
 
       // The file moves again, in a section the settled refusal never named.
       await elsewhere({ notes: "Written while the card was open." });
       await client.invalidateQueries({ queryKey: ["spec", sessionId()] });
-      const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
-      await waitFor(() => expect(notes.value).toBe("Written while the card was open."));
+      const notes = specField("Spec Notes") as HTMLTextAreaElement;
+      await waitFor(() => expect(specField("Spec Notes").value).toBe("Written while the card was open."));
 
       // Built on what is now shown, which already is the file's own text.
       fireEvent.change(notes, {
@@ -966,7 +1027,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's first sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       const notice = (await screen.findByText(/Nothing was saved/)).closest(".notice") as HTMLElement;
@@ -989,7 +1050,7 @@ describe("the Spec pane (SCP-336)", () => {
 
       // Taking the file's side takes what the card showed.
       fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-      await waitFor(() => expect(outcome.value).toBe("The interview's first sentence."));
+      await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's first sentence."));
     });
 
     it("keeps the held refusal through a save that errors while its card is still open", async () => {
@@ -1010,7 +1071,7 @@ describe("the Spec pane (SCP-336)", () => {
         await write(SPEC);
         await elsewhere({ outcome: "The interview's first sentence." });
 
-        const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+        const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
         fireEvent.change(outcome, { target: { value: "The person's sentence." } });
         fireEvent.blur(outcome);
         const notice = (await screen.findByText(/Nothing was saved/)).closest(
@@ -1044,7 +1105,7 @@ describe("the Spec pane (SCP-336)", () => {
         // Taking the file's side takes what the card showed, not the
         // file's later move.
         fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-        await waitFor(() => expect(outcome.value).toBe("The interview's first sentence."));
+        await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's first sentence."));
       } finally {
         asked.mockRestore();
       }
@@ -1065,7 +1126,7 @@ describe("the Spec pane (SCP-336)", () => {
         await write(SPEC);
         await elsewhere({ outcome: "The interview's first sentence." });
 
-        const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+        const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
         fireEvent.change(outcome, { target: { value: "The person's sentence." } });
         fireEvent.blur(outcome);
         const notice = (await screen.findByText(/Nothing was saved/)).closest(
@@ -1096,8 +1157,8 @@ describe("the Spec pane (SCP-336)", () => {
         // The file moves again, in a section the settled refusal never named.
         await elsewhere({ notes: "Written after the errored resend." });
         await client.invalidateQueries({ queryKey: ["spec", sessionId()] });
-        const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
-        await waitFor(() => expect(notes.value).toBe("Written after the errored resend."));
+        const notes = specField("Spec Notes") as HTMLTextAreaElement;
+        await waitFor(() => expect(specField("Spec Notes").value).toBe("Written after the errored resend."));
 
         // Built on what is now shown, which already is the file's own text —
         // refused only if the held view outlived the card that showed it.
@@ -1122,7 +1183,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ notes: "The interview's note." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await waitFor(() => {
@@ -1158,7 +1219,7 @@ describe("the Spec pane (SCP-336)", () => {
       // The person, still on the read from before the interview wrote, adds a
       // different one of their own — typed into the textarea as it already
       // shows the three original lines, ids included.
-      const requirements = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
+      const requirements = specField("Spec Requirements") as HTMLTextAreaElement;
       fireEvent.change(requirements, {
         target: { value: `${requirements.value}\n- The person's own requirement.` },
       });
@@ -1231,13 +1292,13 @@ describe("the Spec pane (SCP-336)", () => {
     const watched = watchBridge();
     try {
       // An outcome typed and not yet left: Generate plan must save it first.
-      const outcome = screen.getByLabelText("Spec Outcome");
+      const outcome = specField("Spec Outcome");
       fireEvent.change(outcome, { target: { value: "A changed outcome." } });
       watched.hold();
       fireEvent.click(screen.getByRole("button", { name: "Generate plan" }));
       await waitFor(() => expect(watched.events).toContain("specSave:called"));
       // Left while that save is out: it goes before the drafter reads the file.
-      const noGos = screen.getByLabelText("Spec No-Gos");
+      const noGos = specField("Spec No-Gos");
       fireEvent.change(noGos, { target: { value: "- Left while the save was out." } });
       fireEvent.blur(noGos);
       watched.let();
@@ -1268,7 +1329,7 @@ describe("the Spec pane (SCP-336)", () => {
     const watched = watchBridge();
     try {
       watched.hold();
-      const notes = screen.getByLabelText("Spec Notes");
+      const notes = specField("Spec Notes");
       fireEvent.change(notes, { target: { value: "Written with the dialog open." } });
       fireEvent.blur(notes);
       await waitFor(() => expect(startOver().disabled).toBe(true));
@@ -1286,21 +1347,21 @@ describe("the Spec pane (SCP-336)", () => {
     const title = await screen.findByLabelText("Spec title");
     fireEvent.change(title, { target: { value: SPEC.title } });
     fireEvent.blur(title);
-    const outcome = screen.getByLabelText("Spec Outcome");
+    const outcome = specField("Spec Outcome");
     fireEvent.change(outcome, { target: { value: SPEC["Spec Outcome"] } });
     fireEvent.blur(outcome);
-    const requirements = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
+    const requirements = specField("Spec Requirements") as HTMLTextAreaElement;
     fireEvent.change(requirements, {
       target: { value: "- The person can choose Light, Dark or System.\n- Text meets WCAG AA contrast." },
     });
     fireEvent.blur(requirements);
 
     await screen.findByText("specs/a-light-colour-mode/spec.md");
-    await waitFor(() => expect(requirements.value).toContain("R2:"));
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R2:"));
     await screen.findByText("Saved in the repository — the file is the spec");
-    expect(requirements.value).toContain("- R1: The person can choose Light, Dark or System.");
-    expect(requirements.value).toContain("- R2: Text meets WCAG AA contrast.");
-    expect(requirements.value).not.toContain("R3:");
+    expect(specField("Spec Requirements").value).toContain("- R1: The person can choose Light, Dark or System.");
+    expect(specField("Spec Requirements").value).toContain("- R2: Text meets WCAG AA contrast.");
+    expect(specField("Spec Requirements").value).not.toContain("R3:");
     const stored = JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>;
     expect(stored["a-light-colour-mode"]).toContain("perbo:requirement-ids through R2");
     expect(stored["a-light-colour-mode"]).toContain(SPEC["Spec Outcome"]);
@@ -1329,7 +1390,7 @@ describe("the Spec pane (SCP-336)", () => {
     mount();
     await screen.findByLabelText("Spec title");
     await waitFor(() =>
-      expect((screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement).value).toContain(
+      expect((specField("Spec Requirements") as HTMLTextAreaElement).value).toContain(
         "written elsewhere",
       ),
     );
@@ -1795,6 +1856,12 @@ describe("the interview docked in planning mode (SCP-313)", () => {
   const pane = (name: string) =>
     within(screen.getByRole("group", { name: "Planning panes" })).getByRole("button", { name });
   const dock = (): HTMLElement => screen.getByRole("complementary", { name: "Interview" });
+  /** Everything the dock's own hints hold, which is where an asking is kept. */
+  const askedInTranscript = (): string =>
+    within(dock())
+      .queryAllByRole("tooltip", { hidden: true })
+      .map((hint) => hint.textContent ?? "")
+      .join("\n");
   const composer = (): HTMLTextAreaElement =>
     screen.getByLabelText("Message the interview") as HTMLTextAreaElement;
 
@@ -1886,6 +1953,112 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     await waitFor(() => expect(composer().value).toBe(""));
   });
 
+  it("keeps what a box wrote behind a dot, and opens it on hover and on focus", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await within(dock()).findByRole("group", { name: "How the queue is split" });
+
+    // The line in the chat says only that an asking happened; the questions
+    // themselves are behind its dot.
+    const said = await within(dock()).findByText(/Asked 3 questions/);
+    // The questions are in the document — a screen reader reaches them through
+    // `aria-describedby` whether or not they are on screen — but the line the
+    // chat shows is the summary, and the rest stays shut until it is asked for.
+    const shown = [...said.childNodes]
+      .filter((node) => !(node instanceof HTMLElement && node.className.includes("info-hint")))
+      .map((node) => node.textContent ?? "")
+      .join("");
+    expect(shown).toContain("Asked 3 questions");
+    expect(shown).not.toContain("Where does the split go?");
+    const dot = within(said).getByRole("button", { name: "The questions that were asked" });
+    const hint = within(said).getByRole("tooltip", { hidden: true });
+    expect(hint.textContent).toContain("Where does the split go?");
+    expect(dot.getAttribute("aria-describedby")).toBe(hint.id);
+    expect(dot.getAttribute("aria-expanded")).toBe("false");
+    expect(hint.className).not.toContain("info-hint-body--open");
+
+    fireEvent.pointerEnter(dot);
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("true"));
+    expect(within(said).getByRole("tooltip").className).toContain("info-hint-body--open");
+    // Crossing the gap to the panel keeps it open: the panel hangs against the
+    // window, so the space between the two is neither of them, and shutting at
+    // once would close the thing the pointer is travelling to.
+    fireEvent.pointerLeave(dot);
+    fireEvent.pointerEnter(within(said).getByRole("tooltip"));
+    await new Promise((settle) => setTimeout(settle, 220));
+    expect(dot.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.pointerLeave(within(said).getByRole("tooltip"));
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("false"));
+
+    // A keyboard reaches it too: it is not a hover-only affordance.
+    fireEvent.focus(dot);
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("true"));
+    fireEvent.keyDown(dot, { key: "Escape" });
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("false"));
+
+    await waitFor(() => expect(within(dock()).queryAllByText(/Noted:/)).toHaveLength(0));
+  });
+
+
+  it("resizes the interview by dragging the bar on its edge, and remembers it", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    const bar = screen.getByRole("separator", { name: "Resize the interview" });
+    expect(dock().style.width).toBe(`${DEFAULT_DOCK_WIDTH}px`);
+    expect(bar.getAttribute("aria-valuenow")).toBe(String(DEFAULT_DOCK_WIDTH));
+
+    // The dock is on the right, so the width is the distance from the pointer
+    // to the window's right edge.
+    Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+    fireEvent.pointerDown(bar, { button: 0, pointerId: 1 });
+    fireEvent.pointerMove(bar, { pointerId: 1, clientX: 700 });
+    await waitFor(() => expect(dock().style.width).toBe("500px"));
+    fireEvent.pointerUp(bar, { pointerId: 1 });
+
+    // A move after the drag has ended does not keep dragging it.
+    fireEvent.pointerMove(bar, { pointerId: 1, clientX: 900 });
+    expect(dock().style.width).toBe("500px");
+    expect(
+      screen.getByRole("separator", { name: "Resize the interview" }).getAttribute("aria-valuenow"),
+    ).toBe("500");
+    expect(localStorage.getItem("perbo:dock")).toBe("500");
+  });
+
+  it("holds the interview's width inside its bounds, and the keyboard moves it", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    const bar = () => screen.getByRole("separator", { name: "Resize the interview" });
+    Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+
+    // Dragged past either end, it stops at the end rather than going past it.
+    fireEvent.pointerDown(bar(), { button: 0, pointerId: 1 });
+    fireEvent.pointerMove(bar(), { pointerId: 1, clientX: 1190 });
+    await waitFor(() => expect(dock().style.width).toBe(`${MIN_DOCK_WIDTH}px`));
+    fireEvent.pointerMove(bar(), { pointerId: 1, clientX: 10 });
+    await waitFor(() => expect(dock().style.width).toBe(`${MAX_DOCK_WIDTH}px`));
+    fireEvent.pointerUp(bar(), { pointerId: 1 });
+
+    // Left widens, because the edge moving left is the dock growing.
+    fireEvent.keyDown(bar(), { key: "ArrowRight" });
+    await waitFor(() => expect(dock().style.width).toBe(`${MAX_DOCK_WIDTH - 16}px`));
+    fireEvent.keyDown(bar(), { key: "ArrowLeft" });
+    await waitFor(() => expect(dock().style.width).toBe(`${MAX_DOCK_WIDTH}px`));
+    // Home puts it back where it opens, as double-clicking does.
+    fireEvent.keyDown(bar(), { key: "Home" });
+    await waitFor(() => expect(dock().style.width).toBe(`${DEFAULT_DOCK_WIDTH}px`));
+    fireEvent.doubleClick(bar());
+    expect(dock().style.width).toBe(`${DEFAULT_DOCK_WIDTH}px`);
+  });
+
   it("puts one group of questions at a time, and sends the options' own words", async () => {
     const plan = await planning();
     location.hash = `planning/${plan.id}/spec`;
@@ -1924,15 +2097,72 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     // Answering the first group brings the second.
     const second = await card("Question 2");
     expect(second.getByText("What happens to the old node?")).toBeTruthy();
-    // The first is off the card, though the transcript still holds it.
+    // The first is off the card, though the transcript still holds it behind
+    // the dot on the line that says the asking happened.
     expect(second.queryByText("Where does the split go?")).toBeNull();
-    expect(within(dock()).getAllByText("Where does the split go?").length).toBeGreaterThan(0);
-    // Every part carries a way out of choosing, and the composer stays live.
-    expect(second.getAllByRole("radio")).toHaveLength(3);
+    expect(askedInTranscript()).toContain("Where does the split go?");
+    // Its own two answers, the way out of choosing between them, and the way
+    // out of the card altogether.
+    expect(second.getAllByRole("radio")).toHaveLength(4);
     expect(second.getByText("Let the interview decide")).toBeTruthy();
-    expect((composer() as HTMLTextAreaElement).disabled).toBe(false);
+    expect(second.getByText("Something else")).toBeTruthy();
+    // The card is the only way to answer while one is up.
+    expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(true);
+    fireEvent.click(second.getByRole("radio", { name: /Something else/ }));
+    await waitFor(() =>
+      expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false),
+    );
 
     await waitFor(() => expect(within(dock()).getAllByText(/Noted:/)).toHaveLength(1));
+  });
+
+  it("keeps the questions a size of their own, which the bar on its edge sets", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const card = await within(dock()).findByRole("group", { name: "How the queue is split" });
+    expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT}px`);
+
+    // Asking for the box back does not make the card taller: the room comes
+    // from the conversation above it.
+    fireEvent.click(within(card).getAllByRole("radio", { name: /Something else/ })[0]!);
+    await waitFor(() =>
+      expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false),
+    );
+    expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT}px`);
+
+    // The bar on its top edge sets the height; dragging up makes it taller.
+    const bar = within(dock()).getByRole("separator", { name: "Resize the questions" });
+    fireEvent.keyDown(bar, { key: "ArrowUp" });
+    await waitFor(() => expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT + 16}px`));
+    fireEvent.keyDown(bar, { key: "ArrowDown" });
+    await waitFor(() => expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT}px`));
+    expect(localStorage.getItem("perbo:asked")).toBe(String(DEFAULT_ASKED_HEIGHT));
+  });
+
+  it("puts the session's own recommendation at the top of a part's answers", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const card = within(
+      await within(dock()).findByRole("group", { name: "How the queue is split" }),
+    );
+
+    // The sample offers "Split at the read" second-to-none but marks it the
+    // recommendation; a person reads the top of a list, so it is put there.
+    const first = card.getAllByRole("radio")[0]!;
+    expect(first.closest("label")?.textContent).toContain("Split at the read");
+    expect(first.closest("label")?.textContent).toContain("recommended");
+    // The two standing answers come last, in that order.
+    const labels = card.getAllByRole("radio").map((radio) => radio.closest("label")?.textContent ?? "");
+    expect(labels.at(-2)).toContain("Let the interview decide");
+    expect(labels.at(-1)).toContain("Something else");
   });
 
   it("takes the questions away once the person says something of their own", async () => {
@@ -1947,6 +2177,13 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await within(dock()).findByRole("group", { name: "How the queue is split" });
 
+    // The box is behind the card, and "Something else" is how it comes back.
+    fireEvent.click(
+      within(dock()).getAllByRole("radio", { name: /Something else/ })[0]!,
+    );
+    await waitFor(() =>
+      expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false),
+    );
     fireEvent.change(composer(), { target: { value: "what do you mean by split?" } });
     fireEvent.click(within(dock()).getAllByRole("button", { name: "Send" }).at(-1)!);
 
@@ -1954,9 +2191,55 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       expect(within(dock()).queryByRole("group", { name: "How the queue is split" })).toBeNull(),
     );
     // Nothing asked is lost: the transcript still holds every question.
-    expect(within(dock()).getAllByText("Where does the split go?").length).toBeGreaterThan(0);
-    expect(within(dock()).getAllByText("What happens to the old node?").length).toBeGreaterThan(0);
+    expect(askedInTranscript()).toContain("Where does the split go?");
+    expect(askedInTranscript()).toContain("What happens to the old node?");
     expect(await within(dock()).findByText(/Noted:/)).toBeTruthy();
+  });
+
+  it("keeps saying it is working through a pause it takes mid-turn", async () => {
+    // The pause that reads as something having gone wrong: the session says a
+    // line, then goes quiet to read the repository before it says the next.
+    // The lines alone cannot tell that from a session that has finished.
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+
+    await previewBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: plan.id });
+    await previewBridge.request({
+      kind: "interviewTurn",
+      id: plan.id,
+      text: "what is this piece of work for?",
+    });
+    expect((await within(dock()).findAllByText("Thinking…")).length).toBeGreaterThan(0);
+
+    // It speaks, and then says nothing for a while. The turn is not over, so
+    // the dock is still saying so — which is the whole point: the lines alone
+    // would read as a session that had finished.
+    await within(dock()).findByText(/I'll look at what's already here/);
+    expect((await within(dock()).findAllByText("Thinking…")).length).toBeGreaterThan(0);
+
+    // The rest of the turn lands, and only then does it stop saying it.
+    await within(dock()).findByText(/Noted:/);
+    await waitFor(() => expect(within(dock()).queryAllByText("Thinking…")).toHaveLength(0));
+  });
+
+  it("stops saying it is working when the interview is stopped mid-turn", async () => {
+    // Something going wrong, or the person deciding not to wait, is the one
+    // case the indicator must not sit through: nothing is coming.
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    await previewBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: plan.id });
+    await previewBridge.request({ kind: "interviewTurn", id: plan.id, text: "why two nodes?" });
+    expect((await within(dock()).findAllByText("Thinking…")).length).toBeGreaterThan(0);
+
+    await previewBridge.request({ kind: "interviewStop", id: plan.id });
+    await waitFor(() => expect(within(dock()).queryAllByText("Thinking…")).toHaveLength(0));
+    // And the turn it was in the middle of still lands without bringing it back.
+    await within(dock()).findByText(/Noted:/);
+    expect(within(dock()).queryAllByText("Thinking…")).toHaveLength(0);
   });
 
   it("says the interview is working until its answer lands", async () => {

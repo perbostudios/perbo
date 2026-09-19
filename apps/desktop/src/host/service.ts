@@ -727,6 +727,7 @@ export class DesktopService {
     // host's own state rather than anything read off a repository, and a
     // cached listing would say one was still there after it had gone.
     const interviews = [...this.interviews.keys()];
+    const working = [...this.working.entries()].flatMap(([id, owed]) => (owed > 0 ? [id] : []));
     const workspace = await this.reads.read("snapshot", "snapshot", async () => {
       const records = await Promise.all(
         this.state.repositories.map((repo) => this.repositorySnapshot(repo.id)),
@@ -767,7 +768,7 @@ export class DesktopService {
         drafts: openDrafts(this.state.editingSessions),
       };
     });
-    return { ...workspace, interviews };
+    return { ...workspace, interviews, working };
   }
   private list(repo: z.infer<typeof RepoSchema>) {
     return this.reads.read("list:" + repo.id, repo.id, async () =>
@@ -1100,11 +1101,24 @@ export class DesktopService {
       running: this.interviews.has(id),
       entry,
       asking: this.askingOf(id),
+      working: (this.working.get(id) ?? 0) > 0,
     });
     return entry;
   }
 
   /** The asking this planning is putting, or null where it holds none or has gone. */
+  /**
+   * The plannings whose interview is working on what it will say next.
+   *
+   * Held here rather than on the record: it is about a process running now, and
+   * a session reopened is a session that has said everything it was going to.
+   *
+   * Counted rather than flagged, because turns can be in flight together: a
+   * person who sends a second before the first is answered is owed two, and the
+   * first answer arriving does not mean the session has stopped working.
+   */
+  private readonly working = new Map<string, number>();
+
   private askingOf(id: string): { entry: number; answered: number } | null {
     try {
       return this.editing.read(id).asking;
@@ -1127,6 +1141,7 @@ export class DesktopService {
       running: this.interviews.has(id),
       entry: null,
       asking: this.askingOf(id),
+      working: (this.working.get(id) ?? 0) > 0,
     });
   }
 
@@ -1150,6 +1165,10 @@ export class DesktopService {
       },
       onClose: ({ code, stopped }) => {
         this.interviews.delete(id);
+        // Whatever the session owed the person, it is not going to say it now:
+        // a dock still reporting work on a child that has gone is the reading
+        // the indicator exists to prevent.
+        this.working.delete(id);
         this.converse(
           id,
           code === 0 || stopped
@@ -1263,6 +1282,13 @@ export class DesktopService {
       if (changed) this.planChanged(id);
       return;
     }
+    if (event.type === "idle") {
+      const owed = (this.working.get(id) ?? 0) - 1;
+      if (owed > 0) this.working.set(id, owed);
+      else this.working.delete(id);
+      this.askingChanged(id);
+      return;
+    }
     if (event.type === "asked") {
       // Clipped the way every other field the session wrote is, and redacted:
       // this is the session's text and the person reads it.
@@ -1301,6 +1327,7 @@ export class DesktopService {
       }
       return;
     }
+    this.working.delete(id);
     this.converse(id, { kind: "note", text: `The interview ended: ${redact(event.reason).slice(0, 2000)}.` });
   }
 
@@ -1426,6 +1453,10 @@ export class DesktopService {
       throw new Error(
         "The interview is not listening. Start it again, then send this once it is running.",
       );
+    // The turn is with the session now: it is working until it says otherwise,
+    // so the dock can say so through a pause that would otherwise read as
+    // something having gone wrong.
+    this.working.set(id, (this.working.get(id) ?? 0) + 1);
     this.converse(id, { kind: "turn", text: turn.text });
     // Recorded before it is answered, so the asking is judged against a
     // conversation that already holds this turn.
@@ -1442,6 +1473,10 @@ export class DesktopService {
    */
   private stopInterview(id: string): InterviewStatus {
     this.interviews.get(id)?.child.stop();
+    // Said now rather than at `onClose`, which is up to eight seconds later:
+    // the person has stopped waiting, so the dock stops saying they should.
+    this.working.delete(id);
+    this.askingChanged(id);
     return this.interviewStatus(id);
   }
 

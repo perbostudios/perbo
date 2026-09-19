@@ -16,7 +16,7 @@ import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { runEditCommand } from "../src/edit.js";
 import { INTERVIEW_SESSION_FILE } from "../src/interview.js";
 import { specCommitFiles } from "../src/specs.js";
-import { readApproachRecord, readContract, readDraftSnapshot, readTicket, storeDir } from "../src/tickets.js";
+import { listTickets, readApproachRecord, readContract, readDraftSnapshot, readTicket, storeDir } from "../src/tickets.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-spec-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -282,6 +282,51 @@ describe("a spec's No-Gos outlive a graph a hand edit drops", () => {
 });
 
 describe("perbo admit --from-spec", () => {
+  it("refuses a second ticket from one spec, and says which one is already there", async () => {
+    // One spec is one piece of work (D-103). Drafting from it again is a second
+    // ticket for the same work, whose records name the same spec — and the
+    // ticket being asked for is the one already drafted.
+    const { repo, specPath } = repository();
+    expect((await admitFromSpec(repo, specPath, scripted([submits(drafted)]))).code).toBe(
+      EXIT_CODES.approve,
+    );
+
+    // Refused before a model is asked, so the second draft costs nothing.
+    const model = scripted([submits(drafted)]);
+    await expect(admitFromSpec(repo, specPath, model)).rejects.toThrow(UsageError);
+    await expect(admitFromSpec(repo, specPath, model)).rejects.toThrow(/PRB-1/);
+    await expect(admitFromSpec(repo, specPath, model)).rejects.toThrow(/--start-over PRB-1/);
+    expect(model.requests).toHaveLength(0);
+    // Refused before a model was asked, and nothing written: still one ticket.
+    expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual(["PRB-1"]);
+  });
+
+  it("lets a spec whose only ticket is spent be drafted from again", async () => {
+    // A ticket at plan_invalid, cancelled or failed is not the plan this spec
+    // has — it is the plan it did not get, and `--start-over` refuses all
+    // three. Admitting again is the way out, so the guard must not be a dead
+    // end.
+    const { repo, specPath } = repository();
+    expect((await admitFromSpec(repo, specPath, scripted([submits(drafted)]))).code).toBe(
+      EXIT_CODES.approve,
+    );
+    const dir = storeDir(repo, null);
+    const ticket = readTicket(dir, "PRB-1");
+    writeFileSync(
+      join(dir, "tickets", "PRB-1.json"),
+      JSON.stringify({ ...ticket, state: "plan_invalid" }, null, 2),
+    );
+
+    expect((await admitFromSpec(repo, specPath, scripted([submits(drafted)]))).code).toBe(
+      EXIT_CODES.approve,
+    );
+    expect(
+      listTickets(dir)
+        .map((each) => each.key)
+        .sort(),
+    ).toEqual(["PRB-1", "PRB-2"]);
+  });
+
   it("admits one ticket at plan_review whose plan carries the drafted nodes", async () => {
     const { repo, specPath } = repository();
     const { code } = await admitFromSpec(repo, specPath, scripted([submits(drafted)]));

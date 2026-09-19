@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import {
   APPROACH_SCHEMA_VERSION,
@@ -1280,6 +1280,13 @@ export function runAdmitCommand(input: AdmitInput): number | Promise<number> {
         input.args.startOver,
         relative(repositoryRoot, resolve(input.cwd, input.args.fromSpec!)).split(sep).join("/"),
       );
+    } else if (input.args.fromSpec !== null) {
+      // One spec is one piece of work and one ticket (D-103). Drafting from a
+      // spec that already has one is a second ticket for the same work, whose
+      // records name the same spec and whose plans disagree — and the ticket
+      // asked for is the one already there. Asked before a model is, as the
+      // re-draft check above is, because the cost is the same either way.
+      assertNotAlreadyDrafted(input);
     }
     return resolveDrafted(input).then((resolved) =>
       input.args.startOver === null
@@ -1295,6 +1302,48 @@ const money = (micros: number, basis: string): string =>
 
 const duration = (ms: number): string =>
   ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 60_000)}min`;
+
+/**
+ * The states a ticket can be in and leave its spec free to be drafted from
+ * again: the ones nothing carries on from.
+ *
+ * A ticket at one of these is not the plan this spec has, it is the plan it
+ * did not get — `--start-over` refuses them, and D-103's way out of a spec gone
+ * stale is to admit it again. Anything else is a live ticket, and a second
+ * beside it is two plans for one piece of work.
+ */
+const SPENT_STATES = new Set(["plan_invalid", "cancelled", "failed"]);
+
+/**
+ * Refuse a second ticket from one spec, naming the one that is already there.
+ *
+ * What to do about it is the caller's, so the refusal says which case this is
+ * rather than choosing: a ticket still in `plan_review` is re-drafted with
+ * `--start-over`, and one past that is the plan this spec has. Nothing is
+ * written either way, and this is asked before a model is.
+ */
+function assertNotAlreadyDrafted(input: AdmitInput): void {
+  const repositoryRoot = resolve(input.cwd, input.args.repo);
+  const dir = storeDir(repositoryRoot, input.args.store);
+  if (!existsSync(join(dir, "tickets"))) return;
+  const spec = relative(repositoryRoot, resolve(input.cwd, input.args.fromSpec!))
+    .split(sep)
+    .join("/");
+  const live = listTickets(dir).filter(
+    (ticket) => ticket.admission.spec?.path === spec && !SPENT_STATES.has(ticket.state),
+  );
+  // The one the refusal is about is the one the caller would act on: a ticket
+  // still open to a re-draft, or failing that the first that stands.
+  const open = live.find((ticket) => ticket.state === "plan_review");
+  const named = open ?? live[0];
+  if (named === undefined) return;
+  throw new UsageError(
+    `${named.key} was already drafted from ${spec}, and one spec is one piece of work: ` +
+      (open === undefined
+        ? `${named.key} is ${named.state}, which is past re-drafting, so this spec has its plan`
+        : `re-draft it with \`perbo admit --from-spec ${spec} --start-over ${named.key}\``),
+  );
+}
 
 function admit(input: AdmitInput, started: number, resolved: Resolved): number {
   const now = input.now ?? new Date();

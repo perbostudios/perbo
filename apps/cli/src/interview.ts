@@ -1348,9 +1348,10 @@ function ticketFromSpec(context: InterviewContext): string | null {
  * The two are separated because they read differently to a person: a plan that
  * does not exist yet is written by generating one, and a plan that has been
  * approved is immutable (ADR-0016) and saying nothing was drafted would be
- * false. Where two tickets record one spec and neither is open — which
- * `generate_plan` refuses to produce, though `admit --from-spec` run twice by
- * hand does — the oldest is taken, `listTickets` being in admission order.
+ * false. Where two tickets record one spec and neither is open — which nothing
+ * admits any more, `admit --from-spec` refusing a second beside a live one, but
+ * which a store written before it did may hold — the oldest is taken,
+ * `listTickets` being in admission order.
  */
 function draftedFromSpec(
   context: InterviewContext,
@@ -1665,6 +1666,16 @@ back. You cannot approve, publish or merge, and there is no tool for any of the 
 and say what is ready for the person's keystroke. State names, keys and numbers come from the tools,
 never from memory.
 
+Write the spec to be read at a glance, because it is read far more often than it is written. One
+idea to a line, in the fewest words that still say it: a fragment is a line, and a full sentence is
+not required. Where Requirements has enough lines to need grouping, group them under \`###\` headings
+— three hashes at least, and only in that section, where they stay headings and the requirements
+keep their own ids under them. Mark what matters and
+nothing else: \`**bold**\` for the thing a reader must not miss, backticks for a literal, and
+@Symbol for code in this repository. The pane draws exactly those, so a mark on an ordinary word
+spends a reader's attention on nothing. Say a thing once — a line that repeats its heading, or a
+requirement already stated in the Outcome, is a line to cut.
+
 Ask through ask_options rather than writing questions out in prose, and ask only what you cannot
 settle from the repository, the spec or what they have already told you: they see only what needs
 them. What you do ask goes in the one call — parts whose answers depend on each other in one group,
@@ -1759,6 +1770,11 @@ export interface InterviewStreamed {
   message?: Record<string, unknown>;
   /** Why the session ended, on the last one. */
   reason?: string;
+  /**
+   * The provider has finished this turn and the next word is the person's.
+   * Each transport knows this in its own terms and says it in this one.
+   */
+  idle?: boolean;
 }
 
 /**
@@ -1895,6 +1911,7 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
   for await (const streamed of transport.run(session)) {
     if (streamed.session_id !== undefined) announce(streamed.session_id);
     if (streamed.message !== undefined) emit({ type: "message", message: streamed.message });
+    if (streamed.idle === true) emit({ type: "idle" });
     if (streamed.reason !== undefined) reason = streamed.reason;
   }
   if (!started) announce(sessionId.length > 0 ? sessionId : "unknown");
