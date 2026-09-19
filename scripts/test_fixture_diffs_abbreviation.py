@@ -45,23 +45,26 @@ class Abbreviation(unittest.TestCase):
         # Each of these changes a generated diff on its own: the prefixes, the
         # hunks the algorithm finds, the context around them and between them,
         # the heuristic that places a hunk, the hash length.
-        with tempfile.TemporaryDirectory() as home:
-            config = Path(home) / "gitconfig"
-            config.write_text(
-                "[diff]\n\tnoprefix = true\n\tmnemonicPrefix = true\n\talgorithm = histogram\n\tcontext = 5\n"
-                "\tinterHunkContext = 10\n\tindentHeuristic = false\n\texternal = false-external-diff\n"
-                "[core]\n\tabbrev = 12\n",
-                encoding="utf-8",
-            )
-            result = subprocess.run(
-                [sys.executable, "validate_fixture_diffs.py"],
-                cwd=SCRIPTS,
-                env={**os.environ, "GIT_CONFIG_GLOBAL": str(config)},
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=300,
-            )
+        # Laid over the person's own configuration, not in its place, which would
+        # drop a core.autocrlf their checkout depends on.
+        settings = {
+            "diff.noprefix": "true", "diff.mnemonicPrefix": "true", "diff.algorithm": "histogram",
+            "diff.context": "5", "diff.interHunkContext": "10", "diff.indentHeuristic": "false",
+            "diff.external": "false-external-diff", "core.abbrev": "12",
+        }
+        env = {**os.environ, "GIT_CONFIG_COUNT": str(len(settings))}
+        for index, (key, value) in enumerate(settings.items()):
+            env[f"GIT_CONFIG_KEY_{index}"] = key
+            env[f"GIT_CONFIG_VALUE_{index}"] = value
+        result = subprocess.run(
+            [sys.executable, "validate_fixture_diffs.py"],
+            cwd=SCRIPTS,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=300,
+        )
         self.assertEqual(result.returncode, 0, (result.stdout + result.stderr)[-2000:])
 
 
@@ -71,7 +74,8 @@ class Abbreviation(unittest.TestCase):
         fixture = next(
             directory
             for directory in sorted(FIXTURES.iterdir())
-            if (directory / "change.diff").is_file() and b"\r\n" not in (directory / "change.diff").read_bytes()
+            if (directory / "change.diff").is_file()
+            and b"\r" not in (directory / "change.diff").read_bytes().replace(b"\r\n", b"\n")
         )
         with tempfile.TemporaryDirectory() as home:
             copy = Path(home) / fixture.name
