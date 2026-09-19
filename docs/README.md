@@ -13,7 +13,7 @@ Start with the [README](../README.md). This index finds the document that answer
 | How review quality is held | [14 — review and the regression suite](14-planning-review-evaluation-and-learning.md), [the regression suite](evaluation/regression-suite.md) |
 | Why something is the way it is | [11 — decisions](11-open-decisions.md), [ADRs](adr/README.md) |
 | What is open, and what is sold | [17 — open source and the commercial product](17-commercial-open-source-and-validation.md) |
-| What comes next | [09 — roadmap](09-roadmap-and-exit-criteria.md), [`backlog/issues.json`](../backlog/issues.json) |
+| What comes next | [09 — roadmap](09-roadmap-and-exit-criteria.md) |
 
 ## Diagrams
 
@@ -38,7 +38,6 @@ Each diagram has a Graphviz `.dot` source beside its `.svg` and `.png`.
 | | |
 |---|---|
 | `scripts/validate_docs.py` | Links, decision and ADR ids, this index's coverage, lifecycle states agreeing between docs/04 and its diagram, foreign keys against edges in docs/03 |
-| `scripts/validate_backlog.py` | Backlog ids, labels, milestones, dependencies and cycles |
 | `scripts/validate_diagrams.py` | A rendering that no longer matches its source |
 | `scripts/validate_fixture_diffs.py` | A corpus fixture whose diff is not what its own trees produce |
 | `pnpm exec turbo run typecheck test lint` | The product code |

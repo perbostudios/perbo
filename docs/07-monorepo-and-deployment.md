@@ -21,7 +21,6 @@ tooling/
   skills/         vendored engineering-skill guidance, bundled into execution briefs
   tsconfig/       one strict TypeScript base every package extends
 docs/             canonical documents, ADRs, design boards
-backlog/          issues.json, the canonical issue list
 diagrams/         rendered architecture diagrams
 scripts/          repository validators and local setup
 ```

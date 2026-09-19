@@ -64,4 +64,4 @@ Check any changed surface and link the corresponding update:
 - [ ] Public promise, target customer, or roadmap gate
 - [ ] No canonical architecture surface changed
 
-Where applicable, the specification, ADR/decision register, diagram, backlog dependency, and evaluation fixture were updated in the same pull request.
+Where applicable, the specification, ADR/decision register, diagram and evaluation fixture were updated in the same pull request.
