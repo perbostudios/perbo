@@ -4828,23 +4828,13 @@ kbd {
   color: var(--muted);
   padding: 0 2px;
 }
-/* The questions as the transcript keeps them, so one moved past is still there
-   to read and answer. */
+/* The transcript says an asking happened and keeps the questions behind its
+   dot, so a group moved past is still there to read without the whole of it
+   sitting in the chat. */
 .asked-said {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0 2px;
-  font-size: calc(11.5px * var(--text-scale));
-  color: var(--muted);
-}
-.asked-said-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.asked-said p {
-  margin: 0;
+  align-items: center;
+  gap: 6px;
 }
 
 /* One group of the interview's questions, put between the conversation and the
@@ -4979,6 +4969,85 @@ kbd {
   align-items: baseline;
   gap: 8px;
   font: calc(12px * var(--text-scale)) var(--mono);
+}
+/* The detail a card holds back until it is asked for. The dot sits on the head
+   beside the word it explains, and what it says is laid over the chat rather
+   than pushing it about, so asking costs the reader no place in the page. */
+.info-hint {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+/* On a head row it sits at the end, away from the words it explains. */
+.tool-head .info-hint,
+.refusal-head .info-hint {
+  margin-left: auto;
+}
+.info-hint-dot {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font: italic 600 calc(10px * var(--text-scale)) var(--serif, var(--mono));
+  cursor: help;
+}
+.info-hint-dot:hover,
+.info-hint-dot:focus-visible {
+  border-color: var(--ink, var(--line));
+  color: var(--ink, var(--muted));
+}
+.info-hint-body {
+  /* Against the window, not the card: the chat scrolls, and an absolutely
+     placed panel is clipped by that scroll. Where it goes is worked out when
+     it opens (`InfoHint.tsx`), which is also what keeps it inside the window
+     when the dock is narrower than the panel. */
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 40;
+  max-height: 260px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 8px 10px;
+  border: 1.5px solid var(--line);
+  border-radius: 10px 8px 11px 8px;
+  background: var(--paper);
+  box-shadow: 0 10px 26px rgba(var(--shadow-rgb), 0.22);
+  font: calc(11px * var(--text-scale)) var(--mono);
+  color: var(--ink, var(--muted));
+  white-space: pre-wrap;
+  text-align: left;
+  /* Kept in the document for a screen reader to read through
+     `aria-describedby`, and taken out of the pointer's way when shut. */
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--duration-quick, 150ms) var(--ease-out, ease-out),
+    visibility var(--duration-quick, 150ms);
+}
+.info-hint-body--open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .info-hint-body {
+    transition: none;
+  }
+}
+/* Why a tool was refused, which the card shows rather than holds back. */
+.tool-why {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  font-size: calc(11.5px * var(--text-scale));
+  white-space: pre-wrap;
 }
 .tool-detail {
   margin: 0;

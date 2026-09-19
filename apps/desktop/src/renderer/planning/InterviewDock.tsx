@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { bridge, errorMessage } from "../data.js";
 import { graphHistory, latestUndoable } from "./history.js";
 import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS } from "../../shared/contract-editing.js";
+import { InfoHint } from "../InfoHint.js";
 import { ThinkingStatus } from "../Screen.js";
 import { INTERVIEW_CONVERSATION_CAP } from "../../shared/protocol.js";
 import type {
@@ -464,26 +465,32 @@ function Line({
   // are written out here as well. A person who says something of their own
   // takes the rest off the card — the session is about to answer what they
   // said — so what was asked has to stay somewhere they can still read it.
-  if (line.kind === "asked")
+  if (line.kind === "asked") {
+    const parts = line.groups.reduce((count, group) => count + group.parts.length, 0);
     return (
-      <div className="asked-said" role="note" aria-label="Asked">
-        {line.groups.map((group, number) => (
-          <div className="asked-said-group" key={number}>
-            {group.title !== null && <b>{group.title}</b>}
-            {group.parts.map((part, index) => (
-              <p key={index}>
-                <span className="asked-letter">
-                  {number + 1}
-                  {group.parts.length > 1 ? `${PART_LETTERS[index] ?? index + 1})` : ")"}
-                </span>
-                {part.question}{" "}
-                <span className="muted">{part.options.map((option) => option.label).join(" · ")}</span>
-              </p>
-            ))}
-          </div>
-        ))}
-      </div>
+      <p className="msg msg--note asked-said">
+        Asked {parts === 1 ? "one question" : `${parts} questions`}
+        {line.groups.length > 1 && `, in ${line.groups.length} groups`}.
+        <InfoHint
+          label="The questions that were asked"
+          text={line.groups
+            .map((group, number) =>
+              [
+                group.title === null ? null : group.title,
+                ...group.parts.map(
+                  (part, index) =>
+                    `${number + 1}${group.parts.length > 1 ? (PART_LETTERS[index] ?? index + 1) : ""}) ` +
+                    `${part.question}\n   ${part.options.map((option) => option.label).join(" · ")}`,
+                ),
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            )
+            .join("\n\n")}
+        />
+      </p>
     );
+  }
   if (line.kind === "refused")
     return (
       <div className="refusal" role="note" aria-label="Refused">
@@ -493,6 +500,9 @@ function Line({
           {line.target !== null && <code className="refusal-target">{line.target}</code>}
         </div>
         <p>{line.reason}</p>
+        {/* No hint here, and no control of any kind: a refusal carries nothing
+            to answer, and D-102 is that it is never put to the person as a
+            question. The rule that refused it is part of the report. */}
         <p className="small muted">
           {line.rule} · this session is never asked to allow something; a call outside what it may
           do is refused and told to you.
@@ -532,10 +542,15 @@ function ToolCard({
               ? "refused by the edit path"
               : "refused"}
         </span>
+        {/* What the tool said is read when it is asked for: the name and the
+            word beside it are what the card is for, and the account underneath
+            them was most of the dock. */}
+        {line.ok && <InfoHint text={line.detail} label={`What ${line.tool} did`} />}
       </div>
-      {edit === null ? (
-        <pre className="tool-detail">{line.detail}</pre>
-      ) : (
+      {/* What a tool did is read when it is asked for; why one was refused is
+          read without asking, because it is the thing to act on. */}
+      {!line.ok && <p className="tool-why">{line.detail}</p>}
+      {edit !== null && (
         <>
           <div className="edit-title">
             Edit {edit.n} · {edit.summary}
@@ -548,9 +563,9 @@ function ToolCard({
             <span className="ba-label">after</span>
             <span>{keys(edit.after)}</span>
           </div>
-          <p className="small muted">
-            It changed those and nothing else. {edit.undoes !== null && `It undid edit ${edit.undoes}. `}
-          </p>
+          {edit.undoes !== null && (
+            <p className="small muted">It undid edit {edit.undoes}.</p>
+          )}
           {onUndo !== null && undoable === edit.n && (
             <button
               type="button"

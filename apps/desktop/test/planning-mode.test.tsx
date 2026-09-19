@@ -1802,6 +1802,12 @@ describe("the interview docked in planning mode (SCP-313)", () => {
   const pane = (name: string) =>
     within(screen.getByRole("group", { name: "Planning panes" })).getByRole("button", { name });
   const dock = (): HTMLElement => screen.getByRole("complementary", { name: "Interview" });
+  /** Everything the dock's own hints hold, which is where an asking is kept. */
+  const askedInTranscript = (): string =>
+    within(dock())
+      .queryAllByRole("tooltip", { hidden: true })
+      .map((hint) => hint.textContent ?? "")
+      .join("\n");
   const composer = (): HTMLTextAreaElement =>
     screen.getByLabelText("Message the interview") as HTMLTextAreaElement;
 
@@ -1892,6 +1898,50 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     // The composer empties, ready for the next turn.
     await waitFor(() => expect(composer().value).toBe(""));
   });
+
+  it("keeps what a box wrote behind a dot, and opens it on hover and on focus", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await within(dock()).findByRole("group", { name: "How the queue is split" });
+
+    // The line in the chat says only that an asking happened; the questions
+    // themselves are behind its dot.
+    const said = await within(dock()).findByText(/Asked 3 questions/);
+    // The questions are in the document — a screen reader reaches them through
+    // `aria-describedby` whether or not they are on screen — but the line the
+    // chat shows is the summary, and the rest stays shut until it is asked for.
+    const shown = [...said.childNodes]
+      .filter((node) => !(node instanceof HTMLElement && node.className.includes("info-hint")))
+      .map((node) => node.textContent ?? "")
+      .join("");
+    expect(shown).toContain("Asked 3 questions");
+    expect(shown).not.toContain("Where does the split go?");
+    const dot = within(said).getByRole("button", { name: "The questions that were asked" });
+    const hint = within(said).getByRole("tooltip", { hidden: true });
+    expect(hint.textContent).toContain("Where does the split go?");
+    expect(dot.getAttribute("aria-describedby")).toBe(hint.id);
+    expect(dot.getAttribute("aria-expanded")).toBe("false");
+    expect(hint.className).not.toContain("info-hint-body--open");
+
+    fireEvent.pointerEnter(dot);
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("true"));
+    expect(within(said).getByRole("tooltip").className).toContain("info-hint-body--open");
+    fireEvent.pointerLeave(dot);
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("false"));
+
+    // A keyboard reaches it too: it is not a hover-only affordance.
+    fireEvent.focus(dot);
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("true"));
+    fireEvent.keyDown(dot, { key: "Escape" });
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("false"));
+
+    await waitFor(() => expect(within(dock()).queryAllByText(/Noted:/)).toHaveLength(0));
+  });
+
 
   it("resizes the interview by dragging the bar on its edge, and remembers it", async () => {
     const plan = await planning();
@@ -1985,9 +2035,10 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     // Answering the first group brings the second.
     const second = await card("Question 2");
     expect(second.getByText("What happens to the old node?")).toBeTruthy();
-    // The first is off the card, though the transcript still holds it.
+    // The first is off the card, though the transcript still holds it behind
+    // the dot on the line that says the asking happened.
     expect(second.queryByText("Where does the split go?")).toBeNull();
-    expect(within(dock()).getAllByText("Where does the split go?").length).toBeGreaterThan(0);
+    expect(askedInTranscript()).toContain("Where does the split go?");
     // Every part carries a way out of choosing, and the composer stays live.
     expect(second.getAllByRole("radio")).toHaveLength(3);
     expect(second.getByText("Let the interview decide")).toBeTruthy();
@@ -2015,8 +2066,8 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       expect(within(dock()).queryByRole("group", { name: "How the queue is split" })).toBeNull(),
     );
     // Nothing asked is lost: the transcript still holds every question.
-    expect(within(dock()).getAllByText("Where does the split go?").length).toBeGreaterThan(0);
-    expect(within(dock()).getAllByText("What happens to the old node?").length).toBeGreaterThan(0);
+    expect(askedInTranscript()).toContain("Where does the split go?");
+    expect(askedInTranscript()).toContain("What happens to the old node?");
     expect(await within(dock()).findByText(/Noted:/)).toBeTruthy();
   });
 

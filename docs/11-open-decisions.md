@@ -592,7 +592,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
   counted back out of the turns, which cannot tell an answer from a question the person typed
   instead: a turn that is not the group's answer ends the asking, because the session is about to
   answer what was said and a card left standing would answer a question nobody is asking any more.
-  The questions stay in the conversation to be read either way. This is not a permission prompt: a call the guard refused is still reported and
+  The conversation keeps the questions either way, behind the line that says they were asked: a
+  card holds what has to be read and what it wrote is there for the asking, so a chat of long
+  accounts is a chat nobody reads. This is not a permission prompt: a call the guard refused is still reported and
   never asked (D-102).
 - Why: a person sees only what needs them (D-001), and prose questions arriving five at a time are
   read as a wall and answered as one. Metering them is the reader's job rather than the session's,
