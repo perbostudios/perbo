@@ -245,7 +245,7 @@ export function InterviewDock({
   // last line: a session that has just said something and gone quiet to read
   // the repository looks, from the lines alone, exactly like one that has
   // finished — and the pause that follows is the one that reads as something
-  // having gone wrong (D-NEW-the-interview-says-when-it-is-working).
+  // having gone wrong (D-119).
   const working = useMemo(() => {
     // Until something is pushed, what the snapshot says: a dock opened part way
     // through a turn missed the change that said so.

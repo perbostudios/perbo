@@ -1020,7 +1020,7 @@ export interface Snapshot {
    * Beside the live ones for the same reason they are here: a dock opened part
    * way through a turn has to know it is mid-pause, and the change that said so
    * went out before it was listening
-   * (D-NEW-the-interview-says-when-it-is-working).
+   * (D-119).
    */
   working?: string[];
 }
@@ -1078,7 +1078,7 @@ export const ChangeSchema = z.discriminatedUnion("kind", [
      * asks anything says nothing for a while, and a reader cannot tell that
      * from a session that has finished or fallen over — so the dock says which
      * it is, from the turn the session itself reports finishing
-     * (D-NEW-the-interview-says-when-it-is-working).
+     * (D-119).
      */
     working: z.boolean().default(false),
   }),
