@@ -8,6 +8,12 @@ import { HomePage } from "../src/renderer/tasks/HomePage.js";
 import { previewBridge } from "../src/renderer/preview.js";
 import { bridge } from "../src/renderer/data.js";
 import { resetRailSize } from "../src/renderer/shell/rail-size.js";
+import {
+  DEFAULT_DOCK_WIDTH,
+  MAX_DOCK_WIDTH,
+  MIN_DOCK_WIDTH,
+  resetDockWidth,
+} from "../src/renderer/shell/dock-size.js";
 import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests } from "../src/shared/shortcuts.js";
 import { withDraft } from "../src/renderer/shell/create.js";
 import { SpecSection } from "../src/renderer/planning/SpecSection.js";
@@ -54,6 +60,7 @@ const railNames = (): string[] =>
 describe("Create in the rail (SCP-334)", () => {
   it("reads Create, Home, Archive, Settings, bound to ⌘1 to ⌘4 in that order, with ⌘N still creating", async () => {
     resetRailSize();
+    resetDockWidth();
     mount();
     await screen.findByRole("heading", { name: /Hi, / });
     const names = railNames();
@@ -1884,6 +1891,60 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     expect(await within(dock()).findByText(/Noted: “split the queue node”/)).toBeTruthy();
     // The composer empties, ready for the next turn.
     await waitFor(() => expect(composer().value).toBe(""));
+  });
+
+  it("resizes the interview by dragging the bar on its edge, and remembers it", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    const bar = screen.getByRole("separator", { name: "Resize the interview" });
+    expect(dock().style.width).toBe(`${DEFAULT_DOCK_WIDTH}px`);
+    expect(bar.getAttribute("aria-valuenow")).toBe(String(DEFAULT_DOCK_WIDTH));
+
+    // The dock is on the right, so the width is the distance from the pointer
+    // to the window's right edge.
+    Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+    fireEvent.pointerDown(bar, { button: 0, pointerId: 1 });
+    fireEvent.pointerMove(bar, { pointerId: 1, clientX: 700 });
+    await waitFor(() => expect(dock().style.width).toBe("500px"));
+    fireEvent.pointerUp(bar, { pointerId: 1 });
+
+    // A move after the drag has ended does not keep dragging it.
+    fireEvent.pointerMove(bar, { pointerId: 1, clientX: 900 });
+    expect(dock().style.width).toBe("500px");
+    expect(
+      screen.getByRole("separator", { name: "Resize the interview" }).getAttribute("aria-valuenow"),
+    ).toBe("500");
+    expect(localStorage.getItem("perbo:dock")).toBe("500");
+  });
+
+  it("holds the interview's width inside its bounds, and the keyboard moves it", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    const bar = () => screen.getByRole("separator", { name: "Resize the interview" });
+    Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+
+    // Dragged past either end, it stops at the end rather than going past it.
+    fireEvent.pointerDown(bar(), { button: 0, pointerId: 1 });
+    fireEvent.pointerMove(bar(), { pointerId: 1, clientX: 1190 });
+    await waitFor(() => expect(dock().style.width).toBe(`${MIN_DOCK_WIDTH}px`));
+    fireEvent.pointerMove(bar(), { pointerId: 1, clientX: 10 });
+    await waitFor(() => expect(dock().style.width).toBe(`${MAX_DOCK_WIDTH}px`));
+    fireEvent.pointerUp(bar(), { pointerId: 1 });
+
+    // Left widens, because the edge moving left is the dock growing.
+    fireEvent.keyDown(bar(), { key: "ArrowRight" });
+    await waitFor(() => expect(dock().style.width).toBe(`${MAX_DOCK_WIDTH - 16}px`));
+    fireEvent.keyDown(bar(), { key: "ArrowLeft" });
+    await waitFor(() => expect(dock().style.width).toBe(`${MAX_DOCK_WIDTH}px`));
+    // Home puts it back where it opens, as double-clicking does.
+    fireEvent.keyDown(bar(), { key: "Home" });
+    await waitFor(() => expect(dock().style.width).toBe(`${DEFAULT_DOCK_WIDTH}px`));
+    fireEvent.doubleClick(bar());
+    expect(dock().style.width).toBe(`${DEFAULT_DOCK_WIDTH}px`);
   });
 
   it("puts one group of questions at a time, and sends the options' own words", async () => {

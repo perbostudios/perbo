@@ -4701,13 +4701,52 @@ kbd {
 }
 /* Wide enough to read a paragraph in, narrow enough to leave the pane the room. It does not collapse: the chat is beside every pane from the first question to the approval. */
 .dock {
-  width: clamp(300px, 28vw, 384px);
+  /* The width is the person's, dragged on `.dock-handle` and remembered, and it
+     arrives as an inline style. No width is stated here: a bound in this file
+     as well as in `dock-size.ts` is a second rule the drag would stop agreeing
+     with, and the edge would stand still under a moving pointer. */
   flex: none;
   min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--soft);
   border-left: 1.5px solid var(--line);
+}
+/* The bar between the pane and the interview. Three pixels of border with a
+   wider reach around it: a person aims at the line they can see, and hits a
+   target their hand can actually hold. */
+.dock-handle {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 3px;
+  margin-right: -3px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.dock-handle::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+}
+.dock-handle-grip {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  transition: background var(--duration-fast, 120ms) ease;
+}
+.dock-handle:hover .dock-handle-grip,
+.dock-handle:focus-visible .dock-handle-grip,
+.dock-handle--dragging .dock-handle-grip {
+  background: var(--accent, var(--line));
+}
+.dock-handle:focus-visible {
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dock-handle-grip {
+    transition: none;
+  }
 }
 .dock-head {
   flex: none;

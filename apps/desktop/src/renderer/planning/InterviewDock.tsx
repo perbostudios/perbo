@@ -52,11 +52,14 @@ export function InterviewDock({
   editor,
   historyOpen,
   onHistory,
+  width,
 }: {
   workspace: Snapshot;
   editor: Editor;
   historyOpen: boolean;
   onHistory: () => void;
+  /** How wide the person has dragged it, from the shell's own record. */
+  width: number;
 }) {
   const client = useQueryClient();
   const session = editor.session;
@@ -209,7 +212,7 @@ export function InterviewDock({
 
   const dropped = (conversation[0]?.n ?? 1) - 1;
   return (
-    <aside className="dock" aria-label="Interview">
+    <aside className="dock" aria-label="Interview" style={{ width }}>
       <div className="dock-head">
         <div className="dock-session">
           <span className={cx("prov-dot", models.draftingProvider === "codex-cli" && "prov-dot--codex")} />

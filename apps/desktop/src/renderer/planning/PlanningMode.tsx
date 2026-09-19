@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Button, EmptyState } from "@perbo/ui";
 import { InkIcon } from "../InkIcon.js";
 import { useCreate } from "../shell/create.js";
@@ -7,6 +7,8 @@ import { ExplorerPane } from "./ExplorerPane.js";
 import { ImpactPane } from "./ImpactPane.js";
 import { HistoryDrawer } from "./HistoryDrawer.js";
 import { InterviewDock } from "./InterviewDock.js";
+import { DockHandle } from "./DockHandle.js";
+import { dockWidthLimit, useDockWidth } from "../shell/dock-size.js";
 import { PLANNING_PANES } from "./panes.js";
 import type { PageProps } from "../shell/App.js";
 import type { PlanningPane } from "./panes.js";
@@ -39,6 +41,30 @@ export function PlanningMode({
   pane,
 }: PageProps & { sessionId: string; pane: PlanningPane }) {
   const create = useCreate();
+  const stored = useDockWidth();
+  // How much room there is for the two of them, measured rather than assumed:
+  // the rail and the window both move it, and the drag has to stop where the
+  // dock actually stops.
+  const plan = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState(0);
+  useEffect(() => {
+    const held = plan.current;
+    if (held === null) return;
+    const measure = (): void => setRoom(held.getBoundingClientRect().width);
+    measure();
+    // A window that has no ResizeObserver still has a resize event, which is
+    // what moves this in practice; the observer also catches the rail opening
+    // and closing beside it.
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(held);
+    return () => observer.disconnect();
+  }, []);
+  const limit = dockWidthLimit(room);
+  const dock = Math.min(stored, limit);
   // The same editor the Composer binds to: the host is asked for the session, and its answer decides whether there is planning to show.
   const editor = useContractEditing({ kind: "session", id: sessionId }, workspace.settings);
   const [history, setHistory] = useState(false);
@@ -79,7 +105,7 @@ export function PlanningMode({
       </Suspense>
     );
   return (
-    <div className="plan">
+    <div className="plan" ref={plan}>
       <section
         className="pane"
         aria-label={PLANNING_PANES.find((entry) => entry.id === pane)?.label ?? "Spec"}
@@ -87,11 +113,13 @@ export function PlanningMode({
         {open}
         {history && <HistoryDrawer editor={editor} onClose={() => setHistory(false)} />}
       </section>
+      <DockHandle width={dock} limit={limit} />
       <InterviewDock
         workspace={workspace}
         editor={editor}
         historyOpen={history}
         onHistory={() => setHistory((shown) => !shown)}
+        width={dock}
       />
     </div>
   );
