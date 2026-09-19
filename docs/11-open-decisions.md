@@ -51,9 +51,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-076 — Perbo is developed in the public repository
 
 - Owner: Founder
-- Decision: `perbostudios/perbo` is where Perbo is developed: its branches, pull requests, issues and releases. Nothing in it is assembled from anywhere else. A private repository holds what stays private: the backlog of open work, whose entries the `SCP-` ids here name; the ticket store's records from before the release; the design boards and the planning-mode prototype until the co-founder agrees to publish them; and the control plane's design (D-016): its decisions and its eight ADRs. It is not synced from this repository. Ticket records a run writes under `.perbo/tickets/` stay on the machine that wrote them; `.perbo/config.json` is committed, and so is `.perbo/principles.md` once a person records one.
+- Decision: `perbostudios/perbo` is where Perbo is developed: its branches, pull requests, issues and releases. Nothing in it is assembled from anywhere else. A private repository holds what stays private: the backlog of open work, whose entries the `SCP-` ids here name; the ticket store's records from before the release; the spend ledger and the dated evaluation records; the design boards and the planning-mode prototype until the co-founder agrees to publish them; and the control plane's design (D-016): its decisions and its eight ADRs. It is not synced from this repository. Ticket records a run writes under `.perbo/tickets/` stay on the machine that wrote them; `.perbo/config.json` is committed, and so is `.perbo/principles.md` once a person records one.
 - Why: one repository is one source of truth, a checkout that holds nothing private cannot leak it, and real use is the evidence (D-099).
-- Changes if: the private repository's material has to change in step with the code, which would call for a private repository that depends on this one rather than one this one is filtered from.
+- Changes if: the private material has to change in step with the code.
 
 ### D-098 — The product is Perbo everywhere
 
