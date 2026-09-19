@@ -21,9 +21,9 @@ import {
   sourceContractFromArguments,
   sourceIdentity,
   type Ticket,
-} from "@focrux/contracts";
-import { pollPullRequest, type PreflightRequest, type PreflightResult } from "@focrux/runner";
-import { branchName } from "@focrux/workspace";
+} from "@perbo/contracts";
+import { pollPullRequest, type PreflightRequest, type PreflightResult } from "@perbo/runner";
+import { branchName } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { runEscapesCommand } from "../src/escapes.js";
 import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "../src/execute.js";
@@ -51,7 +51,7 @@ import { buildCli, removeStagedBundles, spawnBuilt } from "./open-build.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * `focrux run` with nothing admitted behind it (AYO-32).
+ * `perbo run` with nothing admitted behind it (AYO-32).
  *
  * The reviewer is a double and the executor is a real binary this file writes:
  * paying a provider is not what these tests are about, but the write guard is,
@@ -81,7 +81,7 @@ import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
  * from an admitted ticket. The same command after the change: 7 passed.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-local-run-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-local-run-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => vi.restoreAllMocks());
 
@@ -132,7 +132,16 @@ interface AgentCall {
  * runner spawns it, reads its stream-json and its exit code, so what these
  * tests drive is the shipped adapter rather than a stand-in for it.
  */
-function guardedAgent(name: string, calls: readonly AgentCall[]): string {
+function guardedAgent(
+  name: string,
+  calls: readonly AgentCall[],
+  /**
+   * What the init line reports the credential came from. `none` is a
+   * subscription, which is what a developer machine reports; a name is an API
+   * key, and D-096 makes that the only case a cost cap binds at all.
+   */
+  apiKeySource = "none",
+): string {
   const dir = mkdtempSync(join(scratch, `agent-${name}-`));
   const binary = join(dir, "agent.cjs");
   writeFileSync(
@@ -153,7 +162,7 @@ const emit = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
 emit({
   type: "system",
   subtype: "init",
-  apiKeySource: "none",
+  apiKeySource: ${JSON.stringify(apiKeySource)},
   mcp_servers: [],
   plugins: [],
   skills: [],
@@ -322,7 +331,7 @@ const capture = () => {
 };
 
 /**
- * The repository's own `.focrux/config.json` — the pinned checks, the protected
+ * The repository's own `.perbo/config.json` — the pinned checks, the protected
  * paths and the limits this repository agreed once, which is where a run with
  * no ticket behind it reads its judging artifacts from.
  */
@@ -816,7 +825,7 @@ describe("the write guard a run with nothing admitted enforces", () => {
     });
     const fromTicket = await run(
       ticketed,
-      ["--ticket", "FCX-1", "--config", worktreeOverride("guard-parity-ticket"), "--json"],
+      ["--ticket", "PRB-1", "--config", worktreeOverride("guard-parity-ticket"), "--json"],
       { hooks: { review: reviewer("approve") as never } },
     );
 
@@ -866,9 +875,9 @@ describe("the branch a ticket-backed run works on", () => {
         ticket_id: string;
         delivery: { branch: string | null };
       };
-    const own = branchName({ ticket_key: "FCX-1", ticket_id: ticket("FCX-1").ticket_id, outcome: OUTCOME });
-    // FCX-2's branch, present in the checkout as its own run would leave it.
-    const foreign = branchName({ ticket_key: "FCX-2", ticket_id: ticket("FCX-2").ticket_id, outcome: other });
+    const own = branchName({ ticket_key: "PRB-1", ticket_id: ticket("PRB-1").ticket_id, outcome: OUTCOME });
+    // PRB-2's branch, present in the checkout as its own run would leave it.
+    const foreign = branchName({ ticket_key: "PRB-2", ticket_id: ticket("PRB-2").ticket_id, outcome: other });
     git(repo, "branch", foreign);
     const foreignTip = git(repo, "rev-parse", foreign).trim();
 
@@ -884,7 +893,7 @@ describe("the branch a ticket-backed run works on", () => {
       const result = await run(
         repo,
         [
-          "--ticket", "FCX-1",
+          "--ticket", "PRB-1",
           "--config", worktreeOverride("config-branch", { delivery_branch: foreign }),
           "--publish",
           "--json",
@@ -908,8 +917,8 @@ describe("the branch a ticket-backed run works on", () => {
       expect(result.json.branch).toBe(own);
       expect(pushed).toEqual([own]);
       expect(opened).toEqual([own]);
-      // The ticket records its own branch, and FCX-2's is where it was.
-      expect(ticket("FCX-1").delivery.branch).toBe(own);
+      // The ticket records its own branch, and PRB-2's is where it was.
+      expect(ticket("PRB-1").delivery.branch).toBe(own);
       expect(git(repo, "rev-parse", foreign).trim()).toBe(foreignTip);
     } finally {
       process.env.PATH = path;
@@ -918,7 +927,7 @@ describe("the branch a ticket-backed run works on", () => {
 });
 
 describe("the record a run with nothing admitted leaves", () => {
-  it("is under the repository's .focrux/, is read back by inspect, and names no ticket", async () => {
+  it("is under the repository's .perbo/, is read back by inspect, and names no ticket", async () => {
     const repo = repository("record");
     repoConfig(repo, {
       agent_binary: guardedAgent("record", [
@@ -970,7 +979,7 @@ describe("the record a run with nothing admitted leaves", () => {
 
     // No ticket key anywhere in what was persisted: not in the run record, not
     // in the attempts, not in a bundle. The work is keyed by where its contract
-    // came from, and nothing invented an `FCX-…` to stand in for a ticket.
+    // came from, and nothing invented an `PRB-…` to stand in for a ticket.
     for (const path of written) {
       expect(readFileSync(join(store, path), "utf8"), path).not.toMatch(/\bFCX-\d+\b/);
     }
@@ -1021,9 +1030,13 @@ describe("the ceilings a run with nothing admitted stops at", () => {
   it("stops where the spend crosses the ceiling, and still reports what it spent", async () => {
     const repo = repository("ceiling-cost");
     repoConfig(repo, {
-      agent_binary: guardedAgent("ceiling-cost", [
-        { tool: "Write", input: { file_path: "src/feature.ts", content: "export const total = 1;\n" } },
-      ]),
+      agent_binary: guardedAgent(
+        "ceiling-cost",
+        [{ tool: "Write", input: { file_path: "src/feature.ts", content: "export const total = 1;\n" } }],
+        // D-096: a cost ceiling binds only an executor billed per token, so the
+        // stand-in reports an API key.
+        "ANTHROPIC_API_KEY",
+      ),
       materialization_manifest: noInstall(repo),
       // The executor reports $0.004; the ceiling is a tenth of that.
       limits: {
@@ -1051,7 +1064,7 @@ describe("the ceilings a run with nothing admitted stops at", () => {
     expect(result.json.rounds[0]!.attempt.termination.reason).toBe("cost_ceiling_exceeded");
     // The setting that raises it, named with the file it lives in.
     expect(result.json.detail).toContain("attempt_cost_micros");
-    expect(result.json.detail).toContain(join(repo, ".focrux", "config.json"));
+    expect(result.json.detail).toContain(join(repo, ".perbo", "config.json"));
     expect(result.json.rounds).toHaveLength(1);
     // The stop spent money on the way to being reached, and says so.
     expect(result.err).toContain("cost      $0.0040");
@@ -1063,12 +1076,12 @@ describe("the ceilings a run with nothing admitted stops at", () => {
  * SCP-284 — what happens to a run with nothing admitted **after** it publishes.
  *
  * The rest of this file is the run itself; this is the same run's pull request
- * read back. The partner's first runs are local runs: `focrux run --outcome "…"`
+ * read back. The partner's first runs are local runs: `perbo run --outcome "…"`
  * mints its own contract, publishes its own pull request and writes its own
  * record, and until now nothing read that pull request back. A repository with
  * no ticket store had a store full of runs and no way to learn that any of them
  * had merged — and `sync` itself failed on `<store>/tickets`, a directory
- * `focrux run` never creates.
+ * `perbo run` never creates.
  *
  * Nothing here stands in for the thing under test. The store is written with
  * the shipped writer, the runs' branches and merges are real `git` history,
@@ -1082,7 +1095,7 @@ describe("the ceilings a run with nothing admitted stops at", () => {
  * name for two shapes.
  */
 describe("a run with nothing admitted, after its pull request is open", () => {
-  const syncScratch = mkdtempSync(join(tmpdir(), "focrux-sync-local-runs-"));
+  const syncScratch = mkdtempSync(join(tmpdir(), "perbo-sync-local-runs-"));
   afterAll(() => rmSync(syncScratch, { recursive: true, force: true }));
   // The one test below that runs the built program compiles `apps/cli` first,
   // into a directory of this run's own; this takes it away again.
@@ -1132,14 +1145,14 @@ describe("a run with nothing admitted, after its pull request is open", () => {
     writeFileSync(join(root, "README.md"), "base\n");
     // The store is working state of this machine, as it is in a real checkout:
     // untracked, so moving between branches never takes the run records with it.
-    writeFileSync(join(root, ".gitignore"), ".focrux/\n");
+    writeFileSync(join(root, ".gitignore"), ".perbo/\n");
     at(undefined, "add", "README.md", ".gitignore");
     at("2026-07-01T00:00:00Z", "commit", "-qm", "base");
     return { root, dir: storeDir(root, null), git: at };
   }
 
   /**
-   * The record `focrux run --outcome "…"` writes about itself before the loop
+   * The record `perbo run --outcome "…"` writes about itself before the loop
    * starts, with the pull request it went on to publish.
    *
    * The contract is minted by the shipped minting — so the run id, the label
@@ -1521,7 +1534,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
     it("says so in one line and exits 0 rather than failing on a store that does not exist", async () => {
       const root = join(syncScratch, "never-run");
       mkdirSync(root, { recursive: true });
-      expect(existsSync(join(root, ".focrux"))).toBe(false);
+      expect(existsSync(join(root, ".perbo"))).toBe(false);
 
       const streams = captureStreams();
       const code = await runSyncCommand({ argv: ["--repo", root], streams, cwd: root, now: NOW });
@@ -1529,7 +1542,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       expect(code).toBe(EXIT_CODES.approve);
       const said = [...streams.out, ...streams.err].join("");
       expect(said.split("\n").filter((line) => line !== "")).toHaveLength(1);
-      expect(said).toContain(join(root, ".focrux"));
+      expect(said).toContain(join(root, ".perbo"));
       expect(said).not.toMatch(/ENOENT|no such file|error/i);
     });
 
@@ -1548,7 +1561,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
     /**
      * The same reading, taken off the program rather than off the function: the
-     * compiled entry point is run as a process in a directory with no `.focrux`,
+     * compiled entry point is run as a process in a directory with no `.perbo`,
      * and what is counted is the bytes it wrote to its own stdout and the status
      * it exited with. Nothing in this repository stands between the two — a
      * `process.exit` that turned the returned code into something else, or an
@@ -1560,14 +1573,14 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       () => {
         const root = join(syncScratch, "never-run-built");
         mkdirSync(root, { recursive: true });
-        expect(existsSync(join(root, ".focrux"))).toBe(false);
+        expect(existsSync(join(root, ".perbo"))).toBe(false);
 
         const result = spawnBuilt([join(buildCli(), "main.js"), "sync"], { cwd: root, encoding: "utf8" });
 
         expect(result.status).toBe(0);
         expect(result.stderr).toBe("");
         expect(result.stdout.split("\n").filter((line) => line !== "")).toHaveLength(1);
-        expect(result.stdout).toContain(join(root, ".focrux"));
+        expect(result.stdout).toContain(join(root, ".perbo"));
         expect(result.stdout).not.toMatch(/ENOENT|no such file|error/i);
       },
       BUILD_AND_SPAWN_TIMEOUT_MS,
@@ -1575,14 +1588,14 @@ describe("a run with nothing admitted, after its pull request is open", () => {
   });
 
   describe("the branch a local run is on", () => {
-    it("is derived under fcx/ from the run's label where nothing records one", () => {
+    it("is derived under prb/ from the run's label where nothing records one", () => {
       const repo = publishedRepository("derived-branch");
       const record = localRun(repo, "Imports keep their order.", {
         url: "https://github.com/o/r/pull/31",
         number: 31,
       });
       const hex = record.run_id.replace(/^ticket_local_/, "");
-      expect(localRunBranch(repo.dir, record)).toBe(`fcx/local-${hex}/imports-keep-their-order`);
+      expect(localRunBranch(repo.dir, record)).toBe(`prb/local-${hex}/imports-keep-their-order`);
     });
 
     it("is the one its attempts record names, whatever its label would derive now", () => {
@@ -1705,7 +1718,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
         expect(sweep.out.join("")).toContain(run.run_id);
         expect(sweep.out.join("")).not.toContain("AYO-1");
         expect(sweep.err.join("")).toContain("1 ticket in");
-        expect(sweep.err.join("")).toContain("focrux sync FCX-1");
+        expect(sweep.err.join("")).toContain("perbo sync PRB-1");
       });
 
       const escapes = captureStreams();

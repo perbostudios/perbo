@@ -97,7 +97,7 @@ describe("a ticket's source", () => {
  * The shapes admission has ever written, as whole ticket records: ac_2's claim
  * is about stored tickets, and a source only reaches the store inside one.
  *
- * Fixed here rather than read from `.focrux/tickets`, which would make the
+ * Fixed here rather than read from `.perbo/tickets`, which would make the
  * assertion depend on which tickets happen to be admitted the day it runs —
  * green because nobody has yet written the shape it is looking for, and silent
  * about the shape it never saw.

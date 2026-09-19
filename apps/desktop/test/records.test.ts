@@ -10,12 +10,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach } from "vitest";
-import type { Ticket } from "@focrux/contracts";
+import type { Ticket } from "@perbo/contracts";
 import {
   diffSummary,
   ledgerFor,
   listBundles,
   readAttempts,
+  readLatestDraftEdit,
   summariseTicket,
   type StoredAttempt,
 } from "../src/host/records.js";
@@ -28,6 +29,7 @@ import {
   effectiveShortcuts,
   setPlatformForTests,
 } from "../src/shared/shortcuts.js";
+import { InterviewEditSchema } from "../src/shared/protocol.js";
 
 const temporary: string[] = [];
 afterEach(() => {
@@ -42,7 +44,7 @@ const ticket = (
 ): Ticket =>
   ({
     ticket_id: "ticket_1",
-    key: "FCX-1",
+    key: "PRB-1",
     state,
     updated_at: updated,
     delivery: {
@@ -68,7 +70,7 @@ const attempt = (
 });
 
 describe("retained records the desktop reads directly", () => {
-  it("sums only priced attempts of the month, counts ceiling stops, and averages over fully priced merged tickets", () => {
+  it("sums only priced attempts of the month, counts early stops, and averages over fully priced merged tickets", () => {
     const ledger = ledgerFor(
       [
         {
@@ -77,13 +79,15 @@ describe("retained records the desktop reads directly", () => {
             attempt("att_1", "2026-09-03T10:00:00.000Z", {
               cost_micros: 1_500_000,
             }),
+            // D-096: a stall is the stop a run has by default, and it counts
+            // the way a ceiling the repository set does.
             attempt(
               "att_2",
               "2026-09-04T10:00:00.000Z",
               { cost_micros: 500_000, cost_basis: "transport_reported" },
-              "cost_ceiling_exceeded",
+              "stalled",
             ),
-            // A second ceiling stop on the same ticket is still one ticket stopped at a ceiling.
+            // A second early stop on the same ticket is still one ticket stopped.
             attempt(
               "att_2b",
               "2026-09-04T12:00:00.000Z",
@@ -123,13 +127,13 @@ describe("retained records the desktop reads directly", () => {
       unpricedAttempts: 1,
       ticketsRun: 2,
       ticketsMerged: 2,
-      stoppedAtCeiling: 1,
+      stoppedShort: 1,
       averageMergedMicros: 2_250_000,
     });
   });
 
   it("reads a diff's totals through the same size and hash checks as retained output, and caches by hash", () => {
-    const root = mkdtempSync(join(tmpdir(), "focrux-records-"));
+    const root = mkdtempSync(join(tmpdir(), "perbo-records-"));
     temporary.push(root);
     const objects = join(root, "objects");
     mkdirSync(objects);
@@ -182,9 +186,9 @@ describe("retained records the desktop reads directly", () => {
   });
 
   it("summarises a ticket from its attempts record and the latest execution bundle", () => {
-    const root = mkdtempSync(join(tmpdir(), "focrux-records-"));
+    const root = mkdtempSync(join(tmpdir(), "perbo-records-"));
     temporary.push(root);
-    const store = join(root, ".focrux");
+    const store = join(root, ".perbo");
     mkdirSync(join(store, "state"), { recursive: true });
     mkdirSync(join(store, "bundles", "bundles"), { recursive: true });
     mkdirSync(join(store, "bundles", "objects"), { recursive: true });
@@ -265,6 +269,61 @@ describe("retained records the desktop reads directly", () => {
     expect(
       readAttempts(join(store, "state", "ticket_2.attempts.json")).error,
     ).toMatch(/could not be read/);
+  });
+});
+
+describe("the edit the chat cards", () => {
+  /** One `perbo edit` record, as the command writes it. */
+  const record = (summary: string, keys: string[]) => ({
+    version: 1,
+    ticket_key: "PRB-1",
+    plan_version: 1,
+    base: { outcome: "o", criteria: [], paths: [], prohibited: [] },
+    edits: [
+      {
+        at: "2026-09-14T06:00:00.000Z",
+        changes: ["node_2"],
+        author: "interview",
+        summary,
+        keys,
+        before: Object.fromEntries(keys.map((key) => [key, {}])),
+        after: Object.fromEntries(keys.map((key) => [key, {}])),
+        undone: false,
+        replaced: false,
+        undoes: null,
+      },
+    ],
+  });
+
+  it("clips a summary longer than a conversation line holds, rather than losing the line", () => {
+    // `perbo edit` caps no summary: `set_node_paths` writes every glob it was
+    // given, and a plan scoped to a few long ones runs past 300 characters.
+    const root = mkdtempSync(join(tmpdir(), "perbo-draft-record-"));
+    temporary.push(root);
+    const path = join(root, "PRB-1.draft.json");
+    const summary = `node_2 paths set to ${"packages/queue-deep-directory/**, ".repeat(12)}`;
+    expect(summary.length).toBeGreaterThan(300);
+    writeFileSync(path, JSON.stringify(record(summary, ["node:node_2"])));
+
+    const edit = readLatestDraftEdit(path, "interview");
+    expect(edit).not.toBeNull();
+    expect(edit!.summary.length).toBe(300);
+    expect(edit!.summary.startsWith("node_2 paths set to")).toBe(true);
+    // And what comes back is a line the conversation can hold.
+    expect(() => InterviewEditSchema.parse(edit)).not.toThrow();
+  });
+
+  it("clips the entity keys either side of an edit to what a line holds", () => {
+    const root = mkdtempSync(join(tmpdir(), "perbo-draft-keys-"));
+    temporary.push(root);
+    const path = join(root, "PRB-1.draft.json");
+    const keys = Array.from({ length: 240 }, (_, at) => `criterion:${"c".repeat(240)}${String(at)}`);
+    writeFileSync(path, JSON.stringify(record("an edit", keys)));
+
+    const edit = readLatestDraftEdit(path, "interview")!;
+    expect(edit.before).toHaveLength(200);
+    expect(edit.before.every((key) => key.length <= 200)).toBe(true);
+    expect(() => InterviewEditSchema.parse(edit)).not.toThrow();
   });
 });
 

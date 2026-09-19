@@ -11,9 +11,9 @@ import type { DeliveryArm, Ticket } from "./ticket.js";
  * commit reached it anyway, which `opened_by` alone cannot say because a hand
  * finish (day four's five of five) lands its commits on the same branch the
  * loop opened the pull request from. `commits_outside_loop`, read at
- * `focrux sync` time from `gh pr view --json commits`, is that answer per
+ * `perbo sync` time from `gh pr view --json commits`, is that answer per
  * ticket; `unattendedMergeStatus` combines the two into one verdict, and
- * `summariseUnattendedMerges` is the live share `focrux stops` prints.
+ * `summariseUnattendedMerges` is the live share `perbo stops` prints.
  */
 
 /** The trailer `sealChangeSet` and `mergeUp` write into every commit they make. */
@@ -67,7 +67,7 @@ export type UnattendedMergeStatus = (typeof UNATTENDED_MERGE_STATUSES)[number];
  * its commits turn out to say — or the loop's pull request with a commit
  * outside it. `unknown` is a ticket that has not merged, or one that has but
  * where a fact needed to answer is itself undecided: a legacy delivery record
- * with no `opened_by`, or a merge `focrux sync` has not read the commits of
+ * with no `opened_by`, or a merge `perbo sync` has not read the commits of
  * yet. `unknown` is excluded from the share's denominator the same way an
  * unanswered stop is excluded from precision — undecided is not a third kind
  * of "no".

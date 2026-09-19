@@ -1,6 +1,6 @@
 # The compiled tree the open-build tests stage, and the package the packaging
 # test packs from it: one per test process, made with `mkdtemp` under this
-# package so the entry points still resolve `@focrux/*` and read
+# package so the entry points still resolve `@perbo/*` and read
 # `../package.json`, and removed when the run ends. Never `dist/`, which is
 # shared, can be stale, and is being read by the suites running alongside
 # (apps/cli/test/open-build.ts, apps/cli/test/packaging.test.ts).

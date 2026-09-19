@@ -25,7 +25,17 @@ const NO_PROCESS_EXECUTION = {
 
 export default tseslint.config(
   {
-    ignores: ["**/dist/**", "**/node_modules/**", "**/coverage/**", "**/.turbo/**"],
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/coverage/**",
+      "**/.turbo/**",
+      // The `perbo index` fixtures are an authored repository the indexer
+      // reads, not code this repository runs: their imports resolve to
+      // packages that are not installed here, and what the parser has to get
+      // right includes shapes a linter is there to discourage.
+      "apps/cli/test/fixtures/symbol-index/**",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

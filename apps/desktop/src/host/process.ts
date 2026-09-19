@@ -183,6 +183,154 @@ export function redact(
     );
 }
 
+/**
+ * The longest one line of a long-lived child's stdout may be before it is
+ * dropped, in characters of the decoded text rather than bytes of it.
+ */
+export const LINE_CHAR_CAP = 1024 * 1024;
+/** How long a stopped child has to leave on its own before its group is signalled. */
+export const STOP_GRACE_MS = 3000;
+
+export interface LineProcessOptions {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  /** One complete line of stdout. Never a partial one, however the child chunked it. */
+  onLine: (line: string) => void;
+  /** Complete lines of stderr, redacted, as the child writes them. */
+  onStderr?: (text: string) => void;
+  /** The child is gone: its exit code, and whether a stop asked for it. */
+  onClose: (result: { code: number; stopped: boolean }) => void;
+  /** The child could not be started at all. */
+  onError?: (error: Error) => void;
+}
+export interface LineProcess {
+  /**
+   * Write one line to the child's stdin. False only where stdin is no longer
+   * open: a child that has not read what it was sent yet has still been sent
+   * it, which is what the caller is asking about.
+   */
+  write(line: string): boolean;
+  /** End stdin, then signal the process group for a child that has not left. */
+  stop(): void;
+}
+
+/**
+ * A child that stays: stdin open and written a line at a time, stdout read a
+ * line at a time. `runProcess` above is the one-shot form, which every other
+ * command is; this is what the interview needs, because the conversation is
+ * the process (D-102).
+ *
+ * The same environment and the same redaction as `runProcess`, and the same
+ * process group, so a stop reaches the provider children the CLI started. A
+ * stop ends stdin first — the interview's own end is a closed stdin — and
+ * signals only a child that has not gone by then.
+ */
+export function startLineProcess(
+  binary: string,
+  args: readonly string[],
+  options: LineProcessOptions,
+): LineProcess {
+  const child = spawn(binary, [...args], {
+    cwd: options.cwd,
+    env: options.env ?? childEnvironment(),
+    shell: false,
+    detached: process.platform !== "win32",
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stopped = false;
+  let pending = "";
+  let overflowing = false;
+  let stderr = "";
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  const kill = (signal: NodeJS.Signals): void => {
+    if (child.pid === undefined || child.exitCode !== null) return;
+    try {
+      if (process.platform !== "win32") process.kill(-child.pid, signal);
+      else child.kill(signal);
+    } catch {
+      // The group is already gone, which is the outcome the signal was for.
+    }
+  };
+  const say = (text: string): void => options.onStderr?.(redact(text, options.env));
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    pending += chunk;
+    // A line over the cap is dropped whole rather than relayed in part: the
+    // whole of it is what a parser needs, and part of one is not a smaller
+    // version of it. One that has not ended yet is dropped with its tail,
+    // which `overflowing` is what remembers.
+    const tooLong = (): void => {
+      say(`The child wrote a line longer than ${String(LINE_CHAR_CAP)} characters, which is not relayed.\n`);
+    };
+    for (;;) {
+      const at = pending.indexOf("\n");
+      if (at === -1) {
+        if (pending.length > LINE_CHAR_CAP) {
+          pending = "";
+          overflowing = true;
+          tooLong();
+        }
+        break;
+      }
+      const line = pending.slice(0, at);
+      pending = pending.slice(at + 1);
+      if (overflowing) {
+        overflowing = false;
+        continue;
+      }
+      if (line.length > LINE_CHAR_CAP) tooLong();
+      else if (line.length > 0) options.onLine(line);
+    }
+  });
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+    // Keep an unfinished line private: a credential may cross subprocess chunks.
+    const at = stderr.lastIndexOf("\n");
+    if (at === -1) {
+      // A child writing without a newline is held, not held forever. Unlike
+      // stdout, which drops an over-long line whole and says so because a
+      // parser needs all of it, what is kept here is the tail: this is prose
+      // for a person, and the end of it is the part that says why.
+      if (stderr.length > LINE_CHAR_CAP) stderr = stderr.slice(-LINE_CHAR_CAP);
+      return;
+    }
+    say(stderr.slice(0, at + 1));
+    stderr = stderr.slice(at + 1);
+  });
+  child.once("error", (error) => {
+    for (const timer of timers) clearTimeout(timer);
+    options.onError?.(new Error(`Could not start ${binary}: ${error.message}`));
+  });
+  child.once("close", (code) => {
+    for (const timer of timers) clearTimeout(timer);
+    if (stderr.length > 0) say(stderr);
+    options.onClose({ code: code ?? 130, stopped });
+  });
+  // A child that has gone leaves stdin broken; writing to it must not take the app with it.
+  child.stdin.on("error", () => undefined);
+  return {
+    write(line) {
+      if (stopped || child.stdin.destroyed || child.exitCode !== null) return false;
+      // The stream's own answer is whether its buffer is below the high-water
+      // mark, which a line long enough, or a child slow enough to read, puts it
+      // over. The line is queued either way, so it is written, and a caller
+      // told otherwise would report a turn as unheard while the child answers
+      // it.
+      child.stdin.write(line);
+      return true;
+    },
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      child.stdin.end();
+      timers.push(setTimeout(() => kill("SIGTERM"), STOP_GRACE_MS));
+      timers.push(setTimeout(() => kill("SIGKILL"), STOP_GRACE_MS + 8000));
+      for (const timer of timers) timer.unref();
+    },
+  };
+}
+
 /** Fixed binary + argv only. Cancelling the process group reaches the CLI's provider children too. */
 export function runProcess(
   binary: string,

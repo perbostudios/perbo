@@ -1,7 +1,7 @@
-import type { Scheduling, Wait } from "@focrux/contracts";
+import type { Scheduling, Wait } from "@perbo/contracts";
 
 /**
- * The one line that says why a ticket waits, in the words `focrux list`, the
+ * The one line that says why a ticket waits, in the words `perbo list`, the
  * queue's own output and the desktop all print: what it waits on, and the fact
  * that decided it — a dependency's state, or the paths the ticket ahead holds.
  */

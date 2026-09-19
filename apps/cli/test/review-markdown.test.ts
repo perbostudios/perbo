@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ReviewArtifactSchema, type ReviewArtifact } from "@focrux/contracts";
-import { assessLegibility, type ReviewModel } from "@focrux/review";
+import { ReviewArtifactSchema, type ReviewArtifact } from "@perbo/contracts";
+import { assessLegibility, type ReviewModel } from "@perbo/review";
 import { UsageError, parseReviewArgs } from "../src/args.js";
 import { renderReviewMarkdown } from "../src/markdown.js";
 import { runReviewCommand, type Streams } from "../src/run.js";
@@ -28,7 +28,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const goldenPath = join(here, "review-markdown.golden.md");
 const artifactPath = join(here, "review-markdown-artifact.json");
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-markdown-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-markdown-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const contract = {
@@ -312,7 +312,7 @@ describe("the stored verdict, rendered as markdown", () => {
       .filter((line) => line.includes(stored.model.model_id) || line.includes(stored.model.prompt_version));
     expect(provenance).toHaveLength(1);
     expect(provenance[0]).toBe(
-      "_Reviewed by `double/scripted` · prompt `reviewer_v9` · $0.043 estimated._",
+      "_Reviewed by `double/scripted` · prompt `reviewer_v10` · $0.043 estimated._",
     );
     expect(provenance[0]).toContain(stored.model.prompt_version);
     expect(provenance[0]).toContain(`$${(stored.cost_micros / 1_000_000).toFixed(3)}`);

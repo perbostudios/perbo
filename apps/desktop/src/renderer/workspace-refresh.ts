@@ -93,6 +93,12 @@ export class WorkspaceRefresh {
   detail = (repoId: string, key: string) => this.read(repoId, () => this.connection.request({ kind: "detail", repoId, key }));
   output = (repoId: string, key: string, attemptId?: string) => this.read(repoId, () => this.connection.request({ kind: "output", repoId, key, ...(attemptId ? { attemptId } : {}) }));
 
+  // An editing session changed: the picker's list of open drafts follows it, and nothing else in the snapshot does.
+  private refreshDrafts(): void {
+    void this.connection.request({ kind: "drafts" })
+      .then((drafts) => this.patch((snapshot) => ({ ...snapshot, drafts })))
+      .catch(() => undefined);
+  }
   private refreshAll(): void {
     this.invalidate("all");
     void this.client.invalidateQueries({ queryKey: ["workspace"] }, { cancelRefetch: false });
@@ -132,7 +138,20 @@ export class WorkspaceRefresh {
     const parsed = ChangeSchema.safeParse(input);
     if (!parsed.success) return;
     const change = parsed.data;
-    if (change.kind === "editing") return;
+    if (change.kind === "editing") { this.refreshDrafts(); return; }
+    // An interview's lines arrive many times a turn and nothing in a repository
+    // moves when one does, so the list of live interviews is patched where it
+    // is and no record is read. The line itself goes to the chat, which reads
+    // the change stream directly.
+    if (change.kind === "interview") {
+      this.patch((snapshot) => {
+        const live = new Set(snapshot.interviews ?? []);
+        if (change.running) live.add(change.sessionId);
+        else live.delete(change.sessionId);
+        return { ...snapshot, interviews: [...live] };
+      });
+      return;
+    }
     if (change.kind === "power") {
       if (this.power && this.power.sequence > change.sequence) return;
       this.power = change;

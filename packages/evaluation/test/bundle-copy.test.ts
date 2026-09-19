@@ -36,7 +36,7 @@ import { describeWhen } from "./corpus-present.js";
 // as `process.argv[1]`, and what module resolution reports for a file it found,
 // are both resolved, and the assertions below compare against them.
 const here = dirname(fileURLToPath(import.meta.url));
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), "focrux-bundle-copy-test-")));
+const scratch = realpathSync(mkdtempSync(join(tmpdir(), "perbo-bundle-copy-test-")));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => {
   vi.restoreAllMocks();
@@ -222,7 +222,7 @@ describe("a corpus run spawns the copy it took at run start", () => {
   const out = join(scratch, "swap-run");
   const log = join(scratch, "swap-spawns.log");
   const source = join(scratch, "reviewer-source.mjs");
-  const copy = join(out, "bin", "focrux.mjs");
+  const copy = join(out, "bin", "perbo.mjs");
   let code = -1;
 
   beforeAll(async () => {
@@ -306,12 +306,12 @@ describe("finding the bundler a run builds its copy with", () => {
     const root = join(scratch, name);
     mkdirSync(join(root, "tooling", "package"), { recursive: true });
     writeFileSync(join(root, "tooling", "package", "bundle.mjs"), "// a bundler\n");
-    const installed = join(root, "node_modules", "@focrux", "evaluation", "dist");
+    const installed = join(root, "node_modules", "@perbo", "evaluation", "dist");
     mkdirSync(installed, { recursive: true });
     if (options.nestedMarker) {
       // A workspace marker between the module and the repository root — the
       // thing the search must walk straight past.
-      writeFileSync(join(root, "node_modules", "@focrux", "pnpm-workspace.yaml"), "packages: []\n");
+      writeFileSync(join(root, "node_modules", "@perbo", "pnpm-workspace.yaml"), "packages: []\n");
     }
     if (options.esbuild) {
       const esbuild = join(root, "node_modules", "esbuild");
@@ -356,7 +356,7 @@ describe("finding the bundler a run builds its copy with", () => {
     const hostTmp = join(root, "tmp");
     mkdirSync(hostTmp, { recursive: true });
     vi.stubEnv("TMPDIR", hostTmp);
-    const inside = realpathSync(mkdtempSync(join(tmpdir(), "focrux-inside-checkout-")));
+    const inside = realpathSync(mkdtempSync(join(tmpdir(), "perbo-inside-checkout-")));
     const stranded = join(inside, "no-repository", "deep", "dist");
     mkdirSync(stranded, { recursive: true });
 
@@ -413,7 +413,7 @@ describe("a run with no bundle to copy is refused before anything is spawned", (
     // loop writes runs.json whatever the reviews did.
     expect(existsSync(join(out, "artifacts"))).toBe(false);
     expect(existsSync(join(out, "runs.json"))).toBe(false);
-    expect(existsSync(join(out, "bin", "focrux.mjs"))).toBe(false);
+    expect(existsSync(join(out, "bin", "perbo.mjs"))).toBe(false);
   }, 60_000);
 
   it("refuses a reviewer that cannot be read as a program rather than falling back to it", async () => {
@@ -448,7 +448,7 @@ describe("a run with no bundle to copy is refused before anything is spawned", (
 });
 
 /**
- * The real `focrux` binary, if this tree has built one that starts: this
+ * The real `perbo` binary, if this tree has built one that starts: this
  * package's tests can run before `apps/cli` is built, so the suite below waits
  * on the binary rather than on a flag somebody has to remember to turn off.
  */
@@ -479,7 +479,7 @@ describeWithRealCli("the copy a run spawns can start", () => {
     expect(copy.status, copy.stderr).toBe(0);
     // `--version` answers on stderr, and the answer must be a version, not two
     // empty streams agreeing with each other.
-    expect(source.stderr).toMatch(/^focrux \d+\.\d+\.\d+/);
+    expect(source.stderr).toMatch(/^perbo \d+\.\d+\.\d+/);
     expect(copy.stderr).toBe(source.stderr);
   }, 30_000);
 });

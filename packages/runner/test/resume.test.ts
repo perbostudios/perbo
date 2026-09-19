@@ -7,7 +7,7 @@ import {
   SecretIndex,
   type MaterializationManifest,
   type PlanContract,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import type { AgentResult } from "../src/adapter.js";
 import { BundleStore } from "../src/bundle.js";
 import { EgressLog } from "../src/egress.js";
@@ -235,13 +235,13 @@ async function runCutByCostCeiling(): Promise<{
   const repo = makeRepo();
   const contract = makeContract();
   contract.base.base_commit = repo.head;
-  const store = scratch("focrux-resume-store-");
+  const store = scratch("perbo-resume-store-");
 
   const first = await runTicket({
     config: makeConfig({
       repositoryRoot: repo.dir,
       store,
-      agentBinary: cuttingExecutor(scratch("focrux-resume-bin-")),
+      agentBinary: cuttingExecutor(scratch("perbo-resume-bin-")),
       costCeilingMicros: 5_000_000,
     }),
     contract,
@@ -527,7 +527,7 @@ describe("a resume refuses a recorded base too short to name one commit", () => 
 
   /** A bundle written by the class the loop records with, in a store of its own. */
   function bundleRecordingBase(base_commit: string): { root: string; bundle_id: string } {
-    const root = join(scratch("focrux-resume-base-"), "bundles");
+    const root = join(scratch("perbo-resume-base-"), "bundles");
     const { bundle } = new BundleStore({ root, retainContext: true }).write({
       kind: "execution",
       subject_id: "att_c07e0f1a2b3c4d5e",

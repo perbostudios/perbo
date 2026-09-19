@@ -17,7 +17,7 @@ import {
  * includes runs it did not start.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-serve-lock-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-serve-lock-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 /** A pid no process on this host holds: above the kernel's range on every platform this runs on. */

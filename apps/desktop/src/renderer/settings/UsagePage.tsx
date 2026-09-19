@@ -1,4 +1,4 @@
-import { Button, Notice } from "@focrux/ui";
+import { Button, Notice } from "@perbo/ui";
 import { InkIcon } from "../InkIcon.js";
 import { NumberPop, PageHeader, SectionLabel } from "../Screen.js";
 import { errorMessage, useUsage } from "../data.js";
@@ -44,8 +44,8 @@ export function LedgerFacts({ ledger }: { ledger: UsageLedger }) {
         <dt>Tickets run</dt>
         <dd>
           <NumberPop value={ledger.ticketsRun} />
-          {ledger.stoppedAtCeiling > 0 && (
-            <small> · {ledger.stoppedAtCeiling} stopped at a ceiling</small>
+          {ledger.stoppedShort > 0 && (
+            <small> · {ledger.stoppedShort} stopped short</small>
           )}
         </dd>
       </div>
@@ -109,7 +109,7 @@ export function UsagePage({ workspace, navigate }: PageProps) {
             <div className="column-heading">
               <h3>Plans in use</h3>
               <span className="small muted">
-                every number here comes from the provider’s own reply — focrux does not meter you
+                every number here comes from the provider’s own reply — perbo does not meter you
               </span>
             </div>
             {report.providers.map((provider) => (

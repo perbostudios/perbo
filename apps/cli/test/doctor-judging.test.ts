@@ -1,15 +1,15 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DiagnosticResultSchema, type DiagnosticResult } from "@focrux/contracts";
-import type { PreflightResult } from "@focrux/runner";
+import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts";
+import type { PreflightResult } from "@perbo/runner";
 import { afterEach, describe, expect, it } from "vitest";
 import { runDoctorCommand, type DoctorOptions } from "../src/execute.js";
 import { readJudgingPaths } from "../src/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * The JUDGING block: what `focrux doctor` says judges an attempt in this store.
+ * The JUDGING block: what `perbo doctor` says judges an attempt in this store.
  *
  * A scope that overlaps one of these paths is refused at approval, and before
  * this block the only way to learn the list was to write a scope and be
@@ -71,12 +71,12 @@ afterEach(() => {
 });
 
 function repository(name: string, config: Record<string, unknown> | null): string {
-  const dir = mkdtempSync(join(tmpdir(), `focrux-doctor-judging-${name}-`));
+  const dir = mkdtempSync(join(tmpdir(), `perbo-doctor-judging-${name}-`));
   temporary.push(dir);
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture" }));
   if (config !== null) {
-    mkdirSync(join(dir, ".focrux"), { recursive: true });
-    writeFileSync(join(dir, ".focrux", "config.json"), `${JSON.stringify(config, null, 2)}\n`);
+    mkdirSync(join(dir, ".perbo"), { recursive: true });
+    writeFileSync(join(dir, ".perbo", "config.json"), `${JSON.stringify(config, null, 2)}\n`);
   }
   return dir;
 }
@@ -124,7 +124,7 @@ function judgingJson(text: string): { entries: JudgingEntry[]; pairs: Array<{ la
   };
 }
 
-describe("focrux doctor, on a store that declares judging paths", () => {
+describe("perbo doctor, on a store that declares judging paths", () => {
   const config = {
     protected_paths: ["packages/policy/**"],
     protected_tests: ["packages/policy/test/rules.test.ts"],
@@ -136,13 +136,13 @@ describe("focrux doctor, on a store that declares judging paths", () => {
 
     // The three the reader used at approval, and no others: the block is the
     // list a scope will actually be refused against.
-    expect(readJudgingPaths(join(repo, ".focrux"))).toEqual([
-      { path: ".focrux/**", source: "store" },
+    expect(readJudgingPaths(join(repo, ".perbo"))).toEqual([
+      { path: ".perbo/**", source: "store" },
       { path: "packages/policy/**", source: "protected_paths" },
       { path: "packages/policy/test/rules.test.ts", source: "protected_tests" },
     ]);
     expect(judgingBlock(text)).toEqual([
-      { label: ".focrux/**", source: "store" },
+      { label: ".perbo/**", source: "store" },
       { label: "packages/policy/**", source: "protected_paths" },
       { label: "packages/policy/test/rules.test.ts", source: "protected_tests" },
     ]);
@@ -157,17 +157,17 @@ describe("focrux doctor, on a store that declares judging paths", () => {
     const { entries, pairs } = judgingJson(machine.text);
     expect(pairs).toEqual(judgingBlock(human.text));
     expect(entries).toEqual([
-      { path: ".focrux/**", source: "store", set: true },
+      { path: ".perbo/**", source: "store", set: true },
       { path: "packages/policy/**", source: "protected_paths", set: true },
       { path: "packages/policy/test/rules.test.ts", source: "protected_tests", set: true },
     ]);
     expect(
       entries.flatMap((entry) => (entry.path === null ? [] : [{ path: entry.path, source: entry.source }])),
-    ).toEqual(readJudgingPaths(join(repo, ".focrux")));
+    ).toEqual(readJudgingPaths(join(repo, ".perbo")));
   });
 }, SPAWN_TEST_TIMEOUT_MS);
 
-describe("focrux doctor, on a store whose checks pin their definitions", () => {
+describe("perbo doctor, on a store whose checks pin their definitions", () => {
   const check = (id: string, definition: string | null) => ({
     check_id: id,
     name: id.replace("check_", ""),
@@ -194,8 +194,8 @@ describe("focrux doctor, on a store whose checks pin their definitions", () => {
 
     // What approval refuses against: the pinned definitions alongside the
     // paths this store already protected, each still naming its owner.
-    expect(readJudgingPaths(join(repo, ".focrux"))).toEqual([
-      { path: ".focrux/**", source: "store" },
+    expect(readJudgingPaths(join(repo, ".perbo"))).toEqual([
+      { path: ".perbo/**", source: "store" },
       { path: "packages/policy/**", source: "protected_paths" },
       { path: "packages/policy/test/rules.test.ts", source: "protected_tests" },
       // One file two checks are run from is one entry naming both; a check
@@ -204,7 +204,7 @@ describe("focrux doctor, on a store whose checks pin their definitions", () => {
       { path: "scripts/validate_docs.py", source: "checks[check_docs].definition_path" },
     ]);
     expect(judgingBlock(text)).toEqual([
-      { label: ".focrux/**", source: "store" },
+      { label: ".perbo/**", source: "store" },
       { label: "packages/policy/**", source: "protected_paths" },
       { label: "packages/policy/test/rules.test.ts", source: "protected_tests" },
       { label: "turbo.json", source: "checks[check_typecheck,check_unit].definition_path" },
@@ -218,7 +218,7 @@ describe("focrux doctor, on a store whose checks pin their definitions", () => {
     const { entries } = judgingJson((await doctor(repo, true)).text);
 
     expect(entries).toEqual([
-      { path: ".focrux/**", source: "store", set: true },
+      { path: ".perbo/**", source: "store", set: true },
       { path: "packages/policy/**", source: "protected_paths", set: true },
       { path: "packages/policy/test/rules.test.ts", source: "protected_tests", set: true },
       { path: "turbo.json", source: "checks[check_typecheck,check_unit].definition_path", set: true },
@@ -240,7 +240,7 @@ describe("focrux doctor, on a store whose checks pin their definitions", () => {
   });
 }, SPAWN_TEST_TIMEOUT_MS);
 
-describe("focrux doctor, on a store with no config.json", () => {
+describe("perbo doctor, on a store with no config.json", () => {
   it("reports the store alone and says both keys are unset, without erroring", async () => {
     const repo = repository("bare", null);
     const human = await doctor(repo, false);
@@ -248,19 +248,19 @@ describe("focrux doctor, on a store with no config.json", () => {
 
     expect(human.code).toBe(0);
     expect(machine.code).toBe(0);
-    expect(readJudgingPaths(join(repo, ".focrux"))).toEqual([{ path: ".focrux/**", source: "store" }]);
+    expect(readJudgingPaths(join(repo, ".perbo"))).toEqual([{ path: ".perbo/**", source: "store" }]);
 
-    // `.focrux/**` is the only path, and the two keys are present in the block
+    // `.perbo/**` is the only path, and the two keys are present in the block
     // as unset rather than absent from it.
     expect(judgingBlock(human.text)).toEqual([
-      { label: ".focrux/**", source: "store" },
+      { label: ".perbo/**", source: "store" },
       { label: "(unset)", source: "protected_paths" },
       { label: "(unset)", source: "protected_tests" },
     ]);
     const { entries, pairs } = judgingJson(machine.text);
     expect(pairs).toEqual(judgingBlock(human.text));
     expect(entries).toEqual([
-      { path: ".focrux/**", source: "store", set: true },
+      { path: ".perbo/**", source: "store", set: true },
       { path: null, source: "protected_paths", set: false },
       { path: null, source: "protected_tests", set: false },
     ]);
@@ -273,12 +273,12 @@ describe("focrux doctor, on a store with no config.json", () => {
     // An empty list is a decision; a missing key is not. Reporting both as
     // "unset" would tell a person to go and set what they already set.
     expect(judgingJson(text).entries).toEqual([
-      { path: ".focrux/**", source: "store", set: true },
+      { path: ".perbo/**", source: "store", set: true },
       { path: null, source: "protected_paths", set: true },
       { path: null, source: "protected_tests", set: false },
     ]);
     expect(judgingBlock((await doctor(repo, false)).text)).toEqual([
-      { label: ".focrux/**", source: "store" },
+      { label: ".perbo/**", source: "store" },
       { label: "(none)", source: "protected_paths" },
       { label: "(unset)", source: "protected_tests" },
     ]);

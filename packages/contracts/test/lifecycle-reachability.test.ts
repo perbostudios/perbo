@@ -81,8 +81,8 @@ describe("the ticket lifecycle graph matches what it claims to reach", () => {
 
   it("leaves the unreachable states genuinely unreachable", () => {
     // The enum carries states for milestones whose mechanism does not exist —
-    // deployed, observing, rolled_back, plan_invalid. If one becomes reachable
-    // without being declared, that is a lifecycle nobody designed.
+    // deployed, observing, rolled_back. If one becomes reachable without being
+    // declared, that is a lifecycle nobody designed.
     const reached = reachableFrom("plan_review");
     const notYet = TICKET_STATES.filter(
       (state) => !(TICKET_STATES_REACHABLE as readonly string[]).includes(state),

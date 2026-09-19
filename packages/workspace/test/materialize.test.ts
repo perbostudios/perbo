@@ -9,8 +9,8 @@ import {
   MaterializationManifestSchema,
   SecretIndex,
   type InstallStrategy,
-} from "@focrux/contracts";
-import { MaterializationMeasurementSchema } from "@focrux/contracts";
+} from "@perbo/contracts";
+import { MaterializationMeasurementSchema } from "@perbo/contracts";
 import {
   assertAttemptFootprint,
   materialize,
@@ -21,7 +21,7 @@ import { WorkspaceError, provision } from "../src/worktree.js";
 import { diagnose, validateManifest } from "../src/diagnostic.js";
 import { git, makeRepo } from "./support.js";
 
-const scratch = () => mkdtempSync(join(tmpdir(), "focrux-mat-"));
+const scratch = () => mkdtempSync(join(tmpdir(), "perbo-mat-"));
 
 describe("materializeEntry", () => {
   it("copies a secret and indexes it by content, not by name", () => {
@@ -114,8 +114,8 @@ describe("materializationEnv", () => {
     expect(env.NPM_TOKEN).toBeUndefined();
     expect(env.AWS_ACCESS_KEY_ID).toBeUndefined();
     expect(env.DATABASE_URL).toBeUndefined();
-    expect(env.FOCRUX_PORT_START).toBe("41000");
-    expect(env.FOCRUX_DB_SCHEMA).toBe("ayo_att_1");
+    expect(env.PERBO_PORT_START).toBe("41000");
+    expect(env.PERBO_DB_SCHEMA).toBe("ayo_att_1");
   });
 });
 
@@ -144,27 +144,29 @@ describe("diagnose", () => {
     expect(paths).not.toContain("node_modules");
   });
 
-  it("refuses a repository with no verification command, by name and before an attempt", async () => {
+  it("names a repository with no verification command, and verifies it with Git", async () => {
     const repo = makeRepo();
     writeFileSync(join(repo.dir, "package.json"), JSON.stringify({ name: "x" }));
     const result = await diagnose({ checkout: repo.dir, repository_id: "repo_fixture" });
-    expect(result.materializable).toBe(false);
-    expect(result.findings.map((f) => f.reason)).toContain("no_verification_command");
-    expect(result.proposed).toBeNull();
+    expect(result.materializable).toBe(true);
+    const finding = result.findings.find((f) => f.reason === "no_verification_command");
+    expect(finding?.severity).toBe("advisory");
+    expect(result.proposed?.verify.command).toEqual(["git", "status", "--porcelain"]);
   });
 
   it("names an unsupported package manager rather than trying it", async () => {
-    const repo = makeRepo();
-    writeFileSync(join(repo.dir, "uv.lock"), "version = 1\n");
-    const bare = mkdtempSync(join(tmpdir(), "focrux-uv-"));
+    const bare = mkdtempSync(join(tmpdir(), "perbo-uv-"));
     writeFileSync(join(bare, "uv.lock"), "version = 1\n");
     writeFileSync(
       join(bare, "package.json"),
       JSON.stringify({ name: "x", scripts: { test: "true" } }),
     );
     const result = await diagnose({ checkout: bare, repository_id: "repo_py" });
-    expect(result.findings.map((f) => f.reason)).toContain("unsupported_package_manager");
-    expect(result.materializable).toBe(false);
+    const finding = result.findings.find((f) => f.reason === "unsupported_package_manager");
+    expect(finding?.severity).toBe("advisory");
+    // Not tried: nothing is installed, and the scripts are not read.
+    expect(result.proposed?.install.kind).toBe("none");
+    expect(result.proposed?.verify.command).toEqual(["git", "status", "--porcelain"]);
   });
 
   it("reports a required entry whose source has since disappeared", async () => {
@@ -212,7 +214,7 @@ describe("materialize", () => {
     const workspace = await provision({
       repository_root: repo.dir,
       repository_id: "repo_fixture",
-      ticket_key: "FCX-1",
+      ticket_key: "PRB-1",
       ticket_id: "ticket_1",
       outcome: "materialize",
       base_commit: repo.head,
@@ -323,7 +325,7 @@ const RUNS: InstallStrategy = {
  * `package.json` a command run in the worktree reads is visible in its answer.
  */
 function memberRepository(): { workspace: string; member: string; head: string } {
-  const workspace = mkdtempSync(join(tmpdir(), "focrux-monorepo-"));
+  const workspace = mkdtempSync(join(tmpdir(), "perbo-monorepo-"));
   writeFileSync(join(workspace, "pnpm-workspace.yaml"), "packages:\n  - 'services/*'\n");
   writeFileSync(join(workspace, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
   writeFileSync(
@@ -365,7 +367,7 @@ function monorepoRepository(args: { ignoreMember?: boolean } = {}): {
   member: string;
   head: string;
 } {
-  const root = mkdtempSync(join(tmpdir(), "focrux-monorepo-one-"));
+  const root = mkdtempSync(join(tmpdir(), "perbo-monorepo-one-"));
   git(root, "init", "-q", "-b", "main");
   git(root, "config", "user.name", "test");
   git(root, "config", "user.email", "test@example.com");
@@ -399,7 +401,7 @@ async function worktreeOf(repository: string, head: string) {
   return provision({
     repository_root: repository,
     repository_id: "repo_fixture",
-    ticket_key: "FCX-1",
+    ticket_key: "PRB-1",
     ticket_id: `ticket_cwd_${attempt}`,
     outcome: `install directory ${attempt}`,
     base_commit: head,
@@ -491,7 +493,7 @@ describe("the directory the install runs in", () => {
     const { member, head } = memberRepository();
     const worktree = await worktreeOf(member, head);
 
-    // A command a person could have written into `.focrux/config.json` for this
+    // A command a person could have written into `.perbo/config.json` for this
     // package: it asks nothing of a workspace root, so the worktree is where it
     // runs and there is nothing to refuse.
     const result = await materialize({

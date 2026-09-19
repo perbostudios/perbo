@@ -4,16 +4,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { EXIT_CODES } from "@focrux/contracts";
-import type { ReviewModel } from "@focrux/review";
-import type { PreflightRequest, PreflightResult } from "@focrux/runner";
+import { EXIT_CODES } from "@perbo/contracts";
+import type { ReviewModel } from "@perbo/review";
+import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { parseReviewArgs, UsageError } from "../src/args.js";
 import { normalisePullRequestReference } from "../src/pull-request.js";
 import { runReviewCommand, type Streams } from "../src/run.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * `focrux review` with no admitted ticket (SCP-179).
+ * `perbo review` with no admitted ticket (SCP-179).
  *
  * The reviewer model is a double, because paying a provider is not what these
  * tests are about. Everything else is the real thing: the real flag parser, the
@@ -25,16 +25,16 @@ import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
  *
  * Fail-first, measured rather than argued (2026-09-04): `apps/cli/src` and
  * `packages/contracts/src` were put back to the base commit 846e501 with these
- * test files left in place, `@focrux/contracts` rebuilt, and both new files
+ * test files left in place, `@perbo/contracts` rebuilt, and both new files
  * run. Neither collected a single test — `../src/pull-request.js` does not
  * exist there, `parseReviewArgs` has no `--pr`, `--head`/`--base` or
  * `--outcome`, `runReviewCommand` has no ticketless path, and
- * `@focrux/contracts` exports no contract source or routing. Every test below
+ * `@perbo/contracts` exports no contract source or routing. Every test below
  * fails at the base commit and passes here.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
-const scratch = mkdtempSync(join(tmpdir(), "focrux-ticketless-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-ticketless-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 afterEach(() => {
@@ -232,10 +232,10 @@ async function review(
   return { out, err, code, system: seen.system, prompt: seen.prompt };
 }
 
-/** The one bundle in `<repo>/.focrux/reviews`, parsed. */
+/** The one bundle in `<repo>/.perbo/reviews`, parsed. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- read back as JSON, as a person reads it
 function storedBundle(repo: string): Record<string, any> {
-  const dir = join(repo, ".focrux", "reviews");
+  const dir = join(repo, ".perbo", "reviews");
   const files = readdirSync(dir).filter((name) => name.endsWith(".review.json"));
   expect(files).toHaveLength(1);
   return JSON.parse(readFileSync(join(dir, files[0]!), "utf8"));
@@ -282,7 +282,7 @@ describe("ac_1: a review with no admitted ticket, in both invocation forms", () 
 
     // Nothing has ever been admitted here: there is no store to look a ticket
     // up in, and the review must not need one.
-    expect(existsSync(join(repo, ".focrux"))).toBe(false);
+    expect(existsSync(join(repo, ".perbo"))).toBe(false);
 
     const ran = await review(["--pr", "octo/search#41", "--repo", repo], { cwd: repo, gh: binary });
 
@@ -303,7 +303,7 @@ describe("ac_1: a review with no admitted ticket, in both invocation forms", () 
     expect(bundle.artifact.decision).toBe("approve");
     expect(bundle.routing.decision).toBe("pass");
     // No ticket store was created, only the review store.
-    expect(readdirSync(join(repo, ".focrux"))).toEqual(["reviews"]);
+    expect(readdirSync(join(repo, ".perbo"))).toEqual(["reviews"]);
     // SCP-200 puts the credential question in front of the two reads, and
     // those three are the whole of what this command asks `gh` for. SCP-211
     // adds two fields to the view and no call: the head of this pull request
@@ -595,7 +595,7 @@ describe("ac_3: the record covers the verdicts, and only the verdicts", () => {
     expect(ran.err).toContain("cannot start on this machine");
     // No verdict, so no review: the store is not created, and no half-written
     // record claims one happened.
-    expect(existsSync(join(repo, ".focrux"))).toBe(false);
+    expect(existsSync(join(repo, ".perbo"))).toBe(false);
   });
 }, SPAWN_TEST_TIMEOUT_MS);
 
@@ -608,7 +608,7 @@ describe("ac_3: the record covers the verdicts, and only the verdicts", () => {
  * shipped `readPullRequest`, and reviews the diff GitHub serves for it. It
  * checks the pin against GitHub — the commit the pull request merged as, and
  * its title — and then that the review pinned what GitHub answered and showed
- * the reviewer svelte's own patch. It is gated on `FOCRUX_LIVE_GITHUB_TESTS=1`
+ * the reviewer svelte's own patch. It is gated on `PERBO_LIVE_GITHUB_TESTS=1`
  * rather than on whether `gh` happens to work: a test that reaches the network
  * whenever it can is one that reaches the network on every unrelated run, and
  * one that skips itself when a credential is missing is a test that passes for
@@ -664,11 +664,11 @@ describe("ac_4: a real public pull request, pinned by commit", () => {
     mergeCommit: { oid: string } | null;
   }
 
-  const liveRequested = process.env.FOCRUX_LIVE_GITHUB_TESTS === "1";
+  const liveRequested = process.env.PERBO_LIVE_GITHUB_TESTS === "1";
 
   it.skipIf(!liveRequested)(
     `reviews ${pinned.reference} as GitHub serves it, and the pin is that pull request` +
-      (liveRequested ? "" : " — SKIPPED: set FOCRUX_LIVE_GITHUB_TESTS=1 to read GitHub here"),
+      (liveRequested ? "" : " — SKIPPED: set PERBO_LIVE_GITHUB_TESTS=1 to read GitHub here"),
     async () => {
       const repo = emptyRepo("svelte-live");
 
@@ -826,19 +826,19 @@ describe("ac_4: a real public pull request, pinned by commit", () => {
 
 /**
  * The ticketless review reads a pull request body, external text like an issue
- * body, through `@focrux/contracts` and never through the drafting package: a
+ * body, through `@perbo/contracts` and never through the drafting package: a
  * review command does not depend on the package that proposes contracts. The
  * assertion is here because this is the file that must not reach for it.
  */
 describe("what the ticketless review may depend on", () => {
   it("imports no module from the drafting package", () => {
     const source = readFileSync(join(here, "..", "src", "ticketless.ts"), "utf8");
-    expect(source).not.toContain("@focrux/planning");
+    expect(source).not.toContain("@perbo/planning");
   });
 });
 
 /**
- * SCP-200 criterion 1, for `focrux review --pr`: the credential path is decided
+ * SCP-200 criterion 1, for `perbo review --pr`: the credential path is decided
  * before the pull request is read, and the bundle says which one served.
  *
  * The whole network surface of this command is that read, so a machine with no
@@ -901,7 +901,7 @@ describe("the credential the pull request was read through", () => {
     ).rejects.toThrow(/gh is not logged in/);
 
     expect(ghInvocations(log)).toEqual(["auth status"]);
-    expect(existsSync(join(repo, ".focrux", "reviews"))).toBe(false);
+    expect(existsSync(join(repo, ".perbo", "reviews"))).toBe(false);
   });
 
 }, SPAWN_TEST_TIMEOUT_MS);

@@ -9,7 +9,7 @@ Several tickets are in flight at once. Their branches fall behind the base, and 
 
 ## Decision
 
-One deterministic process, `focrux serve`, runs over the ticket store. The loop's own merge step, plus a poll that fetches the base, is the event it reacts to; the runner itself fetches nothing. Re-levelling a branch and reconciling a conflict are rounds of the same loop. There is no orchestrator agent, no webhook and no scheduled agent.
+One deterministic process, `perbo serve`, runs over the ticket store. The loop's own merge step, plus a poll that fetches the base, is the event it reacts to; the runner itself fetches nothing. Re-levelling a branch and reconciling a conflict are rounds of the same loop. There is no orchestrator agent, no webhook and no scheduled agent.
 
 ## Consequences
 

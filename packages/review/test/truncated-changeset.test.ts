@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { ChangeSetSchema, type PlanContract } from "@focrux/contracts";
+import { ChangeSetSchema, type PlanContract } from "@perbo/contracts";
 import { runReview } from "../src/review.js";
 import { coverageEntry, scriptedModel, submits } from "./double.js";
 
@@ -13,7 +13,7 @@ import { coverageEntry, scriptedModel, submits } from "./double.js";
  * file list the seal recorded from `git diff --name-status`.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-truncated-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-truncated-test-"));
 mkdirSync(join(scratch, "a/src"), { recursive: true });
 writeFileSync(join(scratch, "a/src/a.ts"), "export const a = 1;\n");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));

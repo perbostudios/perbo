@@ -12,13 +12,13 @@ import {
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { SecretIndex, type RunBundle, type RunBundleKind } from "@focrux/contracts";
-import { BundleStore } from "@focrux/runner";
+import { SecretIndex, type RunBundle, type RunBundleKind } from "@perbo/contracts";
+import { BundleStore } from "@perbo/runner";
 import { runInspectCommand } from "../src/inspect.js";
 import { makeAttempt, makeReview, makeTicket } from "./attempt-fixture.js";
 
 /**
- * `focrux inspect <ticket> --verify <attempt>` (AYO-69).
+ * `perbo inspect <ticket> --verify <attempt>` (AYO-69).
  *
  * A run bundle is content-addressed and nothing ever recomputed one of its
  * hashes, so the record was trusted exactly as far as the file system was.
@@ -28,7 +28,7 @@ import { makeAttempt, makeReview, makeTicket } from "./attempt-fixture.js";
  * all: that running it leaves the record exactly as it found it.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-verify-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-verify-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const TICKET_ID = "ticket_verify00001";
@@ -75,7 +75,7 @@ interface Fixture {
  */
 function storeWithBundle(name: string): Fixture {
   const repo = join(scratch, name);
-  const store = join(repo, ".focrux");
+  const store = join(repo, ".perbo");
   mkdirSync(join(store, "tickets"), { recursive: true });
   mkdirSync(join(store, "state"), { recursive: true });
   writeFileSync(
@@ -189,7 +189,7 @@ function snapshot(directory: string): Map<string, string> {
   return files;
 }
 
-/** `focrux inspect <key> --verify <attempt>`, as the entry point runs it. */
+/** `perbo inspect <key> --verify <attempt>`, as the entry point runs it. */
 async function verify(
   fixture: Fixture,
   argv: string[] = [],
@@ -203,7 +203,7 @@ async function verify(
   return { code, out: out.join(""), err: err.join("") };
 }
 
-describe("focrux inspect --verify", () => {
+describe("perbo inspect --verify", () => {
   it("recomputes every object an intact bundle names, and says how many", async () => {
     const fixture = storeWithBundle("verify-intact");
     const { code, out } = await verify(fixture);
@@ -304,7 +304,7 @@ describe("focrux inspect --verify", () => {
     // A `forensic` bundle names its artifacts and records that it does not hold
     // them. That is the bundle being honest, not the store being wrong.
     const repo = join(scratch, "verify-not-retained");
-    const store = join(repo, ".focrux");
+    const store = join(repo, ".perbo");
     mkdirSync(join(store, "tickets"), { recursive: true });
     mkdirSync(join(store, "state"), { recursive: true });
     writeFileSync(
@@ -390,7 +390,7 @@ describe("focrux inspect --verify", () => {
     // nothing to stand behind, so it is not a pass; and asking must not create
     // the bundle store it was asked about.
     const repo = join(scratch, "verify-no-bundles");
-    const store = join(repo, ".focrux");
+    const store = join(repo, ".perbo");
     mkdirSync(join(store, "tickets"), { recursive: true });
     mkdirSync(join(store, "state"), { recursive: true });
     writeFileSync(

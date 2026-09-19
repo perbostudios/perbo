@@ -105,4 +105,4 @@ covers the material you use — the format (Apache-2.0) or the fixture content (
 Maintained by [Lian Matsuo](https://github.com/lianmatsuo). To grade a reviewer, point it at a
 fixture's `before/` and `after/` trees and its `contract.json`, and compare what it reports with
 `fixture.json`'s `expected_detection`. The reviewer these fixtures were built for, and the harness
-that scores it against them, are open source in [Focrux](https://github.com/lianmatsuo/focrux).
+that scores it against them, are open source in [Perbo](https://github.com/perbostudios/perbo).

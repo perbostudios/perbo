@@ -13,7 +13,7 @@ import {
 } from "../src/index.js";
 
 /**
- * The arithmetic behind `focrux escapes` (SCP-145): which later commit counts,
+ * The arithmetic behind `perbo escapes` (SCP-145): which later commit counts,
  * which window it counts in, and the rate the two columns produce — never one
  * rate over both.
  */

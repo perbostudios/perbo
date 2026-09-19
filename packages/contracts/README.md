@@ -1,4 +1,4 @@
-# `@focrux/contracts`
+# `@perbo/contracts`
 
 Versioned schemas for every record the loop writes and reads.
 
@@ -8,14 +8,15 @@ Implemented as Zod schemas with inferred types — **files, not tables**:
 |---|---|
 | `PlanContract` | The immutable contract, as a discriminated union over `level`. The P1 body is exactly `outcome`, `acceptance_criteria`, `scope`, `base`; every object is strict, so `steps`, `alternatives`, `assumptions` and `problem_statement` are unrepresentable rather than discouraged. P2 and P3 reuse the P1 body verbatim and add fields. |
 | `ChangeSet` | Files parsed from a unified diff, identified by `(base_commit, head_commit)`. `head_commit_source` is `recorded` when a real commit backs the head and `diff_digest` — the sha256 of the diff bytes — when it does not, so the supersession property still holds, because different bytes give a different pair. |
-| `CheckResult` | A deterministic check. `skipped` is a first-class status and never counts as evidence: a check that skips itself when a dependency is missing reads green and means nothing. |
+| `CheckResult` | A deterministic check. `skipped` is a first-class status and never counts as evidence: a check that skips itself when a dependency is missing reads green and means nothing. `node` names the execution-graph node the check was run for, with the paths the run was narrowed to and why it was not where it was not ([D-107](../../docs/11-open-decisions.md)); a whole-change result carries none, and `wholeChangeChecks` is what everything that judges the change reads. |
 | `ReviewArtifact` | The immutable verdict, pinned to a plan version and a `(base, head)` pair, carrying coverage with verification strength, findings with stable keys, the trust tier of every context item, and every deterministic override. |
-| `ExecutionAttempt` | One run pinned to a plan version and a base commit: the invocation that ran (with its shape hash and what it was asserted to have loaded), the permission profile, every command allowed *and denied*, every outbound host, the ceilings it consumed and the reason it stopped. Remediation rounds append attempts; nothing is rewritten. |
+| `ExecutionAttempt` | One run pinned to a plan version and a base commit: the invocation that ran (with its shape hash and what it was asserted to have loaded), the permission profile, every command allowed *and denied*, every outbound host, what it consumed of each limited resource, and the reason it stopped. Remediation rounds append attempts; nothing is rewritten. |
 | `RunBundle` | The immutable record of one model- or tool-mediated run, with a **computed** `replayability` tier (ADR-0026). A bundle that no longer has the bytes the model saw says `forensic` rather than implying a replay it cannot support. |
 | `MaterializationManifest` | What a worktree needs that Git does not carry (ADR-0025), plus the install strategy, the lifecycle-script policy and the per-attempt port range and database schema. |
-| `PermissionProfile` | The A2b profile the runner hands to an agent, and the eleven prohibited actions. Every field is something the runner does, not something a prompt asks for. |
+| `PermissionProfile` | The A2b profile the runner hands to an agent, and the thirteen prohibited actions. Every field is something the runner does, not something a prompt asks for. |
 | `LimitsTable` | One `assertWithinLimits(table, resource, n)` gating every countable resource, plus three kill switches. |
 | `SecretIndex` | Materialized local secrets, indexed by the sha256 of the file **and of each value inside it**, so exclusion is by content rather than by filename (D-012). It never retains plaintext in anything it serialises. |
+| `SymbolIndex` | The exported symbols and import graph of a TypeScript and JavaScript repository, stamped with the commit it was read at and whether the working tree was clean (D-015). Labels only — names, kinds, lines and paths, never a file's contents. A repository with no tracked TypeScript or JavaScript parses as `UnsupportedRepository` instead, because an index holding no files and a repository this cannot describe are different facts. |
 
 `risk.ts` holds both halves of the twice-computed risk: `derivePlannedRisk` from declared scope,
 repository sensitivity and action class; `deriveActualRisk` from the sealed diff. `raisePlanLevel`

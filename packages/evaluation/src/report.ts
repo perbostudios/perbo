@@ -308,7 +308,7 @@ export function renderReport(
   if (summary.excluded_unprepared.length > 0) {
     lines.push(
       `- **${summary.excluded_unprepared.length} fixture(s) excluded** — they pin a repository that ` +
-        `was not prepared: ${summary.excluded_unprepared.join(", ")}. Run \`focrux-corpus prepare\`.`,
+        `was not prepared: ${summary.excluded_unprepared.join(", ")}. Run \`perbo-corpus prepare\`.`,
     );
   }
   lines.push(`- reviews that did not complete: ${proportion(summary.did_not_complete)}`);

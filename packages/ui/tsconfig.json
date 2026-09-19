@@ -1,1 +1,1 @@
-{ "extends": "@focrux/tsconfig/base.json", "compilerOptions": { "jsx": "react-jsx", "lib": ["ES2023", "DOM"], "outDir": "dist", "rootDir": "src" }, "include": ["src"] }
+{ "extends": "@perbo/tsconfig/base.json", "compilerOptions": { "jsx": "react-jsx", "lib": ["ES2023", "DOM"], "outDir": "dist", "rootDir": "src" }, "include": ["src"] }

@@ -24,10 +24,10 @@ const git = (cwd, ...args) =>
     maxBuffer: 64 * 1024 * 1024,
     env: {
       ...process.env,
-      GIT_AUTHOR_NAME: "focrux-corpus",
-      GIT_AUTHOR_EMAIL: "corpus@focrux.invalid",
-      GIT_COMMITTER_NAME: "focrux-corpus",
-      GIT_COMMITTER_EMAIL: "corpus@focrux.invalid",
+      GIT_AUTHOR_NAME: "perbo-corpus",
+      GIT_AUTHOR_EMAIL: "corpus@perbo.invalid",
+      GIT_COMMITTER_NAME: "perbo-corpus",
+      GIT_COMMITTER_EMAIL: "corpus@perbo.invalid",
       GIT_CONFIG_GLOBAL: "/dev/null",
       GIT_CONFIG_SYSTEM: "/dev/null",
     },
@@ -55,7 +55,7 @@ for (const id of readdirSync(fixturesDir).sort()) {
     continue;
   }
 
-  const scratch = mkdtempSync(join(tmpdir(), "focrux-corpus-"));
+  const scratch = mkdtempSync(join(tmpdir(), "perbo-corpus-"));
   try {
     git(scratch, "init", "--quiet", "--initial-branch=main");
     git(scratch, "config", "core.autocrlf", "false");

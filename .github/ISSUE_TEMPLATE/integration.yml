@@ -19,7 +19,7 @@ body:
     attributes:
       label: Source authority per field group
       description: >
-        Which fields does the provider own, which does Focrux own, and which are read-only?
+        Which fields does the provider own, which does Perbo own, and which are read-only?
         No generic last-write-wins is permitted (ADR-0027). State the conflict policy and
         the freshness objective.
     validations:

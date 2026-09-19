@@ -22,7 +22,7 @@ import {
   type Ticket,
   type UnattendedMergesSummary,
   type WilsonInterval,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { UsageError } from "./args.js";
 import type { Streams } from "./admit.js";
 import {
@@ -38,14 +38,14 @@ import { listChanges, storeDir, type SyncedChange } from "./tickets.js";
 import { readLocalVerdictsOrWarn, verdictsPath } from "./verdicts.js";
 
 /**
- * `focrux stops` — precision of stopping, measured live from pull requests
+ * `perbo stops` — precision of stopping, measured live from pull requests
  * (D-060; founder decision 2026-09-02).
  *
- * Over every `<store>/state/*.stops.json` that `focrux sync` wrote: of the
+ * Over every `<store>/state/*.stops.json` that `perbo sync` wrote: of the
  * changes with at least one answer, the share a person endorsed, with a 95%
  * Wilson interval — and always beside the companion D-060 makes non-optional,
  * the share of changes that reached a person — one with a pull request, or one
- * answered here with `focrux verdict` — on which they were shown anything at
+ * answered here with `perbo verdict` — on which they were shown anything at
  * all. Precision improves trivially when that share falls, and the pair is
  * what makes that visible. `--since` splits the changes at a date and
  * says so when precision rose while the companion fell; `--by-week` cuts the
@@ -167,7 +167,7 @@ export function readStopVerdictFiles(dir: string, streams: Streams): StopVerdict
  * Every stops record in the store, with the decisions taken at the command
  * line folded in (SCP-181).
  *
- * A stop answered by `focrux verdict` and a stop answered by ticking a box on
+ * A stop answered by `perbo verdict` and a stop answered by ticking a box on
  * the pull request are the same person answering the same question about the
  * same finding key. Every reader of the number goes through here, so precision
  * of stopping is a number about the answers rather than about which of the two
@@ -194,14 +194,14 @@ export function readDecisions(dir: string, streams: Streams): LocalVerdict[] {
  * `null` where none were, so a store whose answers all came from pull requests
  * prints exactly what it printed before. Only the decisions in force are
  * listed: a superseded row is what somebody changed their mind about, and
- * `focrux inspect` is where the whole history of a key is read.
+ * `perbo inspect` is where the whole history of a key is read.
  *
  * The name is `decided_by` and nothing else. A row written before that field
  * existed carries none, and prints as its three columns with nothing after
  * them — a report that filled the gap with the account the machine was logged
  * in as, or with a dash, would be claiming to know something the record does
  * not say. The `--json` readings of both commands are aggregates and carry no
- * decisions; `focrux inspect --json` is where a machine reads them whole.
+ * decisions; `perbo inspect --json` is where a machine reads them whole.
  */
 export function renderDecisions(verdicts: readonly LocalVerdict[]): string | null {
   const standing = activeVerdicts(verdicts);
@@ -233,7 +233,7 @@ export const METRIC_TABLE_HEADER = ["metric", "value", "95% Wilson", "n"];
 
 /**
  * Left-padded columns except the last, for however many columns the rows have.
- * Shared rather than copied, because `focrux escapes` prints its rate in this
+ * Shared rather than copied, because `perbo escapes` prints its rate in this
  * table beside these rows and the per-week table prints the same figures a row
  * at a time: "the same table shape" has to be a fact about the code rather
  * than about how carefully three renderers were kept in step.
@@ -448,11 +448,11 @@ export function unattendedRows(summary: UnattendedMergesSummary, cost: MergedCos
  * decision" — and a count of the loop's **own** merges: a pull request a
  * person merged and then reverted says nothing about whether the loop should
  * merge, so the population is `delivery.merged_by` and not every merged
- * ticket. What charges a row is the escape record `focrux sync` already
+ * ticket. What charges a row is the escape record `perbo sync` already
  * writes, read here from files and nothing else.
  *
  * The two columns are named separately and never summed, for the reason
- * `focrux escapes` never sums them: a same-path commit inside fourteen days
+ * `perbo escapes` never sums them: a same-path commit inside fourteen days
  * over-counts on a hot file, and a revert is the strict signal. The headline
  * value is how many merges either column charged, because D-077's trigger is
  * "reverted, **or** charged at day fourteen".
@@ -558,7 +558,7 @@ export function renderIncompleteReviews(rows: readonly IncompleteReviewRow[]): s
   ]);
 }
 
-/** Every number `focrux stops` prints, in the one table D-060 and D-076 share. */
+/** Every number `perbo stops` prints, in the one table D-060 and D-076 share. */
 export function renderStopsAndUnattended(
   summary: StopsSummary,
   unattended: UnattendedMergesSummary,
@@ -769,7 +769,15 @@ function mergedTicketSubject(ticket: Ticket): InspectSubject {
     source: ticket.source,
     // Only the cost is read off this subject; the queue is `inspect`'s to show.
     queue: null,
+    // Not read here: this subject exists to roll a merged change's cost, and
+    // whether the spec has moved since is a reading about work still to do.
+    spec_staleness: null,
     runs_started: null,
+    // The cost roll needs no graph, and reads no contract to find one.
+    nodes: null,
+    edges: null,
+    approach_problem: null,
+    size: null,
   };
 }
 
@@ -845,7 +853,7 @@ export async function runStopsCommand(input: {
   }
   const cost = summariseMergedCost(mergedReports);
   // SCP-202: D-077's own count, over the same population. `escapeRows` reads
-  // the records `focrux sync` wrote and nothing else — no `git`, no `gh` —
+  // the records `perbo sync` wrote and nothing else — no `git`, no `gh` —
   // which is what lets this command stay the offline reading it has been.
   const loopMerges = summariseLoopMerges(mergedChanges, escapeRows(dir, input.streams, input.now ?? new Date()));
 
@@ -908,8 +916,8 @@ export async function runStopsCommand(input: {
   });
   if (files.length === 0) {
     input.streams.stderr(
-      `nothing recorded in ${join(dir, "state")} or ${verdictsPath(dir)} yet: \`focrux sync <KEY>\` ` +
-        "reads the answers off a pull request once one is open, and `focrux verdict <review> " +
+      `nothing recorded in ${join(dir, "state")} or ${verdictsPath(dir)} yet: \`perbo sync <KEY>\` ` +
+        "reads the answers off a pull request once one is open, and `perbo verdict <review> " +
         "--endorse|--override <stop key>` records one here without one.\n",
     );
   }

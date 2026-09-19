@@ -38,4 +38,4 @@ const bridge: DesktopBridge = {
     };
   },
 };
-contextBridge.exposeInMainWorld("focrux", bridge);
+contextBridge.exposeInMainWorld("perbo", bridge);

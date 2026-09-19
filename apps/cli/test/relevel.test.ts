@@ -3,14 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { EXIT_CODES } from "@focrux/contracts";
-import { TicketRunConfigSchema } from "@focrux/runner";
+import { EXIT_CODES } from "@perbo/contracts";
+import { TicketRunConfigSchema } from "@perbo/runner";
 import { UsageError } from "../src/args.js";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { TICKET_RUNS, parseExecuteArgs } from "../src/execute.js";
 import { processDeps } from "../src/serve.js";
 import { readTicket, storeDir as storeDirOf, writeTicket } from "../src/tickets.js";
-import { TicketSchema, transition, withReconciliation } from "@focrux/contracts";
+import { TicketSchema, transition, withReconciliation } from "@perbo/contracts";
 import { runListCommand, parseListArgs } from "../src/admit.js";
 import { mergedTicketContext, ticketKeysMergedBetween } from "../src/relevel.js";
 import { storeDir } from "../src/tickets.js";
@@ -22,7 +22,7 @@ import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
  * model wrote.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-relevel-cli-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-relevel-cli-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const env = {
@@ -94,25 +94,25 @@ describe("what merged under a branch", () => {
     });
   }, SPAWN_TEST_TIMEOUT_MS);
 
-  it("reads a merge of an fcx/ branch the way it reads an ayo/ one, and no other namespace's", () => {
-    const repo = join(scratch, "history-fcx");
+  it("reads a merge of an prb/ branch the way it reads an ayo/ one, and no other namespace's", () => {
+    const repo = join(scratch, "history-prb");
     mkdirSync(repo, { recursive: true });
     git(repo, "init", "-q", "-b", "main");
     commit(repo, "README.md", "base");
     const from = git(repo, "rev-parse", "HEAD");
     // A person's merge of the loop's pull request, which names the branch.
-    git(repo, "checkout", "-q", "-b", "fcx/FCX-3/three");
+    git(repo, "checkout", "-q", "-b", "prb/PRB-3/three");
     commit(repo, "three.md", "three");
     git(repo, "checkout", "-q", "main");
-    git(repo, "merge", "-q", "--no-ff", "-m", "Merge pull request #7 from lianmatsuo/fcx/FCX-3/three", "fcx/FCX-3/three");
+    git(repo, "merge", "-q", "--no-ff", "-m", "Merge pull request #7 from lianmatsuo/prb/PRB-3/three", "prb/PRB-3/three");
     // The same shape under a namespace the loop does not own is not the loop's merge.
-    git(repo, "checkout", "-q", "-b", "feature/FCX-4/four");
+    git(repo, "checkout", "-q", "-b", "feature/PRB-4/four");
     commit(repo, "four.md", "four");
     git(repo, "checkout", "-q", "main");
-    git(repo, "merge", "-q", "--no-ff", "-m", "Merge pull request #8 from lianmatsuo/feature/FCX-4/four", "feature/FCX-4/four");
+    git(repo, "merge", "-q", "--no-ff", "-m", "Merge pull request #8 from lianmatsuo/feature/PRB-4/four", "feature/PRB-4/four");
     const to = git(repo, "rev-parse", "HEAD");
     return ticketKeysMergedBetween({ repository_root: repo, from, to }).then((keys) => {
-      expect(keys).toEqual(["FCX-3"]);
+      expect(keys).toEqual(["PRB-3"]);
     });
   }, SPAWN_TEST_TIMEOUT_MS);
 
@@ -121,8 +121,8 @@ describe("what merged under a branch", () => {
     mkdirSync(repo, { recursive: true });
     git(repo, "init", "-q", "-b", "main");
     commit(repo, "README.md", "base");
-    mkdirSync(join(repo, ".focrux"), { recursive: true });
-    writeFileSync(join(repo, ".focrux", "config.json"), JSON.stringify({ base_ref: "main" }));
+    mkdirSync(join(repo, ".perbo"), { recursive: true });
+    writeFileSync(join(repo, ".perbo", "config.json"), JSON.stringify({ base_ref: "main" }));
     const one = admitted(repo, "One is done.", "one/**");
     const two = admitted(repo, "Two is done.", "two/**");
     const mine = admitted(repo, "Mine is done.", "mine/**");
@@ -160,8 +160,8 @@ describe("the store's hooks for a re-level", () => {
     mkdirSync(repo, { recursive: true });
     git(repo, "init", "-q", "-b", "main");
     commit(repo, "README.md", "base");
-    mkdirSync(join(repo, ".focrux"), { recursive: true });
-    writeFileSync(join(repo, ".focrux", "config.json"), JSON.stringify({ base_ref: "main" }));
+    mkdirSync(join(repo, ".perbo"), { recursive: true });
+    writeFileSync(join(repo, ".perbo", "config.json"), JSON.stringify({ base_ref: "main" }));
     return { repo, key: admitted(repo, "Mine is done.", "mine/**") };
   }
   const toPrOpen = (repo: string, key: string) => {

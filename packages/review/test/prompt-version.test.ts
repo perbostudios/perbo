@@ -3,13 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { CheckResult, PlanContract } from "@focrux/contracts";
+import type { CheckResult, PlanContract } from "@perbo/contracts";
 import { PROMPT_VERSION, systemPrompt } from "../src/prompt.js";
 import { runReview } from "../src/review.js";
 import { coverageEntry, scriptedModel, submits } from "./double.js";
 
-/** sha256 of `systemPrompt(contract, "P1")` at `reviewer_v9`, the one prompt version. */
-const REVIEWER_V9_P1_DIGEST = "d50cf10a307cc4f4f0bc7b3b65f289b21c467a1fc26683e64bd16f4403151bc6";
+/** sha256 of `systemPrompt(contract, "P1")` at `reviewer_v10`, the one prompt version. */
+const REVIEWER_V10_P1_DIGEST = "11336132723b5a18e02802a4a16e6ea007e80245662e80e3fdd06911e0af3135";
 
 const contract: PlanContract = {
   plan_id: "plan_pv",
@@ -43,7 +43,7 @@ const contract: PlanContract = {
   },
 };
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-prompt-version-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-prompt-version-test-"));
 mkdirSync(join(scratch, "a/src"), { recursive: true });
 writeFileSync(join(scratch, "a/src/a.ts"), "export const a = 1;\n");
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -79,25 +79,25 @@ const verdict = {
 };
 
 describe("the reviewer prompt version", () => {
-  it("is reviewer_v9, byte-identical to the pinned digest", () => {
-    expect(PROMPT_VERSION).toBe("reviewer_v9");
+  it("is reviewer_v10, byte-identical to the pinned digest", () => {
+    expect(PROMPT_VERSION).toBe("reviewer_v10");
     const prompt = systemPrompt(contract, "P1");
-    expect(createHash("sha256").update(prompt).digest("hex")).toBe(REVIEWER_V9_P1_DIGEST);
+    expect(createHash("sha256").update(prompt).digest("hex")).toBe(REVIEWER_V10_P1_DIGEST);
   });
 
-  it("delimits everything it shows the reviewer under one namespace, focrux:", () => {
+  it("delimits everything it shows the reviewer under one namespace, perbo:", () => {
     const prompt = systemPrompt(contract, "P1");
-    expect(prompt).toContain("<focrux:...>");
-    expect(prompt).toContain("<focrux:check_result>");
+    expect(prompt).toContain("<perbo:...>");
+    expect(prompt).toContain("<perbo:check_result>");
     // Every namespaced tag the prompt names, not merely the two above: a block
     // left behind under another namespace is a reviewer shown two conventions.
     const namespaces = [...prompt.matchAll(/<\/?([a-z_]+):/g)].map((match) => match[1]);
-    expect([...new Set(namespaces)]).toEqual(["focrux"]);
+    expect([...new Set(namespaces)]).toEqual(["perbo"]);
   });
 });
 
 describe("runReview stamps the prompt version that produced the artifact", () => {
-  it("stamps reviewer_v9 and shows the model the prompt", async () => {
+  it("stamps reviewer_v10 and shows the model the prompt", async () => {
     const model = scriptedModel([submits(verdict)]);
     const outcome = await runReview({
       contract,
@@ -107,8 +107,8 @@ describe("runReview stamps the prompt version that produced the artifact", () =>
       model,
       now: new Date("2026-09-02T10:00:00Z"),
     });
-    expect(outcome.artifact.model.prompt_version).toBe("reviewer_v9");
-    expect(outcome.artifact.independence.context_builder).toBe("reviewer_v9");
-    expect(outcome.bundle.prompt_version).toBe("reviewer_v9");
+    expect(outcome.artifact.model.prompt_version).toBe("reviewer_v10");
+    expect(outcome.artifact.independence.context_builder).toBe("reviewer_v10");
+    expect(outcome.bundle.prompt_version).toBe("reviewer_v10");
   });
 });

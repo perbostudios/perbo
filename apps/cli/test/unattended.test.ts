@@ -3,8 +3,8 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { EXIT_CODES, TICKET_SCHEMA_VERSION, TicketSchema, transition, type Ticket } from "@focrux/contracts";
-import { branchName } from "@focrux/workspace";
+import { EXIT_CODES, TICKET_SCHEMA_VERSION, TicketSchema, transition, type Ticket } from "@perbo/contracts";
+import { branchName } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { makeAttempt } from "./attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
@@ -15,16 +15,16 @@ import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.
 /**
  * SCP-196: the loop's own success as a live number.
  *
- * Two halves. The first drives `focrux sync` against a fake `gh` that answers
+ * Two halves. The first drives `perbo sync` against a fake `gh` that answers
  * `--json ...,commits`, the same way sync-mergeable.test.ts drives the
  * `mergeable` field it sits beside — proving `commits_outside_loop` is read
  * from each commit's own message rather than its author. The second drives
- * `focrux stops` over ticket and attempts fixtures written directly, proving
+ * `perbo stops` over ticket and attempts fixtures written directly, proving
  * the share, the interval, `n` and the cost print, and that `--since` and
  * `--json` bound and shape the same numbers the other measures do.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-unattended-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-unattended-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function capture(): Streams & { out: string[]; err: string[] } {
@@ -34,7 +34,7 @@ function capture(): Streams & { out: string[]; err: string[] } {
 }
 
 /* ------------------------------------------------------------------ *
- * `focrux sync`: `commits_outside_loop` read from `gh pr view --json commits`.
+ * `perbo sync`: `commits_outside_loop` read from `gh pr view --json commits`.
  * ------------------------------------------------------------------ */
 
 const OUTCOME = "Search results are paginated.";
@@ -130,13 +130,13 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
   });
   const dir = storeDir(repo, null);
   const branch = branchName({
-    ticket_key: "FCX-1",
-    ticket_id: readTicket(dir, "FCX-1").ticket_id,
-    outcome: readContract(dir, "FCX-1").outcome,
+    ticket_key: "PRB-1",
+    ticket_id: readTicket(dir, "PRB-1").ticket_id,
+    outcome: readContract(dir, "PRB-1").outcome,
   });
 
   const at = new Date("2026-09-04T09:00:00.000Z");
-  let ticket: Ticket = readTicket(dir, "FCX-1");
+  let ticket: Ticket = readTicket(dir, "PRB-1");
   ticket = transition(ticket, "provisioning", "run started", at);
   ticket = transition(ticket, "executing", "1 attempt executed", at);
   ticket = transition(ticket, "verifying", "no deterministic checks are configured", at);
@@ -156,14 +156,14 @@ describe("sync reads commits_outside_loop from gh, by message, not by author", (
 
     const code = await withGh(
       fakeGh("all-loop", ghAnswer("MERGED", [
-        { oid: "c1", messageHeadline: "FCX-1: pagination", messageBody: "Attempt: att_1\nBase: aaa\n" },
-        { oid: "c2", messageHeadline: "FCX-1: merge main into the attempt branch", messageBody: "Attempt: att_1\nBase: bbb\n" },
+        { oid: "c1", messageHeadline: "PRB-1: pagination", messageBody: "Attempt: att_1\nBase: aaa\n" },
+        { oid: "c2", messageHeadline: "PRB-1: merge main into the attempt branch", messageBody: "Attempt: att_1\nBase: bbb\n" },
       ])),
-      () => runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const ticket = readTicket(dir, "FCX-1");
+    const ticket = readTicket(dir, "PRB-1");
     expect(ticket.state).toBe("merged");
     expect(ticket.delivery.commits_outside_loop).toBe(false);
   });
@@ -174,15 +174,15 @@ describe("sync reads commits_outside_loop from gh, by message, not by author", (
 
     await withGh(
       fakeGh("one-person-commit", ghAnswer("MERGED", [
-        { oid: "c1", messageHeadline: "FCX-1: pagination", messageBody: "Attempt: att_1\nBase: aaa\n" },
+        { oid: "c1", messageHeadline: "PRB-1: pagination", messageBody: "Attempt: att_1\nBase: aaa\n" },
         // No trailer: a person's commit, pushed under the same author identity
         // the loop uses — the message is what tells them apart, not the name.
         { oid: "c2", messageHeadline: "fix the off-by-one the review missed", messageBody: "" },
       ])),
-      () => runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
-    expect(readTicket(dir, "FCX-1").delivery.commits_outside_loop).toBe(true);
+    expect(readTicket(dir, "PRB-1").delivery.commits_outside_loop).toBe(true);
   });
 
   it("leaves it null when gh names no commits to judge", async () => {
@@ -190,15 +190,15 @@ describe("sync reads commits_outside_loop from gh, by message, not by author", (
     const streams = capture();
 
     await withGh(fakeGh("no-commits-field", ghAnswer("OPEN", [])), () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
-    expect(readTicket(dir, "FCX-1").delivery.commits_outside_loop).toBeNull();
+    expect(readTicket(dir, "PRB-1").delivery.commits_outside_loop).toBeNull();
   });
 }, SPAWN_TEST_TIMEOUT_MS);
 
 /* ------------------------------------------------------------------ *
- * `focrux stops`: the share, the interval, `n`, and the cost — over ticket
+ * `perbo stops`: the share, the interval, `n`, and the cost — over ticket
  * and attempts records written directly, the way `apps/cli/test/stops.test.ts`
  * writes stops records directly.
  * ------------------------------------------------------------------ */
@@ -248,8 +248,8 @@ const fixtureTicket = (input: {
 
 function fixtureStore(name: string): string {
   const repo = join(scratch, name);
-  mkdirSync(join(repo, ".focrux", "tickets"), { recursive: true });
-  mkdirSync(join(repo, ".focrux", "state"), { recursive: true });
+  mkdirSync(join(repo, ".perbo", "tickets"), { recursive: true });
+  mkdirSync(join(repo, ".perbo", "state"), { recursive: true });
   return repo;
 }
 
@@ -271,7 +271,7 @@ const priced = (ticket_id: string, micros: number) =>
     head_commit: "abc1234",
   });
 
-describe("focrux stops prints D-076's number beside D-060's", () => {
+describe("perbo stops prints D-076's number beside D-060's", () => {
   it("counts unattended and attended merges, with an interval and n, and the cost beside it", async () => {
     const repo = fixtureStore("unattended-basic");
     const dir = storeDir(repo, null);

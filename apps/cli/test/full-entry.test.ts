@@ -1,17 +1,19 @@
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { FULL_COMMAND_SET } from "../src/execute.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "./open-build.js";
 
 /**
  * The CLI's command table, run as a program and asked rather than read off the
- * source: the six that work against a repository with nothing admitted, and the
- * eleven that build history across machines.
+ * source: the six that work against a repository with nothing admitted, the
+ * twelve that build history across machines, and `index`, which reads the
+ * repository's code.
  */
 
 /** The six commands that work against a repository with nothing admitted, named here rather than imported from the code under test. */
 const OPEN = ["doctor", "baseline", "review", "inspect", "verdict", "run"] as const;
 
-/** The eleven that build history across machines, likewise. */
+/** The twelve that build history across machines, and `index`, likewise. */
 const CLOSED = [
   "admit",
   "approve",
@@ -21,9 +23,11 @@ const CLOSED = [
   "serve",
   "mcp",
   "agent",
+  "interview",
   "stops",
   "escapes",
   "principle",
+  "index",
 ] as const;
 
 let dist: string;
@@ -48,12 +52,12 @@ function invoke(entry: "main.js", args: string[]) {
 /**
  * Every command a help text offers, in the order it offers them.
  *
- * `focrux <name>` is how the help names a command, and the lookbehind keeps a
- * path — `<repo>/.focrux back`, `.focrux/state` — from reading as one.
+ * `perbo <name>` is how the help names a command, and the lookbehind keeps a
+ * path — `<repo>/.perbo back`, `.perbo/state` — from reading as one.
  */
 function offered(help: string): string[] {
   const names: string[] = [];
-  for (const match of help.matchAll(/(?<![\w.])focrux\s+([a-z][a-z-]*)/g)) {
+  for (const match of help.matchAll(/(?<![\w.])perbo\s+([a-z][a-z-]*)/g)) {
     const name = match[1]!;
     if (!names.includes(name)) names.push(name);
   }
@@ -64,19 +68,25 @@ function offered(help: string): string[] {
 // compiled, so they are pinned to run one after another rather than left to
 // whatever vitest's default would do to a describe block that shares it.
 describe.sequential("the entry point", () => {
-  // Seventeen cold spawns of the built binary in one test, each individually
-  // bounded by `spawnBuilt`'s own deadline; 60s covers all seventeen running
-  // slow under the loaded-machine load SCP-191 measures without covering a
-  // genuine hang, which `spawnBuilt` fails on well before this fires.
-  it("carries all seventeen commands", () => {
+  it("names the same commands the code's full set carries, so neither drifts alone", () => {
+    expect([...FULL_COMMAND_SET].sort()).toEqual([...OPEN, ...CLOSED].sort());
+  });
+
+
+  // One cold spawn of the built binary per command, each individually bounded
+  // by `spawnBuilt`'s own deadline, so a genuine hang fails there and this
+  // budget only ever bounds how slowly nineteen of them run together. Nineteen
+  // take about a minute on the loaded machine SCP-191 measures against, so the
+  // budget is that with room, and it grows as the table does.
+  it("carries all nineteen commands", () => {
     for (const command of [...OPEN, ...CLOSED]) {
       const help = invoke("main.js", [command, "--help"]);
       expect(help.code, `${command} --help`).toBe(0);
       expect(help.stderr).not.toMatch(/unknown command/);
     }
-  }, 60_000);
+  }, 150_000);
 
-  it("offers the eleven in its help", () => {
+  it("offers the thirteen in its help", () => {
     const help = invoke("main.js", ["--help"]);
     expect(help.code).toBe(0);
     expect(offered(help.stderr)).toEqual(expect.arrayContaining([...CLOSED]));

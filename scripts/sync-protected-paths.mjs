@@ -2,7 +2,7 @@
 // Keeps the three places that name the files a change may not edit in
 // agreement, and derives the third from the other two.
 //
-//   .focrux/config.json          `protected_tests` — canonical; what the runner
+//   .perbo/config.json          `protected_tests` — canonical; what the runner
 //                                protects on this repository
 //   .github/protected-paths.json the same `protected_tests`, plus its own
 //                                `protected_paths` globs, for the pull request check
@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-export const FOCRUX_CONFIG = ".focrux/config.json";
+export const PERBO_CONFIG = ".perbo/config.json";
 export const PROTECTED_PATHS = ".github/protected-paths.json";
 export const CLAUDE_SETTINGS = ".claude/settings.json";
 
@@ -46,12 +46,12 @@ function stringArray(value, what, path) {
 
 /** The protected lists, read from the two files that declare them. */
 export function readSources(repo) {
-  const configPath = resolve(repo, FOCRUX_CONFIG);
+  const configPath = resolve(repo, PERBO_CONFIG);
   const checkPath = resolve(repo, PROTECTED_PATHS);
   const config = readJson(configPath);
   const check = readJson(checkPath);
   return {
-    configTests: stringArray(config.protected_tests, "protected_tests", FOCRUX_CONFIG),
+    configTests: stringArray(config.protected_tests, "protected_tests", PERBO_CONFIG),
     checkTests: stringArray(check.protected_tests, "protected_tests", PROTECTED_PATHS),
     checkPaths: stringArray(check.protected_paths, "protected_paths", PROTECTED_PATHS),
   };
@@ -62,10 +62,10 @@ export function protectedTestsDifferences(configTests, checkTests) {
   const onlyInConfig = configTests.filter((entry) => !checkTests.includes(entry));
   const onlyInCheck = checkTests.filter((entry) => !configTests.includes(entry));
   const lines = [];
-  for (const entry of onlyInConfig) lines.push(`  ${entry} — in ${FOCRUX_CONFIG}, not in ${PROTECTED_PATHS}`);
-  for (const entry of onlyInCheck) lines.push(`  ${entry} — in ${PROTECTED_PATHS}, not in ${FOCRUX_CONFIG}`);
+  for (const entry of onlyInConfig) lines.push(`  ${entry} — in ${PERBO_CONFIG}, not in ${PROTECTED_PATHS}`);
+  for (const entry of onlyInCheck) lines.push(`  ${entry} — in ${PROTECTED_PATHS}, not in ${PERBO_CONFIG}`);
   if (lines.length === 0 && configTests.join("\n") !== checkTests.join("\n")) {
-    lines.push(`  the same entries in a different order in ${FOCRUX_CONFIG} and ${PROTECTED_PATHS}`);
+    lines.push(`  the same entries in a different order in ${PERBO_CONFIG} and ${PROTECTED_PATHS}`);
   }
   return lines;
 }
@@ -126,7 +126,7 @@ export function run(argv, { repo = REPO_ROOT, log = console.log, logError = cons
   if (differences.length > 0) {
     logError(`sync-protected-paths: the two protected_tests lists disagree:\n${differences.join("\n")}`);
     logError(
-      `\n${FOCRUX_CONFIG} is canonical: make ${PROTECTED_PATHS} match it, in the same change.`,
+      `\n${PERBO_CONFIG} is canonical: make ${PROTECTED_PATHS} match it, in the same change.`,
     );
     return 1;
   }

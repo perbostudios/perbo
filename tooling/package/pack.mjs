@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// The partner tarball D-046 names. Builds the workspace, bundles the CLI and
+// The partner tarball. Builds the workspace, bundles the CLI and
 // everything it imports into one file, stages the runner's write-guard hook
 // beside it along with a manifest, the install page and the licence,
 // archives the stage, and writes a SHA-256 next to the archive in
@@ -72,7 +72,7 @@ export async function stageArchive({ stage, version, root = ROOT }) {
 
   // The same single-file bundle a corpus run executes (bundle.mjs), so the
   // archive and the measured binary are built one way.
-  const bundle = join(bin, "focrux.mjs");
+  const bundle = join(bin, "perbo.mjs");
   const metafile = await bundleCli({
     entry: join(root, CLI_ENTRY_POINT),
     outfile: bundle,
@@ -93,14 +93,14 @@ export async function stageArchive({ stage, version, root = ROOT }) {
     join(stage, "package.json"),
     `${JSON.stringify(
       {
-        name: "focrux",
+        name: "perbo",
         version,
-        description: "Contract to pull request, locally. The focrux CLI, bundled for design partners.",
+        description: "Contract to pull request, locally. The perbo CLI, bundled for design partners.",
         // Guards against `npm publish`; a tarball installs regardless.
         private: true,
         license: "Apache-2.0",
         type: "module",
-        bin: { focrux: "bin/focrux.mjs" },
+        bin: { perbo: "bin/perbo.mjs" },
         engines: { node: ">=22" },
         files: ["bin", "README.md", "LICENSE", "NOTICE", "licenses"],
       },
@@ -133,7 +133,7 @@ if (invokedDirectly(import.meta.url)) {
   run(["pnpm", "exec", "turbo", "run", "build"]);
 
   const version = readVersion();
-  const name = `focrux-${version}`;
+  const name = `perbo-${version}`;
   const stage = join(RELEASE, name);
   const metafile = await stageArchive({ stage, version });
 

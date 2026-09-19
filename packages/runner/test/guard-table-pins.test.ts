@@ -41,7 +41,7 @@ import { scratch } from "./support.js";
  *   vouch for, and a write to a literal path inside the worktree is refused.
  */
 
-const ROOT = realpathSync(scratch("focrux-scp190-pins-"));
+const ROOT = realpathSync(scratch("perbo-scp190-pins-"));
 mkdirSync(join(ROOT, "src"), { recursive: true });
 writeFileSync(join(ROOT, "package.json"), '{"name": "fixture"}\n');
 writeFileSync(join(ROOT, "notes.md"), "notes\n");

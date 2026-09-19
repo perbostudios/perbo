@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { cx } from "@focrux/ui";
+import { cx } from "@perbo/ui";
 import { InkIcon } from "../InkIcon.js";
+import { LineIcon } from "../icons.js";
+import { PLANNING_PANES } from "../planning/panes.js";
+import { useCreate } from "./create.js";
 import { useShortcut } from "./shortcuts.js";
 import { RAIL_WIDTH, setRailSize, useRailSize } from "./rail-size.js";
 import type { Route } from "./App.js";
@@ -70,11 +73,12 @@ export function RailToggle() {
 }
 
 /**
- * The rail (S4): Home, Archive, and a settings icon that grows upward into a
- * pill of General, Usage and Connections. Outside settings the pill opens on
- * hover or focus; inside settings it stays open and the tab you are on
- * carries the bordered plate. It sits beneath the top bar, and the bar's
- * toggle hides it.
+ * The rail: Create first (D-101), with planning's panes under it while a
+ * piece of work is being planned, then Home, Archive, and a settings icon
+ * that grows upward into a pill of General, Usage and Connections. Outside
+ * settings the pill opens on hover or focus; inside settings it stays open
+ * and the tab you are on carries the bordered plate. It sits beneath the top
+ * bar, and the bar's toggle hides it.
  */
 export function Rail({
   route,
@@ -120,7 +124,9 @@ export function Rail({
     wasOpen.current = open;
     return undefined;
   }, [open]);
-  // Home and Archive bind in the shell so they work with the rail collapsed; ⌘3 is the rail's because it raises the pill.
+  const create = useCreate();
+  const planning = route.page === "planning";
+  // Create, Home and Archive bind in the shell so they work with the rail collapsed; ⌘4 is the rail's because it raises the pill.
   useShortcut("settings", () => {
     setHover(true);
     pill.current?.querySelector<HTMLButtonElement>("button")?.focus();
@@ -133,6 +139,43 @@ export function Rail({
       style={{ width: RAIL_WIDTH }}
       aria-label="Main navigation"
     >
+      <div className="rail-group">
+        <button
+          className={cx(
+            "rail-item",
+            create.isOpen && "selected",
+            planning && !create.isOpen && "parent",
+          )}
+          aria-label="Create"
+          title="Create — plan a piece of work"
+          aria-expanded={create.isOpen}
+          onClick={create.toggle}
+          onMouseEnter={create.enter}
+          onMouseLeave={create.leave}
+        >
+          <span className="rail-icon">
+            <LineIcon name="create" size={22} />
+          </span>
+        </button>
+        {planning && (
+          <div className="rail-children" role="group" aria-label="Planning panes">
+            {PLANNING_PANES.map((pane) => (
+              <button
+                key={pane.id}
+                className={cx("rail-item", "rail-child", route.pane === pane.id && "selected")}
+                aria-label={pane.label}
+                title={pane.label}
+                aria-current={route.pane === pane.id ? "page" : undefined}
+                onClick={() => navigate({ ...route, pane: pane.id })}
+              >
+                <span className="rail-icon">
+                  <LineIcon name={pane.icon} size={18} />
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       {(
         [
           { page: "home", icon: "home", label: "Home" },

@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { gitEnv, run } from "@focrux/workspace";
+import { gitEnv, run } from "@perbo/workspace";
 import type { LoadedFixture } from "./corpus.js";
 import type { PinnedRepository } from "./fixture.js";
 
 /**
- * Materialise a pinned-repository fixture into a cache (`focrux-corpus prepare`).
+ * Materialise a pinned-repository fixture into a cache (`perbo-corpus prepare`).
  *
  * The cache is never checked in. That is not tidiness: it is what keeps upstream
  * code out of this repository entirely, so the corpus's "no upstream code is

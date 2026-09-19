@@ -128,7 +128,7 @@ const D073_VERDICT =
 /**
  * The verdict that closes the gate, spelled once.
  *
- * `focrux sync` reads it off a closed pull request to decide where the ticket
+ * `perbo sync` reads it off a closed pull request to decide where the ticket
  * behind it goes (D-083), and this is the string both that reading and this
  * file's own decision compare against.
  */

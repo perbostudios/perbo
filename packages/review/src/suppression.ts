@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { WaiverSchema, type Waiver } from "@focrux/contracts";
+import { WaiverSchema, type Waiver } from "@perbo/contracts";
 import { RULE_DEMOTION_FALSE_POSITIVE_RATE } from "./blocking.js";
 
 /**

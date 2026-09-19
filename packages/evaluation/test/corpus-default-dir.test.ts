@@ -14,7 +14,7 @@ import { SAMPLE_IDS } from "./sample-fixtures.js";
  * What the loader reads when the caller names no directory.
  *
  * It used to read the packaged corpus and nothing else, so a bare call was
- * invisible to `FOCRUX_EVAL_CORPUS_DIR` — the absence gate could point the
+ * invisible to `PERBO_EVAL_CORPUS_DIR` — the absence gate could point the
  * variable at nothing, watch the suites skip, and a bare call inside one of
  * them would still have opened the real corpus. That is the read this file
  * pins: with the override set the bare call goes where it points, and where it

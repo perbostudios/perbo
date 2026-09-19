@@ -3,13 +3,13 @@ import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { EXIT_CODES } from "@focrux/contracts";
-import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL, type ModelRequest, type ModelTurn, type ReviewModel } from "@focrux/review";
+import { EXIT_CODES } from "@perbo/contracts";
+import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL, type ModelRequest, type ModelTurn, type ReviewModel } from "@perbo/review";
 import { UsageError } from "../src/args.js";
 import { parseAdmitArgs, readTicket, runAdmitCommand, storeDir, type Streams } from "../src/admit.js";
 import { nextKey, readDraftSnapshot } from "../src/tickets.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-admit-draft-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-draft-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const gitIdentity = {
@@ -148,23 +148,23 @@ function admittedTyped(repo: string, outcome: string, path: string): string {
   return (JSON.parse(streams.out.join("")) as { ticket: { key: string } }).ticket.key;
 }
 
-describe("focrux admit --from: one draft is one ticket", () => {
+describe("perbo admit --from: one draft is one ticket", () => {
   it("refuses a draft that splits the work into children, writes nothing, and admits the whole as one ticket", async () => {
     const repo = repository();
     const dir = storeDir(repo, null);
     const refused: unknown = await admitFrom(repo, scripted([submits(split)])).catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(UsageError);
     expect((refused as UsageError).message).toContain("children");
-    expect(existsSync(join(dir, "tickets", "FCX-1.json"))).toBe(false);
-    expect(nextKey(dir, "FCX")).toBe("FCX-1");
+    expect(existsSync(join(dir, "tickets", "PRB-1.json"))).toBe(false);
+    expect(nextKey(dir, "PRB")).toBe("PRB-1");
 
     // However many packages it spans, the work drafted as one contract is one ticket.
     const { code, streams } = await admitFrom(repo, scripted([submits(whole)]), ["--json"]);
     expect(code).toBe(EXIT_CODES.approve);
     const document = JSON.parse(streams.out.join("")) as { ticket: { key: string } };
-    expect(document.ticket.key).toBe("FCX-1");
-    expect(readTicket(dir, "FCX-1").title).toBe(whole.outcome);
-    expect(existsSync(join(dir, "tickets", "FCX-2.json"))).toBe(false);
+    expect(document.ticket.key).toBe("PRB-1");
+    expect(readTicket(dir, "PRB-1").title).toBe(whole.outcome);
+    expect(existsSync(join(dir, "tickets", "PRB-2.json"))).toBe(false);
   });
 
   it("steps over an in-flight ticket whose contract is missing, and names it on stderr", async () => {
@@ -177,7 +177,7 @@ describe("focrux admit --from: one draft is one ticket", () => {
     expect(code).toBe(EXIT_CODES.approve);
     expect(JSON.stringify(model.requests[0]?.messages[0])).not.toContain(first);
     expect(streams.err.join("")).toContain(`${first} is in flight but its contract cannot be read; it is left off the board`);
-    expect(readTicket(dir, "FCX-2").title).toBe(one.outcome);
+    expect(readTicket(dir, "PRB-2").title).toBe(one.outcome);
   });
 
   it("shows the drafter the board, takes the dependency it proposes, and refuses one the board does not show", async () => {
@@ -187,20 +187,20 @@ describe("focrux admit --from: one draft is one ticket", () => {
     const { code } = await admitFrom(repo, model);
     expect(code).toBe(EXIT_CODES.approve);
     const shown = JSON.stringify(model.requests[0]?.messages[0]);
-    expect(shown).toContain("<focrux:board");
+    expect(shown).toContain("<perbo:board");
     expect(shown).toContain(first);
     expect(shown).toContain("docs/**");
     const dir = storeDir(repo, null);
-    expect(readTicket(dir, "FCX-2").depends_on).toEqual([first]);
+    expect(readTicket(dir, "PRB-2").depends_on).toEqual([first]);
 
     // Typed wins over proposed.
-    await admitFrom(repo, scripted([submits({ ...one, depends_on: [first] })]), ["--depends-on", "FCX-2"]);
-    expect(readTicket(dir, "FCX-3").depends_on).toEqual(["FCX-2"]);
+    await admitFrom(repo, scripted([submits({ ...one, depends_on: [first] })]), ["--depends-on", "PRB-2"]);
+    expect(readTicket(dir, "PRB-3").depends_on).toEqual(["PRB-2"]);
 
     // A key nobody holds is refused on the way in, and nothing is written.
-    await expect(admitFrom(repo, scripted([submits({ ...one, depends_on: ["FCX-99"] })]))).rejects.toThrow(UsageError);
-    await expect(admitFrom(repo, scripted([submits({ ...one, depends_on: ["FCX-99"] })]))).rejects.toThrow(/FCX-99 not on the board/);
-    expect(existsSync(join(dir, "tickets", "FCX-4.json"))).toBe(false);
+    await expect(admitFrom(repo, scripted([submits({ ...one, depends_on: ["PRB-99"] })]))).rejects.toThrow(UsageError);
+    await expect(admitFrom(repo, scripted([submits({ ...one, depends_on: ["PRB-99"] })]))).rejects.toThrow(/PRB-99 not on the board/);
+    expect(existsSync(join(dir, "tickets", "PRB-4.json"))).toBe(false);
   });
 
   it("lets the drafter open a few files, and records each read and each refusal on the snapshot", async () => {
@@ -221,7 +221,7 @@ describe("focrux admit --from: one draft is one ticket", () => {
     const second = JSON.stringify(model.requests[1]?.messages);
     expect(second).toContain("# hello");
     expect(second).toContain("secret");
-    const snapshot = readDraftSnapshot(storeDir(repo, null), "FCX-1");
+    const snapshot = readDraftSnapshot(storeDir(repo, null), "PRB-1");
     expect(snapshot?.draft?.files_read).toEqual([
       { path: "README.md", bytes: 8, refused: null },
       { path: ".env", bytes: 0, refused: expect.stringContaining("secret") },

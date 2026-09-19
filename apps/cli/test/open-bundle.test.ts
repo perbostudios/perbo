@@ -34,8 +34,8 @@ function hosts(bundle: Bundle): string[] {
 }
 
 /** Every host of ours the bundle's bytes name, which is one too many. */
-const focruxHosts = (bundle: Bundle): string[] =>
-  hosts(bundle).filter((host) => /focrux/.test(host));
+const perboHosts = (bundle: Bundle): string[] =>
+  hosts(bundle).filter((host) => /perbo/.test(host));
 
 let shipped: Bundle;
 
@@ -71,6 +71,17 @@ describe("the shipped bundle's module graph", () => {
   });
 });
 
+describe("what the shipped bundle leaves outside itself", () => {
+  it("does not inline the Claude Agent SDK, which the interview imports when a session starts", () => {
+    // `perbo interview` runs the person's session through it, and imports it
+    // only when a session starts, so it is required from the installation
+    // beside this file rather than carried inside it (`tooling/package/bundle.mjs`).
+    const sdk = "@anthropic-ai/claude-agent-sdk";
+    expect(shipped.modules.filter((path) => path.includes(sdk))).toEqual([]);
+    expect(shipped.text).toContain(`import("${sdk}")`);
+  });
+});
+
 describe("what the shipped bundle talks to", () => {
   it("names the provider endpoint the user's own key is spent at, and no host of ours", () => {
     // The bundled reviewer SDK and the runner's egress profile both name
@@ -79,6 +90,6 @@ describe("what the shipped bundle talks to", () => {
     // tolerated. An address of ours would be a service this binary reports to,
     // and there is none.
     expect(hosts(shipped)).toContain("api.anthropic.com");
-    expect(focruxHosts(shipped)).toEqual([]);
+    expect(perboHosts(shipped)).toEqual([]);
   });
 });

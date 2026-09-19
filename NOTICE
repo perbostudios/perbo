@@ -1,4 +1,4 @@
-Focrux — a loop that takes a ticket on your repository to a pull request.
+Perbo — a loop that takes a ticket on your repository to a pull request.
 
 Licensed under the Apache License, Version 2.0. The unmodified upstream text is
 in LICENSE, fetched from https://www.apache.org/licenses/LICENSE-2.0.txt.
@@ -29,7 +29,7 @@ packages/ui/src/motion.css contains transitions from transitions.dev
 Version 2.0. They are used under the transitions.dev terms, and any use of
 them is governed by those terms: https://transitions.dev/terms.html
 
-The Focrux name, its logo and its artwork are not licensed under the Apache
+The Perbo name, its logo and its artwork are not licensed under the Apache
 License, Version 2.0: the files in apps/desktop/public/brand/. All rights in
 them are reserved.
 

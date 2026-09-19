@@ -18,18 +18,18 @@ import {
   type AuthoredAttempt,
   type PlanContractWithCriteria,
   type SourceContract,
-} from "@focrux/contracts";
-import { redactCredentials } from "@focrux/review";
-import { BaseSourceSchema } from "@focrux/runner";
+} from "@perbo/contracts";
+import { redactCredentials } from "@perbo/review";
+import { BaseSourceSchema } from "@perbo/runner";
 import { UsageError } from "./args.js";
 import { readPullRequest } from "./pull-request.js";
 import { headCommit, repositoryId } from "./store.js";
 import type { ExecuteArgs } from "./execute.js";
 
 /**
- * `focrux run` with nothing admitted behind it (SCP-180).
+ * `perbo run` with nothing admitted behind it (SCP-180).
  *
- * `focrux run --ticket FCX-1` takes its contract from a ticket a person
+ * `perbo run --ticket PRB-1` takes its contract from a ticket a person
  * approved, and that is the path the product is built around. This is the same
  * loop with no admission step in front of it: the contract is typed on the
  * command line, or read out of the pull request that already describes the
@@ -51,10 +51,10 @@ import type { ExecuteArgs } from "./execute.js";
  *    ticket key, so nothing invents one: the branch, the seal's commit message
  *    and the attempt-id seed carry `local_<digest>` or `gh_owner_repo_N`, which
  *    is the same identity the plan and every record of the run are keyed by.
- * 3. **The whole record stays in this repository's `.focrux/`.** The attempts,
+ * 3. **The whole record stays in this repository's `.perbo/`.** The attempts,
  *    the bundles, the checks and the review go exactly where a ticket run's go
  *    — the same store, through the same merge of the same repository config —
- *    and the run record below is written beside them so `focrux inspect` can
+ *    and the run record below is written beside them so `perbo inspect` can
  *    name a run no ticket file describes. Nothing is sent anywhere.
  */
 
@@ -101,7 +101,7 @@ export const RunPullRequestSchema = z.strictObject({
   /** What they add up to. Null while nothing has read them. */
   checks_state: DeliveryChecksStateSchema.nullable().default(null),
   /**
-   * SCP-284: what `focrux sync` last read back off this pull request — where
+   * SCP-284: what `perbo sync` last read back off this pull request — where
    * a ticketed run keeps the same facts on the ticket's `delivery` record.
    *
    * `null` is "nothing has read it back": a run whose pull request has never
@@ -143,7 +143,7 @@ export const RunPullRequestSchema = z.strictObject({
 export type RunPullRequest = z.infer<typeof RunPullRequestSchema>;
 /**
  * The same record as the publish writes it: what a run is first-hand about,
- * with everything a later `focrux sync` reads back left to its defaults. The
+ * with everything a later `perbo sync` reads back left to its defaults. The
  * publish knows the URL, the number and the checks it waited for; it does not
  * know what GitHub will say about the pull request afterwards, and this is the
  * shape that lets it say so by omission rather than by writing a guess.

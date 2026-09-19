@@ -133,7 +133,7 @@ const MAX_FAILURE_TEXT = 300;
 
 /**
  * Node names the argument it refused by quoting it — `… must be a string
- * without null bytes. Received '<focrux:repo_file …'`. The sentence before it
+ * without null bytes. Received '<perbo:repo_file …'`. The sentence before it
  * says what went wrong; the quotation is the value itself, and goes.
  */
 const RECEIVED = /\s*Received\b[\s\S]*$/;

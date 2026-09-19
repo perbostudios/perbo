@@ -32,6 +32,7 @@ def generate(fixture: Path) -> str:
         cwd=fixture,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     # git diff exits 1 when there are differences, which is the normal case here.
     if result.returncode not in (0, 1):
@@ -48,7 +49,7 @@ def main() -> int:
     for directory in sorted(FIXTURES.iterdir()):
         if not directory.is_dir():
             continue
-        meta = json.loads((directory / "fixture.json").read_text())
+        meta = json.loads((directory / "fixture.json").read_text(encoding="utf-8"))
         if meta.get("pinned_repository"):
             for absent in ("before", "after", "change.diff"):
                 if (directory / absent).exists():
@@ -59,8 +60,8 @@ def main() -> int:
         expected = generate(directory)
         path = directory / "change.diff"
         if write:
-            path.write_text(expected)
-        elif path.read_text() != expected:
+            path.write_text(expected, encoding="utf-8")
+        elif path.read_text(encoding="utf-8") != expected:
             wrong.append(f"{directory.name}: change.diff does not match its before/ and after/ trees")
         checked += 1
 

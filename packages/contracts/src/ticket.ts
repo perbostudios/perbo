@@ -61,7 +61,7 @@ export type TicketState = (typeof TICKET_STATES)[number];
  * What Stage 3 can actually put a ticket into. Everything else in the enum
  * belongs to a milestone whose mechanism does not exist yet — `deployed` and
  * `observing` need the opt-in deployment link, `rolled_back` needs health
- * observation, `plan_invalid` needs base-change detection.
+ * observation.
  */
 export const TICKET_STATES_REACHABLE = [
   "plan_review",
@@ -71,21 +71,24 @@ export const TICKET_STATES_REACHABLE = [
   "verifying",
   "independent_review",
   "pr_open",
-  // Reached by `focrux sync`, from what local `gh` reports — a person's
+  // Reached by `perbo sync`, from what local `gh` reports — a person's
   // merge, or, where D-077's `merge` switch is set to the loop, the runner's
   // own merge step, which `sync` then reads back the same way. Never by the
   // executor: `self_merge` is on its prohibited list either way.
   "merged",
-  // D-083: reached by `focrux sync`, from `gh` reporting the pull request
+  // D-083: reached by `perbo sync`, from `gh` reporting the pull request
   // closed and unmerged. Never by the executor, which has no way to close one.
   "closed",
   "changes_requested",
   "failed",
   "cancelled",
-  // Reached by `focrux serve`, from the ticket's own `depends_on` and from
+  // Reached by `perbo serve`, from the ticket's own `depends_on` and from
   // scope overlap with a ticket ahead of it in the queue (SCP-008 criterion
   // 5). Left the same way, by the queue, when what it waits on has merged.
   "blocked",
+  // D-103: reached by `perbo run --ticket` finding the spec stale before the
+  // attempt starts. Terminal: no row leaves it.
+  "plan_invalid",
 ] as const satisfies readonly TicketState[];
 
 export const TICKET_PRIORITIES = ["urgent", "high", "normal", "low"] as const;
@@ -117,7 +120,7 @@ const AbsolutePathSchema = z
  *
  * Absolute on either platform's rules is refused here for the same reason it is
  * required there — the record travels. A `repository_root` of
- * `/Users/somebody/focrux` is a fact about the machine that ran `admit` and
+ * `/Users/somebody/perbo` is a fact about the machine that ran `admit` and
  * about no other, so a clone of the repository on a second machine read it and
  * pointed `run` and `sync` at a directory that was not the checkout it had just
  * been asked about, or did not exist at all.
@@ -199,14 +202,14 @@ export function ticketSourceLabel(source: TicketSource): string | null {
 }
 
 /**
- * A human-facing key, `FCX-118`. Distinct from `ticket_id`, which is opaque and
+ * A human-facing key, `PRB-118`. Distinct from `ticket_id`, which is opaque and
  * is what every other contract references — the key is for people to type and
  * the id is for things to point at, and conflating them makes a renumbering a
  * data migration.
  */
 export const TicketKeySchema = z
   .string()
-  .regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/, "ticket key must look like FCX-118");
+  .regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/, "ticket key must look like PRB-118");
 
 export const TICKET_SCHEMA_VERSION = 1;
 
@@ -230,7 +233,7 @@ export type PullRequestAttribution = z.infer<typeof PullRequestAttributionSchema
 /**
  * Which arm produced a delivery record (SCP-198, SCP-206).
  *
- * `loop` is `focrux run --ticket`: a contract, an executor, an independent
+ * `loop` is `perbo run --ticket`: a contract, an executor, an independent
  * review and remediation before a pull request exists. `direct` is the
  * registered comparison arm — one coding-agent invocation given the same
  * approved text and told to open a pull request itself.
@@ -289,7 +292,7 @@ export type Wait = z.infer<typeof WaitSchema>;
 /**
  * The queue's reading of the ticket, written whole each time it is decided.
  *
- * Stored rather than derived at read time so that `focrux list --json` keeps
+ * Stored rather than derived at read time so that `perbo list --json` keeps
  * its rule — nothing in it is computed — and so the reason a ticket is
  * `blocked` is on the record the person is looking at, not in the head of the
  * process that put it there.
@@ -306,7 +309,7 @@ export type Wait = z.infer<typeof WaitSchema>;
  */
 export const ReconciliationSchema = z.strictObject({
   base_tip: z.string().regex(/^[0-9a-f]{7,40}$/),
-  /** `focrux run --relevel`'s exit code: what the run said, in the one number a parent process gets. */
+  /** `perbo run --relevel`'s exit code: what the run said, in the one number a parent process gets. */
   exit_code: z.number().int(),
   at: z.iso.datetime(),
   /** What the re-level answered — a refusal's message, or the outcome and detail of a run that completed without levelling — so `list` says why and not only that. Null on a record written before this was kept. */
@@ -326,6 +329,97 @@ export const SchedulingSchema = z.strictObject({
   reconciliation: ReconciliationSchema.nullable().default(null),
 });
 export type Scheduling = z.infer<typeof SchedulingSchema>;
+
+/** One file the spec commit holds, by repository-relative path and content hash. */
+export const SpecFileSchema = z.strictObject({
+  path: z.string().min(1),
+  content_sha256: z.string().regex(/^sha256:[0-9a-f]{64}$/, "a spec file's hash must be sha256:<64 hex>"),
+});
+export type SpecFile = z.infer<typeof SpecFileSchema>;
+
+/**
+ * The spec a contract was drafted from (D-103): its path relative to the
+ * repository, the SHA-256 of the bytes the contract was approved from — which
+ * is what a later read compares against to find the spec stale — the files the
+ * loop commits first on the ticket's branch, and the names the repository had
+ * when the plan was approved, which is the other half of that reading.
+ *
+ * The hash is admission's until `perbo approve` replaces it with the bytes it
+ * read, because between drafting and approving is when a person reads the draft
+ * and edits the spec, and D-103 makes an edit **after approval** the stale one.
+ * It stays admission's on a spec approval could not read.
+ *
+ * `files` covers the spec's own folder and whatever the interview changed
+ * beside it: `CONTEXT.md` and the ADR folder. Admission's is the first cut,
+ * and `perbo approve` re-takes it the same way it re-takes the hash above,
+ * so the `spec.md` entry here always carries the same hash as
+ * `content_sha256`; it too stays admission's on a spec approval could not
+ * read. `files` is empty on a record written before the loop committed
+ * anything, which {@link admittedSpecFiles} reads as the spec alone, and that
+ * is what such a ticket's branch carries.
+ */
+export const AdmittedSpecSchema = z.strictObject({
+  path: z.string().min(1),
+  content_sha256: z.string().regex(/^sha256:[0-9a-f]{64}$/, "spec hash must be sha256:<64 hex>"),
+  files: z.array(SpecFileSchema).default([]),
+  /**
+   * The names the spec carries — paths as it spells them, symbols with their
+   * `@` — that this repository had when the plan was approved. Written at
+   * approval and nowhere else, because that is the moment the plan was agreed
+   * against the repository as it stood.
+   *
+   * *Had* is git's tree for a path and the symbol index for a symbol. A record
+   * travels between checkouts, so a path is here only where the tracked tree
+   * holds it: a build output one machine carries is that machine's and not the
+   * repository's, and recording it would have a fresh clone read the spec as
+   * one that has lost a file.
+   *
+   * It is what makes a name stale: a name in this list that no longer resolves
+   * is code the repository has lost, and a name not in it is code the plan is
+   * for and has yet to write. Without it every spec describing work still to do
+   * would be stale on its ticket's first run.
+   *
+   * `null` on a record written before the list existed, and on one approved by
+   * a version that did not record it. Such a record has no baseline to measure
+   * against, so the names in its spec are reported unjudged rather than stale —
+   * the same reading an index that cannot be believed gets. An empty list is a
+   * different answer: the spec was approved naming nothing this repository had.
+   */
+  names_that_resolved: z.array(z.string().min(1)).nullable().default(null),
+  /**
+   * Whether the symbol index was evidence about this checkout when the plan was
+   * approved, and so whether the `@Symbol` half of `names_that_resolved` was
+   * taken at all.
+   *
+   * False leaves that half empty: the index is stamped with a commit and a
+   * clean-or-not tree (D-015), and approving at another commit or over
+   * uncommitted changes in tracked files means it says nothing about the tree
+   * the plan was signed against. Editing the spec in `plan_review` — the
+   * ordinary thing to do while reading the draft — is itself such a change, so
+   * this is not a rare state.
+   *
+   * It is recorded because the reading side cannot tell that from a spec whose
+   * symbols the repository genuinely did not have. Without it the symbol half
+   * would go missing in silence and a later `perbo inspect` would call the
+   * spec current over a name that had gone; with it, those names are reported
+   * unjudged and `perbo index` is named as what fixes the next admission.
+   *
+   * `true` on a record written before this was recorded: such a record was
+   * written by a version that took the baseline exactly as this one does, so
+   * reading it as judged leaves those tickets as they were.
+   */
+  symbols_judged_at_approval: z.boolean().default(true),
+});
+export type AdmittedSpec = z.infer<typeof AdmittedSpecSchema>;
+
+/**
+ * The files the loop commits for an admission record, in the order it recorded
+ * them, and the spec alone for a record written before the list existed.
+ */
+export function admittedSpecFiles(spec: AdmittedSpec): SpecFile[] {
+  if (spec.files.length > 0) return [...spec.files];
+  return [{ path: spec.path, content_sha256: spec.content_sha256 }];
+}
 
 export const TicketSchema = z.strictObject({
   schema_version: z.literal(TICKET_SCHEMA_VERSION),
@@ -377,12 +471,20 @@ export const TicketSchema = z.strictObject({
      * How the criteria arrived. `imported` means from the source's own text;
      * `drafted` means a model drafted them from the source and a person then
      * edited and approved (the founder's decision of 2026-09-02, under ADR-0023
-     * §4: the draft is never executed, only the approved contract is).
+     * §4: the draft is never executed, only the approved contract is); `spec`
+     * is the same drafting from a spec committed in the repository (D-103),
+     * which is the only source that carries requirement ids.
      */
-    criteria_source: z.enum(["typed", "imported", "file", "drafted"]),
+    criteria_source: z.enum(["typed", "imported", "file", "drafted", "spec"]),
     criteria_count: z.number().int().min(1),
-    /** When the model's draft was produced. Null unless `criteria_source` is `drafted`. */
+    /** When the model's draft was produced. Null unless a model drafted them. */
     drafted_at: z.iso.datetime().nullable().default(null),
+    /**
+     * The spec this contract was drafted from (D-103), and every file the loop
+     * commits with it. Null for every other source, and defaulted so a ticket
+     * admitted before specs existed reads back as having none, which it has.
+     */
+    spec: AdmittedSpecSchema.nullable().default(null),
     /**
      * Wall clock from the contract first being shown (`admitted_at`) to
      * `approved_at` — the admission-friction instrument D-003 and ADR-0027 ask
@@ -390,7 +492,7 @@ export const TicketSchema = z.strictObject({
      */
     human_elapsed_ms: z.number().int().min(0).nullable().default(null),
     /**
-     * How many fields `focrux edit` changed between the contract as first
+     * How many fields `perbo edit` changed between the contract as first
      * rendered and the contract that was approved: the outcome, each criterion
      * added, removed or reworded, each scope glob added or removed. A field
      * edited twice counts once — it is one field the rendering got wrong.
@@ -408,8 +510,8 @@ export const TicketSchema = z.strictObject({
      * own record that a counter-seal exists for it.
      *
      * `admit` writes `<KEY>.contract.json` and the copy inside
-     * `<KEY>.draft.json` together, `focrux edit` rewrites both, and nothing else
-     * writes either. Approval and `focrux run --ticket` therefore require the
+     * `<KEY>.draft.json` together, `perbo edit` rewrites both, and nothing else
+     * writes either. Approval and `perbo run --ticket` therefore require the
      * pair to be present and identical, and refuse the ticket otherwise: a
      * contract that differs from its counter-seal, or has lost it, is one
      * nobody was shown.
@@ -417,9 +519,9 @@ export const TicketSchema = z.strictObject({
      * Null means no counter-seal was ever written for this ticket, which is a
      * ticket admitted before they were. Those keep the older behaviour — the
      * pair is not required and not compared — because for them a difference is
-     * the work of an `focrux edit` that only rewrote one file, and refusing
+     * the work of an `perbo edit` that only rewrote one file, and refusing
      * them would strand every unapproved and every approved-but-unrun ticket in
-     * an existing store. A single `focrux edit` counter-seals such a ticket
+     * an existing store. A single `perbo edit` counter-seals such a ticket
      * from then on.
      *
      * It is a record, not a proof: everything here is a file the person owns,
@@ -460,7 +562,7 @@ export const TicketSchema = z.strictObject({
        * The rest of this record is a cache of what `gh` said; this one field is
        * a fact about the loop's own doing, and it is here because nothing else
        * on the ticket can carry it. `recordDelivery` writes `loop` because the
-       * run it is recording opened the pull request itself, and `focrux sync`
+       * run it is recording opened the pull request itself, and `perbo sync`
        * writes `hand_off` for a number the record has never held on a ticket no
        * run is inside — SCP-157's case, decided whatever state that pull
        * request is in, so that a stranger's pull request seen while it was
@@ -510,7 +612,7 @@ export const TicketSchema = z.strictObject({
        *
        * A cache of what the last GitHub-side step used, like the rest of this
        * record: `recordDelivery` writes the path the run published through and
-       * `focrux sync` overwrites it with the path it polled through. Null where
+       * `perbo sync` overwrites it with the path it polled through. Null where
        * nothing has reached GitHub for this ticket, or on a record written
        * before the field existed.
        */
@@ -520,7 +622,7 @@ export const TicketSchema = z.strictObject({
        * it first and never revised afterwards.
        *
        * It is not a cache of anything `gh` says — GitHub cannot tell a pull
-       * request the loop opened from one a direct agent opened — so `focrux
+       * request the loop opened from one a direct agent opened — so `perbo
        * sync` carries it across the record it rewrites rather than reading it.
        * `stops` and `escapes` read both arms through the same fields, and this
        * is the only field that says which of the two a row is.
@@ -532,7 +634,7 @@ export const TicketSchema = z.strictObject({
        *
        * Not a cache of anything `gh` says — GitHub reports who the merge was
        * authenticated as, which is the same credential the loop pushes under —
-       * so, like `arm` and `opened_by`, `focrux sync` carries it across the
+       * so, like `arm` and `opened_by`, `perbo sync` carries it across the
        * record it rewrites rather than reading it.
        *
        * Null is every merge that is not the loop's own: a person's click, and
@@ -547,7 +649,7 @@ export const TicketSchema = z.strictObject({
        * every criterion, written by the run and by nothing else.
        *
        * Not a cache of anything `gh` says — GitHub cannot see whether a
-       * remediation round ran — so, like `arm` and `merged_by`, `focrux sync`
+       * remediation round ran — so, like `arm` and `merged_by`, `perbo sync`
        * carries it across the record it rewrites rather than reading it. It
        * describes the latest run recorded here: a re-run whose review resolved
        * its criteria writes null over it, because that is what that run did.
@@ -555,7 +657,7 @@ export const TicketSchema = z.strictObject({
       incomplete_review: IncompleteReviewPathSchema.nullable().default(null),
       /**
        * The checks on the head this pull request was opened over, as the run
-       * that opened it read them and as every later `focrux sync` re-reads
+       * that opened it read them and as every later `perbo sync` re-reads
        * them: one entry per check, with `unchecked` where nothing had
        * concluded by the time the reader stopped waiting.
        *
@@ -628,7 +730,7 @@ export type Ticket = z.infer<typeof TicketSchema>;
  * out of a colleague's machine and out of CI, and the directory the repository
  * sits in is different in every one of them. So the file records where the
  * repository is *relative to the store the file is in* — `..` for the ordinary
- * `<repo>/.focrux` — and the reader resolves it against the store it actually
+ * `<repo>/.perbo` — and the reader resolves it against the store it actually
  * loaded. Absent means the same as `..`, which is what a ticket admitted before
  * this field was relative reads as once its author's absolute path has been
  * dropped: nothing about the writing machine survives into the reading one.
@@ -686,6 +788,12 @@ export const TICKET_TRANSITIONS: ReadonlyArray<TicketTransition> = [
   // a person running it by hand reopens it to `ready` first, which is their
   // decision to override the queue.
   { from: "ready", to: "blocked" },
+  // D-103: a run refuses to start a ticket whose spec has been edited since
+  // the contract was approved from it, or whose spec names code the repository
+  // no longer has, and leaves the ticket here. Nothing goes the other way: the
+  // contract was approved against a statement that has changed, and an
+  // approved contract is immutable (ADR-0016), so the work is admitted again.
+  { from: "ready", to: "plan_invalid" },
   { from: "blocked", to: "ready" },
   { from: "blocked", to: "cancelled" },
   { from: "provisioning", to: "executing" },
@@ -721,7 +829,7 @@ export const TICKET_TRANSITIONS: ReadonlyArray<TicketTransition> = [
   // record settles at, and `changes_requested` is where a D-073 CHANGES
   // REQUESTED verdict on that pull request puts it instead — the verdict is
   // the fact about the review, and mergeability a fact about a branch a closed
-  // pull request no longer has. `focrux sync` is the only path onto either.
+  // pull request no longer has. `perbo sync` is the only path onto either.
   { from: "pr_open", to: "closed", when: pullRequestIsClosed },
   { from: "pr_open", to: "changes_requested", when: pullRequestIsClosed },
   // What `failed` admits, and for the same reason: the work can be run again.
@@ -1032,7 +1140,7 @@ function fromFailedToPullRequest(
   return TicketSchema.parse({ ...moved, history });
 }
 
-/** Whether the ticket is still moving. Drives the count in `focrux list`. */
+/** Whether the ticket is still moving. Drives the count in `perbo list`. */
 export function isActive(ticket: Ticket): boolean {
   return !(["merged", "done", "cancelled", "inconclusive"] as TicketState[]).includes(ticket.state);
 }

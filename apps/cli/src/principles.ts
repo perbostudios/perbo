@@ -1,18 +1,18 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { PRINCIPLES_FILENAME } from "@focrux/runner";
+import { PRINCIPLES_FILENAME } from "@perbo/runner";
 import { UsageError } from "./args.js";
 import { DEFAULT_STORE_DIRNAME } from "./tickets.js";
 
 /**
- * `focrux principle` — the D-065 ratchet's human side.
+ * `perbo principle` — the D-065 ratchet's human side.
  *
  * Every time a question stops for a person that no determinable practice
  * answers, the answer is recorded here, and every later executor brief
  * consults it — so the same question is never asked twice and the category of
  * things that must stop shrinks by accumulation. The file is written only by
  * this command: the runner's prohibited paths refuse the agent every write
- * under `.focrux/**`, so principles are always a person's.
+ * under `.perbo/**`, so principles are always a person's.
  */
 
 const HEADER = `# Product principles
@@ -32,7 +32,7 @@ export interface PrincipleArgs {
 export function parsePrincipleArgs(argv: string[]): PrincipleArgs {
   const [action, ...rest] = argv;
   if (action !== "add" && action !== "list") {
-    throw new UsageError("usage: focrux principle add \"<what the product should do>\" | focrux principle list");
+    throw new UsageError("usage: perbo principle add \"<what the product should do>\" | perbo principle list");
   }
   const args: PrincipleArgs = { action, text: null, repo: ".", store: null };
   for (let i = 0; i < rest.length; i += 1) {

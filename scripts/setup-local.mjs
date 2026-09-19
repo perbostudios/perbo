@@ -6,16 +6,16 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const environment = { ...process.env };
-delete environment.FOCRUX_DESKTOP_DEV_URL;
+delete environment.PERBO_DESKTOP_DEV_URL;
 const flags = process.argv.slice(2);
 if (flags.includes("--help")) {
   console.log(
-    "Usage: ./scripts/setup-local.mjs [--no-launch]\n\nChecks prerequisites, installs pinned dependencies, builds Focrux and opens the desktop.\n--no-launch  Build without opening a window (CI or headless setup).\nRequires Node 22+, npm and Git. Provider CLIs are installed and signed in separately.",
+    "Usage: ./scripts/setup-local.mjs [--no-launch]\n\nChecks prerequisites, installs pinned dependencies, builds Perbo and opens the desktop.\n--no-launch  Build without opening a window (CI or headless setup).\nRequires Node 22+, npm and Git. Provider CLIs are installed and signed in separately.",
   );
   process.exit(0);
 }
 function fail(message) {
-  console.error(`\nFocrux setup: ${message}`);
+  console.error(`\nPerbo setup: ${message}`);
   process.exit(1);
 }
 if (flags.some((flag) => flag !== "--no-launch"))
@@ -85,12 +85,12 @@ function pnpm(args) {
     );
 }
 console.log(
-  `\nSetting up Focrux in ${root}\nUsing ${packageManager} and Node ${process.versions.node}.`,
+  `\nSetting up Perbo in ${root}\nUsing ${packageManager} and Node ${process.versions.node}.`,
 );
 pnpm(["install", "--frozen-lockfile", "--prod=false"]);
 pnpm(["desktop:build"]);
 console.log(
-  "\nFocrux is ready. Connect Claude Code (claude auth login) and/or Codex (codex login) in the app. GitHub CLI login is needed only for GitHub delivery.",
+  "\nPerbo is ready. Connect Claude Code (claude auth login) and/or Codex (codex login) in the app. GitHub CLI login is needed only for GitHub delivery.",
 );
 if (flags.includes("--no-launch"))
   console.log("Run this script again without --no-launch to open the desktop.");

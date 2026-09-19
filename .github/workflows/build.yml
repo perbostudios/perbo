@@ -73,12 +73,12 @@ jobs:
       - name: Install validator dependencies
         run: python -m pip install --quiet --disable-pip-version-check -r scripts/requirements-validation.txt
 
-      # `FOCRUX_PYTHON` names the interpreter the step above installed the
+      # `PERBO_PYTHON` names the interpreter the step above installed the
       # validators' dependencies into, rather than whatever `python3` resolves
       # to on the runner.
       - name: validators
         env:
-          FOCRUX_PYTHON: python
+          PERBO_PYTHON: python
         run: node scripts/check.mjs validators
 
   # A check on every pull request: one that edits a file that judges a change —
@@ -160,7 +160,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build the evaluation harness
-        run: pnpm exec turbo run build --filter=@focrux/evaluation
+        run: pnpm exec turbo run build --filter=@perbo/evaluation
 
       - name: Clone the pinned corpus
         run: |
@@ -286,8 +286,6 @@ jobs:
       - name: Set up and build the desktop without launching it
         run: node scripts/setup-local.mjs --no-launch
 
-      - name: Bundled desktop runtime and license
+      - name: The CLI on the Node inside Electron
         run: node apps/desktop/scripts/check-runtime.mjs
 
-      - name: Windows runtime packaging regression
-        run: npm exec --yes --package=pnpm@9.15.9 -- pnpm --filter @focrux/desktop exec vitest run test/build-runtime.test.ts

@@ -7,9 +7,9 @@ import {
   insideAllowedPaths,
   isSecretPath,
   parseNameStatus,
-} from "@focrux/contracts";
-import type { ChangeSet, SecretIndex } from "@focrux/contracts";
-import { gitEnv, run, runOrThrow } from "@focrux/workspace";
+} from "@perbo/contracts";
+import type { ChangeSet, SecretIndex } from "@perbo/contracts";
+import { gitEnv, run, runOrThrow } from "@perbo/workspace";
 import { inspectPaths, type JudgingArtifacts, type ProhibitedHit } from "./prohibited.js";
 import { SCRATCH_EXCLUDE_PATHSPEC } from "./scratch.js";
 
@@ -48,12 +48,19 @@ import { SCRATCH_EXCLUDE_PATHSPEC } from "./scratch.js";
  *    `describeRange`, so a merge-up that re-reads the range re-asserts it over
  *    the change set the review will actually see.
  * 6. **The executor's scratch directory is excluded by pathspec, here.** The
- *    runner points `TMPDIR` at `<worktree>/.focrux-tmp` (SCP-166) and this is
+ *    runner points `TMPDIR` at `<worktree>/.perbo-tmp` (SCP-166) and this is
  *    where that directory stops: every list the seal builds carries
  *    `SCRATCH_EXCLUDE_PATHSPEC`, so the directory is never staged, never
  *    committed and never in the diff a reviewer reads — however it got there.
  *    The alternative, a `.gitignore` line or a Git exclude file, would have the
  *    runner write outside the attempt's worktree to keep the executor inside it.
+ * 7. **The spec commit's files are excluded from the change set** (D-103,
+ *    SCP-314). The branch's first commit holds the spec the contract was
+ *    drafted from, and it lands with the change; the review reads the diff
+ *    after it. `spec_paths` is what keeps every file that commit holds out of
+ *    the list, the diff and the scope assertion, so the checks, the review, the
+ *    verification and the pull request still read one change set (SCP-192) and
+ *    none of them reads the spec as work.
  */
 
 export interface SealRequest {
@@ -81,6 +88,13 @@ export interface SealRequest {
    * not this is the difference between a clean diff and a spurious scope escape.
    */
   exclude_paths?: readonly string[];
+  /**
+   * The files the branch's spec commit holds (D-103), kept out of the change
+   * set this describes. The spec lands with the change and the reviewer may
+   * open it as it opens any file; what it must not read is the spec as part of
+   * the work it is judging.
+   */
+  spec_paths?: readonly string[];
   timeoutMs?: number;
   /** Bytes of diff the reviewer is handed whole. Defaults to `MAX_REVIEWABLE_DIFF_BYTES`. */
   max_diff_bytes?: number;
@@ -115,18 +129,19 @@ async function git(args: string[], cwd: string, timeoutMs: number) {
 export async function sealChangeSet(request: SealRequest): Promise<SealResult> {
   const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const cwd = request.worktree;
+  // The spec commit's files are excluded from the staging as well as from the
+  // range: a write to one is refused before it happens (D-103), and one that
+  // reached the worktree anyway is left there rather than committed into a
+  // change set that does not list it.
+  const pathspec = [...SCRATCH_EXCLUDE_PATHSPEC, ...excludeSpec(request.spec_paths)];
 
-  await runOrThrow(["git", "add", "-A", "--", ...SCRATCH_EXCLUDE_PATHSPEC], {
+  await runOrThrow(["git", "add", "-A", "--", ...pathspec], {
     cwd,
     env: gitEnv(),
     timeoutMs,
   });
 
-  const staged = await git(
-    ["diff", "--cached", "--name-only", "--", ...SCRATCH_EXCLUDE_PATHSPEC],
-    cwd,
-    timeoutMs,
-  );
+  const staged = await git(["diff", "--cached", "--name-only", "--", ...pathspec], cwd, timeoutMs);
   const stagedPaths = staged.stdout.split("\n").filter((line) => line.trim().length > 0);
 
   // Content-hash exclusion (D-012). The filename check stays as a second line;
@@ -155,11 +170,7 @@ export async function sealChangeSet(request: SealRequest): Promise<SealResult> {
     }
   }
 
-  const remaining = await git(
-    ["diff", "--cached", "--name-only", "--", ...SCRATCH_EXCLUDE_PATHSPEC],
-    cwd,
-    timeoutMs,
-  );
+  const remaining = await git(["diff", "--cached", "--name-only", "--", ...pathspec], cwd, timeoutMs);
   const toCommit = remaining.stdout.split("\n").filter((line) => line.trim().length > 0);
 
   // An attempt that staged nothing is not sealed into an empty commit; the
@@ -177,6 +188,7 @@ export async function sealChangeSet(request: SealRequest): Promise<SealResult> {
     base_commit: request.base_commit,
     ...(request.judging ? { judging: request.judging } : {}),
     ...(request.paths_allowed === undefined ? {} : { paths_allowed: request.paths_allowed }),
+    ...(request.spec_paths === undefined ? {} : { spec_paths: request.spec_paths }),
     fallback_paths: toCommit,
     timeoutMs,
     ...(request.max_diff_bytes === undefined ? {} : { max_diff_bytes: request.max_diff_bytes }),
@@ -226,6 +238,8 @@ export async function describeRange(args: {
   judging?: JudgingArtifacts;
   /** The globs the approved contract admits a write under (SCP-195). */
   paths_allowed?: readonly string[];
+  /** The files the branch's spec commit holds, kept out of the range (D-103). */
+  spec_paths?: readonly string[];
   /** Paths to inspect when the range is empty — the seal's staged set. */
   fallback_paths?: readonly string[];
   timeoutMs?: number;
@@ -237,9 +251,10 @@ export async function describeRange(args: {
   const head = await runOrThrow(["git", "rev-parse", "HEAD"], { cwd, env: gitEnv(), timeoutMs });
   const head_commit = head.stdout.trim();
   const range = `${args.base_commit}..${head_commit}`;
+  const pathspec = [...SCRATCH_EXCLUDE_PATHSPEC, ...excludeSpec(args.spec_paths)];
 
   const listed = await runOrThrow(
-    ["git", "diff", "--name-status", "-z", range, "--", ...SCRATCH_EXCLUDE_PATHSPEC],
+    ["git", "diff", "--name-status", "-z", range, "--", ...pathspec],
     { cwd, env: gitEnv(), timeoutMs },
   );
   const files = parseNameStatus(listed.stdout);
@@ -247,8 +262,11 @@ export async function describeRange(args: {
   // The prohibited-path inspection reads the range, not this attempt's staged
   // set: what is judged is the change set that goes to review, whichever
   // attempt wrote each of its files.
+  const excluded = new Set(args.spec_paths ?? []);
   const changedPaths =
-    files.length > 0 ? files.map((file) => file.path) : [...(args.fallback_paths ?? [])];
+    files.length > 0
+      ? files.map((file) => file.path)
+      : [...(args.fallback_paths ?? [])].filter((path) => !excluded.has(path));
   const prohibited = inspectPaths(changedPaths, args.judging, { root: cwd });
 
   /**
@@ -285,13 +303,13 @@ export async function describeRange(args: {
   // tail of a diff is a diff with its first files missing. The size decides
   // whether the body is handed over at all.
   const cap = args.max_diff_bytes ?? MAX_REVIEWABLE_DIFF_BYTES;
-  const scratch = mkdtempSync(join(tmpdir(), "focrux-seal-"));
+  const scratch = mkdtempSync(join(tmpdir(), "perbo-seal-"));
   const diffPath = join(scratch, "change.diff");
   let diff: string | null;
   let diff_bytes: number;
   try {
     await runOrThrow(
-      ["git", "diff", "--no-color", `--output=${diffPath}`, range, "--", ...SCRATCH_EXCLUDE_PATHSPEC],
+      ["git", "diff", "--no-color", `--output=${diffPath}`, range, "--", ...pathspec],
       { cwd, env: gitEnv(), timeoutMs },
     );
     diff_bytes = statSync(diffPath).size;
@@ -314,6 +332,16 @@ export async function describeRange(args: {
     changed_paths: files.map((file) => file.path),
     outside_allowed_paths,
   };
+}
+
+/**
+ * One `:(exclude,literal)` pathspec per file the spec commit holds.
+ *
+ * `literal` because a recorded path is a filename and not a glob: a spec whose
+ * name contains a `*` or a `[` would otherwise exclude whatever it matched.
+ */
+function excludeSpec(paths: readonly string[] | undefined): string[] {
+  return (paths ?? []).map((path) => `:(exclude,literal)${path}`);
 }
 
 /**

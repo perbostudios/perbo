@@ -1,13 +1,13 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { parseUnifiedDiff, type CheckResult } from "@focrux/contracts";
-import { gitEnv, run } from "@focrux/workspace";
+import { parseUnifiedDiff, type CheckResult } from "@perbo/contracts";
+import { gitEnv, run } from "@perbo/workspace";
 import { RUNTIME_FILES, type LoadedFixture } from "./corpus.js";
 import { cachePathFor, clonePathFor } from "./prepare.js";
 
 /**
- * Fail-first evidence for a pinned fixture (`focrux-corpus baseline`).
+ * Fail-first evidence for a pinned fixture (`perbo-corpus baseline`).
  *
  * A pinned fixture's `checks.json` records one run, at the head commit, so it
  * cannot show a test failing without the fix — and this repository's own
@@ -236,7 +236,7 @@ async function measureAuthoredBaseline(
     return skip("the change adds or changes no test file, so there is no baseline to take");
   }
 
-  const dir = mkdtempSync(join(tmpdir(), `focrux-baseline-${id}-`));
+  const dir = mkdtempSync(join(tmpdir(), `perbo-baseline-${id}-`));
   try {
     cpSync(before, dir, { recursive: true });
     for (const test of split.tests) {

@@ -132,6 +132,146 @@ export const AGENT_CONFIG_PATTERNS = [
   "**/.codex/**",
 ] as const;
 
+/**
+ * Machine-local secrets, Git metadata and repository-supplied agent
+ * configuration: the paths no surface reads. Materialized local secrets are
+ * excluded from every change set, run bundle, log, telemetry payload and model
+ * context (D-012); Git metadata is machine-local; agent configuration is
+ * withheld rather than interpreted (ADR-0030). That such a path exists is
+ * reportable; its contents are not readable.
+ *
+ * Here rather than in the reviewer because two surfaces apply it: the
+ * reviewer's bounded reader, and the desktop's explorer, which neither lists
+ * nor previews one.
+ */
+export const NEVER_READ_PATHS = [
+  "**/.env",
+  "**/.env.*",
+  "**/*.pem",
+  "**/*.key",
+  "**/*.p12",
+  "**/id_rsa*",
+  "**/secrets/**",
+  "**/.npmrc",
+  "**/.netrc",
+  "**/.git",
+  "**/.git/**",
+  ...AGENT_CONFIG_PATTERNS,
+] as const;
+
+export const isNeverReadPath = (path: string) => matchesAny(path, NEVER_READ_PATHS);
+
+/**
+ * Where a repository keeps its specs, unless `.perbo/config.json` names
+ * another folder under `specs` (D-103).
+ */
+export const DEFAULT_SPEC_FOLDER = "specs";
+
+/**
+ * Where a repository keeps its ADRs, unless `.perbo/config.json` names
+ * another folder under `adr` (D-103).
+ *
+ * Read beside the spec folder, because the two travel together: the interview
+ * writes the spec, `CONTEXT.md` and the ADRs, and the loop commits whatever of
+ * the three approval recorded as one commit on the ticket's branch.
+ */
+export const DEFAULT_ADR_FOLDER = "docs/adr";
+
+/**
+ * Whether a configured spec folder is a plain repository-relative one:
+ * `specs`, `docs/specs`. Not absolute, not a drive path, no backslash, no `.`
+ * or `..` segment, no trailing slash. The CLI, the runner and the desktop
+ * read the same key, and this is what they agree on.
+ */
+export function isRepositoryRelativeFolder(folder: string): boolean {
+  if (folder.trim() !== folder || folder.length === 0) return false;
+  if (folder.startsWith("/") || /^[A-Za-z]:/.test(folder) || folder.includes("\\")) return false;
+  const segments = folder.split("/");
+  return segments.every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
+}
+
+/**
+ * The repository-relative path of a spec that is one piece of work's, or null
+ * where it is not one (D-103).
+ *
+ * A spec lives at `<specs>/<slug>/spec.md`, so the folder holding it is its
+ * own: that folder is what the interview may write, what admission records
+ * whole, and what the loop commits on the branch. A `spec.md` at the root of
+ * the repository, or under a folder the repository keeps other things in,
+ * would make all three of those the whole repository or somebody else's work.
+ *
+ * Judged on where the path lands rather than on what was typed, because a
+ * prefix test says nothing about that: `specs/x/../../elsewhere` keeps the
+ * prefix and leaves the folder. The CLI reads it for `--from-spec` and for the
+ * interview's `--spec`, which is why it is here.
+ */
+export function onePieceOfWork(spec: string, specs: string): string | null {
+  const landed = resolveRepositoryPath(spec);
+  if (landed === null) return null;
+  const at = landed.lastIndexOf("/");
+  if (at <= 0) return null;
+  const folder = landed.slice(0, at);
+  // A folder directly under the spec folder, and not one under another spec's:
+  // the folder is taken whole, so a spec nested inside one would be recorded
+  // and committed by both.
+  const slug = folder.startsWith(`${specs}/`) ? folder.slice(specs.length + 1) : null;
+  return slug !== null && slug.length > 0 && !slug.includes("/") ? landed : null;
+}
+
+/**
+ * One repository-relative path with its `.` and `..` segments resolved, or
+ * null where it is not one: absolute, a drive path, or a climb past the root.
+ *
+ * Written on the string rather than through `node:path`, because the renderer
+ * loads this module in the browser and the answer is the same either way for a
+ * path the repository states with `/`.
+ *
+ * A backslash spelling is not one: Git states a tracked path with `/`, so a
+ * path holding `\` is not a path this repository names, and rewriting the
+ * separator here would resolve `..\..\elsewhere` as if it had been written
+ * the repository's way.
+ */
+export function resolveRepositoryPath(path: string): string | null {
+  if (
+    path.length === 0 ||
+    path.trim() !== path ||
+    path.startsWith("/") ||
+    /^[A-Za-z]:/.test(path) ||
+    path.includes("\\")
+  ) {
+    return null;
+  }
+  const landed: string[] = [];
+  for (const segment of path.split("/")) {
+    if (segment.length === 0 || segment === ".") continue;
+    if (segment !== "..") {
+      landed.push(segment);
+      continue;
+    }
+    if (landed.length === 0) return null;
+    landed.pop();
+  }
+  return landed.length === 0 ? null : landed.join("/");
+}
+
+/**
+ * The paths an executor may never write, whatever a contract says (D-103).
+ *
+ * A spec is the intent the contract was drafted from, and it is a person's and
+ * the interview's to write; an attempt that edited it would be rewriting the
+ * statement it is judged against. It is prohibited rather than merely
+ * unadmitted so the refusal reads as "this is not yours to touch" rather than
+ * "widen the scope to reach it", which is the distinction D-105 draws.
+ *
+ * `folder` is the repository's configured spec folder; the default is added
+ * beside it, so a repository that moved its specs still refuses writes to the
+ * place they used to be and to the place a stale worktree might still have.
+ */
+export function standingProhibitedPaths(folder?: string | null): string[] {
+  const folders = [DEFAULT_SPEC_FOLDER, ...(folder ? [folder] : [])];
+  return [...new Set(folders)].map((each) => `${each}/**`);
+}
+
 export const isMigrationPath = (path: string) => matchesAny(path, MIGRATION_PATTERNS);
 export const isDependencyPath = (path: string) => matchesAny(path, DEPENDENCY_PATTERNS);
 export const isConfigPath = (path: string) => matchesAny(path, CONFIG_PATTERNS);
@@ -157,9 +297,11 @@ export const isAgentConfigPath = (path: string) => matchesAny(path, AGENT_CONFIG
  * `**` anywhere admits everything, so a ticketless run — whose scope is exactly
  * `**` — is judged by the worktree root alone, as it was before this existed.
  *
- * `paths_prohibited` is deliberately not subtracted: a prohibited path inside
- * the allowed ones is a blocking review finding, and the guard is not the place
- * to author a second rule about it.
+ * `paths_prohibited` is not subtracted here. It is a rule of its own in the
+ * guard, judged before these globs are, so a path that is both is refused as
+ * prohibited rather than as unadmitted (D-105): the same rule applied at write
+ * time saves a remediation round for every slip, and subagents write as well as
+ * the executor. The reviewer's `scope.prohibited_path` finding stays behind it.
  */
 export function admittedWriteGlobs(scope: {
   paths_allowed: readonly string[];

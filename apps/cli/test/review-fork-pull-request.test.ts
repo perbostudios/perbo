@@ -2,12 +2,12 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ReviewModel } from "@focrux/review";
+import type { ReviewModel } from "@perbo/review";
 import { parseReviewArgs } from "../src/args.js";
 import { runReviewCommand, type Streams } from "../src/run.js";
 
 /**
- * `focrux review --pr` on a pull request opened from a fork (SCP-211).
+ * `perbo review --pr` on a pull request opened from a fork (SCP-211).
  *
  * A pull request from a fork has its head commit in the fork, not in the
  * repository the pull request is open on, and reading it as though it were in
@@ -36,7 +36,7 @@ import { runReviewCommand, type Streams } from "../src/run.js";
  * outrun five seconds on its own.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-fork-pr-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-fork-pr-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 /**
@@ -218,10 +218,10 @@ async function review(
   return { out, err, code };
 }
 
-/** The one bundle in `<repo>/.focrux/reviews`, parsed. */
+/** The one bundle in `<repo>/.perbo/reviews`, parsed. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- read back as JSON, as a person reads it
 function storedBundle(repo: string): Record<string, any> {
-  const dir = join(repo, ".focrux", "reviews");
+  const dir = join(repo, ".perbo", "reviews");
   const files = readdirSync(dir).filter((name) => name.endsWith(".review.json"));
   expect(files).toHaveLength(1);
   return JSON.parse(readFileSync(join(dir, files[0]!), "utf8"));
@@ -393,7 +393,7 @@ describe("a fork whose head cannot be fetched is refused before anything is spen
     // and no bundle claims a review happened.
     expect(model.built).toBe(0);
     expect(model.turns).toBe(0);
-    expect(existsSync(join(repo, ".focrux"))).toBe(false);
+    expect(existsSync(join(repo, ".perbo"))).toBe(false);
 
     // And the refusal came before the diff was read, so the fork's failure
     // costs one read rather than two.
@@ -433,7 +433,7 @@ describe("a fork whose head cannot be fetched is refused before anything is spen
 
     expect(model.built).toBe(0);
     expect(model.turns).toBe(0);
-    expect(existsSync(join(repo, ".focrux"))).toBe(false);
+    expect(existsSync(join(repo, ".perbo"))).toBe(false);
     expect(ghInvocations(log).some((call) => call.startsWith("pr diff"))).toBe(false);
   }, 30_000);
 });

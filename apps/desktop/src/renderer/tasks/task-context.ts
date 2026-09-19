@@ -37,6 +37,7 @@ export function taskRecords({ detail, workspace, repoId }: TaskContext) {
         "s"
       : "Not recorded",
     busy: projection.busy,
+    held: projection.held,
     criteria:
       "acceptance_criteria" in contract ? contract.acceptance_criteria : [],
     models:

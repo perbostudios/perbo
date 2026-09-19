@@ -15,7 +15,7 @@ afterEach(() => {
     rmSync(root, { recursive: true, force: true });
 });
 function state(): PreToolGuardState {
-  const root = mkdtempSync(join(tmpdir(), "focrux-codex-guard-"));
+  const root = mkdtempSync(join(tmpdir(), "perbo-codex-guard-"));
   roots.push(root);
   mkdirSync(join(root, "src"));
   const profile = buildPermissionProfile({ worktree: root });
@@ -24,6 +24,7 @@ function state(): PreToolGuardState {
     cwd: root,
     tmpdir: null,
     paths_allowed: ["src/**"],
+    paths_prohibited: [],
     allow_list: profile.command_allow_list,
     deny_list: profile.command_deny_list,
   };
@@ -83,7 +84,7 @@ describe("Codex runner action boundary", () => {
   });
   it("validates both subscription providers without changing legacy defaults", () => {
     const required = {
-      ticket_key: "FCX-1",
+      ticket_key: "PRB-1",
       repository_root: "/repo",
       worktree_root: "/worktree",
       bundle_root: "/bundles",

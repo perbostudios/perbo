@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeSetFromDiff } from "@focrux/contracts";
+import { changeSetFromDiff } from "@perbo/contracts";
 import { assessAgentConfiguration } from "../src/agent-config.js";
 
 const diffFor = (paths: string[]) =>

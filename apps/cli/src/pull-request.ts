@@ -3,13 +3,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { parsePullRequestReference, type GithubCredential } from "@focrux/contracts";
+import { parsePullRequestReference, type GithubCredential } from "@perbo/contracts";
 import {
   GithubCredentialError,
   requireGithubCredential,
   type GithubCredentialReading,
-} from "@focrux/runner";
-import { gitEnv, run as captureRun, type RunResult } from "@focrux/workspace";
+} from "@perbo/runner";
+import { gitEnv, run as captureRun, type RunResult } from "@perbo/workspace";
 import { UsageError } from "./args.js";
 
 /**
@@ -21,7 +21,7 @@ import { UsageError } from "./args.js";
  * for the same three things about a pair of local refs. Neither writes anything
  * anywhere: no branch is pushed, no comment is posted, no status is set. That is
  * not a convention here — it is the whole of the network surface of
- * `focrux review`, and the reason the command can be pointed at somebody else's
+ * `perbo review`, and the reason the command can be pointed at somebody else's
  * pull request at all.
  */
 
@@ -191,7 +191,7 @@ export interface GhOptions {
 
 /**
  * Read one pull request through the locally installed `gh`, with the user's own
- * credential (D-009: Focrux never holds one). Argv only, and both calls are
+ * credential (D-009: Perbo never holds one). Argv only, and both calls are
  * `view` and `diff` — there is no `gh` subcommand here that changes anything.
  */
 export async function readPullRequest(
@@ -203,7 +203,7 @@ export async function readPullRequest(
   const repo = `${target.owner}/${target.repo}`;
 
   // SCP-200: which credential this read goes through, decided before it goes.
-  // The whole network surface of `focrux review` is the two reads below, so a
+  // The whole network surface of `perbo review` is the two reads below, so a
   // machine with neither a token nor a login is told so in those words rather
   // than through whatever `gh pr view` prints about it on the day.
   let credential: GithubCredentialReading;

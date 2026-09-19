@@ -9,7 +9,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import readline from "node:readline";
-import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@focrux/contracts";
+import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
 import {
   ProviderError,
   providerFailureText,
@@ -81,7 +81,7 @@ export interface CodexCliOptions {
  * using an ephemeral thread is insufficient: Codex otherwise loads user skills,
  * plugins and the parent desktop task. The temporary home contains one symlink
  * to auth.json and nothing else, so the credential remains owned and read by
- * Codex while Focrux never opens or serialises it.
+ * Codex while Perbo never opens or serialises it.
  */
 class CodexAppServer {
   private readonly process: ChildProcessWithoutNullStreams;
@@ -109,8 +109,8 @@ class CodexAppServer {
 
   constructor(options: CodexCliOptions) {
     this.timeoutMs = options.timeoutMs ?? 600_000;
-    this.scratch = mkdtempSync(join(tmpdir(), "focrux-codex-review-"));
-    this.codexHome = mkdtempSync(join(tmpdir(), "focrux-codex-home-"));
+    this.scratch = mkdtempSync(join(tmpdir(), "perbo-codex-review-"));
+    this.codexHome = mkdtempSync(join(tmpdir(), "perbo-codex-home-"));
     chmodSync(this.codexHome, 0o700);
 
     const sourceHome =
@@ -136,7 +136,7 @@ class CodexAppServer {
     });
 
     this.process = spawn(
-      options.binary ?? process.env.FOCRUX_CODEX_BINARY ?? "codex",
+      options.binary ?? process.env.PERBO_CODEX_BINARY ?? "codex",
       [
         "--disable",
         "shell_tool",
@@ -177,8 +177,8 @@ class CodexAppServer {
   async start(modelId: string, system: string): Promise<string> {
     await this.request("initialize", {
       clientInfo: {
-        name: "focrux_reviewer",
-        title: "Focrux semantic reviewer",
+        name: "perbo_reviewer",
+        title: "Perbo semantic reviewer",
         version: "0.1.0",
       },
       capabilities: {

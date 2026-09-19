@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { exclusiveJob, heldRepository } from "../../shared/jobs.js";
 import { ManifestDialog } from "./ManifestDialog.js";
-import { Button, Dialog, Field, Notice } from "@focrux/ui";
+import { Button, Dialog, Field, Notice } from "@perbo/ui";
 import { FactList, PageHeader, SectionLabel, useElapsed } from "../Screen.js";
 import { errorMessage, useAction } from "../data.js";
 import { useToast } from "../shell/Toast.js";
@@ -24,9 +25,10 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
     [limitsOpen, setLimitsOpen] = useState(false),
     [diagnostic, setDiagnostic] = useState<string | null>(null),
     [manifestRepo, setManifestRepo] = useState<string | null>(null);
-  const active = workspace.jobs.some(
-    (job) => job.state === "running" || job.state === "stopping",
-  );
+  // A readiness check is an exclusive command; disconnecting a repository
+  // waits for whatever is running in it, in either lane.
+  const active = Boolean(exclusiveJob(workspace.jobs));
+  const held = (repoId: string): boolean => heldRepository(workspace.jobs, repoId);
   const save = async (): Promise<void> => {
     await action.mutateAsync({ kind: "saveSettings", settings });
   };
@@ -177,10 +179,10 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
                 setLimitsOpen(true);
               }}
             >
-              <span>Ceilings</span>
+              <span>Stops</span>
               <span className="mono">
-                {workspace.settings.minutes} min · {workspace.settings.commands}{" "}
-                commands · ${workspace.settings.ticketDollars.toFixed(2)}
+                {workspace.settings.stallMinutes} min idle · $
+                {workspace.settings.ticketDollars.toFixed(2)} a ticket
               </span>
               <img src="./brand/dropdown.svg" alt="" />
             </button>
@@ -262,7 +264,7 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
                   </Button>
                   <Button
                     className="small"
-                    disabled={active}
+                    disabled={held(repo.id)}
                     onClick={() =>
                       action.mutate({
                         kind: "forgetRepository",
@@ -284,7 +286,7 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
             + <span>Add a repository</span>
           </button>
           <p className="small muted">
-            Nothing is cloned and nothing is pushed without you — focrux reads the
+            Nothing is cloned and nothing is pushed without you — perbo reads the
             checkout in place and works in a throwaway worktree.
           </p>
         </div>
@@ -303,34 +305,31 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
           change in General
         </button>
         <span className="spacer" />
-        <span className="mono muted small">focrux {workspace.version}</span>
+        <span className="mono muted small">perbo {workspace.version}</span>
       </footer>
       {limitsOpen && (
         <Dialog
-          title="Ceilings for new runs"
+          title="What stops a new run"
           onClose={() => setLimitsOpen(false)}
         >
           <p className="small muted">
-            These limits can tighten the repository’s limits. Subscription cost
-            is only shown when the provider reports it.
+            A run has no time, token, iteration or command ceiling. What stops
+            one is a stall — no tool activity for the window below — and, where
+            your executor authenticates with an API key, the ticket cost cap.
+            On a subscription nothing caps the spend. These can tighten a
+            repository’s own limits, never loosen them.
           </p>
           {(
             [
               {
-                key: "minutes",
-                label: "Minutes per attempt",
+                key: "stallMinutes",
+                label: "Minutes with no tool activity before a run stops",
                 min: 1,
-                max: 120,
-              },
-              {
-                key: "commands",
-                label: "Commands per attempt",
-                min: 1,
-                max: 1000,
+                max: 240,
               },
               {
                 key: "ticketDollars",
-                label: "Ticket cost measure (USD equivalent)",
+                label: "Ticket cost cap (USD, API-key executors only)",
                 min: 0.1,
                 max: 1000,
               },

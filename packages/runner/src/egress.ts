@@ -1,4 +1,4 @@
-import type { EgressRecord } from "@focrux/contracts";
+import type { EgressRecord } from "@perbo/contracts";
 
 /**
  * Egress logging with an attempt-terminating deny path (docs/08, threat 3,

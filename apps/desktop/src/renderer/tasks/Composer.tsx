@@ -1,11 +1,11 @@
 import { InkIcon } from "../InkIcon.js";
 import { useEffect, useRef } from "react";
-import { Button, Field, Notice } from "@focrux/ui";
+import { Button, Field, Notice } from "@perbo/ui";
 import {
   CriterionSchema,
   DraftSchema,
 } from "../../shared/protocol.js";
-import type { Detail, Draft, TaskModels } from "../../shared/protocol.js";
+import type { Detail, Draft, EditingTarget, TaskModels } from "../../shared/protocol.js";
 import { useContractEditing } from "./contract-editor.js";
 import {
   Dropdown,
@@ -16,13 +16,15 @@ import {
 } from "../Screen.js";
 import { ModelPicker, useProviders } from "../settings/ConnectionScreens.js";
 import type { PageProps } from "../shell/App.js";
+import { isLive } from "../../shared/jobs.js";
 export { contractDraft } from "../../shared/contract-editing.js";
 export function Composer({
-  workspace, navigate, existing, existingRepoId, onCancel,
-}: PageProps & { existing?: Detail; existingRepoId?: string; onCancel?: () => void }) {
-  const target = existing && existingRepoId
+  workspace, navigate, existing, existingRepoId, onCancel, target: chosen,
+}: PageProps & { existing?: Detail; existingRepoId?: string; onCancel?: () => void; target?: EditingTarget }) {
+  // Planning mode hands over the session it holds; a ticket's own editor names the ticket.
+  const target: EditingTarget = chosen ?? (existing && existingRepoId
     ? { kind: "ticket" as const, repoId: existingRepoId, key: existing.ticket.key }
-    : { kind: "new" as const, repoId: workspace.repositories[0]?.id ?? "" };
+    : { kind: "new" as const, repoId: workspace.repositories[0]?.id ?? "" });
   const editor = useContractEditing(target, workspace.settings, existing);
   const { draft, step, models, editing, criterion: editedCriterion, newPath } = editor.form;
   const { repoId, record, session } = editor;
@@ -36,9 +38,10 @@ export function Composer({
     editor.update({ criterion: typeof change === "function" ? change(editedCriterion) : change });
   const setNewPath = (newPath: string | null): void => editor.update({ newPath });
   const providers = useProviders(), handled = useRef<string | null>(session?.phase === "ready" ? session.operation?.id ?? null : null);
-  const submitted = useRef<"draft" | "compile">("draft");
-  const active = workspace.jobs.some((job) => job.state === "running" || job.state === "stopping");
+  const submitted = useRef<"draft" | "compile" | "generate" | "startOver">("draft");
   const currentJob = workspace.jobs.find((job) => job.id === session?.operation?.jobId && job.repoId === repoId);
+  // Only this session's own drafting holds its Start: planning runs beside a run and beside another session (D-101).
+  const pending = Boolean(currentJob && isLive(currentJob));
   const restoring = editor.loading || !session || ["conflict", "outcome-unknown"].includes(session.phase);
   const readError = editor.error;
   useEffect(() => {
@@ -58,12 +61,21 @@ export function Composer({
   if (editor.loading) return <div className="launch"><p>Restoring your saved contract edits…</p></div>;
   if (editor.submitting || session?.phase === "working") {
     const intent = editor.submitting ? submitted.current : session?.operation?.intent;
+    const drafting = intent === "generate" || intent === "startOver";
     return <WaitScreen
       step={intent === "draft" ? 1 : 2}
-      title={intent === "draft" ? "Drafting your acceptance criteria" : "Compiling your contract"}
+      title={intent === "draft"
+        ? "Drafting your acceptance criteria"
+        : intent === "generate"
+          ? "Drafting the plan from your spec"
+          : intent === "startOver"
+            ? "Drafting the plan again from your spec"
+            : "Compiling your contract"}
       description={intent === "draft"
         ? "Reading the packages your outcome touches, so the criteria say what must be proven rather than restating the title."
-        : "Pinning the base commit and deriving the plan level from the scope. You will review the contract before the coding loop starts."}
+        : drafting
+          ? "Reading the spec and the packages it names, and proposing the criteria, the scope and the execution graph. You will review the plan before anything runs."
+          : "Pinning the base commit and deriving the plan level from the scope. You will review the contract before the coding loop starts."}
       status={session?.operation?.state === "stopping" ? "Stopping…" : currentJob?.label ?? "Reading the recorded outcome…"}
       onCancel={cancel}
     />;
@@ -92,7 +104,7 @@ export function Composer({
     setEditedCriterion({ ...criterion });
   };
   const canDraft =
-    Boolean(repoId && draft.outcome.trim()) && !active && !restoring;
+    Boolean(repoId && draft.outcome.trim()) && !pending && !restoring;
   const valid =
     DraftSchema.safeParse(draft).success &&
     Boolean(repoId) &&
@@ -447,7 +459,7 @@ export function Composer({
         </Button>
         <Button
           variant="primary"
-          disabled={step === 1 ? !canDraft : !valid || active}
+          disabled={step === 1 ? !canDraft : !valid || pending}
           onClick={() => {
             if (step === 1 && record) setStep(2);
             else start(step === 1);

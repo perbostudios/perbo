@@ -12,7 +12,7 @@ import { test } from "node:test";
 
 import {
   CLAUDE_SETTINGS,
-  FOCRUX_CONFIG,
+  PERBO_CONFIG,
   PROTECTED_PATHS,
   REPO_ROOT,
   computeDenyList,
@@ -37,8 +37,8 @@ function writeJson(dir, relative, value) {
 
 /** A repository with the two declaring files, and whatever settings the test wants. */
 function fixture({ configTests = TESTS, checkTests = TESTS, checkPaths = PATHS, settings } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "focrux-sync-protected-"));
-  writeJson(dir, FOCRUX_CONFIG, { protected_tests: configTests, checks: [] });
+  const dir = mkdtempSync(join(tmpdir(), "perbo-sync-protected-"));
+  writeJson(dir, PERBO_CONFIG, { protected_tests: configTests, checks: [] });
   writeJson(dir, PROTECTED_PATHS, { protected_tests: checkTests, protected_paths: checkPaths });
   if (settings !== undefined) writeJson(dir, CLAUDE_SETTINGS, settings);
   return dir;
@@ -80,14 +80,14 @@ test("divergent protected_tests fail, naming which file has which entry", () => 
   });
   const { code, err } = invoke(["--check"], dir);
   assert.equal(code, 1);
-  assert.match(err, /remediation\.test\.ts — in \.focrux\/config\.json, not in \.github\/protected-paths\.json/);
-  assert.match(err, /decision-order\.test\.ts — in \.github\/protected-paths\.json, not in \.focrux\/config\.json/);
+  assert.match(err, /remediation\.test\.ts — in \.perbo\/config\.json, not in \.github\/protected-paths\.json/);
+  assert.match(err, /decision-order\.test\.ts — in \.github\/protected-paths\.json, not in \.perbo\/config\.json/);
 });
 
 test("the same entries in a different order are a difference too", () => {
   assert.deepEqual(protectedTestsDifferences(TESTS, TESTS), []);
   assert.deepEqual(protectedTestsDifferences(TESTS, [...TESTS].reverse()), [
-    `  the same entries in a different order in ${FOCRUX_CONFIG} and ${PROTECTED_PATHS}`,
+    `  the same entries in a different order in ${PERBO_CONFIG} and ${PROTECTED_PATHS}`,
   ]);
 });
 

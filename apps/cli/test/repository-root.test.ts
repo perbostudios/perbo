@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { win32 } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { StoredTicketSchema, type Ticket } from "@focrux/contracts";
-import { TicketRunConfigSchema } from "@focrux/runner";
+import { StoredTicketSchema, type Ticket } from "@perbo/contracts";
+import { TicketRunConfigSchema } from "@perbo/runner";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { TICKET_RUNS } from "../src/execute.js";
 import { TicketStoreError, listTickets, readTicket, storeDir, writeTicket } from "../src/tickets.js";
@@ -13,10 +13,10 @@ import { TicketStoreError, listTickets, readTicket, storeDir, writeTicket } from
 /**
  * A ticket file names no machine.
  *
- * The store is committed — `<repo>/.focrux/tickets/FCX-118.json` is in the
+ * The store is committed — `<repo>/.perbo/tickets/PRB-118.json` is in the
  * history like any other file — so every ticket is read from clones its author
  * never had: a colleague's checkout, a worktree, a CI runner, a `git clone`
- * into a temporary directory. A `repository_root` of `/Users/somebody/focrux`
+ * into a temporary directory. A `repository_root` of `/Users/somebody/perbo`
  * survived none of those, and what it took down with it was not a display
  * string: `run` provisions worktrees under that path and `sync` polls the pull
  * request from it, so a ticket read anywhere else acted on a checkout the
@@ -32,7 +32,7 @@ import { TicketStoreError, listTickets, readTicket, storeDir, writeTicket } from
  * gates and mutant attempts, that work can outrun five seconds on its own.
  */
 
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), "focrux-repository-root-")));
+const scratch = realpathSync(mkdtempSync(join(tmpdir(), "perbo-repository-root-")));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const GIT_ENV = {
@@ -94,12 +94,12 @@ function admitted(repo: string): void {
   });
   expect(code).toBe(0);
   git(repo, "add", "-A");
-  git(repo, "commit", "-q", "-m", "admit FCX-1");
+  git(repo, "commit", "-q", "-m", "admit PRB-1");
 }
 
 /** The bytes `admit` wrote, parsed but not validated: what is actually on disk. */
 const storedJson = (repo: string): Record<string, unknown> =>
-  JSON.parse(readFileSync(join(repo, ".focrux", "tickets", "FCX-1.json"), "utf8")) as Record<
+  JSON.parse(readFileSync(join(repo, ".perbo", "tickets", "PRB-1.json"), "utf8")) as Record<
     string,
     unknown
   >;
@@ -159,12 +159,12 @@ describe("a ticket admission writes", () => {
     const root = stored["repository_root"];
     expect(typeof root).toBe("string");
     expect(absoluteAnywhere(root as string)).toBe(false);
-    // The store sits at `<repo>/.focrux`, so the repository is one directory up.
+    // The store sits at `<repo>/.perbo`, so the repository is one directory up.
     expect(root).toBe("..");
 
     // And nothing else in the file smuggles the path back in: a typed admission
     // has no file source, so the admitting checkout must appear nowhere at all.
-    expect(readFileSync(join(repo, ".focrux", "tickets", "FCX-1.json"), "utf8")).not.toContain(
+    expect(readFileSync(join(repo, ".perbo", "tickets", "PRB-1.json"), "utf8")).not.toContain(
       repo,
     );
   }, 30_000);
@@ -177,7 +177,7 @@ describe("a ticket admission writes", () => {
     // Every later command re-writes the whole ticket. The relativisation is in
     // the store's writer rather than in `admit`, so a state change cannot put a
     // machine's path back.
-    writeTicket(dir, readTicket(dir, "FCX-1"));
+    writeTicket(dir, readTicket(dir, "PRB-1"));
     expect(storedJson(repo)["repository_root"]).toBe("..");
   }, 30_000);
 
@@ -204,10 +204,10 @@ describe("a ticket admission writes", () => {
     expect(code).toBe(0);
 
     const stored = JSON.parse(
-      readFileSync(join(store, "tickets", "FCX-1.json"), "utf8"),
+      readFileSync(join(store, "tickets", "PRB-1.json"), "utf8"),
     ) as Record<string, unknown>;
     expect(absoluteAnywhere(stored["repository_root"] as string)).toBe(false);
-    expect(readTicket(store, "FCX-1").repository_root).toBe(repo);
+    expect(readTicket(store, "PRB-1").repository_root).toBe(repo);
   }, 30_000);
 });
 
@@ -221,10 +221,10 @@ describe("a committed ticket read from another clone", () => {
     cloneRepository(repo, clone);
 
     const dir = storeDir(clone, null);
-    expect(readTicket(dir, "FCX-1").repository_root).toBe(clone);
+    expect(readTicket(dir, "PRB-1").repository_root).toBe(clone);
     expect(listTickets(dir).map((ticket) => ticket.repository_root)).toEqual([clone]);
     // Not the directory it was admitted in, which still exists and is wrong.
-    expect(readTicket(dir, "FCX-1").repository_root).not.toBe(repo);
+    expect(readTicket(dir, "PRB-1").repository_root).not.toBe(repo);
   }, 30_000);
 
   it("gives `run` the second clone to work in", () => {
@@ -233,7 +233,7 @@ describe("a committed ticket read from another clone", () => {
     const clone = join(scratch, "run-clone");
     cloneRepository(repo, clone);
 
-    const work = TICKET_RUNS.load({ cwd: clone, repo: ".", store: null, key: "FCX-1" });
+    const work = TICKET_RUNS.load({ cwd: clone, repo: ".", store: null, key: "PRB-1" });
     const config = TicketRunConfigSchema.parse(TICKET_RUNS.runConfig(work, undefined));
     expect(config.repository_root).toBe(clone);
   }, 30_000);
@@ -249,14 +249,14 @@ describe("a committed ticket read from another clone", () => {
     // tree stops being a legacy record the moment the migration has done its
     // work, and the coverage would expire with it.
     const dir = storeDir(clone, null);
-    legacyRoot(dir, "FCX-1", admitting);
+    legacyRoot(dir, "PRB-1", admitting);
 
-    const read = warningsFrom(() => readTicket(dir, "FCX-1"));
+    const read = warningsFrom(() => readTicket(dir, "PRB-1"));
     expect(read.value.repository_root).toBe(clone);
     // The path the file names is real, is on this machine, and is not what was used.
-    expect(absoluteAnywhere(storedRoot(dir, "FCX-1"))).toBe(true);
+    expect(absoluteAnywhere(storedRoot(dir, "PRB-1"))).toBe(true);
     expect(read.value.repository_root).not.toBe(admitting);
-    // Silently, because a ticket file inside `<repo>/.focrux` is a record of the
+    // Silently, because a ticket file inside `<repo>/.perbo` is a record of the
     // checkout it is in and of nothing else. The directory it names exists on
     // this machine — it is the checkout it was copied from — and a line about
     // that for every legacy ticket in the store would be noise, not news.
@@ -265,7 +265,7 @@ describe("a committed ticket read from another clone", () => {
 
     // Re-writing it drops the author's path for good.
     writeTicket(dir, ticket);
-    expect(storedRoot(dir, "FCX-1")).toBe("..");
+    expect(storedRoot(dir, "PRB-1")).toBe("..");
   }, 30_000);
 
   it("names both directories when a store outside its repository reads one", () => {
@@ -279,10 +279,10 @@ describe("a committed ticket read from another clone", () => {
     const elsewhere = join(scratch, "relocated");
     const store = join(elsewhere, "store");
     mkdirSync(store, { recursive: true });
-    cpSync(join(admitting, ".focrux", "tickets"), join(store, "tickets"), { recursive: true });
-    legacyRoot(store, "FCX-1", admitting);
+    cpSync(join(admitting, ".perbo", "tickets"), join(store, "tickets"), { recursive: true });
+    legacyRoot(store, "PRB-1", admitting);
 
-    const read = warningsFrom(() => readTicket(store, "FCX-1"));
+    const read = warningsFrom(() => readTicket(store, "PRB-1"));
     expect(read.value.repository_root).toBe(elsewhere);
     expect(read.warnings).toHaveLength(1);
     expect(read.warnings[0]).toContain(admitting);
@@ -302,10 +302,10 @@ describe("a committed ticket read from another clone", () => {
     const elsewhere = join(scratch, "absent-relocated");
     const store = join(elsewhere, "store");
     mkdirSync(store, { recursive: true });
-    cpSync(join(admitting, ".focrux", "tickets"), join(store, "tickets"), { recursive: true });
-    legacyRoot(store, "FCX-1", join(scratch, "no-such-machine", "focrux"));
+    cpSync(join(admitting, ".perbo", "tickets"), join(store, "tickets"), { recursive: true });
+    legacyRoot(store, "PRB-1", join(scratch, "no-such-machine", "perbo"));
 
-    const read = warningsFrom(() => readTicket(store, "FCX-1"));
+    const read = warningsFrom(() => readTicket(store, "PRB-1"));
     expect(read.value.repository_root).toBe(elsewhere);
     expect(read.warnings).toEqual([]);
   }, 30_000);
@@ -316,8 +316,8 @@ describe("the store's writer", () => {
     const repo = repository("refuses");
     admitted(repo);
     const dir = storeDir(repo, null);
-    const before = readFileSync(join(repo, ".focrux", "tickets", "FCX-1.json"), "utf8");
-    const ticket = readTicket(dir, "FCX-1");
+    const before = readFileSync(join(repo, ".perbo", "tickets", "PRB-1.json"), "utf8");
+    const ticket = readTicket(dir, "PRB-1");
 
     // The type says a ticket is valid; only a parse checks it. `writeTicket`
     // parses what it is about to write with the schema that reads it back, so
@@ -326,7 +326,7 @@ describe("the store's writer", () => {
     expect(() =>
       writeTicket(dir, { ...ticket, state: "somewhere-else" } as unknown as Ticket),
     ).toThrow(TicketStoreError);
-    expect(readFileSync(join(repo, ".focrux", "tickets", "FCX-1.json"), "utf8")).toBe(before);
+    expect(readFileSync(join(repo, ".perbo", "tickets", "PRB-1.json"), "utf8")).toBe(before);
   }, 30_000);
 
   it("parses with a schema that refuses an absolute repository root", () => {
@@ -340,7 +340,7 @@ describe("the store's writer", () => {
     admitted(repo);
     const stored = storedJson(repo);
     expect(StoredTicketSchema.safeParse(stored).success).toBe(true);
-    for (const root of ["/Users/somebody/focrux", "C:\\Users\\somebody\\focrux"]) {
+    for (const root of ["/Users/somebody/perbo", "C:\\Users\\somebody\\perbo"]) {
       const refused = StoredTicketSchema.safeParse({ ...stored, repository_root: root });
       expect(refused.success, `${root} was accepted as a stored repository root`).toBe(false);
       expect(refused.error?.issues[0]?.message).toContain("must be relative");

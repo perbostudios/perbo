@@ -1,6 +1,6 @@
 # Working in this repository
 
-Focrux is an open-source operating plane for getting work done with coding agents ([D-001](docs/11-open-decisions.md)). This repository is where Focrux is developed ([D-076](docs/11-open-decisions.md)) and holds its source of truth: the decision register, the ADRs, the canonical documents, the diagrams and the backlog. Read this before changing anything. `CLAUDE.md` imports this file, so Claude Code and Codex read the same rules.
+Perbo is an open-source operating plane for getting work done with coding agents ([D-001](docs/11-open-decisions.md)). This repository is where Perbo is developed ([D-076](docs/11-open-decisions.md)) and holds its source of truth: the decision register, the ADRs, the canonical documents, the diagrams and the backlog. Read this before changing anything. `CLAUDE.md` imports this file, so Claude Code and Codex read the same rules.
 
 ## The source of truth
 
@@ -19,17 +19,17 @@ The layout is in [docs/07](docs/07-monorepo-and-deployment.md), and each package
 
 ```bash
 pnpm check                                   # the gate: every stage, in order
-pnpm check --filter @focrux/review           # one package, after building what it depends on
+pnpm check --filter @perbo/review           # one package, after building what it depends on
 pnpm check --list                            # the stages, to run one on its own
 node apps/cli/dist/main.js doctor --repo .   # can this repository be materialized at all
 ```
 
-Running the corpus spends money: it needs a reviewer credential, and `--run` is the flag that spends it. `focrux run` spends more, because it executes a coding agent. Both use the person's own credential and write it nowhere.
+Running the corpus spends money: it needs a reviewer credential, and `--run` is the flag that spends it. `perbo run` spends more, because it executes a coding agent. Both use the person's own credential and write it nowhere.
 
 ## The rules that bite
 
 - **A test green on the machine that wrote it and red on the next is making an assumption about its environment.** Nothing under `.local/` exists on a fresh checkout; floor an assertion on what is always present.
-- **A fresh worktree needs `pnpm --filter @focrux/desktop rebuild node`** after an `--ignore-scripts` install, or `@focrux/desktop#build` fails with "Cannot find module 'node/bin/node'" and interrupts every package's tests.
+- **A fresh worktree needs `pnpm --filter @perbo/desktop rebuild node`** after an `--ignore-scripts` install, or `@perbo/desktop#build` fails with "Cannot find module 'node/bin/node'" and interrupts every package's tests.
 - **turbo drops `TMPDIR`.** A test whose precondition depends on the temporary path's length passes under `turbo run test`, which falls back to `/tmp`, and fails under a package's own vitest on `/var/folders/…`, or the reverse. Run both when a change touches paths, wrapping or rendering.
 - **One review and one gate at a time.** Two review runs beside a gate on one machine push the load average past 200 and time tests out.
 - **Run the new variant; do not just read it.** Adding a case to shared machinery, such as a fixture class or a routing policy, means finding every place that branches on it. Prove it with an end-to-end test per variant, and check that test by mutation.

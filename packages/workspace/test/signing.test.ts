@@ -24,7 +24,7 @@ import { git, makeRepo } from "./support.js";
  * diagnostic's answer rather than on an import.
  */
 
-const scratch = () => mkdtempSync(join(tmpdir(), "focrux-signing-"));
+const scratch = () => mkdtempSync(join(tmpdir(), "perbo-signing-"));
 
 /** A key pair, locked behind `passphrase` where one is given. */
 function keypair(name: string, passphrase: string): { pub: string; secret: string } {

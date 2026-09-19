@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { exclusiveJob } from "../../shared/jobs.js";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Field, Notice, cx } from "@focrux/ui";
+import { Button, Field, Notice, cx } from "@perbo/ui";
 import { bridge, errorMessage, useAction } from "../data.js";
 import { Dropdown, FactList, ProgressDots, SectionLabel, useElapsed } from "../Screen.js";
 import { InkIcon } from "../InkIcon.js";
@@ -401,7 +402,7 @@ export function ProviderScreen({
           <summary>Optional API connection</summary>
           <p className="small muted">
             Anthropic API review can use an ANTHROPIC_API_KEY in the app’s
-            launch environment. Focrux does not save API keys. Subscription CLIs
+            launch environment. Perbo does not save API keys. Subscription CLIs
             are the default.
           </p>
         </details>
@@ -447,9 +448,8 @@ export function RepositoryScreen({
     [chooseError, setChooseError] = useState<string | null>(null),
     [manifestOpen, setManifestOpen] = useState(false);
   const action = useAction(),
-    active = workspace.jobs.some(
-      (job) => job.state === "running" || job.state === "stopping",
-    );
+    // A readiness check and its configuration save are exclusive commands.
+    active = Boolean(exclusiveJob(workspace.jobs));
   useEffect(() => {
     if (!selected && workspace.repositories[0])
       setSelected(workspace.repositories[0].id);

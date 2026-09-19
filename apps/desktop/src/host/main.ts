@@ -28,12 +28,12 @@ import {
 import { DesktopService } from "./service.js";
 import { redact } from "./process.js";
 
-app.setName("Focrux");
-app.setPath("userData", join(app.getPath("appData"), "Focrux"));
+app.setName("Perbo");
+app.setPath("userData", join(app.getPath("appData"), "Perbo"));
 if (!app.requestSingleInstanceLock()) app.quit();
 else
   void start().catch((error: unknown) => {
-    dialog.showErrorBox("Focrux could not start", redact(String(error)));
+    dialog.showErrorBox("Perbo could not start", redact(String(error)));
     app.quit();
   });
 
@@ -41,11 +41,11 @@ async function start(): Promise<void> {
   await app.whenReady();
   const devURL =
     !app.isPackaged &&
-    process.env.FOCRUX_DESKTOP_DEV_URL === "http://127.0.0.1:51859"
-      ? process.env.FOCRUX_DESKTOP_DEV_URL
+    process.env.PERBO_DESKTOP_DEV_URL === "http://127.0.0.1:51859"
+      ? process.env.PERBO_DESKTOP_DEV_URL
       : null;
   const indexPath = join(__dirname, "../renderer/index.html");
-  const iconPath = join(__dirname, "../renderer/brand/focrux-app-icon.png");
+  const iconPath = join(__dirname, "../renderer/brand/perbo-app-icon.png");
   app.dock?.setIcon(iconPath);
   const allowedURL = devURL ?? pathToFileURL(indexPath).href;
   const trustedURL = (candidate: string): boolean => {
@@ -68,13 +68,19 @@ async function start(): Promise<void> {
   const service = new DesktopService({
     dataDirectory: app.getPath("userData"),
     cliPath: app.isPackaged
-      ? join(process.resourcesPath, "cli/dist/focrux.js")
-      : join(__dirname, "../cli/dist/focrux.js"),
-    nodeBinary: join(
-      app.isPackaged ? process.resourcesPath : join(__dirname, ".."),
-      "runtime",
-      process.platform === "win32" ? "node.exe" : "node",
-    ),
+      ? join(process.resourcesPath, "cli/dist/perbo.js")
+      : join(__dirname, "../cli/dist/perbo.js"),
+    // Electron is the Node runtime: `process.execPath` is this app's own
+    // binary, and `ELECTRON_RUN_AS_NODE` — which `electronNode` sets on the
+    // child's environment — makes it behave as `node` rather than start a
+    // second window.
+    //
+    // A separate Node copied beside the app would be a copy of whichever
+    // platform built it, which is a runtime that cannot be cross-packaged and a
+    // second interpreter to keep patched. The one inside Electron is the one
+    // already being shipped either way.
+    nodeBinary: process.execPath,
+    electronNode: true,
     version: app.getVersion(),
     changed: (change) => {
       if (window && !window.isDestroyed())
@@ -240,7 +246,7 @@ async function start(): Promise<void> {
   nativeTheme.on("updated", () => window?.setBackgroundColor(paper()));
   const createWindow = async (): Promise<void> => {
     window = new BrowserWindow({
-      title: "Focrux",
+      title: "Perbo",
       icon: iconPath,
       width: 1280,
       height: 800,
@@ -286,7 +292,7 @@ async function start(): Promise<void> {
         })
         .catch((error: unknown) => {
           if (!current.isDestroyed()) current.webContents.send(CLOSE_CANCEL);
-          dialog.showErrorBox("Focrux could not close", redact(String(error)));
+          dialog.showErrorBox("Perbo could not close", redact(String(error)));
         })
         .finally(() => {
           closing = false;
@@ -301,7 +307,7 @@ async function start(): Promise<void> {
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       {
-        label: "Focrux",
+        label: "Perbo",
         submenu: [
           { role: "about" },
           { type: "separator" },
@@ -367,7 +373,7 @@ async function start(): Promise<void> {
         .catch((error: unknown) => {
           if (window && !window.isDestroyed())
             window.webContents.send(CLOSE_CANCEL);
-          dialog.showErrorBox("Focrux could not quit", redact(String(error)));
+          dialog.showErrorBox("Perbo could not quit", redact(String(error)));
         })
         .finally(() => {
           quitRequested = false;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { redactReviewArtifact, REDACTION_SKIPPED_KEYS } from "./redact.js";
-import type { ReviewArtifact } from "@focrux/contracts";
+import type { ReviewArtifact } from "@perbo/contracts";
 
 /**
  * The measured problem (D-063): a reviewer that correctly reports a committed

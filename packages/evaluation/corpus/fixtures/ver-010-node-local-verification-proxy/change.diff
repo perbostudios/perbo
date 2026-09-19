@@ -1,0 +1,64 @@
+diff --git a/packages/audit/src/page.ts b/packages/audit/src/page.ts
+new file mode 100644
+index 0000000..d83beca
+--- /dev/null
++++ b/packages/audit/src/page.ts
+@@ -0,0 +1,10 @@
++import { listAuditEntries, type AuditEntry } from "./store.js";
++
++const PAGE_SIZE = 25;
++
++/** Page N of the audit log: PAGE_SIZE rows starting at offset (N-1)*PAGE_SIZE. */
++export async function paginate(page: number): Promise<AuditEntry[]> {
++  const entries = await listAuditEntries();
++  const offset = page * PAGE_SIZE;
++  return entries.slice(offset, offset + PAGE_SIZE);
++}
+diff --git a/packages/audit/src/route.ts b/packages/audit/src/route.ts
+index 9e6bc65..c8a7843 100644
+--- a/packages/audit/src/route.ts
++++ b/packages/audit/src/route.ts
+@@ -1,7 +1,8 @@
+-import { listAuditEntries } from "./store.js";
++import { paginate } from "./page.js";
+ 
+-/** GET /audit — every entry, unpaginated. */
+-export async function handleAuditRequest(): Promise<{ status: number; body: unknown }> {
+-  const rows = await listAuditEntries();
++/** GET /audit?page=N — calls the paginator and returns its rows as JSON. */
++export async function handleAuditRequest(query: { page?: string }): Promise<{ status: number; body: unknown }> {
++  const page = Number(query.page ?? "1");
++  const rows = await paginate(page);
+   return { status: 200, body: { rows } };
+ }
+diff --git a/packages/audit/test/page.test.ts b/packages/audit/test/page.test.ts
+new file mode 100644
+index 0000000..1de215e
+--- /dev/null
++++ b/packages/audit/test/page.test.ts
+@@ -0,0 +1,9 @@
++import { describe, expect, it } from "vitest";
++import { paginate } from "../src/page.js";
++
++describe("paginate", () => {
++  it("returns exactly page_size rows for a full page", async () => {
++    const rows = await paginate(1);
++    expect(rows).toHaveLength(25);
++  });
++});
+diff --git a/packages/audit/test/route.test.ts b/packages/audit/test/route.test.ts
+new file mode 100644
+index 0000000..3e3c40f
+--- /dev/null
++++ b/packages/audit/test/route.test.ts
+@@ -0,0 +1,10 @@
++import { describe, expect, it } from "vitest";
++import { handleAuditRequest } from "../src/route.js";
++
++describe("handleAuditRequest", () => {
++  it("calls the paginator and returns its rows as JSON", async () => {
++    const response = await handleAuditRequest({ page: "1" });
++    expect(response.status).toBe(200);
++    expect((response.body as { rows: unknown[] }).rows).toHaveLength(25);
++  });
++});

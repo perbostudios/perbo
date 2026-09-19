@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { LimitsTableSchema } from "@focrux/contracts";
+import { LimitsTableSchema } from "@perbo/contracts";
 import { runAgent } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
 import { SPAWN_TEST_TIMEOUT_MS, fakeAgent, scratch } from "./support.js";
 
 /**
- * D-096: an attempt and a remediation round are bounded by cost, wall clock,
- * fresh tokens, the remediation-round count and the ticket budget, and by
- * nothing counted in iterations or tool calls.
+ * D-096: an attempt is stopped by the stall detector, by a cost cap where the
+ * executor is billed per token, and by a ceiling the repository set itself, and
+ * by nothing counted in iterations or tool calls.
  *
  * An iteration is one assistant event on the executor's stream — a message,
  * not a tool call — and a command is one tool call. A repository that sets one
@@ -27,7 +27,7 @@ const runTurns = async (
   limits: Record<string, number>,
   options: { round?: boolean } = {},
 ) => {
-  const worktree = scratch("focrux-no-counter-");
+  const worktree = scratch("perbo-no-counter-");
   const agent = fakeAgent([
     { kind: "shell", commands: Array.from({ length: turns }, () => "git status") },
   ]);

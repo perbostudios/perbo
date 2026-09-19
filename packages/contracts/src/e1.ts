@@ -58,7 +58,7 @@ export const E1SubjectIdSchema = z
 /**
  * A work item's identifier in the partner's own tracker, which is what makes
  * the baseline and the product run comparable at all. Never one of this
- * product's ids: the baseline is timed on the workflow Focrux has not touched.
+ * product's ids: the baseline is timed on the workflow Perbo has not touched.
  */
 export const E1WorkItemIdSchema = z
   .string()

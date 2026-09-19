@@ -7,7 +7,7 @@ import {
   type FindingRouting,
   type PlanLevel,
   type RoutingPolicy,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 
 export { BLOCKING_ROWS };
 export type { BlockingRow };

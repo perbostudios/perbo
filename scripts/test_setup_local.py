@@ -10,7 +10,7 @@ import unittest
 
 class SetupLocalTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(prefix="focrux setup ")
+        self.temporary = tempfile.TemporaryDirectory(prefix="perbo setup ")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "checkout with spaces"
         scripts = self.root / "scripts"
@@ -46,11 +46,11 @@ class SetupLocalTests(unittest.TestCase):
             [self.node, str(self.script), *args],
             cwd=self.temporary.name,
             env={**self.environment, **(extra or {})},
-            text=True, capture_output=True, timeout=20, check=False,
+            text=True, encoding="utf-8", capture_output=True, timeout=20, check=False,
         )
 
     def calls(self) -> list[dict[str, object]]:
-        return [json.loads(line) for line in self.trace.read_text().splitlines()]
+        return [json.loads(line) for line in self.trace.read_text(encoding="utf-8").splitlines()]
 
     def test_builds_with_pinned_pnpm_from_another_directory_and_preserves_data(self) -> None:
         for _ in range(2):
@@ -62,7 +62,7 @@ class SetupLocalTests(unittest.TestCase):
         self.assertEqual(installs[0]["args"], ["exec", "--yes", "--package=pnpm@9.15.9", "--", "pnpm", "install", "--frozen-lockfile", "--prod=false"])
         self.assertTrue(all(Path(call["cwd"]).resolve() == self.root.resolve() for call in calls))
         self.assertFalse(any("desktop:start" in call["args"] for call in calls))
-        self.assertEqual(self.profile.read_text(), '{"existing":"preserve me"}')
+        self.assertEqual(self.profile.read_text(encoding="utf-8"), '{"existing":"preserve me"}')
         self.assertTrue(os.access(self.script, os.X_OK))
 
     def test_default_opens_the_built_desktop(self) -> None:

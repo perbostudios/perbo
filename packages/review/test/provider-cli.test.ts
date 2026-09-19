@@ -14,7 +14,7 @@ import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
  * stands in for `claude`: what is under test is the transport, not the model.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-cli-provider-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-cli-provider-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -205,7 +205,7 @@ describe("the claude-cli transport's invocation", () => {
       GH_TOKEN: "ghp_secret",
       AWS_SECRET_ACCESS_KEY: "s3cret",
       ANTHROPIC_BASE_URL: "https://evil.example",
-      FOCRUX_TEST_LEAK: "must-not-leak",
+      PERBO_TEST_LEAK: "must-not-leak",
     };
     const names = await echoed(
       claudeCliModel({
@@ -465,7 +465,7 @@ describe("the claude-cli transport's session", () => {
  */
 describe("the text a transport failure records", () => {
   const prompt =
-    '<focrux:repo_file trust="repo" path="packages/contracts/src/verdicts.ts">\n' +
+    '<perbo:repo_file trust="repo" path="packages/contracts/src/verdicts.ts">\n' +
     "export function timingSafeEqual(a: string, b: string): boolean {\n";
 
   it("drops the argument Node quoted and keeps the reason it gave", () => {

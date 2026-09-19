@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { CheckResult, Finding } from "@focrux/contracts";
-import { changeSetFromDiff, findingKey } from "@focrux/contracts";
+import type { CheckResult, Finding } from "@perbo/contracts";
+import { changeSetFromDiff, findingKey } from "@perbo/contracts";
 import {
   CLOSURE_VERIFY_PROMPT_VERSION,
   closureVerifySchema,

@@ -72,6 +72,17 @@ describe("the native ticket", () => {
     }
   });
 
+  it("takes a ready ticket to plan_invalid, which is where a stale spec leaves it", () => {
+    // D-103: a run refuses to start a ticket whose spec has changed since the
+    // contract was approved from it, and leaves the ticket saying so.
+    const moved = transition(ticket({ state: "ready" }), "plan_invalid", "spec stale");
+    expect(moved.state).toBe("plan_invalid");
+    expect(moved.history.at(-1)).toMatchObject({ from: "ready", to: "plan_invalid" });
+    // And nothing takes it out again: an approved contract is immutable
+    // (ADR-0016), so the work is admitted again rather than re-approved.
+    expect(TICKET_TRANSITIONS.filter((row) => row.from === "plan_invalid")).toEqual([]);
+  });
+
   it("refuses a transition with no row, and names what is allowed instead", () => {
     expect(() => transition(ticket(), "pr_open", "skip ahead")).toThrow(IllegalTransitionError);
     try {
@@ -170,7 +181,7 @@ describe("the native ticket", () => {
   });
 
   it("keeps the human key and the opaque id apart", () => {
-    expect(() => TicketSchema.parse({ ...ticket(), key: "focrux-1" })).toThrow();
+    expect(() => TicketSchema.parse({ ...ticket(), key: "perbo-1" })).toThrow();
     expect(() => TicketSchema.parse({ ...ticket(), ticket_id: "AYO-1" })).toThrow();
   });
 });
@@ -287,7 +298,7 @@ describe("SCP-173: who opened the pull request on a failed ticket's branch", () 
       at: "2026-08-29T00:00:00.000Z",
       from: "failed" as const,
       to: "pr_open" as const,
-      note: `reconciled after the fact by \`focrux sync\` from \`gh\`: pull/9 exists on b — ${HAND_OFF_NOTE}`,
+      note: `reconciled after the fact by \`perbo sync\` from \`gh\`: pull/9 exists on b — ${HAND_OFF_NOTE}`,
     };
     expect(row).not.toHaveProperty("handed_off");
     expect(isHandOff(row)).toBe(true);
@@ -390,7 +401,7 @@ describe("SCP-176: a record with no opened_by is attributed from history, never 
       at: "2026-09-02T00:00:00.000Z",
       from: "failed",
       to: "pr_open",
-      note: `reconciled after the fact by \`focrux sync\` from \`gh\`: pull/9 exists on ayo/fixture/x — ${HAND_OFF_NOTE}`,
+      note: `reconciled after the fact by \`perbo sync\` from \`gh\`: pull/9 exists on ayo/fixture/x — ${HAND_OFF_NOTE}`,
     },
   ];
 
@@ -415,7 +426,7 @@ describe("SCP-176: a record with no opened_by is attributed from history, never 
       at: "2026-09-02T00:00:00.000Z",
       from: "failed",
       to: "pr_open",
-      note: "reconciled after the fact by `focrux sync` from `gh`: pull/9 exists on ayo/fixture/x",
+      note: "reconciled after the fact by `perbo sync` from `gh`: pull/9 exists on ayo/fixture/x",
     },
   ];
 
@@ -476,7 +487,7 @@ describe("SCP-176: sync walks a failed ticket to pr_open without choosing an ope
     const resumed = resumeWithUnrecordedOpener(
       failed,
       { pull_request_url: "https://github.com/o/r/pull/9" },
-      `reconciled after the fact by \`focrux sync\`: pull/9 exists — ${OPENER_UNKNOWN_NOTE}`,
+      `reconciled after the fact by \`perbo sync\`: pull/9 exists — ${OPENER_UNKNOWN_NOTE}`,
       at,
     );
     expect(resumed.state).toBe("pr_open");
@@ -559,7 +570,7 @@ describe("executing to pr_open is the direct arm's row and nobody else's", () =>
     ticket({
       state: "executing",
       delivery: {
-        branch: arm === "direct" ? "direct/focrux-1/activation" : "ayo/AYO-1/activation",
+        branch: arm === "direct" ? "direct/perbo-1/activation" : "ayo/AYO-1/activation",
         pull_request_url: "https://github.com/o/r/pull/1",
         pull_request_number: 1,
         state: "open",

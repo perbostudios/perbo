@@ -1,5 +1,5 @@
 {
-  "name": "@focrux/planning",
+  "name": "@perbo/planning",
   "version": "0.1.0",
   "license": "Apache-2.0",
   "private": true,
@@ -10,6 +10,22 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./impact": {
+      "types": "./dist/impact.d.ts",
+      "default": "./dist/impact.js"
+    },
+    "./graph-edit": {
+      "types": "./dist/graph-edit.d.ts",
+      "default": "./dist/graph-edit.js"
+    },
+    "./node-page-text": {
+      "types": "./dist/node-page-text.d.ts",
+      "default": "./dist/node-page-text.js"
+    },
+    "./spec-text": {
+      "types": "./dist/spec-text.d.ts",
+      "default": "./dist/spec-text.js"
     }
   },
   "files": ["dist"],
@@ -20,12 +36,12 @@
     "lint": "eslint src test"
   },
   "dependencies": {
-    "@focrux/contracts": "workspace:*",
-    "@focrux/review": "workspace:*",
+    "@perbo/contracts": "workspace:*",
+    "@perbo/review": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@focrux/tsconfig": "workspace:*",
+    "@perbo/tsconfig": "workspace:*",
     "@eslint/js": "catalog:",
     "@types/node": "catalog:",
     "eslint": "catalog:",

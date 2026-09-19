@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { EXIT_CODES } from "@focrux/contracts";
+import { EXIT_CODES } from "@perbo/contracts";
 import { parseListArgs } from "./admit.js";
 import { UsageError } from "./args.js";
 import { readEndpoint, type EndpointRecord } from "./endpoint.js";
@@ -7,12 +7,12 @@ import type { Streams } from "./streams.js";
 import { storeDir } from "./tickets.js";
 
 /**
- * `focrux mcp` — how a session of the person's own finds the endpoint.
+ * `perbo mcp` — how a session of the person's own finds the endpoint.
  *
- * Prints the block to paste, and writes nothing: Focrux never edits another
+ * Prints the block to paste, and writes nothing: Perbo never edits another
  * tool's user configuration. Paseo can inject because it spawns the agent;
  * for a session the person starts themselves, this is the handover, and
- * `focrux agent` is the one that spawns.
+ * `perbo agent` is the one that spawns.
  */
 
 export interface McpArgs {
@@ -34,7 +34,7 @@ export function parseMcpArgs(argv: readonly string[]): McpArgs {
 export function mcpConfig(record: EndpointRecord, role: McpArgs["role"]): { mcpServers: Record<string, unknown> } {
   return {
     mcpServers: {
-      focrux: {
+      perbo: {
         type: "http",
         url: record.url,
         headers: { Authorization: `Bearer ${record.tokens[role]}` },
@@ -52,13 +52,13 @@ export function renderMcp(record: EndpointRecord, role: McpArgs["role"]): string
     `  claude --mcp-config '${JSON.stringify(mcpConfig(record, role))}'`,
     "",
     "Claude Code, saved for this project (writes ~/.claude.json; your choice):",
-    `  claude mcp add --transport http focrux ${record.url} --header "Authorization: Bearer ${token}"`,
+    `  claude mcp add --transport http perbo ${record.url} --header "Authorization: Bearer ${token}"`,
     "",
     "Codex, for this session only:",
-    `  FOCRUX_ENDPOINT_TOKEN=${token} codex -c 'mcp_servers.focrux.url="${record.url}"' -c 'mcp_servers.focrux.bearer_token_env_var="FOCRUX_ENDPOINT_TOKEN"'`,
+    `  PERBO_ENDPOINT_TOKEN=${token} codex -c 'mcp_servers.perbo.url="${record.url}"' -c 'mcp_servers.perbo.bearer_token_env_var="PERBO_ENDPOINT_TOKEN"'`,
     "",
     "The two Claude Code lines put the token on a command line, which any process on this machine can",
-    "list while the session runs; `focrux agent` launches without that, through a file only you can read.",
+    "list while the session runs; `perbo agent` launches without that, through a file only you can read.",
     "The token is this queue's alone and dies with it.",
     "",
   ].join("\n");
@@ -70,7 +70,7 @@ export function runMcpCommand(input: { argv: string[]; streams: Streams; cwd: st
   const record = readEndpoint(dir);
   if (record === null) {
     input.streams.stderr(
-      `no queue is serving ${dir}: start one with \`focrux serve\`, which hosts the endpoint and writes ` +
+      `no queue is serving ${dir}: start one with \`perbo serve\`, which hosts the endpoint and writes ` +
         "its record, and run this again\n",
     );
     return EXIT_CODES.did_not_complete;

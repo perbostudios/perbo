@@ -9,7 +9,7 @@ import {
   VERIFICATION_STRENGTHS,
   type ClosureAuthority,
   type FindingDirection,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 
 /**
  * The structured verdict (ADR-0023 §2, SCP-077).
@@ -69,7 +69,7 @@ export class MalformedVerdictError extends Error {
  * *because the feature is a stub*, and a test that cannot be written because
  * its dependency returns a constant. Both are behavioural, and both are `human`.
  *
- * The vocabulary itself lives in `@focrux/contracts`, with the finding the
+ * The vocabulary itself lives in `@perbo/contracts`, with the finding the
  * answer is recorded on. What stays here is the wording, because the wording is
  * prompt surface.
  */

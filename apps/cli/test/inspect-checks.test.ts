@@ -7,12 +7,12 @@ import {
   DELIVERED_CHECKS_POLL_INTERVAL_MS,
   type PreflightRequest,
   type PreflightResult,
-} from "@focrux/runner";
+} from "@perbo/runner";
 import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "../src/execute.js";
 import { attemptsRecordSubject, runInspectCommand } from "../src/inspect.js";
 
 /**
- * What `focrux inspect` says about the checks on the head a run published.
+ * What `perbo inspect` says about the checks on the head a run published.
  *
  * The run reads them after opening the pull request and writes them down. Read
  * back a day later, `inspect` says which check ran and what it concluded — so
@@ -26,7 +26,7 @@ import { attemptsRecordSubject, runInspectCommand } from "../src/inspect.js";
  * ones.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-inspect-checks-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-checks-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const gitEnv = {
@@ -42,7 +42,7 @@ const gitEnv = {
 const git = (dir: string, ...argv: string[]): string =>
   execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
 
-/** A repository with one commit, a `test` script, a lockfile and no `.focrux/`. */
+/** A repository with one commit, a `test` script, a lockfile and no `.perbo/`. */
 function repository(name: string): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
   execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
@@ -446,7 +446,7 @@ async function withGh<T>(bin: string, body: () => Promise<T>): Promise<T> {
   }
 }
 
-/** `focrux run --outcome …` on a repository with no ticket, and what it printed. */
+/** `perbo run --outcome …` on a repository with no ticket, and what it printed. */
 async function run(
   repo: string,
   argv: readonly string[],
@@ -498,7 +498,7 @@ interface RunReport {
   } | null;
 }
 
-/** `focrux inspect <run>` as a script reads it, and as a person does. */
+/** `perbo inspect <run>` as a script reads it, and as a person does. */
 async function inspect(
   repo: string,
   runId: string,

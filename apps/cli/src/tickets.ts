@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { StoredAdmissionSchema } from "./admission.js";
 import {
+  ApproachRecordSchema,
   AuthoredAttemptSchema,
   D073_CHANGES_REQUESTED,
   PlanContractSchema,
@@ -12,14 +13,15 @@ import {
   TicketKeySchema,
   isAbsolutePath,
   mergedAt,
+  type ApproachRecord,
   type PlanContract,
   type StoredTicket,
   type Ticket,
   type TicketState,
-} from "@focrux/contracts";
-import { ContractDraftSchema, DraftModelRecordSchema } from "@focrux/planning";
-import { AttemptsRecordError, lastAttemptBranch, readAttemptsRecord } from "@focrux/runner";
-import { branchName, recordedBranch } from "@focrux/workspace";
+} from "@perbo/contracts";
+import { ContractDraftSchema, DraftModelRecordSchema } from "@perbo/planning";
+import { AttemptsRecordError, lastAttemptBranch, readAttemptsRecord } from "@perbo/runner";
+import { branchName, recordedBranch } from "@perbo/workspace";
 import { listLocalRuns, type LocalRunRecord } from "./local-run.js";
 import { StoreError, repositoryRootOf, storeDir, storedRepositoryRoot } from "./store.js";
 
@@ -30,23 +32,29 @@ import { StoreError, repositoryRootOf, storeDir, storedRepositoryRoot } from "./
  * local ([ADR-0004](../../../docs/adr/0004-local-first-runner.md)), and this is
  * the state that execution produces.
  *
- * Three files per ticket, on purpose:
+ * Three files per ticket, and a fourth where the plan has a graph:
  *
- * - `FCX-118.json` is the ticket: intent, state, history. It changes constantly.
- * - `FCX-118.contract.json` is the plan contract. After approval it is
+ * - `PRB-118.json` is the ticket: intent, state, history. It changes constantly.
+ * - `PRB-118.contract.json` is the plan contract. After approval it is
  *   **immutable** ([ADR-0016](../../../docs/adr/0016-minimal-machine-maintained-planning.md)),
  *   and keeping it in its own file is what makes "the contract did not change
  *   during execution" checkable with `git diff` rather than believed.
- * - `FCX-118.draft.json` is the contract as it was shown to the person — a
+ * - `PRB-118.draft.json` is the contract as it was shown to the person — a
  *   model's draft, or the typed one — with the model's provenance where a model
- *   drafted it, and the record of every `focrux edit` applied to it. Neither
+ *   drafted it, and the record of every `perbo edit` applied to it. Neither
  *   execution nor review reads what is *in* it. It exists so that
  *   `admission.edit_count` is a computed number rather than a recollection, and
- *   so that the contract has a counter-seal: `admit` and `focrux edit` write
+ *   so that the contract has a counter-seal: `admit` and `perbo edit` write
  *   both files together and nothing else writes either, so a difference between
- *   them is somebody's text editor. `approve` and `focrux run --ticket` refuse a
+ *   them is somebody's text editor. `approve` and `perbo run --ticket` refuse a
  *   ticket whose pair disagrees, is missing or does not parse — for a ticket
  *   whose `admission.counter_sealed_at` says it was written with one.
+ * - `PRB-118.approach.json` is the approach: the suggested order between the
+ *   plan's nodes and the spec's No-Gos ([D-100](../../../docs/11-open-decisions.md)).
+ *   It is there only where the plan has a graph or the spec states a No-Go, it
+ *   is not counter-sealed, and `perbo edit` rewrites it after approval as well
+ *   as before — it is the half of the plan the contract deliberately does not
+ *   freeze. Review never reads it.
  */
 
 const TICKETS = "tickets";
@@ -66,8 +74,9 @@ export {
   repositoryRootOf,
   storeDir,
   storedRepositoryRoot,
+  trackedFiles,
 } from "./store.js";
-export { JUDGING_CONFIG_KEYS, judgingPaths, readJudgingPaths } from "./store.js";
+export { JUDGING_CONFIG_KEYS, judgingPaths, readJudgingPaths, standingProhibited } from "./store.js";
 export type {
   CheckDefinitionSource,
   JudgingPath,
@@ -85,15 +94,19 @@ const SequenceSchema = z.record(z.string().min(1), z.number().int().min(0));
 const ticketPath = (dir: string, key: string) => join(dir, TICKETS, `${key}.json`);
 const contractPath = (dir: string, key: string) => join(dir, TICKETS, `${key}.contract.json`);
 const draftPath = (dir: string, key: string) => join(dir, TICKETS, `${key}.draft.json`);
+const approachPath = (dir: string, key: string) => join(dir, TICKETS, `${key}.approach.json`);
 
-/** Where a ticket's contract lives, for `focrux edit` to open it. */
+/** Where a ticket's contract lives, for `perbo edit` to open it. */
 export const contractPathFor = contractPath;
+/** Where a ticket's approach lives, for a caller that reports the file. */
+export const approachPathFor = approachPath;
 
-/** A ticket file by name: not the contract, not the draft, not the sequence. */
+/** A ticket file by name: not the contract, the draft, the approach or the sequence. */
 const isTicketFile = (name: string) =>
   name.endsWith(".json") &&
   !name.endsWith(".contract.json") &&
   !name.endsWith(".draft.json") &&
+  !name.endsWith(".approach.json") &&
   name !== SEQUENCE_FILE;
 
 /**
@@ -146,7 +159,7 @@ function storedTicketJson(dir: string, path: string): unknown {
  * dropping it is a *choice between two real directories* rather than the only
  * reading left.
  *
- * For the ordinary `<repo>/.focrux` store the choice does not arise, whatever
+ * For the ordinary `<repo>/.perbo` store the choice does not arise, whatever
  * the record says: the ticket file is *inside* a checkout, so that checkout is
  * the one it is a record of. The recorded path being a directory that also
  * exists here changes nothing — it is another worktree of the same repository
@@ -340,19 +353,121 @@ export function writeContract(dir: string, ticket: Ticket, contract: PlanContrac
   return path;
 }
 
+/**
+ * The approach beside the ticket: `<KEY>.approach.json`, a fourth file for the
+ * half of a graphed plan that is **not** contract (D-100, ADR-0016).
+ *
+ * Written by admission where the plan has nodes or the spec states No-Gos, and
+ * rewritten by `perbo edit` before and after approval — the contract is
+ * immutable from approval and this is not the contract. Nothing in the review
+ * path reads it, which is what keeps a No-Go out of a verdict.
+ */
+export function writeApproachRecord(dir: string, key: string, approach: ApproachRecord): string {
+  mkdirSync(join(dir, TICKETS), { recursive: true });
+  const path = approachPath(dir, key);
+  writeFileSync(path, `${JSON.stringify(ApproachRecordSchema.parse(approach), null, 2)}\n`);
+  return path;
+}
+
+/** Remove the approach record, where a plan no longer has a graph or No-Gos to keep in it. */
+export function deleteApproachRecord(dir: string, key: string): void {
+  rmSync(approachPath(dir, key), { force: true });
+}
+
+/**
+ * The approach beside a ticket, or null where there is none — a flat plan
+ * admitted from an issue has no order to record and no No-Gos to carry.
+ *
+ * A file that is there and does not parse is a `TicketStoreError` naming it,
+ * as an unreadable draft snapshot is: it is a record somebody edited by hand.
+ * Given the contract, a record naming another ticket or plan is refused the
+ * same way rather than read as this plan's order: a copied or stale file
+ * carries someone else's edges and No-Gos, and nothing in an edge says whose
+ * it is.
+ */
+export function readApproachRecord(
+  dir: string,
+  key: string,
+  contract?: Pick<PlanContract, "ticket_id" | "plan_id">,
+): ApproachRecord | null {
+  const path = approachPath(dir, key);
+  if (!existsSync(path)) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new TicketStoreError(
+      `${key}.approach.json is not JSON: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  const parsed = ApproachRecordSchema.safeParse(raw);
+  if (parsed.success) {
+    if (contract && (parsed.data.ticket_id !== contract.ticket_id || parsed.data.plan_id !== contract.plan_id)) {
+      throw new TicketStoreError(
+        `${key}.approach.json names ticket ${parsed.data.ticket_id} and plan ${parsed.data.plan_id}, ` +
+          `not this ticket's ${contract.ticket_id} and ${contract.plan_id}; it is another plan's approach. ` +
+          "Restore the file from version control, or remove it and rebuild the order with --graph-edit",
+      );
+    }
+    return parsed.data;
+  }
+  throw new TicketStoreError(
+    `${key}.approach.json is not an approach record: ` +
+      parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "(approach)"}: ${issue.message}`)
+        .join("; "),
+  );
+}
+
 export const DRAFT_SNAPSHOT_VERSION = 1;
 
-/** One `focrux edit`, in the words `contractEditCount` counted it in. */
+/**
+ * Who made an edit. `you` is the person at the command line, and is what
+ * `admission.edit_count` counts; `interview` is their own agent session asking
+ * for one on their behalf, which does not raise that count (D-100).
+ */
+export const EDIT_AUTHORS = ["you", "interview"] as const;
+export type EditAuthor = (typeof EDIT_AUTHORS)[number];
+
+/**
+ * One `perbo edit`, in the words `contractEditCount` counted it in, with what
+ * a graph edit needs to be undone: the entity keys it touched and each key's
+ * value either side.
+ *
+ * Every field past `changes` is defaulted, so a record written before graph
+ * edits existed reads back as a flag edit by the person, which is what it was.
+ * The edit's **number** is its position in the list, one upward — there is no
+ * stored sequence, because a list already has one and two would drift.
+ */
 export const AppliedEditSchema = z.strictObject({
   at: z.iso.datetime(),
   changes: z.array(z.string().min(1)),
+  author: z.enum(EDIT_AUTHORS).default("you"),
+  /** One line: what the edit did. Null for a record written before summaries. */
+  summary: z.string().min(1).nullable().default(null),
+  /** `node:<id>`, `criterion:<id>`, `edge:<from>-><to>`. */
+  keys: z.array(z.string().min(1)).default([]),
+  before: z.record(z.string().min(1), z.unknown()).default({}),
+  after: z.record(z.string().min(1), z.unknown()).default({}),
+  /** True once `--undo` reverted it. It stays in the log either way (D-100). */
+  undone: z.boolean().default(false),
+  /**
+   * True once the plan was re-drafted from its spec over the top of it
+   * (`admit --from-spec --start-over`, D-103). The edit stays in the log, and
+   * is no longer in force: it does not count towards `edit_count`, and it
+   * cannot be undone, because the contract it changed is gone.
+   */
+  replaced: z.boolean().default(false),
+  /** The edit this one undid, by its number. Null for an edit of its own. */
+  undoes: z.number().int().positive().nullable().default(null),
 });
 export type AppliedEdit = z.infer<typeof AppliedEditSchema>;
 
 /**
  * The contract as it was agreed, beside the record of how it got there.
  *
- * `contract` is the contract as `admit` rendered it and as every `focrux edit`
+ * `contract` is the contract as `admit` rendered it and as every `perbo edit`
  * since has left it — the counter-seal `approve` compares `<KEY>.contract.json`
  * against. The two files are written together by those two commands and by
  * nothing else, so any difference between them is a hand edit, and `approve`
@@ -370,11 +485,11 @@ export const DraftSnapshotSchema = z.strictObject({
   /** When the contract was first shown. Equal to the ticket's `admitted_at`. */
   rendered_at: z.iso.datetime(),
   /**
-   * The ticket's own list, not a shorter one: `admit` writes three of the four,
-   * and the fourth reaches here when the first edit of an imported ticket seals
+   * The ticket's own list, not a shorter one: `admit` writes four of the five,
+   * and the fifth reaches here when the first edit of an imported ticket seals
    * a snapshot beside it.
    */
-  criteria_source: z.enum(["typed", "imported", "file", "drafted"]),
+  criteria_source: z.enum(["typed", "imported", "file", "drafted", "spec"]),
   contract: PlanContractSchema,
   /**
    * Every edit applied since, in order. Defaulted so a snapshot written before
@@ -440,7 +555,7 @@ export function writeDraftSnapshot(dir: string, snapshot: DraftSnapshot): string
  * things with the third. A file that does not parse is the same hand edit the
  * counter-seal exists to catch — often the same one, a text editor that left the
  * JSON broken as well as changed — so `approve` has to be able to say that in
- * the words it says a mismatch in, and `focrux edit`, which rewrites the file,
+ * the words it says a mismatch in, and `perbo edit`, which rewrites the file,
  * has to be able to proceed past it. Neither can do that with a `SyntaxError`
  * from `JSON.parse`.
  */
@@ -580,7 +695,7 @@ export const SCHEMA_VERSION = TICKET_SCHEMA_VERSION;
  * One change this store holds, whether a ticket named it or a local run did
  * (SCP-284).
  *
- * `focrux run --outcome "…"` is the loop with nothing admitted behind it, and
+ * `perbo run --outcome "…"` is the loop with nothing admitted behind it, and
  * on a repository nobody admitted anything on it is the *only* way work runs.
  * Everything downstream of the pull request — `sync`, `escapes`, `stops` —
  * was written against the ticket file, so on such a repository each of them
@@ -590,7 +705,7 @@ export const SCHEMA_VERSION = TICKET_SCHEMA_VERSION;
  * This is the one place the two records are read as the same thing, and it is
  * in this module because both of them are this store: `<store>/tickets` holds
  * one kind and `<store>/runs` the other. A ticket carries its delivery on the
- * ticket file; a local run carries it on the run record `focrux run` wrote
+ * ticket file; a local run carries it on the run record `perbo run` wrote
  * about itself, under the same fields. Every reader takes a
  * {@link SyncedChange} and asks it the questions it always asked — which
  * state, what does its delivery say, when did it merge — so a local run counts
@@ -598,7 +713,7 @@ export const SCHEMA_VERSION = TICKET_SCHEMA_VERSION;
  * ticket does, rather than through a second implementation of each.
  *
  * The `kind` is kept because two things still differ and neither should be
- * guessed: what a person types to read the change back (`FCX-1`, or the run
+ * guessed: what a person types to read the change back (`PRB-1`, or the run
  * id), and where its cost is rolled from.
  */
 export type SyncedChange = {

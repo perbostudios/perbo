@@ -3,15 +3,15 @@ import type * as ChildProcess from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DiagnosticResultSchema, type DiagnosticResult } from "@focrux/contracts";
-import type { PreflightRequest, PreflightResult } from "@focrux/runner";
-import type { DiagnoseRequest } from "@focrux/workspace";
+import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts";
+import type { PreflightRequest, PreflightResult } from "@perbo/runner";
+import type { DiagnoseRequest } from "@perbo/workspace";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runDoctorCommand, type DoctorOptions } from "../src/execute.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * `focrux doctor`, with the three things it does that start another program —
+ * `perbo doctor`, with the three things it does that start another program —
  * the machine preflight, the materialisation diagnostic and the reading of the
  * branch this checkout is on — handed in.
  *
@@ -89,10 +89,10 @@ const cannotMaterialize: DiagnosticResult = DiagnosticResultSchema.parse({
       path: "package.json",
     },
     {
-      reason: "no_verification_command",
+      reason: "ignored_paths_unavailable",
       severity: "refusal",
-      detail: "the repository declares no test script, so nothing defines a working worktree",
-      path: "package.json",
+      detail: "could not list the ignored files: not a git repository",
+      path: null,
     },
   ],
   proposed: null,
@@ -110,7 +110,7 @@ const onMain = () => ({ base_ref: "main", from: "branch" }) as const;
 
 const temporary: string[] = [];
 function checkout(name: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `focrux-doctor-${name}-`));
+  const dir = mkdtempSync(join(tmpdir(), `perbo-doctor-${name}-`));
   temporary.push(dir);
   return dir;
 }
@@ -134,7 +134,7 @@ describe("the process observer these tests measure with", () => {
   }, DOCTOR_TIMEOUT_MS);
 });
 
-describe("focrux doctor", () => {
+describe("perbo doctor", () => {
   it("refuses a repository it cannot materialize, by name and before any attempt", async () => {
     const dir = checkout("refusal");
     writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "x" }));
@@ -170,7 +170,7 @@ describe("focrux doctor", () => {
     const result = JSON.parse(out.join("")) as { materializable: boolean; findings: Array<{ reason: string }> };
     expect(result.materializable).toBe(false);
     expect(result.findings.map((finding) => finding.reason)).toContain("lockfile_missing");
-    expect(result.findings.map((finding) => finding.reason)).toContain("no_verification_command");
+    expect(result.findings.map((finding) => finding.reason)).toContain("ignored_paths_unavailable");
     // The refusal above came from the command reading the diagnostic it was
     // given. Nothing was run to reach it.
     expect(observed.started).toEqual([]);
@@ -213,6 +213,7 @@ describe("focrux doctor", () => {
       // install.
       {
         agentBinary: "claude",
+        agentProvider: "claude-cli",
         reviewerProvider: "claude-cli",
         needsGh: false,
         installBinary: null,
@@ -230,7 +231,7 @@ describe("focrux doctor", () => {
     expect(result.preflight).toEqual(machineReady);
     expect(result.findings.map((finding) => finding.reason)).toEqual([
       "lockfile_missing",
-      "no_verification_command",
+      "ignored_paths_unavailable",
     ]);
   });
 
@@ -281,7 +282,7 @@ async function run(
  * than waiting for a program to answer `--version`.
  */
 function withEmptyPath(): () => void {
-  const empty = mkdtempSync(join(tmpdir(), "focrux-doctor-nopath-"));
+  const empty = mkdtempSync(join(tmpdir(), "perbo-doctor-nopath-"));
   temporary.push(empty);
   const previous = process.env.PATH;
   process.env.PATH = empty;

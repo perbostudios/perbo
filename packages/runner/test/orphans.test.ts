@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LimitsTableSchema } from "@focrux/contracts";
+import { LimitsTableSchema } from "@perbo/contracts";
 import { TicketRunConfigSchema, runTicket, type TicketRunResult } from "../src/loop.js";
 import { makeContract, makeRepo, makeReview, scratch } from "./support.js";
 
@@ -65,7 +65,7 @@ interface Survivor {
  * where the test can read them, seals one file and exits cleanly.
  */
 function agentLeaving(survivors: readonly Survivor[]): { binary: string; pids: () => Record<string, number> } {
-  const dir = scratch("focrux-orphan-agent-");
+  const dir = scratch("perbo-orphan-agent-");
   const binary = join(dir, "agent.cjs");
   const pidsFile = join(dir, "pids.json");
   writeFileSync(
@@ -136,7 +136,7 @@ const approve = (async () => ({
 })) as never;
 
 function configFor(repositoryRoot: string, checkCommand: string[] = ["node", "-e", "process.exit(0)"]) {
-  const root = scratch("focrux-orphans-");
+  const root = scratch("perbo-orphans-");
   return TicketRunConfigSchema.parse({
     ticket_key: "SCP094",
     repository_root: repositoryRoot,
@@ -225,7 +225,7 @@ describe("an attempt's end leaves no process running from its worktree", () => {
   }, 90_000);
 
   it("ends one a check's command started in its own session", async () => {
-    const marker = scratch("focrux-orphan-check-");
+    const marker = scratch("perbo-orphan-check-");
     const pidFile = join(marker, "pid.json");
     const agent = agentLeaving([]);
     const { result } = await runWith({

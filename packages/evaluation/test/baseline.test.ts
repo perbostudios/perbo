@@ -114,7 +114,7 @@ describe("measureBaseline on an authored fixture", () => {
   it("measures the before tree with the after tests, without a pinned repository", async () => {
     const fixture = sample.find((entry) => entry.fixture.id === "cln-025-archived-rows-hidden-from-listing");
     expect(fixture).toBeDefined();
-    const result = await measureBaseline({ fixture: fixture!, cacheRoot: mkdtempSync(join(tmpdir(), "focrux-base-test-")) });
+    const result = await measureBaseline({ fixture: fixture!, cacheRoot: mkdtempSync(join(tmpdir(), "perbo-base-test-")) });
     expect(result.skipped).toBeNull();
     expect(result.check?.status).toBe("passed");
     expect(result.check?.summary).toMatch(/before tree/);

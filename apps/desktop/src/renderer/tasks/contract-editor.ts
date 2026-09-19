@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { EditingSessionSchema, LegacyEditingSchema, TaskModelsSchema } from "../../shared/protocol.js";
-import type { DesktopBridge, Detail, EditingForm, EditingSession, EditingTarget, LegacyEditing, TaskModels } from "../../shared/protocol.js";
+import type { DesktopBridge, Detail, EditingForm, EditingOperation, EditingSession, EditingTarget, LegacyEditing, TaskModels } from "../../shared/protocol.js";
 import { editingForm } from "../../shared/contract-editing.js";
 import { bridge } from "../data.js";
 
@@ -26,15 +26,15 @@ type EditorView = {
 
 function legacyEditing(models: TaskModels): LegacyEditing | undefined {
   try {
-    const draft: unknown = JSON.parse(sessionStorage.getItem("focrux:composer") ?? "null");
+    const draft: unknown = JSON.parse(sessionStorage.getItem("perbo:composer") ?? "null");
     if (!draft) return undefined;
-    const saved: unknown = JSON.parse(sessionStorage.getItem("focrux:composer-record") ?? "null");
+    const saved: unknown = JSON.parse(sessionStorage.getItem("perbo:composer-record") ?? "null");
     const record = saved && typeof saved === "object" ? saved as Record<string, unknown> : {};
     return LegacyEditingSchema.parse({
-      repoId: record.repoId ?? sessionStorage.getItem("focrux:composer-repo"),
+      repoId: record.repoId ?? sessionStorage.getItem("perbo:composer-repo"),
       key: record.key ?? null, digest: record.digest ?? null,
-      form: { ...editingForm(models), draft, step: sessionStorage.getItem("focrux:composer-step") === "2" ? 2 : 1 },
-      pending: sessionStorage.getItem("focrux:composer-job") !== null,
+      form: { ...editingForm(models), draft, step: sessionStorage.getItem("perbo:composer-step") === "2" ? 2 : 1 },
+      pending: sessionStorage.getItem("perbo:composer-job") !== null,
     });
   } catch { return undefined; }
 }
@@ -54,6 +54,7 @@ export class ContractEditor {
   private reading: Promise<void> | null = null;
   private refreshRevision = 0;
   private connected = false;
+  private readers = 0;
   private submission: { cancelled: boolean } | null = null;
   private readonly identified: (session: EditingSession) => void;
 
@@ -72,9 +73,20 @@ export class ContractEditor {
     this.value = { ...this.value, ...patch };
     for (const listener of this.listeners) listener();
   }
+  /**
+   * Bind a screen to this session and return its release. Counted, because one
+   * session is bound by more than one screen at a time — planning mode holds it
+   * while the pane inside it does — and the first screen to leave must not take
+   * the other's subscription with it.
+   */
   connect = (): (() => void) => {
+    this.readers++;
+    this.open();
+    return this.release;
+  };
+  private open = (): void => {
     // A session outlives its screen, including unsaved text after a failed write.
-    if (this.connected) return this.disconnect;
+    if (this.connected) return;
     this.connected = true;
     const generation = ++this.generation;
     this.unsubscribe?.();
@@ -82,7 +94,7 @@ export class ContractEditor {
       if ((change.kind === "editing" && change.sessionId === this.saved?.id) ||
         (change.kind === "records" && (change.repoId === null || change.repoId === this.saved?.repoId))) void this.refresh();
     });
-    if (this.failedSave || this.value.saving || this.value.submitting) return this.disconnect;
+    if (this.failedSave || this.value.saving || this.value.submitting) return;
     const legacy = this.target.kind === "new" ? legacyEditing(this.value.form.models) : undefined;
     const changes = this.changes;
     void this.connection.request({ kind: "editingOpen", target: this.saved ? { kind: "session", id: this.saved.id } : this.target, ...(legacy ? { legacy } : {}) })
@@ -90,13 +102,16 @@ export class ContractEditor {
         if (generation !== this.generation || changes !== this.changes || this.value.saving || this.value.submitting) return;
         this.accept(result);
         if (legacy) for (const key of ["composer", "composer-record", "composer-repo", "composer-step", "composer-job"])
-          sessionStorage.removeItem("focrux:" + key);
+          sessionStorage.removeItem("perbo:" + key);
         await this.loadRecord(result, generation);
       })
       .catch((error) => { if (generation === this.generation) this.publish({ loading: false, error: message(error) }); });
-    return this.disconnect;
   };
-  private disconnect = (): void => {
+  private release = (): void => {
+    if (--this.readers > 0) return;
+    this.close();
+  };
+  private close = (): void => {
     this.connected = false;
     this.generation++;
     this.unsubscribe?.();
@@ -167,7 +182,7 @@ export class ContractEditor {
     saving.add(work);
     void work.finally(() => saving.delete(work));
   };
-  submit = (intent: "draft" | "compile"): void => {
+  submit = (intent: EditingOperation["intent"]): void => {
     if (this.value.submitting) return;
     this.publish({ submitting: true, error: null });
     const operationId = crypto.randomUUID();
@@ -209,7 +224,7 @@ export class ContractEditor {
     }
   };
   retry = async (): Promise<void> => {
-    if (!this.saved) { this.connected = false; this.connect(); return; }
+    if (!this.saved) { this.close(); this.open(); return; }
     try {
       if (!this.failedSave) {
         this.accept(await this.connection.request({ kind: "editingOpen", target: { kind: "session", id: this.saved.id } }));

@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SecretIndex } from "@focrux/contracts";
-import { BundleStore } from "@focrux/runner";
+import { SecretIndex } from "@perbo/contracts";
+import { BundleStore } from "@perbo/runner";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseAdmitArgs, runAdmitCommand } from "../src/admit.js";
 import { parseExecuteArgs, runExecuteCommand } from "../src/execute.js";
@@ -13,7 +13,7 @@ import { makeAttempt, makeTicket } from "./attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * `focrux run --ticket <id> --resume-from <bundle_id>` at the command line
+ * `perbo run --ticket <id> --resume-from <bundle_id>` at the command line
  * (SCP-154).
  *
  * What the loop does with the retained diff is proven in the runner's own
@@ -85,9 +85,9 @@ const GIT_ENV = {
 const git = (dir: string, ...argv: string[]): string =>
   execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: GIT_ENV });
 
-/** A repository with one commit, the way `focrux admit` expects to find one. */
+/** A repository with one commit, the way `perbo admit` expects to find one. */
 function repository(name: string): string {
-  const dir = scratch(`focrux-resume-${name}-`);
+  const dir = scratch(`perbo-resume-${name}-`);
   execFileSync("git", ["init", "-q", "-b", "main", dir], { env: GIT_ENV });
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture" }));
   git(dir, "add", "-A");
@@ -135,7 +135,7 @@ function admit(repo: string): { ticket_id: string; base_commit: string } {
       cwd: repo,
     }),
   ).toBe(0);
-  const ticket = readTicket(storeDir(repo, null), "FCX-1");
+  const ticket = readTicket(storeDir(repo, null), "PRB-1");
   expect(ticket.state).toBe("ready");
   return { ticket_id: ticket.ticket_id, base_commit: git(repo, "rev-parse", "HEAD").trim() };
 }
@@ -152,7 +152,7 @@ function cutAttemptBundle(input: {
   diff?: string;
   attempt_id?: string;
 }): { bundle_id: string; path: string } {
-  const store = new BundleStore({ root: join(input.repo, ".focrux", "bundles"), retainContext: true });
+  const store = new BundleStore({ root: join(input.repo, ".perbo", "bundles"), retainContext: true });
   const { bundle, path } = store.write({
     kind: "execution",
     subject_id: input.attempt_id ?? CUT_ATTEMPT,
@@ -192,7 +192,7 @@ function cutAttemptBundle(input: {
  * observed rather than asserted about a double.
  */
 function recordingAgentBinary(repo: string): { binary: string; ran: () => boolean } {
-  const dir = scratch("focrux-resume-bin-");
+  const dir = scratch("perbo-resume-bin-");
   const sentinel = join(dir, "invoked");
   const binary = join(dir, "agent");
   writeFileSync(
@@ -200,8 +200,8 @@ function recordingAgentBinary(repo: string): { binary: string; ran: () => boolea
     `#!/bin/sh\necho "$@" >> ${sentinel}\ncase "$1" in --version) echo 'fake-agent 1.0.0'; exit 0 ;; esac\nexit 0\n`,
     { mode: 0o755 },
   );
-  mkdirSync(join(repo, ".focrux"), { recursive: true });
-  writeFileSync(join(repo, ".focrux", "config.json"), `${JSON.stringify({ agent_binary: binary }, null, 2)}\n`);
+  mkdirSync(join(repo, ".perbo"), { recursive: true });
+  writeFileSync(join(repo, ".perbo", "config.json"), `${JSON.stringify({ agent_binary: binary }, null, 2)}\n`);
   return { binary, ran: () => existsSync(sentinel) };
 }
 
@@ -210,7 +210,7 @@ function recordingAgentBinary(repo: string): { binary: string; ran: () => boolea
  * absent and the run stops at the preflight rather than executing anything.
  */
 function withoutClaudeOnPath(): () => void {
-  const bin = mkdtempSync(join(tmpdir(), "focrux-empty-bin-"));
+  const bin = mkdtempSync(join(tmpdir(), "perbo-empty-bin-"));
   symlinkSync(execFileSync("which", ["git"], { encoding: "utf8" }).trim(), join(bin, "git"));
   const previous = process.env.PATH;
   process.env.PATH = bin;
@@ -227,7 +227,7 @@ function withoutClaudeOnPath(): () => void {
  */
 const RESUME_RUN_TIMEOUT_MS = 60_000;
 
-describe("focrux run --resume-from, when the base commit has moved", () => {
+describe("perbo run --resume-from, when the base commit has moved", () => {
   it("exits non-zero naming change.diff, runs no executor, and leaves the ticket ready", async () => {
     const repo = repository("moved");
     // The attempt a ceiling cut ran here, and its diff describes this tree.
@@ -242,12 +242,12 @@ describe("focrux run --resume-from, when the base commit has moved", () => {
     expect(ticket.base_commit).toBe(moved);
     const bundle = cutAttemptBundle({ repo, ticket_id: ticket.ticket_id, base_commit: cutBase, diff });
     const agent = recordingAgentBinary(repo);
-    const before = readTicket(storeDir(repo, null), "FCX-1");
+    const before = readTicket(storeDir(repo, null), "PRB-1");
     const bundleBefore = readFileSync(bundle.path, "utf8");
 
     const run = streams();
     const code = await runExecuteCommand({
-      args: parseExecuteArgs(["--repo", repo, "--ticket", "FCX-1", "--resume-from", bundle.bundle_id]),
+      args: parseExecuteArgs(["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id]),
       streams: run.streams,
       cwd: repo,
     });
@@ -269,8 +269,8 @@ describe("focrux run --resume-from, when the base commit has moved", () => {
     expect(agent.ran()).toBe(false);
     // Nothing was spent and nothing was moved: the ticket is where it was, and
     // the cut attempt's bundle is byte-for-byte what it was.
-    expect(readTicket(storeDir(repo, null), "FCX-1")).toEqual(before);
-    expect(readTicket(storeDir(repo, null), "FCX-1").state).toBe("ready");
+    expect(readTicket(storeDir(repo, null), "PRB-1")).toEqual(before);
+    expect(readTicket(storeDir(repo, null), "PRB-1").state).toBe("ready");
     expect(readFileSync(bundle.path, "utf8")).toBe(bundleBefore);
   }, RESUME_RUN_TIMEOUT_MS);
 
@@ -289,7 +289,7 @@ describe("focrux run --resume-from, when the base commit has moved", () => {
     const wrongTicket = streams();
     expect(
       await runExecuteCommand({
-        args: parseExecuteArgs(["--repo", repo, "--ticket", "FCX-1", "--resume-from", bundle.bundle_id]),
+        args: parseExecuteArgs(["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id]),
         streams: wrongTicket.streams,
         cwd: repo,
       }),
@@ -300,7 +300,7 @@ describe("focrux run --resume-from, when the base commit has moved", () => {
     const notABundle = streams();
     expect(
       await runExecuteCommand({
-        args: parseExecuteArgs(["--repo", repo, "--ticket", "FCX-1", "--resume-from", "../../etc/passwd"]),
+        args: parseExecuteArgs(["--repo", repo, "--ticket", "PRB-1", "--resume-from", "../../etc/passwd"]),
         streams: notABundle.streams,
         cwd: repo,
       }),
@@ -309,11 +309,11 @@ describe("focrux run --resume-from, when the base commit has moved", () => {
     expect(notABundle.err.join("")).toContain("is not a bundle id");
 
     expect(agent.ran()).toBe(false);
-    expect(readTicket(storeDir(repo, null), "FCX-1").state).toBe("ready");
+    expect(readTicket(storeDir(repo, null), "PRB-1").state).toBe("ready");
   }, RESUME_RUN_TIMEOUT_MS);
 });
 
-describe("focrux run --resume-from, when the bundle matches the run", () => {
+describe("perbo run --resume-from, when the bundle matches the run", () => {
   it("accepts it, says what will be applied, and stops only for what the machine lacks", async () => {
     const repo = repository("accepted");
     const diff = retainedDiff(repo);
@@ -333,7 +333,7 @@ describe("focrux run --resume-from, when the bundle matches the run", () => {
     const run = streams();
     try {
       code = await runExecuteCommand({
-        args: parseExecuteArgs(["--repo", repo, "--ticket", "FCX-1", "--resume-from", bundle.bundle_id]),
+        args: parseExecuteArgs(["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id]),
         streams: run.streams,
         cwd: repo,
       });
@@ -353,11 +353,11 @@ describe("focrux run --resume-from, when the bundle matches the run", () => {
 
     expect(code).toBe(3);
     expect(said).toContain("agent_binary_missing");
-    expect(readTicket(storeDir(repo, null), "FCX-1").state).toBe("ready");
+    expect(readTicket(storeDir(repo, null), "PRB-1").state).toBe("ready");
   }, RESUME_RUN_TIMEOUT_MS);
 });
 
-describe("focrux inspect, where a cut attempt's work is still on disk", () => {
+describe("perbo inspect, where a cut attempt's work is still on disk", () => {
   /**
    * A ticket with two attempts that both stopped short: one whose execution
    * bundle retained a `change.diff`, and one that changed nothing and has none.
@@ -433,7 +433,7 @@ describe("focrux inspect, where a cut attempt's work is still on disk", () => {
     expect(rendered).toContain(`bundle  ${fixture.withoutDiff}`);
     // And, for the attempt whose work survived, the command that starts the
     // next attempt from it — beside the termination that raises the question.
-    expect(rendered).toContain(`resume  focrux run --ticket AYO-1 --resume-from ${fixture.withDiff}`);
+    expect(rendered).toContain(`resume  perbo run --ticket AYO-1 --resume-from ${fixture.withDiff}`);
     // The attempt that changed nothing retained no diff, so there is nothing to
     // resume and nothing is offered.
     expect(rendered).not.toContain(`--resume-from ${fixture.withoutDiff}`);

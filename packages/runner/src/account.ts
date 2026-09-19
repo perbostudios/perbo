@@ -1,4 +1,4 @@
-import { EXECUTOR_ACCOUNT_MAX_CHARS } from "@focrux/contracts";
+import { EXECUTOR_ACCOUNT_MAX_CHARS } from "@perbo/contracts";
 
 /**
  * The executor's own account of its change (D-092).

@@ -96,7 +96,7 @@ suite rather than by a fixed pass rate ([D-010](11-open-decisions.md)).
 
 Precision of stopping — of the changes review stopped, the share a person endorses, beside the
 share of changes on which a person was shown anything at all — is read live from real pull
-requests with `focrux stops`, not measured on the corpus ([D-060](11-open-decisions.md)).
+requests with `perbo stops`, not measured on the corpus ([D-060](11-open-decisions.md)).
 
 ## Principles
 
@@ -105,9 +105,9 @@ established practice, or declares that no determinable practice exists. `securit
 `context.*` findings always stop for a person regardless — closing one means deciding product
 behaviour, or handing attacker-authored text to an agent. A deterministic finding always stops.
 The last remediation round always stops, so nothing is routed with nowhere left to go. A person's
-answer to a decline is recorded with `focrux principle add` and read on later reviews
+answer to a decline is recorded with `perbo principle add` and read on later reviews
 ([D-065](11-open-decisions.md)).
 
-Focrux is judged by real use: stops, escapes and the unattended-merge share are read live from
+Perbo is judged by real use: stops, escapes and the unattended-merge share are read live from
 people's work, and the regression suite checks that a change to the reviewer did not make it
 worse ([D-099](11-open-decisions.md)).

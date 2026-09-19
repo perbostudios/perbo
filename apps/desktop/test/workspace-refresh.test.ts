@@ -56,6 +56,33 @@ describe("workspace refresh interface", () => {
     expect(f.client.getQueryData<Snapshot>(["workspace"])!.jobs[0]!.log).toBe("progress 100");
   });
 
+  /**
+   * SCP-313: an interview's lines arrive many times a turn, and nothing in the
+   * repository has moved when one does. The list of live interviews is patched
+   * where it is, and no record is read.
+   */
+  it("follows a live interview without requesting repository records", async () => {
+    const f = await fixture();
+    f.observeDetail();
+    const sessionId = "70000000-0000-4000-8000-000000000001";
+    const line = (n: number, running: boolean): Change => ({
+      kind: "interview",
+      sequence: n,
+      sessionId,
+      running,
+      entry: { n, at: "2026-01-01T00:00:00.000Z", line: { kind: "said", text: "line " + String(n) } },
+      asking: null,
+    });
+    for (let n = 1; n <= 40; n++) f.emit(line(n, true));
+    expect(f.requests).toEqual([]);
+    expect(f.client.getQueryData<Snapshot>(["workspace"])!.interviews).toEqual([sessionId]);
+    expect(f.client.getQueryData<Snapshot>(["workspace"])!.refreshingRepos ?? []).toEqual([]);
+    // And the one that says it has gone takes it off the list.
+    f.emit({ kind: "interview", sequence: 41, sessionId, running: false, entry: null, asking: null });
+    expect(f.client.getQueryData<Snapshot>(["workspace"])!.interviews).toEqual([]);
+    expect(f.requests).toEqual([]);
+  });
+
   it("does not let an older snapshot erase newer progress", async () => {
     const f = await fixture(), reply = deferred<Snapshot>();
     f.override(async () => reply.promise);

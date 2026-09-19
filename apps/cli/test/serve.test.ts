@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { EXIT_CODES, TicketSchema, transition, withReconciliation, type Ticket, type TicketState } from "@focrux/contracts";
-import { acquireServeLock } from "@focrux/runner";
+import { EXIT_CODES, TicketSchema, transition, withReconciliation, type Ticket, type TicketState } from "@perbo/contracts";
+import { acquireServeLock } from "@perbo/runner";
 import { UsageError } from "../src/args.js";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { ServeTickSchema, keyFromAdmitJson, parseServeArgs, processDeps, runServeCommand, type ServeDeps } from "../src/serve.js";
@@ -12,17 +12,17 @@ import { readEndpoint } from "../src/endpoint.js";
 import { readTicket, storeDir, writeTicket } from "../src/tickets.js";
 
 /**
- * `focrux serve` (SCP-008 criterion 5, SCP-227): the queue over one store.
+ * `perbo serve` (SCP-008 criterion 5, SCP-227): the queue over one store.
  *
  * Every process it would start is a fake here — the run it spawns, the fetch,
  * the sync, the diff of a sealed branch — and each fake records what it was
  * asked, so a test reads the queue's decisions rather than a coding agent's.
- * The tickets are real: admitted through `focrux admit` into a real store in a
+ * The tickets are real: admitted through `perbo admit` into a real store in a
  * real git repository, because the queue reads exactly what a person's store
  * holds and a hand-built record would be a second opinion about its shape.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-serve-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-serve-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const gitIdentity = {
@@ -53,8 +53,8 @@ function repository(config: Record<string, unknown> = {}): string {
   mkdirSync(dir, { recursive: true });
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
   execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
-  mkdirSync(join(dir, ".focrux"), { recursive: true });
-  writeFileSync(join(dir, ".focrux", "config.json"), JSON.stringify({ base_ref: "main", ...config }, null, 2));
+  mkdirSync(join(dir, ".perbo"), { recursive: true });
+  writeFileSync(join(dir, ".perbo", "config.json"), JSON.stringify({ base_ref: "main", ...config }, null, 2));
   return dir;
 }
 
@@ -178,7 +178,7 @@ describe("parseServeArgs", () => {
   });
 });
 
-describe("focrux serve --once", () => {
+describe("perbo serve --once", () => {
   it("fetches the base once, then starts the ready tickets in queue order up to the ceiling", async () => {
     const repo = repository({ limits: { organisation: "t", limits: { concurrent_local_attempts: 2 } } });
     const first = admitted(repo, { outcome: "Docs say what is true.", paths: ["docs/**"] });
@@ -418,7 +418,7 @@ describe("focrux serve --once", () => {
 
   it("refuses before anything runs when the base cannot be named", async () => {
     const repo = repository();
-    writeFileSync(join(repo, ".focrux", "config.json"), JSON.stringify({ base_ref: "  " }));
+    writeFileSync(join(repo, ".perbo", "config.json"), JSON.stringify({ base_ref: "  " }));
     admitted(repo, { outcome: "Docs say what is true.", paths: ["docs/**"] });
     const f = fakes();
     const { code, streams } = await serveOnce(repo, f.deps);
@@ -590,7 +590,7 @@ describe("focrux serve --once", () => {
           onLine("worktree ready");
           if (code !== 0) {
             onLine("error: the run did not start: carries 1 commit the loop did not make past what the pull request has (abc).", "stderr");
-            onLine("Nothing was executed. `focrux doctor --repo /r` reports the whole diagnostic.");
+            onLine("Nothing was executed. `perbo doctor --repo /r` reports the whole diagnostic.");
           }
         }
         return { code };
@@ -739,9 +739,9 @@ function admittedFrom(repo: string, reference: string): string {
   return (JSON.parse(streams.out.join("")) as { ticket: { key: string } }).ticket.key;
 }
 
-const TRACKER = { tracker: { repository: "o/r", draft_label: "focrux" } };
+const TRACKER = { tracker: { repository: "o/r", draft_label: "perbo" } };
 
-describe("focrux serve drafts labelled tracker issues", () => {
+describe("perbo serve drafts labelled tracker issues", () => {
   it("drafts the lowest-numbered labelled issue the store does not hold, one per tick, and each once per process", async () => {
     const repo = repository(TRACKER);
     admittedFrom(repo, "o/r#1");
@@ -785,7 +785,7 @@ describe("focrux serve drafts labelled tracker issues", () => {
       [{ reference: "o/r#3", key: "AYO-3", code: 0 }],
     ]);
     expect(streams.err.join("")).toContain("drafted o/r#2 as AYO-2; nothing runs until it is approved");
-    expect(streams.err.join("")).toContain("drafting 'focrux' issues from o/r");
+    expect(streams.err.join("")).toContain("drafting 'perbo' issues from o/r");
 
     // A new process remembers nothing: the store is the record, and #2 is
     // still not in it.
@@ -834,7 +834,7 @@ describe("focrux serve drafts labelled tracker issues", () => {
 
     const failing = fakes({ listIssues: async () => ({ ok: false, detail: "gh: not logged in" }) });
     const { streams } = await serveOnce(repository(TRACKER), failing.deps);
-    expect(streams.err.join("")).toContain("could not list focrux issues in o/r: gh: not logged in");
+    expect(streams.err.join("")).toContain("could not list perbo issues in o/r: gh: not logged in");
     expect(failing.drafted).toEqual([]);
   });
 

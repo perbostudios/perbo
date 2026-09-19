@@ -1,0 +1,27 @@
+{
+  "id": "req-011-node-crossing-cache-invalidation",
+  "class": "requirement_omission",
+  "defective": true,
+  "plan_level": "P1",
+  "source": {
+    "kind": "documented_pattern",
+    "reference": "Stale-cache-after-write: a pre-existing write path left bypassing a newly added cache layer",
+    "url": ["https://martinfowler.com/bliki/TwoHardThings.html"],
+    "derivation": "reconstructed",
+    "upstream_licence": "n/a",
+    "code_copied": false
+  },
+  "defect": "A pre-existing admin write path, outside both of the change's nodes and untouched by the diff, still writes through the raw store client after a write-through cache is added in front of it, so it never invalidates the cache and can leave a stale read live.",
+  "why_it_is_hard": "Each node's own diff is correct and its own test passes reviewed alone: the cache layer invalidates on its own writes (ac_1), and the ordinary write path is routed through it (ac_2). The omission is a file neither node's paths name and the diff never touches — visible only by reading the whole diff together with the unmodified tree around it.",
+  "expected_detection": {
+    "mode": "blocking",
+    "criterion_ids": ["ac_1"],
+    "files": ["packages/store/src/admin-write.ts"],
+    "rule_prefixes": []
+  },
+  "forbidden_strings": [],
+  "must_not_approve": false,
+  "authored_on": "2026-09-17",
+  "authored_before_reviewer": false,
+  "notes": "Exercises per-node review (D-107, SCP-328): node_cache and node_write each look complete when reviewed alone against their own criterion, and the cross-node omission is visible only to the overall review, which reads the whole change. Paired with ver-010 as SCP-328's second graph-shaped fixture, exercising the opposite direction — a defect only a node-scoped review is likely to notice."
+}

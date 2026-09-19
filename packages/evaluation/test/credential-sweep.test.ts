@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { findCredentials } from "@focrux/review";
+import { findCredentials } from "@perbo/review";
 import { corpus, describeCorpus } from "./corpus-present.js";
 
 /**

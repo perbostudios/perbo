@@ -1,4 +1,4 @@
-import { PlanContractSchema, type PlanContract } from "@focrux/contracts";
+import { PlanContractSchema, type PlanContract } from "@perbo/contracts";
 import { describe, expect, it } from "vitest";
 import { contractDifferences, contractEditCount } from "../src/index.js";
 

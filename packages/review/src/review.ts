@@ -25,7 +25,7 @@ import {
   type ReviewDecision,
   type ReviewError,
   type VerdictRejectionKind,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { assessAgentConfiguration } from "./agent-config.js";
 import {
   CURRENT_ROUTING_POLICY,
@@ -73,7 +73,7 @@ export interface ReviewInput {
    * `git diff --name-status`, so it is complete whatever the diff's size, and a
    * `truncated` one is refused deterministically rather than reviewed as the
    * prefix that survived. Absent, the change set is parsed from the diff —
-   * the standalone `focrux review` path, which reads the whole file.
+   * the standalone `perbo review` path, which reads the whole file.
    */
   changeset?: ChangeSet | undefined;
   checks: CheckResult[];
@@ -378,6 +378,18 @@ function evidenceOf(entry: ModelVerdict["coverage"][number]): Evidence | null {
       ? { file: entry.evidence_file, line: entry.evidence_line, symbol: entry.evidence_symbol }
       : null,
   };
+}
+
+/**
+ * How many of a review's findings escalated to a person (D-051): every
+ * finding whose routing the blocking matrix decided was `escalates`, which
+ * `applyBlocking` stamps onto `routing` unconditionally — so this reads back
+ * from a final `findings` list the same count `runReview` decides it with,
+ * and `combineReviews` (`graph.ts`) reads it the same way over the combined
+ * list (D-107).
+ */
+export function escalationCount(findings: readonly Finding[]): number {
+  return findings.filter((finding) => finding.routing === "escalates").length;
 }
 
 /**
@@ -846,7 +858,6 @@ export async function runReview(input: ReviewInput): Promise<ReviewOutcome> {
   }
 
   const touched = pathsInDiff(input.diff ?? "");
-  let escalations = 0;
   const seenKeys = new Set<string>();
   const findings: Finding[] = [];
   for (const { finding, row, closure, direction } of raw) {
@@ -874,11 +885,10 @@ export async function runReview(input: ReviewInput): Promise<ReviewOutcome> {
             : undefined,
     };
     const decision = decideBlocking(lookup);
-    if (decision.outcome === "escalates") escalations += 1;
     findings.push({ ...applyBlocking(finding, decision, lookup), waiver });
   }
 
-  const decision = deriveDecision({ error, coverage, findings, escalations });
+  const decision = deriveDecision({ error, coverage, findings, escalations: escalationCount(findings) });
 
   const resolvedCost = resolveModelCost({
     usage,

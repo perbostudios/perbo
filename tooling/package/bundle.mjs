@@ -3,8 +3,8 @@
 // dependency inlined into one `.mjs`, with only Node's own modules left
 // external, so the file runs on its own with no `node_modules` beside it.
 //
-// Two callers, one bundle: `pack.mjs` stages it into the design-partner tarball
-// (D-046), and a corpus `--run` builds one into its own output directory at run
+// Two callers, one bundle: `pack.mjs` stages it into the design-partner tarball,
+// and a corpus `--run` builds one into its own output directory at run
 // start and spawns that copy for every fixture, so a rebuild of the tree during
 // a run cannot change what is being measured.
 //
@@ -31,7 +31,7 @@ export const CLI_ENTRY_POINT = join("apps", "cli", "dist", "main.js");
  *
  * A bundle rather than the compiled entry point beside it because a `bin` has
  * to work where the package is *installed*, and there the workspace packages
- * it imports do not exist: `@focrux/contracts` and the rest are never
+ * it imports do not exist: `@perbo/contracts` and the rest are never
  * published, so a tarball whose binary imported them by name would install and
  * then fail on its first line. Bundling is what makes `apps/cli` packable at
  * all — the archive `pack.mjs` builds has always been one file for the same
@@ -40,19 +40,19 @@ export const CLI_ENTRY_POINT = join("apps", "cli", "dist", "main.js");
  *
  * Beside the compiled entry point rather than in a `bin/` of its own, because
  * the CLI reads its own version from `../package.json` — one directory above
- * the file that is running. That holds for `dist/focrux.js` both here and in an
+ * the file that is running. That holds for `dist/perbo.js` both here and in an
  * installed package, and it is the same arrangement `pack.mjs` stages the
  * archive in; a nested directory would have put the binary one level too deep
  * and left `--version` reading a file that is not there.
  */
-export const CLI_BIN = join("apps", "cli", "dist", "focrux.js");
+export const CLI_BIN = join("apps", "cli", "dist", "perbo.js");
 
 /**
  * The library entry `apps/cli`'s `main` and `exports` name, and the compiled
  * module it is built from.
  *
  * Bundled for the same reason the binaries are, and it is the same reason twice:
- * an installed `@focrux/cli` has no `@focrux/contracts` beside it, so the
+ * an installed `@perbo/cli` has no `@perbo/contracts` beside it, so the
  * compiled `dist/index.js` — which is `export *` over modules that import the
  * workspace by name — resolves nothing once it leaves this repository. A
  * manifest may not name an entry point that only works where it was built, so
@@ -96,7 +96,7 @@ export const GUARD_HOOK_FILE = "guard-hook.js";
 export async function bundleGuardHook({ beside, root = ROOT }) {
   const entry = join(root, GUARD_HOOK_ENTRY);
   if (!existsSync(entry)) {
-    throw new Error(`${entry} is not compiled: build @focrux/runner before staging a binary`);
+    throw new Error(`${entry} is not compiled: build @perbo/runner before staging a binary`);
   }
   return bundleCli({ entry, outfile: join(beside, GUARD_HOOK_FILE), absWorkingDir: root });
 }
@@ -118,7 +118,7 @@ export async function bundleCliPackage({ root = ROOT } = {}) {
     await bundleCli({ entry, outfile: target, absWorkingDir: root });
     // Executable, because that is what a `bin` is. npm and pnpm both set the
     // bit when they link one, but a file run straight out of the build tree —
-    // `apps/cli/dist/bin/focrux --version` — has only what was written here.
+    // `apps/cli/dist/bin/perbo --version` — has only what was written here.
     chmodSync(target, 0o755);
     built.push(target);
     // The hook is written beside the binary, where the runner looks for it.
@@ -157,7 +157,7 @@ export function bundledPackages(metafile) {
       continue;
     }
     const [top, dir] = input.split("/");
-    if (top === "packages" || top === "apps") names.add(`@focrux/${dir}`);
+    if (top === "packages" || top === "apps") names.add(`@perbo/${dir}`);
   }
   return [...names].sort();
 }
@@ -170,12 +170,38 @@ export const NODE_BUILTINS = builtinModules.flatMap((module) =>
   module.startsWith("node:") ? [module] : [module, `node:${module}`],
 );
 
-// A bundled CommonJS dependency may call require() through a pattern esbuild
-// cannot resolve statically; esbuild's shim for that call uses a `require` in
-// scope when one exists and throws when none does, so give it a real one.
+/**
+ * The Claude Agent SDK, which `perbo interview` runs the person's session
+ * through (D-102), stays external.
+ *
+ * `interview.ts` imports it when a session is actually started, and says what
+ * to install when it is not there; inlining it would carry a megabyte and a half
+ * of it into every binary. The session runs the person's own Claude Code, which
+ * the interview names to the SDK by path (`pathToClaudeCodeExecutable`), not the
+ * copy the published package carries as a per-platform optional dependency.
+ */
+export const EXTERNAL_PACKAGES = ["@anthropic-ai/claude-agent-sdk"];
+
+// What a CommonJS dependency has in scope and an ES module does not. The
+// output is ESM, so each of these is a free variable that throws on the line
+// that reads it — at run time, in whichever branch reaches it first, which is
+// why they are supplied here rather than waited for.
+//
+// `require`: a bundled dependency may call it through a pattern esbuild cannot
+// resolve statically, and esbuild's shim for that call uses a `require` in
+// scope when one exists and throws when none does.
+//
+// `__filename` and `__dirname`: the TypeScript compiler reads both while it
+// starts, to decide whether the file system is case-sensitive and to find its
+// own directory. In a bundle they name the bundle, which is the true answer to
+// both questions about the file that is running.
 const BANNER = [
-  'import { createRequire as __focruxCreateRequire } from "node:module";',
-  "const require = __focruxCreateRequire(import.meta.url);",
+  'import { createRequire as __perboCreateRequire } from "node:module";',
+  'import { dirname as __perboDirname } from "node:path";',
+  'import { fileURLToPath as __perboFileURLToPath } from "node:url";',
+  "const require = __perboCreateRequire(import.meta.url);",
+  "const __filename = __perboFileURLToPath(import.meta.url);",
+  "const __dirname = __perboDirname(__filename);",
 ].join("\n");
 
 /**
@@ -195,7 +221,7 @@ export async function bundleCli({ entry, outfile, absWorkingDir = process.cwd() 
     platform: "node",
     format: "esm",
     target: "node22",
-    external: NODE_BUILTINS,
+    external: [...NODE_BUILTINS, ...EXTERNAL_PACKAGES],
     banner: { js: BANNER },
     legalComments: "inline",
     metafile: true,

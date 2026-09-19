@@ -58,7 +58,7 @@ let compiled: string | undefined;
  *
  * The directory is made *under the package* rather than under the system
  * temporary directory, because what is compiled has to keep working: the
- * entry points resolve `@focrux/*` through `apps/cli/node_modules` and read the
+ * entry points resolve `@perbo/*` through `apps/cli/node_modules` and read the
  * version from `../package.json`, and both answers are only right for a
  * directory one level below `apps/cli`. `.gitignore` keeps it out of the tree.
  */
@@ -105,9 +105,9 @@ export async function bundleBuild(): Promise<Bundle> {
   // permission model: it matches on the resolved path, and a temporary
   // directory reached through a symlinked `/tmp` would be denied at the first
   // component rather than allowed at the last.
-  const install = realpathSync(mkdtempSync(join(tmpdir(), "focrux-bundle-")));
+  const install = realpathSync(mkdtempSync(join(tmpdir(), "perbo-bundle-")));
   staged.push(install);
-  const file = join(install, "bin", "focrux.mjs");
+  const file = join(install, "bin", "perbo.mjs");
   const metafile = await bundler.bundleCli({ entry, outfile: file, absWorkingDir: bundler.ROOT });
   // Staged as the release script stages it: the binary reports its version from
   // the manifest one directory up from where it runs, so a bundle without one

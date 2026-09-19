@@ -1,4 +1,4 @@
-import { Button, Notice } from "@focrux/ui";
+import { Button, Notice } from "@perbo/ui";
 import { Brand, FactList, PageHeader, SectionLabel } from "../Screen.js";
 import { errorMessage, useAction, useUsage } from "../data.js";
 import type { PageProps } from "../shell/App.js";
@@ -17,7 +17,7 @@ export function AboutPage({ workspace, navigate }: PageProps) {
           <div className="about-brand">
             <Brand />
             <div>
-              <h1>focrux</h1>
+              <h1>perbo</h1>
               <span className="small muted">
                 {workspace.version} ·{" "}
                 {workspace.mode === "desktop"
@@ -34,7 +34,7 @@ export function AboutPage({ workspace, navigate }: PageProps) {
           </p>
           <FactList
             rows={[
-              ["Built by", "Focrux"],
+              ["Built by", "Perbo"],
               ["Runner", "this machine · nothing hosted"],
               ["Credentials", "Claude Code and Codex subscription CLIs"],
               ["Telemetry", "off · no account required"],

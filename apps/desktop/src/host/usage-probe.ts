@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@focrux/contracts";
+import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
 import type { UsageWindow } from "../shared/protocol.js";
 import { metadataProcess } from "./model-catalog.js";
 import { childEnvironment } from "./process.js";
@@ -79,7 +79,7 @@ export async function codexUsage(
   const auth = join(base.CODEX_HOME ?? join(homedir(), ".codex"), "auth.json");
   if (!existsSync(auth))
     return { plan: null, windows: null, detail: "Codex is not signed in on this machine." };
-  const scratch = mkdtempSync(join(tmpdir(), "focrux-usage-"));
+  const scratch = mkdtempSync(join(tmpdir(), "perbo-usage-"));
   try {
     const { env } = scrubEnvironment({
       base,
@@ -111,7 +111,7 @@ export async function codexUsage(
       initial: {
         id,
         method: "initialize",
-        params: { clientInfo: { name: "focrux_usage", version: "0.1.0" }, capabilities: {} },
+        params: { clientInfo: { name: "perbo_usage", version: "0.1.0" }, capabilities: {} },
       },
       receive: (message, send) => {
         if (message.id !== id) return;

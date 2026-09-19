@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
-import { run } from "@focrux/workspace";
+import { run } from "@perbo/workspace";
 
 /**
  * What an attempt leaves running, and ending it before the worktree goes.

@@ -4,9 +4,11 @@ import {
   DEFAULT_LIMITS_TABLE,
   LimitExceededError,
   LimitsTableSchema,
+  PER_TOKEN_COST_LIMITS,
   assertProviderEnabled,
   assertWithinLimits,
   limitFor,
+  limitsForCredential,
 } from "../src/limits.js";
 
 describe("assertWithinLimits", () => {
@@ -80,34 +82,68 @@ describe("limits table", () => {
 
   it("falls back to the default for a resource with no override", () => {
     const table = LimitsTableSchema.parse({ organisation: "org" });
-    expect(limitFor(table, "attempt_tokens")).toBe(DEFAULT_LIMITS.attempt_tokens);
+    expect(limitFor(table, "remediation_rounds")).toBe(DEFAULT_LIMITS.remediation_rounds);
   });
 
   /**
-   * D-096. The three counters have no default: an iteration is one assistant
-   * event and a command is one tool call, and both were proxies for spend that
-   * cut ordinary work. A table without them is a table with no ceiling on them.
+   * D-096. None of the six has a default: cost, wall clock and fresh tokens
+   * were the ceilings people read on their own provider account anyway, and an
+   * iteration or a command was only ever a proxy for those. A table without
+   * them is a table with no ceiling on them, and what stops a hang is the stall
+   * detector instead.
    */
-  it("accepts a table naming none of the three counters, and bounds neither", () => {
+  it("accepts a table naming none of the six counters, and bounds none of them", () => {
     const table = LimitsTableSchema.parse({ organisation: "org" });
-    for (const resource of ["attempt_iterations", "round_iterations", "attempt_commands"] as const) {
+    for (const resource of [
+      "attempt_iterations",
+      "round_iterations",
+      "attempt_commands",
+      "attempt_wall_clock_ms",
+      "attempt_tokens",
+      "attempt_cost_micros",
+    ] as const) {
       expect(DEFAULT_LIMITS[resource]).toBeUndefined();
       expect(limitFor(table, resource)).toBeNull();
-      expect(() => assertWithinLimits(table, resource, 10_000)).not.toThrow();
+      expect(() => assertWithinLimits(table, resource, 10_000_000_000)).not.toThrow();
     }
   });
 
   it("accepts a table that sets them, and each one still fires at what it says", () => {
     const table = LimitsTableSchema.parse({
       organisation: "org",
-      limits: { attempt_iterations: 400, round_iterations: 80, attempt_commands: 400 },
+      limits: {
+        attempt_iterations: 400,
+        round_iterations: 80,
+        attempt_commands: 400,
+        attempt_wall_clock_ms: 60_000,
+        attempt_tokens: 1_000,
+      },
     });
     expect(limitFor(table, "attempt_iterations")).toBe(400);
     expect(limitFor(table, "round_iterations")).toBe(80);
     expect(limitFor(table, "attempt_commands")).toBe(400);
+    expect(limitFor(table, "attempt_wall_clock_ms")).toBe(60_000);
+    expect(limitFor(table, "attempt_tokens")).toBe(1_000);
     expect(() => assertWithinLimits(table, "attempt_iterations", 401)).toThrow(LimitExceededError);
     expect(() => assertWithinLimits(table, "round_iterations", 81)).toThrow(LimitExceededError);
     expect(() => assertWithinLimits(table, "attempt_commands", 401)).toThrow(LimitExceededError);
+    expect(() => assertWithinLimits(table, "attempt_wall_clock_ms", 60_001)).toThrow(
+      LimitExceededError,
+    );
+    expect(() => assertWithinLimits(table, "attempt_tokens", 1_001)).toThrow(LimitExceededError);
+  });
+
+  /**
+   * SCP-323: the one resource this ticket adds a default to, because it is the
+   * only thing left that stops a run nobody asked to stop.
+   */
+  it("defaults the stall window, which no table has to name", () => {
+    const table = LimitsTableSchema.parse({ organisation: "org" });
+    expect(limitFor(table, "attempt_stall_ms")).toBe(20 * 60 * 1000);
+    expect(() => assertWithinLimits(table, "attempt_stall_ms", 20 * 60 * 1000)).not.toThrow();
+    expect(() => assertWithinLimits(table, "attempt_stall_ms", 20 * 60 * 1000 + 1)).toThrow(
+      LimitExceededError,
+    );
   });
 
   /**
@@ -116,10 +152,76 @@ describe("limits table", () => {
    */
   it("keeps an older configuration that names them parsing", () => {
     const parsed = LimitsTableSchema.safeParse({
-      organisation: "focrux",
+      organisation: "perbo",
       limits: { attempt_iterations: 400, round_iterations: 80, attempt_commands: 400 },
     });
     expect(parsed.success).toBe(true);
+  });
+});
+
+/**
+ * D-096: a cost cap means something only where the executor is billed per
+ * token. A subscription bills by the month whatever an attempt does, so a
+ * dollar figure on it is a measure and never a bill, and capping on it stops
+ * ordinary work for a number nobody is charged.
+ */
+describe("the cost caps follow the credential the attempt records", () => {
+  const table = LimitsTableSchema.parse({ organisation: "org" });
+
+  it("bounds neither cost resource on its own, whatever the table says", () => {
+    expect(limitFor(table, "attempt_cost_micros")).toBeNull();
+    expect(limitFor(table, "ticket_cost_micros")).toBeNull();
+  });
+
+  it("applies $5 an attempt and $60 a ticket against an API key", () => {
+    const applied = limitsForCredential(table, "user_api_key");
+    expect(limitFor(applied, "attempt_cost_micros")).toBe(PER_TOKEN_COST_LIMITS.attempt_cost_micros);
+    expect(limitFor(applied, "ticket_cost_micros")).toBe(PER_TOKEN_COST_LIMITS.ticket_cost_micros);
+    expect(PER_TOKEN_COST_LIMITS.attempt_cost_micros).toBe(5_000_000);
+    expect(PER_TOKEN_COST_LIMITS.ticket_cost_micros).toBe(60_000_000);
+    expect(() => assertWithinLimits(applied, "attempt_cost_micros", 5_000_001)).toThrow(
+      LimitExceededError,
+    );
+  });
+
+  it("lets the repository override the per-token defaults", () => {
+    const configured = LimitsTableSchema.parse({
+      organisation: "org",
+      limits: { attempt_cost_micros: 15_000_000, ticket_cost_micros: 200_000_000 },
+    });
+    const applied = limitsForCredential(configured, "user_api_key");
+    expect(limitFor(applied, "attempt_cost_micros")).toBe(15_000_000);
+    expect(limitFor(applied, "ticket_cost_micros")).toBe(200_000_000);
+  });
+
+  it("bounds nothing on a subscription, including a cap the repository set", () => {
+    const configured = LimitsTableSchema.parse({
+      organisation: "org",
+      limits: { attempt_cost_micros: 500, ticket_cost_micros: 1_000 },
+    });
+    const applied = limitsForCredential(configured, "subscription");
+    expect(limitFor(applied, "attempt_cost_micros")).toBeNull();
+    expect(limitFor(applied, "ticket_cost_micros")).toBeNull();
+    expect(() => assertWithinLimits(applied, "attempt_cost_micros", 900_000_000)).not.toThrow();
+  });
+
+  it("caps a credential it could not identify, because unknown is not a subscription", () => {
+    const applied = limitsForCredential(table, "unknown");
+    expect(limitFor(applied, "attempt_cost_micros")).toBe(PER_TOKEN_COST_LIMITS.attempt_cost_micros);
+  });
+
+  it("leaves every other resource exactly as the table had it", () => {
+    const configured = LimitsTableSchema.parse({
+      organisation: "org",
+      limits: { attempt_commands: 400, attempt_stall_ms: 90_000 },
+    });
+    for (const credential of ["subscription", "user_api_key"] as const) {
+      const applied = limitsForCredential(configured, credential);
+      expect(limitFor(applied, "attempt_commands")).toBe(400);
+      expect(limitFor(applied, "attempt_stall_ms")).toBe(90_000);
+      expect(applied.organisation).toBe("org");
+      expect(applied.kill_switches).toEqual(configured.kill_switches);
+    }
   });
 });
 

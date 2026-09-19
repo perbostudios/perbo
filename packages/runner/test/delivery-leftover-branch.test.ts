@@ -6,13 +6,13 @@ import { pushAttemptBranch } from "../src/delivery.js";
 import { git, scratch } from "./support.js";
 
 /**
- * A remote attempt branch, `fcx/…` or `ayo/…`, a failed publish left behind
+ * A remote attempt branch, `prb/…` or `ayo/…`, a failed publish left behind
  * (SCP-266).
  *
  * The branch name is a digest of the outcome, so a re-run on the same outcome
  * mints the same name over a different commit: its push is rejected
  * non-fast-forward, and stays rejected until the branch is deleted by hand. The
- * loop owns the `fcx/` and `ayo/` namespaces, so a leftover there with no open
+ * loop owns the `prb/` and `ayo/` namespaces, so a leftover there with no open
  * pull request standing on it is the loop's to replace — under a lease on the
  * tip it read, so a branch that moved between the read and the push is not
  * overwritten.
@@ -45,9 +45,9 @@ interface Fixture {
 
 /** A worktree on `BRANCH`, and a bare `origin` that may already hold it. */
 function fixture(options: { leftover?: boolean } = {}): Fixture {
-  const origin = scratch("focrux-origin-");
+  const origin = scratch("perbo-origin-");
   git(origin, "init", "-q", "--bare", "-b", "main");
-  const work = scratch("focrux-work-");
+  const work = scratch("perbo-work-");
   git(work, "init", "-q", "-b", "main");
   git(work, "config", "user.name", "test");
   git(work, "config", "user.email", "test@example.com");
@@ -99,7 +99,7 @@ function fakeGh(options: {
   answer: "open" | "closed" | "absent" | "error";
   advance?: { origin: string; branch: string; to: string };
 }): { bin: string } {
-  const dir = scratch("focrux-gh-");
+  const dir = scratch("perbo-gh-");
   const log = join(dir, "calls.log");
   const answer = {
     open: `printf '%s' '{"number":7,"url":"https://example.invalid/pull/7","state":"OPEN"}'; exit 0`,
@@ -131,7 +131,7 @@ function fakeGh(options: {
 
 /** A PATH holding `git` and nothing else — the machine with no `gh` installed. */
 function pathWithGitOnly(): string {
-  const dir = scratch("focrux-no-gh-");
+  const dir = scratch("perbo-no-gh-");
   symlinkSync(execFileSync("/bin/sh", ["-c", "command -v git"], { encoding: "utf8" }).trim(), join(dir, "git"));
   return dir;
 }

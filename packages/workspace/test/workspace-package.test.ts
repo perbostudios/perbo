@@ -22,7 +22,7 @@ import {
  * Nothing here starts a process: every answer is read off files on disk.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-ws-package-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-ws-package-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 /** A directory tree holding exactly the files it is given, relative to its root. */

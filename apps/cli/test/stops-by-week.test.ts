@@ -2,12 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { PARTNER_READING_CAVEAT, STOP_VERDICTS_SCHEMA_VERSION, type StopVerdicts } from "@focrux/contracts";
+import { PARTNER_READING_CAVEAT, STOP_VERDICTS_SCHEMA_VERSION, type StopVerdicts } from "@perbo/contracts";
 import type { Streams } from "../src/admit.js";
 import { HIDING_WARNING, parseStopsArgs, runStopsCommand, weekHidingWarning } from "../src/stops.js";
 
 /**
- * `focrux stops --by-week` over fake stops files: the weeks the table prints,
+ * `perbo stops --by-week` over fake stops files: the weeks the table prints,
  * the week nothing fell in, the widening test read between consecutive weeks,
  * the ISO week-year around New Year — and, because the flag is an addition and
  * not a change, the byte-for-byte output of a `--since` run without it.
@@ -16,7 +16,7 @@ import { HIDING_WARNING, parseStopsArgs, runStopsCommand, weekHidingWarning } fr
  * the clock is passed in so "through the current week" is a fixed range.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-stops-week-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-stops-week-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function capture(): Streams & { out: string[]; err: string[] } {
@@ -54,7 +54,7 @@ const record = (n: number, at: string, stops: StopVerdicts["stops"]): StopVerdic
 
 function store(name: string, records: readonly StopVerdicts[]): string {
   const repo = join(scratch, name);
-  const state = join(repo, ".focrux", "state");
+  const state = join(repo, ".perbo", "state");
   mkdirSync(state, { recursive: true });
   for (const one of records) {
     writeFileSync(join(state, `${one.ticket_id}.stops.json`), `${JSON.stringify(one, null, 2)}\n`);
@@ -97,7 +97,7 @@ const W33 = "2026-08-11T00:00:00.000Z";
 const W34 = "2026-08-18T00:00:00.000Z";
 const W35 = "2026-08-25T00:00:00.000Z";
 
-describe("focrux stops --by-week", () => {
+describe("perbo stops --by-week", () => {
   it("prints every week in the window, in the total's columns, and n=0 for the week nothing fell in", async () => {
     // Three changes in three weeks, with 2026-W33 empty between them.
     const repo = store("gap", [
@@ -239,7 +239,7 @@ describe("focrux stops --by-week", () => {
       ["week", "precision of stopping", "95% Wilson", "n", "person shown something", "dogfood excluded"],
       ["total", "—", "—", "0", "— (n=0)", "0"],
     ]);
-    expect(err).toContain("focrux sync");
+    expect(err).toContain("perbo sync");
   });
 
   /**

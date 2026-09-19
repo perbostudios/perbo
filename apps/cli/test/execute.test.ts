@@ -12,8 +12,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LimitsTableSchema } from "@focrux/contracts";
-import { DEFAULT_DELIVERED_CHECKS_BOUND_MS, TicketRunConfigSchema } from "@focrux/runner";
+import { LimitsTableSchema } from "@perbo/contracts";
+import { DEFAULT_DELIVERED_CHECKS_BOUND_MS, TicketRunConfigSchema } from "@perbo/runner";
 import { describe, expect, it, vi } from "vitest";
 import { UsageError } from "../src/args.js";
 import { readPullRequestChecks } from "../src/pull-request.js";
@@ -49,7 +49,7 @@ const streams = () => {
   };
 };
 
-describe("focrux run / doctor argument parsing", () => {
+describe("perbo run / doctor argument parsing", () => {
   it("rejects an unknown flag rather than reviewing something else", () => {
     expect(() => parseExecuteArgs(["--contarct", "c.json"])).toThrow(UsageError);
     expect(() => parseExecuteArgs(["positional"])).toThrow(UsageError);
@@ -88,7 +88,7 @@ describe("exit codes", () => {
   });
 });
 
-// `focrux doctor` refusing a repository it cannot materialize lives in
+// `perbo doctor` refusing a repository it cannot materialize lives in
 // doctor-refusal.test.ts, where the preflight and the diagnostic are injected
 // and the test observes that no process is started to reach the refusal.
 
@@ -243,7 +243,7 @@ describe("what the run says when no check reported on the head", () => {
    * `gh` on PATH answering.
    */
   async function repositoryChecks(name: string, on: "push" | "pull_request") {
-    const dir = mkdtempSync(join(tmpdir(), `focrux-run-checks-${name}-`));
+    const dir = mkdtempSync(join(tmpdir(), `perbo-run-checks-${name}-`));
     const path = `.github/workflows/${on === "push" ? "release" : "ci"}.yml`;
     mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
     writeFileSync(join(dir, path), `name: CI\non:\n  ${on}:\n    branches: [main]\njobs: {}\n`);
@@ -265,7 +265,7 @@ describe("what the run says when no check reported on the head", () => {
    * whole of what `gh workflow list` writes is the case's own `body`.
    */
   async function repositoryWithoutWorkflows(name: string, body: string) {
-    const dir = mkdtempSync(join(tmpdir(), `focrux-run-checks-${name}-`));
+    const dir = mkdtempSync(join(tmpdir(), `perbo-run-checks-${name}-`));
     const bin = join(dir, ".bin");
     ghListing(bin, [], body);
 
@@ -404,7 +404,7 @@ const doctorArgs = (repo: string, extra: Partial<Parameters<typeof runDoctorComm
 });
 
 function repository(name: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `focrux-execute-${name}-`));
+  const dir = mkdtempSync(join(tmpdir(), `perbo-execute-${name}-`));
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
   execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], {
     env: {
@@ -425,7 +425,7 @@ function repository(name: string): string {
  * absent rather than mocked absent. Restored by the returned function.
  */
 function withoutClaudeOnPath(): () => void {
-  const bin = mkdtempSync(join(tmpdir(), "focrux-fake-bin-"));
+  const bin = mkdtempSync(join(tmpdir(), "perbo-fake-bin-"));
   const git = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
   symlinkSync(git, join(bin, "git"));
   const previous = process.env.PATH;
@@ -445,7 +445,7 @@ const DOCTOR_RUN_TIMEOUT_MS = 60_000;
 
 describe("preflight, before anything is touched", () => {
   it("doctor reports a missing agent binary with the command that fixes it", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "focrux-preflight-"));
+    const dir = mkdtempSync(join(tmpdir(), "perbo-preflight-"));
     writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "x" }));
     const restore = withoutClaudeOnPath();
     try {
@@ -489,32 +489,32 @@ describe("preflight, before anything is touched", () => {
         cwd: repo,
       }),
     ).toBe(0);
-    const before = readTicket(storeDir(repo, null), "FCX-1");
+    const before = readTicket(storeDir(repo, null), "PRB-1");
     expect(before.state).toBe("ready");
 
     const restore = withoutClaudeOnPath();
     try {
       const run = streams();
       const code = await runExecuteCommand({
-        args: doctorArgs(repo, { ticket: "FCX-1", json: false }),
+        args: doctorArgs(repo, { ticket: "PRB-1", json: false }),
         streams: run.streams,
         cwd: repo,
       });
       expect(code).toBe(3);
       expect(run.err.join("")).toContain("agent_binary_missing");
-      expect(run.err.join("")).toContain("FCX-1 was not touched");
+      expect(run.err.join("")).toContain("PRB-1 was not touched");
       expect(run.out.join("")).toBe("");
     } finally {
       restore();
     }
-    expect(readTicket(storeDir(repo, null), "FCX-1")).toEqual(before);
+    expect(readTicket(storeDir(repo, null), "PRB-1")).toEqual(before);
   }, DOCTOR_RUN_TIMEOUT_MS);
 });
 
 describe("ceilings surfaced", () => {
   it("doctor prints the effective table and names the attempt that hit one", async () => {
     const repo = repository("ceilings");
-    const store = join(repo, ".focrux");
+    const store = join(repo, ".perbo");
     mkdirSync(join(store, "tickets"), { recursive: true });
     mkdirSync(join(store, "state"), { recursive: true });
     writeFileSync(
@@ -555,8 +555,19 @@ describe("ceilings surfaced", () => {
     const rendered = text.out.join("");
     expect(rendered).toMatch(/attempt_iterations\s+200\s+200\s+config \(no default\)/);
     // D-096: nothing raised it and nothing defaults it, so there is no ceiling
-    // to print — and the table says that rather than a number.
+    // to print — and the table says that rather than a number. Four resources
+    // read this way now, the wall clock and the token count among them.
     expect(rendered).toMatch(/attempt_commands\s+—\s+no ceiling\s+not set/);
+    expect(rendered).toMatch(/attempt_wall_clock_ms\s+—\s+no ceiling\s+not set/);
+    expect(rendered).toMatch(/attempt_tokens\s+—\s+no ceiling\s+not set/);
+    // The one resource this ticket gives a default, and the two whose default
+    // waits on the executor being billed per token.
+    expect(rendered).toMatch(/attempt_stall_ms\s+1200000\s+20m\s+default/);
+    expect(rendered).toMatch(/attempt_cost_micros\s+5000000\s+\$5\.00\s+per-token default/);
+    expect(rendered).toMatch(/ticket_cost_micros\s+60000000\s+\$60\.00\s+per-token default/);
+    expect(rendered).toContain(
+      "the two cost keys bind only where the executor is billed per token",
+    );
     expect(rendered).toContain("ceiling hit  AYO-3 att_ceiling000001: attempt_iterations reached 61 against 60");
     expect(rendered).toContain("raise it with limits.limits.attempt_iterations in");
     expect(rendered).toContain("(now 200)");
@@ -571,6 +582,11 @@ describe("ceilings surfaced", () => {
     };
     expect(result.limits.effective.attempt_iterations).toBe(200);
     expect(result.limits.effective.attempt_commands).toBeNull();
+    expect(result.limits.effective.attempt_stall_ms).toBe(1_200_000);
+    // The table's own answer, before a credential is known: neither cost key
+    // bounds anything on its own (D-096).
+    expect(result.limits.effective.attempt_cost_micros).toBeNull();
+    expect(result.limits.effective.ticket_cost_micros).toBeNull();
     expect(result.limits.ceiling_terminations).toEqual([
       {
         ticket: "AYO-3",
@@ -592,18 +608,25 @@ describe("ceilings surfaced", () => {
       }),
     );
     expect(line).toBe(
-      // D-096: cost is the guard that means something, and it leads. No
-      // iteration or command ceiling is named because none is in force.
-      "cost $15.00 · wall clock 45m · tokens 2,000,000 · " +
+      // D-096: the stall window is the only thing that stops a run nobody asked
+      // to stop, and it leads.
+      "stall 20m · " +
         // SCP-193: the two that bound the ticket rather than one attempt, which
         // are the ones a person reads when a run continues itself.
         // SCP-194: the cap is six, and it is a cap above the progress rule
         // rather than the rule itself.
-        "remediation rounds 6 · ticket budget $60.00 · provider wait 6h",
+        "remediation rounds 6 · provider wait 6h · " +
+        // Marked per-token because whether they bind at all depends on the
+        // credential the executor turns out to authenticate with, and nothing
+        // has read that yet. The $15 is the repository's own.
+        "per-token cost $15.00 · per-token ticket budget $60.00 · " +
+        // A wall clock only because this repository set one; no token,
+        // iteration or command ceiling is named because none is in force.
+        "wall clock 45m",
     );
   });
 
-  it("names a counter the repository configured, after the ceilings every run has", () => {
+  it("names a counter the repository configured, after the bounds every run has", () => {
     const line = renderCeilingsLine(
       LimitsTableSchema.parse({
         organisation: "t",
@@ -611,8 +634,8 @@ describe("ceilings surfaced", () => {
       }),
     );
     expect(line).toBe(
-      "cost $5.00 · wall clock 30m · tokens 2,000,000 · " +
-        "remediation rounds 6 · ticket budget $60.00 · provider wait 6h · " +
+      "stall 20m · remediation rounds 6 · provider wait 6h · " +
+        "per-token cost $5.00 · per-token ticket budget $60.00 · " +
         "iterations 400 · round iterations 80 · commands 400",
     );
   });
@@ -664,7 +687,7 @@ describe("a partner's first hour", () => {
       writeFileSync(join(repo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
       const overridePath = join(repo, "desktop-selection.json");
       writeFileSync(overridePath, JSON.stringify({ ...codexSelection, _comment: "Desktop selection" }));
-      const configPath = join(repo, ".focrux", "config.json");
+      const configPath = join(repo, ".perbo", "config.json");
       const preflight = readyPreflight();
       const proposed = streams();
       const proposedCode = await runDoctorCommand({
@@ -676,6 +699,7 @@ describe("a partner's first hour", () => {
       expect(proposedCode).toBe(0);
       expect(preflight).toHaveBeenCalledWith({
         agentBinary: "codex",
+        agentProvider: "codex-cli",
         reviewerProvider: "codex-cli",
         needsGh: false,
         installBinary: "pnpm",
@@ -700,7 +724,10 @@ describe("a partner's first hour", () => {
             base_ref: "main",
             checks: [{ check_id: "check_lint" }, { check_id: "check_unit" }],
             materialization_manifest: { source_checkout: "." },
-            limits: { limits: { attempt_cost_micros: 5_000_000 } },
+            // D-096: the proposal writes the defaults a run actually has, and
+            // the cost caps are not among them — a repository that wants one
+            // adds the key.
+            limits: { limits: { attempt_stall_ms: 1_200_000 } },
           },
         },
       });
@@ -729,16 +756,22 @@ describe("a partner's first hour", () => {
         provider: { dependency: { reason: expect.stringContaining(configPath) } },
       });
       const saved = TicketRunConfigSchema.parse(
-        mergeRunConfig({ dir: join(repo, ".focrux"), key: "FCX-1", repository_root: repo }, null),
+        mergeRunConfig({ dir: join(repo, ".perbo"), key: "PRB-1", repository_root: repo }, null),
       );
       expect(saved).toMatchObject({ ...codexSelection, base_ref: "main" });
       expect(saved.checks.map((check) => check.check_id)).toEqual(["check_lint", "check_unit"]);
       expect(saved.materialization_manifest?.source_checkout).toBe(repo);
-      expect(saved.limits.limits.attempt_cost_micros).toBe(5_000_000);
-    // D-096: the scaffold writes the defaults, and the three counters have none.
-    expect(saved.limits.limits.attempt_iterations).toBeUndefined();
-    expect(saved.limits.limits.round_iterations).toBeUndefined();
-    expect(saved.limits.limits.attempt_commands).toBeUndefined();
+      expect(saved.limits.limits.attempt_stall_ms).toBe(1_200_000);
+      // D-096: the scaffold writes the defaults a run actually has, and the
+      // ceilings this ticket removed have none — including the two cost caps,
+      // whose numbers wait on a credential billed per token.
+      expect(saved.limits.limits.attempt_cost_micros).toBeUndefined();
+      expect(saved.limits.limits.ticket_cost_micros).toBeUndefined();
+      expect(saved.limits.limits.attempt_wall_clock_ms).toBeUndefined();
+      expect(saved.limits.limits.attempt_tokens).toBeUndefined();
+      expect(saved.limits.limits.attempt_iterations).toBeUndefined();
+      expect(saved.limits.limits.round_iterations).toBeUndefined();
+      expect(saved.limits.limits.attempt_commands).toBeUndefined();
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
@@ -748,7 +781,7 @@ describe("a partner's first hour", () => {
     const repo = repository("codex-existing-config");
     try {
       execFileSync("git", ["-C", repo, "config", "commit.gpgsign", "false"]);
-      const store = join(repo, ".focrux");
+      const store = join(repo, ".perbo");
       mkdirSync(store);
       const configPath = join(store, "config.json");
       const stored = JSON.stringify({
@@ -795,7 +828,7 @@ describe("a partner's first hour", () => {
   }, DOCTOR_RUN_TIMEOUT_MS);
 
   it.each([null, [], "codex", 17])("rejects a non-object explicit configuration: %j", async (value) => {
-    const repo = mkdtempSync(join(tmpdir(), "focrux-doctor-invalid-config-"));
+    const repo = mkdtempSync(join(tmpdir(), "perbo-doctor-invalid-config-"));
     try {
       const overridePath = join(repo, "selection.json");
       writeFileSync(overridePath, JSON.stringify(value));
@@ -807,7 +840,7 @@ describe("a partner's first hour", () => {
         preflight,
       })).rejects.toThrow(`${overridePath} is not a JSON object`);
       expect(preflight).not.toHaveBeenCalled();
-      expect(existsSync(join(repo, ".focrux", "config.json"))).toBe(false);
+      expect(existsSync(join(repo, ".perbo", "config.json"))).toBe(false);
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
@@ -820,7 +853,7 @@ describe("a partner's first hour", () => {
       JSON.stringify({ name: "x", scripts: { test: "vitest run", lint: "eslint .", build: "tsc" } }),
     );
     writeFileSync(join(repo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-    const configPath = join(repo, ".focrux", "config.json");
+    const configPath = join(repo, ".perbo", "config.json");
 
     const proposed = streams();
     await runDoctorCommand({ args: doctorArgs(repo), streams: proposed.streams, cwd: repo });
@@ -832,7 +865,7 @@ describe("a partner's first hour", () => {
     expect(existsSync(configPath)).toBe(false);
     expect(first.config.proposed.checks.map((check) => check.check_id)).toEqual(["check_lint", "check_unit"]);
     expect(first.config.proposed.checks[1]).toMatchObject({ command: ["pnpm", "run", "test"], kind: "unit" });
-    expect(first.config.proposed.limits.limits.attempt_cost_micros).toBe(5_000_000);
+    expect(first.config.proposed.limits.limits.attempt_stall_ms).toBe(1_200_000);
     expect(first.config.proposed.limits.limits.attempt_iterations).toBeUndefined();
     expect(first.config.proposed.materialization_manifest.source_checkout).toBe(".");
 
@@ -849,7 +882,7 @@ describe("a partner's first hour", () => {
 
     // What it wrote is a run configuration the loop accepts, through the same merge a ticket gets.
     const merged = TicketRunConfigSchema.safeParse(
-      mergeRunConfig({ dir: join(repo, ".focrux"), key: "FCX-1", repository_root: repo }, null),
+      mergeRunConfig({ dir: join(repo, ".perbo"), key: "PRB-1", repository_root: repo }, null),
     );
     expect(merged.success).toBe(true);
     expect(merged.success && merged.data.checks.map((check) => check.name)).toEqual(["lint", "test"]);

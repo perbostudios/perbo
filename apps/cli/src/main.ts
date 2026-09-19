@@ -22,7 +22,9 @@ import { runInspectCommand } from "./inspect.js";
 import { parsePrincipleArgs, runPrincipleCommand } from "./principles.js";
 import { VERSION, runReviewCommand } from "./run.js";
 import { runStopsCommand } from "./stops.js";
+import { runIndexCommand } from "./symbol-index.js";
 import { runAgentCommand } from "./agent.js";
+import { runInterviewCommand } from "./interview.js";
 import { runMcpCommand } from "./mcp.js";
 import { runServeCommand } from "./serve.js";
 import { runSyncCommand } from "./sync.js";
@@ -30,13 +32,16 @@ import { USAGE } from "./usage.js";
 import { runVerdictCommand } from "./verdict.js";
 
 /**
- * `focrux` (docs/04, "Review CLI contract", SCP-091).
+ * `perbo` (docs/04, "Review CLI contract", SCP-091).
  *
  * Every command: the six that work against a repository with nothing
- * admitted — doctor, baseline, review, inspect, verdict, run — and the eleven
+ * admitted — doctor, baseline, review, inspect, verdict, run — the twelve
  * that build history across machines — admission, its edits and approval, the
  * work on record, the pull-request read-back, the queue over the store, its
- * endpoint and the session that reads it, and the two measures over it.
+ * endpoint, the session that reads it and the interview that writes the spec,
+ * and the two measures over it — and
+ * `index`, which reads the repository's own code and writes only the symbol
+ * and import index built from it.
  *
  * The shell around the table — help, version, an unknown command, and what a
  * thrown error exits as — is `entry.js`.
@@ -76,12 +81,16 @@ export const FULL_ENTRY_POINT: EntryPoint<FullCommandName> = {
         return runMcpCommand({ argv: rest, streams, cwd });
       case "agent":
         return runAgentCommand({ argv: rest, streams, cwd });
+      case "interview":
+        return runInterviewCommand({ argv: rest, streams, cwd });
       case "stops":
         return runStopsCommand({ argv: rest, streams, cwd });
       case "escapes":
         return runEscapesCommand({ argv: rest, streams, cwd });
       case "principle":
         return runPrincipleCommand(parsePrincipleArgs(rest));
+      case "index":
+        return runIndexCommand({ argv: rest, streams, cwd });
       default:
         // Unreachable: the shell refuses anything not in `commands`, and this
         // switch covers every one of them. A command added to the table and not

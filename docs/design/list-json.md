@@ -1,18 +1,18 @@
-# `focrux list --json`
+# `perbo list --json`
 
 The machine-readable projection of the local ticket store. This page records what that output *is*,
 so the shape is a decision somebody made rather than whatever the code happened to serialise.
 
-The human rendering it mirrors is `focrux list`: a flat list of admitted work, deliberately not a
+The human rendering it mirrors is `perbo list`: a flat list of admitted work, deliberately not a
 backlog. `--json` is that same listing, under the same filter, for a reader
 that is not a person.
 
 ## What is decided here
 
-1. **One document, one write.** `focrux list --json` writes a single JSON value to stdout and
+1. **One document, one write.** `perbo list --json` writes a single JSON value to stdout and
    nothing else: no table, no column headings, no colour, no prose. The bytes are
-   `JSON.stringify(document, null, 2)` followed by one newline, so `focrux list --json | jq` and
-   `focrux list --json > tickets.json` both hold a complete document.
+   `JSON.stringify(document, null, 2)` followed by one newline, so `perbo list --json | jq` and
+   `perbo list --json > tickets.json` both hold a complete document.
 2. **The container is an object, not an array.** A bare array can carry the tickets and nothing about the listing: not which store was
    read, not whether `--all` was in force, not how many tickets the filter hid. Those are facts the
    caller would otherwise have to reconstruct from the argv it passed. They are added as sibling
@@ -35,7 +35,7 @@ that is not a person.
 | field | what it carries |
 |---|---|
 | `schema_version` | `1`. Incremented when an existing field changes meaning or leaves; adding a sibling key does not increment it. |
-| `store` | Absolute path of the ticket store the listing was read from — `<repo>/.focrux` unless `--store` overrode it. |
+| `store` | Absolute path of the ticket store the listing was read from — `<repo>/.perbo` unless `--store` overrode it. |
 | `filter` | The filter this listing was taken under: `{ "all": false }` for the default active-only listing, `{ "all": true }` under `--all`. |
 | `counts` | `{ "shown": <n>, "total": <n> }` — `shown` equals `tickets.length`, `total` is the store before the filter. Equal under `--all`. |
 | `tickets` | The tickets the table would print, in the order it would print them: oldest `admitted_at` first. |
@@ -43,14 +43,14 @@ that is not a person.
 ```json
 {
   "schema_version": 1,
-  "store": "/home/lian/acme/.focrux",
+  "store": "/home/lian/acme/.perbo",
   "filter": { "all": false },
   "counts": { "shown": 1, "total": 3 },
   "tickets": [
     {
       "schema_version": 1,
       "ticket_id": "ticket_9f1c0f7b2a4d8e13",
-      "key": "FCX-1",
+      "key": "PRB-1",
       "title": "Activation email goes out within 60 seconds.",
       "state": "ready",
       "priority": "normal",
@@ -102,13 +102,13 @@ emitting it.
 |---|---|
 | `schema_version` | The ticket record's version, `1`. Distinct from the document's. |
 | `ticket_id` | The opaque id every other contract references. |
-| `key` | The human key, `AYO-118`. What the `TICKET` column prints. |
+| `key` | The human key, `PRB-118`. What the `TICKET` column prints. |
 | `title` | The one-sentence outcome. What the `OUTCOME` column prints. |
 | `state` | The stored lifecycle state, verbatim — the same string the `STATE` column prints. |
 | `priority` | `urgent`, `high`, `normal` or `low`. |
 | `labels` | The labels given at admission, as an array. |
 | `depends_on` | Ticket keys that must be done first. Keys, not ids: a person wrote them. |
-| `scheduling` | What `focrux serve` last decided the ticket waits on: `waits_on`, each `{ key, reason, paths, state }` with `reason` one of `depends_on` or `scope_overlap`, and `decided_at`, when that list last changed (`null` for a ticket that has never waited); and `reconciliation`, `null` or `{ base_tip, exit_code, at, reason }` for a re-level that did not level the branch, `reason` what it answered: a refusal's message, or the outcome and detail of a run that completed without levelling. Stored, not derived, so a `blocked` row carries its reason and rule 4 still holds. |
+| `scheduling` | What `perbo serve` last decided the ticket waits on: `waits_on`, each `{ key, reason, paths, state }` with `reason` one of `depends_on` or `scope_overlap`, and `decided_at`, when that list last changed (`null` for a ticket that has never waited); and `reconciliation`, `null` or `{ base_tip, exit_code, at, reason }` for a re-level that did not level the branch, `reason` what it answered: a refusal's message, or the outcome and detail of a run that completed without levelling. Stored, not derived, so a `blocked` row carries its reason and rule 4 still holds. |
 | `source` | Where the work came from: `kind`, `reference`, `url`, `title_at_admission`. |
 | `repository_root` | The repository the ticket was admitted against. |
 | `plan_id` | The plan contract admission drafted. The contract itself is not in this output. |
@@ -135,7 +135,7 @@ is answerable from a piped listing without opening a ticket file.
 
 The plan contract, the draft snapshot and the attempt bundles. `list` projects the ticket store, and
 a listing that inlined every contract would be a different command;
-`focrux inspect <KEY> --json` is that command.
+`perbo inspect <KEY> --json` is that command.
 
 ## Compatibility
 

@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BundleIdSchema, CommitShaSchema, type ResumedFrom, type RunBundle } from "@focrux/contracts";
-import { gitEnv, run } from "@focrux/workspace";
+import { BundleIdSchema, CommitShaSchema, type ResumedFrom, type RunBundle } from "@perbo/contracts";
+import { gitEnv, run } from "@perbo/workspace";
 import { BundleStore } from "./bundle.js";
 
 /**
@@ -10,7 +10,7 @@ import { BundleStore } from "./bundle.js";
  *
  * An attempt stopped by `attempt_cost_micros` — or by any other ceiling — has
  * already been paid for, and its work survives in the retained `change.diff` of
- * its execution bundle. `focrux run --ticket <id> --resume-from <bundle_id>`
+ * its execution bundle. `perbo run --ticket <id> --resume-from <bundle_id>`
  * starts the next attempt from those bytes instead of from nothing.
  *
  * Two properties are what make that safe rather than merely convenient:
@@ -131,7 +131,7 @@ export function resolveResumeSource(args: {
   if (!BundleIdSchema.safeParse(args.bundle_id).success) {
     refuse(
       `'${args.bundle_id}' is not a bundle id, so no ${RETAINED_DIFF_ARTIFACT} can be read from ` +
-        "it — `focrux inspect <ticket>` lists the bundle of every attempt on record",
+        "it — `perbo inspect <ticket>` lists the bundle of every attempt on record",
     );
   }
 
@@ -235,7 +235,7 @@ export async function applyRetainedDiff(args: {
   source: ResumeSource;
   timeoutMs?: number;
 }): Promise<void> {
-  const scratch = mkdtempSync(join(tmpdir(), "focrux-resume-"));
+  const scratch = mkdtempSync(join(tmpdir(), "perbo-resume-"));
   const path = join(scratch, RETAINED_DIFF_ARTIFACT);
   try {
     writeFileSync(path, args.source.diff);

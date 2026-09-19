@@ -18,8 +18,8 @@ import { scratch } from "./support.js";
  * inside it is ordinary work and is allowed.
  */
 
-const ROOT = realpathSync(scratch("focrux-scp177-root-"));
-const OUTSIDE = realpathSync(scratch("focrux-scp177-out-"));
+const ROOT = realpathSync(scratch("perbo-scp177-root-"));
+const OUTSIDE = realpathSync(scratch("perbo-scp177-out-"));
 const HOME = "/Users/nobody";
 
 mkdirSync(join(ROOT, "src"), { recursive: true });

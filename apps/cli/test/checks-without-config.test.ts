@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { PreflightRequest, PreflightResult } from "@focrux/runner";
+import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import {
   parseExecuteArgs,
   proposedChecks,
@@ -13,10 +13,10 @@ import {
 import { storeDir } from "../src/store.js";
 
 /**
- * A first run on a repository that has no `.focrux/config.json` (SCP-259).
+ * A first run on a repository that has no `.perbo/config.json` (SCP-259).
  *
  * The claim is that such a run is judged by the repository's own checks anyway:
- * the ones `focrux doctor` would propose, derived from the scripts
+ * the ones `perbo doctor` would propose, derived from the scripts
  * `package.json` already declares, pinned for this run and marked in the record
  * as proposed rather than configured. Before this, a config-less repository ran
  * no check at all and the reviewer had no executed test to read.
@@ -29,7 +29,7 @@ import { storeDir } from "../src/store.js";
  * runner spawning the command the derivation produced.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-checks-no-config-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-checks-no-config-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const gitEnv = {
@@ -47,7 +47,7 @@ const git = (dir: string, ...argv: string[]): string =>
 
 /**
  * A repository with one commit, an npm lockfile, and whatever scripts the test
- * gives it — and, above all, no `.focrux/` at all.
+ * gives it — and, above all, no `.perbo/` at all.
  */
 function repository(name: string, scripts: Record<string, string>): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
@@ -441,5 +441,60 @@ describe("the checks derived for a package inside a workspace", () => {
     expect(proposedChecks(root).map((check) => (check["command"] as string[]).join(" "))).toContain(
       "pnpm run test:unit",
     );
+  });
+});
+
+/**
+ * Scripts a run does not run on a repository's behalf: one that starts a
+ * service, which a worktree cannot be given, and any script where no manager
+ * this build installs with is there to run it.
+ */
+describe("the checks derived from scripts a worktree cannot run", () => {
+  it("leave out a script that starts a service, and keep the others", () => {
+    const repo = repository("service-checks", {
+      lint: "eslint .",
+      test: "docker compose up -d && vitest run",
+    });
+
+    expect(proposedChecks(repo).map((check) => check["name"])).toEqual(["lint"]);
+  });
+
+  it("keep a lint script that runs a container, since only a test script is the suite", () => {
+    const repo = repository("container-lint", {
+      lint: "eslint . && docker run --rm -i hadolint/hadolint < Dockerfile",
+      test: "vitest run",
+    });
+
+    expect(proposedChecks(repo).map((check) => check["name"])).toEqual(["lint", "test"]);
+  });
+
+  it("are none where the manager is one this build does not install with", () => {
+    const dir = mkdtempSync(join(scratch, "uv-checks-"));
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "fixture", scripts: { lint: "eslint .", test: "vitest run" } }),
+    );
+    writeFileSync(join(dir, "uv.lock"), "version = 1\n");
+
+    expect(proposedChecks(dir)).toEqual([]);
+  });
+});
+
+describe("the checks derived for a member of a pnpm workspace with no root package.json", () => {
+  it("are the member's own, run with pnpm", () => {
+    // pnpm installs a workspace from `pnpm-workspace.yaml` with no root
+    // manifest, so the member's scripts are installed for and are its checks.
+    const root = mkdtempSync(join(scratch, "rootless-workspace-"));
+    mkdirSync(join(root, "packages", "api"), { recursive: true });
+    writeFileSync(join(root, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+    writeFileSync(join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    writeFileSync(
+      join(root, "packages", "api", "package.json"),
+      JSON.stringify({ name: "@fixture/api", scripts: { lint: "eslint .", test: "vitest run" } }),
+    );
+
+    expect(
+      proposedChecks(join(root, "packages", "api")).map((check) => (check["command"] as string[]).join(" ")),
+    ).toEqual(["pnpm run lint", "pnpm run test"]);
   });
 });

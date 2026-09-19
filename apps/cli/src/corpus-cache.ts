@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 /**
- * The corpus cache, as `focrux doctor` reports it.
+ * The corpus cache, as `perbo doctor` reports it.
  *
  * The regression suite is scored against a corpus of fixtures that is cloned
  * rather than checked in, so whether this machine can run it — and whether what
@@ -30,10 +30,10 @@ export const CORPUS_CACHE_PIN = "corpus-pin.json";
 
 /**
  * What fixes a cache that is absent or behind, named as the fix on the line:
- * the `@focrux/evaluation` binary's `prepare`, which clones the repositories the
+ * the `@perbo/evaluation` binary's `prepare`, which clones the repositories the
  * pinned fixtures name, at the commits they pin, into the cache.
  */
-export const CORPUS_PREPARE_COMMAND = "focrux-corpus prepare";
+export const CORPUS_PREPARE_COMMAND = "perbo-corpus prepare";
 
 /**
  * The recorded regression score, first match wins: this repository's own copy,

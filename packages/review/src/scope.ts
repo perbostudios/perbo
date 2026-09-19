@@ -7,7 +7,7 @@ import {
   type Finding,
   type Scope,
   type ScopeDeviation,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 
 /**
  * Scope enforcement is a computation over the diff and the contract. It must be

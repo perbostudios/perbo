@@ -3,9 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { EXIT_CODES } from "@focrux/contracts";
-import type { PreflightRequest, PreflightResult } from "@focrux/runner";
-import { runOrThrow } from "@focrux/workspace";
+import { EXIT_CODES } from "@perbo/contracts";
+import type { PreflightRequest, PreflightResult } from "@perbo/runner";
+import { runOrThrow } from "@perbo/workspace";
 import { exitForThrown } from "../src/entry.js";
 import {
   parseExecuteArgs,
@@ -29,7 +29,7 @@ import { storeDir } from "../src/store.js";
  * program prints rather than on an import.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-signing-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-signing-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const gitEnv = {
@@ -82,7 +82,7 @@ function repository(name: string, pub: string | null): string {
   return dir;
 }
 
-/** The repository's own `.focrux/config.json`, as a run with no ticket reads it. */
+/** The repository's own `.perbo/config.json`, as a run with no ticket reads it. */
 function repoConfig(repo: string): void {
   const dir = storeDir(repo, null);
   mkdirSync(dir, { recursive: true });
@@ -141,7 +141,7 @@ const capture = () => {
 };
 
 /**
- * `focrux run …` as the program runs it: the command, and — for anything that
+ * `perbo run …` as the program runs it: the command, and — for anything that
  * escapes it — `exitForThrown` writing onto the same stderr.
  */
 async function program(
@@ -215,11 +215,11 @@ describe("a repository whose configuration signs commits with a key nothing can 
     expect(result.err).toContain("ssh-add");
     expect(result.err).toContain("commit.gpgsign false");
     // And what answers the whole question about this repository.
-    expect(result.err).toContain(`focrux doctor --repo ${repo}`);
+    expect(result.err).toContain(`perbo doctor --repo ${repo}`);
 
     // It cost nothing on the way there: no branch cut, nothing under the root
     // the worktree would have gone in, and not one frame of this program.
-    expect(git(repo, "branch", "--list", "ayo/*", "fcx/*").trim()).toBe("");
+    expect(git(repo, "branch", "--list", "ayo/*", "prb/*").trim()).toBe("");
     const worktrees = worktreeRoot("locked-run");
     expect(existsSync(worktrees) ? readdirSync(worktrees) : []).toEqual([]);
     expect(result.err).not.toMatch(STACK_FRAME);

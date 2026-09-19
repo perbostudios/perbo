@@ -1,5 +1,5 @@
-import { AYO_BRANCH_PREFIX, BRANCH_PREFIX, gitEnv, run } from "@focrux/workspace";
-import type { MergedTicketContext } from "@focrux/runner";
+import { AYO_BRANCH_PREFIX, BRANCH_PREFIX, gitEnv, run } from "@perbo/workspace";
+import type { MergedTicketContext } from "@perbo/runner";
 import { listTickets, readContract } from "./tickets.js";
 
 /**
@@ -11,7 +11,7 @@ import { listTickets, readContract } from "./tickets.js";
  * read from the base's own history between the branch's merge-base and the
  * base's tip, and only from the shapes the loop itself writes: the runner's
  * merge subject (`<KEY>: merge <branch> into <base>`) and the attempt-branch
- * namespaces (`fcx/<KEY>/<slug>` and `ayo/<KEY>/<slug>`), which a person's
+ * namespaces (`prb/<KEY>/<slug>` and `ayo/<KEY>/<slug>`), which a person's
  * merge of the loop's pull request names in its subject. Nothing a model wrote
  * is read.
  */

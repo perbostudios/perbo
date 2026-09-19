@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Finding, ReviewArtifact } from "@focrux/contracts";
+import type { Finding, ReviewArtifact } from "@perbo/contracts";
 import type { LoadedFixture } from "../src/corpus.js";
 import { FixtureSchema, type Fixture } from "../src/fixture.js";
 import type { HarnessResult, RunRecord } from "../src/harness.js";

@@ -14,8 +14,8 @@ import { join, resolve } from "node:path";
  *
  * It sits at the worktree root rather than beside the code being changed
  * because a package's own `vitest run` collects test files under a
- * `.focrux-tmp/` inside that package — measured on this repository, where a
- * `packages/runner/.focrux-tmp/probe.test.ts` was collected — and no package's
+ * `.perbo-tmp/` inside that package — measured on this repository, where a
+ * `packages/runner/.perbo-tmp/probe.test.ts` was collected — and no package's
  * run reaches the root.
  *
  * Keeping it out of the change set is the seal's job, not a `.gitignore` entry
@@ -25,7 +25,7 @@ import { join, resolve } from "node:path";
  */
 
 /** The directory's name inside the worktree. */
-export const SCRATCH_DIR_NAME = ".focrux-tmp";
+export const SCRATCH_DIR_NAME = ".perbo-tmp";
 
 /**
  * The pathspec that keeps the directory out of every file list the seal builds.

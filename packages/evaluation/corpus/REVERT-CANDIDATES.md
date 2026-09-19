@@ -117,7 +117,7 @@ Discovery is the scarce half; it is not the whole job. Each candidate becomes a 
   suite was green at the head commit: the defect was found by users, not by the tests. Writing
   `passed` without running it would make the fixture assert the one thing it exists to demonstrate.
 
-`focrux-corpus prepare` clones the pinned commits and `focrux-corpus baseline --write` records
+`perbo-corpus prepare` clones the pinned commits and `perbo-corpus baseline --write` records
 whether the change's own tests fail at its base commit.
 
 Measuring the head suite is where the time goes, and it is mostly environment archaeology rather than

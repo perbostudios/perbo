@@ -1,7 +1,9 @@
 export * from "./adapter.js";
 export * from "./skills.js";
 export * from "./admission.js";
+export * from "./agents.js";
 export * from "./attempts.js";
+export * from "./brief.js";
 export * from "./bundle.js";
 export * from "./ceilings.js";
 export * from "./checks.js";
@@ -23,6 +25,7 @@ export * from "./refusal.js";
 export * from "./rerun.js";
 export * from "./resume.js";
 export * from "./seal.js";
+export * from "./spec-commit.js";
 export {
   TRANSPORT_RETRY_DELAY_MS,
   providerReset,

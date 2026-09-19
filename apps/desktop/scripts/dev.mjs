@@ -5,7 +5,7 @@ const server = await createServer();
 await server.listen();
 const env = {
   ...process.env,
-  FOCRUX_DESKTOP_DEV_URL: "http://127.0.0.1:51859",
+  PERBO_DESKTOP_DEV_URL: "http://127.0.0.1:51859",
 };
 delete env.ELECTRON_RUN_AS_NODE;
 const app = spawn(electron, ["."], { stdio: "inherit", env });

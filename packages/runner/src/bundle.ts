@@ -11,7 +11,7 @@ import {
   type RunBundle,
   type RunBundleKind,
   type SecretIndex,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 
 /**
  * Immutable run bundles, written locally (SCP-048, ADR-0013 as amended, ADR-0026).

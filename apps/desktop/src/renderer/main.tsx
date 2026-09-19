@@ -8,8 +8,8 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/caveat/500.css";
 // motion.css first: tokens.css maps its colour tokens onto the theme, and the later sheet wins at :root.
-import "@focrux/ui/motion.css";
-import "@focrux/ui/tokens.css";
+import "@perbo/ui/motion.css";
+import "@perbo/ui/tokens.css";
 import "./styles.css";
 import { App } from "./shell/App.js";
 import { bridge } from "./data.js";
@@ -34,7 +34,7 @@ class ErrorBoundary extends React.Component<
           on disk.
         </p>
         <pre>{this.state.message}</pre>
-        <button onClick={() => location.reload()}>Reload Focrux</button>
+        <button onClick={() => location.reload()}>Reload Perbo</button>
       </main>
     ) : (
       this.props.children

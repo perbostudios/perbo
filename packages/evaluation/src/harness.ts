@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { ReviewArtifactSchema, type ReviewArtifact } from "@focrux/contracts";
+import { ReviewArtifactSchema, type ReviewArtifact } from "@perbo/contracts";
 import { captureExecutedBundle, type ExecutedBundle } from "./bundle.js";
 import { loadCorpus, type LoadedFixture } from "./corpus.js";
 import { scoreRun, type RunScore } from "./score.js";
@@ -33,7 +33,7 @@ export const DEFAULT_REVIEW_TIMEOUT_MS = 15 * 60 * 1000;
 /**
  * The corpus harness.
  *
- * It spawns the real `focrux` binary once per fixture per repeat. That is the
+ * It spawns the real `perbo` binary once per fixture per repeat. That is the
  * point of SCP-091's "corpus runs and real runs share one code path": a harness
  * that called `runReview` directly would not exercise the argument parsing, the
  * artifact serialisation or the exit codes, which are three of the things the
@@ -126,13 +126,13 @@ async function runOnce(
       artifact: null,
       score: null,
       wall_ms: 0,
-      failure: "pins a repository that has not been prepared; run `focrux-corpus prepare`",
+      failure: "pins a repository that has not been prepared; run `perbo-corpus prepare`",
       partial: null,
     };
   }
   const rawPath = options.artifactsDir
     ? join(options.artifactsDir, `${entry.fixture.id}.${repeat}.json`)
-    : join(tmpdir(), "focrux-corpus-state", "raw", `${entry.fixture.id}.${repeat}.json`);
+    : join(tmpdir(), "perbo-corpus-state", "raw", `${entry.fixture.id}.${repeat}.json`);
   mkdirSync(dirname(rawPath), { recursive: true });
   const args = [
     // The run's own copy, never `options.cliPath`.
@@ -151,7 +151,7 @@ async function runOnce(
     // Resume records go to scratch: a corpus run must not leave state inside
     // the fixture directories, which are checked in.
     "--state",
-    join(tmpdir(), "focrux-corpus-state"),
+    join(tmpdir(), "perbo-corpus-state"),
     ...(options.model ? ["--model", options.model] : []),
     ...(options.provider ? ["--provider", options.provider] : []),
     // The artifact before redaction, in a file. stdout is redacted (D-063), and
@@ -550,7 +550,7 @@ export async function runCorpus(options: HarnessOptions): Promise<HarnessResult>
    */
   const bundle = captureExecutedBundle({
     entry: options.cliPath,
-    outDir: options.outDir ?? mkdtempSync(join(tmpdir(), "focrux-corpus-bundle-")),
+    outDir: options.outDir ?? mkdtempSync(join(tmpdir(), "perbo-corpus-bundle-")),
   });
   progress(`reviewer bundle ${bundle.sha256} (${bundle.bytes} bytes) at ${bundle.path}`);
 

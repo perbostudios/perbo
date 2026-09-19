@@ -10,7 +10,7 @@ import {
   readIssueFile,
 } from "../src/index.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-planning-file-issue-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-planning-file-issue-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const write = (name: string, text: string): string => {

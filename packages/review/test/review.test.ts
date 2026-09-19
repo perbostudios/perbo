@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { CheckResult, PlanContract } from "@focrux/contracts";
+import type { CheckResult, PlanContract } from "@perbo/contracts";
 import { PlanNotReviewableError, runReview } from "../src/review.js";
 import { ProviderError, type ModelRequest, type ReviewModel } from "../src/provider.js";
 import { claudeCliModel } from "../src/provider-cli.js";
@@ -12,7 +12,7 @@ import { coverageEntry, reads, scriptedModel, submits } from "./double.js";
 import { argumentOf, fakeClaudeBinary } from "./fake-claude.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-review-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-review-test-"));
 mkdirSync(join(scratch, "packages/a/src"), { recursive: true });
 writeFileSync(join(scratch, "packages/a/src/a.ts"), "export const a = 1;\n");
 writeFileSync(join(scratch, "packages/a/src/helper.ts"), "export const helper = () => 2;\n");
@@ -795,6 +795,29 @@ describe("the reviewer's inputs", () => {
     expect(first).toContain('trust=\\"user\\"');
     expect(first).toContain('trust=\\"repo\\"');
   });
+
+  it("carry a graphed ticket's nodes and none of its approach", async () => {
+    // A node's criteria and paths are contract, so the reviewer sees them. The
+    // order between nodes and the spec's No-Gos are approach (D-100): they live
+    // in `<KEY>.approach.json`, they may change after approval, and nothing
+    // assembles them into a review.
+    const model = scriptedModel([submits(bothMet)]);
+    await run({
+      model,
+      contract: {
+        ...contract(),
+        nodes: [
+          { id: "node_1", title: "return one", criteria: ["ac_1"], paths: ["a/src/a.ts"] },
+          { id: "node_2", title: "the helper", criteria: ["ac_2"], paths: ["a/src/helper.ts"] },
+        ],
+      },
+    });
+    const rendered = JSON.stringify(model.requests);
+    expect(rendered).toContain("node_1");
+    for (const approach of ["no_gos", "No-Go", "edges", "approach"]) {
+      expect(rendered).not.toContain(approach);
+    }
+  });
 });
 
 describe("the reviewer's inputs do not grow when an executor exists", () => {
@@ -830,7 +853,18 @@ describe("the reviewer's inputs do not grow when an executor exists", () => {
     );
     const declared = [...block.matchAll(/^\s{2}(\w+)\??:/gm)].map((match) => match[1]!);
     expect(declared.sort()).toEqual(permitted.sort());
-    for (const forbidden of ["transcript", "narrative", "summary", "attempt", "remediation_context"]) {
+    for (const forbidden of [
+      "transcript",
+      "narrative",
+      "summary",
+      "attempt",
+      "remediation_context",
+      // The approach half of a graphed plan (D-100): edges and the spec's
+      // No-Gos change after approval, so review never receives them.
+      "approach",
+      "edges",
+      "no_gos",
+    ]) {
       expect(declared).not.toContain(forbidden);
     }
   });
@@ -911,7 +945,7 @@ describe("a review carried by the claude-cli transport", () => {
 describe("a change whose new file carries a NUL byte", () => {
   /** Spelled as an escape; a raw one here would make this file unreviewable. */
   const NUL_BYTE = "\u0000";
-  const tree = mkdtempSync(join(tmpdir(), "focrux-nul-review-"));
+  const tree = mkdtempSync(join(tmpdir(), "perbo-nul-review-"));
   mkdirSync(join(tree, "a/src"), { recursive: true });
   writeFileSync(join(tree, "a/src/a.ts"), "export const a = 1;\n");
   writeFileSync(join(tree, "a/src/helper.ts"), "export const helper = () => 2;\n");

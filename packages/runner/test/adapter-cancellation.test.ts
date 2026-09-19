@@ -36,7 +36,7 @@ describe.skipIf(process.platform === "win32")("cancelling the runner process", (
   it.each(["SIGTERM", "SIGINT"] as const)(
     "forwards %s to the detached Claude group and records cancellation",
     async (signal) => {
-      const root = scratch("focrux-cancel-runner-");
+      const root = scratch("perbo-cancel-runner-");
       const binary = join(root, "agent.cjs");
       const pidsFile = join(root, "pids.json");
       const entry = join(root, "runner.mjs");

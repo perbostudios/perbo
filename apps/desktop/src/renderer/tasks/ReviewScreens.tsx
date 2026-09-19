@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Dialog, Field, Notice, Segmented, Switch, cx } from "@focrux/ui";
+import { Button, Dialog, Field, Notice, Segmented, Switch, cx } from "@perbo/ui";
 import { FactList, PageFooter, PageHeader, SectionLabel, SuccessMark } from "../Screen.js";
 import { InkIcon } from "../InkIcon.js";
 import { errorMessage, useAction, useOutput } from "../data.js";
@@ -509,7 +509,7 @@ export function OutputScreen(context: TaskContext) {
                     ceiling.resource.replaceAll("_", " "),
                     (ceiling.used ?? "unknown") +
                       " / " +
-                      ceiling.ceiling +
+                      (ceiling.ceiling ?? "no ceiling") +
                       (ceiling.hit ? " · reached" : ""),
                   ])}
                 />
@@ -604,7 +604,7 @@ export function MergeScreen(context: TaskContext) {
           <div>
             <h1>Merge?</h1>
             <p className="muted">
-              The pull request is open on your branch. focrux will not merge it
+              The pull request is open on your branch. perbo will not merge it
               — the thing that wrote this code and the thing that reviewed it
               are the same system, so the last call is yours.
             </p>
@@ -676,7 +676,7 @@ export function MergeScreen(context: TaskContext) {
         <div className="scope-message">
           <InkIcon name="locked" size={22} />
           <span>
-            Merging closes the ticket after Focrux refreshes its status from
+            Merging closes the ticket after Perbo refreshes its status from
             GitHub. The contract, findings and cost stay in the archive.
             Deployment and outcome are opt-in, and not on this screen.
           </span>

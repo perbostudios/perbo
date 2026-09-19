@@ -1,90 +1,90 @@
 # Decision register
 
-This is the one home for the decisions that govern Focrux. Every other document cites an entry by its id and does not restate it.
+This is the one home for the decisions that govern Perbo. Every other document cites an entry by its id and does not restate it.
 
 - The register holds only what is true now. When a decision changes, its entry is rewritten; when one is replaced, it is deleted. Git holds the history (D-111).
 - Each entry states the decision and why it holds, and what would change it where that is known.
 - A new entry is written on its branch as `D-NEW-<label>`, and `scripts/assign_ids.py` gives it the next number when the pull request merges (D-110). Numbers are never reused, so a gap is a deleted entry or a private one (D-076).
 - The founder owns product decisions and the co-founder owns design and marketing decisions. Every entry names its owner.
 - An architectural decision that crosses components also has an ADR in [`adr/`](adr/README.md), which records the architecture and cites the entry.
-- A decision that is not built yet says so on a "Decided, not built" line, with what the system does until then.
+- A decision that is not built yet says so on a "Decided, not built" line, with what the system does until then. One built in part says which part on a "Built: … Not built: …" line instead, so that neither half is read as the whole.
 
 ## The product
 
-### D-001 — Focrux is an open-source operating plane for getting work done
+### D-001 — Perbo is an open-source operating plane for getting work done
 
 - Owner: Founder
-- Decision: Focrux is an open-source operating plane for intuitively getting your work done, no matter the scale of work. It runs your coding agents (Claude Code, Codex) on your repository: each piece of work is one ticket, from a one-line fix to an epic planned as a graph, taken from an agreed contract to a reviewed pull request, and you see only what needs you.
+- Decision: Perbo is an open-source operating plane for intuitively getting your work done, no matter the scale of work. It runs your coding agents (Claude Code, Codex) on your repository: each piece of work is one ticket, from a one-line fix to an epic planned as a graph, taken from an agreed contract to a reviewed pull request, and you see only what needs you.
 - Why: in the founder's words, it gives an intuitive surface for building software the most capable way available, with agents, and reduces the person's cognitive effort as far as it can.
 - Changes if: people use it for something other than getting work done through their agents.
 
-### D-002 — Focrux is for developers who already work with coding agents
+### D-002 — Perbo is for developers who already work with coding agents
 
 - Owner: Founder
-- Decision: Focrux is for any developer already working with Claude Code or Codex, alone or on a team. Design partners are chosen by behaviour: the team uses a coding agent daily, merges at least twenty pull requests a month, and has someone who reviews everything.
+- Decision: Perbo is for any developer already working with Claude Code or Codex, alone or on a team. Design partners are chosen by behaviour: the team uses a coding agent daily, merges at least twenty pull requests a month, and has someone who reviews everything.
 - Why: the entry path is a name, an existing subscription and a checkout, and the product ships as open source.
 - Changes if: the people who keep using it are a different group.
 
 ### D-088 — The loop is the product; review is its step
 
 - Owner: Founder
-- Decision: what a person runs is the loop. A ticket is admitted on their repository, taken by the executor to a change, judged by an independent reviewer, remediated on the branch until only what needs a person remains, and delivered as a pull request. `focrux review` is the loop's step and a command, not a product of its own. People can attach other reviewers: Focrux reads the reviews other tools leave on its pull requests and routes their findings like its own, and the person picks the model and provider for Focrux's own review.
-- Why: in the founder's words, independent review of somebody else's pull request is what a tool like Bugbot is for, and Focrux produces a fully contained loop.
-- Changes if: people run `focrux review` on its own far more than the loop.
+- Decision: what a person runs is the loop. A ticket is admitted on their repository, taken by the executor to a change, judged by an independent reviewer, remediated on the branch until only what needs a person remains, and delivered as a pull request. `perbo review` is the loop's step and a command, not a product of its own. People can attach other reviewers: Perbo reads the reviews other tools leave on its pull requests and routes their findings like its own, and the person picks the model and provider for Perbo's own review.
+- Why: in the founder's words, independent review of somebody else's pull request is what a tool like Bugbot is for, and Perbo produces a fully contained loop.
+- Changes if: people run `perbo review` on its own far more than the loop.
 - Decided, not built: reading other tools' reviews. Until then the loop reads only its own reviewer.
 
 ### D-016 — The control plane is the commercial product
 
 - Owner: Founder
-- Decision: the commercial product is the control plane, built on top of open-source Focrux. It starts with team memory: history across people and machines, a shared queue and board, calibration learned from verdicts, SSO, audit and retention. Operating modules come after, each chosen by paying users before it is built. Its design is recorded, decided and not built, and stays private (D-076).
+- Decision: the commercial product is the control plane, built on top of open-source Perbo. It starts with team memory: history across people and machines, a shared queue and board, calibration learned from verdicts, SSO, audit and retention. Operating modules come after, each chosen by paying users before it is built. Its design is recorded, decided and not built, and stays private (D-076).
 - Why: what a team shares across people and machines is what it pays for; everything a person runs alone stays open (D-075).
 - Changes if: paying users ask for something else first.
 
 ### D-075 — Everything that runs on one machine is open source
 
 - Owner: Founder
-- Decision: the open-source product is everything that runs on one machine: the desktop, the whole CLI, the queue and its endpoint, `focrux agent`, `focrux interview`, and phone pairing over the local network. Anything hosted or shared across people is the control plane (D-016). The code is Apache-2.0, and contributions carry a Developer Certificate of Origin, with no contributor licence agreement. The corpus is public in [`plantedbugs`](https://github.com/lianmatsuo/plantedbugs), all of it from the public release, under Apache-2.0 for the fixture format and CC-BY-4.0 for the fixtures.
+- Decision: the open-source product is everything that runs on one machine: the desktop, the whole CLI, the queue and its endpoint, `perbo agent`, `perbo interview`, and phone pairing over the local network. Anything hosted or shared across people is the control plane (D-016). The code is Apache-2.0, and contributions carry a Developer Certificate of Origin, with no contributor licence agreement. The corpus is public in [`plantedbugs`](https://github.com/lianmatsuo/plantedbugs), all of it from the public release, under Apache-2.0 for the fixture format and CC-BY-4.0 for the fixtures.
 - Why: the line follows memory, not features. The reviewer's prompts are open because a reviewer nobody can read is one nobody will trust.
 - Changes if: an open component turns out to need the hosted plane to work.
 - ADR: [ADR-0032](adr/0032-open-source-the-local-cli-and-the-reviewer.md).
 
-### D-076 — Focrux is developed in the public repository
+### D-076 — Perbo is developed in the public repository
 
 - Owner: Founder
-- Decision: `lianmatsuo/focrux` is where Focrux is developed: its branches, pull requests, issues and releases. Nothing in it is assembled from anywhere else. A private archive holds what stays private: the ticket store's records from before the release, the spend ledger and the dated evaluation records, the design boards and the planning-mode prototype until the co-founder agrees to publish them, and the control plane's design (D-016): its decisions, its backlog entries with their milestone and the labels only they use, and its eight ADRs. The archive is not synced from this repository. Ticket records a run writes under `.focrux/tickets/` stay on the machine that wrote them; `.focrux/config.json` is committed, and so is `.focrux/principles.md` once a person records one.
+- Decision: `perbostudios/perbo` is where Perbo is developed: its branches, pull requests, issues and releases. Nothing in it is assembled from anywhere else. A private archive holds what stays private: the ticket store's records from before the release, the spend ledger and the dated evaluation records, the design boards and the planning-mode prototype until the co-founder agrees to publish them, and the control plane's design (D-016): its decisions, its backlog entries with their milestone and the labels only they use, and its eight ADRs. The archive is not synced from this repository. Ticket records a run writes under `.perbo/tickets/` stay on the machine that wrote them; `.perbo/config.json` is committed, and so is `.perbo/principles.md` once a person records one.
 - Why: one repository is one source of truth, a checkout that holds nothing private cannot leak it, and real use is the evidence (D-099).
 - Changes if: the archive's material has to change in step with the code, which would call for a private repository that depends on this one rather than one this one is filtered from.
 
-### D-098 — The product is Focrux everywhere
+### D-098 — The product is Perbo everywhere
 
 - Owner: Founder
-- Decision: the package scope is `@focrux/*`, the binary is `focrux`, the store is `.focrux/`, and environment variables are `FOCRUX_*`. New tickets use the key `FCX`, and new branches the prefix `fcx/`; an `AYO` ticket's new branch keeps `ayo/`. Existing `AYO` keys and `ayo/` branches stay as recorded identifiers, and the records in a store keep their bytes. The reviewer's prompt delimiters carry the new name.
-- Why: in the founder's words, every instance is renamed, not removed.
+- Decision: the package scope is `@perbo/*`, the binary is `perbo`, the store is `.perbo/`, and environment variables are `PERBO_*`. Tickets take the key `PRB` unless `perbo admit --prefix` names another, and this repository's tickets all carry it; every new branch takes the prefix `prb/`, a ticket that already has a branch keeps it whatever its prefix, and a recorded branch or pull request keeps the name it has on GitHub. The reviewer's prompt delimiters carry the name.
+- Why: one name across the desktop, the terminal, the store and the code means nothing needs translating between them, and in the founder's words, every instance is renamed.
 - Changes if: a trademark or availability conflict.
 - ADR: [ADR-0035](adr/0035-rename-the-product-to-focrux.md).
 
-### D-099 — Focrux is judged by real use
+### D-099 — Perbo is judged by real use
 
 - Owner: Founder
-- Decision: Focrux is judged by how people use it. There are no pre-registered experiments on stand-in tickets. `focrux stops`, `focrux escapes` and the share of tickets merged unattended are read live from people's work. The regression suite stays as the check on any change to the reviewer (D-010).
+- Decision: Perbo is judged by how people use it. There are no pre-registered experiments on stand-in tickets. `perbo stops`, `perbo escapes` and the share of tickets merged unattended are read live from people's work. The regression suite stays as the check on any change to the reviewer (D-010).
 - Why: experiments on stand-in tickets kept reopening what the product was; people's use answers it.
 - Changes if: real use cannot answer a question the founder needs answered.
 
 ## Work and planning
 
-### D-003 — Focrux owns admitted work
+### D-003 — Perbo owns admitted work
 
 - Owner: Founder
-- Decision: work enters Focrux one ticket at a time, by admission. Before admission the tracker is authoritative and Focrux holds only a reference. From admission Focrux is canonical for the ticket's intent, contract, state, review and outcome, and the tracker receives a one-way status projection. GitHub stays authoritative for refs, commits, pull requests and checks. No field is synced both ways, and no backlog migration is ever needed.
+- Decision: work enters Perbo one ticket at a time, by admission. Before admission the tracker is authoritative and Perbo holds only a reference. From admission Perbo is canonical for the ticket's intent, contract, state, review and outcome, and the tracker receives a one-way status projection. GitHub stays authoritative for refs, commits, pull requests and checks. No field is synced both ways, and no backlog migration is ever needed.
 - Why: a product that does not own the ticket cannot own its contract, its dependencies or its order.
 - Changes if: people routinely maintain the same ticket in both places.
 - ADR: [ADR-0027](adr/0027-own-the-ticket-natively.md).
-- Decided, not built: the status projection. Until then Focrux writes nothing to a tracker.
+- Decided, not built: the status projection. Until then Perbo writes nothing to a tracker.
 
 ### D-072 — A model drafts the contract; approval is the authority boundary
 
 - Owner: Founder
-- Decision: `focrux admit --from owner/repo#N`, and the queue's tracker drafting, fetch the issue as external data and ask for a draft against a closed schema: an outcome, criteria with their verification kind, a proposed scope and a rationale. The drafter is shown the tickets in flight and may propose `depends_on` among them, and it may read up to eight small files through the reviewer's bounded reader. One draft is one contract is one ticket. Nothing runs from a draft: `focrux edit` changes any field, and `focrux approve` is the only step that produces the contract the runner reads. Admission records how long the person took and which fields they changed. The plan level is derived from the scope; a person may raise it and never lower it.
+- Decision: `perbo admit --from owner/repo#N`, and the queue's tracker drafting, fetch the issue as external data and ask for a draft against a closed schema: an outcome, criteria with their verification kind, a proposed scope and a rationale. The drafter is shown the tickets in flight and may propose `depends_on` among them, and it may read up to eight small files through the reviewer's bounded reader. One draft is one contract is one ticket. Nothing runs from a draft: `perbo edit` changes any field, and `perbo approve` is the only step that produces the contract the runner reads. Admission records how long the person took and which fields they changed. The plan level is derived from the scope; a person may raise it and never lower it.
 - Why: a scope a person read, could change, and approved is one they chose, whatever proposed it.
 - Changes if: people approve drafts they did not read, seen as edit counts at zero while stops rise.
 
@@ -102,44 +102,44 @@ This is the one home for the decisions that govern Focrux. Every other document 
 - Why: approving several sibling contracts one at a time is the slicing a graph removes, and one ticket keeps one approval and one pull request.
 - Changes if: people split graph tickets by hand to get them reviewed or merged.
 - ADR: [ADR-0037](adr/0037-execution-graph.md).
-- Decided, not built. Until then a plan is a flat list of two to four criteria.
+- Built: the plan's `nodes`, the approach record beside the ticket, the drafter's graph, `perbo edit --graph-edit` and `--undo`, the graph in `perbo inspect`, the pinned checks and the review per node (D-107), and the desktop's Graph pane, which curates the graph through that same edit path, approves it once, and stays live while the work runs: each node's state derived from the sealed change set, the pinned checks narrowed to that node and the evidence bindings of the review of the plan the ticket now carries, less whatever the rounds since it verified closed, with every changed path no node's globs match shown as outside. Nothing there is read from the executor's account of itself ([ADR-0023](adr/0023-untrusted-context-boundary.md)).
 
 ### D-101 — Create opens planning mode
 
 - Owner: Founder
 - Decision: Create moves into the desktop's rail, first (⌘1; Home ⌘2, Archive ⌘3, Settings ⌘4; ⌘N still creates). It opens planning mode for one piece of work: Spec, Explorer, Graph and Impact panes, with the interview docked beside them. Planning mode also opens for any ticket in `plan_review`. Drafting, impact checks, file reads and the interview run alongside a run; runs, decisions and publishing still take one at a time.
 - Why: planning the next piece of work while the last one runs is what the queue is for.
-- Decided, not built.
+- Built: Create first in the rail with ⌘1 to ⌘4, the picker, planning mode over a contract editing session whose Spec pane holds the spec ([D-103](#d-103--a-spec-is-a-folder-in-the-repository-committed-first)) and the contract steps under it, with the Explorer and Graph panes beside it and the interview docked beside whichever is open, and planning alongside a run; the explorer's reads and the interview's three requests are answered outside the job list, so a run never holds one up, the picker opens planning mode over a ticket in `plan_review`; and the Impact pane, asked for by a button because its answer is a fresh index of the whole tracked tree, answered outside the job list with the explorer's reads.
 
 ### D-102 — The interview is the person's own session
 
 - Owner: Founder
-- Decision: the interview is the person's own Claude Code or Codex session, run by `focrux interview` and shown as a chat in planning mode. Its Generate plan action brings the spec up to date and runs the drafter, admitting one ticket. After that it changes the plan only through the validated edit path, each edit shown to the person and undoable as D-100 says. It may read anything and run read-only commands, may write only the spec folder, `CONTEXT.md` and the ADR folder, and cannot approve, publish or merge. Anything outside that is refused rather than asked: there are no permission prompts. It proposes no path marks, which are the person's own. Claude runs through the Claude Agent SDK and Codex through `codex app-server`. Paseo's design is followed in Focrux's own code; none of Paseo's code is copied.
+- Decision: the interview is the person's own Claude Code or Codex session, run by `perbo interview` and shown as a chat in planning mode. Its Generate plan action brings the spec up to date and runs the drafter, admitting one ticket. After that it changes the plan only through the validated edit path, each edit shown to the person and undoable as D-100 says. It may read anything and run read-only commands, may write only the spec folder, `CONTEXT.md` and the ADR folder, and cannot approve, publish or merge. Anything outside that is refused rather than asked: there are no permission prompts. Asking the person about the work is a different act and is what the interview is for: it may put questions with the answers to pick from, which become the person's own words when they pick one and never a way to allow something (D-117). It proposes no path marks, which are the person's own. Claude runs through the Claude Agent SDK and Codex through `codex app-server`. Paseo's design is followed in Perbo's own code; none of Paseo's code is copied.
 - Why: a person's own session gets the same trust model the endpoint gives it (D-109).
-- Decided, not built.
+- Built: `perbo interview`, which runs the person's own session — Claude Code through the Claude Agent SDK, Codex through `codex app-server` — with the bundled grilling and domain-modelling skills in its orientation and its own tools in-process, the interview's rules deciding every call behind either and the transport owning only how its provider is asked and what it streams back; the runner's write guard deciding every write before it runs, with this piece of work's own spec folder, `CONTEXT.md` and the ADR folder as the only writable paths and a list of read-only shapes bounding the commands it is asked about, holding every command that reading finds — the line's own invocations, and each one a substitution, a process substitution, an unquoted here-document body, a wrapper or a function body stands in front of, at any nesting depth — to that list, refusing a bare environment assignment that would set what a later shape resolves and runs in, refusing by name a flag that would let one of those shapes write or run a program, and refusing outright what that reading cannot resolve — a quoting, a command, a variable's value, or a program name a closure check finds unaccounted for — so that nothing but the listed read-only shapes runs, rather than promising that every way to disguise a write is named (SCP-355), each refusal reported rather than asked; `generate_plan`, which drafts one ticket from the spec and re-drafts that ticket rather than admitting a second; `edit_plan` and `undo_edit`, through the validated edit path with the interview as author; `read_plan`; `ask_options`, which puts what it cannot settle itself as groups of questions with the answers to pick from, one group at a time, answered as an ordinary turn in the options' own words; the streamed JSON-line protocol and the session id kept beside the spec; the same interview on Codex, behind one session interface, where `codex app-server` runs a thread with a read-only sandbox and an `untrusted` approval policy, so that every write and every command outside the set Codex itself trusts as read-only is asked about, each of those questions is answered by the interview's own judgement rather than reaching the person, the interview's tools are the thread's dynamic tools, and `--session` continues the thread through the app server's own resume; and the chat in planning mode, docked beside every pane, which the desktop host relays that protocol to — it spawns the command as a long-lived child with its argv built from the registered repository and the planning session's own records, shows each refusal as a refusal with nothing to answer, shows each plan edit as the plan's own record took it with an undo on its number, and keeps the conversation on the planning session so leaving and restarting come back to it.
 
 ### D-103 — A spec is a folder in the repository, committed first
 
 - Owner: Founder
 - Decision: a spec lives at `specs/<slug>/spec.md` (the folder is configurable), under the headings Outcome, Requirements, No-Gos, Rabbit holes and Notes, naming code as `@Symbol` or by path. Each requirement carries an id, `R1` upward, written into the spec when the requirement is written and never reused. A criterion records the requirement it was drafted from, so the node a requirement lands in is derived from its criteria rather than written down a second time, and is shown beside the requirement. The folder also holds a page per node, `specs/<slug>/nodes/<node>.md`, generated from the spec and the graph: the node's title, the requirements derived to it, its criteria and their verification, its paths, and the spec's No-Gos. A node's page is regenerated whenever either changes, and the Notes section in it is written by hand and survives that. Only `spec.md` is drafted from. The drafter drafts from it as it drafts from an issue, and also reads the repository's `CONTEXT.md`, its ADR titles and `principles.md` as data. Admission records the spec's path and content hash. The loop commits the spec folder, with the interview's `CONTEXT.md` and ADR changes, as the first commit on the ticket's branch, and review reads the diff after that commit. `specs/**` is a standing prohibited path for the executor. A spec edited after approval, or naming code that no longer exists, is stale: a ticket that has not started returns to `plan_invalid`, and a running one is flagged and continues.
 - Why: a spec is intent upstream of the contract, and its staleness is detected rather than kept in step by hand ([ADR-0016](adr/0016-minimal-machine-maintained-planning.md)). A node reads on its own without giving a requirement a second place to be written, which would drift, and a re-draft moves a requirement between nodes with no edit to the spec.
-- Decided, not built.
+- Built: the spec folder and the slug the title takes, minted from the person's first turn to the interview where they have not titled the planning themselves (D-118), created when missing, with the folder itself `specs` unless `.perbo/config.json` names another under `specs`; the writer that gives each requirement its id and hands out no id twice; `perbo admit --from-spec <path>`, which reads `spec.md` under those headings, drafts from it as it drafts from an issue, records on the admission record the spec's path, its content hash and every file the loop commits with it — the spec's whole folder, and the `CONTEXT.md` and the files under the ADR folder (`docs/adr` unless `.perbo/config.json` names another under `adr`) that the checkout has changed — and takes the No-Gos from its own heading, with `--start-over <KEY>` re-drafting a ticket in `plan_review` from the same spec; a criterion recording the requirement id it was drafted from; the page per node, regenerated whenever the spec or the graph changes and keeping the Notes written in it by hand; the requirement's node beside it in the Spec pane, which writes the spec into the repository; the spec folder as a standing prohibited path for the executor; and the loop committing those recorded files as the branch's first commit past the contract's base, before the executor runs and with its own `Attempt:` trailer, refusing the run where one of them has changed or gone, and keeping every file that commit holds out of the change set the checks, the review, the verification and the pull request read. Staleness is read from the spec's own bytes against the hash approval recorded — approval and not admission, because D-103 makes an edit *after approval* the stale one and the spec is ordinarily edited in `plan_review` while the draft is read, with admission's hash — and the files the loop commits with it — left standing on a spec approval could not read — and from the `@Symbol` and path names in it against the names approval recorded the repository as having — which is what separates a name the repository has lost from one the plan is for and the work has yet to write — answered against `perbo index` and the checkout, every path judged after it resolves; `perbo run --ticket` reads it before it moves the ticket or makes a worktree and leaves a stale ticket at `plan_invalid`, `perbo inspect` prints it for every ticket drafted from a spec so a run in flight is flagged and not interrupted, a name the index cannot answer for is reported unjudged rather than refusing a run, a ticket approved before the recorded names existed has every name in its spec reported unjudged, only a path git tracks is recorded so a build output in one checkout cannot make a clone read the spec as stale, and approval over a tree the index cannot be believed against records no symbol at all — for the life of the ticket, and records that it happened, so every later reading of it reports the spec's `@Symbol` names as unjudged and names `perbo index` rather than calling the spec current. The reading says which moment it took the spec's bytes from: approval for a contract that has been approved, admission for a ticket still in `plan_review`.
 
 ### D-104 — Sizes, not forecasts
 
 - Owner: Founder
 - Decision: a plan shows a size, S to XL, derived by fixed thresholds from its nodes, its criteria, and the files and packages in scope, with the counts beside it. S is 1 node, at most 4 criteria, 10 files and 1 package, the size of a ticket before graphs; M at most 3 nodes, 10 criteria, 25 files and 2 packages; L at most 6, 20, 50 and 3; XL beyond. A plan takes the largest size any of its counts reaches. Runs show usage as each provider reports it: tokens always, dollars where given. Nothing forecasts cost or time.
 - Why: a description of the graph forecasts nothing, and nothing measures a forecast (D-097).
-- Decided, not built.
+- Built: `perbo inspect` derives the size and shows it with its counts, marking the ones that set it, and the desktop's Graph pane shows the same size beside the graph, recomputed after every edit. Not built: a run's usage as each provider reports it.
 
-### D-015 — Focrux reads code and never edits it
+### D-015 — Perbo reads code and never edits it
 
 - Owner: Founder
-- Decision: editing code stays in the person's editor. Focrux's surfaces read code and write only planning artifacts. The one piece of code intelligence is a TypeScript and JavaScript symbol and import index, built on demand for impact warnings, `@Symbol` completion and stale-spec checks.
+- Decision: editing code stays in the person's editor. Perbo's surfaces read code and write only planning artifacts. The one piece of code intelligence is a TypeScript and JavaScript symbol and import index, built on demand for impact warnings, `@Symbol` completion and stale-spec checks.
 - Why: every surface serves writing a spec and a contract; none needs an editor or a language server.
-- Changes if: people ask to edit code inside Focrux more than they use their editor.
+- Changes if: people ask to edit code inside Perbo more than they use their editor.
 - ADR: [ADR-0018](adr/0018-defer-custom-ide-until-evidence-gates.md).
-- Decided, not built: the symbol index.
+- Built: the index itself, `perbo index`; `@Symbol` completion over it in the desktop's Spec pane — the repository's exported names offered as a reference is typed, the one chosen written in with the caret past it, every reference marked behind the text, one the index does not hold marked apart with the two nearest names offered in its place and each replacing every use of it in that section, and a head saying how many do not resolve beside the index's size and the commit it was built at; impact warnings over it in planning mode's Impact pane, which on demand lists what the draft in hand is likely to touch that its scope does not cover: files outside that scope importing what the draft changes or what the spec names, and the path classes `risk.ts` recognises in a package the scope or the spec reaches, each warning advice that becomes a scope change through the draft's own mark or a No-Go through the spec's own save, on the person's click; and the stale-spec check over it (D-103), which reads the record only where it was built at this checkout's commit with nothing uncommitted either side — a reading that cannot believe the index reports what it could not judge, and an approval that cannot believe it records no `@Symbol` at all, for the life of the ticket, recording that it could not so every later reading of that ticket says so too, since nothing after approval puts those names back, which is why the index matters most at approval. The two panes read the index through the host running `perbo index` over the registered repository and nothing a renderer sent, and the stale-spec check reads the `.perbo/index.json` the checkout already holds and runs nothing ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4), and a repository the index cannot describe is said to be one rather than shown as an index holding no names, because a person acts differently on each. Not built: nothing.
 
 ## Running the work
 
@@ -162,7 +162,7 @@ This is the one home for the decisions that govern Focrux. Every other document 
 - Owner: Founder
 - Decision: the write guard refuses a write to a path the contract prohibits, even inside the allowed paths, using the same match as the reviewer's `scope.prohibited_path` finding. That blocking finding stays as the backstop.
 - Why: the same rule applied earlier saves a remediation round for every slip, and subagents write as well as the executor.
-- Decided, not built. Until then the reviewer's finding is the only check.
+- Built: the guard's refusal, with the review's finding behind it, and a repository's standing prohibited list under `paths_prohibited` in `.perbo/config.json`, each entry carrying what put it there. The planning mode explorer writes it, admission folds it into every new ticket's `paths_prohibited`, the guard reads it again when a run starts, so an entry added after admission binds the ticket's later runs, and `perbo doctor` reports it in its own `PROHIBITED` block. Under Windows semantics the guard also refuses a spelling Windows resolves to a prohibited path — another letter case, a trailing dot or space, a stream, a short 8.3 name — which the review's exact match does not see.
 
 ### D-096 — No ceilings on a run; a stall detector stops a hang
 
@@ -170,23 +170,23 @@ This is the one home for the decisions that govern Focrux. Every other document 
 - Decision: an attempt has no cost, token, wall-clock, iteration or command ceiling. A stall detector stops an attempt that shows no tool activity for a set time. The per-ticket limit on remediation rounds stays. A cost cap remains only where the executor is billed per token, with an API key in its environment. After every compaction, the executor and each subagent receive their brief again.
 - Why: people read spend on their own provider accounts, so what still has to stop is a hang, and a credential that bills per token. Every iteration ceiling that fired cut ordinary work.
 - Changes if: an attempt runs away in a way the stall detector does not see.
-- Decided, not built: the stall detector, removing the ceilings, and the brief after compaction. Until then the runner enforces cost, wall-clock and token ceilings, and any iteration or command ceiling a repository sets.
+- Built: the stall detector (`attempt_stall_ms`, 20 minutes by default; a stall terminates the attempt `stalled` and ends the run), the ceilings removed, the cost caps bound to a per-token credential, and the brief after every compaction — a `SessionStart` hook under the `compact` matcher on Claude, `thread/inject_items` answering a `contextCompaction` item on Codex, the recorded brief plus a state block composed from the round's records, and each re-injection on the attempt. Not built: nothing.
 
 ### D-106 — The executor may delegate to subagents
 
 - Owner: Founder
-- Decision: on Claude and on Codex, the executor may start subagents from roles Focrux defines. The runner enforces only the trust boundaries: every subagent write passes the ticket's scope guard, repository and personal agent definitions stay unreachable, every subagent's activity is recorded against it, and the reviewer receives none of it. How many subagents, which roles and which model are the executor's call. Codex needs version 0.145.0 or later.
+- Decision: on Claude and on Codex, the executor may start subagents from roles Perbo defines. The runner enforces only the trust boundaries: every subagent write passes the ticket's scope guard, repository and personal agent definitions stay unreachable, every subagent's activity is recorded against it, and the reviewer receives none of it. How many subagents, which roles and which model are the executor's call. Codex needs version 0.145.0 or later.
 - Why: delegation is the executor's responsibility; the product keeps the checks that protect scope and independence.
 - Changes if: a subagent write escapes the scope guard, or a subagent's account reaches review.
 - ADR: [ADR-0038](adr/0038-subagents.md).
-- Decided, not built. A live test on both transports comes first.
+- Built on Claude: three roles Perbo defines, passed as `--agents` and enforced by the guard's hook, which now judges the tool under both names Claude Code answers to for it — `Agent` and `Task` — and refuses both a `subagent_type` outside them and a call a subagent made, whatever role that one names; the guard's directory kept per agent in one file each, so interleaved calls lose nothing, and a call refused, rather than judged from a directory the shell has left, wherever the guard cannot keep track of an agent's directory — a file that will not read back, or a move it cannot record; personal definitions held unreachable by the closed set and by the measured precedence of `--agents` over `~/.claude/agents` on a shared name (ADR-0038, 2026-09-15); every command record naming the role that ran it, except the two the runner is handed no name for — a refusal reported only by the result envelope, which names no agent, and the amendment that refusal makes, which is keyed by tool and command text and so can land on an identical line another agent ran; and the executor's account taken from the top-level session's last message alone. Built on Codex (SCP-327): the same three roles, written as `agents/<name>.toml` files under the isolated `CODEX_HOME` with `agents.enabled=true`; the write guard's state and Codex's own usage report kept per thread instead of one shared object, since a spawned agent is its own thread; a subagent starting one of its own refused reactively, as the attempt `prohibited_action` (`enable_own_tooling`), because Codex offers no request to refuse a spawn before it happens; a child's role looked up once with `thread/read` on its first activity and named on its command records; and `doctor` refusing a Codex older than 0.145.0, wherever the binary is checked. How it holds is in ADR-0038. Not built: whether Codex itself restricts a spawn's role to the ones configured, rather than a free-form or unnamed one — a live run settles it. The live test both halves build from is recorded in ADR-0038 (2026-09-12).
 
 ### D-094 — Selected skills guide execution
 
 - Owner: Founder
-- Decision: Focrux ships the 25 skills of Matt Pocock's published bundle, at a pinned revision and with their licence. A person can select up to three as executor guidance. The runner appends their text to the execution and remediation briefs and records their revision and content hash on each attempt; selecting none leaves the brief unchanged. Skills do not enable native skill discovery, repository instructions, hooks, plugins or extra permissions, and neither the review nor closure verification receives them.
+- Decision: Perbo ships the 25 skills of Matt Pocock's published bundle, at a pinned revision and with their licence. A person can select up to three as executor guidance. The runner appends their text to the execution and remediation briefs and records their revision and content hash on each attempt; selecting none leaves the brief unchanged. Skills do not enable native skill discovery, repository instructions, hooks, plugins or extra permissions, and neither the review nor closure verification receives them.
 - Why: the founder asked for these skills in the product's agents, and pinning keeps what reached a run knowable.
-- Changes if: a selected skill is missing from execution, reaches review, or widens authority; or the reviewing run keeps catching a working rule the executor could not have known, which would call for a person-authored conventions file under `.focrux/`, delivered as data the way principles are (D-065).
+- Changes if: a selected skill is missing from execution, reaches review, or widens authority; or the reviewing run keeps catching a working rule the executor could not have known, which would call for a person-authored conventions file under `.perbo/`, delivered as data the way principles are (D-065).
 
 ### D-092 — A remediation round is briefed with its predecessor's account
 
@@ -205,7 +205,7 @@ This is the one home for the decisions that govern Focrux. Every other document 
 ### D-065 — Fix by the established practice; stop only where no practice answers
 
 - Owner: Founder
-- Decision: the routing policy in force sends every stopping finding on a routable row to the executor. The executor either closes it by the established practice (a platform primitive, a lockfile dependency, the settled pattern, implemented completely) or declares `NO_PRACTICE <finding_key>: <reason>`. A declined finding stays open, ends the loop `escalated`, and reaches the pull request under "No determinable practice — for you to decide". `security.*` and `context.*` stop whatever the row or severity; deterministic rows stop; the last round stops. A person's answer to a decline is recorded with `focrux principle add` into `.focrux/principles.md`, which the executor reads and cannot write. The pull request lists what was found, what the executor closed and verified, what is left for a person, and what was advisory.
+- Decision: the routing policy in force sends every stopping finding on a routable row to the executor. The executor either closes it by the established practice (a platform primitive, a lockfile dependency, the settled pattern, implemented completely) or declares `NO_PRACTICE <finding_key>: <reason>`. A declined finding stays open, ends the loop `escalated`, and reaches the pull request under "No determinable practice — for you to decide". `security.*` and `context.*` stop whatever the row or severity; deterministic rows stop; the last round stops. A person's answer to a decline is recorded with `perbo principle add` into `.perbo/principles.md`, which the executor reads and cannot write. The pull request lists what was found, what the executor closed and verified, what is left for a person, and what was advisory.
 - Why: in the founder's words, it is always better to fix than not to fix, and only not worth it when the effect is neutral; nobody but the owner can decide a neutral product question.
 - Changes if: declines stay near zero while preference questions are silently fixed.
 
@@ -249,7 +249,7 @@ This is the one home for the decisions that govern Focrux. Every other document 
 - Owner: Founder
 - Decision: a ticket with an execution graph is reviewed once per node (that node's criteria, and the part of the diff inside its paths) and once over the whole change, for the outcome, anything that crosses nodes, and any path allowed in the explorer that no node names. The pinned checks also run once per node, narrowed to that node's paths as a failed check's rerun is narrowed to the files that own it, and each node's results reach that node's review. It changes the reviewer, so it carries a regression-suite run and adds graph-shaped fixtures to the corpus. No-Gos brief the executor; nothing checks them yet.
 - Why: each review stays near the size of change the reviewer is measured on, and a node that fails its own checks is found before the whole change is.
-- Decided, not built.
+- Built: the pinned checks per node, narrowed to the node's paths, recorded with the attempt and shown per node in `perbo inspect`; review per node and once overall (SCP-328) — `reviewGraph` reviews each node in plan order, on that node's criteria, the part of the diff inside its paths and that node's own check results, then the whole change unnarrowed but for its checks, and combines the N+1 artifacts into the gate's one view: the stricter reading wins wherever the overall review and a node's judged the same criterion, and where the same finding key repeats across them, the reading the gate treats as stricter wins — blocking, then escalating, then remediable — and the first where none of those tell the two apart — so a node-local blocking or escalating finding closes the gate on its own, even against a repeated key the whole-change review itself read as advisory. A node with no file inside its paths is not reviewed on its own. The per-node artifacts are recorded beside the combined one in the ticket store and shown per node in `perbo inspect`, beside its checks. A flat plan calls the reviewer once, on its input as the caller built it. The graph-shaped corpus fixtures. Not built: No-Gos still brief the executor; nothing checks them yet.
 
 ### D-037 — Review independence by risk level
 
@@ -280,7 +280,7 @@ This is the one home for the decisions that govern Focrux. Every other document 
 ### D-083 — A pull request closed without merging
 
 - Owner: Founder
-- Decision: `focrux sync` moves a `pr_open` ticket to `closed` when GitHub reports its pull request closed and unmerged, and to `changes_requested`, with delivery `closed`, where the pull request carries a changes-requested review verdict. `closed` is terminal for the record, and the ticket can be run again.
+- Decision: `perbo sync` moves a `pr_open` ticket to `closed` when GitHub reports its pull request closed and unmerged, and to `changes_requested`, with delivery `closed`, where the pull request carries a changes-requested review verdict. `closed` is terminal for the record, and the ticket can be run again.
 - Why: the record says what happened in a state, not in a printed line.
 
 ### D-041 — The person merges; a repository may let the loop merge
@@ -295,12 +295,12 @@ This is the one home for the decisions that govern Focrux. Every other document 
 ### D-108 — The queue runs tickets, re-levels branches and merges in order
 
 - Owner: Founder
-- Decision: `focrux serve` is one process over the store. On each tick it:
+- Decision: `perbo serve` is one process over the store. On each tick it:
   - fetches the base ref, the queue's only fetch;
   - reads every open pull request through `sync`, and merges in queue order where the repository opted into `merge: loop` (D-041);
   - decides which tickets wait by set arithmetic over approved records: `depends_on`, the intersection of `paths_allowed`, and a sealed branch's actual paths, with generated paths exempt. So `blocked` is reachable;
   - re-levels every open branch that fell behind the base before starting anything new;
-  - starts `focrux run --ticket` children up to `concurrent_local_attempts`;
+  - starts `perbo run --ticket` children up to `concurrent_local_attempts`;
   - drafts open tracker issues carrying a configured label into `plan_review`, one per tick.
 
   A clean re-level keeps the review approval when the change's content hash is unchanged and the base touched nothing in scope. A conflict starts a reconciliation round, briefed with the base commit, the conflicting paths and the merged ticket's approved contract, and bounded as remediation rounds are (D-096). A re-level refuses a branch carrying a commit the loop did not make. Nothing in the queue approves.
@@ -308,10 +308,10 @@ This is the one home for the decisions that govern Focrux. Every other document 
 - Changes if: the queue deadlocks or starves, or a re-level pushes a change nobody reviewed.
 - ADR: [ADR-0036](adr/0036-queue.md).
 
-### D-109 — The queue's tool endpoint and `focrux agent`
+### D-109 — The queue's tool endpoint and `perbo agent`
 
 - Owner: Founder
-- Decision: `focrux serve` hosts a loopback MCP endpoint with a bearer token per role (person, drafter). Its tools are this build's own commands, run in-process with arguments built as values. They are reads (`list_tickets`, `inspect_ticket`, `stops`, `escapes`, `queue_state`) plus `admit_ticket`, `edit_ticket`, `sync_ticket`, `queue_pause` and `queue_resume`. It never approves, publishes or merges. `focrux mcp` prints the client configuration and writes nothing. `focrux agent [--provider claude|codex]` launches the person's own session in the primary checkout, with the endpoint injected for that launch, and the person's own configuration applies. The executor is given neither the token nor the address and keeps ADR-0030's empty MCP configuration, and the reviewer's inputs do not change. The executor runs as the person's user, so a program it starts could read the endpoint record; the tools are bounded so that a token holder can at most draft, edit an unapproved contract, sync, and pause or resume the queue.
+- Decision: `perbo serve` hosts a loopback MCP endpoint with a bearer token per role (person, drafter). Its tools are this build's own commands, run in-process with arguments built as values. They are reads (`list_tickets`, `inspect_ticket`, `stops`, `escapes`, `queue_state`) plus `admit_ticket`, `edit_ticket`, `sync_ticket`, `queue_pause` and `queue_resume`. It never approves, publishes or merges. `perbo mcp` prints the client configuration and writes nothing. `perbo agent [--provider claude|codex]` launches the person's own session in the primary checkout, with the endpoint injected for that launch, and the person's own configuration applies. The executor is given neither the token nor the address and keeps ADR-0030's empty MCP configuration, and the reviewer's inputs do not change. The executor runs as the person's user, so a program it starts could read the endpoint record; the tools are bounded so that a token holder can at most draft, edit an unapproved contract, sync, and pause or resume the queue.
 - Why: a person's own session should reach the queue, and nothing reachable through the endpoint approves, publishes or merges.
 - Changes if: a ticket is approved without a person's keystroke, or a session string reaches a flag.
 
@@ -339,8 +339,8 @@ This is the one home for the decisions that govern Focrux. Every other document 
 ### D-013 — Supported repositories and environments
 
 - Owner: Founder
-- Decision: Focrux supports GitHub repositories, standard git worktrees and the package managers `focrux doctor` detects, with a declared materialization manifest where a worktree needs files git does not carry. A repository `doctor` cannot materialize is refused with the reason.
-- Why: the environment half of a repository is the likeliest cause of a first-run failure.
+- Decision: Perbo runs on any GitHub repository a standard git worktree can check out, with a declared materialization manifest where a worktree needs files git does not carry. `perbo doctor` proposes the manifest: an install with the package managers this build supports — pnpm, npm, yarn and bun — and a verification with the repository's test script. The kind of repository is never a reason to refuse it: where there is no test script a worktree can run, because none is declared, the package manager is one this build does not install with, its lockfile has nothing beside it to install from, or each test script starts a service, `doctor` says so as an advisory, installs nothing it cannot, and verifies with `git status --porcelain`, so an attempt there is judged by the review and whichever checks are pinned, and its base counts as unmeasured. A repository `doctor` cannot materialize at all, such as a checkout that is not a git repository or signs its commits with a key that cannot sign, is refused with the reason.
+- Why: Perbo has to work with any kind of repository people bring, and one whose tests a worktree cannot run still has work to do. The environment half of a repository is the likeliest cause of a first-run failure, so `doctor` names what it could not set up before an attempt rather than during one.
 - Changes if: a class of repository people bring cannot be materialized.
 
 ### D-035 — Untrusted context is data, never instruction
@@ -354,7 +354,7 @@ This is the one home for the decisions that govern Focrux. Every other document 
 ### D-036 — A worktree is materialized, not merely provisioned
 
 - Owner: Founder
-- Decision: a worktree acquires its environment from a declared materialization manifest, which `focrux doctor` proposes. Secrets are materialized locally and excluded from artifacts, installs use the package manager's shared store, and attempts get their own ports or run one at a time.
+- Decision: a worktree acquires its environment from a declared materialization manifest, which `perbo doctor` proposes. Secrets are materialized locally and excluded from artifacts, installs use the package manager's shared store, and attempts get their own ports or run one at a time.
 - Why: a fresh worktree has no dependencies, no environment files and no local configuration.
 - ADR: [ADR-0025](adr/0025-worktree-environment-contract.md).
 
@@ -372,12 +372,19 @@ This is the one home for the decisions that govern Focrux. Every other document 
 - Decision: every model artifact records a `cost_basis`: `transport_reported`, `provider_list_estimate` or `unavailable`. An unknown cost is never summed as zero, and a total is called all-in only when every component is priced. Token counts are always kept.
 - Why: a partial total reads as a whole one.
 
-## The desktop
-
-### D-093 — The Focrux desktop runs Claude Code and Codex
+### D-115 — The loop will not need GitHub
 
 - Owner: Founder
-- Decision: the desktop is a local app around the bundled CLI, built from the supplied hand-drawn assets and shared components. Claude Code and Codex plan, execute and review on the person's existing subscription logins; API credentials are optional. Each person authenticates with their own credential. Focrux never reads, stores or forwards a subscription credential, never pays for, resells or intermediates usage, and never modifies a provider's binary. The agent binary's path, version and hash are recorded on every attempt.
+- Decision: the loop will run without GitHub — against another host, a plain Git remote, or no remote at all — delivering a branch or a patch where there is no pull request to open. Git stays: a worktree is how an attempt gets a scope it cannot write outside. What a delivery is where there is no pull request, and where admission reads its issue from, are not yet decided.
+- Why: a repository that is not on GitHub has no way through the loop today. An admission drafted from an issue reads it through the GitHub CLI, and every delivery ends in a pull request opened the same way.
+- Decided, not built: all of it. Until then both go through the GitHub CLI, and a run that has to open a pull request without it is refused at preflight.
+
+## The desktop
+
+### D-093 — The Perbo desktop runs Claude Code and Codex
+
+- Owner: Founder
+- Decision: the desktop is a local app around the bundled CLI, built from the supplied hand-drawn assets and shared components. Claude Code and Codex plan, execute and review on the person's existing subscription logins; API credentials are optional. Each person authenticates with their own credential. Perbo never reads, stores or forwards a subscription credential, never pays for, resells or intermediates usage, and never modifies a provider's binary. The agent binary's path, version and hash are recorded on every attempt.
 - Why: people already have these subscriptions, and the product runs where their agents already run.
 - Changes if: a provider's terms stop permitting it.
 - ADR: [ADR-0033](adr/0033-focrux-local-desktop-and-subscription-providers.md).
@@ -390,10 +397,10 @@ This is the one home for the decisions that govern Focrux. Every other document 
 - Changes if: edits are lost, a result lands in another session, or an admission is duplicated.
 - ADR: [ADR-0034](adr/0034-desktop-editing-and-workspace-projection.md).
 
-### D-097 — Focrux UI v2; the phone's surfaces follow pairing
+### D-097 — Perbo UI v2; the phone's surfaces follow pairing
 
 - Owner: Founder
-- Decision: the desktop follows the v2 boards (`design/focrux-v2`). The rail's settings pill holds General, Usage and Connections. General holds the name, the four moments the loop may interrupt a person, appearance and an away-from-keyboard hold. Usage reports a provider's plan windows only from the provider's own reply, and a spend ledger summed from retained attempts. Shortcuts are rebindable, except the two money bindings. Completed tickets stay on Home until archived by hand, and archiving is a desktop preference, never a ticket state. There is a dark theme, and motion is vendored from transitions.dev at a pinned commit. The desktop shows no forecast, and no phone surface until pairing lands; the phone boards are the target for that work.
+- Decision: the desktop follows the v2 boards (`design/perbo-v2`). The rail's settings pill holds General, Usage and Connections. General holds the name, the four moments the loop may interrupt a person, appearance and an away-from-keyboard hold. Usage reports a provider's plan windows only from the provider's own reply, and a spend ledger summed from retained attempts. Shortcuts are rebindable, except the two money bindings. Completed tickets stay on Home until archived by hand, and archiving is a desktop preference, never a ticket state. There is a dark theme, and motion is vendored from transitions.dev at a pinned commit. The desktop shows no forecast, and no phone surface until pairing lands; the phone boards are the target for that work.
 - Why: nothing shown is invented; every number comes from a provider or the records.
 - Changes if: the desktop shows a number no provider reported, or a desktop preference changes a ticket's state.
 
@@ -464,7 +471,7 @@ This is the one home for the decisions that govern Focrux. Every other document 
 ### D-060 — Precision of stopping
 
 - Owner: Founder
-- Decision: precision of stopping is the share of stopped changes where the person endorses the stop, meaning they would have wanted to be asked before it was fixed. `focrux stops` reads it live from the endorse-or-override answer on each pull request, always beside the share of changes on which a person was shown anything. A reading of 70% or more needs a Wilson interval wholly on one side of the bar; below nine unanimous stops it cannot resolve.
+- Decision: precision of stopping is the share of stopped changes where the person endorses the stop, meaning they would have wanted to be asked before it was fixed. `perbo stops` reads it live from the endorse-or-override answer on each pull request, always beside the share of changes on which a person was shown anything. A reading of 70% or more needs a Wilson interval wholly on one side of the bar; below nine unanimous stops it cannot resolve.
 - Why: it measures the stops people actually feel, and the companion shows a gate that improves by hiding findings.
 
 ### D-079 — A check the product runs is changed by a person
@@ -485,27 +492,37 @@ This is the one home for the decisions that govern Focrux. Every other document 
 ### D-038 — The baseline comes before first use
 
 - Owner: Founder
-- Decision: a partner's direct-agent baseline is captured with `focrux baseline` before they first use Focrux: the same partner, comparable tickets, agent-direct, wall clock from start of work to pull request.
+- Decision: a partner's direct-agent baseline is captured with `perbo baseline` before they first use Perbo: the same partner, comparable tickets, agent-direct, wall clock from start of work to pull request.
 - Why: it cannot be reconstructed afterwards.
 
 ### D-047 — The partner agreement
 
 - Owner: Founder
-- Decision: a partner receives the written disclosure ("What leaves your machine" on the [install page](install.md)) and signs a one-page agreement covering what they share with the founder. There is no processor agreement or subprocessor list, because a local build sends nothing to Focrux. A lawyer confirms this before the first partner signs.
+- Decision: a partner receives the written disclosure ("What leaves your machine" on the [install page](install.md)) and signs a one-page agreement covering what they share with the founder. There is no processor agreement or subprocessor list, because a local build sends nothing to Perbo. A lawyer confirms this before the first partner signs.
 - Why: the partner's code and prompts travel only to their own providers, under their own credentials.
 
-### D-046 — Releases are verifiable
+### D-046 — Releases are verifiable, and a copy updates itself to a verified one
 
 - Owner: Founder
-- Decision: Focrux is released from the public repository with a signed tag, a published SHA-256 and a build provenance attestation. There is no auto-update: a fix reaches people by an explicit reinstall.
-- Why: an update channel is a remote-code-execution path by design.
-- Changes if: a security fix has to reach people faster than a reinstall allows.
+- Decision: Perbo is released from the public repository. Each release carries a `SHA256SUMS` file, a detached minisign signature over it made with a key that never leaves the founder's machine, a build provenance attestation and an SBOM (D-048). The desktop updates itself. It asks the public repository for its latest release, and where that is newer than the copy running it names both versions beside a changelog link and an update button. The button downloads the release's `SHA256SUMS`, its signature and the image for this machine, and replaces the app only when all three agree: the signature checks against the public key compiled into the app, the image's SHA-256 is the line the signed file gives it, and the version that line names is newer than the copy running, so an older release, however validly signed, is never installed over a newer one. A copy Homebrew installed is left to `brew upgrade`, which the prompt names instead. The request for the latest release is the one the app makes on its own behalf, and the install page's disclosure names it.
+- Why: a copy that cannot tell its user it is out of date goes on running whatever it shipped with. An update channel is a remote-code-execution path by design, so this one runs only what the founder's key signed: an update is trusted on its signature, not on the host that served it or the connection it came over. The binaries are not code-signed (D-116), and the update framework Electron uses on macOS will not install over an unsigned app, so the check is made here instead.
+- Changes if: the signing key leaves the founder's machine, or the binaries are code-signed and notarized.
+- Decided, not built: the signing key and the signing on the founder's machine, the release workflow that builds and publishes, the updater, and the disclosure's line for the request. Until then nothing is released, and the app makes no request of its own.
+
+### D-116 — The desktop is a free download
+
+- Owner: Founder
+- Decision: anyone can download the desktop from perbostudios.com, which links to the latest release on the public repository. The first release is for macOS only, as separate disk images for Apple silicon and for Intel; Windows follows once the loop runs there end to end. A Homebrew cask installs the same app and puts the CLI on `PATH`. The binaries are not code-signed or notarized: the download page says how to open one that macOS has quarantined, and a Homebrew install needs no such step. The CLI is not published to npm. The workspace carries one version number, and the first public release is 0.1.0. The download page says what makes the app useful before anyone installs it: Git, the GitHub CLI to open a pull request (D-115), and Claude Code or Codex signed in. A design partner downloads the same release as anyone else, and the tarball handed over out of band is retired.
+- Why: the product is free and runs on the person's machine (D-075), so a download is how people meet it, and one channel is one thing to get right for each version.
+- Changes if: a release has to reach people who cannot open an unsigned binary.
+- Decided, not built: the disk images, the release workflow, the cask and the download page. Until then the app is built from source with `pnpm desktop:package`, and `release.yml` still drafts the partner tarball.
 
 ### D-048 — Product-regulation artefacts come with the first binary release
 
 - Owner: Founder
 - Decision: an SBOM, a vulnerability-handling policy, a disclosure contact and a declared support period are prepared for the first distribution of a binary, which the public release is.
 - Why: obligations of this kind attach to placing a product on a market.
+- Built: the vulnerability-handling policy, the disclosure contact and the declared support period, in [`SECURITY.md`](../SECURITY.md). Not built: the SBOM, which the release workflow produces with each release (D-046).
 
 ### D-030 — Nothing learns from private content without opt-in
 
@@ -525,7 +542,7 @@ This is the one home for the decisions that govern Focrux. Every other document 
 ### D-078 — Documentation and decision tickets are admissible
 
 - Owner: Founder
-- Decision: a ticket whose criteria are validator outcomes is admissible. A validator's pass is `proxy` evidence wherever the validator cannot tell two documents apart. This repository runs its work through Focrux when that is convenient.
+- Decision: a ticket whose criteria are validator outcomes is admissible. A validator's pass is `proxy` evidence wherever the validator cannot tell two documents apart. This repository runs its work through Perbo when that is convenient.
 - Why: a green validator says an entry is well formed, never that it is right.
 - Changes if: validator-criteria tickets land entries that turn out wrong on substance.
 
@@ -557,5 +574,44 @@ This is the one home for the decisions that govern Focrux. Every other document 
 ### D-112 — Trademarks, patents and the brand under Apache-2.0
 
 - Owner: Founder
-- Decision: the repository says nothing about trademarks or patents beyond Apache-2.0's own terms, which grant no trademark rights and carry a patent licence. The Focrux name, logo and artwork are not licensed under Apache-2.0; all rights in them are reserved, and `NOTICE` names the files.
+- Decision: the repository says nothing about trademarks or patents beyond Apache-2.0's own terms, which grant no trademark rights and carry a patent licence. The Perbo name, logo and artwork are not licensed under Apache-2.0; all rights in them are reserved, and `NOTICE` names the files.
 - Why: the founder's choice. The artwork is the co-founder's; reserving it keeps the brand out of forks while the code stays Apache-2.0.
+
+### D-117 — The interview asks with answers to pick from
+
+- Owner: Founder
+- Decision: the interview puts what it cannot settle from the repository, the spec or what the person
+  has already said through `ask_options`, which carries groups of questions, each group's parts read
+  together because one part's answer bears on another's. It asks for all of it in the one call and
+  returns without waiting — a tool returns to the model, and one that waited on a person would hold
+  the turn open — and the dock puts one group at a time, so what the session may ask cheaply the
+  person is not asked cheaply. Every part offers at least two answers, may carry the session's own
+  recommendation, and always carries leaving the choice to the interview; the composer stays open, so
+  answering in the person's own words is never closed off. Picking sends the options' own wording as
+  an ordinary turn. How much of an asking has been answered is recorded on the planning rather than
+  counted back out of the turns, which cannot tell an answer from a question the person typed
+  instead: a turn that is not the group's answer ends the asking, because the session is about to
+  answer what was said and a card left standing would answer a question nobody is asking any more.
+  The questions stay in the conversation to be read either way. This is not a permission prompt: a call the guard refused is still reported and
+  never asked (D-102).
+- Why: a person sees only what needs them (D-001), and prose questions arriving five at a time are
+  read as a wall and answered as one. Metering them is the reader's job rather than the session's,
+  because a rule the session is asked to follow is one it can drift from, while a queue it cannot
+  reach holds. The wording that goes back is the option's own so the answer is the person's sentence
+  and not a token only the app understands, which also keeps what the session wrote out of every
+  action parameter ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4): it reaches a turn and
+  nothing else.
+- Built: `ask_options` and the `asked` event beside the interview's other tools, bounded at four
+  groups of four parts of eight options and refused at the tool above that; the host relaying it
+  under the clipping and redaction every other field the session writes is given, flattening the
+  whitespace a label goes back down as; the asking and the count answered recorded on the planning,
+  moved on by an answer and ended by anything else or by the line itself falling out of the
+  conversation's cap; and the dock's card, which puts one group with its parts lettered, holds Send
+  until every part is answered, and sends the options' own words.
+
+### D-118 — An untitled planning is named by its first turn
+
+- Owner: Founder
+- Decision: the interview writes `specs/<slug>/spec.md`, so a planning with no slug has nowhere to write. Where the person has not titled it in the Spec pane, the host cuts a title from their first turn — the first sentence, its opening dropped, clipped to a whole word within the slug's cap — writes the spec with it and records the slug, then starts the interview on that spec and sends the turn. The chat says which folder was named. A turn no folder name can come from is refused as before, naming the title it could not take. The folder is minted once and is not moved afterwards; the title in it stays editable.
+- Why: a person opening planning and typing what they want should be talking to the interview, not stopped by a field they have not found. Their own words name the folder, so nothing a model returned becomes a path ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). The naming is said rather than silent because a slug outlives the message it came from.
+- Built: `specTitleFromMessage` in `@perbo/planning`, the host naming the spec on the first turn and saying so as a note, and the browser preview doing the same.

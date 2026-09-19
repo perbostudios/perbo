@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import type { AcceptanceCriterion } from "@focrux/contracts";
+import type { AcceptanceCriterion } from "@perbo/contracts";
 import { EditingSessionSchema } from "../src/shared/protocol.js";
 import type { ReplyMap, Request } from "../src/shared/protocol.js";
 import { editingForm } from "../src/shared/contract-editing.js";
@@ -36,7 +36,7 @@ async function contextFor(criteria: AcceptanceCriterion[]): Promise<TaskContext>
   const workspace = structuredClone(
     await previewBridge.request({ kind: "snapshot" }),
   );
-  const row = workspace.tasks.find((task) => task.ticket.key === "FCX-421")!;
+  const row = workspace.tasks.find((task) => task.ticket.key === "PRB-421")!;
   const detail = structuredClone(
     await previewBridge.request({
       kind: "detail",

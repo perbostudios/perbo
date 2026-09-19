@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Button, EmptyState, Notice, cx } from "@focrux/ui";
+import { Button, EmptyState, Notice, cx } from "@perbo/ui";
 import { InkIcon } from "../InkIcon.js";
 import {
   Dropdown,
@@ -10,6 +10,7 @@ import {
 } from "../Screen.js";
 import { archived, timeAgo } from "../presentation.js";
 import { errorMessage, useAction, useTaskSummary } from "../data.js";
+import { useCreate } from "../shell/create.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/App.js";
@@ -261,6 +262,7 @@ export function HomePage({
 }: PageProps & { archive: boolean }) {
   const action = useAction();
   const toast = useToast();
+  const create = useCreate();
   const [search, setSearch] = useState(""),
     [repoFilter, setRepoFilter] = useState("all"),
     [homeFilter, setHomeFilter] = useState<"all" | "needs" | "running" | "completed">("all"),
@@ -360,7 +362,7 @@ export function HomePage({
             "Archive"
           ) : (
             <>
-              <span className="header-wordmark">focrux</span>
+              <span className="header-wordmark">perbo</span>
               {repository && (
                 <span className="repo-tag">
                   {repository.name} · {repository.branch}
@@ -415,10 +417,6 @@ export function HomePage({
                   : ""}
               </p>
             </div>
-            <span className="spacer" />
-            <Button variant="primary" onClick={() => navigate({ page: "new" })}>
-              <span>+</span>Create a task
-            </Button>
           </div>
           <div className="home-controls">
             <div className="home-search">
@@ -599,7 +597,7 @@ export function HomePage({
           }
           action={
             !archive && !all.length ? (
-              <Button onClick={() => navigate({ page: "new" })}>
+              <Button onClick={create.open}>
                 Create a task
               </Button>
             ) : undefined

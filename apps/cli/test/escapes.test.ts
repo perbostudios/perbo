@@ -10,8 +10,8 @@ import {
   wilsonInterval,
   type Ticket,
   type TicketEscapes,
-} from "@focrux/contracts";
-import { TicketDeliveryStateSchema, type TicketDeliveryState } from "@focrux/runner";
+} from "@perbo/contracts";
+import { TicketDeliveryStateSchema, type TicketDeliveryState } from "@perbo/runner";
 import type { Streams } from "../src/admit.js";
 import { baselinePath } from "../src/baseline.js";
 import {
@@ -25,7 +25,7 @@ import { runSyncCommand } from "../src/sync.js";
 import { idsFor, readTicket, storeDir, writeTicket } from "../src/tickets.js";
 
 /**
- * `focrux escapes` (SCP-145) over a real git history: one merge reverted, one
+ * `perbo escapes` (SCP-145) over a real git history: one merge reverted, one
  * whose paths were touched again inside fourteen days, one touched again after
  * them, and one nobody went near. The history is built with `git`; nothing in
  * this file stands in for it.
@@ -37,7 +37,7 @@ import { idsFor, readTicket, storeDir, writeTicket } from "../src/tickets.js";
  * is rather than of whether the command works.
  */
 const GIT_FIXTURE_TIMEOUT_MS = 60_000;
-const scratch = mkdtempSync(join(tmpdir(), "focrux-escapes-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-escapes-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const gitEnv = (at?: string) => ({
@@ -551,7 +551,7 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
 
     const table = capture();
     await runEscapesCommand({ argv: ["--repo", local.repo], streams: table, cwd: local.repo, now: READ_AT });
-    expect(table.out.join("")).toContain("`focrux sync AYO-1`");
+    expect(table.out.join("")).toContain("`perbo sync AYO-1`");
     expect(table.err.join("")).toContain("behind the default branch");
 
     // Reachable again, the same command closes the gap and the revert appears.
@@ -602,7 +602,7 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     const fetched = globalThis.fetch;
     process.env.PATH = bin;
     globalThis.fetch = (() => {
-      throw new Error("the network is not available to `focrux escapes`");
+      throw new Error("the network is not available to `perbo escapes`");
     }) as typeof fetch;
     try {
       const streams = capture();
@@ -792,7 +792,7 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
       now: new Date("2026-11-01T00:00:00.000Z"),
     });
     expect(table.out.join("")).toContain(`watched only to ${OBSERVED_AT}, fell due ${closes}`);
-    expect(table.out.join("")).toContain("`focrux sync AYO-1`");
+    expect(table.out.join("")).toContain("`perbo sync AYO-1`");
     expect(table.err.join("")).toContain("stops short of their 14-day window");
 
     // Synced again after the window closed, the same ticket is evidence.
@@ -933,7 +933,7 @@ describe("ac_4 — the stand-in partner's merged tickets are the first populatio
     mkdirSync(dirname(baselinePath(f.dir)), { recursive: true });
     // D-038: a comparison started once a ticket was already admitted is not a
     // partner's before-first-use baseline, whatever it holds — this is the
-    // stand-in's own store on a machine where `focrux baseline` was used late.
+    // stand-in's own store on a machine where `perbo baseline` was used late.
     writeFileSync(
       baselinePath(f.dir),
       JSON.stringify({

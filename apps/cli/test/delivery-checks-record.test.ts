@@ -9,8 +9,8 @@ import {
   type DeliveredCheck,
   type DeliveryChecksState,
   type Ticket,
-} from "@focrux/contracts";
-import { branchName } from "@focrux/workspace";
+} from "@perbo/contracts";
+import { branchName } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { recordDelivery, runSyncCommand } from "../src/sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.js";
@@ -19,13 +19,13 @@ import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.
  * What the ticket's delivery record says about the checks on its head.
  *
  * The run reads them after opening the pull request and hands them to
- * `recordDelivery`; every `focrux sync` afterwards re-reads them from `gh` and
+ * `recordDelivery`; every `perbo sync` afterwards re-reads them from `gh` and
  * writes the record whole from what it said. Both halves matter: a run that
  * recorded a red check and a sync that then quietly dropped it would leave the
  * ticket looking exactly like one whose checks were never red.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-delivery-checks-record-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-delivery-checks-record-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const OUTCOME = "Search results are paginated.";
@@ -128,12 +128,12 @@ function publishedTicket(
   });
   const dir = storeDir(repo, null);
   const branch = branchName({
-    ticket_key: "FCX-1",
-    ticket_id: readTicket(dir, "FCX-1").ticket_id,
-    outcome: readContract(dir, "FCX-1").outcome,
+    ticket_key: "PRB-1",
+    ticket_id: readTicket(dir, "PRB-1").ticket_id,
+    outcome: readContract(dir, "PRB-1").outcome,
   });
 
-  let ticket: Ticket = readTicket(dir, "FCX-1");
+  let ticket: Ticket = readTicket(dir, "PRB-1");
   ticket = transition(ticket, "provisioning", "run started", AT);
   ticket = transition(ticket, "executing", "1 attempt executed", AT);
   ticket = transition(ticket, "verifying", "no deterministic checks are configured", AT);
@@ -197,11 +197,11 @@ describe("the checks the run read, on the ticket", () => {
           { name: "lint", status: "IN_PROGRESS" },
         ]),
       ),
-      () => runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     // Rewritten whole from what `gh` said, and what it said is still red. A
     // check it reported with no conclusion is `unchecked`, which is not a pass
     // either.
@@ -229,7 +229,7 @@ describe("the checks the run read, on the ticket", () => {
           { __typename: "StatusContext", context: "ci/legacy", state: "PENDING" },
         ]),
       ),
-      () => runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     // That the sync returned at all is half the claim: an empty conclusion
@@ -237,7 +237,7 @@ describe("the checks the run read, on the ticket", () => {
     // nor `unchecked`, and the write refuses it — a `ZodError` out of
     // `runSyncCommand` in place of a delivery record.
     expect(code).toBe(EXIT_CODES.approve);
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     expect(after.delivery.checks).toEqual([
       { name: "build", conclusion: "success" },
       { name: "validate", conclusion: "unchecked" },

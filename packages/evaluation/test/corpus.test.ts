@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { hasAcceptanceCriteria, parseUnifiedDiff } from "@focrux/contracts";
+import { hasAcceptanceCriteria, parseUnifiedDiff } from "@perbo/contracts";
 import { CLASS_PREFIX, anchorFileIsReal, anchoringNote } from "../src/corpus.js";
 import { PERMISSIVE_LICENCES } from "../src/prepare.js";
 import { DEFECT_CLASSES } from "../src/fixture.js";
@@ -65,7 +65,7 @@ describeCorpus("every expectation is anchored to something that exists", () => {
       }
 
       // A pinned fixture computes its diff from a clone that is not checked in,
-      // so on a machine that has never run `focrux-corpus prepare` there is no
+      // so on a machine that has never run `perbo-corpus prepare` there is no
       // diff to anchor against — including CI, which cannot clone 800 MB of
       // upstream repositories to assert a path. The criterion check above still
       // runs; only the file check needs the diff.
@@ -229,8 +229,8 @@ describeCorpus("scp-006 detection is deterministic after D-062", () => {
   it("yields a blocking deterministic finding attributable to the seeded defect", async () => {
     const entry = corpus.find((candidate) => candidate.fixture.id.startsWith("scp-006"));
     expect(entry).toBeDefined();
-    const { assessScope } = await import("@focrux/review");
-    const { changeSetFromDiff } = await import("@focrux/contracts");
+    const { assessScope } = await import("@perbo/review");
+    const { changeSetFromDiff } = await import("@perbo/contracts");
     const changeset = changeSetFromDiff({
       diff: entry!.diff,
       base_commit: entry!.contract.base.base_commit,

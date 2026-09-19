@@ -2,15 +2,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { EXIT_CODES } from "@focrux/contracts";
-import type { ReviewModel } from "@focrux/review";
+import { EXIT_CODES } from "@perbo/contracts";
+import type { ModelRequest, ReviewModel } from "@perbo/review";
 import { parseReviewArgs } from "../src/args.js";
 import { exitForThrown } from "../src/entry.js";
 import { runReviewCommand, type Streams } from "../src/run.js";
 import { USAGE } from "../src/usage.js";
 
 /**
- * `focrux review --diff -` and `--checks -`: one of the two read from standard
+ * `perbo review --diff -` and `--checks -`: one of the two read from standard
  * input, so a CI step that already holds the diff in a pipe does not have to
  * write a temporary file for it.
  *
@@ -24,7 +24,7 @@ import { USAGE } from "../src/usage.js";
  * happen.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-review-stdin-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-review-stdin-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const contract = {
@@ -84,12 +84,16 @@ writeFileSync(join(scratch, "contract.json"), JSON.stringify(contract));
 writeFileSync(join(scratch, "change.diff"), DIFF);
 writeFileSync(join(scratch, "checks.json"), JSON.stringify(checks));
 
+/** Every request a stubbed reviewer was handed, for a test to search. */
+const requests: ModelRequest[] = [];
+
 /** A reviewer that answers the one criterion, and counts what it was asked. */
 function stubModel(turns: { count: number }): ReviewModel {
   return {
     provider: "double",
     model_id: "scripted",
-    async turn() {
+    async turn(request) {
+      requests.push(request);
       turns.count += 1;
       return {
         toolCalls: [
@@ -146,7 +150,7 @@ beforeEach(() => {
 });
 
 /**
- * One `focrux review`, with an optional standard input.
+ * One `perbo review`, with an optional standard input.
  *
  * A refusal is turned into an exit code by `exitForThrown` — the function
  * `startEntryPoint` maps a thrown error with, so the code and the words
@@ -206,6 +210,26 @@ function stable(value: unknown): unknown {
       .map(([key, entry]) => [key, stable(entry)]),
   );
 }
+
+describe("a node's check result", () => {
+  it("never reaches the reviewer: the review of the change is handed the whole-change results alone", async () => {
+    const perNode = {
+      ...checks[0]!,
+      status: "failed",
+      summary: "1 failed",
+      node: { node_id: "node_queue", paths: ["packages/search/test/query.test.ts"], scope: "files", note: null },
+    };
+    writeFileSync(join(scratch, "checks-nodes.json"), JSON.stringify([checks[0], perNode]));
+    requests.length = 0;
+    const ran = await review([
+      "--contract", "contract.json", "--diff", "change.diff", "--checks", "checks-nodes.json", "--repo", "repo",
+    ]);
+    expect(ran.code).toBe(EXIT_CODES.approve);
+    expect(JSON.stringify(requests)).not.toContain("node_queue");
+    const artifact = JSON.parse(ran.out) as { checks?: unknown[] };
+    expect(JSON.stringify(artifact)).not.toContain("node_queue");
+  });
+});
 
 describe("the diff on standard input", () => {
   it("reviews the piped diff exactly as it reviews the same diff from a file", async () => {

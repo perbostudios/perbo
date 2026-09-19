@@ -9,8 +9,9 @@ import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "../src/pr
  * SCP-163: a command's admission is decided by where its writes land.
  *
  * Two lists decide a command, and they are not the same list. `judgeCommand` is
- * the decision the runner **records**, and it authors exactly two refusals: the
- * deny-list, and a write the resolver put outside the worktree. A verb the
+ * the decision the runner **records**, and its refusals are the deny-list and
+ * the write rules (outside the worktree, a prohibited path, outside the
+ * contract's globs), never absence from a list. A verb the
  * allow-list does not carry is admitted — the agent's permission layer runs
  * `cd`, `echo` and `pwd` with no entry, so a name denial here would land on
  * commands that ran. The `--allowedTools` list the runner hands the agent is
@@ -24,7 +25,7 @@ import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "../src/pr
  * resolver walks real directories and real symlinks rather than a string.
  */
 
-const worktree = mkdtempSync(join(tmpdir(), "focrux-scp163-"));
+const worktree = mkdtempSync(join(tmpdir(), "perbo-scp163-"));
 mkdirSync(join(worktree, "sub"), { recursive: true });
 writeFileSync(join(worktree, "a"), "contents\n");
 
@@ -43,7 +44,7 @@ const admittedByName = (command: string): boolean =>
 
 const ADMITTED = [
   // The AYO-13 clean-up lines, in the spelling the executor used.
-  "mkdir -p .scratch/.focrux",
+  "mkdir -p .scratch/.perbo",
   "rm -r .scratch",
   `rm -rf ${worktree}/.scratch`,
   // The rest of the mutating vocabulary, all of it inside the worktree.

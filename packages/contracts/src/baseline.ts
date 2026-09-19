@@ -4,7 +4,7 @@ import { z } from "zod";
 /**
  * The partner's direct-agent baseline (D-038, SCP-080).
  *
- * E1 compares Focrux's wall clock against "the user's current workflow": the
+ * E1 compares Perbo's wall clock against "the user's current workflow": the
  * same partner, agent-direct, from "start work" to "pull request opened",
  * pauses excluded. That number has to be captured **before** first use — a
  * partner who has already run a ticket through the loop cannot go back and

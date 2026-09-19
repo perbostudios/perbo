@@ -12,11 +12,11 @@ Generated planning documents regrow into a second bureaucracy that people have t
 A plan is a typed, versioned artifact with two parts:
 
 - **The contract, immutable after approval:** outcome, acceptance criteria, scope and base. Execution is bound by it, and review is judged against it.
-- **The approach, mutable during execution:** steps, notes and discovered work. The executor owns it; freezing it guarantees drift.
+- **The approach, mutable during execution:** steps, notes and discovered work, which the executor owns and nothing records; and, where the plan has a graph, the order between its nodes with the spec's No-Gos, which are recorded beside the ticket. Freezing any of it guarantees drift.
 
-Required detail scales with risk, through the plan level. The schema cannot express prose fields such as alternatives or a problem statement. Decided, not built: a stale spec returns a ticket that has not started to `plan_invalid` ([D-103](../11-open-decisions.md)).
+Required detail scales with risk, through the plan level. The schema cannot express prose fields such as alternatives or a problem statement. A spec that is no longer the one a contract was drafted from takes the ticket the run was about to start to `plan_invalid` ([D-103](../11-open-decisions.md)); nothing takes it out again, because the contract it holds is approved and so immutable.
 
-A plan may also group its criteria into nodes, whose criteria and paths are contract and whose order is approach ([ADR-0037](0037-execution-graph.md)). This is decided, not built.
+A plan may also group its criteria into nodes, whose criteria and paths are contract and whose order is approach ([ADR-0037](0037-execution-graph.md)). The order, with the spec's No-Gos, is kept beside the ticket rather than in the contract, so that it can change while the work runs.
 
 ## Consequences
 

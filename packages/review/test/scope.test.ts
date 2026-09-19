@@ -4,7 +4,7 @@ import {
   changeSetFromDiff,
   insideAllowedPaths,
   type Scope,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { assessScope } from "../src/scope.js";
 
 const scope: Scope = {

@@ -2,13 +2,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { E1LedgerSchema, type E1Ledger } from "@focrux/contracts";
+import { E1LedgerSchema, type E1Ledger } from "@perbo/contracts";
 import { UsageError } from "../src/args.js";
 import { runBaselineCommand } from "../src/baseline.js";
 import { parseE1Args } from "../src/e1.js";
 
 /**
- * `focrux baseline open | time | seal | run | routing | result` end to end
+ * `perbo baseline open | time | seal | run | routing | result` end to end
  * (D-038, SCP-080).
  *
  * The harness is machinery a person types at, and the four things it has to
@@ -23,7 +23,7 @@ import { parseE1Args } from "../src/e1.js";
  * tree this file does not collect.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-e1-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-e1-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const T0 = Date.parse("2026-09-01T09:00:00.000Z");
@@ -49,7 +49,7 @@ async function cli(dir: string, argv: string[], when: Date = at(10_000), isTTY =
 }
 
 const ledgerOf = (dir: string): E1Ledger =>
-  E1LedgerSchema.parse(JSON.parse(readFileSync(join(dir, ".focrux", "e1.json"), "utf8")));
+  E1LedgerSchema.parse(JSON.parse(readFileSync(join(dir, ".perbo", "e1.json"), "utf8")));
 
 const OPEN = [
   "open",
@@ -173,7 +173,7 @@ describe("ten timed tickets, then a seal", () => {
     await cli(dir, ["resume"], at(25));
     await cli(dir, ["stop", "--pr", "https://example.invalid/pull/412"], at(75));
     const stopwatch = JSON.parse(
-      readFileSync(join(dir, ".focrux", "baseline.json"), "utf8"),
+      readFileSync(join(dir, ".perbo", "baseline.json"), "utf8"),
     ) as { entries: [{ id: string }] };
 
     const timed = await cli(dir, [
@@ -193,7 +193,7 @@ describe("ten timed tickets, then a seal", () => {
     });
 
     await cli(dir, ["start", "Still going"], at(200));
-    const open = JSON.parse(readFileSync(join(dir, ".focrux", "baseline.json"), "utf8")) as {
+    const open = JSON.parse(readFileSync(join(dir, ".perbo", "baseline.json"), "utf8")) as {
       entries: { id: string }[];
     };
     await expect(
@@ -396,13 +396,13 @@ describe("the thresholds", () => {
 
   it("refuses a ledger on disk that no longer adds up rather than reading past it", async () => {
     const dir = await timedTen("corrupt");
-    const path = join(dir, ".focrux", "e1.json");
+    const path = join(dir, ".perbo", "e1.json");
     const raw = JSON.parse(readFileSync(path, "utf8")) as {
       subjects: [{ tickets: [{ elapsed_ms: number }] }];
     };
     raw.subjects[0].tickets[0].elapsed_ms = 1;
     rmSync(path);
-    mkdirSync(join(dir, ".focrux"), { recursive: true });
+    mkdirSync(join(dir, ".perbo"), { recursive: true });
     (await import("node:fs")).writeFileSync(path, JSON.stringify(raw));
     await expect(cli(dir, ["result"])).rejects.toThrow(/e1\.json is not an E1 ledger/);
   });

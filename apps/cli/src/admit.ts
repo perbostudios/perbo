@@ -1,11 +1,14 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import {
+  APPROACH_SCHEMA_VERSION,
   AcceptanceCriterionSchema,
   EXIT_CODES,
   IllegalTransitionError,
   PlanContractSchema,
+  PlanNodeSchema,
   QUEUE_HOLDING_STATES,
   TICKET_SCHEMA_VERSION,
   TicketSchema,
@@ -17,31 +20,40 @@ import {
   isDependencyPath,
   isMigrationPath,
   isSecurityPath,
+  onePieceOfWork,
   ticketSourceLabel,
   transition,
   type AcceptanceCriterion,
+  type ApproachRecord,
+  type GraphEdge,
   type PlanBase,
   type PlanContract,
   type PlanLevel,
+  type PlanNode,
   type RiskDerivation,
   type Scope,
   type Ticket,
   type TicketPriority,
   type VerificationKind,
-} from "@focrux/contracts";
+  unknownRequirementIds,
+} from "@perbo/contracts";
 import {
+  type BoardEntry,
   CONTRACT_DRAFT_JSON_SCHEMA,
+  type DraftResult,
+  type GitHubIssue,
   PlanningError,
+  type SourceIssue,
+  type Spec,
+  assertNoSymlink,
+  assertNodePagesWritable,
   contractDifferences,
   contractEditCount,
   draftContract,
   fetchGitHubIssue,
   readIssueFile,
-  type BoardEntry,
-  type DraftResult,
-  type GitHubIssue,
-  type SourceIssue,
-} from "@focrux/planning";
+  readSpecFile,
+} from "@perbo/planning";
 import {
   ProviderError,
   RepoReader,
@@ -49,8 +61,10 @@ import {
   claudeCliModel,
   codexCliModel,
   type ReviewModel,
-} from "@focrux/review";
+} from "@perbo/review";
 import { UsageError } from "./args.js";
+import { prohibitedSpecPaths, regenerateNodePages, specCommitFiles } from "./specs.js";
+import { specBaseline } from "./spec-staleness.js";
 import {
   TicketStoreError,
   assertContractMatches,
@@ -62,10 +76,13 @@ import {
   readContract,
   readJudgingPaths,
   readDraftSnapshotFile,
+  deleteApproachRecord,
   recordIssued,
   readTicket,
   repositoryId,
+  standingProhibited,
   storeDir,
+  writeApproachRecord,
   writeContract,
   writeDraftSnapshot,
   writeTicket,
@@ -73,10 +90,11 @@ import {
   type DraftSnapshotFile,
   type JudgingRule,
 } from "./tickets.js";
+import { specFolder } from "./store.js";
 import { describeScheduling } from "./waits.js";
 
 /**
- * `focrux admit`, `focrux approve`, `focrux list` — roadmap items 11 and 12.
+ * `perbo admit`, `perbo approve`, `perbo list` — roadmap items 11 and 12.
  *
  * The friction these remove is specific and was measured by doing it by hand:
  * before this, starting a ticket meant hand-writing a `contract.json` with an
@@ -87,7 +105,7 @@ import { describeScheduling } from "./waits.js";
  *
  * ## The model drafts; the person approves
  *
- * `focrux admit --from owner/repo#N` asks a model to draft the contract —
+ * `perbo admit --from owner/repo#N` asks a model to draft the contract —
  * outcome, acceptance criteria and a *proposed* scope — from the issue, the
  * way the Admit artboard shows it. `--from-file <path>` drafts from a pasted
  * Markdown file instead, for work that never reached a tracker: the first line
@@ -116,7 +134,7 @@ const DEFAULT_PROHIBITED = [".github/**", "infra/**", "**/*.pem", "**/.env*"];
 /** Exempt from scope accounting: they change on every install or codegen run. */
 const DEFAULT_GENERATED = ["pnpm-lock.yaml", "package-lock.json", "**/*.generated.ts"];
 const DEFAULT_EXPANSION_BUDGET = 3;
-const DEFAULT_PREFIX = "FCX";
+const DEFAULT_PREFIX = "PRB";
 
 export type DraftProvider = "anthropic" | "claude-cli" | "codex-cli";
 
@@ -142,6 +160,10 @@ export interface AdmitArgs {
   from: string | null;
   /** A Markdown file holding a pasted issue: draft the contract from it instead. */
   fromFile: string | null;
+  /** The `spec.md` of a spec folder: draft the contract and its graph from it (D-103). */
+  fromSpec: string | null;
+  /** A ticket in `plan_review` to re-draft from that spec, keeping its key (D-103). */
+  startOver: string | null;
   provider: DraftProvider;
   model: string | null;
   manualReviewer: string | null;
@@ -205,6 +227,8 @@ export function parseAdmitArgs(argv: readonly string[]): AdmitArgs {
     sourceUrl: null,
     from: null,
     fromFile: null,
+    fromSpec: null,
+    startOver: null,
     provider: "claude-cli",
     model: null,
     manualReviewer: null,
@@ -230,7 +254,7 @@ export function parseAdmitArgs(argv: readonly string[]): AdmitArgs {
         if (!/^[A-Z][A-Z0-9]{1,9}$/.test(prefix)) {
           throw new UsageError(
             `--prefix must be 2 to 10 uppercase letters or digits starting with a letter, so a ` +
-              `key reads like FCX-118. Got '${prefix}'`,
+              `key reads like PRB-118. Got '${prefix}'`,
           );
         }
         args.prefix = prefix;
@@ -289,7 +313,7 @@ export function parseAdmitArgs(argv: readonly string[]): AdmitArgs {
       case "--depends-on": {
         const key = takeValue(tokens, ++i, token);
         if (!/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/.test(key)) {
-          throw new UsageError(`--depends-on must be a ticket key like FCX-2. Got '${key}'`);
+          throw new UsageError(`--depends-on must be a ticket key like PRB-2. Got '${key}'`);
         }
         args.dependsOn.push(key);
         break;
@@ -318,6 +342,17 @@ export function parseAdmitArgs(argv: readonly string[]): AdmitArgs {
       case "--from-file":
         args.fromFile = takeValue(tokens, ++i, token);
         break;
+      case "--from-spec":
+        args.fromSpec = takeValue(tokens, ++i, token);
+        break;
+      case "--start-over": {
+        const key = takeValue(tokens, ++i, token);
+        if (!/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/.test(key)) {
+          throw new UsageError(`--start-over must be a ticket key like PRB-2. Got '${key}'`);
+        }
+        args.startOver = key;
+        break;
+      }
       case "--provider": {
         const provider = takeValue(tokens, ++i, token);
         if (provider !== "anthropic" && provider !== "claude-cli" && provider !== "codex-cli") {
@@ -348,11 +383,35 @@ export function parseAdmitArgs(argv: readonly string[]): AdmitArgs {
   // Two sources for one draft is not a preference to resolve by picking one:
   // whichever lost would have been read as the thing being admitted, and the
   // ticket would carry the provenance of the other.
-  if (args.from !== null && args.fromFile !== null) {
+  const sources = (
+    [
+      ["--from", args.from],
+      ["--from-file", args.fromFile],
+      ["--from-spec", args.fromSpec],
+    ] as const
+  ).filter(([, value]) => value !== null);
+  if (sources.length > 1) {
     throw new UsageError(
-      `--from and --from-file are mutually exclusive: one contract is drafted from one issue. ` +
-        `Got --from '${args.from}' and --from-file '${args.fromFile}'`,
+      `${sources.map(([flag]) => flag).join(" and ")} are mutually exclusive: one contract is ` +
+        `drafted from one document. Got ` +
+        sources.map(([flag, value]) => `${flag} '${value}'`).join(" and "),
     );
+  }
+  if (args.startOver !== null) {
+    // Starting over is drafting the same ticket again from the document it was
+    // drafted from, so there is one source it can come from and it is a spec.
+    if (args.fromSpec === null) {
+      throw new UsageError(
+        `--start-over ${args.startOver} re-drafts a ticket from its spec, so it needs the spec: ` +
+          "perbo admit --from-spec specs/<slug>/spec.md --start-over " + args.startOver,
+      );
+    }
+    if (args.approve) {
+      throw new UsageError(
+        "--start-over drafts the contract with a model, so it cannot be approved in the same " +
+          "command: read the draft, then `perbo approve <key>`",
+      );
+    }
   }
   return args;
 }
@@ -562,7 +621,7 @@ export function chooseLevel(scope: Scope, requested: PlanLevel | null): LevelCho
  *
  * P2's are derived from the scope — statements about what it declares, not
  * placeholders. P3's decision fields are a person's: the record carries the
- * derivation and the rest is `UNSTATED` until `focrux edit` states them. A
+ * derivation and the rest is `UNSTATED` until `perbo edit` states them. A
  * value already on `existing` is kept, so an edit never erases what a person
  * wrote.
  */
@@ -619,6 +678,8 @@ export function assembleContract(args: {
   criteria: AcceptanceCriterion[];
   scope: Scope;
   base: PlanBase;
+  /** The execution graph's nodes. Empty, or absent, for a flat plan (D-100). */
+  nodes?: readonly PlanNode[];
   existing?: PlanContract;
 }): PlanContract {
   return PlanContractSchema.parse({
@@ -628,6 +689,9 @@ export function assembleContract(args: {
     acceptance_criteria: args.criteria,
     scope: args.scope,
     base: args.base,
+    // Absent rather than empty: a plan either groups its criteria or does not,
+    // and `nodes: []` would be a third state meaning neither.
+    ...(args.nodes !== undefined && args.nodes.length > 0 ? { nodes: args.nodes } : {}),
     ...levelAdditions(
       args.level.level,
       args.scope,
@@ -681,10 +745,36 @@ export function judgingOverlap(
   return overlaps;
 }
 
+/**
+ * Every requirement id a criterion cites is one the spec carries.
+ *
+ * The schema checks the shape and stops there: what requirements exist is a
+ * fact about a Markdown file, so the set is supplied here and by `perbo edit`,
+ * which is the only other thing that writes a criterion. A contract with no
+ * spec behind it cites nothing, and a citation on one is refused rather than
+ * kept as a reference to nowhere.
+ */
+export function assertRequirementsCarried(
+  contract: PlanContract,
+  requirementIds: readonly string[],
+  specPath: string | null,
+  remedy = "",
+): void {
+  const unknown = unknownRequirementIds(contract, requirementIds);
+  if (unknown.length === 0) return;
+  throw new UsageError(
+    `the contract cites ${unknown.length} requirement${unknown.length === 1 ? "" : "s"} ` +
+      `${specPath === null ? "and no spec was drafted from" : `${specPath} does not carry`}: ` +
+      unknown.map((each) => `${each.criterion_id} cites ${each.requirement_id}`).join("; ") +
+      ". A criterion records the requirement it was drafted from (D-103), and an id nothing " +
+      `declares is a reference to nowhere${remedy}`,
+  );
+}
+
 export function assertApprovable(
   contract: PlanContract,
   key: string,
-  judging: readonly JudgingRule[] = [{ path: ".focrux/**", source: "store" }],
+  judging: readonly JudgingRule[] = [{ path: ".perbo/**", source: "store" }],
 ): void {
   const overlaps = judgingOverlap(contract.scope.paths_allowed, judging);
   if (overlaps.length > 0) {
@@ -695,7 +785,7 @@ export function assertApprovable(
         // says the scope was reaching for the check that grades the attempt.
         overlaps.map((o) => `${o.scope} overlaps protected ${o.judging.path} (${o.judging.source})`).join("; ") +
         `. The runner would refuse the change at the seal, after an attempt had been paid for. ` +
-        `Narrow the scope: focrux edit ${key} --path <glob outside the protected paths>`,
+        `Narrow the scope: perbo edit ${key} --path <glob outside the protected paths>`,
     );
   }
   if (contract.level !== "P3") return;
@@ -708,7 +798,7 @@ export function assertApprovable(
   if (unstated.length === 0) return;
   throw new UsageError(
     `${key} derives to P3 and ${unstated.join(", ")} ${unstated.length === 1 ? "is" : "are"} ` +
-      `not yet stated. These are decisions only a person makes: focrux edit ${key}, state them, ` +
+      `not yet stated. These are decisions only a person makes: perbo edit ${key}, state them, ` +
       "then approve",
   );
 }
@@ -718,7 +808,7 @@ export function assertApprovable(
  * `<KEY>.draft.json`: refused if the two differ, and equally if the counter-seal
  * is gone or no longer parses.
  *
- * `admit` writes the two files from one object and `focrux edit` rewrites both,
+ * `admit` writes the two files from one object and `perbo edit` rewrites both,
  * so they agree unless something else wrote one of them — a text editor, a
  * script, a patch applied to the store. That difference is not an edit and is
  * not counted as one: it is a contract nobody was shown, and approving it would
@@ -731,16 +821,16 @@ export function assertApprovable(
  * safe to require is `admission.counter_sealed_at`: the ticket's own record that
  * the pair was written. Null there means a ticket admitted before counter-seals
  * existed — nothing is required of it and nothing compared, because for such a
- * ticket a difference is the work of an earlier `focrux edit` that rewrote only
+ * ticket a difference is the work of an earlier `perbo edit` that rewrote only
  * one file, not a hand edit, and refusing it would strand tickets in stores that
- * are already on disk. One `focrux edit` seals such a ticket from then on.
+ * are already on disk. One `perbo edit` seals such a ticket from then on.
  *
  * Every field is compared, not only the three a person edits. A base commit or
  * a level that differs between the two files is the same hand edit by a
  * different route, and naming it is cheaper than the argument about whether it
  * mattered.
  *
- * Called at approval and again by `loadAdmitted`, which is what `focrux run
+ * Called at approval and again by `loadAdmitted`, which is what `perbo run
  * --ticket` binds an attempt through. Approval is where a person can still put
  * it right; execution is where it would otherwise stop mattering that they
  * hadn't, since an approved contract is immutable and an attempt is judged
@@ -750,6 +840,8 @@ export function assertContractSealed(
   ticket: Ticket,
   contract: PlanContract,
   draft: DraftSnapshotFile,
+  /** What the caller was about to do, for the refusal's first words. */
+  action: "run" | "approved" | "edited" = ticket.approved_at !== null ? "run" : "approved",
 ): void {
   const sealedAt = ticket.admission.counter_sealed_at;
   if (sealedAt === null) return;
@@ -766,23 +858,23 @@ export function assertContractSealed(
 
   // An unapproved ticket can still be put right, and there is exactly one
   // command that does it. An approved one cannot: the contract is immutable
-  // (ADR-0016), so `focrux edit` refuses it, and the honest remedies are the
+  // (ADR-0016), so `perbo edit` refuses it, and the honest remedies are the
   // file the pair came from and new work.
   const remedy =
     ticket.approved_at !== null
       ? "An approved contract is immutable (ADR-0016), so this is not an edit to redo: restore " +
         `both files from version control, and if the contract should change, admit that as new work.`
       : draft.kind === "snapshot"
-        ? `Change a contract the one way that records it: focrux edit ${key} ` +
-          `--outcome "..." --criterion "what :: how it is proven" --path "<glob>", or focrux edit ` +
+        ? `Change a contract the one way that records it: perbo edit ${key} ` +
+          `--outcome "..." --criterion "what :: how it is proven" --path "<glob>", or perbo edit ` +
           `${key} for the editor. That rewrites both files and re-derives the level from the scope.`
         : `Restore ${key}.draft.json from version control, which also restores how the contract ` +
           "was drafted; or, if the contract as it now stands is the one you mean to approve, read " +
-          `it and write the pair again from it: focrux edit ${key}.`;
+          `it and write the pair again from it: perbo edit ${key}.`;
 
   throw new UsageError(
-    `${key} cannot be ${ticket.approved_at !== null ? "run" : "approved"}: ${problem}. ` +
-      "Those two files are written together by admission and by `focrux edit` and by nothing " +
+    `${key} cannot be ${action}: ${problem}. ` +
+      "Those two files are written together by admission and by `perbo edit` and by nothing " +
       "else, so a contract that has lost its counter-seal, or no longer matches it, is one " +
       `nobody was shown, and not one to start an attempt against. ${remedy}`,
   );
@@ -818,13 +910,22 @@ interface Resolved {
   criteria: AcceptanceCriterion[];
   paths: string[];
   prohibited: string[];
-  criteriaSource: "typed" | "file" | "drafted";
+  criteriaSource: "typed" | "file" | "drafted" | "spec";
   issue: SourceIssue | null;
   drafted: DraftResult | null;
-  /** The file `--from-file` read, resolved. Null for every other source. */
+  /** The file `--from-file` or `--from-spec` read, resolved. Null for every other source. */
   sourcePath: string | null;
   /** Keys this work follows: typed with `--depends-on`, else what the draft proposed against the board. */
   dependsOn: string[];
+  /** The graph the draft proposed, with ids. Empty where the plan is flat. */
+  nodes: PlanNode[];
+  edges: GraphEdge[];
+  /** Read from the spec's own No-Gos heading, never drafted (D-100). */
+  noGos: string[];
+  /** The spec this was drafted from, as the admission record carries it. */
+  spec: { path: string; content_sha256: string } | null;
+  /** The requirement ids the spec carries, which a criterion may cite. */
+  requirementIds: string[];
 }
 
 export interface AdmitInput {
@@ -846,18 +947,49 @@ export interface AdmitInput {
  * and past this point nothing downstream can tell — or needs to tell — which
  * of the two it was holding.
  */
-function readSource(input: AdmitInput): Promise<{ issue: SourceIssue; path: string | null }> {
+function readSource(
+  input: AdmitInput,
+): Promise<{ issue: SourceIssue; path: string | null; spec: Spec | null }> {
   const { args } = input;
+  if (args.fromSpec !== null) {
+    // A spec is drafted from as an issue is: it is read here into the same
+    // shape, and everything downstream of this point holds one thing. What it
+    // adds travels beside the issue, not inside it — the requirement ids the
+    // drafter may cite, and the No-Gos, which are the spec's own and never a
+    // model's (D-103, D-100).
+    const path = resolve(input.cwd, args.fromSpec);
+    const { spec, markdown } = readSpecFile(path);
+    return Promise.resolve({
+      issue: { reference: specReference(path), title: spec.title, body: markdown },
+      path,
+      spec,
+    });
+  }
   if (args.fromFile !== null) {
     // Resolved against the working directory, like every other path this
     // command takes, so `--from-file issue.md` means the one in front of you.
     // The resolved path is what travels on: it is the one that names the same
     // file when the ticket is read from another directory or another machine.
     const path = resolve(input.cwd, args.fromFile);
-    return Promise.resolve({ issue: readIssueFile(path), path });
+    return Promise.resolve({ issue: readIssueFile(path), path, spec: null });
   }
-  return (input.fetchIssue ?? fetchGitHubIssue)(args.from!).then((issue) => ({ issue, path: null }));
+  return (input.fetchIssue ?? fetchGitHubIssue)(args.from!).then((issue) => ({
+    issue,
+    path: null,
+    spec: null,
+  }));
 }
+
+/** `spec:<slug>`, from the folder the `spec.md` sits in: what D-103 names it by. */
+function specReference(path: string): string {
+  const segments = path.split(/[\\/]/).filter((segment) => segment.length > 0);
+  const folder = segments[segments.length - 2];
+  return `spec:${folder ?? segments[segments.length - 1] ?? "spec"}`;
+}
+
+/** The SHA-256 of the spec as read for drafting: the same bytes the drafter saw, not a second read. */
+const contentHash = (text: string): string =>
+  `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 
 function typedCriteria(input: AdmitInput): AcceptanceCriterion[] {
   const { args } = input;
@@ -894,6 +1026,11 @@ function resolveTyped(input: AdmitInput): Resolved {
     drafted: null,
     sourcePath: null,
     dependsOn: args.dependsOn,
+    nodes: [],
+    edges: [],
+    noGos: [],
+    spec: null,
+    requirementIds: [],
   };
 }
 
@@ -940,21 +1077,57 @@ const DRAFT_READ_LIMITS = {
 };
 
 /**
- * Draft from the issue, then let every typed flag override its part: `--outcome`
- * the outcome, any `--criterion` all the criteria, any `--path` all the globs.
+ * Draft from the issue or the spec, then let every typed flag override its
+ * part: `--outcome` the outcome, any `--criterion` all the criteria, any
+ * `--path` all the globs.
  *
- * The same function for `--from` and `--from-file`, deliberately: a pasted file
- * and a fetched issue are the same external-trust text once read, and a second
- * path to the model is a second place for that to stop being true.
+ * One function for all three sources, deliberately: a pasted file, a fetched
+ * issue and a committed spec are the same external-trust text once read, and a
+ * second path to the model is a second place for that to stop being true. What
+ * a spec adds — the ids a criterion may cite, and the No-Gos — travels beside
+ * the text, never inside the instruction position.
  */
 async function resolveDrafted(input: AdmitInput): Promise<Resolved> {
   const { args, streams } = input;
   const repositoryRoot = resolve(input.cwd, args.repo);
   let issue: SourceIssue;
   let sourcePath: string | null;
+  let spec: Spec | null;
   let drafted: DraftResult;
   try {
-    ({ issue, path: sourcePath } = await readSource(input));
+    ({ issue, path: sourcePath, spec } = await readSource(input));
+    // A spec is kept in the repository it is drafted for and committed with
+    // the change (D-103), so its recorded path is repository-relative; one
+    // outside the repository has no such path, and is refused before a model
+    // is asked anything.
+    if (spec !== null && sourcePath !== null) {
+      const within = relative(repositoryRoot, sourcePath);
+      if (within.startsWith("..") || isAbsolute(within)) {
+        throw new UsageError(
+          `--from-spec names ${sourcePath}, which is outside ${repositoryRoot}. A spec lives in the ` +
+            "repository it is drafted for, at specs/<slug>/spec.md, and is committed with the change (D-103)",
+        );
+      }
+      // And in a folder of its own under the spec folder (D-103): admission
+      // records that folder whole and the loop commits it, so a `spec.md` at
+      // the root of the repository, or under a folder the repository keeps
+      // other things in, would put all of it on the branch.
+      const specs = specFolder(storeDir(repositoryRoot, args.store));
+      if (onePieceOfWork(within.split(sep).join("/"), specs) === null) {
+        throw new UsageError(
+          `--from-spec names ${sourcePath}, which is not one piece of work's spec. A spec lives at ` +
+            `${specs}/<slug>/spec.md, in a folder of its own, because admission records that ` +
+            "folder whole and the loop commits it on the ticket's branch (D-103)",
+        );
+      }
+      // And reached without a link: its pages are written beside it.
+      try {
+        assertNoSymlink(repositoryRoot, within.split(sep).join("/"));
+      } catch (error) {
+        if (!(error instanceof PlanningError)) throw error;
+        throw new UsageError(`--from-spec: ${error.message}`);
+      }
+    }
     const model = input.model ?? draftingModel(args.provider, args.model);
     streams.stderr(
       `read ${issue.reference}: ${issue.title}\ndrafting the contract with ${model.provider} ` +
@@ -967,6 +1140,9 @@ async function resolveDrafted(input: AdmitInput): Promise<Resolved> {
       // Carried so a flagged line is reported at the line of the file the
       // person will open, not at an offset into the text this assembled.
       ...(issue.source_lines !== undefined ? { sourceLines: issue.source_lines } : {}),
+      ...(spec === null
+        ? {}
+        : { sourceKind: "spec" as const, requirementIds: spec.requirements.map((r) => r.id) }),
       reference: issue.reference,
       repositoryRoot,
       repositoryId: repositoryId(repositoryRoot),
@@ -998,29 +1174,80 @@ async function resolveDrafted(input: AdmitInput): Promise<Resolved> {
             id: `ac_${index + 1}`,
             text: criterion.text,
             expected_verification: { kind: criterion.kind, assertion: criterion.assertion },
+            ...(criterion.requirement_id === undefined
+              ? {}
+              : { requirement_id: criterion.requirement_id }),
           }),
         );
+  // A graph is a statement about the drafted criteria and the drafted scope,
+  // by position. Typing either replaces what it was a statement about, so the
+  // graph goes with it rather than being reindexed onto something else. The
+  // person still has `perbo edit --graph-edit` to build one.
+  const overridden = typed.length > 0 ? "--criterion" : args.paths.length > 0 ? "--path" : null;
+  if (overridden !== null && drafted.draft.nodes.length > 0) {
+    streams.stderr(
+      `${overridden} replaces what the drafted graph divided, so the graph is not kept. ` +
+        "Build one with perbo edit KEY --graph-edit.\n",
+    );
+  }
+  const graph =
+    overridden === null
+      ? {
+          nodes: drafted.draft.nodes.map((node, index) =>
+            PlanNodeSchema.parse({
+              id: `node_${index + 1}`,
+              title: node.title,
+              criteria: node.criteria.map((at) => `ac_${at + 1}`),
+              paths: node.paths,
+            }),
+          ),
+          edges: drafted.draft.edges.map((edge) => ({
+            from: `node_${edge.from + 1}`,
+            to: `node_${edge.to + 1}`,
+          })),
+        }
+      : { nodes: [], edges: [] };
   return {
     outcome: args.title ?? drafted.draft.outcome,
     criteria,
     paths: args.paths.length > 0 ? args.paths : drafted.draft.proposed_scope.paths_allowed,
     prohibited: [...new Set([...args.prohibited, ...drafted.draft.proposed_scope.paths_prohibited_extra])],
-    criteriaSource: "drafted",
+    criteriaSource: spec === null ? "drafted" : "spec",
     issue,
     drafted,
     sourcePath,
     dependsOn: args.dependsOn.length > 0 ? args.dependsOn : drafted.draft.depends_on,
+    nodes: graph.nodes,
+    edges: graph.edges,
+    noGos: spec?.no_gos ?? [],
+    spec:
+      spec === null || sourcePath === null
+        ? null
+        : {
+            // Relative to the repository, because the spec is committed in it
+            // and the ticket outlives the directory a person typed the path in.
+            path: relative(repositoryRoot, sourcePath).split(sep).join("/"),
+            content_sha256: contentHash(issue.body),
+          },
+    requirementIds: spec?.requirements.map((requirement) => requirement.id) ?? [],
   };
 }
 
 /**
- * Synchronous for typed admission, which every test and script relies on;
- * a promise when `--from` or `--from-file` is given, because drafting calls a
- * model.
+ * Synchronous for typed admission, which every test and script relies on; a
+ * promise when `--from`, `--from-file` or `--from-spec` is given, because
+ * drafting calls a model.
  */
 export function runAdmitCommand(input: AdmitInput): number | Promise<number> {
   const started = Date.now();
-  const flag = input.args.from !== null ? "--from" : input.args.fromFile !== null ? "--from-file" : null;
+  const flag =
+    input.args.from !== null
+      ? "--from"
+      : input.args.fromFile !== null
+        ? "--from-file"
+        : input.args.fromSpec !== null
+          ? "--from-spec"
+          : null;
   if (flag !== null) {
     // D-072 licenses drafting only because a person reads the draft before it
     // binds anything. Approving in the same command would hand the runner a
@@ -1029,10 +1256,36 @@ export function runAdmitCommand(input: AdmitInput): number | Promise<number> {
     if (input.args.approve) {
       throw new UsageError(
         `${flag} drafts the contract with a model, so it cannot be approved in the same command: ` +
-          "read the draft, then `focrux approve <key>`",
+          "read the draft, then `perbo approve <key>`",
       );
     }
-    return resolveDrafted(input).then((resolved) => admit(input, started, resolved));
+    // Starting over is re-drafting from a spec, which is the only source a
+    // ticket's plan can be drafted again from: `--from` and `--from-file` name
+    // a document the ticket was never drafted from, and the flags a caller
+    // built by hand are checked here as `parseAdmitArgs` checks a command line.
+    if (input.args.startOver !== null && flag !== "--from-spec") {
+      throw new UsageError(
+        `--start-over ${input.args.startOver} re-drafts a ticket from its spec, so it needs the ` +
+          "spec: perbo admit --from-spec specs/<slug>/spec.md --start-over " + input.args.startOver,
+      );
+    }
+    // Whether this ticket can be re-drafted at all is asked before a model is,
+    // as a spec outside the repository is: a ticket already approved is one
+    // nothing can change, and finding that out after a draft has been paid for
+    // is the whole of what it costs.
+    if (input.args.startOver !== null) {
+      const repositoryRoot = resolve(input.cwd, input.args.repo);
+      assertRedraftable(
+        storeDir(repositoryRoot, input.args.store),
+        input.args.startOver,
+        relative(repositoryRoot, resolve(input.cwd, input.args.fromSpec!)).split(sep).join("/"),
+      );
+    }
+    return resolveDrafted(input).then((resolved) =>
+      input.args.startOver === null
+        ? admit(input, started, resolved)
+        : redraft(input, started, resolved, input.args.startOver),
+    );
   }
   return admit(input, started, resolveTyped(input));
 }
@@ -1057,7 +1310,17 @@ function admit(input: AdmitInput, started: number, resolved: Resolved): number {
   const scope: Scope = {
     repository_id,
     paths_allowed: resolved.paths,
-    paths_prohibited: resolved.prohibited,
+    // The spec folders (D-103) and what this repository prohibits for every
+    // ticket (D-105) join whatever the draft and the flags named: a spec is
+    // what the contract was drafted from, and a path put on the standing list
+    // binds work admitted after it without anybody restating it.
+    paths_prohibited: [
+      ...new Set([
+        ...resolved.prohibited,
+        ...prohibitedSpecPaths(dir),
+        ...standingProhibited(dir).map((entry) => entry.path),
+      ]),
+    ],
     generated_paths: args.generated,
     expansion_budget_files: args.expansionBudget,
   };
@@ -1068,12 +1331,14 @@ function admit(input: AdmitInput, started: number, resolved: Resolved): number {
     outcome: resolved.outcome,
     criteria: resolved.criteria,
     scope,
+    nodes: resolved.nodes,
     base: {
       base_commit,
       context_manifest_hash: contextManifestHash({ base_commit, ...scope }),
       captured_at: now.toISOString(),
     },
   });
+  assertRequirementsCarried(contract, resolved.requirementIds, resolved.spec?.path ?? null);
   // Refused before anything is written: a P3 with unstated decisions cannot be
   // approved, so `--approve` must not create a ticket that then cannot be.
   if (args.approve) assertApprovable(contract, key, readJudgingPaths(dir));
@@ -1099,6 +1364,7 @@ function admit(input: AdmitInput, started: number, resolved: Resolved): number {
       criteria_source: resolved.criteriaSource,
       criteria_count: resolved.criteria.length,
       drafted_at: resolved.drafted ? now.toISOString() : null,
+      spec: resolved.spec,
       human_elapsed_ms: null,
       edit_count: null,
       // The contract and the copy inside the draft snapshot are written from
@@ -1128,7 +1394,7 @@ function admit(input: AdmitInput, started: number, resolved: Resolved): number {
     rendered_at: now.toISOString(),
     criteria_source: resolved.criteriaSource,
     contract,
-    /** Nothing has been edited yet; `focrux edit` appends to this. */
+    /** Nothing has been edited yet; `perbo edit` appends to this. */
     edits: [],
     draft:
       resolved.drafted && resolved.issue
@@ -1153,8 +1419,28 @@ function admit(input: AdmitInput, started: number, resolved: Resolved): number {
   };
 
   recordIssued(dir, key);
+  // The node pages are written last, so what they need is checked first: a
+  // spec folder, nodes folder or page that is a link refuses the admission
+  // with no ticket, contract or snapshot written. The key issued above stays
+  // issued, as every key once issued does.
+  assertPagesWritable(repositoryRoot, resolved, contract);
   writeContract(dir, ticket, contract);
   writeDraftSnapshot(dir, snapshot);
+  // The approach, where there is one to record: a plan with nodes carries the
+  // order between them, suggested or not yet, and a spec carries its No-Gos.
+  // Neither is contract, so neither is counter-sealed and neither is frozen at
+  // approval (D-100, ADR-0016).
+  const approach: ApproachRecord | null =
+    resolved.nodes.length > 0 || resolved.noGos.length > 0
+      ? {
+          schema_version: APPROACH_SCHEMA_VERSION,
+          ticket_id,
+          plan_id,
+          edges: resolved.edges,
+          no_gos: resolved.noGos,
+        }
+      : null;
+  if (approach) writeApproachRecord(dir, key, approach);
   if (args.approve) {
     const moved = transition(ticket, "ready", "contract approved at admission", now);
     ticket = TicketSchema.parse({
@@ -1163,15 +1449,349 @@ function admit(input: AdmitInput, started: number, resolved: Resolved): number {
       admission: { ...moved.admission, human_elapsed_ms: 0, edit_count: 0 },
     });
   }
+  // The page per node, beside the spec the plan was drafted from (D-103).
+  // Nothing for a ticket drafted from an issue, which has no folder. Written
+  // before the ticket, because the pages are among the files the record below
+  // says the loop commits.
+  const pages = regenerateNodePages({ repositoryRoot, ticket, contract });
+  ticket = withSpecFiles({ dir, repositoryRoot, ticket });
   const path = writeTicket(dir, ticket);
 
   if (args.json) {
-    streams.stdout(`${JSON.stringify({ ticket, contract, draft: snapshot.draft }, null, 2)}\n`);
+    streams.stdout(
+      `${JSON.stringify({ ticket, contract, approach, draft: snapshot.draft }, null, 2)}\n`,
+    );
     return EXIT_CODES.approve;
   }
 
   streams.stdout(`${key}  ${ticket.title}\n`);
-  streams.stderr(renderAdmitted({ input, key, ticket, contract, level, resolved, path }));
+  streams.stderr(renderAdmitted({ input, key, ticket, contract, level, resolved, path, approach }));
+  if (pages !== null && pages.written.length > 0) {
+    streams.stderr(
+      `\n  spec      ${resolved.spec?.path ?? "spec.md"}\n` +
+        pages.written
+          .map((page) => `            ${relative(repositoryRoot, page).split(sep).join("/")}\n`)
+          .join(""),
+    );
+  }
+  return EXIT_CODES.approve;
+}
+
+/**
+ * The ticket with the files the loop commits first on its branch recorded
+ * beside the spec's path and hash (D-103), and unchanged for one admitted
+ * without a spec.
+ */
+function withSpecFiles(args: { dir: string; repositoryRoot: string; ticket: Ticket }): Ticket {
+  const spec = args.ticket.admission.spec;
+  if (spec === null) return args.ticket;
+  return TicketSchema.parse({
+    ...args.ticket,
+    admission: {
+      ...args.ticket.admission,
+      spec: {
+        ...spec,
+        files: specCommitFiles({
+          repositoryRoot: args.repositoryRoot,
+          store: args.dir,
+          specPath: spec.path,
+        }),
+      },
+    },
+  });
+}
+
+/**
+ * The ticket with the names its spec carries that this repository has
+ * recorded beside the spec's path and hash (D-103), and the files the loop
+ * commits re-taken from that same moment — and unchanged for one admitted
+ * without a spec.
+ *
+ * Whether the symbol index could be believed as that was read is recorded with
+ * them. An index that could not be contributes no `@Symbol` to the baseline,
+ * so no later reading of this ticket can call a symbol gone; recording that it
+ * happened is what lets the reading say so instead of calling the spec current.
+ *
+ * Written at approval and at no other moment, because that is when the plan was
+ * agreed against the repository as it stood: a name the repository had then and
+ * has lost is a stale spec, and a name it did not have is the work the plan is
+ * for. Reading this at admission instead would take the baseline before the
+ * person had seen the contract, and reading it later would take it after the
+ * work had begun to change the answer. Admission has no second call for the
+ * case where it approves too, because it never does: `--approve` is refused
+ * beside every flag that drafts from a document, and a ticket typed on the
+ * command line has no spec (D-072).
+ *
+ * `files` is re-taken with the same walk `withSpecFiles` runs at admission
+ * (`specCommitFiles`), so the loop commits the folder as it stood at approval
+ * rather than at admission. Its `spec.md` entry is never hashed a second time
+ * for this: it is set to the `content_sha256` this same read already took, so
+ * the two fields can never disagree about the spec's own bytes.
+ */
+function withNamesThatResolved(args: { dir: string; ticket: Ticket }): Ticket {
+  const spec = args.ticket.admission.spec;
+  if (spec === null) return args.ticket;
+  const baseline = specBaseline({
+    repositoryRoot: args.ticket.repository_root,
+    specPath: spec.path,
+  });
+  // What the spec said when it was approved, so a later reading judges an
+  // edit made after approval — which is the rule D-103 states. The hash
+  // admission took is from when the contract was drafted, and the spec is
+  // ordinarily edited between the two, while the draft is being read.
+  // A spec that could not be read leaves admission's hash standing, and its
+  // files with it: there is nothing fresher this read took them from.
+  const content_sha256 = baseline.content_sha256 ?? spec.content_sha256;
+  const files =
+    baseline.content_sha256 === null
+      ? spec.files
+      : specCommitFiles({
+          repositoryRoot: args.ticket.repository_root,
+          store: args.dir,
+          specPath: spec.path,
+        }).map((file) => (file.path === spec.path ? { ...file, content_sha256 } : file));
+  return TicketSchema.parse({
+    ...args.ticket,
+    admission: {
+      ...args.ticket.admission,
+      spec: {
+        ...spec,
+        content_sha256,
+        files,
+        names_that_resolved: baseline.names,
+        symbols_judged_at_approval: baseline.symbols_judged,
+      },
+    },
+  });
+}
+
+/** What the node pages need, asked before a record is written (D-103). */
+function assertPagesWritable(repositoryRoot: string, resolved: Resolved, contract: PlanContract): void {
+  if (resolved.spec === null) return;
+  try {
+    assertNodePagesWritable({
+      repositoryRoot,
+      specFolder: dirname(resolve(repositoryRoot, resolved.spec.path)),
+      contract,
+    });
+  } catch (error) {
+    if (!(error instanceof PlanningError)) throw error;
+    throw new UsageError(`the node pages beside ${resolved.spec.path} cannot be written: ${error.message}`);
+  }
+}
+
+/**
+ * The ticket a `--start-over` names, if its plan may be drafted again: one in
+ * `plan_review` that nobody has approved. Read before the model is called and
+ * again when the draft comes back.
+ */
+function assertRedraftable(dir: string, key: string, specPath: string): Ticket {
+  const ticket = readTicket(dir, key);
+  if (ticket.approved_at !== null) {
+    throw new UsageError(
+      `${key} was approved at ${ticket.approved_at}, and an approved contract is immutable ` +
+        "(ADR-0016). A change to it is new work: admit it",
+    );
+  }
+  if (ticket.state !== "plan_review") {
+    throw new UsageError(
+      `${key} is ${ticket.state}; only a ticket in plan_review may be re-drafted from its spec`,
+    );
+  }
+  // The recorded path is the ticket's provenance, which staleness is later
+  // judged against: starting over keeps it, so any other spec is other work.
+  const recorded = ticket.admission.spec;
+  if (recorded === null) {
+    throw new UsageError(
+      `${key} was not drafted from a spec, so there is no spec to start over from. A plan ` +
+        "drafted from a spec is admitted with perbo admit --from-spec",
+    );
+  }
+  if (recorded.path !== specPath) {
+    throw new UsageError(
+      `${key} was drafted from ${recorded.path}, and starting over drafts it again from that ` +
+        `spec. ${specPath} is another: admit it as work of its own`,
+    );
+  }
+  return ticket;
+}
+
+/**
+ * `perbo admit --from-spec <path> --start-over <KEY>`: draft this ticket's
+ * plan again from its spec (D-103).
+ *
+ * The same ticket and the same `ticket_id`, a new plan version. What was
+ * drafted is replaced whole — the outcome, the criteria, the graph and the
+ * scope — so the graph edits made since the first draft, and the node paths
+ * they set, go with it. What is in the spec survives because it is read from
+ * the spec: its No-Gos, and every edit a person made to the document.
+ *
+ * Nothing else is admitted. Re-drafting is the one thing that changes a plan
+ * other than an edit (D-100), and the confirmation before it is the desktop's:
+ * a command line is already deliberate.
+ */
+function redraft(input: AdmitInput, started: number, resolved: Resolved, key: string): number {
+  const now = input.now ?? new Date();
+  const { args, streams } = input;
+  const repositoryRoot = resolve(input.cwd, args.repo);
+  const dir = storeDir(repositoryRoot, args.store);
+
+  if (resolved.spec === null) {
+    throw new UsageError(`--start-over ${key} re-drafts a ticket from its spec, so it needs the spec`);
+  }
+  const ticket = assertRedraftable(dir, key, resolved.spec.path);
+  const before = readContract(dir, key);
+  assertContractMatches(ticket, before);
+  const draft = readDraftSnapshotFile(dir, key);
+  // The re-draft is recorded in the same log the edits are, so the log has to
+  // be the one that vouches for the contract standing now.
+  assertContractSealed(ticket, before, draft, "edited");
+  if (draft.kind !== "snapshot") {
+    throw new UsageError(
+      `${key} has no draft snapshot to record a re-draft against` +
+        (draft.kind === "unreadable" ? `: ${draft.reason}` : "") +
+        `. Restore it from version control, or run perbo edit ${key} --outcome "..." once to write one`,
+    );
+  }
+
+  const scope: Scope = {
+    repository_id: repositoryId(repositoryRoot),
+    paths_allowed: resolved.paths,
+    paths_prohibited: [...new Set([...resolved.prohibited, ...prohibitedSpecPaths(dir)])],
+    generated_paths: args.generated,
+    expansion_budget_files: args.expansionBudget,
+  };
+  const level = chooseLevel(scope, args.level);
+  // Pinned to the tree the re-draft actually read, not to the one the first
+  // draft was captured against: the drafter opened this checkout's files.
+  const base_commit = headCommit(repositoryRoot);
+  const contract = assembleContract({
+    identity: { plan_id: before.plan_id, version: before.version + 1, ticket_id: before.ticket_id },
+    level,
+    outcome: resolved.outcome,
+    criteria: resolved.criteria,
+    scope,
+    nodes: resolved.nodes,
+    base: {
+      base_commit,
+      context_manifest_hash: contextManifestHash({ base_commit, ...scope }),
+      captured_at: now.toISOString(),
+    },
+  });
+  assertRequirementsCarried(contract, resolved.requirementIds, resolved.spec?.path ?? null);
+
+  const snapshot: DraftSnapshot = {
+    ...draft.snapshot,
+    contract,
+    criteria_source: resolved.criteriaSource,
+    edits: [
+      // Every edit still in force was made to a contract that no longer
+      // exists, so it stops counting and stops being undoable — the log keeps
+      // it, and says why.
+      ...draft.snapshot.edits.map((edit) => ({ ...edit, replaced: true })),
+      {
+        at: now.toISOString(),
+        changes: [],
+        author: "you" as const,
+        summary: `re-drafted from the spec (plan version ${contract.version})`,
+        keys: [],
+        before: {},
+        after: {},
+        undone: false,
+        replaced: false,
+        undoes: null,
+      },
+    ],
+    draft:
+      resolved.drafted && resolved.issue
+        ? {
+            issue: {
+              reference: resolved.issue.reference,
+              url: resolved.issue.url ?? null,
+              path: resolved.sourcePath,
+              title: resolved.issue.title,
+            },
+            proposed: resolved.drafted.draft,
+            model: resolved.drafted.model,
+            unknown_roots: resolved.drafted.unknown_roots,
+            issue_authored_attempts: resolved.drafted.issue_authored_attempts,
+            issue_authored_attempts_found: resolved.drafted.issue_authored_attempts_found,
+            files_read: resolved.drafted.files_read,
+          }
+        : draft.snapshot.draft,
+  };
+
+  // The node pages are written last, so what they need is checked first: a
+  // spec folder, nodes folder or page that is a link refuses the re-draft
+  // with the ticket, its contract and its snapshot as they were.
+  assertPagesWritable(repositoryRoot, resolved, contract);
+  writeContract(dir, ticket, contract);
+  writeDraftSnapshot(dir, snapshot);
+  const approach: ApproachRecord | null =
+    resolved.nodes.length > 0 || resolved.noGos.length > 0
+      ? {
+          schema_version: APPROACH_SCHEMA_VERSION,
+          ticket_id: contract.ticket_id,
+          plan_id: contract.plan_id,
+          edges: resolved.edges,
+          no_gos: resolved.noGos,
+        }
+      : null;
+  if (approach) writeApproachRecord(dir, key, approach);
+  else deleteApproachRecord(dir, key);
+
+  const updated: Ticket = TicketSchema.parse({
+    ...ticket,
+    title: contract.outcome,
+    plan_version: contract.version,
+    updated_at: now.toISOString(),
+    admission: {
+      ...ticket.admission,
+      elapsed_ms: Date.now() - started,
+      criteria_source: resolved.criteriaSource,
+      criteria_count: resolved.criteria.length,
+      drafted_at: now.toISOString(),
+      spec: resolved.spec,
+      // The person's clock and their edits both start again: this is a plan
+      // they have not read yet.
+      human_elapsed_ms: null,
+      edit_count: recordedEdits(snapshot).count,
+      counter_sealed_at: now.toISOString(),
+      level_source: level.source,
+      derived_level: level.derivation.level,
+    },
+    history: [
+      ...ticket.history,
+      {
+        at: now.toISOString(),
+        from: ticket.state,
+        to: ticket.state,
+        note: `re-drafted from ${resolved.spec?.path ?? resolved.sourcePath ?? "its spec"}, plan version ${contract.version}`,
+      },
+    ],
+  });
+  const pages = regenerateNodePages({ repositoryRoot, ticket: updated, contract });
+  writeTicket(dir, withSpecFiles({ dir, repositoryRoot, ticket: updated }));
+
+  if (args.json) {
+    streams.stdout(
+      `${JSON.stringify({ ticket: updated, contract, approach, draft: snapshot.draft }, null, 2)}\n`,
+    );
+    return EXIT_CODES.approve;
+  }
+  streams.stdout(`${key}  ${updated.title}\n`);
+  streams.stderr(
+    `${key} re-drafted from ${resolved.spec?.path ?? "its spec"}: plan version ${contract.version}, ` +
+      `${resolved.criteria.length} criteria, ${resolved.nodes.length} node` +
+      `${resolved.nodes.length === 1 ? "" : "s"}\n` +
+      `  The graph edits made to the last version are dropped and kept in the log, marked replaced.\n` +
+      (pages !== null && pages.written.length > 0
+        ? pages.written
+            .map((page) => `  ${relative(repositoryRoot, page).split(sep).join("/")}\n`)
+            .join("")
+        : "") +
+      `\nRead it once more, then approve it:\n  perbo approve ${key}\n`,
+  );
   return EXIT_CODES.approve;
 }
 
@@ -1184,6 +1804,7 @@ function renderAdmitted(args: {
   level: LevelChoice;
   resolved: Resolved;
   path: string;
+  approach: ApproachRecord | null;
 }): string {
   const { key, ticket, contract, level, resolved } = args;
   const drafted = resolved.drafted;
@@ -1237,11 +1858,36 @@ function renderAdmitted(args: {
       `${drafted.model.model_id}, ${money(drafted.model.cost_micros, drafted.model.cost_basis)}\n`
     : `\nadmitted ${key} (${ticket.state}) in ${ticket.admission.elapsed_ms}ms\n`;
   const next = ticket.approved_at
-    ? `\nApproved. The contract is immutable from here.\n  focrux run --ticket ${key}\n`
+    ? `\nApproved. The contract is immutable from here.\n  perbo run --ticket ${key}\n`
     : drafted
       ? `\nThe model drafted this; nothing runs until you approve it. Edit anything, then approve:\n` +
-        `  focrux edit ${key}\n  focrux approve ${key}\n`
-      : `\nRead the contract, then approve it:\n  focrux edit ${key}\n  focrux approve ${key}\n`;
+        `  perbo edit ${key}\n  perbo approve ${key}\n`
+      : `\nRead the contract, then approve it:\n  perbo edit ${key}\n  perbo approve ${key}\n`;
+  // The graph as recorded: each node with the criteria it covers and the paths
+  // it lands in, then the order and the No-Gos, which are approach and live in
+  // their own file. `perbo inspect` says the same with the size beside it.
+  const graph =
+    resolved.nodes.length > 0
+      ? `  graph\n` +
+        resolved.nodes
+          .map(
+            (node) =>
+              `    ${node.id}  ${node.title}\n` +
+              `          criteria: ${node.criteria.join(", ")}\n` +
+              `          paths:    ${node.paths.join(", ")}\n`,
+          )
+          .join("") +
+        (args.approach && args.approach.edges.length > 0
+          ? `    order     ${args.approach.edges
+              .map((edge) => `${edge.from} -> ${edge.to}`)
+              .join(", ")}  (approach: it may change during execution)\n`
+          : "")
+      : "";
+  const noGos =
+    args.approach && args.approach.no_gos.length > 0
+      ? `  no-gos    from the spec, kept out of the contract\n` +
+        args.approach.no_gos.map((noGo) => `            ${noGo}\n`).join("")
+      : "";
   return (
     head +
     `  contract  ${contract.plan_id} v1, ${levelLine}, ${resolved.criteria.length} criteria\n` +
@@ -1253,6 +1899,8 @@ function renderAdmitted(args: {
     unknown +
     "\n" +
     (ticket.depends_on.length > 0 ? `  after     ${ticket.depends_on.join(", ")}\n` : "") +
+    graph +
+    noGos +
     (drafted ? `  rationale ${drafted.draft.rationale}\n` : "") +
     attempts +
     `  stored    ${relative(args.input.cwd, args.path)}` +
@@ -1263,7 +1911,8 @@ function renderAdmitted(args: {
 }
 
 /**
- * What `focrux edit` recorded changing, across every edit, deduplicated.
+ * What `perbo edit` recorded the **person** changing, across every edit,
+ * deduplicated.
  *
  * The fields a person had to touch, not the number of times they touched them:
  * two passes over the outcome is one field the rendering got wrong, and
@@ -1271,9 +1920,23 @@ function renderAdmitted(args: {
  * often the command was run. For a ticket edited once — every ticket in the
  * record so far — this is the number `approve` used to compute by diffing the
  * two files, from the same `contractEditCount` and in the same words.
+ *
+ * An edit the interview applied is left out (D-100). The instrument asks how
+ * much of the drafted contract a person had to correct by hand; a change their
+ * agent session made on their behalf answers a different question, and folding
+ * the two together would make a rising count unreadable.
  */
 export function recordedEdits(snapshot: DraftSnapshot): { count: number; changes: string[] } {
-  const changes = [...new Set(snapshot.edits.flatMap((edit) => edit.changes))];
+  const changes = [
+    ...new Set(
+      snapshot.edits
+        // An edit the re-draft replaced changed a contract that no longer
+        // exists (D-103): counting it would say a person corrected the draft
+        // they are looking at, which they have not.
+        .filter((edit) => edit.author === "you" && !edit.replaced)
+        .flatMap((edit) => edit.changes),
+    ),
+  ];
   return { count: changes.length, changes };
 }
 
@@ -1285,7 +1948,7 @@ export function runApproveCommand(input: {
 }): number {
   const now = input.now ?? new Date();
   const [key, ...rest] = input.argv;
-  if (!key || key.startsWith("--")) throw new UsageError("approve requires a ticket key, e.g. FCX-1");
+  if (!key || key.startsWith("--")) throw new UsageError("approve requires a ticket key, e.g. PRB-1");
   const args = parseListArgs(rest);
   const dir = storeDir(resolve(input.cwd, args.repo), args.store);
 
@@ -1306,7 +1969,7 @@ export function runApproveCommand(input: {
   // person's time from first seeing the contract, and how much of it they
   // changed before signing it.
   //
-  // For a counter-sealed ticket the edits are the ones `focrux edit` recorded as
+  // For a counter-sealed ticket the edits are the ones `perbo edit` recorded as
   // it applied them: with the two contracts held in step by the check above, a
   // difference between the files is never one of them and is never reported as
   // one. For a ticket with no counter-seal the difference is all there is, and
@@ -1320,14 +1983,20 @@ export function runApproveCommand(input: {
     : null;
   const human_elapsed_ms = Math.max(0, now.getTime() - Date.parse(existing.admitted_at));
   const moved = transition(existing, "ready", "contract approved", now);
-  const approved = TicketSchema.parse({
-    ...moved,
-    approved_at: now.toISOString(),
-    admission: {
-      ...moved.admission,
-      human_elapsed_ms,
-      edit_count: edits ? edits.count : null,
-    },
+  // D-103's baseline beside D-003's instrument: the names this repository has
+  // as the plan is signed against it, which is what a later reading measures a
+  // stale spec by.
+  const approved = withNamesThatResolved({
+    dir,
+    ticket: TicketSchema.parse({
+      ...moved,
+      approved_at: now.toISOString(),
+      admission: {
+        ...moved.admission,
+        human_elapsed_ms,
+        edit_count: edits ? edits.count : null,
+      },
+    }),
   });
   writeTicket(dir, approved);
   input.streams.stderr(
@@ -1337,7 +2006,7 @@ export function runApproveCommand(input: {
         ? `${edits.count} edit${edits.count === 1 ? "" : "s"}` +
           (edits.count > 0 ? ` (${edits.changes.join(", ")})` : "")
         : "edits unknown (no draft snapshot)") +
-      `\n  focrux run --ticket ${key}\n`,
+      `\n  perbo run --ticket ${key}\n`,
   );
   return EXIT_CODES.approve;
 }
@@ -1347,13 +2016,13 @@ const STATE_WIDTH = 19;
 /** Said on stderr in both modes: a pipe reading stdout never sees it. */
 const EMPTY_STORE_HINT =
   "\nAdmit the thing you are about to do. Your backlog stays where it is.\n" +
-  '  focrux admit --outcome "..." --criterion "... :: ..." --path "src/**"\n';
+  '  perbo admit --outcome "..." --criterion "... :: ..." --path "src/**"\n';
 
 /** Bumped when a field of the document below changes meaning or leaves it. */
 export const LIST_JSON_SCHEMA_VERSION = 1;
 
 /**
- * What `focrux list --json` writes, and the whole of what it writes.
+ * What `perbo list --json` writes, and the whole of what it writes.
  *
  * The shape is stated in [docs/design/list-json.md](../../../docs/design/list-json.md)
  * and parsed here on the way out, so the document and the emitted bytes cannot
@@ -1465,6 +2134,12 @@ export function runListCommand(input: { args: ListArgs; streams: Streams; cwd: s
 
 export { TicketStoreError };
 
+/** The results that judged a round: those a node did not run (D-107). */
+const wholeChange = (checks: readonly unknown[]): readonly unknown[] =>
+  checks.filter(
+    (check) => !(typeof check === "object" && check !== null && "node" in check && check.node !== undefined),
+  );
+
 /**
  * The states a completed run passed through, derived from what the result
  * proves rather than from progress prose.
@@ -1496,8 +2171,8 @@ export function statesObserved(result: {
     path.push({
       to: "verifying",
       note:
-        last && last.checks.length > 0
-          ? `${last.checks.length} deterministic checks ran`
+        last && wholeChange(last.checks).length > 0
+          ? `${wholeChange(last.checks).length} deterministic checks ran`
           : "no deterministic checks are configured for this repository",
     });
   }
@@ -1609,7 +2284,7 @@ export function applyObservedPath(
   throw new UnreachableStateError(current.state, terminal.to);
 }
 
-/** Load an admitted ticket and its contract, for `focrux run --ticket`. */
+/** Load an admitted ticket and its contract, for `perbo run --ticket`. */
 export function loadAdmitted(
   cwd: string,
   repo: string,
@@ -1621,7 +2296,7 @@ export function loadAdmitted(
   if (ticket.approved_at === null) {
     throw new UsageError(
       `${key} is ${ticket.state}: its contract has not been approved, and execution binds to an ` +
-        `approved contract. Read it, then: focrux approve ${key}`,
+        `approved contract. Read it, then: perbo approve ${key}`,
     );
   }
   const contract = readContract(dir, key);

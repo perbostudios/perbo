@@ -1,5 +1,5 @@
 {
-  "name": "@focrux/workspace",
+  "name": "@perbo/workspace",
   "version": "0.1.0",
   "license": "Apache-2.0",
   "private": true,
@@ -7,7 +7,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "focrux-materialisation": "./dist/main.js"
+    "perbo-materialisation": "./dist/main.js"
   },
   "exports": {
     ".": {
@@ -23,11 +23,11 @@
     "lint": "eslint src test"
   },
   "dependencies": {
-    "@focrux/contracts": "workspace:*",
+    "@perbo/contracts": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@focrux/tsconfig": "workspace:*",
+    "@perbo/tsconfig": "workspace:*",
     "@eslint/js": "catalog:",
     "@types/node": "catalog:",
     "eslint": "catalog:",

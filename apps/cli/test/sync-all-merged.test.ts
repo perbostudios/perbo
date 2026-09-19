@@ -2,27 +2,27 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { EXIT_CODES, TICKET_SCHEMA_VERSION, TicketSchema, wilsonInterval, type Ticket } from "@focrux/contracts";
-import { GithubCredentialError, TicketDeliveryStateSchema, type TicketDeliveryState } from "@focrux/runner";
+import { EXIT_CODES, TICKET_SCHEMA_VERSION, TicketSchema, wilsonInterval, type Ticket } from "@perbo/contracts";
+import { GithubCredentialError, TicketDeliveryStateSchema, type TicketDeliveryState } from "@perbo/runner";
 import type { Streams } from "../src/admit.js";
 import { runStopsCommand } from "../src/stops.js";
 import { runSyncCommand } from "../src/sync.js";
 import { readTicket, storeDir, writeTicket } from "../src/tickets.js";
 
 /**
- * SCP-203: `focrux sync --all-merged` reads every merged ticket's pull
+ * SCP-203: `perbo sync --all-merged` reads every merged ticket's pull
  * request once and fills `commits_outside_loop` and `github_credential` —
  * the SCP-196/SCP-200 fields that did not exist when this store's first
  * sixteen merges last synced, which is why `unattended merges` reads
  * "16 not yet decided" today.
  *
  * Every fixture ticket is written straight to the store the way the `stops`
- * half of unattended.test.ts does it, not through `focrux admit`: nothing
+ * half of unattended.test.ts does it, not through `perbo admit`: nothing
  * here needs a real `git` repository, only a ticket store shaped like the
  * live one, so no test spawns a process and none declares a spawn deadline.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-sync-all-merged-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-sync-all-merged-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function capture(): Streams & { out: string[]; err: string[] } {
@@ -33,8 +33,8 @@ function capture(): Streams & { out: string[]; err: string[] } {
 
 function fixtureStore(name: string): string {
   const repo = join(scratch, name);
-  mkdirSync(join(repo, ".focrux", "tickets"), { recursive: true });
-  mkdirSync(join(repo, ".focrux", "state"), { recursive: true });
+  mkdirSync(join(repo, ".perbo", "tickets"), { recursive: true });
+  mkdirSync(join(repo, ".perbo", "state"), { recursive: true });
   return repo;
 }
 
@@ -294,7 +294,7 @@ describe("ac_2 — one line per ticket, a closing count, and an unreadable pull 
   });
 });
 
-describe("ac_3 — after the sweep, `focrux stops` prints the unattended-merges row with n = 16 and its Wilson interval", () => {
+describe("ac_3 — after the sweep, `perbo stops` prints the unattended-merges row with n = 16 and its Wilson interval", () => {
   it("fills every merged ticket's commits_outside_loop so the row reads a known share instead of \"not yet decided\"", async () => {
     const repo = fixtureStore("stops-row");
     const dir = storeDir(repo, null);

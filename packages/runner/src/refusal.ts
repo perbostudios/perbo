@@ -1,4 +1,4 @@
-import type { DiagnosticFinding } from "@focrux/contracts";
+import type { DiagnosticFinding } from "@perbo/contracts";
 
 /**
  * The run will not start, and the reason is a property of the repository.

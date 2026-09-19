@@ -12,8 +12,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { EXIT_CODES } from "@focrux/contracts";
-import type { PreflightRequest, PreflightResult } from "@focrux/runner";
+import { EXIT_CODES } from "@perbo/contracts";
+import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import {
   parseExecuteArgs,
   resolveBase,
@@ -28,7 +28,7 @@ import { storeDir } from "../src/store.js";
 /**
  * The branch a run publishes against, and which of three sources named it.
  *
- * A repository with no `.focrux/config.json` used to publish against the
+ * A repository with no `.perbo/config.json` used to publish against the
  * literal `HEAD`, which GitHub refuses — `Base ref must be a branch` — after
  * the whole loop has been paid for. The base is resolved before the run starts
  * instead: a `base_ref` somebody configured, failing that the branch this
@@ -46,7 +46,7 @@ import { storeDir } from "../src/store.js";
  * something this file asserted about it.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-base-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-base-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const gitEnv = {
@@ -94,7 +94,7 @@ interface RepositoryShape {
   branches?: readonly string[];
 }
 
-/** A repository with one commit, a `test` script, a lockfile and no `.focrux/`. */
+/** A repository with one commit, a `test` script, a lockfile and no `.perbo/`. */
 function repository(name: string, shape: RepositoryShape = {}): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
   execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
@@ -301,7 +301,7 @@ function runConfig(name: string, repo: string): string {
   return path;
 }
 
-/** The repository's own `.focrux/config.json`. */
+/** The repository's own `.perbo/config.json`. */
 function repoConfig(repo: string, config: Record<string, unknown>): void {
   const dir = storeDir(repo, null);
   mkdirSync(dir, { recursive: true });
@@ -397,7 +397,7 @@ interface RunReport {
 }
 
 /**
- * `focrux run …` as the program runs it: the command, and — for anything that
+ * `perbo run …` as the program runs it: the command, and — for anything that
  * escapes it — `exitForThrown` writing onto the same stderr.
  */
 async function run(
@@ -427,7 +427,7 @@ async function run(
 }
 
 /**
- * `focrux run --contract <file> --config <file>`: the one path that is handed a
+ * `perbo run --contract <file> --config <file>`: the one path that is handed a
  * whole run configuration instead of merging one. The contract is written here
  * rather than minted, pinned to this checkout's HEAD, and the configuration
  * carries the roots a merged one would have derived — deliberately with no
@@ -579,7 +579,7 @@ describe("the base a run publishes against, where nothing configured one", () =>
     // under the root this run was given, no attempt branch, no run state.
     const worktrees = worktreeRoot("nameless");
     expect(existsSync(worktrees) ? readdirSync(worktrees) : []).toEqual([]);
-    expect(git(repo, "branch", "--list", "ayo/*", "fcx/*").trim()).toBe("");
+    expect(git(repo, "branch", "--list", "ayo/*", "prb/*").trim()).toBe("");
     expect(existsSync(join(storeDir(repo, null), "state"))).toBe(false);
 
     // One message about the base: the finding, the key that fixes it and the
@@ -589,7 +589,7 @@ describe("the base a run publishes against, where nothing configured one", () =>
     expect(said).toHaveLength(1);
     expect(said[0]).toContain("base_ref_unknown");
     expect(said[0]).toContain(join(storeDir(repo, null), "config.json"));
-    expect(result.err).toContain(`focrux doctor --repo ${repo}`);
+    expect(result.err).toContain(`perbo doctor --repo ${repo}`);
     expect(result.err).not.toMatch(STACK_FRAME);
   }, RUN_TIMEOUT_MS);
 
@@ -726,7 +726,7 @@ describe("a base_ref that is not a branch name", () => {
     expect(gh.calls()).toEqual([]);
     const worktrees = worktreeRoot(name);
     expect(existsSync(worktrees) ? readdirSync(worktrees) : []).toEqual([]);
-    expect(git(repo, "branch", "--list", "ayo/*", "fcx/*").trim()).toBe("");
+    expect(git(repo, "branch", "--list", "ayo/*", "prb/*").trim()).toBe("");
     expect(baseLines(result.err)).toEqual([]);
   }, RUN_TIMEOUT_MS);
 
@@ -839,13 +839,13 @@ describe("a run handed its whole configuration, on the --contract path", () => {
     // configuration file names the branch, not the one that turns away another
     // ticket's.
     const result = await withGh(gh.bin, () =>
-      runContract(repo, "contract-branch", { delivery_branch: "fcx/contractbranch/named-by-the-file" }, [
+      runContract(repo, "contract-branch", { delivery_branch: "prb/contractbranch/named-by-the-file" }, [
         "--publish",
       ]),
     );
 
     expect(result.code).toBe(0);
-    const derived = "fcx/contractbranch/the-feature-module-exports-a-com";
+    const derived = "prb/contractbranch/the-feature-module-exports-a-com";
     expect((JSON.parse(result.out) as RunReport).branch).toBe(derived);
     const create = created(gh.calls());
     expect(create[create.indexOf("--head") + 1]).toBe(derived);

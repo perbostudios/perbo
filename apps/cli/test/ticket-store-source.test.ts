@@ -47,7 +47,7 @@ const record = (key: string, source: Record<string, unknown>) => ({
 
 /** A store holding exactly the three source shapes a previous version wrote. */
 function legacyStore(): string {
-  const dir = mkdtempSync(join(tmpdir(), "focrux-store-legacy-"));
+  const dir = mkdtempSync(join(tmpdir(), "perbo-store-legacy-"));
   scratch.push(dir);
   mkdirSync(join(dir, "tickets"), { recursive: true });
   const write = (key: string, source: Record<string, unknown>) =>

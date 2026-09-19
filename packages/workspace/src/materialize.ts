@@ -10,7 +10,7 @@ import {
   type MaterializationEntry,
   type MaterializationManifest,
   type MaterializationMeasurement,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { narrowsToMember, unpinnedInstallEnv, workspaceMembership } from "./diagnostic.js";
 import { DiskWatcher, directoryBytes } from "./disk.js";
 import { run, type RunResult } from "./exec.js";
@@ -86,11 +86,11 @@ export function materializationEnv(args: {
     LANG: args.base.LANG ?? "C",
     TMPDIR: args.base.TMPDIR ?? "/tmp",
     CI: "1",
-    FOCRUX_WORKTREE: args.worktree,
-    FOCRUX_PORT_START: String(args.ports.start),
-    FOCRUX_PORT_END: String(args.ports.end),
+    PERBO_WORKTREE: args.worktree,
+    PERBO_PORT_START: String(args.ports.start),
+    PERBO_PORT_END: String(args.ports.end),
   };
-  if (args.database_schema) env.FOCRUX_DB_SCHEMA = args.database_schema;
+  if (args.database_schema) env.PERBO_DB_SCHEMA = args.database_schema;
   return env;
 }
 
@@ -200,7 +200,7 @@ function within(root: string, path: string): boolean {
  *
  * An install that does not narrow to a member asks nothing of the directory
  * beyond its being the checkout, and runs at the worktree root exactly as it
- * always has. That includes one a person wrote into `.focrux/config.json` for
+ * always has. That includes one a person wrote into `.perbo/config.json` for
  * such a package: it is their declaration rather than this derivation's, and
  * refusing it would refuse a command that works.
  */
@@ -237,8 +237,8 @@ export function installDirectory(args: {
  * Where the verification runs, which is the same question asked of the other
  * command a manifest carries.
  *
- * The verification is the given root's own — `detectVerifyCommand` reads it
- * from that root's `package.json`, and the checks a run pins come from the same
+ * The verification is the given root's own — the diagnostic reads it from that
+ * root's `package.json`, and the checks a run pins come from the same
  * scripts — so it runs where those scripts live: the counterpart of that root
  * inside the worktree. For a checkout that is its own repository that is the
  * worktree root, as it always was. For one package of a monorepo checked out
@@ -436,7 +436,7 @@ export async function materialize(request: MaterializeRequest): Promise<Material
     // At the counterpart of the root the run was given, which is the worktree
     // root for a checkout that is its own repository and the package's own
     // directory for one package of a monorepo checked out whole. The verify
-    // command is read from that root's own scripts (`detectVerifyCommand`), so
+    // command is read from that root's own scripts (`declaredVerifyCommand`), so
     // running it there is what makes the `test` script this executes the one
     // the derivation named rather than a script of the same name belonging to
     // some directory above it.

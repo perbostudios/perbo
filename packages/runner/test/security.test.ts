@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LimitsTableSchema } from "@focrux/contracts";
+import { LimitsTableSchema } from "@perbo/contracts";
 import { runAgent } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { EgressLog, extractHosts, hostAllowed } from "../src/egress.js";
@@ -17,7 +17,7 @@ import {
 } from "../src/quarantine.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./support.js";
 
-const scratch = () => mkdtempSync(join(tmpdir(), "focrux-runner-"));
+const scratch = () => mkdtempSync(join(tmpdir(), "perbo-runner-"));
 
 describe("the agent environment", () => {
   it("drops every credential class, and keeps what the agent needs to authenticate as the user", () => {
@@ -32,7 +32,7 @@ describe("the agent environment", () => {
         AWS_SECRET_ACCESS_KEY: "s3cret",
         SSH_AUTH_SOCK: "/tmp/agent.sock",
         NPM_TOKEN: "npm_x",
-        FOCRUX_API_KEY: "ayo_x",
+        PERBO_API_KEY: "ayo_x",
         DATABASE_URL: "postgres://production",
         ANTHROPIC_AUTH_TOKEN: "sk-ant-x",
       },
@@ -49,7 +49,7 @@ describe("the agent environment", () => {
       "AWS_SECRET_ACCESS_KEY",
       "SSH_AUTH_SOCK",
       "NPM_TOKEN",
-      "FOCRUX_API_KEY",
+      "PERBO_API_KEY",
       "DATABASE_URL",
       "ANTHROPIC_AUTH_TOKEN",
     ]) {
@@ -166,7 +166,7 @@ describe("prohibited actions, from paths", () => {
   });
 
   it("always treats the ticket store as a judging artifact, whatever the configuration says", () => {
-    for (const path of [".focrux/principles.md", "apps/x/.focrux/config.json"]) {
+    for (const path of [".perbo/principles.md", "apps/x/.perbo/config.json"]) {
       expect(inspectPaths([path]).map((hit) => hit.action), path).toContain(
         "modify_judging_artifact",
       );

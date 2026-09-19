@@ -1,4 +1,4 @@
-import { ESCAPE_WINDOW_DAYS, type EscapeRow } from "@focrux/contracts";
+import { ESCAPE_WINDOW_DAYS, type EscapeRow } from "@perbo/contracts";
 
 /**
  * When each merged change's fourteen days are up (`SCP-217`).
@@ -30,7 +30,7 @@ export type Dueness = "due" | "not yet due" | "no merge date";
  * The instant a change's fourteen days are up: its own merge, plus the window.
  *
  * Null when the row carries no merge date, which is a row with no escapes
- * record at all. This is the same arithmetic `focrux sync` wrote into the
+ * record at all. This is the same arithmetic `perbo sync` wrote into the
  * record's `window_closes_at`; it is done again here so the command's reading
  * is the fourteen days it names, whatever window an older record was collected
  * under.

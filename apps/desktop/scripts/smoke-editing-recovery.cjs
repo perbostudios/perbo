@@ -7,18 +7,18 @@ const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 
 if (!process.versions.electron) {
-  const root = mkdtempSync(join(tmpdir(), "focrux-editing-recovery-"));
+  const root = mkdtempSync(join(tmpdir(), "perbo-editing-recovery-"));
   const repository = join(root, "repository");
   mkdirSync(repository);
   writeFileSync(join(repository, "README.md"), "# Native editing recovery fixture\n", { flag: "wx" });
   for (const args of [
-    ["init", "--initial-branch=main"], ["config", "user.name", "Focrux fixture"],
+    ["init", "--initial-branch=main"], ["config", "user.name", "Perbo fixture"],
     ["config", "user.email", "fixture@example.invalid"], ["config", "commit.gpgsign", "false"],
     ["add", "README.md"], ["commit", "-m", "Initialize recovery fixture"],
   ]) execFileSync("git", args, { cwd: repository, stdio: "pipe" });
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  delete env.FOCRUX_DESKTOP_DEV_URL;
+  delete env.PERBO_DESKTOP_DEV_URL;
   for (const phase of ["write", "recover"]) {
     const result = spawnSync(require("electron"), [__filename, `--phase=${phase}`, `--workspace=${root}`], {
       cwd: join(__dirname, ".."), env, encoding: "utf8", timeout: 50_000,
@@ -55,7 +55,7 @@ if (!process.versions.electron) {
   app.on("browser-window-created", (_event, window) => {
     const page = window.webContents;
     const js = text => page.executeJavaScript(text, true);
-    const request = value => js(`window.focrux.request(${JSON.stringify(value)})`);
+    const request = value => js(`window.perbo.request(${JSON.stringify(value)})`);
     const type = async (selector, value) => {
       await until(() => js(`Boolean(document.querySelector(${JSON.stringify(selector)}))`), selector);
       await js(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -63,7 +63,7 @@ if (!process.versions.electron) {
     const click = text => js(`(() => { const button = [...document.querySelectorAll('button')].find(entry => entry.textContent.trim() === ${JSON.stringify(text)}); if (!button) throw new Error('Button unavailable'); button.click(); })()`);
     page.on("render-process-gone", (_event, details) => failures.push(details.reason));
     page.once("did-finish-load", () => void (async () => {
-      await until(() => js("Boolean(window.focrux)"), "native bridge");
+      await until(() => js("Boolean(window.perbo)"), "native bridge");
       let workspace = await request({ kind: "snapshot" });
       if (phase === "write") {
         await request({ kind: "saveSettings", settings: { ...workspace.settings, onboardingComplete: true, executorModel: "native-recovery-model" } });
@@ -104,7 +104,7 @@ if (!process.versions.electron) {
       }
       const originalEmit = ipcMain.emit.bind(ipcMain);
       ipcMain.emit = function (name, ...args) {
-        if (name === "focrux:close-response") {
+        if (name === "perbo:close-response") {
           void js("document.body.inert").then(inert => {
             assert.equal(inert, true);
             inputQuiescentAtClose = true;

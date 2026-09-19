@@ -1,4 +1,4 @@
-import { EXIT_CODES } from "@focrux/contracts";
+import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "./args.js";
 import { describeFailure } from "./run.js";
 import { StoreError } from "./store.js";
@@ -10,7 +10,7 @@ import type { Streams } from "./streams.js";
  */
 
 /**
- * What `focrux` can be asked to do.
+ * What `perbo` can be asked to do.
  *
  * Named by their union rather than as strings, so a table that lists a command
  * its dispatch does not answer fails to compile instead of at the user.
@@ -18,7 +18,7 @@ import type { Streams } from "./streams.js";
 export interface EntryPoint<Command extends string = string> {
   /** The help, which names the commands and nothing else. */
   usage: string;
-  /** The commands it carries, in the order the help lists them. */
+  /** The commands it carries. */
   commands: readonly Command[];
   /** The version reported by `--version`. */
   version: string;
@@ -36,11 +36,11 @@ export function processStreams(): Streams {
 }
 
 /**
- * `focrux <argv>`: the exit code, with everything a person reads on stderr.
+ * `perbo <argv>`: the exit code, with everything a person reads on stderr.
  *
  * stdout carries the command's record — the ReviewArtifact as JSON whenever it
  * is piped and a human rendering when it is a terminal; progress, warnings and
- * diagnostics always go to stderr. `focrux review … > review.json` therefore
+ * diagnostics always go to stderr. `perbo review … > review.json` therefore
  * yields a valid artifact under every outcome, including `error`.
  */
 export async function runEntryPoint(argv: string[], entry: EntryPoint): Promise<number> {
@@ -51,7 +51,7 @@ export async function runEntryPoint(argv: string[], entry: EntryPoint): Promise<
     return command === undefined ? EXIT_CODES.usage_or_input_error : 0;
   }
   if (command === "--version" || command === "-v") {
-    process.stderr.write(`focrux ${entry.version}\n`);
+    process.stderr.write(`perbo ${entry.version}\n`);
     return 0;
   }
   if (!entry.commands.includes(command)) {

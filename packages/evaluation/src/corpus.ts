@@ -7,7 +7,7 @@ import {
   parseUnifiedDiff,
   type CheckResult,
   type PlanContract,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { FixtureSchema, type Fixture } from "./fixture.js";
 
 export interface LoadedFixture {
@@ -43,7 +43,7 @@ export interface LoadedFixture {
  * proves the corpus suites skip rather than fail, without deleting anything
  * here.
  */
-export const CORPUS_DIR_ENV = "FOCRUX_EVAL_CORPUS_DIR";
+export const CORPUS_DIR_ENV = "PERBO_EVAL_CORPUS_DIR";
 
 /**
  * The corpus that ships in the package.
@@ -59,7 +59,7 @@ export function packagedCorpusDir(): string {
 
 /**
  * The directory a corpus read that names none of its own uses: the override
- * when `FOCRUX_EVAL_CORPUS_DIR` is set to something other than whitespace,
+ * when `PERBO_EVAL_CORPUS_DIR` is set to something other than whitespace,
  * otherwise the packaged corpus. A relative override is resolved against the
  * working directory, like every other path a caller hands this package.
  *

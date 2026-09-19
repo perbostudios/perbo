@@ -5,8 +5,8 @@ import type {
   ReviewArtifact,
   ReviewRouting,
   SourceContract,
-} from "@focrux/contracts";
-import { hasAcceptanceCriteria } from "@focrux/contracts";
+} from "@perbo/contracts";
+import { hasAcceptanceCriteria } from "@perbo/contracts";
 
 /**
  * The human rendering of a review, and of one that stopped before it reached a
@@ -207,7 +207,7 @@ export function renderArtifact(
   lines.push("");
   lines.push(
     paint(
-      `focrux ${options.version}   review of ${artifact.target.id} ` +
+      `perbo ${options.version}   review of ${artifact.target.id} ` +
         `(${artifact.target.base_commit.slice(0, 7)} → ${artifact.target.head_commit.slice(0, 7)})` +
         `   plan v${artifact.plan_version}`,
       "dim",

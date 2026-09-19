@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { gitEnv, run, runOrThrow } from "@focrux/workspace";
+import { gitEnv, run, runOrThrow } from "@perbo/workspace";
 
 /**
  * Keeping the attempt's branch level with the base (SCP-192).

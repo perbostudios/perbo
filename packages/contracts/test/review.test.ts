@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { assertReviewerContextKind, mayOccupyInstructionPosition } from "../src/context.js";
 import { AttemptUsageSchema } from "../src/attempt.js";
-import { EXIT_CODES, exitCodeForDecision, findingKey } from "../src/review.js";
+import {
+  EXIT_CODES,
+  NodeReviewsSchema,
+  ReviewArtifactSchema,
+  exitCodeForDecision,
+  findingKey,
+} from "../src/review.js";
 import { RunBundleSchema, RunCostBasisSchema } from "../src/runbundle.js";
 
 describe("finding identity", () => {
@@ -97,5 +103,60 @@ describe("cost basis on durable usage records", () => {
       },
     });
     expect(historical.usage.cost_basis).toBe("unavailable");
+  });
+});
+
+/**
+ * D-107: a node's review, recorded beside the ticket's combined artifact.
+ * `NodeReviewsSchema` is what a store record reads that list back through.
+ */
+describe("a ticket's per-node reviews", () => {
+  const minimalArtifact = () =>
+    ReviewArtifactSchema.parse({
+      schema_version: 1,
+      review_id: "rev_0000000000000001",
+      created_at: "2026-08-27T00:00:00.000Z",
+      target: { type: "changeset", id: "cs_0000000000000001", base_commit: "0000000", head_commit: "1111111" },
+      plan_id: "plan_fixture",
+      plan_version: 1,
+      planned_risk: "P1",
+      actual_risk: "P1",
+      escalated: false,
+      independence: {
+        context_builder: "reviewer_v2",
+        executor_narrative_visible: false,
+        executor_transcript_visible: false,
+        separate_process: true,
+        model_family: "same",
+        grounded_in: ["plan.acceptance_criteria", "diff", "check_results", "selected_files"],
+      },
+      context_manifest: [],
+      checks: [],
+      overrides: [],
+      coverage: [],
+      findings: [],
+      scope_deviation: {
+        files_outside_scope: [],
+        files_in_prohibited_paths: [],
+        files_exempt_as_generated: [],
+        within_expansion_budget: true,
+        expansion_budget_files: 0,
+      },
+      decision: "approve",
+      confidence: null,
+      cost_micros: 0,
+      latency_ms: 0,
+      model: { provider: "double", model_id: "double", prompt_version: "reviewer_v2", input_tokens: 0, output_tokens: 0 },
+      error: null,
+    });
+
+  it("round-trips a node's review, and null for a node not reviewed on its own", () => {
+    const parsed = NodeReviewsSchema.parse([
+      { node_id: "node_a", review: minimalArtifact() },
+      { node_id: "node_b", review: null },
+    ]);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]?.review?.decision).toBe("approve");
+    expect(parsed[1]?.review).toBeNull();
   });
 });

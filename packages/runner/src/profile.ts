@@ -4,7 +4,8 @@ import {
   PermissionProfileSchema,
   scrubEnvironment,
   type PermissionProfile,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
+import { SUBAGENT_TOOL_NAMES } from "./agents.js";
 import { scratchEnvironment, scratchPath } from "./scratch.js";
 
 /**
@@ -19,8 +20,26 @@ import { scratchEnvironment, scratchPath } from "./scratch.js";
  * The built-in tools an executor needs, and no others. `WebFetch` and
  * `WebSearch` are absent: on the local provider egress cannot be intercepted,
  * so the honest control is not to hand the agent a fetch tool at all.
+ *
+ * The tool that starts a subagent is here because the executor may delegate
+ * ([D-106](../../../docs/11-open-decisions.md)). Both names it answers to —
+ * `Agent`, and `Task` under its former name — are listed, because the guard's
+ * own matcher has to carry both and the two lists must not disagree about
+ * what the agent's own permission layer admits ahead of it. Which role it
+ * starts is not its choice: the invocation offers the roles Perbo defines
+ * and the write guard refuses a `subagent_type` outside them, so the tool
+ * being available does not put the person's own agent definitions within
+ * reach (ADR-0038).
  */
-export const DEFAULT_AGENT_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"] as const;
+export const DEFAULT_AGENT_TOOLS = [
+  "Bash",
+  "Read",
+  "Edit",
+  "Write",
+  "Glob",
+  "Grep",
+  ...SUBAGENT_TOOL_NAMES,
+] as const;
 
 /**
  * Command patterns the agent may run. Read-only Git is permitted so it can
@@ -68,6 +87,11 @@ export const DEFAULT_COMMAND_ALLOW_LIST = [
   "Bash(python3:*)",
   "Bash(pytest:*)",
   "Bash(make:*)",
+  // The executor starts subagents from Perbo's roles (D-106). The guard's
+  // hook decides which role, before the call; these entries are what stop the
+  // agent's own permission layer refusing the tool, under either name it
+  // answers to, ahead of it.
+  ...SUBAGENT_TOOL_NAMES,
 ] as const;
 
 /**
@@ -115,7 +139,6 @@ export const DEFAULT_COMMAND_DENY_LIST = [
   "Bash(sudo:*)",
   "WebFetch",
   "WebSearch",
-  "Task",
 ] as const;
 
 /**
@@ -166,7 +189,7 @@ export function buildPermissionProfile(args: {
  * The agent's environment.
  *
  * `HOME` is present, and that is the trade BYOK forces: the agent authenticates
- * with the user's own credential and the credential lives under `HOME`. Focrux
+ * with the user's own credential and the credential lives under `HOME`. Perbo
  * never reads it, never stores it and never forwards it — but it also cannot
  * hide the directory it sits in without breaking the login. The compensating
  * controls are the tool allow-list and the path jail, and ADR-0004's amendment
@@ -187,12 +210,12 @@ export function buildAgentEnvironment(args: {
   const extra: Record<string, string> = {
     // Pinned here so a repository cannot redirect model traffic (threat 19).
     ...(args.profile.provider_base_url === PINNED_PROVIDER_BASE_URL ? { ANTHROPIC_BASE_URL: PINNED_PROVIDER_BASE_URL } : {}),
-    FOCRUX_WORKTREE: args.worktree,
-    FOCRUX_PORT_START: String(args.ports.start),
-    FOCRUX_PORT_END: String(args.ports.end),
+    PERBO_WORKTREE: args.worktree,
+    PERBO_PORT_START: String(args.ports.start),
+    PERBO_PORT_END: String(args.ports.end),
     CI: "1",
     ...scratchEnvironment(scratchPath(args.worktree)),
   };
-  if (args.database_schema) extra.FOCRUX_DB_SCHEMA = args.database_schema;
+  if (args.database_schema) extra.PERBO_DB_SCHEMA = args.database_schema;
   return scrubEnvironment({ base: args.base, allow: args.profile.env_allow_list, extra });
 }

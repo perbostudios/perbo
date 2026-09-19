@@ -96,6 +96,36 @@ describe("parseUnifiedDiff", () => {
     const [file] = parseUnifiedDiff(modified);
     expect(file?.patch).toContain("+  sendActivationEmail();");
   });
+
+  /**
+   * D-107: a node's review is built by filtering `ChangeSet.files` and
+   * rejoining their `patch`es (`buildContext`, `prompt.ts`). That depends on
+   * each file's `patch` being its exact slice of the diff, in order, with
+   * nothing dropped at a file boundary.
+   */
+  it("hands back each file's patch text verbatim, for a modification, a rename, a new file and a deleted one", () => {
+    const combined = [modified, added, deleted, renamed].join("");
+    const files = parseUnifiedDiff(combined);
+    expect(files.map((file) => file.path)).toEqual([
+      "packages/auth/signup.ts",
+      "packages/auth/retry.ts",
+      "packages/auth/old.ts",
+      "packages/auth/b.ts",
+    ]);
+    expect(files[0]?.patch).toBe(modified.trimEnd());
+    expect(files[1]?.patch).toBe(added.trimEnd());
+    expect(files[2]?.patch).toBe(deleted.trimEnd());
+    // The last file in the diff keeps the trailing newline `split`/`join`
+    // would otherwise drop, which is what makes the round trip below exact.
+    expect(files[3]?.patch).toBe(renamed);
+  });
+
+  it("joins a changeset's files back into the diff that built it", () => {
+    const combined = [modified, added, deleted, renamed].join("");
+    const changeset = changeSetFromDiff({ diff: combined, base_commit: "a1b2c3d" });
+    const rejoined = changeset.files.map((file) => file.patch).join("\n");
+    expect(rejoined).toBe(combined);
+  });
 });
 
 describe("change-set identity", () => {

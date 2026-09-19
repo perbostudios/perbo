@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   EXECUTION_ATTEMPT_SCHEMA_VERSION,
   ExecutionAttemptSchema,
+  TERMINATION_REASONS,
 } from "../src/attempt.js";
 
 /**
@@ -114,5 +115,24 @@ describe("an attempt's base verification", () => {
     expect(() =>
       ExecutionAttemptSchema.parse(attempt({ base_verification: { verified: true } })),
     ).toThrow();
+  });
+});
+
+/**
+ * SCP-323: `stalled` is the reason the stall detector terminates with, and it
+ * has to be on the record's own enum before the runner can write one.
+ */
+describe("a stalled attempt's termination reason", () => {
+  it("is accepted on the record, distinct from the wall clock's", () => {
+    expect(TERMINATION_REASONS).toContain("stalled");
+    const parsed = ExecutionAttemptSchema.parse(
+      attempt({
+        termination: {
+          reason: "stalled",
+          detail: "attempt_stall_ms would reach 1200001, above the limit of 1200000",
+        },
+      }),
+    );
+    expect(parsed.termination.reason).toBe("stalled");
   });
 });

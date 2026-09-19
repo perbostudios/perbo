@@ -3,12 +3,12 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { PreflightRequest, PreflightResult } from "@focrux/runner";
+import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "../src/execute.js";
 import { attemptsRecordSubject, runInspectCommand } from "../src/inspect.js";
 
 /**
- * What `focrux inspect` says about the pull request a run with no ticket
+ * What `perbo inspect` says about the pull request a run with no ticket
  * opened.
  *
  * A ticketed run takes the URL from the ticket file. A local run has no ticket,
@@ -22,7 +22,7 @@ import { attemptsRecordSubject, runInspectCommand } from "../src/inspect.js";
  * delivery call and `inspect`'s own reading are the shipped ones.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-inspect-pr-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-pr-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const gitEnv = {
@@ -38,7 +38,7 @@ const gitEnv = {
 const git = (dir: string, ...argv: string[]): string =>
   execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
 
-/** A repository with one commit, a `test` script, a lockfile and no `.focrux/`. */
+/** A repository with one commit, a `test` script, a lockfile and no `.perbo/`. */
 function repository(name: string): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
   execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
@@ -301,7 +301,7 @@ async function withGh<T>(bin: string, body: () => Promise<T>): Promise<T> {
   }
 }
 
-/** `focrux run --outcome …` on a repository with no ticket, and what it printed. */
+/** `perbo run --outcome …` on a repository with no ticket, and what it printed. */
 async function run(
   repo: string,
   argv: readonly string[],
@@ -337,7 +337,7 @@ interface RunReport {
   pull_request: { url: string; number: number | null } | null;
 }
 
-/** `focrux inspect <run>` as a script reads it, and as a person does. */
+/** `perbo inspect <run>` as a script reads it, and as a person does. */
 async function inspect(
   repo: string,
   runId: string,

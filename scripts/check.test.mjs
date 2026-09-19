@@ -98,37 +98,37 @@ test("--list prints one line per stage and runs nothing", () => {
 });
 
 test("--filter expands to exactly three commands", () => {
-  const { code, runner } = gate(["--filter", "@focrux/contracts"]);
+  const { code, runner } = gate(["--filter", "@perbo/contracts"]);
   assert.equal(code, 0);
   assert.deepEqual(runner.runs(), [
     ["pnpm", "install", "--frozen-lockfile"],
-    ["pnpm", "exec", "turbo", "run", "build", "--filter=@focrux/contracts..."],
-    ["pnpm", "exec", "turbo", "run", "typecheck", "test", "lint", "--filter=@focrux/contracts"],
+    ["pnpm", "exec", "turbo", "run", "build", "--filter=@perbo/contracts..."],
+    ["pnpm", "exec", "turbo", "run", "typecheck", "test", "lint", "--filter=@perbo/contracts"],
   ]);
   assert.deepEqual(
-    filterPlan("@focrux/ui").map((step) => step.stage),
+    filterPlan("@perbo/ui").map((step) => step.stage),
     FILTERED_STAGES,
   );
 });
 
 test("--filter names the repository-wide stages it is skipping", () => {
-  const { out } = gate(["--filter", "@focrux/contracts"]);
+  const { out } = gate(["--filter", "@perbo/contracts"]);
   for (const name of STAGE_NAMES.filter((stage) => !FILTERED_STAGES.includes(stage))) {
     assert.ok(out.includes(name), `${name} is not named as skipped`);
   }
 });
 
 test("an unknown package exits 2 and prints the workspace's packages", () => {
-  const { code, err, runner } = gate(["--filter", "@focrux/nonesuch"]);
+  const { code, err, runner } = gate(["--filter", "@perbo/nonesuch"]);
   assert.equal(code, 2);
-  assert.match(err, /Unknown package: @focrux\/nonesuch/);
-  assert.match(err, /@focrux\/contracts/);
+  assert.match(err, /Unknown package: @perbo\/nonesuch/);
+  assert.match(err, /@perbo\/contracts/);
   assert.equal(runner.calls.length, 0);
 });
 
 test("the workspace's packages are read from pnpm-workspace.yaml", () => {
   const packages = workspacePackages(REPO_ROOT);
-  for (const name of ["@focrux/cli", "@focrux/desktop", "@focrux/review", "@focrux/tsconfig"]) {
+  for (const name of ["@perbo/cli", "@perbo/desktop", "@perbo/review", "@perbo/tsconfig"]) {
     assert.ok(packages.includes(name), `${name} is missing`);
   }
 });
@@ -172,9 +172,9 @@ test("a missing validator dependency prints the pip line before exiting", () => 
   assert.match(out, /python3 -m pip install -r scripts\/requirements-validation\.txt/);
 });
 
-test("FOCRUX_PYTHON names the interpreter the validators run under", () => {
+test("PERBO_PYTHON names the interpreter the validators run under", () => {
   const runner = fakeRunner();
-  gate(["validators"], { runner, env: { FOCRUX_PYTHON: "/opt/venv/bin/python" } });
+  gate(["validators"], { runner, env: { PERBO_PYTHON: "/opt/venv/bin/python" } });
   assert.ok(runner.runs().some((argv) => argv[0] === "/opt/venv/bin/python"));
   assert.ok(!runner.runs().some((argv) => argv[0] === "python3"));
 });
@@ -262,7 +262,7 @@ test("resolveProtectedRange returns the given range untouched", () => {
 // --------------------------------------------------------------------------
 
 function pinnedRepo(pin) {
-  const dir = mkdtempSync(join(tmpdir(), "focrux-check-pin-"));
+  const dir = mkdtempSync(join(tmpdir(), "perbo-check-pin-"));
   mkdirSync(join(dir, ".github"), { recursive: true });
   writeFileSync(join(dir, ".github", "corpus-pin.json"), JSON.stringify(pin, null, 2));
   return dir;
@@ -282,7 +282,7 @@ test("a pin whose commit or repository is not one is refused", () => {
   assert.throws(() => readCorpusPin(badCommit), /"commit" must be a commit SHA/);
   const badRepo = pinnedRepo({ repository: "git@github.com:example/corpus", commit: SHA });
   assert.throws(() => readCorpusPin(badRepo), /"repository" must be an https clone URL/);
-  const absent = mkdtempSync(join(tmpdir(), "focrux-check-nopin-"));
+  const absent = mkdtempSync(join(tmpdir(), "perbo-check-nopin-"));
   assert.throws(() => readCorpusPin(absent), /no corpus pin at/);
 });
 

@@ -64,7 +64,7 @@ pnpm check
 
 `scripts/check.mjs` runs every stage in order and prints each command as it
 goes; `pnpm check --list` names the stages, and `pnpm check --filter
-@focrux/<package>` runs one package after building what it depends on.
+@perbo/<package>` runs one package after building what it depends on.
 `.github/workflows/build.yml` runs the same stages as steps on every pull
 request, so what passes on your machine is what passes there. The Python
 validators need `scripts/requirements-validation.txt` installed; they check the
@@ -91,11 +91,12 @@ yours may be too. Two things follow from the certificate above
   `.claude/settings.json` sets that trailer for Claude Code sessions in this
   repository.
 
-Before an agent-authored pull request from the maintainer merges, a separate
-agent run reads the whole diff against `AGENTS.md` and leaves its approval as a
-review comment. That review is maintainer tooling, not a second person: it is
-never a required approval on `main`, and a change from outside is read by the
-maintainer.
+Before a session merges an agent-authored pull request, a separate agent run
+reads the whole diff against `AGENTS.md` and the `AGENTS.md` of each package it
+touches, and leaves an unqualified approve as a review comment
+([D-073](docs/11-open-decisions.md)); the founder may merge without it. That
+review is maintainer tooling, not a second person: it is never a required
+approval on `main`, and a change from outside is read by the maintainer.
 
 ## A change to the reviewer carries its regression-suite run
 

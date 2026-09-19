@@ -14,7 +14,7 @@ import { commandSegments, inspectCommand, inspectCommandWithCwd } from "../src/p
  */
 
 const AYO26_ROOT =
-  "/Users/nobody/.focrux/worktrees/focrux-adversarial-review-7eea98-0a500fe1e40b/att_064fd34d7d54861c";
+  "/Users/nobody/.perbo/worktrees/perbo-adversarial-review-7eea98-0a500fe1e40b/att_064fd34d7d54861c";
 const HOME = "/Users/nobody";
 const AYO26_TARGET = `${AYO26_ROOT}/packages/runner/test/loop.test.ts`;
 const AYO26 = readFileSync(
@@ -58,7 +58,7 @@ describe("the command AYO-26 was killed on", () => {
 });
 
 describe("the lines of a body", () => {
-  const scope = worktree("focrux-scp174-body-");
+  const scope = worktree("perbo-scp174-body-");
   const body = ["> /etc/passwd", "cd /tmp", "rm -rf /"];
   const command = [`cat > ${scope.root}/notes.txt <<'EOF'`, ...body, "EOF"].join("\n");
 
@@ -90,7 +90,7 @@ describe("the lines of a body", () => {
 });
 
 describe("two heredocs opened by one command", () => {
-  const scope = worktree("focrux-scp174-two-");
+  const scope = worktree("perbo-scp174-two-");
   const lines = (target: string) =>
     [`cat <<A > ${target} <<B`, "> /etc/passwd", "A", "cd /tmp", "B"].join("\n");
 
@@ -106,7 +106,7 @@ describe("two heredocs opened by one command", () => {
 });
 
 describe("what the command goes on to do after a body", () => {
-  const scope = worktree("focrux-scp174-after-");
+  const scope = worktree("perbo-scp174-after-");
 
   it("moves the shell, and the write after the move is judged from there", () => {
     const command = [
@@ -133,7 +133,7 @@ describe("what the command goes on to do after a body", () => {
 });
 
 describe("`<<-`, whose body and terminator may be indented with tabs", () => {
-  const scope = worktree("focrux-scp174-dash-");
+  const scope = worktree("perbo-scp174-dash-");
 
   it("consumes the indented body up to the indented terminator", () => {
     const command = [`cat > ${scope.root}/a.txt <<-EOF`, "\t> /etc/passwd", "\tEOF"].join("\n");
@@ -164,7 +164,7 @@ describe("`<<-`, whose body and terminator may be indented with tabs", () => {
 });
 
 describe("a heredoc whose terminator never comes", () => {
-  const scope = worktree("focrux-scp174-open-");
+  const scope = worktree("perbo-scp174-open-");
 
   it("runs to the end of the text, so nothing after the operator is judged", () => {
     const command = [
@@ -178,7 +178,7 @@ describe("a heredoc whose terminator never comes", () => {
 });
 
 describe("`<<<`, which is a here-string and not a heredoc", () => {
-  const scope = worktree("focrux-scp174-string-");
+  const scope = worktree("perbo-scp174-string-");
 
   it("keeps its word on the line, and the redirect beside it is judged", () => {
     const found = outsideHits("cat <<<EOF > /tmp/x", scope);

@@ -16,7 +16,7 @@ import {
   type AttemptWait,
   type ExecutionAttempt,
   type VerifiedCommit,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { sameCommit } from "./resume.js";
 
 /**

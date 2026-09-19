@@ -1,8 +1,8 @@
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_LIMITS_TABLE, SecretIndex } from "@focrux/contracts";
-import { provision } from "@focrux/workspace";
+import { DEFAULT_LIMITS_TABLE, SecretIndex } from "@perbo/contracts";
+import { provision } from "@perbo/workspace";
 import { sealChangeSet, untrackedAfterChecks } from "../src/seal.js";
 import {
   createPullRequest,
@@ -14,7 +14,7 @@ import { finding, makeContract, makeRepo, makeReview, scratch } from "./support.
 import { readFileSync as read } from "node:fs";
 
 async function worktreeFor(repo: { dir: string; head: string }, attempt = "att_seal") {
-  const root = scratch("focrux-seal-");
+  const root = scratch("perbo-seal-");
   const workspace = await provision({
     repository_root: repo.dir,
     repository_id: "repo_fixture",
@@ -128,6 +128,26 @@ describe("a seal whose commit fails", () => {
  * into, or a shape it could not read. That is a defect in the runner, and the
  * record has to say so rather than let the review find it.
  */
+describe("the spec commit's files, kept out of the change set", () => {
+  it("excludes the recorded path and not another the same spelling would match as a glob", async () => {
+    const repo = makeRepo();
+    const workspace = await worktreeFor(repo, "att_spec_literal");
+    mkdirSync(join(workspace.path, "src", "nodes"), { recursive: true });
+    // A recorded name git reads as a character class unless the pathspec is
+    // literal, beside the work file that class matches.
+    writeFileSync(join(workspace.path, "src", "nodes", "node[3].md"), "the spec's\n");
+    writeFileSync(join(workspace.path, "src", "nodes", "node3.md"), "the change's\n");
+
+    const sealed = await sealChangeSet({
+      ...sealArgs(workspace, new SecretIndex()),
+      paths_allowed: ["src/**"],
+      spec_paths: ["src/nodes/node[3].md"],
+    });
+    expect(sealed.changed_paths).not.toContain("src/nodes/node[3].md");
+    expect(sealed.changed_paths).toContain("src/nodes/node3.md");
+  }, 30_000);
+});
+
 describe("a changed path outside the contract's allowed paths", () => {
   it("is reported by the seal, with the path named", async () => {
     const repo = makeRepo();

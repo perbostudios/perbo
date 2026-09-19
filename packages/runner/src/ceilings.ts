@@ -2,27 +2,32 @@ import {
   LimitExceededError,
   assertWithinLimits,
   limitFor,
+  limitsForCredential,
+  type CredentialClass,
   type LimitedResource,
   type LimitsTable,
   type TerminationReason,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 
 /**
- * Per-attempt ceilings, enforced in the runner rather than by the model
- * (SCP-087, docs/08, threat 11).
+ * Per-attempt ceilings and the stall detector, enforced in the runner rather
+ * than by the model (SCP-087, docs/08).
  *
  * "By the runner" is the whole content of the requirement. A prompt that asks
- * an agent to stop after forty commands is a request; a counter that kills the
- * process is a ceiling. Every one of these terminates the attempt with a typed
+ * an agent to stop when it is getting nowhere is a request; a timer that kills
+ * the process is a stop. Every one of these terminates the attempt with a typed
  * reason and an audit entry, so a run that stopped is distinguishable from a
  * run that finished.
  *
- * Iterations and commands are counted here and bound nothing unless the
- * repository set a ceiling for them (D-096): the record says what a run did
- * either way, and what stops an attempt is cost, wall clock or fresh tokens.
+ * Cost, wall clock, fresh tokens, iterations and commands are counted here and
+ * bound nothing unless the repository set a ceiling for them (D-096): the
+ * record says what a run did either way. What stops an attempt nobody asked to
+ * stop is `attempt_stall_ms` — no tool activity for the window — and, where the
+ * executor is billed per token, the two cost caps.
  */
 
 const REASON_FOR: Record<LimitedResource, TerminationReason> = {
+  attempt_stall_ms: "stalled",
   attempt_wall_clock_ms: "wall_clock_exceeded",
   attempt_commands: "command_ceiling_exceeded",
   attempt_iterations: "iteration_ceiling_exceeded",
@@ -83,7 +88,9 @@ export interface CeilingOptions {
 }
 
 export class AttemptCeilings {
-  private readonly limits: LimitsTable;
+  /** The table as configured, before the credential decides the cost caps. */
+  private readonly configured: LimitsTable;
+  private limits: LimitsTable;
   private readonly startedAt: number;
   private readonly clock: () => number;
   private readonly unbounded: ReadonlySet<LimitedResource>;
@@ -92,14 +99,30 @@ export class AttemptCeilings {
   private iterations = 0;
   private tokens = 0;
   private costMicros = 0;
+  /** When the executor's stream last showed a tool call or a tool result. */
+  private lastActivity: number;
   private breach: CeilingBreach | null = null;
 
   constructor(limits: LimitsTable, clock: () => number = Date.now, options: CeilingOptions = {}) {
-    this.limits = limits;
+    this.configured = limits;
+    // Until the executor says what it authenticated with, it is `unknown`, and
+    // an unidentified credential is capped rather than exempted (D-096).
+    this.limits = limitsForCredential(limits, "unknown");
     this.clock = clock;
     this.startedAt = clock();
+    this.lastActivity = this.startedAt;
     this.unbounded = new Set(options.unbounded ?? []);
     this.iterationsResource = options.iterations ?? "attempt_iterations";
+  }
+
+  /**
+   * What the executor turned out to be billed on, read from its own stream
+   * (D-096). On a subscription the two cost caps stop bounding anything from
+   * here on; against an API key they stand at the table's number or the
+   * per-token default.
+   */
+  useCredential(credential: CredentialClass): void {
+    this.limits = limitsForCredential(this.configured, credential);
   }
 
   private test(resource: LimitedResource, reached: number): CeilingBreach | null {
@@ -143,17 +166,40 @@ export class AttemptCeilings {
     return this.test("attempt_cost_micros", this.costMicros);
   }
 
-  /** Called on a timer; the wall clock is the ceiling nothing else can reach. */
-  tick(): CeilingBreach | null {
-    return this.test("attempt_wall_clock_ms", this.clock() - this.startedAt);
+  /**
+   * A tool call, or its result, on the executor's stream.
+   *
+   * This is the only thing the stall detector counts as the executor being
+   * alive. A turn of text is not: an agent can narrate for as long as it likes
+   * and still be working, but an agent that has neither asked for a tool nor
+   * been answered by one in the whole window has stopped.
+   */
+  noteToolActivity(): void {
+    this.lastActivity = this.clock();
   }
 
-  get wallClockLimitMs(): number {
+  /**
+   * Called on a timer; these are the two nothing on the stream can reach.
+   *
+   * The stall window runs from the last tool activity rather than from the
+   * start of the attempt, which is the difference between it and the wall clock
+   * beside it: a long attempt working steadily never reaches it.
+   */
+  tick(): CeilingBreach | null {
+    const now = this.clock();
+    return (
+      this.test("attempt_wall_clock_ms", now - this.startedAt) ??
+      this.test("attempt_stall_ms", now - this.lastActivity)
+    );
+  }
+
+  /** Null where the repository set no wall clock, which is the default (D-096). */
+  get wallClockLimitMs(): number | null {
     return limitFor(this.limits, "attempt_wall_clock_ms");
   }
 
-  get costLimitMicros(): number {
-    return limitFor(this.limits, "attempt_cost_micros");
+  get stallLimitMs(): number {
+    return limitFor(this.limits, "attempt_stall_ms");
   }
 
   breached(): CeilingBreach | null {

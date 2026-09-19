@@ -21,7 +21,7 @@ const git = (cwd: string, ...args: string[]) =>
 
 /** A throwaway repository with two commits and a gitignored `.env`. */
 export function makeRepo(): { dir: string; head: string; first: string } {
-  const dir = mkdtempSync(join(tmpdir(), "focrux-ws-"));
+  const dir = mkdtempSync(join(tmpdir(), "perbo-ws-"));
   git(dir, "init", "-q", "-b", "main");
   // Repository-local identity, so a fixture does not depend on the developer's
   // global Git configuration — and does not fail on a machine that signs

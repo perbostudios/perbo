@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_LIMITS_TABLE } from "@focrux/contracts";
+import { DEFAULT_LIMITS_TABLE } from "@perbo/contracts";
 import { diagnose, unpinnedInstallEnv } from "../src/diagnostic.js";
 import { materialize } from "../src/materialize.js";
 import { provision } from "../src/worktree.js";
@@ -22,7 +22,7 @@ import { git } from "./support.js";
  * commit before it and each test fails on the behaviour it is about.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-nolock-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-nolock-"));
 
 /** A one-commit checkout holding exactly the files it is given. */
 function checkout(name: string, files: Record<string, string>): string {
@@ -167,7 +167,7 @@ describe("a checkout with no lockfile", () => {
     const workspace = await provision({
       repository_root: dir,
       repository_id: "repo_fixture",
-      ticket_key: "FCX-1",
+      ticket_key: "PRB-1",
       ticket_id: "ticket_1",
       outcome: "materialize an empty repository",
       base_commit: git(dir, "rev-parse", "HEAD").trim(),
@@ -201,7 +201,7 @@ describe("a checkout with no lockfile", () => {
     expect(finding?.detail).not.toContain("git status");
   });
 
-  it("materializes a checkout in an ecosystem this build does not read, judged by the review alone", async () => {
+  it("materializes a checkout in an ecosystem this build does not read, judged by the review", async () => {
     const dir = checkout("cargo", {
       "Cargo.toml": '[package]\nname = "fixture"\nversion = "0.1.0"\nedition = "2021"\n',
       "src/main.rs": "fn main() {}\n",
@@ -219,6 +219,6 @@ describe("a checkout with no lockfile", () => {
     expect(finding?.severity).toBe("advisory");
     // Cargo.toml names cargo; what is true is that this build does not read it.
     expect(finding?.detail).toMatch(/^nothing here names a package manager this build reads \(/);
-    expect(finding?.detail).toContain("judged by the review alone");
+    expect(finding?.detail).toContain("judged by the review and whichever checks are pinned");
   });
 });

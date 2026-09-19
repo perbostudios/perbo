@@ -7,7 +7,7 @@
 // the compiled entry points, a compiled hook and the licence in it, and
 // nothing else.
 // Running the scripts themselves would run a workspace build, and a test in
-// this package cannot depend on one having happened: `@focrux/package` has no
+// this package cannot depend on one having happened: `@perbo/package` has no
 // workspace dependencies, so turbo is free to run this before any package is
 // built. What the real entry points bundle to is asserted where a build is
 // guaranteed, in apps/cli/test/packaging.test.ts.
@@ -42,7 +42,7 @@ function put(root, path, text) {
  * its README from.
  */
 function sourceTree() {
-  const root = mkdtempSync(join(tmpdir(), "focrux-stage-source-"));
+  const root = mkdtempSync(join(tmpdir(), "perbo-stage-source-"));
   scratch.push(root);
   put(root, CLI_ENTRY_POINT, '#!/usr/bin/env node\nprocess.stdout.write("0.0.0");\n');
   put(root, GUARD_HOOK_ENTRY, 'process.stdout.write("{}");\n');
@@ -54,7 +54,7 @@ function sourceTree() {
 }
 
 function stageDirectory() {
-  const stage = join(mkdtempSync(join(tmpdir(), "focrux-stage-")), "focrux-0.0.0");
+  const stage = join(mkdtempSync(join(tmpdir(), "perbo-stage-")), "perbo-0.0.0");
   scratch.push(dirname(stage));
   return stage;
 }
@@ -62,7 +62,7 @@ function stageDirectory() {
 test("the partner archive's stage holds the write-guard hook beside the binary", async () => {
   const stage = stageDirectory();
   await stageArchive({ stage, version: "0.0.0", root: sourceTree() });
-  assert.ok(existsSync(join(stage, "bin", "focrux.mjs")), "the stage holds no binary");
+  assert.ok(existsSync(join(stage, "bin", "perbo.mjs")), "the stage holds no binary");
   assert.equal(readFileSync(join(stage, "licenses/mattpocock-skills-MIT.txt"), "utf8"), "MIT license fixture\n");
   assert.ok(
     existsSync(join(stage, "bin", GUARD_HOOK_FILE)),

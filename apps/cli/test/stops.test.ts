@@ -8,18 +8,18 @@ import {
   reconcileStopVerdicts,
   type ObservedStop,
   type StopVerdicts,
-} from "@focrux/contracts";
-import { parseStopAnswers } from "@focrux/runner";
+} from "@perbo/contracts";
+import { parseStopAnswers } from "@perbo/runner";
 import { UsageError } from "../src/args.js";
 import type { Streams } from "../src/admit.js";
 import { HIDING_WARNING, parseStopsArgs, runStopsCommand } from "../src/stops.js";
 
 /**
- * `focrux stops` over fake stops files: the exact numbers, the interval, and
+ * `perbo stops` over fake stops files: the exact numbers, the interval, and
  * the D-060 rule that precision is never printed without its companion.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-stops-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-stops-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function capture(): Streams & { out: string[]; err: string[] } {
@@ -57,7 +57,7 @@ const record = (
 
 function store(name: string, records: readonly StopVerdicts[], extra: Record<string, string> = {}): string {
   const repo = join(scratch, name);
-  const state = join(repo, ".focrux", "state");
+  const state = join(repo, ".perbo", "state");
   mkdirSync(state, { recursive: true });
   for (const one of records) {
     writeFileSync(join(state, `${one.ticket_id}.stops.json`), `${JSON.stringify(one, null, 2)}\n`);
@@ -78,7 +78,7 @@ const three = [
   record(3, D3, []),
 ];
 
-describe("focrux stops", () => {
+describe("perbo stops", () => {
   it("prints precision of stopping beside the companion, as one table", async () => {
     const repo = store("three", three);
     const streams = capture();
@@ -148,7 +148,7 @@ describe("focrux stops", () => {
     const streams = capture();
     expect(await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo })).toBe(0);
     expect(streams.out.join("")).toMatch(/precision of stopping\s+—/);
-    expect(streams.err.join("")).toContain("focrux sync");
+    expect(streams.err.join("")).toContain("perbo sync");
   });
 
   it("refuses a --since that is not a date, and an option it does not know", () => {
@@ -186,7 +186,7 @@ describe("stops --arm reads the unattended row for one arm", () => {
     updated_at: D3,
     admission: { elapsed_ms: 10, criteria_source: "typed", criteria_count: 1 },
     delivery: {
-      branch: arm === "direct" ? `direct/focrux-${n}/paging` : `ayo/AYO-${n}/paging`,
+      branch: arm === "direct" ? `direct/perbo-${n}/paging` : `ayo/AYO-${n}/paging`,
       pull_request_url: `https://github.com/o/r/pull/${n}`,
       pull_request_number: n,
       state: "merged",
@@ -206,7 +206,7 @@ describe("stops --arm reads the unattended row for one arm", () => {
   /** Two arms in one store: the loop's merge attended, the direct arm's not. */
   const twoArms = (name: string): string => {
     const repo = store(name, []);
-    const tickets = join(repo, ".focrux", "tickets");
+    const tickets = join(repo, ".perbo", "tickets");
     mkdirSync(tickets, { recursive: true });
     writeFileSync(join(tickets, "AYO-1.json"), `${JSON.stringify(mergedTicket(1, "loop", true), null, 2)}\n`);
     writeFileSync(join(tickets, "AYO-2.json"), `${JSON.stringify(mergedTicket(2, "direct", false), null, 2)}\n`);
@@ -286,7 +286,7 @@ const read = async (name: string, records: readonly StopVerdicts[]): Promise<str
 };
 
 /**
- * `focrux stops` judged against D-060's bar.
+ * `perbo stops` judged against D-060's bar.
  *
  * The bar is ≥70% of stops endorsed with the 95% Wilson interval wholly on one
  * side of it, read at live n. Nine unanimous endorsed stops is the smallest
@@ -296,7 +296,7 @@ const read = async (name: string, records: readonly StopVerdicts[]): Promise<str
  * fail, whether its interval sits below the bar or spans it.
  *
  * Every record here is written by `reconcileStopVerdicts`, the same function
- * `focrux sync` writes the store's records with. What is asserted is the text
+ * `perbo sync` writes the store's records with. What is asserted is the text
  * the command prints.
  */
 describe("the reading against D-060's bar", () => {
@@ -368,7 +368,7 @@ describe("the reading against D-060's bar", () => {
  * what it did: it is self-declared, so an unsigned tick is counted as a
  * person's and the partner n is an upper bound.
  */
-describe("focrux stops excludes dogfood answers from the partner reading", () => {
+describe("perbo stops excludes dogfood answers from the partner reading", () => {
   /** One change with a stop per answer, each naming who gave it. */
   const mixedChange = (
     n: number,
@@ -401,14 +401,14 @@ describe("focrux stops excludes dogfood answers from the partner reading", () =>
    * answered box ticked and the line signed as the argument says.
    *
    * Written as body text and read back by `parseStopAnswers` — the same reader
-   * `focrux sync` uses on what `gh` returns — because the question below is
+   * `perbo sync` uses on what `gh` returns — because the question below is
    * what a body can do to a reading, and a body is where the answer is.
    */
   const stopLines = (finding_key: string, answer: "endorse" | "override", by: "unsigned" | "stand_in") =>
     (["endorse", "override"] as const)
       .map((box) => {
-        const marker = `<!-- focrux:stop key=${finding_key} answer=${box} rule=auth.token_never_expires routing=blocks -->`;
-        const signature = box !== answer || by === "unsigned" ? "" : ` <!-- focrux:answered-by who=${by} -->`;
+        const marker = `<!-- perbo:stop key=${finding_key} answer=${box} rule=auth.token_never_expires routing=blocks -->`;
+        const signature = box !== answer || by === "unsigned" ? "" : ` <!-- perbo:answered-by who=${by} -->`;
         return `- [${box === answer ? "x" : " "}] ${box} this ${marker}${signature}`;
       })
       .join("\n");

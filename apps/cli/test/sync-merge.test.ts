@@ -4,8 +4,8 @@ import { hostname, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { EXIT_CODES, PROHIBITED_ACTIONS, transition, type Ticket } from "@focrux/contracts";
-import { branchName } from "@focrux/workspace";
+import { EXIT_CODES, PROHIBITED_ACTIONS, transition, type Ticket } from "@perbo/contracts";
+import { branchName } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { makeAttempt } from "./attempt-fixture.js";
 import { recordDelivery, runSyncCommand } from "../src/sync.js";
@@ -22,7 +22,7 @@ import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.
  * dropped from the implementation fails exactly the case that names it.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-sync-merge-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-sync-merge-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -77,7 +77,7 @@ const view = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   statusCheckRollup: [{ name: "unit", status: "COMPLETED", conclusion: "SUCCESS" }],
   reviews: [],
   comments: [{ body: approvalComment(HEAD) }],
-  commits: [{ oid: HEAD, messageHeadline: "FCX-1: paginate", messageBody: `Attempt: ${ATTEMPT}\n` }],
+  commits: [{ oid: HEAD, messageHeadline: "PRB-1: paginate", messageBody: `Attempt: ${ATTEMPT}\n` }],
   ...over,
 });
 
@@ -213,13 +213,13 @@ function publishedTicket(
   const dir = storeDir(repo, null);
   if (config !== null) writeFileSync(join(dir, "config.json"), `${JSON.stringify(config, null, 2)}\n`);
   const branch = branchName({
-    ticket_key: "FCX-1",
-    ticket_id: readTicket(dir, "FCX-1").ticket_id,
-    outcome: readContract(dir, "FCX-1").outcome,
+    ticket_key: "PRB-1",
+    ticket_id: readTicket(dir, "PRB-1").ticket_id,
+    outcome: readContract(dir, "PRB-1").outcome,
   });
 
   const at = new Date("2026-09-03T09:00:00.000Z");
-  let ticket: Ticket = readTicket(dir, "FCX-1");
+  let ticket: Ticket = readTicket(dir, "PRB-1");
   ticket = transition(ticket, "provisioning", "run started", at);
   ticket = transition(ticket, "executing", "1 attempt executed", at);
   ticket = transition(ticket, "verifying", "no deterministic checks are configured", at);
@@ -257,10 +257,10 @@ function publishedTicket(
 
 const NOW = new Date("2026-09-04T10:00:00.000Z");
 
-/** `focrux sync <KEY> --merge`, with the escape collection left out of it. */
+/** `perbo sync <KEY> --merge`, with the escape collection left out of it. */
 const syncMerge = (repo: string, streams: Streams) =>
   runSyncCommand({
-    argv: ["FCX-1", "--merge", "--repo", repo],
+    argv: ["PRB-1", "--merge", "--repo", repo],
     streams,
     cwd: repo,
     now: NOW,
@@ -288,8 +288,8 @@ describe("ac_1 — the switch, and the six conditions", () => {
     expect(streams.err.join("")).toContain(
       'the `merge` switch is "person", so this merge is a person\'s click: the pull request is open and waiting for one',
     );
-    expect(readTicket(dir, "FCX-1").state).toBe("pr_open");
-    expect(readTicket(dir, "FCX-1").delivery.merged_by).toBeNull();
+    expect(readTicket(dir, "PRB-1").state).toBe("pr_open");
+    expect(readTicket(dir, "PRB-1").delivery.merged_by).toBeNull();
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);
 
@@ -327,7 +327,7 @@ describe("ac_1 — the switch, and the six conditions", () => {
       answers: {
         view: view({
           commits: [
-            { oid: HEAD, messageHeadline: "FCX-1: paginate", messageBody: `Attempt: ${ATTEMPT}\n` },
+            { oid: HEAD, messageHeadline: "PRB-1: paginate", messageBody: `Attempt: ${ATTEMPT}\n` },
             { oid: OTHER, messageHeadline: "fix a typo", messageBody: "" },
           ],
         }),
@@ -356,7 +356,7 @@ describe("ac_1 — the switch, and the six conditions", () => {
 
       expect(mergeCall(gh.argv()), "it merged anyway").toBeUndefined();
       expect(streams.err.join("")).toContain(one.rule);
-      expect(readTicket(dir, "FCX-1").state).toBe("pr_open");
+      expect(readTicket(dir, "PRB-1").state).toBe("pr_open");
       expect(code).toBe(EXIT_CODES.did_not_complete);
     }, MERGE_TEST_TIMEOUT_MS);
   }
@@ -370,7 +370,7 @@ describe("ac_1 — the switch, and the six conditions", () => {
 
     expect(mergeCall(gh.argv())).toBeDefined();
     expect(code).toBe(EXIT_CODES.approve);
-    expect(readTicket(dir, "FCX-1").state).toBe("merged");
+    expect(readTicket(dir, "PRB-1").state).toBe("merged");
   }, MERGE_TEST_TIMEOUT_MS);
 });
 
@@ -386,7 +386,7 @@ describe("ac_1 — the refusals that are not one of the six", () => {
 
     expect(mergeCall(gh.argv())).toBeUndefined();
     expect(streams.err.join("")).toContain("merge.no_pull_request");
-    expect(readTicket(dir, "FCX-1").delivery.merged_by).toBeNull();
+    expect(readTicket(dir, "PRB-1").delivery.merged_by).toBeNull();
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);
 
@@ -399,7 +399,7 @@ describe("ac_1 — the refusals that are not one of the six", () => {
 
     expect(mergeCall(gh.argv())).toBeUndefined();
     expect(streams.err.join("")).toContain("merge.no_pull_request");
-    expect(readTicket(dir, "FCX-1").delivery.merged_by).toBeNull();
+    expect(readTicket(dir, "PRB-1").delivery.merged_by).toBeNull();
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);
 
@@ -423,8 +423,8 @@ describe("ac_1 — the refusals that are not one of the six", () => {
     expect(said).toContain("merge.refused_by_github");
     expect(said).toContain("Pull request #202 is not mergeable");
     expect(said).toContain("Base branch was modified");
-    expect(readTicket(dir, "FCX-1").state).toBe("pr_open");
-    expect(readTicket(dir, "FCX-1").delivery.merged_by).toBeNull();
+    expect(readTicket(dir, "PRB-1").state).toBe("pr_open");
+    expect(readTicket(dir, "PRB-1").delivery.merged_by).toBeNull();
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);
 });
@@ -449,7 +449,7 @@ describe("ac_2 — the merge, the trailer, and what is written back", () => {
 
     // `sync` read the merge back onto the delivery record, and the ticket
     // walked to `merged` on the same evidence any other sync walks it on.
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     expect(after.state).toBe("merged");
     expect(after.delivery.state).toBe("merged");
     expect(after.delivery.merged_by).toBe("loop");
@@ -496,7 +496,7 @@ describe("ac_3 — serial in phase 1", () => {
     expect(streams.err.join("")).toContain("merge.in_flight");
     // The refusal names what holds it, the way SCP-193's run lock does.
     expect(streams.err.join("")).toContain("AYO-2");
-    expect(readTicket(dir, "FCX-1").state).toBe("pr_open");
+    expect(readTicket(dir, "PRB-1").state).toBe("pr_open");
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);
 
@@ -514,7 +514,7 @@ describe("ac_3 — serial in phase 1", () => {
 
     expect(mergeCall(gh.argv())).toBeUndefined();
     expect(streams.err.join("")).toContain("merge.base_moved");
-    expect(readTicket(dir, "FCX-1").state).toBe("pr_open");
+    expect(readTicket(dir, "PRB-1").state).toBe("pr_open");
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);
 });

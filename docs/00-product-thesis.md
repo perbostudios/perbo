@@ -1,6 +1,6 @@
 # Product thesis
 
-Focrux is an open-source operating plane for intuitively getting your work done, no matter the scale of work ([D-001](11-open-decisions.md)). It runs a person's own coding agents on their repository, and brings back only what needs them.
+Perbo is an open-source operating plane for intuitively getting your work done, no matter the scale of work ([D-001](11-open-decisions.md)). It runs a person's own coding agents on their repository, and brings back only what needs them.
 
 ## The problem
 
@@ -14,7 +14,7 @@ Doing that by reading the agent's summary and skimming the diff is free and fast
 
 ## What changes for the person
 
-| | Without Focrux | With Focrux |
+| | Without Perbo | With Perbo |
 |---|---|---|
 | What "done" means | In the person's head, or one sentence in an issue | A contract drafted from the issue and approved in a minute: outcome, criteria and scope |
 | Checking the work | Read the agent's summary, skim the diff | Checks, then an independent reviewer that sees the contract, the diff and the checks, and never the agent's summary |
@@ -29,7 +29,7 @@ Developers who already work with Claude Code or Codex, alone or on a team ([D-00
 
 ## What it is not
 
-- Not an editor: Focrux reads code and never edits it ([D-015](11-open-decisions.md)).
+- Not an editor: Perbo reads code and never edits it ([D-015](11-open-decisions.md)).
 - Not an organisation of agents with job titles ([ADR-0011](adr/0011-control-loop-not-agent-organisation.md)).
 - Not a review product for other people's pull requests: review is the loop's step ([D-088](11-open-decisions.md)).
 - Not a service that holds your code: everything runs on your machine, under your own logins ([D-075](11-open-decisions.md)).
@@ -45,4 +45,4 @@ Developers who already work with Claude Code or Codex, alone or on a team ([D-00
 
 ## The commercial product
 
-Focrux is open source. What a team shares across people and machines is the control plane, sold on top of it ([D-016](11-open-decisions.md), [docs/17](17-commercial-open-source-and-validation.md)).
+Perbo is open source. What a team shares across people and machines is the control plane, sold on top of it ([D-016](11-open-decisions.md), [docs/17](17-commercial-open-source-and-validation.md)).

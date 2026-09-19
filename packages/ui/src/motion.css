@@ -1,4 +1,4 @@
-/* Motion for Focrux, from transitions.dev.
+/* Motion for Perbo, from transitions.dev.
    This file is not licensed under the Apache License, Version 2.0 that covers
    the rest of this repository. The transitions in it are used under the
    transitions.dev terms: https://transitions.dev/terms.html
@@ -8,7 +8,7 @@
    the published snippet for one transition the desktop uses, unchanged, including its
    prefers-reduced-motion guard. Theme colours the snippets read (--tabs-*,
    --shimmer-*, --think-*) are overridden per theme in tokens.css.
-   The one Focrux addition is at the end: the boards' own page entrance,
+   The one Perbo addition is at the end: the boards' own page entrance,
    written against the token scale. */
 :root {
   /* ── Motion tokens — shared scale ──────────────────────────────
@@ -812,7 +812,7 @@
   .t-think-text::before { display: none !important; }
 }
 
-/* Focrux — the boards' page entrance (`pageIn`), on the token scale:
+/* Perbo — the boards' page entrance (`pageIn`), on the token scale:
    the page-slide usage maps to --duration-fast, --ease-smooth-out,
    --distance-base and --blur-medium. */
 @keyframes fx-page-in {

@@ -26,11 +26,11 @@ for source in sorted(DIAGRAMS.glob("*.dot")):
     if not svg_path.exists() or svg_path.stat().st_size == 0:
         continue
 
-    svg_text = html.unescape(svg_path.read_text())
+    svg_text = html.unescape(svg_path.read_text(encoding="utf-8"))
     # Graphviz splits a label across one <text> element per line.
     rendered_text = " ".join(re.findall(r"<text[^>]*>(.*?)</text>", svg_text, re.DOTALL))
 
-    for label in re.findall(r'label="((?:[^"\\]|\\.)*)"', source.read_text()):
+    for label in re.findall(r'label="((?:[^"\\]|\\.)*)"', source.read_text(encoding="utf-8")):
         for line in label.split("\\n"):
             line = line.strip()
             # Skip empty and punctuation-only fragments; they are not emitted verbatim.

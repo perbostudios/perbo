@@ -3,7 +3,7 @@ import { existsSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { LimitsTableSchema, type CommandRecord } from "@focrux/contracts";
+import { LimitsTableSchema, type CommandRecord } from "@perbo/contracts";
 import { ADMISSION_RULES } from "../src/admission.js";
 import { runAgent, type AgentResult } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
@@ -22,26 +22,26 @@ import { scratch } from "./support.js";
  * has to keep being measured, which is what this test is.
  *
  * It spends real money on the user's own credential, so it is gated. Without
- * `FOCRUX_LIVE_AGENT_TESTS=1` it skips with the reason, which is what CI does.
+ * `PERBO_LIVE_AGENT_TESTS=1` it skips with the reason, which is what CI does.
  */
 
-const LIVE = process.env.FOCRUX_LIVE_AGENT_TESTS === "1";
-const binary = process.env.FOCRUX_AGENT_BINARY ?? "claude";
-const model = process.env.FOCRUX_AGENT_MODEL ?? "sonnet";
+const LIVE = process.env.PERBO_LIVE_AGENT_TESTS === "1";
+const binary = process.env.PERBO_AGENT_BINARY ?? "claude";
+const model = process.env.PERBO_AGENT_MODEL ?? "sonnet";
 
 const describeLive = LIVE ? describe : describe.skip;
 
 if (!LIVE) {
   // eslint-disable-next-line no-console -- the reason a skipped gate was skipped
   console.log(
-    "[live-guard] skipped: set FOCRUX_LIVE_AGENT_TESTS=1 (and have a `claude` " +
+    "[live-guard] skipped: set PERBO_LIVE_AGENT_TESTS=1 (and have a `claude` " +
       "credential) to run the pre-execution guard against the pinned binary.",
   );
 }
 
 /** A worktree that looks like a repository, because the executor orients in one. */
 function fixtureWorktree(): string {
-  const worktree = scratch("focrux-scp177-live-");
+  const worktree = scratch("perbo-scp177-live-");
   execFileSync("git", ["init", "--quiet"], { cwd: worktree });
   writeFileSync(join(worktree, "README.md"), "# fixture\n");
   return worktree;
@@ -49,7 +49,7 @@ function fixtureWorktree(): string {
 
 const worktree = LIVE ? fixtureWorktree() : "";
 /** Outside the worktree by construction: the guard's whole question. */
-const outsideTarget = join(tmpdir(), `focrux-scp177-probe-${process.pid}`);
+const outsideTarget = join(tmpdir(), `perbo-scp177-probe-${process.pid}`);
 const outsideWrite = `${outsideTarget}-write`;
 
 afterAll(() => {

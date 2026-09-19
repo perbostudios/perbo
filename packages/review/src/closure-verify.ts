@@ -1,4 +1,4 @@
-import type { ChangeSet, CheckResult, Finding, Scope } from "@focrux/contracts";
+import type { ChangeSet, CheckResult, Finding, Scope } from "@perbo/contracts";
 import { assessLegibility } from "./legibility.js";
 import { assessScope } from "./scope.js";
 import type { ModelCostBasis, ModelTurn, ModelUsage, ReviewModel } from "./provider.js";

@@ -9,7 +9,7 @@ import {
   transition,
   unattendedMergeStatus,
   type Ticket,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { runSyncCommand } from "../src/sync.js";
 import { readTicket, storeDir, writeTicket } from "../src/tickets.js";
@@ -30,12 +30,12 @@ import { readTicket, storeDir, writeTicket } from "../src/tickets.js";
 
 const SPAWN_DEADLINE_MS = 20_000;
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-sync-arm-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-sync-arm-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const PR = 41;
 const url = `https://github.com/o/r/pull/${PR}`;
-const BRANCH = "direct/focrux-1/search-results-are-paginated";
+const BRANCH = "direct/perbo-1/search-results-are-paginated";
 
 const gitIdentity = {
   ...process.env,
@@ -132,7 +132,7 @@ function directArmTicket(
   });
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-04T09:00:00.000Z");
-  let ticket: Ticket = readTicket(dir, "FCX-1");
+  let ticket: Ticket = readTicket(dir, "PRB-1");
   const arm = options.arm ?? "direct";
   ticket = transition(ticket, "provisioning", "the arm was provisioned", at);
   ticket = transition(ticket, "executing", "1 invocation", at);
@@ -181,14 +181,14 @@ describe("sync carries the arm across the record it rewrites", () => {
       process.env.GH_TOKEN = "ghp_scp206syncarmsentinel";
 
       const code = await runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
       });
 
       expect(code).toBe(EXIT_CODES.approve);
-      const after = readTicket(dir, "FCX-1");
+      const after = readTicket(dir, "PRB-1");
       expect(after.delivery.arm).toBe("direct");
       expect(after.delivery.pull_request_number).toBe(PR);
     },
@@ -197,7 +197,7 @@ describe("sync carries the arm across the record it rewrites", () => {
 
   it("reads a record written before the arm existed as the loop's", () => {
     const { dir } = directArmTicket("legacy");
-    const path = join(dir, "tickets", "FCX-1.json");
+    const path = join(dir, "tickets", "PRB-1.json");
     const raw = JSON.parse(readFileSync(path, "utf8")) as {
       delivery: Record<string, unknown>;
     };
@@ -223,14 +223,14 @@ describe("sync carries a direct-arm record to a scored merge", () => {
       process.env.GH_TOKEN = "ghp_scp206syncarmsentinel";
 
       const code = await runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
       });
 
       expect(code).toBe(EXIT_CODES.approve);
-      const after = readTicket(dir, "FCX-1");
+      const after = readTicket(dir, "PRB-1");
       expect(after.state).toBe("pr_open");
       expect(after.delivery.arm).toBe("direct");
       expect(after.history.some((row) => row.to === "independent_review")).toBe(false);
@@ -247,20 +247,20 @@ describe("sync carries a direct-arm record to a scored merge", () => {
       // the case the guard is for: the evidence disagrees with itself, and the
       // walk must still be refused rather than routed around.
       const { repo, dir } = directArmTicket("loop-stranded", { state: "executing", arm: "loop" });
-      const before = readFileSync(join(dir, "tickets", "FCX-1.json"), "utf8");
+      const before = readFileSync(join(dir, "tickets", "PRB-1.json"), "utf8");
       process.env.PATH = `${fakeGh("bin-loop-stranded", ghAnswer("OPEN"))}:${originalPath ?? ""}`;
       process.env.GH_TOKEN = "ghp_scp206syncarmsentinel";
       const streams = capture();
 
       const code = await runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams,
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
       });
 
       expect(code).toBe(EXIT_CODES.did_not_complete);
-      expect(readFileSync(join(dir, "tickets", "FCX-1.json"), "utf8")).toBe(before);
+      expect(readFileSync(join(dir, "tickets", "PRB-1.json"), "utf8")).toBe(before);
       expect(streams.err.join("")).toContain("refusing to reconcile it to pr_open");
     },
     SPAWN_DEADLINE_MS,
@@ -283,14 +283,14 @@ describe("sync carries a direct-arm record to a scored merge", () => {
       process.env.GH_TOKEN = "ghp_scp206syncarmsentinel";
 
       await runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
         mergeFacts: () => null,
       });
 
-      const after = readTicket(dir, "FCX-1");
+      const after = readTicket(dir, "PRB-1");
       expect(after.state).toBe("merged");
       expect(after.delivery.commits_outside_loop).toBe(false);
       expect(unattendedMergeStatus(after)).toBe("unattended");
@@ -312,14 +312,14 @@ describe("sync carries a direct-arm record to a scored merge", () => {
       process.env.GH_TOKEN = "ghp_scp206syncarmsentinel";
 
       await runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
         mergeFacts: () => null,
       });
 
-      const after = readTicket(dir, "FCX-1");
+      const after = readTicket(dir, "PRB-1");
       expect(after.delivery.commits_outside_loop).toBe(true);
       expect(unattendedMergeStatus(after)).toBe("attended");
     },
@@ -333,20 +333,20 @@ describe("sync carries a direct-arm record to a scored merge", () => {
       process.env.PATH = `${fakeGh(
         "bin-loop-trailer",
         ghAnswer("MERGED", [
-          { oid: "c1", messageHeadline: "FCX-1: pagination", messageBody: "Attempt: att_1\n" },
+          { oid: "c1", messageHeadline: "PRB-1: pagination", messageBody: "Attempt: att_1\n" },
         ]),
       )}:${originalPath ?? ""}`;
       process.env.GH_TOKEN = "ghp_scp206syncarmsentinel";
 
       await runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
         mergeFacts: () => null,
       });
 
-      expect(readTicket(dir, "FCX-1").delivery.commits_outside_loop).toBe(false);
+      expect(readTicket(dir, "PRB-1").delivery.commits_outside_loop).toBe(false);
     },
     SPAWN_DEADLINE_MS,
   );

@@ -19,7 +19,7 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
 });
 function fixture(handler: string) {
-  const root = mkdtempSync(join(tmpdir(), "focrux-catalog-test-"));
+  const root = mkdtempSync(join(tmpdir(), "perbo-catalog-test-"));
   temporary.push(root);
   const binary = join(root, "provider cli");
   const trace = join(root, "trace.jsonl");

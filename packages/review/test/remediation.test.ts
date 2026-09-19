@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ReviewArtifactSchema, exitCodeForDecision, type Finding } from "@focrux/contracts";
+import { ReviewArtifactSchema, exitCodeForDecision, type Finding } from "@perbo/contracts";
 import {
   applyBlocking,
   decideBlocking,
@@ -339,12 +339,12 @@ describe("families that never go back to the executor", () => {
  */
 describe("the closure question", () => {
   /**
-   * The digest of everything the reviewer is shown, at `reviewer_v9`. It is a
+   * The digest of everything the reviewer is shown, at `reviewer_v10`. It is a
    * checked-in constant on purpose: a test that recomputed it from the code
    * under test would agree with any change, which is what the version literal
    * did before it.
    */
-  const REVIEWER_V9_SURFACE = "cec3a27f885e71e8";
+  const REVIEWER_V10_SURFACE = "11c488a039e2faca";
   const CONTRACT = {
     plan_id: "plan_surface",
     version: 1,
@@ -433,8 +433,8 @@ describe("the closure question", () => {
       .digest("hex")
       .slice(0, 16);
     expect({ version: PROMPT_VERSION, surface }).toEqual({
-      version: "reviewer_v9",
-      surface: REVIEWER_V9_SURFACE,
+      version: "reviewer_v10",
+      surface: REVIEWER_V10_SURFACE,
     });
   });
 });

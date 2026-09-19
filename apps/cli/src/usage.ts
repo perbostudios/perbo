@@ -1,11 +1,10 @@
-/**
- * The help `focrux` writes: every command it carries, in the order the entry
- * point lists them.
- */
+import { CORPUS_PREPARE_COMMAND } from "./corpus-cache.js";
 
-export const USAGE = `focrux — contract to pull request, locally
+/** The help `perbo` writes: every command it carries. */
 
-  focrux doctor --repo . [--config <file>] [--worktree-root <dir>] [--write-config] [--probe]
+export const USAGE = `perbo — contract to pull request, locally
+
+  perbo doctor --repo . [--config <file>] [--worktree-root <dir>] [--write-config] [--probe]
       Can this machine and this repository run a ticket at all? The machine
       first — node, git, the package manager the repository installs with, the
       coding agent, the reviewer credential and, with --publish, gh — then
@@ -13,7 +12,7 @@ export const USAGE = `focrux — contract to pull request, locally
       specific reason before an attempt rather than in the
       middle of one. Then the ceilings the runner enforces here, and every
       recorded attempt that already hit one with the config key that raises it.
-      A checkout with no .focrux/config.json is shown a proposed one;
+      A checkout with no .perbo/config.json is shown a proposed one;
       --write-config writes it, never over a file that exists. Given a worktree
       root, it also says what a package manager will make of that location.
       --config overlays an explicit JSON object on the repository configuration
@@ -23,7 +22,7 @@ export const USAGE = `focrux — contract to pull request, locally
       One line reports the corpus cache at .local/corpus-cache: absent, or the
       commit it is pinned to and the fixtures it holds, or behind — naming both
       its commit and the one the recorded regression score was measured against.
-      Absent and behind name \`focrux-corpus prepare\` as the fix. It is a warning:
+      Absent and behind name \`${CORPUS_PREPARE_COMMAND}\` as the fix. It is a warning:
       the corpus is what scores the reviewer, not what runs an attempt, so it
       never moves the exit code.
 
@@ -34,15 +33,20 @@ export const USAGE = `focrux — contract to pull request, locally
       an attempt has spent anything, rather than at the review. The key is never
       printed, whatever the provider echoes back.
 
-  focrux run --ticket FCX-1 [--publish] [--resume-from <bundle_id>]
-  focrux run --ticket FCX-1 --relevel [--publish]
-  focrux run --contract c.json --config run.json [--publish]
-  focrux run --outcome "..." [--criterion "..."] [--path "src/**"]
-  focrux run --pr owner/repo#412
+  perbo run --ticket PRB-1 [--publish] [--resume-from <bundle_id>]
+  perbo run --ticket PRB-1 --relevel [--publish]
+  perbo run --contract c.json --config run.json [--publish]
+  perbo run --outcome "..." [--criterion "..."] [--path "src/**"]
+  perbo run --pr owner/repo#412
       Provision, materialize, execute one agent under the permission profile,
       seal the change set, run the pinned checks, review independently, route
       remediable findings back to the executor, and — with --publish — open a
       pull request. A human merges it.
+
+      On Claude the executor may start subagents, from the roles Perbo
+      defines and no others. Their writes pass the same scope guard, each from
+      its own directory; \`perbo inspect\` names the one a refusal belongs to;
+      and the review sees none of their work.
 
       With --relevel, the ticket is at pr_open and the run merges the base's
       tip into its branch instead of running it: the pinned checks alone where
@@ -53,10 +57,19 @@ export const USAGE = `focrux — contract to pull request, locally
       the ticket stays at pr_open. Exit 0 when the branch is level.
 
       With --ticket, the contract comes from the admitted ticket and the run
-      configuration from <repo>/.focrux/config.json — the checks and the
+      configuration from <repo>/.perbo/config.json — the checks and the
       materialisation manifest a repository agrees once rather than per ticket.
       The ticket is moved as the run goes, and moved before it starts, so a run
       that never returns does not leave a ticket saying "ready".
+
+      A ticket drafted from a spec has that spec read first: one edited since
+      approval read its bytes, or naming an @Symbol or a path the repository
+      had then and has since lost, stops the run before anything is moved or
+      provisioned and leaves the ticket at plan_invalid, which the work is
+      admitted again out of. A name nothing can judge is a warning on stderr
+      and never a refusal — including every @Symbol on a ticket approved over
+      a tree the index could not be believed against, which is a baseline with
+      no symbols in it and a run that says so on each attempt.
 
       With --outcome or --pr, the same loop runs with no admission step in front
       of it: the contract is minted from what you typed, or from the pull
@@ -67,7 +80,7 @@ export const USAGE = `focrux — contract to pull request, locally
       done here, against this checkout's HEAD. The whole record — the run, the
       attempts, the bundles, the checks and the review — goes to this
       repository's <store>, judged by the same pinned checks, protected paths
-      and ceilings a ticket run is, and \`focrux inspect <run id>\` reads it back.
+      and ceilings a ticket run is, and \`perbo inspect <run id>\` reads it back.
       The run prints what it cost when it ends, whatever ended it.
 
       With --resume-from, the run starts from the retained change.diff of the
@@ -78,19 +91,19 @@ export const USAGE = `focrux — contract to pull request, locally
       records the cut one as what it continues. A base commit that has moved, or
       a diff that no longer applies, refuses the run rather than merging
       something nobody asked for. The bundle it reads is never rewritten.
-      \`focrux inspect <ticket>\` names the bundle of every attempt on record.
+      \`perbo inspect <ticket>\` names the bundle of every attempt on record.
 
-  focrux review --contract c.json --diff change.diff --checks checks.json --repo .
-  git diff main... | focrux review --contract c.json --diff - --checks checks.json
+  perbo review --contract c.json --diff change.diff --checks checks.json --repo .
+  git diff main... | perbo review --contract c.json --diff - --checks checks.json
       The review step on its own, with nothing behind it. \`-\` as the value of
       --diff or --checks reads that one from standard input, so a CI step can
       pipe it instead of writing a temporary file; one of the two may read
       standard input, not both, and an empty one is refused before the reviewer
       is called. The verdict still goes to stdout alone.
 
-  focrux review --pr owner/repo#412
-  focrux review --head <ref> --base <ref> --outcome "..." [--criterion "..."]
-      Review a change Focrux never admitted. With --pr, the contract is the
+  perbo review --pr owner/repo#412
+  perbo review --head <ref> --base <ref> --outcome "..." [--criterion "..."]
+      Review a change Perbo never admitted. With --pr, the contract is the
       pull request's own: the outcome is its \`Outcome\` section, or its first
       paragraph, or its title, and the criteria are the list under a heading
       that names them — and where it names none, the change is judged against
@@ -102,13 +115,15 @@ export const USAGE = `focrux — contract to pull request, locally
       theirs.
 
       The verdict, the findings and the routing decision — executor, human or
-      pass — are printed and written to <repo>/.focrux/reviews/. Nothing is
+      pass — are printed and written to <repo>/.perbo/reviews/. Nothing is
       sent anywhere: reading the pull request is the only thing that leaves
       this machine, and nothing is written to GitHub at all.
 
-  focrux admit --outcome "..." --criterion "what :: how it is proven" --path "src/**"
-  focrux admit --from owner/repo#412 [--provider claude-cli] [--model <id>]
-  focrux admit --from-file issue.md [--provider claude-cli] [--model <id>]
+  perbo admit --outcome "..." --criterion "what :: how it is proven" --path "src/**"
+  perbo admit --from owner/repo#412 [--provider claude-cli] [--model <id>]
+  perbo admit --from-file issue.md [--provider claude-cli] [--model <id>]
+  perbo admit --from-spec specs/<slug>/spec.md [--provider claude-cli]
+  perbo admit --from-spec specs/<slug>/spec.md --start-over PRB-1
       Admit one piece of work. Creates a native ticket and its plan contract
       against HEAD, in plan_review. With --from, a model drafts the outcome,
       the criteria and a proposed scope from the issue; the draft is saved
@@ -117,34 +132,89 @@ export const USAGE = `focrux — contract to pull request, locally
       is the title and whose rest is the body, for work that never reached a
       tracker; the file is external text, read as data and never as
       instructions, and anything in it addressed to the drafter is flagged on
-      the draft. The two are mutually exclusive. --outcome, --criterion and
-      --path override the draft's part. The drafter is shown the tickets in
+      the draft. --from-spec drafts from a spec committed in the repository,
+      under the headings Outcome, Requirements, No-Gos, Rabbit holes and
+      Notes: its requirement ids are the only ones a criterion may cite, its
+      No-Gos are read from their own heading rather than drafted, and its path
+      and content hash are recorded on the ticket. The spec lives in a folder
+      of its own under the spec folder, at specs/<slug>/spec.md, and one that
+      does not is refused: that folder is recorded whole. Recorded with it is
+      every other file the loop commits: the folder's own files but for the
+      interview's session record, and the CONTEXT.md and ADR files this
+      checkout has changed. The loop puts those on the ticket's branch as its
+      first commit, and the review reads the diff after it. The spec's own
+      folder is off limits to the executor, and a page per node is written
+      beside the spec and rewritten whenever the spec or the graph
+      changes. --start-over
+      drafts an existing ticket's plan again from the same spec, keeping the
+      ticket and admitting no other. The three sources are mutually
+      exclusive. --outcome, --criterion and --path override the draft's part,
+      and either of the last two drops the drafted graph with what it
+      replaced. The drafter is shown the tickets in
       flight and may propose --depends-on among them, and may open a few
       files. However large the issue, the draft is one contract and admits
       one ticket. The level is derived from the scope; --level may raise it,
       never lower it. Admitting takes ownership of this one thing; a backlog
       is never migrated.
 
-  focrux approve FCX-1
+  perbo approve PRB-1
       Approve the contract. It is immutable from that moment. Records the
       person's time from first rendering to approval and how many fields they
-      changed, which is the admission-friction instrument.
+      changed, which is the admission-friction instrument. For work admitted
+      from a spec it also records what that spec said at this moment: its bytes'
+      hash, so a later edit is judged against the spec you approved rather than
+      the one the draft was written from, and the names it uses that this
+      repository has, which are the only names a later reading may call stale.
+      Approving over uncommitted changes in tracked files records no @Symbol at
+      all, for the life of the ticket, because the index is not evidence about
+      that tree — and records that it happened, so every later reading reports
+      those names as not judged rather than calling the spec current over one
+      that has gone. Commit what you are carrying and rebuild the index before
+      you approve; nothing after approval can take that half of the baseline.
 
-  focrux list [--all] [--json]
+  perbo list [--all] [--json]
       The admitted work, and where each piece is. --json writes the same
       listing as one JSON document on stdout and nothing else; its shape is
       docs/design/list-json.md.
 
-  focrux principle add "focrux list shows open tickets; finished ones need --all." [--repo .]
+  perbo principle add "perbo list shows open tickets; finished ones need --all." [--repo .]
       Record a product answer no determinable practice could settle;
-      every later executor brief consults it. \`focrux principle list\` prints them.
+      every later executor brief consults it. \`perbo principle list\` prints them.
 
-  focrux sync FCX-1 [--merge]
+  perbo index --repo . [--json]
+      Build this repository's exported symbols and import graph with
+      TypeScript's own parser, and write it to <repo>/.perbo/index.json.
+      Reads the tracked .ts .tsx .mts .cts .js .jsx .mjs .cjs files, skipping
+      node_modules, dist and the store itself; a file over a megabyte, a
+      symbolic link, or one carrying a name the record cannot hold is listed as
+      skipped rather than dropped. For each file: the names it
+      exports with what each was declared as, and each import with the file in
+      this repository it resolves to — a relative path by the extension and
+      index rules the code itself uses, a workspace package by the entry its
+      manifest declares, anything else external. No type checker runs, nothing
+      is sent anywhere, and no code is edited or written: the record holds
+      names, kinds, lines and paths, and no line of the source it read.
+
+      Prints a summary; --json prints the record it wrote. A repository with no
+      tracked TypeScript or JavaScript is told so and named by the extensions
+      it does carry, and no index is written — exit 0 either way, because
+      neither answer is a failure. Nothing keeps the file current: it is
+      stamped with the commit it was built at and with whether the tracked
+      files carried uncommitted changes, and rebuilding is this command. The
+      stale-spec check reads it and believes it only at this checkout's commit
+      with nothing uncommitted either side. A reading that cannot believe it
+      says so, naming the spec's names as not judged; a perbo approve that
+      cannot believe it records no @Symbol at all and records that it could
+      not, so every later reading of that ticket says the same. Nothing after
+      approval puts those names back, so the index matters most at the moment
+      you approve.
+
+  perbo sync PRB-1 [--merge]
       Read the pull request, its merge state, its checks and the boxes ticked
       against each stop through local gh; write them onto the ticket and into
       <store>/state/<ticket_id>.stops.json. Idempotent: the whole record is
       rewritten from what gh reported, so running it twice changes nothing.
-      With --merge, and only where .focrux/config.json sets merge to "loop",
+      With --merge, and only where .perbo/config.json sets merge to "loop",
       merge it first: a separate review run must have approved this head by
       name, the checks on it must be green, GitHub must report it mergeable,
       every commit must carry the loop's attempt trailer and a verified
@@ -152,11 +222,11 @@ export const USAGE = `focrux — contract to pull request, locally
       since the approval. Any of those missing is a stop that names
       the condition and exits 3. The default is "person" — a person's click.
 
-  focrux sync [--repo .] [--store <dir>]
-  focrux sync <local run id>
+  perbo sync [--repo .] [--store <dir>]
+  perbo sync <local run id>
       The same read for work no ticket was admitted for: with no key, every
       local run in the store, and with a run id, that one. What gh says about
-      the run's own pull request is written onto the record focrux run wrote
+      the run's own pull request is written onto the record perbo run wrote
       about itself — that it merged, that it was closed without merging, the
       review verdicts left on it, whether GitHub can still merge it,
       whether a commit outside the loop reached it, and the checks its head
@@ -177,25 +247,25 @@ export const USAGE = `focrux — contract to pull request, locally
       "no pull request on that branch", both leave the record as it was rather
       than erasing the pull request the run itself published, and syncing one
       named run exits 3 where the read did not happen. A repository with
-      no .focrux directory at all, or one holding neither runs nor tickets,
+      no .perbo directory at all, or one holding neither runs nor tickets,
       says so in one line and exits 0: nothing has run there yet, which is not
       a broken store.
 
-  focrux serve [--repo .] [--store <dir>] [--publish] [--interval 60s] [--once] [--json] [--no-endpoint]
+  perbo serve [--repo .] [--store <dir>] [--publish] [--interval 60s] [--once] [--json] [--no-endpoint]
       The queue over this store: one process that outlives a run. Each tick it
       fetches the base ref — the queue's only fetch; the runner still
       reads the local ref — syncs every open pull request (and, where
-      .focrux/config.json sets merge to "loop", asks each in queue order to
+      .perbo/config.json sets merge to "loop", asks each in queue order to
       merge under sync --merge's conditions until one does), reconciles any ticket a dead
-      run left mid-state, decides who waits, and starts focrux run --ticket as
+      run left mid-state, decides who waits, and starts perbo run --ticket as
       a child process for each ready ticket up to concurrent_local_attempts,
       counting a run a person started by hand. Queue order is a ticket's
       dependencies first, then priority, then admission time. A ticket waits — state blocked, the reason on its record
-      and in focrux list — while a depends_on key has not merged, or while a
+      and in perbo list — while a depends_on key has not merged, or while a
       ticket ahead of it holds a scope this one's reaches: its globs until it
       has sealed, the paths it changed afterwards, generated paths left out.
       The wait ends on its own when that ticket merges. Where
-      .focrux/config.json names a tracker ({ "repository": "owner/repo",
+      .perbo/config.json names a tracker ({ "repository": "owner/repo",
       "draft_label": "<label>" }), each tick also drafts one open issue carrying
       the label into plan_review through admit --from: one draft a tick (a
       draft is a few model turns), the lowest-numbered of the newest hundred
@@ -207,7 +277,7 @@ export const USAGE = `focrux — contract to pull request, locally
       While it runs it hosts a tool endpoint on loopback for a session of
       your own (below); --no-endpoint hosts none.
 
-  focrux mcp [--repo .] [--store <dir>] [--drafter] [--json]
+  perbo mcp [--repo .] [--store <dir>] [--drafter] [--json]
       The block a Claude Code or Codex session pastes to reach the queue's
       endpoint: the URL and this queue's capability token, in the forms each
       CLI takes for one session or saved for the project. Prints, never writes.
@@ -217,7 +287,7 @@ export const USAGE = `focrux — contract to pull request, locally
       cannot approve, publish or merge: those stay your keystroke. --drafter
       prints the read-only token instead. Needs a running serve.
 
-  focrux agent [--repo .] [--store <dir>] [--provider claude|codex] [-- <provider args>]
+  perbo agent [--repo .] [--store <dir>] [--provider claude|codex] [-- <provider args>]
       Start your own Claude Code (default) or Codex session in this checkout
       with the endpoint injected for that process alone — through a 0600 file
       or an environment variable, never an argument — and a short orientation
@@ -225,7 +295,24 @@ export const USAGE = `focrux — contract to pull request, locally
       neutralised, because this is you at a keyboard with a helper, and the
       session holds no loop authority. Arguments after -- go to the provider.
 
-  focrux sync --all-merged [--force]
+  perbo interview --repo . --spec specs/<slug> [--session <id>] [--model <id>]
+                   [--provider claude|codex]
+      Interview yourself about a piece of work with your own session — Claude
+      Code through the Claude Agent SDK, or Codex through codex app-server —
+      and write the spec. It reads anything and runs read-only commands; it
+      writes that spec's folder, CONTEXT.md and the ADR folder, and nothing
+      else. Anything outside that is refused rather than put to you: there are
+      no permission prompts, and on Codex the app server's own approval
+      requests are answered by the same rules rather than reaching you. Its
+      generate_plan tool drafts one ticket from the spec, and after that
+      edit_plan and undo_edit change the plan through the validated edit path,
+      recorded as the interview's. It cannot approve, publish or merge. Your
+      turns arrive as JSON lines on stdin; every event leaves as one on stdout.
+      The session id is printed and kept beside the spec, so --session <id>
+      continues the conversation: the SDK's session on Claude, and the app
+      server's own thread resume on Codex.
+
+  perbo sync --all-merged [--force]
       Read every ticket whose delivery already reports merged, once each, and
       fill commits_outside_loop and github_credential — the fields a ticket
       merged before they existed never got. Prints one line per ticket (its
@@ -234,16 +321,33 @@ export const USAGE = `focrux — contract to pull request, locally
       A ticket whose commits_outside_loop is already known is left alone;
       --force re-reads it anyway. A one-time backfill, not a standing sync.
 
-  focrux edit FCX-1 [--outcome "..."] [--criterion "..."] [--path "..."]
+  perbo edit PRB-1 [--outcome "..."] [--criterion "..."] [--path "..."]
+  perbo edit PRB-1 --graph-edit '<json>' [--author you|interview]
+  perbo edit PRB-1 --undo <n>
       Open the contract in $VISUAL or $EDITOR before approval and re-validate
       it on return; a contract that no longer parses is refused with its
       issues listed and the file left as edited. With --outcome, --criterion
       or --path, edit without an editor: each replaces the whole of its part.
       Only a ticket in plan_review may be edited.
 
-  focrux inspect FCX-1 [--attempt <id>] [--json]
-  focrux inspect <local run id> [--attempt <id>] [--json]
-  focrux inspect FCX-1 --verify <attempt id> [--json]
+      --graph-edit applies one edit to the plan's execution graph: add_node,
+      split_node, merge_nodes, delete_node, set_criterion, set_node_paths,
+      add_edge or remove_edge. It is applied to a copy and the whole result is
+      validated, so a refused edit changes nothing and says why. Each one is
+      recorded with its author, what it touched and the values either side;
+      --author interview marks an edit a person's own agent session asked for,
+      which does not count towards the admission edit count. --undo <n> puts
+      one back, by its number in that record, and is refused when a later edit
+      still in force changed the same node, edge or criterion. add_edge and
+      remove_edge still apply after approval, because the order between nodes
+      is approach; everything else is contract and freezes at approval.
+
+      One edit at a time: --graph-edit, --undo and the flag edits are separate
+      paths and cannot be combined.
+
+  perbo inspect PRB-1 [--attempt <id>] [--json]
+  perbo inspect <local run id> [--attempt <id>] [--json]
+  perbo inspect PRB-1 --verify <attempt id> [--json]
       Read a ticket's — or a local run's — attempts back from the store: how
       each ended, what it
       used against which ceiling, cost with its basis, the checks, the review
@@ -252,6 +356,22 @@ export const USAGE = `focrux — contract to pull request, locally
       stands in the queue and what it waits on. --attempt narrows to one and
       adds the bundle's objects and the change set's files.
 
+      For a ticket drafted from a spec it prints whether that spec is still
+      the one the contract was approved from: the path, and either that it is
+      unedited with every name in it still here, or each reason it is stale,
+      or what could not be judged. A ticket that has not been approved has no
+      such moment, so its spec is measured from admission and the reading says
+      which of the two it took. It prints this whatever state the ticket is in
+      and moves nothing, so a run in flight carries the flag and continues.
+
+      For a ticket it also prints the plan's execution graph — each node with
+      its criteria and its paths, then the order suggested between them, which
+      is approach and may change while the work runs — and the plan's size, S
+      to XL, from fixed thresholds over its nodes, its criteria and the files
+      and packages in scope, with the counts that set it marked. A flat plan
+      has no graph section and one size line. It forecasts neither cost nor
+      time.
+
       --verify checks the record instead of reading it: it recomputes the
       sha256 of every object that attempt's bundles name and prints
       "verified: n objects", exit 0. An object whose bytes are not what the
@@ -259,28 +379,28 @@ export const USAGE = `focrux — contract to pull request, locally
       names and the store does not hold is reported as missing, which is a
       different fault in different words. Either exits 2. It writes nothing.
 
-  focrux baseline start "<title>" [--ref owner/repo#N]
-  focrux baseline pause | resume | stop [--pr <url>] [--note "..."]
-  focrux baseline abandon [--reason "..."] | list [--json]
+  perbo baseline start "<title>" [--ref owner/repo#N]
+  perbo baseline pause | resume | stop [--pr <url>] [--note "..."]
+  perbo baseline abandon [--reason "..."] | list [--json]
       The direct-agent wall clock to compare against: "start work" to
-      "pull request opened", pauses excluded, in <repo>/.focrux/baseline.json.
+      "pull request opened", pauses excluded, in <repo>/.perbo/baseline.json.
       Capture it before the first ticket runs — the file records whether that
       happened and never pretends. list prints the count, median and p90, and
       says how far from the ten entries the comparison wants it is.
 
-  focrux baseline open --partner <id> [--agent] --agreed-on <date>
+  perbo baseline open --partner <id> [--agent] --agreed-on <date>
                        --agreed-with "<who>" --record "<where>"
-  focrux baseline time --partner <id> --item <ID> --title "<t>"
+  perbo baseline time --partner <id> --item <ID> --title "<t>"
                        --started <iso> --opened <iso> [--interruptions <min>]
-  focrux baseline time --partner <id> --from bl_<id> [--item <ID>]
-  focrux baseline seal --partner <id>
-  focrux baseline run  --partner <id> --item <ID> --started <iso>
+  perbo baseline time --partner <id> --from bl_<id> [--item <ID>]
+  perbo baseline seal --partner <id>
+  perbo baseline run  --partner <id> --item <ID> --started <iso>
                        [--opened <iso>] [--interruptions <min>] [--friction <min>]
                        [--abandoned "<reason>"] [--defect "<summary> :: <url>"]
-  focrux baseline routing --partner <id> --period "<when>" --eligible <n>
+  perbo baseline routing --partner <id> --period "<when>" --eligible <n>
                           --voluntary <n> [--on-request <n>]
-  focrux baseline result [--partner <id>] [--json]
-      The E1 comparison itself, in <repo>/.focrux/e1.json. A partner's
+  perbo baseline result [--partner <id>] [--json]
+      The E1 comparison itself, in <repo>/.perbo/e1.json. A partner's
       baseline is ten timed tickets and is sealed before their first product
       run; a sealed baseline cannot be added to, edited or reconstructed. The
       ratio is computed from product runs of those same ten work items and
@@ -289,7 +409,7 @@ export const USAGE = `focrux — contract to pull request, locally
       it. --agent marks the AI stand-in's own agent-direct baseline, which is
       reported on its own and pooled with no partner's.
 
-  focrux stops [--json] [--repo .] [--store <dir>] [--since <ISO date>]
+  perbo stops [--json] [--repo .] [--store <dir>] [--since <ISO date>]
               [--by-week] [--arm loop|direct]
       Precision of stopping, measured live from the answers on pull requests:
       of the changes with an answer, the share a person endorsed, with a 95%
@@ -320,14 +440,14 @@ export const USAGE = `focrux — contract to pull request, locally
       only, which is how the loop-versus-direct-agent registration states the
       metric; without it every merged ticket counts, as before.
 
-  focrux verdict <review> --endorse|--override <stop key> [--note "..."]
-  focrux verdict <review> --accept|--reject <finding key> [--note "..."]
+  perbo verdict <review> --endorse|--override <stop key> [--note "..."]
+  perbo verdict <review> --accept|--reject <finding key> [--note "..."]
               [--author "..."] [--stand-in] [--replace] [--repo .]
               [--store <dir>] [--json]
       Answer a review here instead of on the pull request. <review> is a ticket
       key, a pull request (url or number) or a review id — including the id
       \`review --pr\` printed for a change nothing ran here, which is written to
-      <repo>/.focrux/reviews/ and files no attempt; the key is a finding
+      <repo>/.perbo/reviews/ and files no attempt; the key is a finding
       key, whole or by any prefix that names one — the same key the checkbox on
       the pull request carries, so a stop answered either way is one decision.
       --endorse and --override answer a stop, exactly as the two boxes do;
@@ -340,13 +460,13 @@ export const USAGE = `focrux — contract to pull request, locally
       the two lines to set are printed. --stand-in says an AI answered in a
       person's place: the row is marked as the machine's and is left out of
       every number reported as a person's, which is what a signed tick on a
-      pull request does too. \`focrux stops\` counts
-      it beside the answers read off pull requests and \`focrux inspect\` prints
+      pull request does too. \`perbo stops\` counts
+      it beside the answers read off pull requests and \`perbo inspect\` prints
       it beside its finding. A key that already has a decision is refused
       without --replace, and a replacement supersedes the earlier row rather
       than overwriting it.
 
-  focrux verdict --list <change> [--json] [--repo .] [--store <dir>]
+  perbo verdict --list <change> [--json] [--repo .] [--store <dir>]
       Read those decisions back: every one recorded for a change — the finding
       key, the decision, who decided and when — newest first, with a replaced
       one kept and marked. <change> is named the same way as above. Who decided
@@ -355,18 +475,18 @@ export const USAGE = `focrux — contract to pull request, locally
       has been decided about prints "no decisions recorded". --json prints the
       rows as <store>/verdicts.json holds them, narrowed to this change.
 
-  focrux escapes [--json] [--repo .] [--store <dir>]
+  perbo escapes [--json] [--repo .] [--store <dir>]
       Of the tickets whose change merged, how many were reverted and how many
       had one of their paths touched again within fourteen days —
       two columns, never summed, each naming the merge commit, the later
       commit and the paths, printed in one table with the two numbers stops
-      prints. Offline: it reads only what \`focrux sync\` wrote to
+      prints. Offline: it reads only what \`perbo sync\` wrote to
       <store>/state/<ticket_id>.escapes.json. Each change's fourteen days run
       from its own merge date: one merged fewer than fourteen days ago reads
       "not yet due" with the day it falls due, never zero, and the summary
       counts the due changes and the not-yet-due ones separately.
 
-Required for admit (unless --from or --from-file drafts them)
+Required for admit (unless --from, --from-file or --from-spec drafts them)
   --outcome <sentence>    one sentence: what will be true afterwards
   --criterion <text :: assertion [:: kind]>   repeatable. What must be proven,
                           then the assertion that proves it, then how: test
@@ -379,7 +499,14 @@ Drafting for admit
   --from owner/repo#412   draft the contract from this GitHub issue with a model
   --from-file <file>      draft it from a Markdown file instead: first line the
                           title, the rest the body. External text, like an issue
-                          body. Cannot be combined with --from
+                          body
+  --from-spec <file>      draft it from a spec's spec.md, with its requirement
+                          ids and its No-Gos. External text too. The three
+                          drafting sources are mutually exclusive
+  --start-over <KEY>      with --from-spec: draft that ticket's plan again from
+                          the same spec. The same key, a new plan version, and
+                          the graph edits since the last draft dropped, kept in
+                          the log marked replaced. Only a ticket in plan_review
   --provider <name>       'claude-cli' (default, the locally installed \`claude\` and
                           its own login), 'anthropic' (ANTHROPIC_API_KEY) or
                           'codex-cli'; the drafter uses the reviewer's transport
@@ -387,8 +514,8 @@ Drafting for admit
 
 Optional for admit
   --repo <dir>            the repository being worked in (default .)
-  --store <dir>           where tickets live (default <repo>/.focrux)
-  --prefix <XXX>          ticket key prefix (default FCX)
+  --store <dir>           where tickets live (default <repo>/.perbo)
+  --prefix <XXX>          ticket key prefix (default PRB)
   --criteria-file <file>  one criterion per line, # for comments
   --prohibit <glob>       repeatable, added to the prohibited paths
   --generated <glob>      repeatable, exempt from scope accounting
@@ -398,7 +525,7 @@ Optional for admit
   --manual-reason <why>   why that criterion cannot be automated
   --priority <p>          urgent | high | normal | low
   --label <name>          repeatable
-  --depends-on FCX-2      repeatable, a ticket that must be done first
+  --depends-on PRB-2      repeatable, a ticket that must be done first
   --source owner/repo#412 where the work was before admission
   --source-url <url>      its link
   --approve               approve the contract as part of admitting it
@@ -418,7 +545,7 @@ Optional for a review with no ticket
   --path <glob>           repeatable. What the change was allowed to touch;
                           without it nothing is out of scope, because nobody
                           said what was in it
-  --store <dir>           where the review is written (default <repo>/.focrux)
+  --store <dir>           where the review is written (default <repo>/.perbo)
 
 Optional for review
   --checks <file>         deterministic CheckResult[]; they outrank any model claim.
@@ -428,11 +555,11 @@ Optional for review
   --suppressions <file>   authorised, expiring per-rule waivers
   --rule-authority <file> measured false-positive rates, from a corpus run
   --bundle <dir>          write the run record (prompt, files read, turns) here
-  --state <dir>           where an unfinished review is saved (default .focrux/reviews)
+  --state <dir>           where an unfinished review is saved (default .perbo/reviews)
   --resume <review_id>    re-run only the criteria an earlier review left unresolved
   --model <id>            override the reviewer model
   --provider <name>       'claude-cli' (default: the locally installed \`claude\`
-                          and its own login, as \`focrux run\` uses), 'anthropic'
+                          and its own login, as \`perbo run\` uses), 'anthropic'
                           (ANTHROPIC_API_KEY) or 'codex-cli' (the locally
                           installed \`codex\` and its own login)
   --max-turns <n>         cap the reviewer's file reads
@@ -462,10 +589,10 @@ For run and doctor
                           limits and the remediation round bound; doctor overlays
                           it for readiness and any newly proposed configuration
   --repo <dir>            the checkout to diagnose (doctor only, default .)
-  --store <dir>           where tickets, config and attempts live (default <repo>/.focrux)
+  --store <dir>           where tickets, config and attempts live (default <repo>/.perbo)
   --worktree-root <dir>   where worktrees would go (doctor only); checked for a
                           package-manager workspace above it
-  --write-config          doctor only: write the proposed .focrux/config.json when
+  --write-config          doctor only: write the proposed .perbo/config.json when
                           the checkout has none
   --probe                 doctor only: make one minimal call at the configured
                           reviewer model and name what refused it. Blocking with
@@ -484,7 +611,7 @@ For run and doctor
   --quiet                 suppress progress on stderr
 
 Credentials
-  The agent authenticates with the user's own credential and Focrux never reads,
+  The agent authenticates with the user's own credential and Perbo never reads,
   stores or forwards it (BYOK). ANTHROPIC_API_KEY, where the reviewer uses
   it, is read from the environment and never written to a bundle, a log or an
   artifact. The runner holds the Git credential and performs the push and the

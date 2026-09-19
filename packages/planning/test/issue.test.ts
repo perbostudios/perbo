@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { PlanningError, fetchGitHubIssue, parseIssueReference } from "../src/index.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-planning-issue-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-planning-issue-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 /** A stand-in `gh` that records its argv and prints a fixed answer. */

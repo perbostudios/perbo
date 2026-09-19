@@ -1,0 +1,81 @@
+diff --git a/packages/store/src/cache.ts b/packages/store/src/cache.ts
+new file mode 100644
+index 0000000..a443489
+--- /dev/null
++++ b/packages/store/src/cache.ts
+@@ -0,0 +1,27 @@
++import { createClient, type StoreClient } from "./client.js";
++
++/**
++ * A write-through cache in front of the store client: a write updates the
++ * client and invalidates this key's cache entry, so the next read is never
++ * stale.
++ */
++export interface CachedStore {
++  get(key: string): Promise<string | null>;
++  set(key: string, value: string): Promise<void>;
++}
++
++export function createCachedStore(client: StoreClient = createClient()): CachedStore {
++  const cache = new Map<string, string>();
++  return {
++    async get(key) {
++      if (cache.has(key)) return cache.get(key)!;
++      const value = await client.get(key);
++      if (value !== null) cache.set(key, value);
++      return value;
++    },
++    async set(key, value) {
++      await client.set(key, value);
++      cache.delete(key);
++    },
++  };
++}
+diff --git a/packages/store/src/write.ts b/packages/store/src/write.ts
+index 5401461..6f9e79c 100644
+--- a/packages/store/src/write.ts
++++ b/packages/store/src/write.ts
+@@ -1,8 +1,8 @@
+-import { createClient } from "./client.js";
++import { createCachedStore } from "./cache.js";
+ 
+-const client = createClient();
++const store = createCachedStore();
+ 
+-/** Writes a user profile field directly through the store client. */
++/** Writes a user profile field through the cache-aware wrapper. */
+ export async function writeProfile(userId: string, field: string, value: string): Promise<void> {
+-  await client.set(`${userId}:${field}`, value);
++  await store.set(`${userId}:${field}`, value);
+ }
+diff --git a/packages/store/test/cache.test.ts b/packages/store/test/cache.test.ts
+new file mode 100644
+index 0000000..677f5c1
+--- /dev/null
++++ b/packages/store/test/cache.test.ts
+@@ -0,0 +1,12 @@
++import { describe, expect, it } from "vitest";
++import { createCachedStore } from "../src/cache.js";
++
++describe("createCachedStore", () => {
++  it("invalidates a key's cache entry when that key is written", async () => {
++    const store = createCachedStore();
++    await store.set("u1:name", "Ada");
++    expect(await store.get("u1:name")).toBe("Ada");
++    await store.set("u1:name", "Grace");
++    expect(await store.get("u1:name")).toBe("Grace");
++  });
++});
+diff --git a/packages/store/test/write.test.ts b/packages/store/test/write.test.ts
+index edf05ea..8f6ee05 100644
+--- a/packages/store/test/write.test.ts
++++ b/packages/store/test/write.test.ts
+@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
+ import { writeProfile } from "../src/write.js";
+ 
+ describe("writeProfile", () => {
+-  it("writes the field through the store client", async () => {
++  it("writes the field through the cache-aware wrapper", async () => {
+     await expect(writeProfile("u1", "name", "Ada")).resolves.toBeUndefined();
+   });
+ });

@@ -19,7 +19,7 @@ import { summariseCorpus } from "../src/summarise.js";
  * not about which function the harness called.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-spend-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-spend-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => vi.restoreAllMocks());
 

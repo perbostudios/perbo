@@ -1,5 +1,5 @@
 {
-  "name": "@focrux/evaluation",
+  "name": "@perbo/evaluation",
   "version": "0.1.0",
   "license": "Apache-2.0",
   "private": true,
@@ -7,7 +7,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "focrux-corpus": "./dist/main.js"
+    "perbo-corpus": "./dist/main.js"
   },
   "exports": {
     ".": {
@@ -29,15 +29,15 @@
     "corpus": "node dist/main.js"
   },
   "dependencies": {
-    "@focrux/cli": "workspace:*",
-    "@focrux/contracts": "workspace:*",
-    "@focrux/review": "workspace:*",
-    "@focrux/runner": "workspace:*",
-    "@focrux/workspace": "workspace:*",
+    "@perbo/cli": "workspace:*",
+    "@perbo/contracts": "workspace:*",
+    "@perbo/review": "workspace:*",
+    "@perbo/runner": "workspace:*",
+    "@perbo/workspace": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@focrux/tsconfig": "workspace:*",
+    "@perbo/tsconfig": "workspace:*",
     "@eslint/js": "catalog:",
     "@types/node": "catalog:",
     "eslint": "catalog:",

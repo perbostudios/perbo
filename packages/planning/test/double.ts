@@ -1,4 +1,4 @@
-import { SUBMIT_REVIEW_TOOL, type ModelRequest, type ModelTurn, type ReviewModel } from "@focrux/review";
+import { SUBMIT_REVIEW_TOOL, type ModelRequest, type ModelTurn, type ReviewModel } from "@perbo/review";
 
 /**
  * A scripted drafter. Everything the planning package promises is a property
@@ -58,6 +58,48 @@ export const validDraft = {
   },
   rationale: "The issue describes a missing email; auth owns signup and queue owns delivery.",
   depends_on: [],
+  nodes: [],
+  edges: [],
+};
+
+/**
+ * A draft from a spec: criteria citing the requirements they came from, grouped
+ * into nodes with an order suggested between them. What `--from-spec` produces,
+ * without a model.
+ */
+export const graphedDraft = {
+  outcome: "New users receive an activation email within 60 seconds of signing up.",
+  acceptance_criteria: [
+    {
+      text: "A signup POST queues exactly one activation email.",
+      assertion: "one message is on the queue after a single signup",
+      kind: "test",
+      requirement_id: "R1",
+    },
+    {
+      text: "No email is sent for a duplicate signup within 5 minutes.",
+      assertion: "a second signup inside the window queues nothing",
+      kind: "test",
+      requirement_id: "R2",
+    },
+    {
+      text: "A failed send is retried three times.",
+      assertion: "three attempts are recorded for one failing send",
+      kind: "test",
+      requirement_id: "R4",
+    },
+  ],
+  proposed_scope: {
+    paths_allowed: ["packages/auth/**", "packages/queue/**"],
+    paths_prohibited_extra: [],
+  },
+  rationale: "The spec's three requirements fall into queueing and retrying.",
+  depends_on: [],
+  nodes: [
+    { title: "Queue the email", criteria: [0, 1], paths: ["packages/queue/**"] },
+    { title: "Retry a failed send", criteria: [2], paths: ["packages/queue/**"] },
+  ],
+  edges: [{ from: 0, to: 1 }],
 };
 
 /**

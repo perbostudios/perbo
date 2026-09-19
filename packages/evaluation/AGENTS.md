@@ -11,5 +11,5 @@ The corpus, its harness and scorer, and the regression suite. The repository-wid
 - **Ask whether a check can come out either way.** `test/forbidden-strings.test.ts` and `test/expectation-reachability.test.ts` are two that can; a check nobody can fail is indistinguishable from one that works.
 
 ```bash
-pnpm check --filter @focrux/evaluation
+pnpm check --filter @perbo/evaluation
 ```

@@ -2,13 +2,13 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DiagnosticResultSchema, type DiagnosticResult } from "@focrux/contracts";
-import type { PreflightResult } from "@focrux/runner";
+import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts";
+import type { PreflightResult } from "@perbo/runner";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { runDoctorCommand, type DoctorOptions } from "../src/execute.js";
 
 /**
- * `focrux doctor --probe`: one minimal call at the configured reviewer model,
+ * `perbo doctor --probe`: one minimal call at the configured reviewer model,
  * before an attempt has spent anything.
  *
  * The provider is real here in the only sense a test can make it real. The
@@ -45,7 +45,7 @@ const PLANTED_KEY = ["sk-ant-api03", "PROBEFIXTUREdoNOTprintME0123456789abcdef"]
 const KNOWN_MODEL = "claude-opus-5-probe-fixture";
 const UNKNOWN_MODEL = "claude-model-that-does-not-exist";
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-doctor-probe-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-doctor-probe-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 type Mode = "answers" | "refuses-credential" | "no-network" | "rate-limited";
@@ -71,7 +71,7 @@ function fakeClaude(name: string, mode: Mode): Fake {
   const script = join(bin, "claude");
   const failure: Record<Exclude<Mode, "answers">, string[]> = {
     // The provider quoting the credential back at the caller, which is the
-    // channel a redaction that only handled focrux's own text would miss.
+    // channel a redaction that only handled perbo's own text would miss.
     "refuses-credential": [
       `printf 'Invalid API key · Please run /login (x-api-key %s was refused)\\n' "$ANTHROPIC_API_KEY" > "${said}"`,
       `cat "${said}" >&2`,
@@ -182,8 +182,8 @@ function repository(name: string, config: Record<string, unknown> | null): strin
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture" }));
   if (config !== null) {
-    mkdirSync(join(dir, ".focrux"), { recursive: true });
-    writeFileSync(join(dir, ".focrux", "config.json"), `${JSON.stringify(config, null, 2)}\n`);
+    mkdirSync(join(dir, ".perbo"), { recursive: true });
+    writeFileSync(join(dir, ".perbo", "config.json"), `${JSON.stringify(config, null, 2)}\n`);
   }
   return dir;
 }
@@ -259,7 +259,7 @@ const fixLine = (block: string): string =>
 
 const failureLine = (block: string): string => block.split("\n")[0] ?? "";
 
-describe("what one minimal call tells `focrux doctor --probe`", () => {
+describe("what one minimal call tells `perbo doctor --probe`", () => {
   it(
     "names the model that answered and how long it took, having called it once",
     async () => {
@@ -344,7 +344,7 @@ describe("what one minimal call tells `focrux doctor --probe`", () => {
   );
 });
 
-describe("what `focrux doctor --probe` never prints", () => {
+describe("what `perbo doctor --probe` never prints", () => {
   it(
     "keeps the provider key out of both streams, on every class and on success",
     async () => {
@@ -514,7 +514,7 @@ describe("the same probe as the JSON a script reads", () => {
   );
 });
 
-describe("`focrux doctor` without --probe", () => {
+describe("`perbo doctor` without --probe", () => {
   it(
     "calls no provider and says the probe was not run",
     async () => {
@@ -541,7 +541,7 @@ describe("what a failed probe does to the exit code", () => {
   it(
     "leaves it unchanged where nothing on this checkout depends on the provider",
     async () => {
-      // No `.focrux/config.json`: no run here is configured to review through
+      // No `.perbo/config.json`: no run here is configured to review through
       // anything yet, so the probe is a reading and not a gate.
       const fake = fakeClaude("advisory", "refuses-credential");
       const unconfigured = repository("advisory", null);
@@ -589,8 +589,8 @@ describe("what a failed probe does to the exit code", () => {
       expect(probed.code).toBe(1);
       const block = providerBlock(probed.stdout);
       expect(block).toContain("blocking:");
-      expect(block).toContain("`focrux run` here reviews through this provider");
-      expect(block).toContain(join(configured, ".focrux", "config.json"));
+      expect(block).toContain("`perbo run` here reviews through this provider");
+      expect(block).toContain(join(configured, ".perbo", "config.json"));
       // The keys that file actually holds, named: the reason is a claim about
       // a file a person can open, so it says which lines of it it read.
       expect(block).toContain("sets reviewer_provider and reviewer_model");
@@ -656,12 +656,12 @@ describe("what a failed probe does to the exit code", () => {
 
       // The file did not exist when the call went out and does now, so a run
       // here depends on the provider from this moment on.
-      expect(existsSync(join(fresh, ".focrux", "config.json"))).toBe(true);
+      expect(existsSync(join(fresh, ".perbo", "config.json"))).toBe(true);
       expect(probed.code).toBe(1);
       const reason = providerBlock(probed.stdout)
         .split("\n")
         .find((line) => line.includes("blocking:")) ?? "";
-      expect(reason).toContain(join(fresh, ".focrux", "config.json"));
+      expect(reason).toContain(join(fresh, ".perbo", "config.json"));
       // The keys of the file it wrote, which is where a reader would look.
       expect(reason).toContain("sets reviewer_provider and model");
     },

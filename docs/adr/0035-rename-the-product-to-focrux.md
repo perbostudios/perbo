@@ -1,4 +1,4 @@
-# ADR-0035: The product is Focrux everywhere
+# ADR-0035: The product is Perbo everywhere
 
 - Status: accepted
 
@@ -8,20 +8,20 @@ A person meets the product in the desktop, the terminal, the local store and the
 
 ## Decision
 
-- The package scope is `@focrux/*`.
-- The binary is `focrux`, and its bundle is `bin/focrux.mjs`.
-- The local store is `.focrux/` in a repository and `~/.focrux/` on a machine.
-- Environment variables are `FOCRUX_*`.
-- Worktree, bundle and hook names carry the `focrux-` prefix.
-- The reviewer's prompt delimiters are `<focrux:…>`.
-- New tickets take the key `FCX`.
-- New branches take the prefix `fcx/`, and an `AYO` ticket's keep `ayo/`; a ticket or run that already has a branch keeps it.
+- The package scope is `@perbo/*`.
+- The binary is `perbo`, and its bundle is `bin/perbo.mjs`.
+- The local store is `.perbo/` in a repository and `~/.perbo/` on a machine.
+- Environment variables are `PERBO_*`.
+- Worktree, bundle and hook names carry the `perbo-` prefix.
+- The reviewer's prompt delimiters are `<perbo:…>`.
+- Tickets take the key `PRB` unless `perbo admit --prefix` names another.
+- New branches take the prefix `prb/`; a ticket or run that already has a branch keeps it, whatever its prefix.
 
-Recorded identifiers keep their bytes: existing `AYO` ticket keys and `ayo/` branches, `SCP-`, `D-` and ADR numbers and filenames, and the records in a ticket store.
+Recorded identifiers keep their bytes: branch names and pull request links, `SCP-`, `D-` and ADR numbers and filenames.
 
 ## Consequences
 
-Nothing reads or migrates a machine's existing `~/.ayaori` directory.
+Nothing reads or migrates a machine's existing `~/.focrux` directory, or the desktop's profile under its old name.
 
 ## Alternatives considered
 

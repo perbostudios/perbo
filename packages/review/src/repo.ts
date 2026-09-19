@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { isAgentConfigPath, matchesAny } from "@focrux/contracts";
+import { AGENT_CONFIG_PATTERNS, NEVER_READ_PATHS, isAgentConfigPath, matchesAny } from "@perbo/contracts";
 import { nulByteOffset } from "./legibility.js";
 
 /**
@@ -44,22 +44,16 @@ const SKIP_DIRS = new Set([
 const LOCAL_METADATA = ["**/.git", "**/.git/**"] as const;
 
 /**
- * Never read into a model call. Materialized local secrets are excluded from
- * every change set, run bundle, log, telemetry payload and model context
- * (D-012); repository-supplied agent configuration is withheld rather than
- * interpreted (ADR-0030).
+ * The materialized-secret half of {@link NEVER_READ_PATHS}: what this reader
+ * refuses with its own sentence, because the refusal a reviewer reads has to
+ * say which rule withheld the file. Git metadata and agent configuration carry
+ * their own sentences below, and the three together are that list.
  */
-const NEVER_READ = [
-  "**/.env",
-  "**/.env.*",
-  "**/*.pem",
-  "**/*.key",
-  "**/*.p12",
-  "**/id_rsa*",
-  "**/secrets/**",
-  "**/.npmrc",
-  "**/.netrc",
-] as const;
+const NEVER_READ = NEVER_READ_PATHS.filter(
+  (pattern) =>
+    !(LOCAL_METADATA as readonly string[]).includes(pattern) &&
+    !(AGENT_CONFIG_PATTERNS as readonly string[]).includes(pattern),
+);
 
 export type ReadOutcome =
   | { ok: true; path: string; content: string; truncated: boolean; bytes: number; sha256: string }

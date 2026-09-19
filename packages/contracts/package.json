@@ -1,5 +1,5 @@
 {
-  "name": "@focrux/contracts",
+  "name": "@perbo/contracts",
   "version": "0.1.0",
   "license": "Apache-2.0",
   "private": true,
@@ -18,6 +18,42 @@
     "./materialisation-entry": {
       "types": "./dist/materialisation-entry.d.ts",
       "default": "./dist/materialisation-entry.js"
+    },
+    "./paths": {
+      "types": "./dist/paths.d.ts",
+      "default": "./dist/paths.js"
+    },
+    "./standing": {
+      "types": "./dist/standing.d.ts",
+      "default": "./dist/standing.js"
+    },
+    "./plan": {
+      "types": "./dist/plan.d.ts",
+      "default": "./dist/plan.js"
+    },
+    "./approach": {
+      "types": "./dist/approach.d.ts",
+      "default": "./dist/approach.js"
+    },
+    "./graph-edit": {
+      "types": "./dist/graph-edit.d.ts",
+      "default": "./dist/graph-edit.js"
+    },
+    "./interview-protocol": {
+      "types": "./dist/interview-protocol.d.ts",
+      "default": "./dist/interview-protocol.js"
+    },
+    "./size": {
+      "types": "./dist/size.d.ts",
+      "default": "./dist/size.js"
+    },
+    "./risk": {
+      "types": "./dist/risk.d.ts",
+      "default": "./dist/risk.js"
+    },
+    "./symbol-index": {
+      "types": "./dist/symbol-index.d.ts",
+      "default": "./dist/symbol-index.js"
     }
   },
   "files": [
@@ -33,7 +69,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@focrux/tsconfig": "workspace:*",
+    "@perbo/tsconfig": "workspace:*",
     "@eslint/js": "catalog:",
     "@types/node": "catalog:",
     "eslint": "catalog:",

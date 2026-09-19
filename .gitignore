@@ -12,22 +12,26 @@ coverage/
 artifacts/
 worktrees/
 
-# The partner tarball and its SHA-256, written by tooling/package/pack.mjs (D-046).
+# The partner tarball and its SHA-256, written by tooling/package/pack.mjs.
 release/
 
 # The local store. Everything in it is working state — tickets and their
 # contracts, unfinished reviews, worktrees, run bundles, quarantine — except the
 # two files that are this repository's own declarations (D-076).
 #
-# Written as `.focrux/*` rather than `.focrux/`, because git cannot re-include a
+# Written as `.perbo/*` rather than `.perbo/`, because git cannot re-include a
 # path whose parent directory is itself excluded: excluding the directory would
 # make the two exceptions below silently do nothing.
-.focrux/*
+.perbo/*
 
 # The run configuration for this repository, and the owner's recorded product
 # decisions (D-065): durable, reviewed, shared.
-!.focrux/config.json
-!.focrux/principles.md
+!.perbo/config.json
+!.perbo/principles.md
+
+# The store under the product's old name. Nothing reads it, and what a checkout
+# still holds there is working state like the above.
+.focrux/
 
 # Corpus run output: full diffs and file contents, not for the repository.
 .local/

@@ -14,8 +14,8 @@ import {
   type Finding,
   type ReviewArtifact,
   type RunBundle,
-} from "@focrux/contracts";
-import { BundleStore } from "@focrux/runner";
+} from "@perbo/contracts";
+import { BundleStore } from "@perbo/runner";
 import { attemptsRecordSubject } from "../src/inspect.js";
 import {
   buildTicketlessBundle,
@@ -28,10 +28,10 @@ import { makeAttempt, makeReview } from "./attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * `focrux verdict` on a review that no attempt filed (SCP-249).
+ * `perbo verdict` on a review that no attempt filed (SCP-249).
  *
- * `focrux review --pr owner/repo#N` writes its bundle into
- * `<repo>/.focrux/reviews/` and files no attempt: there was no run, so there is
+ * `perbo review --pr owner/repo#N` writes its bundle into
+ * `<repo>/.perbo/reviews/` and files no attempt: there was no run, so there is
  * no attempts record for the id it hands back. Every test here resolves the
  * reference with `attemptsRecordSubject` — the attempts record alone, with no
  * ticket asked for — against a repository holding only what `review` wrote,
@@ -64,7 +64,7 @@ vi.stubGlobal("fetch", () => {
   throw new Error("refused: recording a verdict asked the network");
 });
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-verdict-review-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-verdict-review-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const REVIEW_ID = "rev_open00000001";
@@ -141,14 +141,14 @@ function reviewArtifact(): ReviewArtifact {
 }
 
 /**
- * A repository as `focrux review --pr` leaves one: `.focrux/reviews/` holding
+ * A repository as `perbo review --pr` leaves one: `.perbo/reviews/` holding
  * the bundle it wrote, and nothing else at all — no ticket, no attempts record,
  * no bundles. The bundle is built by the same functions the command uses, so
  * the fixture is an artifact rather than a hand-written imitation of one.
  */
 function repositoryWithReview(name: string, artifact = reviewArtifact()): { repo: string; store: string } {
   const repo = join(scratch, name);
-  const store = join(repo, ".focrux");
+  const store = join(repo, ".perbo");
   mkdirSync(store, { recursive: true });
   const contract = sourceContractFromPullRequest({
     reference: PULL_REQUEST,
@@ -199,7 +199,7 @@ const verdict = (repo: string, argv: string[], now = NOW) =>
     resolve: attemptsRecordSubject,
   });
 
-describe("focrux verdict answers a review that `review --pr` wrote", () => {
+describe("perbo verdict answers a review that `review --pr` wrote", () => {
   it("records the decision against the work the review names", async () => {
     const { repo, store } = repositoryWithReview("records");
     const streams = capture();
@@ -314,7 +314,7 @@ describe("focrux verdict answers a review that `review --pr` wrote", () => {
     );
     // And the one it does hold is named, so a mistyped id is a short step back.
     await expect(verdict(repo, ["rev_nothingatall", "--list"])).rejects.toThrow(new RegExp(REVIEW_ID));
-    expect(store).toContain(".focrux");
+    expect(store).toContain(".perbo");
   });
 }, SPAWN_TEST_TIMEOUT_MS);
 

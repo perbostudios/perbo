@@ -21,8 +21,8 @@ import { scratch } from "./support.js";
  * not what decides it.
  */
 
-const ROOT = realpathSync(scratch("focrux-scp234-root-"));
-const OUTSIDE = realpathSync(scratch("focrux-scp234-out-"));
+const ROOT = realpathSync(scratch("perbo-scp234-root-"));
+const OUTSIDE = realpathSync(scratch("perbo-scp234-out-"));
 
 mkdirSync(join(ROOT, "backlog"), { recursive: true });
 writeFileSync(join(ROOT, "backlog", "issues.json"), '{"issues": []}\n');

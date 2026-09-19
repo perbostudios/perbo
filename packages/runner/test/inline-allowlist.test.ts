@@ -23,8 +23,8 @@ import { scratch } from "./support.js";
  * attempt actually types are pinned as allowed alongside.
  */
 
-const ROOT = realpathSync(scratch("focrux-scp190-root-"));
-const OUTSIDE = realpathSync(scratch("focrux-scp190-out-"));
+const ROOT = realpathSync(scratch("perbo-scp190-root-"));
+const OUTSIDE = realpathSync(scratch("perbo-scp190-out-"));
 
 mkdirSync(join(ROOT, "src"), { recursive: true });
 writeFileSync(join(ROOT, "package.json"), '{"name": "fixture"}\n');

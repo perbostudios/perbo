@@ -5,7 +5,7 @@
 
 ## Context
 
-Focrux runs on one machine, with the person's own subscriptions or keys. What a team shares across people and machines is what it pays for ([D-016](../11-open-decisions.md)). A reviewer nobody can read is one nobody will trust, and a benchmark scored only by insiders substantiates nothing.
+Perbo runs on one machine, with the person's own subscriptions or keys. What a team shares across people and machines is what it pays for ([D-016](../11-open-decisions.md)). A reviewer nobody can read is one nobody will trust, and a benchmark scored only by insiders substantiates nothing.
 
 ## Decision
 
@@ -13,14 +13,14 @@ Focrux runs on one machine, with the person's own subscriptions or keys. What a 
 - `apps/cli` (every command) and `apps/desktop`;
 - `packages/contracts`, `packages/review` (with the reviewer's prompts), `packages/workspace`, `packages/runner`, `packages/planning` and `packages/ui`;
 - the evaluation harness and scorer;
-- the queue and its endpoint, and `focrux agent`;
-- `focrux interview` and phone pairing over the local network, which are decided and not built.
+- the queue and its endpoint, and `perbo agent`;
+- phone pairing over the local network, which is decided and not built.
 
 **The corpus** is public in `plantedbugs`, all of it from the public release: the fixture format under Apache-2.0 and the fixtures under CC-BY-4.0.
 
 **Commercial:** anything hosted or shared across people, which is the control plane ([D-016](../11-open-decisions.md)).
 
-`lianmatsuo/focrux` is where Focrux is developed ([D-076](../11-open-decisions.md)); a private archive holds the material that stays private.
+`perbostudios/perbo` is where Perbo is developed ([D-076](../11-open-decisions.md)); a private archive holds the material that stays private.
 
 ## Consequences
 

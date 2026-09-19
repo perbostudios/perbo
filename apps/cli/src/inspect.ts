@@ -5,15 +5,21 @@ import { z } from "zod";
 import {
   CheckResultsFileSchema,
   EXIT_CODES,
+  NodeReviewsSchema,
   QUEUE_HOLDING_STATES,
   ReviewArtifactSchema,
   RunBundleSchema,
   activeVerdicts,
   limitFor,
+  limitsForCredential,
   parseUnifiedDiff,
+  planNodes,
+  planSizeCounts,
   pullRequestAttribution,
   queueOrder,
+  sizeEstimate,
   ticketSourceLabel,
+  wholeChangeChecks,
   type ArtifactRef,
   type AttemptWait,
   type CheckResult,
@@ -24,12 +30,17 @@ import {
   type LocalVerdict,
   type LimitedResource,
   type LimitsTable,
+  type GraphEdge,
+  type NodeReview,
+  type PlanNode,
   type ReviewArtifact,
   type RunBundle,
   type RunBundleKind,
+  type SizeCount,
+  type SizeEstimate,
   type TicketSource,
-} from "@focrux/contracts";
-import { BundleStore, parseDeclines, runNumbers, type Decline } from "@focrux/runner";
+} from "@perbo/contracts";
+import { BundleStore, parseDeclines, runNumbers, type Decline } from "@perbo/runner";
 import { UsageError } from "./args.js";
 import {
   BASE_SOURCE_LABEL,
@@ -40,6 +51,7 @@ import {
   limitAtBreach,
   readAttemptsFile,
   readRepoConfig,
+  reachedAtBreach,
   runsStartedBy,
   usageOf,
 } from "./execute.js";
@@ -50,6 +62,7 @@ import {
   type RunBase,
 } from "./local-run.js";
 import { WIDTH, clip, pad, painter, spread, wrap, type Paint } from "./render.js";
+import { specStaleness } from "./spec-staleness.js";
 import { storeDir } from "./store.js";
 import type { Streams } from "./streams.js";
 import { readLocalVerdictsOrWarn } from "./verdicts.js";
@@ -57,11 +70,19 @@ import { readLocalVerdictsOrWarn } from "./verdicts.js";
 // which stays loose about everything the store's own writer already checked.
 import type { StoredAdmission } from "./admission.js";
 import { VERSION } from "./run.js";
-import { TicketStoreError, listTickets, readTicketForDisplay, type DisplayTicket } from "./tickets.js";
+import {
+  TicketStoreError,
+  listTickets,
+  readApproachRecord,
+  readContract,
+  readTicketForDisplay,
+  trackedFiles,
+  type DisplayTicket,
+} from "./tickets.js";
 import { describeScheduling } from "./waits.js";
 
 /**
- * `focrux inspect` — read an attempt back (dogfood limitation 5).
+ * `perbo inspect` — read an attempt back (dogfood limitation 5).
  *
  * Every attempt writes an immutable bundle and, until this, no command read
  * one: diagnosing a run meant finding the store and opening JSON by hand. This
@@ -79,7 +100,7 @@ import { describeScheduling } from "./waits.js";
  * It reads only. Nothing here writes to the store, and the bundle bytes it
  * shows are the redacted ones the loop persisted.
  *
- * The record it reads is `<repo>/.focrux/`: working state of one machine. What
+ * The record it reads is `<repo>/.perbo/`: working state of one machine. What
  * an *admitted ticket* adds — the key the record is filed under, the state it
  * is in, how it was admitted and where the work came from — {@link ticketSubject}
  * reads from the ticket file, and it answers from the attempts record for a
@@ -131,7 +152,7 @@ export function parseInspectArgs(argv: readonly string[]): InspectArgs {
     if (token === "--store") args.store = value;
   }
   if (positional.length !== 1) {
-    throw new UsageError("inspect takes exactly one ticket key, e.g. focrux inspect FCX-1");
+    throw new UsageError("inspect takes exactly one ticket key, e.g. perbo inspect PRB-1");
   }
   args.key = positional[0]!;
   // Refused rather than resolved in favour of one of them: `--verify` names the
@@ -140,7 +161,7 @@ export function parseInspectArgs(argv: readonly string[]): InspectArgs {
   if (args.verify !== null && args.attempt !== null) {
     throw new UsageError(
       "--verify names the attempt to check, so it cannot be given with --attempt: " +
-        `focrux inspect ${args.key} --verify ${args.verify}`,
+        `perbo inspect ${args.key} --verify ${args.verify}`,
     );
   }
   return args;
@@ -247,6 +268,13 @@ export interface DenialReport {
   rule: string;
   target: string;
   reason: string;
+  /**
+   * The subagent role the refused call belongs to, and null for the
+   * executor's own session (D-106). A refusal a child earned is not the
+   * executor's, and which agent to brief differently is the thing a person
+   * reads this section for.
+   */
+  agent: string | null;
   at: string;
 }
 
@@ -303,6 +331,8 @@ export interface AttemptReport {
    */
   checks: CheckResult[] | null;
   review: ReviewArtifact | null;
+  /** `review`'s per-node artifacts (D-107), empty for a flat plan or a round the bundle holds none for. */
+  node_reviews: NodeReview[];
   /** The bundle's own summary when its artifact bytes were not retained. */
   review_decision: string | null;
   verification: ClosureVerificationFile | null;
@@ -328,17 +358,8 @@ export interface AttemptReport {
 }
 
 /**
- * The work an attempts record belongs to, as `inspect` needs it.
- *
- * Everything a *ticket* adds to a record of attempts, behind one interface: read
- * from the ticket store where a name resolves to one, and answered from the
- * record itself otherwise, with `null` for each thing only an admission could
- * have known. A `null` here is a name with no ticket behind it, never a record
- * that failed to load.
- */
-/**
  * Where a ticket stands in the queue (SCP-227): its place among the tickets
- * holding one, in the order `focrux serve` starts them, and what it waits on,
+ * holding one, in the order `perbo serve` starts them, and what it waits on,
  * in the queue's own words. Read from the store, never from a running queue.
  */
 export interface QueueStanding {
@@ -352,6 +373,39 @@ export interface QueueStanding {
   waits: string | null;
 }
 
+/**
+ * Whether a ticket's spec is still the one its contract was drafted from
+ * (D-103), as `perbo inspect` prints it.
+ *
+ * `specStaleness` (`spec-staleness.ts`) builds it. `stale` empty and `unjudged`
+ * empty is a spec that is still the statement the plan was approved against.
+ */
+export interface SpecStaleness {
+  /** The spec's path relative to the repository, as admission recorded it. */
+  path: string;
+  /**
+   * The moment the spec is measured from: `approval` for a contract that has
+   * been approved, which is the statement a person signed and what D-103 makes
+   * an edit stale against, and `admission` for a ticket still in `plan_review`,
+   * which has no such moment yet. Every sentence below is about that moment, so
+   * the reading says which one it took rather than leaving a reader to guess.
+   */
+  judged_against: "approval" | "admission";
+  /** Why the spec is no longer that statement. One sentence each; empty where it still is. */
+  stale: string[];
+  /** What could not be judged at all, and what would answer it. */
+  unjudged: string[];
+}
+
+/**
+ * The work an attempts record belongs to, as `inspect` needs it.
+ *
+ * Everything a *ticket* adds to a record of attempts, behind one interface: read
+ * from the ticket store where a name resolves to one, and answered from the
+ * record itself otherwise, with `null` for each thing only an admission could
+ * have known. A `null` here is a name with no ticket behind it, never a record
+ * that failed to load.
+ */
 export interface InspectSubject {
   /**
    * Whether a ticket describes this work or nothing does (SCP-180). A local run
@@ -359,23 +413,29 @@ export interface InspectSubject {
    * would fill read null rather than being filled with something plausible.
    */
   kind: "ticket" | "local";
-  /** What a person calls this work: a ticket key, or the id the record is filed under. */
+  /**
+   * What a person calls this work: a ticket's key; a local run's label, or the
+   * name it was asked by where it has no run record; a stored review's pull
+   * request where one was named, and otherwise the identity its plan was filed
+   * under.
+   */
   ticket: string;
   ticket_id: string;
   /**
    * The outcome the attempts were made against. A ticket's is its title; a
-   * local run's is on the run record `focrux run` wrote before it started.
+   * local run's is on the run record `perbo run` wrote before it started.
    */
   outcome: string | null;
   /** Where a local run's contract came from: `arguments`, or a pull request. */
   contract_source: LocalRunRecord["source"] | null;
   /**
    * Why the run stopped before an attempt existed, where its record says one
-   * did. `null` on work that started, and on a build whose records cannot say —
-   * a refusal printed once and then lost is the thing this exists to prevent.
+   * did. `null` on work that started, and on a ticket, whose records carry no
+   * refusal — a refusal printed once and then lost is the thing this exists to
+   * prevent.
    */
   refusal: LocalRunRecord["refusal"];
-  /** The lifecycle state, or `null` in a build that keeps no lifecycle. */
+  /** The lifecycle state, or `null` for a local run, which has none. */
   state: string | null;
   pull_request_url: string | null;
   /**
@@ -404,8 +464,8 @@ export interface InspectSubject {
    * printing that answer beside this run's pull request would name a branch
    * this run never published against.
    *
-   * `null` where the record does not say: a build whose records carry no base,
-   * or a run recorded before they did.
+   * `null` where the record does not say: a ticket, whose delivery carries no
+   * base, or a run recorded before they did.
    */
   base: RunBase | null;
   /**
@@ -436,18 +496,45 @@ export interface InspectSubject {
   /** The ticket's standing in the queue (SCP-227). `null` where nothing admitted this work. */
   queue: QueueStanding | null;
   /**
+   * Whether the spec this contract was drafted from is still that spec
+   * (D-103). `null` where nothing admitted this work, and where the ticket was
+   * drafted from an issue, a file or the command line rather than a spec.
+   */
+  spec_staleness: SpecStaleness | null;
+  /**
    * Runs the ticket's own history says started, whether or not this store holds
    * their record. `null` where there is no history to count them in, so the
    * attempts record is the only thing that could say a run happened.
    */
   runs_started: number | null;
+  /**
+   * The plan's execution graph (D-100): its nodes, whose criteria and paths are
+   * contract, and the order between them, which is approach and lives beside
+   * the ticket in `<KEY>.approach.json`.
+   *
+   * Both `null` for a flat plan and for work nothing admitted — a plan either
+   * groups its criteria or does not, and an empty list would read as a graph
+   * with nothing in it.
+   */
+  nodes: readonly PlanNode[] | null;
+  edges: readonly GraphEdge[] | null;
+  /** Why the approach record could not be read as this plan's, where it could not. */
+  approach_problem: string | null;
+  /**
+   * How big the plan is, S to XL, with the counts it came from and the ones
+   * that set it (D-104). `null` where nothing admitted this work, or where the
+   * contract cannot be read. It forecasts neither cost nor time.
+   */
+  size: SizeEstimate | null;
 }
 
 /**
  * Which work `inspect` was asked about, resolved against the store it reads.
  *
- * Throws {@link UsageError} where the name is not one this build can find, so
- * the person is told what is on record rather than shown an empty report.
+ * Throws where the store holds no work by that name, with an error that says
+ * what is on record or where to see it, rather than showing an empty report:
+ * {@link ticketSubject} throws the ticket store's own error,
+ * {@link attemptsRecordSubject} a {@link UsageError}.
  */
 export type ResolveSubject = (storeDirectory: string, name: string) => InspectSubject;
 
@@ -466,13 +553,15 @@ const ATTEMPTS_SUFFIX = ".attempts.json";
 /**
  * The work an attempts record belongs to, read from the record itself.
  *
- * What a build with no admitted history can know: the id the loop filed the
- * attempts under, which is the id it was run against. Everything a ticket would
- * have added is `null`, and a name with no record is refused with the ids that
- * do have one rather than an empty report.
+ * What a run with no ticket behind it can say: the id the loop filed the
+ * attempts under, which is the id it was run against, and what the run record
+ * `perbo run` wrote before the loop started holds — its label, its contract
+ * and where that came from, a refusal, the base and the pull request. Everything
+ * only a ticket would add is `null`, and a name with neither record is refused
+ * with the ids that do have one rather than an empty report.
  */
 export const attemptsRecordSubject: ResolveSubject = (storeDirectory, name) => {
-  // The run record `focrux run` writes before the loop starts, where there is
+  // The run record `perbo run` writes before the loop starts, where there is
   // one: it holds the contract the attempts were made against and where that
   // contract came from, neither of which the attempts record itself says. A
   // run whose record was removed is still readable — the id is what the
@@ -508,7 +597,13 @@ export const attemptsRecordSubject: ResolveSubject = (storeDirectory, name) => {
     admission: null,
     source: null,
     queue: null,
+    spec_staleness: null,
     runs_started: null,
+    // A run with no ticket has no plan to group and no scope to size.
+    nodes: null,
+    edges: null,
+    approach_problem: null,
+    size: null,
   };
 };
 
@@ -590,11 +685,19 @@ export function reportAttempt(
   } = attemptBundles(attempt, bundles);
 
   let review: ReviewArtifact | null = null;
+  let node_reviews: NodeReview[] = [];
   if (reviewBundle) {
     const body = artifactBody(store, reviewBundle, "review.json");
     if (body !== null) {
       const parsed = ReviewArtifactSchema.safeParse(JSON.parse(body));
       if (parsed.success) review = parsed.data;
+    }
+    // D-107: the graph's per-node artifacts, recorded beside review.json.
+    // Absent on a bundle written before per-node review existed.
+    const nodesBody = artifactBody(store, reviewBundle, "node-reviews.json");
+    if (nodesBody !== null) {
+      const parsedNodes = NodeReviewsSchema.safeParse(JSON.parse(nodesBody));
+      if (parsedNodes.success) node_reviews = parsedNodes.data;
     }
   }
   let verification: ClosureVerificationFile | null = null;
@@ -682,13 +785,27 @@ export function reportAttempt(
         };
 
   const breached = ceilingResourceFor(attempt.termination.reason);
+  // D-096: the cost caps applied to this attempt only if its own credential
+  // billed per token, and the attempt recorded which that was.
+  const appliedLimits = limitsForCredential(limits, attempt.agent.credential_class);
   const ceilings: CeilingUse[] = (
-    ["attempt_iterations", "attempt_commands", "attempt_wall_clock_ms", "attempt_tokens", "attempt_cost_micros"] as const
+    [
+      "attempt_stall_ms",
+      "attempt_iterations",
+      "attempt_commands",
+      "attempt_wall_clock_ms",
+      "attempt_tokens",
+      "attempt_cost_micros",
+    ] as const
   ).map((resource) => ({
     resource,
-    used: usageOf(attempt, resource),
+    // The stall window is the one resource the record keeps no running count
+    // of; where it is what stopped the attempt, the refusal's own message says
+    // how long the silence was.
+    used: usageOf(attempt, resource) ?? (breached === resource ? reachedAtBreach(attempt) : null),
     // The ceiling in force when it was hit, not the one in the file today.
-    ceiling: (breached === resource ? limitAtBreach(attempt) : null) ?? limitFor(limits, resource),
+    ceiling:
+      (breached === resource ? limitAtBreach(attempt) : null) ?? limitFor(appliedLimits, resource),
     hit: breached === resource,
   }));
 
@@ -745,6 +862,7 @@ export function reportAttempt(
       rule: command.denial_rule ?? "not recorded",
       target: command.denial_target ?? "not recorded",
       reason: command.denial_reason ?? "not recorded",
+      agent: command.agent,
       at: command.at,
     }));
 
@@ -774,6 +892,7 @@ export function reportAttempt(
     round_cost,
     checks,
     review,
+    node_reviews,
     review_decision: reviewBundle ? String(scalar(reviewBundle, "decision") ?? "") || null : null,
     verification,
     ladder,
@@ -899,6 +1018,7 @@ export function summariseMergedCost(reports: readonly InspectReport[]): MergedCo
 }
 
 const RESOURCE_LABEL: Record<string, string> = {
+  attempt_stall_ms: "stall",
   attempt_iterations: "iterations",
   attempt_commands: "commands",
   attempt_wall_clock_ms: "wall clock",
@@ -940,6 +1060,7 @@ function rollLabel(roll: CostRoll): string {
 function renderUse(use: CeilingUse, cost: AttemptCost): string {
   const show = (value: number): string => {
     switch (use.resource) {
+      case "attempt_stall_ms":
       case "attempt_wall_clock_ms":
         return formatDuration(value);
       case "attempt_cost_micros":
@@ -1069,6 +1190,87 @@ function admissionLines(
     // The `admit` command's own runtime, which measures the machine.
     `    ${pad("admit", 10)} ` +
       paint(or(admission.elapsed_ms, (ms) => `${formatDuration(ms)} of machine time`), "dim"),
+    "",
+  ];
+}
+
+/**
+ * The plan's execution graph and its size (D-100, D-104).
+ *
+ * The nodes' criteria and paths are contract; the order is approach, and is
+ * labelled so, because it is the one thing here that may still change while the
+ * work runs. A flat plan has no section and one size line — the size is a
+ * reading of every plan, and a graph is not.
+ */
+function graphLines(report: InspectReport, paint: Paint): string[] {
+  const lines: string[] = [];
+  if (report.nodes !== null && report.nodes.length > 0) {
+    lines.push(paint("GRAPH", "sect") + paint("   criteria and paths are contract", "dim"));
+    for (const node of report.nodes) {
+      lines.push(`  ${paint(node.id, "hi")}  ${node.title}`);
+      lines.push(paint(`          criteria  ${node.criteria.join(", ")}`, "dim"));
+      lines.push(paint(`          paths     ${node.paths.join(", ")}`, "dim"));
+    }
+    lines.push(
+      paint(
+        `  order   ${
+          report.approach_problem !== null
+            ? `not read: ${report.approach_problem}`
+            : report.edges === null || report.edges.length === 0
+              ? "none suggested"
+              : report.edges.map((edge) => `${edge.from} -> ${edge.to}`).join(", ")
+        }  (approach: it may change while the work runs)`,
+        "dim",
+      ),
+    );
+  }
+  if (report.size !== null) {
+    const driving = new Set(report.size.drivers);
+    const count = (name: SizeCount, [one, many]: [string, string]) => {
+      const value = report.size!.counts[name];
+      const written = `${value} ${value === 1 ? one : many}`;
+      // The counts that set the size are the ones worth reading first, so they
+      // are marked rather than left for the reader to work back to.
+      return driving.has(name) ? `${written}*` : written;
+    };
+    lines.push(
+      `  ${paint(`Size ${report.size.name}`, "hi")} · ` +
+        `${count("nodes", ["node", "nodes"])} · ${count("criteria", ["criterion", "criteria"])} · ` +
+        `${count("files", ["file", "files"])} · ${count("packages", ["package", "packages"])}` +
+        paint("   * sets the size", "dim"),
+    );
+    lines.push("");
+  } else if (lines.length > 0) {
+    lines.push("");
+  }
+  return lines;
+}
+
+/**
+ * Whether the spec this contract was drafted from is still that spec (D-103).
+ *
+ * Printed for every ticket drafted from one, stale or not: a person reading a
+ * ticket is asking "is this still the statement I approved", and a section
+ * that appeared only on a stale spec would leave "still the spec" and "not
+ * checked" looking the same.
+ */
+function specLines(staleness: SpecStaleness, paint: Paint): string[] {
+  const row = (label: string, value: string, tone: "mid" | "warn" | "dim"): string[] => {
+    const lead = `    ${pad(label, 10)} `;
+    return lead.length + value.length <= WIDTH
+      ? [lead + paint(value, tone)]
+      : [lead.trimEnd(), ...wrap(value, 6).map((line) => paint(line, tone))];
+  };
+  const current =
+    staleness.stale.length === 0 && staleness.unjudged.length === 0
+      ? row("current", `unedited since ${staleness.judged_against}, and every name in it is still here`, "mid")
+      : [];
+  return [
+    paint("  SPEC", "sect") + paint("        what this contract was drafted from", "dim"),
+    ...row("path", staleness.path, "mid"),
+    ...current,
+    ...staleness.stale.flatMap((reason) => row("stale", reason, "warn")),
+    ...staleness.unjudged.flatMap((reason) => row("unjudged", reason, "dim")),
     "",
   ];
 }
@@ -1220,7 +1422,7 @@ function refusalLines(refusal: NonNullable<InspectReport["refusal"]>, paint: Pai
     lines.push(`    ${paint(finding.reason, "hi")}`);
     lines.push(...wrap(finding.detail, 6).map((line) => paint(line, "mid")));
   }
-  lines.push(paint(`    focrux doctor --repo ${refusal.repository_root}`, "dim"), "");
+  lines.push(paint(`    perbo doctor --repo ${refusal.repository_root}`, "dim"), "");
   return lines;
 }
 
@@ -1236,9 +1438,9 @@ export function renderInspect(
   lines.push("");
   lines.push(
     paint(
-      `focrux ${options.version}   inspect ${report.ticket}   ${report.ticket_id}` +
-        // A build that keeps no lifecycle has no state to print, and an empty
-        // column would read as one it failed to find.
+      `perbo ${options.version}   inspect ${report.ticket}   ${report.ticket_id}` +
+        // A local run has no lifecycle state to print, and an empty column
+        // would read as one it failed to find.
         (report.state === null ? "" : `   ${report.state}`),
       "dim",
     ),
@@ -1286,7 +1488,9 @@ export function renderInspect(
   } else if (report.kind === "local" && report.contract_source !== null) {
     lines.push(...localRunLines(report, paint));
   }
+  if (report.spec_staleness !== null) lines.push(...specLines(report.spec_staleness, paint));
   if (report.queue !== null) lines.push(...queueLines(report.queue, report.state, paint));
+  lines.push(...graphLines(report, paint));
   // A run that was refused has no attempt under it, so this is the whole of
   // what happened and it goes first.
   if (report.refusal !== null) lines.push(...refusalLines(report.refusal, paint));
@@ -1479,7 +1683,7 @@ export function renderInspect(
     if (stopped && retainedDiff) {
       lines.push(
         paint(
-          `  resume  focrux run ${resumeSubject(report)} --resume-from ${execution!.bundle_id}`,
+          `  resume  perbo run ${resumeSubject(report)} --resume-from ${execution!.bundle_id}`,
           "mid",
         ),
       );
@@ -1498,6 +1702,18 @@ export function renderInspect(
         "mid",
       ),
     );
+    // D-096: the brief goes back after every compaction, the executor's own
+    // session and each subagent alike. Printed only where one happened —
+    // "none" is the ordinary round and says nothing a reader needs.
+    if (attempt.record.brief_reinjections.length > 0) {
+      lines.push(
+        paint(
+          `  brief   given back ${attempt.record.brief_reinjections.length} ` +
+            "time(s) after a compaction",
+          "mid",
+        ),
+      );
+    }
     lines.push("");
     lines.push(paint("  CEILINGS", "sect") + paint("   used against the ceiling in force", "dim"));
     for (const use of attempt.ceilings) {
@@ -1518,35 +1734,93 @@ export function renderInspect(
     );
     lines.push("");
 
-    if (attempt.checks && attempt.checks.length > 0) {
+    if ((attempt.checks && attempt.checks.length > 0) || attempt.node_reviews.length > 0) {
       lines.push(paint("  CHECKS", "sect"));
-      for (const check of attempt.checks) {
+      /**
+       * One check's row and what hangs under it. `indent` is 4 for a result
+       * measured over the whole change and 6 for one a node ran, which is what
+       * puts a node's results under the node's own line.
+       */
+      const checkRows = (check: CheckResult, indent: number): void => {
+        const margin = " ".repeat(indent);
+        const hang = `${margin}   `;
+        const commandWidth = 28 - indent;
         const mark = CHECK_MARK[check.status] ?? "?";
-        const visible = `    ${mark}  ${pad(check.name, 15)} ${pad(check.command ?? "", 24)}`;
+        const visible = `${margin}${mark}  ${pad(check.name, 15)} ${pad(check.command ?? "", commandWidth)}`;
         const summary = clip(check.summary, WIDTH - visible.length - 2);
         lines.push(
-          `    ${paint(mark, check.status === "passed" ? "ok" : "bad")}  ${pad(check.name, 15)} ` +
-            `${pad(check.command ?? "", 24)}` +
+          `${margin}${paint(mark, check.status === "passed" ? "ok" : "bad")}  ` +
+            `${pad(check.name, 15)} ${pad(check.command ?? "", commandWidth)}` +
             " ".repeat(Math.max(2, WIDTH - visible.length - summary.length)) +
             paint(summary, "mid"),
         );
+        // D-107: what a node's run was aimed at, or why it could not be aimed
+        // anywhere narrower than the whole change.
+        if (check.node) {
+          lines.push(
+            paint(
+              clip(
+                `${hang}${
+                  check.node.scope === "files"
+                    ? `narrowed to ${check.node.paths.join(", ")}`
+                    : `over the whole change: ${check.node.note ?? "not narrowed"}`
+                }`,
+                WIDTH,
+              ),
+              "dim",
+            ),
+          );
+        }
         // What the second run measured, and the tests both runs named. A
         // failing check whose record says only that a command exited is not
         // one anybody can act on.
         if (check.rerun) {
           const verdict =
             check.flaky === true ? "flaky · re-run passed" : `re-run ${check.rerun.status}`;
-          lines.push(paint(clip(`       ${verdict}  ${check.rerun.command}`, WIDTH), "dim"));
-          if (check.rerun.note) lines.push(paint(clip(`       ${check.rerun.note}`, WIDTH), "dim"));
+          lines.push(paint(clip(`${hang}${verdict}  ${check.rerun.command}`, WIDTH), "dim"));
+          if (check.rerun.note) lines.push(paint(clip(`${hang}${check.rerun.note}`, WIDTH), "dim"));
         }
         for (const test of check.failing_tests ?? []) {
-          lines.push(paint(clip(`       ${test}`, WIDTH), "mid"));
+          lines.push(paint(clip(`${hang}${test}`, WIDTH), "mid"));
         }
         // The directory the command ran under. A check that behaves one way
         // here and another in a clean checkout is often reading this, and
         // absent means the record predates the field rather than "none".
         if (check.tmpdir !== undefined) {
-          lines.push(paint(clip(`       tmpdir ${check.tmpdir ?? "unset"}`, WIDTH), "dim"));
+          lines.push(paint(clip(`${hang}tmpdir ${check.tmpdir ?? "unset"}`, WIDTH), "dim"));
+        }
+      };
+
+      for (const check of wholeChangeChecks(attempt.checks ?? [])) checkRows(check, 4);
+      // Then each node's own results, under the node that ran them, so a
+      // person sees which node failed what (D-107).
+      const byNode = new Map<string, CheckResult[]>();
+      for (const check of attempt.checks ?? []) {
+        if (check.node === undefined) continue;
+        byNode.set(check.node.node_id, [...(byNode.get(check.node.node_id) ?? []), check]);
+      }
+      // A node's own review can stand with no check of its own beside it —
+      // the checks section was not retained, or none ran for this round — so
+      // its line still appears here, under a node this loop would otherwise
+      // never visit.
+      for (const nodeReview of attempt.node_reviews) {
+        if (!byNode.has(nodeReview.node_id)) byNode.set(nodeReview.node_id, []);
+      }
+      for (const [node_id, ran] of byNode) {
+        lines.push(paint(`    ${node_id}`, "dim"));
+        for (const check of ran) checkRows(check, 6);
+        // D-107: that node's own review, or why it has none.
+        const nodeReview = attempt.node_reviews.find((entry) => entry.node_id === node_id);
+        if (nodeReview !== undefined) {
+          lines.push(
+            paint(
+              nodeReview.review
+                ? `      review ${nodeReview.review.decision} · ` +
+                    `${nodeReview.review.findings.filter((finding) => finding.blocking).length} blocking`
+                : "      not reviewed on its own: no file inside its paths changed",
+              "dim",
+            ),
+          );
         }
       }
       lines.push("");
@@ -1642,7 +1916,8 @@ export function renderInspect(
           `    ${paint(pad(clip(denial.rule, 24), 24), "warn")} ` +
             paint(clip(denial.target, WIDTH - 32), "hi"),
         );
-        for (const line of wrap(`${denial.tool}  ${denial.command}`, 6)) {
+        const by = denial.agent === null ? "" : `${denial.agent}  `;
+        for (const line of wrap(`${by}${denial.tool}  ${denial.command}`, 6)) {
           lines.push(paint(line, "dim"));
         }
       }
@@ -1751,7 +2026,7 @@ export interface ObjectCheck {
 }
 
 export interface VerifyReport {
-  /** What a person calls this work: a ticket key, or the id the record is filed under. */
+  /** What a person calls this work, as `inspect`'s resolver named it (`InspectSubject.ticket`). */
   ticket: string;
   attempt_id: string;
   /** The bundles this attempt wrote, in the order the report lists them. */
@@ -1935,7 +2210,7 @@ const ticketFileSubject = (storeDirectory: string, key: string): InspectSubject 
     // writes about itself; a ticket's delivery does not carry one.
     base: null,
     // What the run that opened the pull request read on its head, and what
-    // every `focrux sync` since has re-read.
+    // every `perbo sync` since has re-read.
     delivery_checks:
       ticket.delivery.checks_state === null
         ? null
@@ -1946,12 +2221,78 @@ const ticketFileSubject = (storeDirectory: string, key: string): InspectSubject 
     admission: ticket.admission,
     source: ticket.source,
     queue: queueStanding(storeDirectory, ticket),
+    // D-103: whether the spec this contract was drafted from is still that
+    // spec. Read for every ticket, whatever state it is in — a run in flight
+    // is the case this is printed for and not acted on.
+    spec_staleness: specStaleness({
+      repositoryRoot: ticket.repository_root,
+      // Which moment the reading is against. A ticket in `plan_review` has not
+      // been approved, so its spec is measured from admission and says so —
+      // telling it the spec was "edited since the contract was approved from
+      // it" would name a moment that has not happened.
+      approved: ticket.approved_at !== null,
+      // Absent and null are one answer: a ticket admitted before specs
+      // existed carries no key, and one admitted from an issue carries null.
+      spec: ticket.admission.spec ?? null,
+    }),
     runs_started: runsStartedBy(ticket),
+    ...graphOf(storeDirectory, ticket),
   };
 };
 
 /**
- * Where the ticket stands, read from the store as `focrux serve` reads it:
+ * The plan's graph and its size, read from the contract beside the ticket and
+ * the approach beside that (D-100, D-104).
+ *
+ * The size counts over this checkout's tracked files, because that is where the
+ * work would land; a contract that cannot be read leaves all of it null rather
+ * than taking the report down, since everything else `inspect` answers is
+ * still answerable, and an approach record that cannot be read, or names
+ * another plan, is reported as the problem it is rather than as no order.
+ */
+function graphOf(
+  storeDirectory: string,
+  ticket: DisplayTicket,
+): {
+  nodes: readonly PlanNode[] | null;
+  edges: readonly GraphEdge[] | null;
+  approach_problem: string | null;
+  size: SizeEstimate | null;
+} {
+  let contract;
+  try {
+    contract = readContract(storeDirectory, ticket.key);
+  } catch {
+    return { nodes: null, edges: null, approach_problem: null, size: null };
+  }
+  const nodes = planNodes(contract);
+  let approachProblem: string | null = null;
+  const approach = (() => {
+    try {
+      return readApproachRecord(storeDirectory, ticket.key, contract);
+    } catch (error) {
+      approachProblem = error instanceof Error ? error.message : String(error);
+      return null;
+    }
+  })();
+  return {
+    nodes: nodes.length > 0 ? nodes : null,
+    edges: nodes.length > 0 && approachProblem === null ? (approach?.edges ?? []) : null,
+    approach_problem: approachProblem,
+    size: sizeEstimate(
+      planSizeCounts({
+        nodes,
+        criteria: contract.level === "P0" ? 0 : contract.acceptance_criteria.length,
+        paths_allowed: contract.scope.paths_allowed,
+        paths_prohibited: contract.scope.paths_prohibited,
+        trackedFiles: trackedFiles(ticket.repository_root),
+      }),
+    ),
+  };
+}
+
+/**
+ * Where the ticket stands, read from the store as `perbo serve` reads it:
  * the whole store in queue order, then the tickets holding a place. Ordered
  * before the filter, as the queue orders it, because a settled dependency
  * still decides where its dependants fall in the order. The queue itself is
@@ -1974,7 +2315,7 @@ function queueStanding(storeDirectory: string, ticket: DisplayTicket): QueueStan
  * What a name on the command line stands for: the ticket, or — where no ticket
  * answers to it — the run that does (SCP-180).
  *
- * `focrux` keeps both in one store: `focrux run --outcome …` writes its
+ * `perbo` keeps both in one store: `perbo run --outcome …` writes its
  * attempts beside an admitted ticket's, under the id its own contract is keyed
  * by and with no ticket file at all. The ticket store is asked first, so a
  * store holding both is read exactly the way it always was, and the fallback is
@@ -1991,7 +2332,7 @@ export const ticketSubject: ResolveSubject = (storeDirectory, key): InspectSubje
     if (!(unrecorded instanceof UsageError)) throw unrecorded;
     // The name is neither. The ticket store's own refusal leads, because it
     // lists the tickets and a mistyped key is the common case; what has run
-    // here without one is appended, because "no ticket FCX-9" is the wrong
+    // here without one is appended, because "no ticket PRB-9" is the wrong
     // whole answer in a store whose work has no tickets in it at all.
     try {
       return ticketFileSubject(storeDirectory, key);
@@ -2043,7 +2384,7 @@ export async function runInspectCommand(input: InspectOptions): Promise<number> 
     // The human rendering whenever `--json` was not asked for, where the
     // reading above switches on the terminal instead. What a check returns is
     // a verdict and an exit code, not a document to pipe into a renderer, and
-    // `focrux inspect X --verify att … | tee` has to say the same thing in a
+    // `perbo inspect X --verify att … | tee` has to say the same thing in a
     // pipeline that it says on a terminal.
     input.streams.stdout(
       args.json ? `${JSON.stringify(verification, null, 2)}\n` : renderVerification(verification),

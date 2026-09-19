@@ -5,7 +5,7 @@
 //   node scripts/check.mjs                            every stage, in order
 //   node scripts/check.mjs code validators            those stages, in canonical order
 //   node scripts/check.mjs --list                     the stages, one line each
-//   node scripts/check.mjs --filter @focrux/review    one package's build, typecheck, test and lint
+//   node scripts/check.mjs --filter @perbo/review    one package's build, typecheck, test and lint
 //
 // `.github/workflows/build.yml` runs these same stages, one step per stage, so
 // the Actions page names the stage that failed and a contributor runs locally
@@ -92,7 +92,7 @@ export const STAGES = [
   },
   {
     name: "runtime",
-    summary: "the desktop's bundled runtime and its licence",
+    summary: "the desktop's CLI on the Node inside Electron, with the Agent SDK beside it",
     run(ctx) {
       ctx.run(["node", "apps/desktop/scripts/check-runtime.mjs"]);
     },
@@ -461,7 +461,7 @@ export function runGate(argv, overrides = {}) {
   }
 
   const runner = overrides.runner ?? createRunner({ repo });
-  const python = env.FOCRUX_PYTHON || "python3";
+  const python = env.PERBO_PYTHON || "python3";
   const ctx = makeContext({ repo, runner, log, python, options, exists });
 
   let plan;

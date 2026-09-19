@@ -16,7 +16,7 @@ import { sampleDir } from "./sample-fixtures.js";
  * cannot run here and is tested by the reviewer's own suite.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-harness-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-harness-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 /**

@@ -1,12 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { GH_NOT_LOGGED_IN } from "@focrux/contracts";
+import { realpathSync } from "node:fs";
+import { delimiter, join } from "node:path";
+import { GH_NOT_LOGGED_IN } from "@perbo/contracts";
 import {
   readGithubCredential,
   type GithubCredentialReading,
 } from "./github-credential.js";
 
 /**
- * What must be on this machine before `focrux run` can do anything, checked
+ * What must be on this machine before `perbo run` can do anything, checked
  * before a worktree is provisioned rather than discovered as an ENOENT stack
  * trace with the ticket left in `provisioning`.
  *
@@ -24,7 +26,8 @@ export interface PreflightFinding {
     | "gh_missing"
     | "gh_not_authenticated"
     | "reviewer_credential_missing"
-    | "reviewer_binary_missing";
+    | "reviewer_binary_missing"
+    | "codex_too_old";
   detail: string;
   /** The one command or action that clears it. */
   fix: string;
@@ -49,11 +52,19 @@ export interface PreflightResult {
 
 export interface PreflightRequest {
   /**
-   * The coding agent binary the adapter will spawn, e.g. `claude`. `null`
-   * when no agent runs — `focrux review` on its own — so only the reviewer's
-   * transport is checked.
+   * The coding agent binary the adapter will spawn — a free path a
+   * repository configures, not necessarily named `claude` or `codex`.
+   * `null` when no agent runs — `perbo review` on its own — so only the
+   * reviewer's transport is checked.
    */
   agentBinary: string | null;
+  /**
+   * Which agent transport `agentBinary` is, when the caller already knows —
+   * from the same repository configuration's `agent_provider`, never
+   * guessed from `agentBinary`'s own spelling. `null` where the caller has
+   * an `agentBinary` but does not know which transport it is, or has none.
+   */
+  agentProvider: "claude-cli" | "codex-cli" | null;
   /** Which reviewer transport the run will use. */
   reviewerProvider: "anthropic" | "claude-cli" | "codex-cli";
   /** Whether the run will push and open a pull request through `gh`. */
@@ -94,10 +105,132 @@ function version(
   }
 }
 
+/** D-106: the earliest Codex build the runner's subagent role files and per-thread guard are held to. */
+const CODEX_MIN_VERSION = "0.145.0";
+
+/**
+ * `major.minor.patch` with an optional `-prerelease`, as semver spells it;
+ * null where the text is not one, which is refused rather than guessed at.
+ */
+function parseSemver(value: string): { parts: [number, number, number]; prerelease: boolean } | null {
+  const match = /^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?$/.exec(value);
+  if (!match) return null;
+  return {
+    parts: [Number(match[1]), Number(match[2]), Number(match[3])],
+    prerelease: match[4] !== undefined,
+  };
+}
+
+/**
+ * Whether `found` is at or above the floor, as semver orders versions: a
+ * prerelease of the floor itself (`0.145.0-rc.1`) is below it, a prerelease
+ * of a later version is above it.
+ */
+function atLeast(found: ReturnType<typeof parseSemver>, floor: [number, number, number]): boolean {
+  if (found === null) return false;
+  const pairs: Array<[number, number]> = [
+    [found.parts[0], floor[0]],
+    [found.parts[1], floor[1]],
+    [found.parts[2], floor[2]],
+  ];
+  for (const [have, need] of pairs) {
+    if (have !== need) return have > need;
+  }
+  return !found.prerelease;
+}
+
+/**
+ * `identity` resolved to a real filesystem path, so the same Codex binary
+ * named two ways — an absolute path one caller configures and a bare name
+ * PATH resolves for another — dedupes to the same key. A bare name (no
+ * `/`) is looked up across `env.PATH` the way `execFileSync` itself would
+ * find it, since `realpathSync` alone only resolves a path already written
+ * as one; `identity` itself, unresolved, where nothing here can resolve it,
+ * so an unresolvable name still dedupes a second, identical mention.
+ */
+function resolvedBinaryIdentity(identity: string, env: NodeJS.ProcessEnv): string {
+  const candidates = identity.includes("/")
+    ? [identity]
+    : (env.PATH ?? "")
+        .split(delimiter)
+        .filter((dir) => dir.length > 0)
+        .map((dir) => join(dir, identity));
+  for (const candidate of candidates) {
+    try {
+      return realpathSync(candidate);
+    } catch {
+      continue;
+    }
+  }
+  return identity;
+}
+
+/**
+ * D-106: a Codex binary below {@link CODEX_MIN_VERSION} cannot hold the
+ * subagent role files and per-thread guard state this runner asks it to.
+ * Called only where the caller already knows `tool` is meant to be Codex —
+ * the agent binary once its `agentProvider` is `codex-cli`, and the reviewer
+ * transport once it is `codex-cli` — so a version line that does not start
+ * with `codex-cli `, including no output at all, is refused the same way a
+ * parsed lower version is, naming what it printed, rather than passed as
+ * fine for not looking like Codex's own. `agentBinary` is a free path a
+ * repository configures, never a spelling to guess the transport from —
+ * `preflight()` falls back to reading the line's own prefix only where the
+ * transport is not given at all.
+ *
+ * `identity` is the binary string the caller checked it under —
+ * `agentBinary`, or the reviewer's `PERBO_CODEX_BINARY`/`codex` — resolved
+ * through {@link resolvedBinaryIdentity} before `checked` sees it, so the
+ * same binary configured two ways still dedupes to one entry. `checked` is
+ * shared across both call sites in one `preflight()` run: the agent and the
+ * reviewer are often the same binary, and a person reading `doctor`'s
+ * output should see that binary's version problem once, not twice for the
+ * same run.
+ */
+function checkCodexVersion(
+  identity: string,
+  tool: PreflightTool,
+  findings: PreflightFinding[],
+  checked: Set<string>,
+  env: NodeJS.ProcessEnv,
+): void {
+  const resolved = resolvedBinaryIdentity(identity, env);
+  if (checked.has(resolved)) return;
+  checked.add(resolved);
+  if (!tool.present) return;
+  if (tool.version === null || !tool.version.startsWith("codex-cli ")) {
+    findings.push({
+      severity: "blocking",
+      reason: "codex_too_old",
+      detail: `codex's version could not be read from ${JSON.stringify(tool.version ?? "")}; ${CODEX_MIN_VERSION} or later is needed`,
+      fix: `install Codex ${CODEX_MIN_VERSION} or later`,
+    });
+    return;
+  }
+  const found = tool.version.slice("codex-cli ".length).trim();
+  const floor = parseSemver(CODEX_MIN_VERSION)!.parts;
+  const parsed = parseSemver(found);
+  if (!atLeast(parsed, floor)) {
+    findings.push({
+      severity: "blocking",
+      reason: "codex_too_old",
+      // A line with no version to order against the floor was never below
+      // it; that verb belongs to a version this actually parsed and placed.
+      detail:
+        parsed === null
+          ? `codex ${found} could not be read as a version; ${CODEX_MIN_VERSION} or later is needed`
+          : `codex ${found} is below the ${CODEX_MIN_VERSION} subagents need`,
+      fix: `install Codex ${CODEX_MIN_VERSION} or later`,
+    });
+  }
+}
+
 export function preflight(request: PreflightRequest): PreflightResult {
   const env = request.env ?? process.env;
   const findings: PreflightFinding[] = [];
   const tools: Record<string, PreflightTool> = {};
+  /** Every binary identity {@link checkCodexVersion} has already reported on, once. */
+  const codexVersionChecked = new Set<string>();
 
   const nodeMajor = Number(process.versions.node.split(".")[0]);
   const minNode = request.minNodeMajor ?? 22;
@@ -162,6 +295,15 @@ export function preflight(request: PreflightRequest): PreflightResult {
             : `install \`${request.agentBinary}\` and make sure it is on PATH`,
       });
     }
+    // Keyed on the provider, not the binary's spelling: `agentBinary` is a
+    // free path, so a Claude Code configured somewhere other than literally
+    // `claude` is still Claude. Where the provider is not given at all, the
+    // line's own prefix is the only signal there is, and a line that does
+    // not even start with `codex-cli ` is not this runner's business to
+    // refuse — it is not known to be Codex's.
+    const looksLikeCodex = tools[request.agentBinary]!.version?.startsWith("codex-cli ") === true;
+    if (request.agentProvider === "codex-cli" || (request.agentProvider === null && looksLikeCodex))
+      checkCodexVersion(request.agentBinary, tools[request.agentBinary]!, findings, codexVersionChecked, env);
   }
 
   if (request.reviewerProvider === "anthropic") {
@@ -174,6 +316,13 @@ export function preflight(request: PreflightRequest): PreflightResult {
       });
     }
   } else if (request.reviewerProvider === "claude-cli") {
+    // Keyed on the binary, not the provider: the reviewer's `claude-cli`
+    // transport spawns the bare `claude` command on its own, independently
+    // of `agentBinary`, which a repository is free to configure as any
+    // path. Only where the agent check above already looked up that exact
+    // bare command — `agentBinary === "claude"` — does this reach the same
+    // answer without asking again; a Claude agent configured anywhere else
+    // still needs its own lookup of the command the reviewer actually runs.
     if (request.agentBinary !== "claude") {
       tools.claude = version("claude", env);
       if (!tools.claude.present) {
@@ -186,16 +335,17 @@ export function preflight(request: PreflightRequest): PreflightResult {
       }
     }
   } else if (request.reviewerProvider === "codex-cli") {
-    const codex = env.FOCRUX_CODEX_BINARY ?? "codex";
+    const codex = env.PERBO_CODEX_BINARY ?? "codex";
     tools.codex = version(codex, env);
     if (!tools.codex.present) {
       findings.push({
         severity: "blocking",
         reason: "reviewer_binary_missing",
         detail: `the reviewer provider is \`codex-cli\` and \`${codex}\` cannot be run`,
-        fix: "set FOCRUX_CODEX_BINARY to the Codex executable, or use --provider claude-cli",
+        fix: "set PERBO_CODEX_BINARY to the Codex executable, or use --provider claude-cli",
       });
     }
+    checkCodexVersion(codex, tools.codex, findings, codexVersionChecked, env);
   }
 
   // `gh` is checked whether or not this run publishes: `sync`, `stops` and

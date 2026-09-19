@@ -1,10 +1,10 @@
-# `@focrux/evaluation`
+# `@perbo/evaluation`
 
 Owns the seeded-defect corpus and fixture format, immutable run-bundle capture, evaluation results, and model/prompt/policy promotion state.
 
 The corpus holds seeded defects in seven classes and **clean changes**; without the clean changes a recall number is meaningless, because a reviewer that blocks everything scores perfect recall. Two classes carry the product's specific claims: verification defects (passes a test the executor wrote that does not test the criterion) and adversarial context (an instruction planted in a test log or dependency README).
 
-The fixtures are published as `plantedbugs`, and the harness and scorer are open with the rest of Focrux (D-075). Each run bundle carries a computed `replayability` tier (ADR-0026).
+The fixtures are published as `plantedbugs`, and the harness and scorer are open with the rest of Perbo (D-075). Each run bundle carries a computed `replayability` tier (ADR-0026).
 
 ## Running it
 
@@ -23,12 +23,12 @@ would take the transport-reported total past the ceiling, and a run it stops is 
 partial, with no threshold reported as met.
 
 It writes `runs.json`, `summary.json`, `report.md` and `rule-authority.json`, and prints the report.
-The harness **spawns the real `focrux` binary** once per fixture per repeat rather than calling
+The harness **spawns the real `perbo` binary** once per fixture per repeat rather than calling
 `runReview` directly — otherwise the argument parsing, the artifact serialisation and the exit codes
 would be untested by the thing that is supposed to be able to trust them.
 
 What it spawns is the run's **own copy** of that binary: before the first fixture, a single-file
-bundle of the CLI is built into `<out>/bin/focrux.mjs`, and every fixture and every repeat runs that
+bundle of the CLI is built into `<out>/bin/perbo.mjs`, and every fixture and every repeat runs that
 file. Rebuilding the tree during a run therefore cannot change what is being measured. The copy's
 SHA-256 and byte size go into `run-manifest.json`, the digest is printed in the report header, and a
 run that cannot build the bundle stops rather than falling back to the tree's copy.
@@ -38,7 +38,7 @@ run that cannot build the bundle stops rather than falling back to the tree's co
 A read that names no directory — `loadCorpus()`, the CLI without `--corpus` — takes it in this
 order:
 
-1. `FOCRUX_EVAL_CORPUS_DIR`, when it is set to something other than whitespace. A relative value is
+1. `PERBO_EVAL_CORPUS_DIR`, when it is set to something other than whitespace. A relative value is
    resolved against the working directory.
 2. Otherwise `corpus/fixtures` beside this package, which is what a checkout of this repository has.
 
@@ -109,7 +109,7 @@ human never hears about until the rounds run out.
 **Human agreement that a finding is worth fixing** (≥70% of a 40-finding sample) is not measurable
 here. It needs a person to score a sample of findings, which the harness does not do.
 
-`rule-authority.json` is the measured false-positive rate per rule, which `focrux review
+`rule-authority.json` is the measured false-positive rate per rule, which `perbo review
 --rule-authority` consumes to demote a rule that cries wolf. Only a **blocking** finding on a change
 with no seeded defect counts against a rule — an advisory one costs the user nothing.
 

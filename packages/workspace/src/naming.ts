@@ -1,8 +1,8 @@
 /**
  * Branch naming (docs/04, docs/07, ADR-0023 §4).
  *
- * `fcx/<ticket id>/<short-slug>`, or `ayo/` for an `AYO` ticket, and every part
- * of it is derived here from the ticket's key and id and the approved plan —
+ * `prb/<ticket id>/<short-slug>`, and every part of it is derived here from the
+ * ticket's id and the approved plan —
  * never from anything a model said during execution. The slug comes from the
  * plan's `outcome`, which is machine-drafted and **human-confirmed at
  * approval**; it then passes through an allow-list, so even a hostile outcome
@@ -14,8 +14,8 @@
  */
 
 /** The prefix a newly derived branch takes. */
-export const BRANCH_PREFIX = "fcx";
-/** The prefix an `AYO` ticket's branches take, kept as a recorded identifier (D-098). */
+export const BRANCH_PREFIX = "prb";
+/** The prefix of branches recorded before `prb/`, still an attempt branch (D-098). */
 export const AYO_BRANCH_PREFIX = "ayo";
 export const MAX_SLUG_LENGTH = 32;
 
@@ -46,15 +46,14 @@ export function shortSlug(outcome: string): string {
 }
 
 export interface BranchNameArgs {
-  /** The ticket's key, or a local run's label. Only an `AYO` key derives `ayo/`. */
+  /** The ticket's key, or a local run's label. */
   ticket_key: string;
   ticket_id: string;
   outcome: string;
 }
 
 export function branchName(args: BranchNameArgs): string {
-  const prefix = /^AYO-[0-9]/.test(args.ticket_key) ? AYO_BRANCH_PREFIX : BRANCH_PREFIX;
-  return `${prefix}/${ticketKey(args.ticket_id)}/${shortSlug(args.outcome)}`;
+  return `${BRANCH_PREFIX}/${ticketKey(args.ticket_id)}/${shortSlug(args.outcome)}`;
 }
 
 const ATTEMPT_BRANCH = new RegExp(

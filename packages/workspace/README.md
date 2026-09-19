@@ -1,4 +1,4 @@
-# @focrux/workspace
+# @perbo/workspace
 
 The local worktree provider, and the half of it that is actually hard: making
 the worktree **runnable**.
@@ -7,21 +7,23 @@ the worktree **runnable**.
   exact base commit, with leases, stale reclaim and typed refusals.
 - `diagnostic.ts` — proposes a materialization manifest from the checkout the
   user already has, and refuses a repository that cannot be materialized with a
-  named reason **before** an attempt starts.
+  named reason **before** an attempt starts. A repository with no test script a
+  worktree can run is not one of those: it is verified with
+  `git status --porcelain`, and an advisory says why.
 - `materialize.ts` — copies the untracked files, installs under a declared
   strategy with lifecycle scripts off, allocates ports and a database schema,
   and runs the command that proves the result works.
 - `exec.ts` — every process this package starts, by argv and never a shell
   string.
-- `naming.ts` — `fcx/<ticket id>/<short-slug>`, derived from the key, the id and
-  the approved outcome through an allow-list, and never from anything a model
-  said during execution.
+- `naming.ts` — `prb/<ticket id>/<short-slug>`, derived from the id and the
+  approved outcome through an allow-list,
+  and never from anything a model said during execution.
 - `ports.ts` — a contiguous port range per attempt, checked by binding.
 - `disk.ts` — what a worktree costs, as a free-space delta and as a directory
   size, because hardlinks and copy-on-write make those different numbers.
 - `suspend.ts` — a closed laptop, detected as lateness on a timer, so an attempt
   does not carry on as though nothing happened.
-- `main.ts` — the `focrux-materialisation` binary, ADR-0025's measurement
+- `main.ts` — the `perbo-materialisation` binary, ADR-0025's measurement
   harness. It writes its full record to the path passed via `--out`, and
   `experiment.ts` behind it is reachable only from there: the measurement is not
   part of what this package offers its callers.

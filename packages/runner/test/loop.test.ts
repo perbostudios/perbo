@@ -5,12 +5,13 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   LimitsTableSchema,
+  PlanContractSchema,
   SecretIndex,
   type MaterializationManifest,
   type PlanContract,
-} from "@focrux/contracts";
-import { runReview, type ReviewModel } from "@focrux/review";
-import { branchName } from "@focrux/workspace";
+} from "@perbo/contracts";
+import { runReview, type ReviewModel } from "@perbo/review";
+import { branchName } from "@perbo/workspace";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { BundleStore } from "../src/bundle.js";
@@ -93,7 +94,7 @@ function makeConfig(
   manifest?: MaterializationManifest,
   unitCommand: string[] = ["node", "-e", "process.exit(0)"],
 ) {
-  const root = scratch("focrux-loop-");
+  const root = scratch("perbo-loop-");
   return TicketRunConfigSchema.parse({
     ...(manifest ? { materialization_manifest: manifest } : {}),
     ticket_key: TICKET_KEY,
@@ -568,7 +569,7 @@ describe("the record", () => {
    *
    * A regression pin, not a test of new behaviour: this is what the loop did
    * before SCP-180 and what it must go on doing after it. `inputs.changeset_id`
-   * is what every reader joins a review to its attempt by — `focrux inspect`
+   * is what every reader joins a review to its attempt by — `perbo inspect`
    * among them — and a run reached this file having changed it to the change
    * set the runner sealed, which is the same value in every run a real reviewer
    * makes and a different one only where the reviewer states a target of its
@@ -625,7 +626,7 @@ describe("the record", () => {
   }, 60_000);
 
   it("degrades the replay claim honestly when the bytes were not kept", () => {
-    const root = scratch("focrux-bundle-");
+    const root = scratch("perbo-bundle-");
     const store = new BundleStore({ root, retainContext: false });
     const { bundle } = store.write({
       kind: "execution",
@@ -1127,7 +1128,7 @@ describe("a ceiling termination", () => {
 
     expect(result.outcome).toBe("terminated");
     expect(result.detail).toContain("limits.limits.attempt_iterations");
-    expect(result.detail).toContain(join(repo.dir, ".focrux", "config.json"));
+    expect(result.detail).toContain(join(repo.dir, ".perbo", "config.json"));
     expect(result.rounds[0]?.attempt.termination.detail).toContain("limits.limits.attempt_iterations");
   }, 60_000);
 });
@@ -1144,7 +1145,7 @@ function sealOnBranch(
   files: Record<string, string>,
   branch = branchName({ ticket_key: TICKET_KEY, ticket_id: contract.ticket_id, outcome: contract.outcome }),
 ): string {
-  const path = join(scratch("focrux-prior-"), "wt");
+  const path = join(scratch("perbo-prior-"), "wt");
   if (git(repo.dir, "branch", "--list", branch).trim().length > 0) {
     git(repo.dir, "worktree", "add", path, branch);
   } else {
@@ -1182,7 +1183,7 @@ const reviewedPaths = (input: Record<string, unknown> | undefined): string[] =>
     .sort();
 
 describe("a re-run of a ticket whose branch is already recorded", () => {
-  /** The branch an earlier run of this contract is on: `ayo/`, which an FCX key does not derive. */
+  /** The branch an earlier run of this contract is on: `ayo/`, which an PRB key does not derive. */
   const RECORDED = "ayo/scp094/the-feature-module-exports-a-com";
   const CARRIED = { "src/carried.ts": "export const carried = 1;\n" };
 
@@ -1192,7 +1193,7 @@ describe("a re-run of a ticket whose branch is already recorded", () => {
     contract.base.base_commit = repo.head;
     const config = TicketRunConfigSchema.parse({
       ...makeConfig(repo.dir, withoutInstall(repo.dir)),
-      ticket_key: "FCX-7",
+      ticket_key: "PRB-7",
       delivery_branch: RECORDED,
     });
     const prior = sealOnBranch(repo, contract, CARRIED, RECORDED);
@@ -1208,7 +1209,7 @@ describe("a re-run of a ticket whose branch is already recorded", () => {
     // The earlier run's commit is on the branch this attempt worked on.
     expect(attempt.prior_commits.map((commit) => commit.sha)).toEqual([prior]);
     // And no branch was cut under the prefix the key derives.
-    expect(git(repo.dir, "branch", "--list", "fcx/*").trim()).toBe("");
+    expect(git(repo.dir, "branch", "--list", "prb/*").trim()).toBe("");
   }, 60_000);
 
   it("keeps the branch its latest attempt was on", async () => {
@@ -1217,7 +1218,7 @@ describe("a re-run of a ticket whose branch is already recorded", () => {
     contract.base.base_commit = repo.head;
     const config = TicketRunConfigSchema.parse({
       ...makeConfig(repo.dir, withoutInstall(repo.dir)),
-      ticket_key: "FCX-7",
+      ticket_key: "PRB-7",
     });
     const prior = sealOnBranch(repo, contract, CARRIED, RECORDED);
     mkdirSync(config.state_root, { recursive: true });
@@ -1249,7 +1250,7 @@ describe("a re-run of a ticket whose branch is already recorded", () => {
     const attempt = result.rounds[0]!.attempt;
     expect(attempt.branch).toBe(RECORDED);
     expect(attempt.prior_commits.map((commit) => commit.sha)).toEqual([prior]);
-    expect(git(repo.dir, "branch", "--list", "fcx/*").trim()).toBe("");
+    expect(git(repo.dir, "branch", "--list", "prb/*").trim()).toBe("");
   }, 60_000);
 });
 
@@ -1318,7 +1319,7 @@ describe("a re-run on a branch that already carries sealed commits", () => {
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, withoutInstall(repo.dir));
-    sealOnBranch(repo, contract, { ".focrux/config.json": '{"checks":[]}\n' });
+    sealOnBranch(repo, contract, { ".perbo/config.json": '{"checks":[]}\n' });
 
     const agent = agentDouble(() => undefined);
     const reviewInputs: Array<Record<string, unknown>> = [];
@@ -1333,7 +1334,7 @@ describe("a re-run on a branch that already carries sealed commits", () => {
     const attempt = result.rounds[0]!.attempt;
     expect(attempt.termination.reason).toBe("prohibited_action");
     expect(attempt.termination.detail).toContain("modify_judging_artifact");
-    expect(attempt.termination.detail).toContain(".focrux/config.json");
+    expect(attempt.termination.detail).toContain(".perbo/config.json");
     expect(attempt.prohibited_action_hits.map((hit) => hit.action)).toContain(
       "modify_judging_artifact",
     );
@@ -1560,22 +1561,22 @@ describe("a re-run on a branch that already carries sealed commits", () => {
  * run again, printing the shape a vitest suite under turbo prints.
  */
 function flakyUnitCheck(alwaysFails: boolean): { command: string[]; calls: () => number } {
-  const dir = scratch("focrux-flaky-check-");
+  const dir = scratch("perbo-flaky-check-");
   const counter = join(dir, "calls");
   const script = join(dir, "check.cjs");
   const failing = [
-    "@focrux/cli:test:  ❯ test/x.test.ts (2 tests | 1 failed) 58ms",
-    "@focrux/cli:test:      × case 5ms",
-    "@focrux/cli:test:  FAIL  test/x.test.ts > suite > case",
-    "@focrux/cli:test: AssertionError: expected 1 to be 2",
-    "@focrux/cli:test:  Test Files  1 failed | 12 passed (13)",
-    "@focrux/cli:test:        Tests  1 failed | 142 passed (143)",
+    "@perbo/cli:test:  ❯ test/x.test.ts (2 tests | 1 failed) 58ms",
+    "@perbo/cli:test:      × case 5ms",
+    "@perbo/cli:test:  FAIL  test/x.test.ts > suite > case",
+    "@perbo/cli:test: AssertionError: expected 1 to be 2",
+    "@perbo/cli:test:  Test Files  1 failed | 12 passed (13)",
+    "@perbo/cli:test:        Tests  1 failed | 142 passed (143)",
     "",
   ].join("\n");
   const passing = [
-    "@focrux/cli:test:  ✓ test/x.test.ts (2 tests) 12ms",
-    "@focrux/cli:test:  Test Files  13 passed (13)",
-    "@focrux/cli:test:        Tests  143 passed (143)",
+    "@perbo/cli:test:  ✓ test/x.test.ts (2 tests) 12ms",
+    "@perbo/cli:test:  Test Files  13 passed (13)",
+    "@perbo/cli:test:        Tests  143 passed (143)",
     "",
   ].join("\n");
   writeFileSync(
@@ -1706,7 +1707,7 @@ describe("a unit check that fails once", () => {
  */
 describe("an attempt the runner stopped", () => {
   const stoppingExecutor = (lines: readonly string[]): string => {
-    const binary = join(scratch("focrux-scp159-loop-"), "executor");
+    const binary = join(scratch("perbo-scp159-loop-"), "executor");
     writeFileSync(
       binary,
       `#!/bin/sh\ncase "$1" in --version) echo 'fake-executor 1.0.0'; exit 0 ;; esac\n` +
@@ -1776,14 +1777,14 @@ describe("the pull request the loop publishes", () => {
     // going missing between them, which is the only place it can be lost.
     const issue = "/repo/inbox/SCP-169.md";
     const repo = makeRepo();
-    const remote = scratch("focrux-remote-");
+    const remote = scratch("perbo-remote-");
     git(remote, "init", "-q", "--bare");
     git(repo.dir, "remote", "add", "origin", remote);
 
     // A `gh` that records the body it is handed and refuses `pr view`, so
     // creation is the path taken. The runner holds the credential and shells
     // out to `gh` itself, so this is where the published body can be read.
-    const bin = scratch("focrux-gh-");
+    const bin = scratch("perbo-gh-");
     const bodyFile = join(bin, "body.txt");
     writeFileSync(
       join(bin, "gh"),
@@ -1965,13 +1966,13 @@ describe("an attempt whose model transport gave up", () => {
 
   it("prices both attempts in the pull request and claims no round it did not run", async () => {
     const repo = makeRepo();
-    const remote = scratch("focrux-remote-");
+    const remote = scratch("perbo-remote-");
     git(remote, "init", "-q", "--bare");
     git(repo.dir, "remote", "add", "origin", remote);
 
     // A `gh` that records the body it is handed and refuses `pr view`, so
     // creation is the path taken.
-    const bin = scratch("focrux-gh-transport-");
+    const bin = scratch("perbo-gh-transport-");
     const bodyFile = join(bin, "body.txt");
     writeFileSync(
       join(bin, "gh"),
@@ -2159,6 +2160,8 @@ describe("a run a ceiling cut", () => {
     cut: number;
     termination: { reason: string; detail: string };
     files: readonly string[];
+    /** What the double says it authenticated with; billed per token unless said otherwise. */
+    credential?: "user_api_key" | "subscription";
   }) => {
     let call = 0;
     const seen: Array<{ worktree: string; terminated: string }> = [];
@@ -2176,7 +2179,11 @@ describe("a run a ceiling cut", () => {
       return {
         invocation: {
           adapter: "double", binary_path: "/bin/true", binary_version: "0.0.0",
-          binary_sha256: "0".repeat(64), model: "double", credential_class: "subscription",
+          // D-096: a cost ceiling cuts only an executor billed per token, and
+          // the ticket budget that decides whether a cut attempt is continued
+          // is measured on the same credential. A subscription has neither.
+          binary_sha256: "0".repeat(64), model: "double",
+          credential_class: input.credential ?? "user_api_key",
           argv: ["-p", "<prompt>"], shape_sha256: "1".repeat(64),
           neutralisation: {
             suppressed_at_invocation: ["double"], withheld_from_worktree: [], asserted_empty: ["mcp_servers"],
@@ -2335,6 +2342,56 @@ describe("a run a ceiling cut", () => {
     expect(result.rounds[0]!.superseded_attempts).toHaveLength(2);
     expect(result.detail).toContain("$3.00");
   }, 60_000);
+
+  it("leaves a subscription attempt's figure out of a per-token budget (D-096)", async () => {
+    const repo = makeRepo();
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = makeConfig(repo.dir);
+    config.limits = LimitsTableSchema.parse({
+      organisation: "test",
+      limits: { concurrent_local_attempts: 4, ticket_cost_micros: 2_500_000 },
+    });
+    const cut = {
+      cut: 99,
+      termination: {
+        reason: "cost_ceiling_exceeded",
+        detail: "attempt_cost_micros would reach 5000001, above the limit of 5000000",
+      },
+      files: ["src/one.ts", "src/two.ts", "src/three.ts", "src/four.ts"],
+    };
+
+    // A first run on a subscription: its one attempt reports $1.00, which is a
+    // measure of work and not a bill, and no budget binds, so the run ends
+    // with that attempt on the ticket's record.
+    const subscribed = cutThenComplete({ ...cut, credential: "subscription" });
+    const first = await runTicket({
+      config,
+      contract,
+      sleep: async () => undefined,
+      hooks: { agent: subscribed.run as never, review: approve },
+    });
+    expect(first.outcome).toBe("terminated");
+    expect(subscribed.seen).toHaveLength(1);
+
+    // A second run on an API key against the same $2.50: the subscription
+    // attempt's dollar is not spend, so attempts at $0, $1 and $2 all have
+    // room, as they would on a ticket nothing had run on. Each writes a file
+    // the sealed branch does not yet carry, so each has work of its own.
+    const billed = cutThenComplete({
+      ...cut,
+      files: ["src/five.ts", "src/six.ts", "src/seven.ts", "src/eight.ts"],
+    });
+    const second = await runTicket({
+      config,
+      contract,
+      sleep: async () => undefined,
+      hooks: { agent: billed.run as never, review: approve },
+    });
+    expect(second.outcome).toBe("terminated");
+    expect(billed.seen).toHaveLength(3);
+    expect(second.detail).toContain("$3.00");
+  }, 90_000);
 });
 
 describe("a run a provider's session limit cut", () => {
@@ -3002,5 +3059,165 @@ describe("a conflict round in the middle of a ticket's rounds", () => {
     ]);
     // The cap is one remediation round, and the conflict did not consume it.
     expect(result.outcome).toBe("approved");
+  }, 90_000);
+});
+
+/**
+ * D-107, through the loop: what the round hands the checks and what it records.
+ *
+ * The two cases are one pair — the same repository, the same executor, the
+ * same pinned check, and only the plan's graph different. A flat plan's
+ * assertion says nothing on its own; beside the graphed one it says the node
+ * results the loop records come from the plan's nodes and nowhere else.
+ */
+describe("a graphed ticket's round", () => {
+  /** A two-node plan over the same scope `makeContract` declares. */
+  const graphed = (base_commit: string): PlanContract => {
+    const contract = makeContract();
+    return PlanContractSchema.parse({
+      ...contract,
+      base: { ...contract.base, base_commit },
+      acceptance_criteria: [
+        ...contract.acceptance_criteria,
+        {
+          id: "ac_2",
+          text: "a test exercises total()",
+          expected_verification: { kind: "test", assertion: "the suite names total()" },
+        },
+      ],
+      nodes: [
+        { id: "node_module", title: "The module", criteria: ["ac_1"], paths: ["src/**"] },
+        { id: "node_tests", title: "Its tests", criteria: ["ac_2"], paths: ["test/**"] },
+      ],
+    });
+  };
+
+  /** An executor that writes one source file and one test file. */
+  const writesBoth = () =>
+    agentDouble((worktree) => {
+      mkdirSync(join(worktree, "src"), { recursive: true });
+      mkdirSync(join(worktree, "test"), { recursive: true });
+      writeFileSync(join(worktree, "src", "feature.ts"), "export const total = (n) => n.length;\n");
+      writeFileSync(join(worktree, "test", "feature.test.ts"), "// exercises total()\n");
+    });
+
+  it("records the pinned check once per node beside the whole-change result", async () => {
+    const repo = makeRepo();
+    const contract = graphed(repo.head);
+    const config = makeConfig(repo.dir);
+    const agent = writesBoth();
+    const reviewInputs: Array<Record<string, unknown>> = [];
+
+    const result = await runTicket({
+      config,
+      contract,
+      hooks: { agent: agent.run as never, review: approvingReview(reviewInputs) },
+    });
+
+    const checks = result.rounds[0]!.checks;
+    expect(checks).toHaveLength(3);
+
+    const whole = checks.filter((check) => check.node === undefined);
+    expect(whole).toHaveLength(1);
+    expect(whole[0]!.status).toBe("passed");
+
+    // The node whose paths hold only a source file has no test file for the
+    // narrow form, so the check ran over the change for it and said so.
+    const module = checks.find((check) => check.node?.node_id === "node_module")!;
+    expect(module.node?.scope).toBe("task");
+    expect(module.node?.note).toContain("test file");
+
+    // The node whose paths hold the change's test file was narrowed to it.
+    // The fixture worktree has no test runner to resolve, so this asserts what
+    // the run was aimed at and not what it concluded.
+    const tests = checks.find((check) => check.node?.node_id === "node_tests")!;
+    expect(tests.node?.scope).toBe("files");
+    expect(tests.node?.paths).toEqual(["test/feature.test.ts"]);
+
+    // D-107: reviewed once per node, in plan order, then once overall — three
+    // calls. A node's own call is handed only that node's own check result; the
+    // overall call, last, is handed the whole-change result and nothing tagged.
+    expect(reviewInputs).toHaveLength(3);
+    const [moduleCall, testsCall, overallCall] = reviewInputs as Array<{ checks: Array<{ node?: { node_id?: string } }> }>;
+    expect(moduleCall!.checks).toHaveLength(1);
+    expect(moduleCall!.checks[0]!.node?.node_id).toBe("node_module");
+    expect(testsCall!.checks).toHaveLength(1);
+    expect(testsCall!.checks[0]!.node?.node_id).toBe("node_tests");
+    // A node's result is evidence for that node's review and gates nothing:
+    // the overall call is handed the whole-change result, and the gate is open.
+    expect(overallCall!.checks).toHaveLength(1);
+    expect(overallCall!.checks[0]!.node).toBeUndefined();
+    expect(result.outcome).toBe("approved");
+  }, 90_000);
+
+  it("records no node at all for a plan without a graph", async () => {
+    const repo = makeRepo();
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = makeConfig(repo.dir);
+    const agent = writesBoth();
+    const reviewInputs: Array<Record<string, unknown>> = [];
+
+    const result = await runTicket({
+      config,
+      contract,
+      hooks: { agent: agent.run as never, review: approvingReview(reviewInputs) },
+    });
+
+    expect(result.rounds[0]!.checks).toHaveLength(1);
+    expect(result.rounds[0]!.checks.every((check) => check.node === undefined)).toBe(true);
+    expect((reviewInputs[0]!.checks as unknown[])).toHaveLength(1);
+    expect(result.outcome).toBe("approved");
+    // AC5: a flat plan has no nodes to review on their own, so the reviewer is
+    // called exactly once, unchanged, and there is no per-node record.
+    expect(reviewInputs).toHaveLength(1);
+    expect(result.node_reviews).toEqual([]);
+    expect(result.rounds[0]!.node_reviews).toEqual([]);
+    // A flat plan has no node to build a model for, so reviewGraph never
+    // calls the model factory: the one call carries the one model the loop
+    // itself built, the same as before reviewGraph existed.
+    expect(reviewInputs[0]!.model).toBeDefined();
+  }, 90_000);
+
+  it("a node-only blocking finding closes the gate the overall call alone left open", async () => {
+    const repo = makeRepo();
+    const contract = graphed(repo.head);
+    const config = makeConfig(repo.dir);
+    const agent = writesBoth();
+    const reviewInputs: Array<Record<string, unknown>> = [];
+    const blocking = finding({ key: "a".repeat(64), blocking: true, routing: "blocks", criterion_id: "ac_1" });
+    // Node order: `node_module` (blocking), then `node_tests`, then the
+    // overall — both approve on their own, so only the node's finding can be
+    // why the ticket ends changes_requested.
+    const outcomes = [
+      { review_id: "rev_000000000000a001", decision: "changes_requested" as const, findings: [blocking] },
+      { review_id: "rev_000000000000b001", decision: "approve" as const },
+      { review_id: "rev_000000000000f001", decision: "approve" as const },
+    ];
+    let call = 0;
+    const review = (async (input: Record<string, unknown>) => {
+      reviewInputs.push(input);
+      const script = outcomes[call]!;
+      call += 1;
+      return {
+        artifact: makeReview(script),
+        bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
+      };
+    }) as never;
+
+    const result = await runTicket({ config, contract, hooks: { agent: agent.run as never, review } });
+
+    expect(reviewInputs).toHaveLength(3);
+    expect(result.node_reviews.map((entry) => entry.node_id)).toEqual(["node_module", "node_tests"]);
+    expect(result.node_reviews[0]!.review?.decision).toBe("changes_requested");
+    expect(result.node_reviews[1]!.review?.decision).toBe("approve");
+    // The overall call and node_tests both approved; only node_module blocked.
+    expect(result.outcome).toBe("changes_requested");
+    expect(result.final_review?.findings.some((entry) => entry.key === blocking.key)).toBe(true);
+    // Each of the three calls carries its own model, built from its own
+    // narrowed contract and checks (D-107): a shared one would offer a
+    // node's call a schema for criteria and checks that are not its own.
+    const models = reviewInputs.map((input) => input.model);
+    expect(new Set(models).size).toBe(3);
   }, 90_000);
 });

@@ -22,20 +22,20 @@ import {
   type ReviewArtifact,
   type ReviewRouting,
   type SourceContract,
-} from "@focrux/contracts";
-import { isRemediableFamily, redactCredentials, remediableFindings } from "@focrux/review";
+} from "@perbo/contracts";
+import { isRemediableFamily, redactCredentials, remediableFindings } from "@perbo/review";
 import { UsageError, type ReviewArgs } from "./args.js";
 import { readPullRequest, readRefRange, type GitRunner, type PullRequestRead } from "./pull-request.js";
 
 /**
  * Reviewing a change nobody admitted (SCP-179).
  *
- * `focrux review --contract c.json --diff change.diff` is the review step with
+ * `perbo review --contract c.json --diff change.diff` is the review step with
  * a plan already approved behind it. This is the same step with nothing behind
  * it: the contract is read from the pull request the change is already
  * described in, or typed on the command line, the diff comes from `gh` or from
  * `git`, and the verdict, the findings and the routing decision are written
- * into the repository's own `.focrux/`. Nothing is sent anywhere. The only
+ * into the repository's own `.perbo/`. Nothing is sent anywhere. The only
  * thing that leaves this machine is the read of the pull request, and only when
  * one was named.
  */
@@ -279,7 +279,7 @@ export function buildTicketlessBundle(input: {
 /** `<store>/reviews/` — the local store, and the only place this run writes. */
 export function reviewsDir(cwd: string, args: ReviewArgs): string {
   const repoDir = resolve(cwd, args.repo);
-  return args.store ? resolve(cwd, args.store, "reviews") : join(repoDir, ".focrux", "reviews");
+  return args.store ? resolve(cwd, args.store, "reviews") : join(repoDir, ".perbo", "reviews");
 }
 
 /**

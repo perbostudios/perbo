@@ -14,8 +14,8 @@ import {
 } from "../src/stops.js";
 
 /**
- * D-060, measured live: what one `focrux sync` writes per ticket, and what
- * `focrux stops` computes over those files. The semantics under test mirror
+ * D-060, measured live: what one `perbo sync` writes per ticket, and what
+ * `perbo stops` computes over those files. The semantics under test mirror
  * `precisionOfStopping` in packages/evaluation/src/stopping.ts — a change is
  * endorsed when any of its stops is — so the live number and the corpus number
  * answer the same question.
