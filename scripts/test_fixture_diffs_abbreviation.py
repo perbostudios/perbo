@@ -81,7 +81,9 @@ class Abbreviation(unittest.TestCase):
                     path.write_bytes(re.sub(rb"(?<!\r)\n", b"\r\n", path.read_bytes()))
             system = Path(home) / "gitconfig"
             system.write_text("[core]\n\tautocrlf = true\n", encoding="utf-8")
-            with mock.patch.dict(os.environ, {"GIT_CONFIG_SYSTEM": str(system)}):
+            # Only that system file: a person's own global setting would otherwise win.
+            with mock.patch.dict(os.environ, {"GIT_CONFIG_SYSTEM": str(system), "GIT_CONFIG_GLOBAL": os.devnull}):
+                os.environ.pop("GIT_CONFIG_NOSYSTEM", None)
                 generated = generate(copy)
         self.assertEqual(generated, (fixture / "change.diff").read_text(encoding="utf-8"))
 
