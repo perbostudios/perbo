@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -40,7 +39,6 @@ class GitOutputEncoding(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, "-X", "utf8=0", "-c", CHILD, str(FIXTURE)],
             cwd=SCRIPTS,
-            env=os.environ,
             capture_output=True,
             text=True,
             encoding="utf-8",
