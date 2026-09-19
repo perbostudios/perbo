@@ -23,12 +23,21 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).resolve().parent.parent / "packages/evaluation/corpus/fixtures"
 PREFIX = re.compile(r"([ab])/(?:before|after)/")
+# The committed diffs abbreviate every `index` hash to seven characters.
+INDEX = re.compile(r"^index ([0-9a-f]{40})\.\.([0-9a-f]{40})", re.MULTILINE)
+ABBREV = 7
 
 
 def generate(fixture: Path) -> str:
-    """`git diff --no-index` over the two trees, with the authoring prefixes removed."""
+    """`git diff --no-index` over the two trees, with the authoring prefixes removed.
+
+    The hashes are asked for whole and cut here, because the length git
+    abbreviates them to is not the diff's: it follows `core.abbrev`, and past
+    that it lengthens a prefix another object in the enclosing repository
+    shares, so the same trees would print differently in two checkouts.
+    """
     result = subprocess.run(
-        ["git", "diff", "--no-index", "--no-color", "before", "after"],
+        ["git", "diff", "--no-index", "--no-color", "--full-index", "before", "after"],
         cwd=fixture,
         capture_output=True,
         text=True,
@@ -37,7 +46,8 @@ def generate(fixture: Path) -> str:
     # git diff exits 1 when there are differences, which is the normal case here.
     if result.returncode not in (0, 1):
         raise SystemExit(f"{fixture.name}: git diff failed: {result.stderr.strip()}")
-    return PREFIX.sub(r"\1/", result.stdout)
+    abbreviated = INDEX.sub(lambda match: f"index {match[1][:ABBREV]}..{match[2][:ABBREV]}", result.stdout)
+    return PREFIX.sub(r"\1/", abbreviated)
 
 
 def main() -> int:

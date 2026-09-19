@@ -179,17 +179,6 @@ test("PERBO_PYTHON names the interpreter the validators run under", () => {
   assert.ok(!runner.runs().some((argv) => argv[0] === "python3"));
 });
 
-test("the fixture-diff validator is given core.abbrev=7", () => {
-  const runner = fakeRunner();
-  gate(["validators"], { runner });
-  const call = runner.calls.find((entry) => entry.argv.includes("scripts/validate_fixture_diffs.py"));
-  assert.deepEqual(call.opts.env, {
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "core.abbrev",
-    GIT_CONFIG_VALUE_0: "7",
-  });
-});
-
 test("protected-paths has nothing to compare on main", () => {
   const runner = fakeRunner({
     capture: (argv) =>
