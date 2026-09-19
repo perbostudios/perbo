@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -11,9 +10,6 @@ import unittest
 SCRIPTS = Path(__file__).resolve().parent
 # The authored fixture whose diff carries Cyrillic text.
 FIXTURE = SCRIPTS.parent / "packages/evaluation/corpus/fixtures/scp-009-dependency-added-to-the-root-manifest"
-# What the gate sets for this validator: with Git's default abbreviation every
-# authored fixture's `index` line differs, whatever the encoding.
-ABBREV = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.abbrev", "GIT_CONFIG_VALUE_0": "7"}
 
 # Run in a child interpreter so the host is a Windows one: UTF-8 mode off, which
 # a host with no locale set turns on by itself, and the locale's encoding the
@@ -43,7 +39,6 @@ class GitOutputEncoding(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, "-X", "utf8=0", "-c", CHILD, str(FIXTURE)],
             cwd=SCRIPTS,
-            env={**os.environ, **ABBREV},
             capture_output=True,
             text=True,
             encoding="utf-8",

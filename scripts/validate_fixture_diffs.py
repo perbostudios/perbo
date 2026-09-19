@@ -23,12 +23,31 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).resolve().parent.parent / "packages/evaluation/corpus/fixtures"
 PREFIX = re.compile(r"([ab])/(?:before|after)/")
+# The committed diffs abbreviate every `index` hash to seven characters.
+INDEX = re.compile(r"^index ([0-9a-f]{40})\.\.([0-9a-f]{40})", re.MULTILINE)
+ABBREV = 7
 
 
 def generate(fixture: Path) -> str:
-    """`git diff --no-index` over the two trees, with the authoring prefixes removed."""
+    """`git diff --no-index` over the two trees, with the authoring prefixes removed.
+
+    The hashes are asked for whole and cut here, because the length git
+    abbreviates them to is not the diff's: it follows `core.abbrev`, and past
+    that it lengthens a prefix another object in the enclosing repository
+    shares, so the same trees would print differently in two checkouts. The
+    diff's shape is pinned by flags for the same reason, since a person's own
+    settings for the prefixes, the algorithm, the context or its heuristics
+    would each change it. Their configuration is otherwise read as it is,
+    because `core.autocrlf` is what turns a Windows checkout's line endings
+    back into the ones the diff was made from.
+    """
     result = subprocess.run(
-        ["git", "diff", "--no-index", "--no-color", "before", "after"],
+        [
+            "git", "diff", "--no-index", "--no-color", "--no-ext-diff", "--full-index",
+            "--src-prefix=a/", "--dst-prefix=b/", "--unified=3", "--diff-algorithm=myers",
+            "--indent-heuristic", "--inter-hunk-context=0",
+            "before", "after",
+        ],
         cwd=fixture,
         capture_output=True,
         text=True,
@@ -37,7 +56,8 @@ def generate(fixture: Path) -> str:
     # git diff exits 1 when there are differences, which is the normal case here.
     if result.returncode not in (0, 1):
         raise SystemExit(f"{fixture.name}: git diff failed: {result.stderr.strip()}")
-    return PREFIX.sub(r"\1/", result.stdout)
+    abbreviated = INDEX.sub(lambda match: f"index {match[1][:ABBREV]}..{match[2][:ABBREV]}", result.stdout)
+    return PREFIX.sub(r"\1/", abbreviated)
 
 
 def main() -> int:

@@ -133,16 +133,7 @@ export const STAGES = [
       }
       ctx.run([python, "scripts/validate_docs.py"]);
       ctx.run([python, "scripts/validate_diagrams.py"]);
-      // `core.abbrev=7` because git otherwise abbreviates the `index` hashes in
-      // a generated diff to eight characters and every authored fixture reads
-      // as mismatched.
-      ctx.run([python, "scripts/validate_fixture_diffs.py"], {
-        env: {
-          GIT_CONFIG_COUNT: "1",
-          GIT_CONFIG_KEY_0: "core.abbrev",
-          GIT_CONFIG_VALUE_0: "7",
-        },
-      });
+      ctx.run([python, "scripts/validate_fixture_diffs.py"]);
       ctx.run([python, "-c", YAML_PARSE]);
       ctx.run(["node", "--test", "scripts/check.test.mjs", "scripts/sync-protected-paths.test.mjs"]);
       ctx.run(["node", "scripts/sync-protected-paths.mjs", "--check"]);
