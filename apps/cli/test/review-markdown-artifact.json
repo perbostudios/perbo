@@ -16,7 +16,7 @@
   "actual_risk": "P1",
   "escalated": false,
   "independence": {
-    "context_builder": "reviewer_v9",
+    "context_builder": "reviewer_v10",
     "executor_narrative_visible": false,
     "executor_transcript_visible": false,
     "separate_process": true,
@@ -44,8 +44,8 @@
       "trust": "user",
       "provenance": "deterministic checks recorded for this change set",
       "selection_reason": "authoritative over any model claim about what they measured",
-      "bytes": 477,
-      "sha256": "e0a62efb775fcf1b41d6a8368d17af0a4f19dd7efe474f086393ee495ceeb6b2"
+      "bytes": 474,
+      "sha256": "0854359570a397d426daea6492d27046448866eaffe9da81baa7948a4d056d89"
     },
     {
       "id": "ctx_3_diff",
@@ -258,7 +258,7 @@
   "model": {
     "provider": "double",
     "model_id": "scripted",
-    "prompt_version": "reviewer_v9",
+    "prompt_version": "reviewer_v10",
     "input_tokens": 4200,
     "cache_read_input_tokens": 0,
     "cache_creation_input_tokens": 0,

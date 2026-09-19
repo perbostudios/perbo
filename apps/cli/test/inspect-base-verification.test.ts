@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { ReviewArtifactSchema, SecretIndex, type ExecutionAttempt, type Finding } from "@focrux/contracts";
-import { BundleStore } from "@focrux/runner";
+import { ReviewArtifactSchema, SecretIndex, type ExecutionAttempt, type Finding } from "@perbo/contracts";
+import { BundleStore } from "@perbo/runner";
 import { buildInspectReport, renderInspect } from "../src/inspect.js";
 import { makeAttempt, makeReview, makeTicket } from "./attempt-fixture.js";
 
@@ -17,7 +17,7 @@ import { makeAttempt, makeReview, makeTicket } from "./attempt-fixture.js";
  * nothing measured it, rather than leaving a reader to assume.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-inspect-base-verify-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-base-verify-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const TICKET_ID = "ticket_baseverify1";
@@ -55,7 +55,7 @@ function storeWith(
   base_verification: ExecutionAttempt["base_verification"],
 ): string {
   const repo = join(scratch, name);
-  const store = join(repo, ".focrux");
+  const store = join(repo, ".perbo");
   mkdirSync(join(store, "tickets"), { recursive: true });
   mkdirSync(join(store, "state"), { recursive: true });
   writeFileSync(
@@ -147,7 +147,7 @@ const render = (store: string): string =>
     version: "test",
   });
 
-describe("focrux inspect, on a check finding that blocks", () => {
+describe("perbo inspect, on a check finding that blocks", () => {
   it("names the commit the attribution rests on and what its verification said", () => {
     const rendered = render(
       storeWith("measured", { commit: BASE_COMMIT, verified: false }),

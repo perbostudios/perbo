@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DeliveredCheckSchema, LimitsTableSchema, type ChangeSet } from "@focrux/contracts";
+import { DeliveredCheckSchema, LimitsTableSchema, type ChangeSet } from "@perbo/contracts";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
@@ -94,7 +94,7 @@ const publishing = {
 };
 
 function makeConfig(repositoryRoot: string, over: Record<string, unknown> = {}) {
-  const root = scratch("focrux-delivery-checks-");
+  const root = scratch("perbo-delivery-checks-");
   return TicketRunConfigSchema.parse({
     materialization_manifest: withoutInstall(repositoryRoot),
     ticket_key: "CHECKS",
@@ -157,7 +157,7 @@ function fakeGh(name: string, rollup: unknown[]): {
   calls: () => string[][];
   body: () => string | null;
 } {
-  const root = scratch(`focrux-delivery-checks-gh-${name}-`);
+  const root = scratch(`perbo-delivery-checks-gh-${name}-`);
   const rollupPath = join(root, "rollup.json");
   const logPath = join(root, "calls.jsonl");
   const bodyPath = join(root, "body.md");

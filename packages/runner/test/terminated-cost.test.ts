@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LimitsTableSchema } from "@focrux/contracts";
+import { LimitsTableSchema } from "@perbo/contracts";
 import { runAgent, type AgentResult } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
@@ -114,7 +114,7 @@ async function run(
 
 describe("an attempt the runner stops records what it cost", () => {
   it("estimates a stopped priced-model attempt from the assistant usage read before the stop", async () => {
-    const worktree = scratch("focrux-scp292-estimated-");
+    const worktree = scratch("perbo-scp292-estimated-");
     const { result: stopped } = await run(
       worktree,
       [
@@ -142,7 +142,7 @@ describe("an attempt the runner stops records what it cost", () => {
   }, 60_000);
 
   it("uses the running list-price estimate to stop before a result event", async () => {
-    const worktree = scratch("focrux-scp292-cost-ceiling-");
+    const worktree = scratch("perbo-scp292-cost-ceiling-");
     const { result: stopped, ceilings } = await run(
       worktree,
       [
@@ -175,7 +175,7 @@ describe("an attempt the runner stops records what it cost", () => {
   }, 60_000);
 
   it("counts repeated content envelopes for one assistant request only once", async () => {
-    const worktree = scratch("focrux-scp292-repeated-assistant-");
+    const worktree = scratch("perbo-scp292-repeated-assistant-");
     const repeated = assistant({
       id: "msg_one",
       request_id: "req_one",
@@ -201,7 +201,7 @@ describe("an attempt the runner stops records what it cost", () => {
   }, 60_000);
 
   it("leaves an unpriced model unavailable when its stopped stream has only tokens", async () => {
-    const worktree = scratch("focrux-scp292-unpriced-model-");
+    const worktree = scratch("perbo-scp292-unpriced-model-");
     const { result: stopped } = await run(
       worktree,
       [assistant({ id: "msg_one", request_id: "req_one", input_tokens: 100, output_tokens: 20 })],
@@ -217,7 +217,7 @@ describe("an attempt the runner stops records what it cost", () => {
   }, 60_000);
 
   it("carries the charge reported before a prohibited action, marked partial", async () => {
-    const worktree = scratch("focrux-scp159-prohibited-");
+    const worktree = scratch("perbo-scp159-prohibited-");
     const { result } = await run(worktree, [
       assistant({ total_cost_usd: 0.8, input_tokens: 1_000, output_tokens: 100 }),
       assistant({ total_cost_usd: 2.0, input_tokens: 1_500, output_tokens: 200 }),
@@ -233,7 +233,7 @@ describe("an attempt the runner stops records what it cost", () => {
   }, 60_000);
 
   it("records the cost ceiling's own figure when the ceiling is what stopped it", async () => {
-    const worktree = scratch("focrux-scp159-cost-");
+    const worktree = scratch("perbo-scp159-cost-");
     const { result, ceilings } = await run(
       worktree,
       [
@@ -252,7 +252,7 @@ describe("an attempt the runner stops records what it cost", () => {
   }, 60_000);
 
   it("says the cost is unavailable, never zero, when nothing was reported before the stop", async () => {
-    const worktree = scratch("focrux-scp159-unavailable-");
+    const worktree = scratch("perbo-scp159-unavailable-");
     const { result } = await run(worktree, [], { attempt_wall_clock_ms: 1 });
 
     expect(result.termination.reason).toBe("wall_clock_exceeded");
@@ -261,7 +261,7 @@ describe("an attempt the runner stops records what it cost", () => {
   }, 60_000);
 
   it("stops on the iteration ceiling with the charge reported by then", async () => {
-    const worktree = scratch("focrux-scp159-iterations-");
+    const worktree = scratch("perbo-scp159-iterations-");
     const { result } = await run(
       worktree,
       [
@@ -280,7 +280,7 @@ describe("an attempt the runner stops records what it cost", () => {
   }, 60_000);
 
   it("stops on the token ceiling with the charge reported by then", async () => {
-    const worktree = scratch("focrux-scp159-tokens-");
+    const worktree = scratch("perbo-scp159-tokens-");
     const { result } = await run(
       worktree,
       [
@@ -296,7 +296,7 @@ describe("an attempt the runner stops records what it cost", () => {
   }, 60_000);
 
   it("takes final usage totals and transport cost instead of repeated assistant accounting", async () => {
-    const worktree = scratch("focrux-scp159-completed-");
+    const worktree = scratch("perbo-scp159-completed-");
     const { result } = await run(
       worktree,
       [
@@ -349,7 +349,7 @@ describe("an attempt the runner stops records what it cost", () => {
   }, 60_000);
 
   it("keeps distinct assistant-request sums when the result carries no usage", async () => {
-    const worktree = scratch("focrux-scp292-result-without-usage-");
+    const worktree = scratch("perbo-scp292-result-without-usage-");
     const { result } = await run(
       worktree,
       [

@@ -12,6 +12,7 @@ import {
   InstallStrategySchema,
   LIMITED_RESOURCES,
   LimitsTableSchema,
+  PER_TOKEN_COST_LIMITS,
   PlanContractSchema,
   UNCHECKED,
   failedChecks,
@@ -22,19 +23,22 @@ import {
   type LimitedResource,
   type LimitsTable,
   type MaterializationManifest,
+  type PerTokenCostLimit,
   type PlanContract,
   type TerminationReason,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import {
   GREENFIELD_VERIFY,
+  declaredVerifyCommand,
   detectPackageManager,
   diagnose,
   pinInstallCommand,
   proposedInstall,
   proposedInstallStep,
+  verificationServiceNeed,
   workspaceMembership,
   type DiagnoseRequest,
-} from "@focrux/workspace";
+} from "@perbo/workspace";
 import {
   DEFAULT_DELIVERED_CHECKS_BOUND_MS,
   ResumeRefusedError,
@@ -54,15 +58,18 @@ import {
   type PreflightResult,
   type TicketRunResult,
   type MergedTicketContext,
-} from "@focrux/runner";
+} from "@perbo/runner";
 import {
   TICKET_TRANSITIONS,
   TicketSchema,
+  admittedSpecFiles,
   transition,
+  type SpecFile,
+  type StandingProhibitedEntry,
   type Ticket,
   type TicketSource,
   type TicketState,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import {
   applyObservedPath,
   loadAdmitted,
@@ -97,13 +104,14 @@ import {
   reviewerDependency,
 } from "./provider-probe.js";
 import { mergedTicketContext } from "./relevel.js";
-import { judgingPaths, storeDir, type JudgingPath } from "./store.js";
+import { judgingPaths, standingProhibited, storeDir, type JudgingPath } from "./store.js";
 import type { Streams } from "./streams.js";
 import { derivedBranch, recordDelivery } from "./sync.js";
-import { listTickets } from "./tickets.js";
+import { specStaleness } from "./spec-staleness.js";
+import { listTickets, readApproachRecord } from "./tickets.js";
 
 /**
- * `focrux run` and `focrux doctor` (SCP-016 through SCP-020, SCP-094).
+ * `perbo run` and `perbo doctor` (SCP-016 through SCP-020, SCP-094).
  *
  * Two commands, and the split is deliberate. `doctor` answers "can this
  * repository be materialized at all", which ADR-0025 requires to fail **before**
@@ -118,7 +126,7 @@ import { listTickets } from "./tickets.js";
  * the one place here that reads and writes the ticket store.
  */
 
-/** Every command this binary carries, in the order its help lists them. */
+/** Every command this binary carries. */
 export const FULL_COMMAND_SET = [
   "doctor",
   "baseline",
@@ -134,12 +142,39 @@ export const FULL_COMMAND_SET = [
   "serve",
   "mcp",
   "agent",
+  "interview",
   "stops",
   "escapes",
   "principle",
+  "index",
 ] as const;
 
 export type FullCommandName = (typeof FULL_COMMAND_SET)[number];
+
+/**
+ * The spec's No-Gos, from the ticket's approach record (D-100).
+ *
+ * Empty where the ticket has no approach record, which is every ticket whose
+ * spec stated none and every plan with no graph. A record that cannot be read,
+ * or that belongs to another ticket or plan, is the same answer with a line on
+ * stderr: `perbo inspect` reports it as the problem it is, and it is not this
+ * run's to refuse over.
+ */
+function approachNoGos(
+  dir: string,
+  key: string,
+  contract: Pick<PlanContract, "ticket_id" | "plan_id">,
+): string[] {
+  try {
+    return readApproachRecord(dir, key, contract)?.no_gos ?? [];
+  } catch (error) {
+    process.stderr.write(
+      `warning: the executor's brief carries no No-Gos, because ${key}.approach.json ` +
+        `is not this plan's usable record: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return [];
+  }
+}
 
 /**
  * An approved piece of work a run was pointed at with `--ticket`, as the
@@ -156,7 +191,12 @@ export interface AdmittedWork {
 
 /** The ticket store, as `run` uses it. {@link TICKET_RUNS} is the one implementation. */
 export interface TicketRuns {
-  /** The admitted ticket and its approved contract, or a `UsageError` saying why not. */
+  /**
+   * The admitted ticket and its approved contract. Throws where there is none to
+   * run: the ticket store's own error for a key it does not hold, or for a
+   * contract that does not match its ticket; a {@link UsageError} for a contract
+   * not yet approved, or one that disagrees with its draft record.
+   */
   load(input: { cwd: string; repo: string; store: string | null; key: string }): AdmittedWork;
   /**
    * The run configuration the ticket derives, under an explicit `--config`.
@@ -173,8 +213,7 @@ export interface TicketRuns {
    * Record that this run has begun — before the attempt, so a run that never
    * returns does not leave a ticket saying `ready` — and answer which run of
    * the ticket this is, counting from 1.
-   */
-  /**
+   *
    * `relevel`: the ticket is at `pr_open` and stays there; nothing is reopened,
    * and the answer is null — the loop then counts the runs on the attempts
    * record itself, so a re-level's attempt ids are minted after every run's
@@ -197,7 +236,7 @@ export interface ExecuteArgs {
   publish: boolean;
   json: boolean;
   quiet: boolean;
-  /** `doctor` only: write the proposed `.focrux/config.json` when none exists. */
+  /** `doctor` only: write the proposed `.perbo/config.json` when none exists. */
   writeConfig: boolean;
   /**
    * `doctor` only: make one minimal call at the configured reviewer model and
@@ -701,6 +740,16 @@ export const TICKET_RUNS: TicketRuns = {
         source: ticket.source ?? null,
         branch: ticket.delivery.branch,
         publish,
+        // D-096: the spec's No-Gos, which the brief a compaction gives back
+        // states. Read here rather than in the merge, which reads no ticket;
+        // a record that cannot be read, or is another plan's, is reported and
+        // leaves them empty, because a run must not stop over the half of the
+        // approach that gates nothing.
+        no_gos: approachNoGos(work.dir, work.key, work.contract),
+        // D-103: the spec files the loop commits first on the branch. A ticket
+        // admitted before the list existed records the spec alone, which is
+        // what its branch carries.
+        spec_files: ticket.admission.spec === null ? [] : admittedSpecFiles(ticket.admission.spec),
       },
       override,
     );
@@ -742,6 +791,42 @@ export const TICKET_RUNS: TicketRuns = {
       }
       return null;
     }
+    // D-103: the spec the contract was drafted from, before anything is moved
+    // and before any worktree exists. A ticket the run is about to start is a
+    // ticket that has not started, whatever it did on an earlier attempt, so
+    // this is where the stale one stops — and a run already in flight is past
+    // here, which is why nothing interrupts one.
+    let ticket = readTicket(work.dir, work.key);
+    const staleness = specStaleness({
+      repositoryRoot: ticket.repository_root,
+      // A run only ever starts an approved ticket: `plan_review -> ready` is
+      // the one row into the runnable side from an unapproved state, and it is
+      // `perbo approve`. So the reading here is always against approval, and
+      // the sentences it prints say so. `inspect` is the caller that asks the
+      // record, because it is the one that renders a ticket in `plan_review`.
+      approved: ticket.approved_at !== null,
+      spec: ticket.admission.spec,
+    });
+    for (const unjudged of staleness?.unjudged ?? []) {
+      // Said and not acted on: a name nothing could judge is not evidence that
+      // the spec has moved, and refusing over one would stop a run for a
+      // reading this repository has not been asked to take.
+      process.stderr.write(`warning: ${work.key}'s spec is not fully checked: ${unjudged}\n`);
+    }
+    if (staleness !== null && staleness.stale.length > 0) {
+      // Through `ready` where the ticket is somewhere else, because that is the
+      // one state the row out of leads here, and a ticket reopened for an
+      // attempt it never got is what happened.
+      const reopened = ticket.state === "ready" ? ticket : reopen(ticket, `new attempt after ${ticket.state}`);
+      writeTicket(work.dir, transition(reopened, "plan_invalid", staleness.stale.join("; ")));
+      throw new UsageError(
+        `${work.key} was drafted from ${staleness.path}, which is no longer that spec, so the run ` +
+          `does not start and the ticket is now plan_invalid: ${staleness.stale.join("; ")}. An ` +
+          "approved contract is immutable (ADR-0016), so this work is admitted again rather than " +
+          "approved again (D-103)",
+      );
+    }
+
     // A ticket that already ran comes back through `ready`, because that is
     // what the lifecycle calls a new attempt.
     //
@@ -752,7 +837,6 @@ export const TICKET_RUNS: TicketRuns = {
     // "the review did not complete" with a stack trace, permanently, with no
     // command able to recover it. A ticket is re-runnable or it is a dead
     // record; there is no third thing.
-    let ticket = readTicket(work.dir, work.key);
     if (ticket.state !== "ready") {
       ticket = reopen(ticket, `new attempt after ${ticket.state}`);
     }
@@ -949,6 +1033,7 @@ export async function runExecuteCommand(options: ExecuteOptions): Promise<number
   // trace with the ticket left in `provisioning`.
   const machine = (options.preflight ?? preflight)({
     agentBinary: config.agent_binary,
+    agentProvider: config.agent_provider,
     reviewerProvider: config.reviewer_provider,
     needsGh: config.publish,
     // An install of kind `none` is never spawned, so it names no binary to ask for.
@@ -965,7 +1050,7 @@ export async function runExecuteCommand(options: ExecuteOptions): Promise<number
   streams.stderr(`  ceilings  ${renderCeilingsLine(config.limits)}\n`);
 
   // What is judging this attempt, where nobody has said (SCP-259). A repository
-  // with no `.focrux/config.json` is run against the checks its own package
+  // with no `.perbo/config.json` is run against the checks its own package
   // scripts imply, and the line names them, says where they came from, and
   // names the command that writes them down. Printed only where every pinned
   // check is one of those: a config on disk, or an explicit `--config` naming
@@ -980,7 +1065,7 @@ export async function runExecuteCommand(options: ExecuteOptions): Promise<number
     streams.stderr(
       `  checks    ${proposed.length === 0 ? "none" : proposed.map((check) => check.name).join(", ")}` +
         ` — proposed from this package's own scripts because ${join(runStore, "config.json")} does` +
-        ` not exist; pin them with: focrux doctor --repo ${args.repo} --write-config\n`,
+        ` not exist; pin them with: perbo doctor --repo ${args.repo} --write-config\n`,
     );
   }
 
@@ -1212,7 +1297,7 @@ export async function runExecuteCommand(options: ExecuteOptions): Promise<number
   streams.stderr(`\ncost      ${renderCostRoll(cost)}\n`);
   if (local) {
     streams.stderr(
-      `read it back with: focrux inspect ${result.ticket_id}` +
+      `read it back with: perbo inspect ${result.ticket_id}` +
         (args.store ? ` --store ${args.store}` : args.repo === "." ? "" : ` --repo ${args.repo}`) +
         "\n",
     );
@@ -1458,6 +1543,14 @@ export async function runDoctorCommand(options: DoctorOptions): Promise<number> 
   const configuredBinary = repoConfig?.["agent_binary"];
   const agentBinary =
     typeof configuredBinary === "string" ? configuredBinary : RUN_CONFIG_DEFAULTS.agent_binary;
+  // The transport that binary is, read the same way — never guessed from
+  // agentBinary's own spelling, which a repository is free to configure as
+  // any path.
+  const configuredProvider = repoConfig?.["agent_provider"];
+  const agentProvider =
+    configuredProvider === "claude-cli" || configuredProvider === "codex-cli"
+      ? configuredProvider
+      : RUN_CONFIG_DEFAULTS.agent_provider;
   // The reviewer this repository has agreed on, transport and model both, and
   // the keys each was read from. The model is `reviewer_model` where one is
   // pinned and the run's own `model` otherwise, which is the fallback the loop
@@ -1481,6 +1574,7 @@ export async function runDoctorCommand(options: DoctorOptions): Promise<number> 
     : proposedInstall(checkout, detectPackageManager(checkout, membership));
   const machine = checkMachine({
     agentBinary,
+    agentProvider,
     reviewerProvider,
     needsGh: publishes,
     installBinary: install.kind === "none" ? null : (install.command[0] ?? null),
@@ -1515,6 +1609,11 @@ export async function runDoctorCommand(options: DoctorOptions): Promise<number> 
   // scope with — so the list can be read before a scope is written against it
   // rather than at the refusal.
   const judging = judgingPaths(store);
+
+  // The standing prohibited list (D-105), which is not a judging path: a scope
+  // may name one of these, and it is the write that is refused. Reported beside
+  // JUDGING because a person reading one is asking the same question.
+  const standing = standingProhibited(store);
 
   // The corpus this checkout would score the reviewer against, and whether it
   // is the one the recorded score was measured on. A warning either way: it
@@ -1658,6 +1757,7 @@ export async function runDoctorCommand(options: DoctorOptions): Promise<number> 
             unreadable_attempt_files: hits.unreadable,
           },
           judging_paths: judging,
+          standing_prohibited: standing,
           check_advisories: advisories,
           // SCP-279: the pinned checks a run here is judged by, whether this
           // repository runs anything on the pull request afterwards, and how
@@ -1695,6 +1795,9 @@ export async function runDoctorCommand(options: DoctorOptions): Promise<number> 
       )}\n`,
     );
   } else {
+    // Whether anything is installed at all: an install of kind `none` runs
+    // nowhere, so no directory or member filter is named for it.
+    const installs = result.proposed !== null && result.proposed.install.kind !== "none";
     // The base beside the checkout it was read from, in the human reading too
     // and not only in the JSON: a person running the diagnostic to find out
     // what a run here would do is asking this as much as they are asking about
@@ -1708,9 +1811,11 @@ export async function runDoctorCommand(options: DoctorOptions): Promise<number> 
       ...(inWorkspace
         ? [
             `WORKSPACE ${membership.workspace_root}  (the workspace this package belongs to; ` +
-              `its install runs there${
-                membership.package_name === null ? "" : `, filtered to ${membership.package_name}`
-              })`,
+              (installs
+                ? `its install runs there${
+                    membership.package_name === null ? "" : `, filtered to ${membership.package_name}`
+                  })`
+                : "nothing is installed)"),
           ]
         : []),
       `BASE      ${
@@ -1746,7 +1851,7 @@ export async function runDoctorCommand(options: DoctorOptions): Promise<number> 
         : (detectPackageManager(checkout)?.lockfile ?? null);
       lines.push(
         `  install           ${result.proposed.install.command.join(" ")}` +
-          (inWorkspace ? `  (in ${installStep.cwd})` : "") +
+          (inWorkspace && installs ? `  (in ${installStep.cwd})` : "") +
           (result.proposed.install.pinned ? "" : `  (unpinned: no ${missing ?? "lockfile"})`),
       );
       lines.push(`  lifecycle scripts ${result.proposed.install.lifecycle_scripts.policy}`);
@@ -1765,6 +1870,7 @@ export async function runDoctorCommand(options: DoctorOptions): Promise<number> 
     }
     lines.push("", ...renderLimitsTable(limits, configSource), ...renderCeilingHits(hits, limits, configSource));
     lines.push("", ...renderJudgingPaths(judging, configPath));
+    lines.push("", ...renderStandingProhibited(standing, configPath));
     lines.push(
       "",
       ...renderPullRequestChecks(
@@ -1784,7 +1890,7 @@ export async function runDoctorCommand(options: DoctorOptions): Promise<number> 
       lines.push(`CONFIG    ${configPath} does not exist. Proposed:`, "");
       lines.push(...JSON.stringify(proposal, null, 2).split("\n").map((line) => `  ${line}`));
       const writeCommand = [
-        "focrux", "doctor", "--repo", options.args.repo,
+        "perbo", "doctor", "--repo", options.args.repo,
         ...(overridePath === null ? [] : ["--config", overridePath]),
         "--write-config",
       ].map((arg) => /^[\w./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", "'\\''")}'`).join(" ");
@@ -1815,19 +1921,6 @@ export async function runDoctorCommand(options: DoctorOptions): Promise<number> 
   return result.materializable && machine.ok && !probeBlocking ? 0 : 1;
 }
 
-/**
- * The run configuration for an admitted ticket.
- *
- * Three layers, narrowest last: what the ticket already knows (its repository,
- * where its worktrees and bundles go), then `.focrux/config.json` — the things
- * a repository agrees **once** rather than per ticket, which is what the checks
- * and the materialisation manifest are — then an explicit `--config` for the
- * run in front of you.
- *
- * The split is the friction this removes. Checks and a materialisation manifest
- * are properties of a repository, and copying them into every ticket's run file
- * was the largest part of the JSON a person had to write by hand.
- */
 /**
  * Drop keys beginning with `_`.
  *
@@ -1900,7 +1993,7 @@ export function reopen(ticket: Ticket, note: string): Ticket {
   );
 }
 
-/** The comment-stripped `.focrux/config.json`, or null when the store has none. */
+/** The comment-stripped `.perbo/config.json`, or null when the store has none. */
 export function readRepoConfig(dir: string): Record<string, unknown> | null {
   const path = join(dir, "config.json");
   if (!existsSync(path)) return null;
@@ -1943,6 +2036,7 @@ export function effectiveLimits(repoConfig: Record<string, unknown> | null, sour
 }
 
 const CEILING_RESOURCE_FOR: Partial<Record<TerminationReason, LimitedResource>> = {
+  stalled: "attempt_stall_ms",
   wall_clock_exceeded: "attempt_wall_clock_ms",
   command_ceiling_exceeded: "attempt_commands",
   iteration_ceiling_exceeded: "attempt_iterations",
@@ -2101,6 +2195,7 @@ const withThousands = (n: number) => n.toLocaleString("en-US");
 /** A resource's value in the unit a person thinks in, beside the raw number. */
 function humanLimit(resource: LimitedResource, value: number): string {
   switch (resource) {
+    case "attempt_stall_ms":
     case "attempt_wall_clock_ms":
     case "wait_for_provider_ms":
       return formatDuration(value);
@@ -2114,36 +2209,41 @@ function humanLimit(resource: LimitedResource, value: number): string {
   }
 }
 
-/** The counters a repository may set, and what the ceilings line calls each. */
-const COUNTER_LABEL = [
+/** The resources a repository may set that nothing defaults, and their labels. */
+const CONFIGURED_ONLY_LABEL = [
+  ["attempt_wall_clock_ms", "wall clock"],
+  ["attempt_tokens", "tokens"],
   ["attempt_iterations", "iterations"],
   ["round_iterations", "round iterations"],
   ["attempt_commands", "commands"],
 ] as const;
 
 /**
- * One line, for the start of a run: the ceilings that will end it.
+ * One line, for the start of a run: what can stop it.
  *
- * Cost leads because it is the guard that means something (D-096). The first
- * three bound one attempt, or one remediation round; the next three bound the
- * ticket the attempts belong to (SCP-193) — how many rounds it gets, what it
- * may spend before the loop stops restarting itself, and the longest the loop
- * will sit out a provider that named its own reset. Nothing counted in
- * messages or tool calls appears unless the repository set a ceiling for it,
- * and then it comes last, so a reader can tell the bounds every run has from
- * the one this repository added.
+ * The stall window leads because it is the only thing that stops an attempt
+ * nobody asked to stop (D-096). The next two bound the ticket the attempts
+ * belong to (SCP-193) — how many remediation rounds it gets, and the longest
+ * the loop will sit out a provider that named its own reset. The two cost
+ * numbers come after them, marked per-token, because whether they bound
+ * anything depends on what the executor authenticates with and that is not
+ * known until it has started. Nothing counted in time, tokens, messages or tool
+ * calls appears unless the repository set a ceiling for it, and then it comes
+ * last, so a reader can tell the bounds every run has from the ones this
+ * repository added.
  */
 export function renderCeilingsLine(limits: LimitsTable): string {
   const at = (resource: DefaultedResource) => humanLimit(resource, limitFor(limits, resource));
+  const perToken = (resource: PerTokenCostLimit) =>
+    humanLimit(resource, limits.limits[resource] ?? PER_TOKEN_COST_LIMITS[resource]);
   const parts = [
-    `cost ${at("attempt_cost_micros")}`,
-    `wall clock ${at("attempt_wall_clock_ms")}`,
-    `tokens ${at("attempt_tokens")}`,
+    `stall ${at("attempt_stall_ms")}`,
     `remediation rounds ${at("remediation_rounds")}`,
-    `ticket budget ${at("ticket_cost_micros")}`,
     `provider wait ${at("wait_for_provider_ms")}`,
+    `per-token cost ${perToken("attempt_cost_micros")}`,
+    `per-token ticket budget ${perToken("ticket_cost_micros")}`,
   ];
-  for (const [resource, label] of COUNTER_LABEL) {
+  for (const [resource, label] of CONFIGURED_ONLY_LABEL) {
     const value = limitFor(limits, resource);
     if (value !== null) parts.push(`${label} ${humanLimit(resource, value)}`);
   }
@@ -2154,23 +2254,28 @@ export function renderLimitsTable(limits: LimitsTable, configPath: string): stri
   const lines = [
     `CEILINGS  DEFAULT_LIMITS overlaid by ${configPath}`,
     "          each key is raised as limits.limits.<name>",
+    "          the two cost keys bind only where the executor is billed per token",
   ];
+  const perTokenDefaults: Partial<Record<LimitedResource, number>> = PER_TOKEN_COST_LIMITS;
   for (const resource of LIMITED_RESOURCES) {
-    const value = limitFor(limits, resource);
     const configured = limits.limits[resource];
-    const fallback = DEFAULT_LIMITS[resource];
-    // Three states, not two: raised above a default, set where there is no
-    // default (D-096), and the absence that is no ceiling at all.
+    const perToken = perTokenDefaults[resource];
+    const fallback = DEFAULT_LIMITS[resource] ?? perToken;
+    const value = configured ?? fallback ?? null;
+    const defaultWord = perToken === undefined ? "default" : "per-token default";
+    // Four states: a default every run has, a default that waits on an API key,
+    // a ceiling the repository set where nothing defaults one, and the absence
+    // that is no ceiling at all (D-096).
     const note =
       configured === undefined
         ? fallback === undefined
           ? "not set"
-          : "default"
+          : defaultWord
         : fallback === undefined
           ? "config (no default)"
           : configured !== fallback
-            ? `config (default ${humanLimit(resource, fallback)})`
-            : "default";
+            ? `config (${defaultWord} ${humanLimit(resource, fallback)})`
+            : defaultWord;
     lines.push(
       `  ${resource.padEnd(26)} ${(value === null ? "—" : String(value)).padStart(12)}  ` +
         `${(value === null ? "no ceiling" : humanLimit(resource, value)).padEnd(10)} ${note}`,
@@ -2225,6 +2330,26 @@ export function renderJudgingPaths(entries: readonly JudgingPath[], configPath: 
   for (const entry of entries) {
     lines.push(`  ${judgingPathLabel(entry).padEnd(width)}  ${entry.source}`);
   }
+  return lines;
+}
+
+/**
+ * The PROHIBITED block: what this repository refuses a write to for every
+ * ticket, each entry with what put it there. Separate from JUDGING, which is
+ * what an approved scope may not overlap: a scope may name a standing path, and
+ * what the guard refuses is the write.
+ */
+export function renderStandingProhibited(
+  entries: readonly StandingProhibitedEntry[],
+  configPath: string,
+): string[] {
+  const lines = [
+    "PROHIBITED  what every ticket here refuses a write to, whatever its contract says",
+    `            read from paths_prohibited in ${configPath}`,
+  ];
+  if (entries.length === 0) return [...lines, "  (none)"];
+  const width = Math.max(...entries.map((entry) => entry.path.length));
+  for (const entry of entries) lines.push(`  ${entry.path.padEnd(width)}  ${entry.source}`);
   return lines;
 }
 
@@ -2356,7 +2481,7 @@ export function renderCheckAdvisories(
 
 /** What the configuration on disk installs with, read back against the checkout. */
 export interface ConfiguredInstall {
-  /** The install command `.focrux/config.json` pins, as it declares it. */
+  /** The install command `.perbo/config.json` pins, as it declares it. */
   command: string[];
   /** Whether that install reproduces a lockfile or resolves its own versions. */
   pinned: boolean;
@@ -2368,12 +2493,22 @@ export interface ConfiguredInstall {
    * `install_could_pin` where the checkout has gained the lockfile the
    * configured install predates. `install_outgrown` where the configuration
    * still holds the manifest `--write-config` pins for a checkout that named no
-   * package manager — nothing installed, `git status --porcelain` as the
-   * verification — and the checkout now names one. Null otherwise, including
-   * where the two merely differ, which is what a deliberately edited install
-   * looks like from here.
+   * package manager this build installs with — nothing installed,
+   * `git status --porcelain` as the verification — and the checkout now names
+   * one, with something for it to install. `verify_outgrown` where the
+   * configured verification is
+   * `git status --porcelain` and the checkout declares a test script a worktree
+   * can run: the manifest `--write-config` pinned before the package declared
+   * one, or a person's own choice, which this cannot tell apart, so it says what
+   * a run does and leaves the choice to them. It carries the unpinned install
+   * the checkout could now pin, where there is one, rather than hide it. Null
+   * otherwise, including where the two merely differ, which is what a
+   * deliberately edited install looks like from here.
    */
-  advisory: { reason: "install_could_pin" | "install_outgrown"; detail: string } | null;
+  advisory: {
+    reason: "install_could_pin" | "install_outgrown" | "verify_outgrown";
+    detail: string;
+  } | null;
 }
 
 /**
@@ -2387,11 +2522,12 @@ export interface ConfiguredInstall {
  * — a divergence nothing was reading, in the one file `doctor` refuses to
  * rewrite. So it is read back and reported here instead.
  *
- * The same holds for the manifest written where nothing named a package
- * manager this build reads: it installs nothing and verifies with
- * `git status --porcelain`, and because a pinned manifest skips the
- * diagnostic, a run keeps using it after the checkout names a manager — one
- * this build supports, or one it would otherwise refuse. The read-back says so.
+ * The same holds for the manifest written where the checkout declared no
+ * verification a worktree can run: it verifies with `git status --porcelain`,
+ * and where nothing named a package manager this build installs with, it
+ * installs nothing. Because a pinned manifest skips the diagnostic, a run keeps
+ * using it after the checkout names such a manager or declares a test script.
+ * The read-back says so.
  *
  * Null where the configuration carries no manifest, and null where the install
  * it carries is not one this build understands: a file a person has edited into
@@ -2415,13 +2551,27 @@ export function configuredInstall(
   const detected = detectPackageManager(checkout);
   const proposed = proposedInstall(checkout, detected);
   const configured = parsed.data;
-  // The manifest `--write-config` pins where nothing named a manager, and only
-  // that one: an install a person set to `none` beside a verification of their
-  // own is theirs.
-  const greenfield =
-    configured.kind === "none" &&
-    Array.isArray(verify) &&
-    verify.join(" ") === GREENFIELD_VERIFY.join(" ");
+  // The verification `--write-config` pins where the checkout declared none a
+  // worktree could run.
+  const unverified = Array.isArray(verify) && verify.join(" ") === GREENFIELD_VERIFY.join(" ");
+  // The manifest it pins where nothing named a manager this build installs
+  // with, and only that one: an install a person set to `none` beside a
+  // verification of their own is theirs.
+  const greenfield = configured.kind === "none" && unverified;
+  // What the diagnostic would verify with now, where the configured manifest
+  // verifies with nothing the checkout declares.
+  const declared = unverified ? declaredVerifyCommand(checkout, detected) : null;
+  // An unpinned install this checkout could now pin: an advisory of its own,
+  // or part of the verification's where both have moved.
+  const couldPin =
+    configured.pinned || detected === null || !detected.pinned
+      ? null
+      : `${detected.named_by} now pins what ${detected.manager} installs, and the ` +
+        `configured install predates it: \`${configured.command.join(" ")}\` still ` +
+        "resolves its own versions, so two runs of it can differ. Set " +
+        `"materialization_manifest.install.command" to ` +
+        `\`${detected.pinned_install.join(" ")}\` and "…install.pinned" to true in ` +
+        `${configPath}.`;
   return {
     command: configured.command,
     pinned: configured.pinned,
@@ -2430,34 +2580,30 @@ export function configuredInstall(
       configured.pinned === proposed.pinned &&
       configured.command.join(" ") === proposed.command.join(" "),
     advisory:
-      greenfield && detected !== null
+      greenfield && detected?.supported && detected.manifest_present
         ? {
             reason: "install_outgrown",
-            detail: detected.supported
-              ? `${detected.named_by} now names ${detected.manager}, and the configured manifest ` +
-                `predates it: it installs nothing and verifies with \`${GREENFIELD_VERIFY.join(" ")}\`, ` +
-                "so a run neither installs nor runs what this checkout declares. Set " +
-                `"materialization_manifest.install" and "…verify" to what \`focrux doctor\` ` +
-                `proposes for this checkout, or remove "materialization_manifest" from ` +
-                `${configPath} so each run derives them.`
-              : `${detected.named_by} now names ${detected.manager}, which this build does not ` +
-                "support, and the configured manifest predates it: a run with it installs " +
-                `nothing, verifies with \`${GREENFIELD_VERIFY.join(" ")}\` and does not refuse ` +
-                `this repository as a run without it does. Remove "materialization_manifest" ` +
-                `from ${configPath} and a run refuses it.`,
+            detail:
+              `${detected.named_by} now names ${detected.manager}, and the configured manifest ` +
+              `predates it: it installs nothing and verifies with \`${GREENFIELD_VERIFY.join(" ")}\`, ` +
+              "so a run neither installs nor runs what this checkout declares. Set " +
+              `"materialization_manifest.install" and "…verify" to what \`perbo doctor\` ` +
+              `proposes for this checkout, or remove "materialization_manifest" from ` +
+              `${configPath} so each run derives them.`,
           }
-        : configured.pinned || detected === null || !detected.pinned
-          ? null
-          : {
-              reason: "install_could_pin",
+        : declared !== null
+          ? {
+              reason: "verify_outgrown",
               detail:
-                `${detected.named_by} now pins what ${detected.manager} installs, and the ` +
-                `configured install predates it: \`${configured.command.join(" ")}\` still ` +
-                "resolves its own versions, so two runs of it can differ. Set " +
-                `"materialization_manifest.install.command" to ` +
-                `\`${detected.pinned_install.join(" ")}\` and "…install.pinned" to true in ` +
-                `${configPath}.`,
-            },
+                `this checkout declares \`${declared.join(" ")}\`, and the configured manifest ` +
+                `verifies with \`${GREENFIELD_VERIFY.join(" ")}\`, which any checkout Git can ` +
+                "read passes, so a run never runs it. Unless that is deliberate, set " +
+                `"materialization_manifest.verify.command" to \`${declared.join(" ")}\` in ` +
+                `${configPath}.${couldPin === null ? "" : ` ${couldPin}`}`,
+            }
+          : couldPin === null
+            ? null
+            : { reason: "install_could_pin", detail: couldPin },
   };
 }
 
@@ -2489,12 +2635,14 @@ const SCRIPT_CHECKS: Array<{ script: string; kind: "typecheck" | "lint" | "unit"
  * derived (SCP-259).
  *
  * `doctor` proposes these and writes them on request; a run on a repository
- * that has no `.focrux/config.json` pins these same ones for the attempt. One
+ * that has no `.perbo/config.json` pins these same ones for the attempt. One
  * function, because the file `doctor` offers and the set a first run is judged
  * by must not be able to disagree.
  *
- * Empty where nothing names a package manager, and empty where the package
- * declares none of the scripts below: a check is never invented.
+ * Empty where nothing names a package manager this build installs with, and
+ * empty where the package declares none of the scripts below: a check is never
+ * invented. A test script that starts a service is left out, as the diagnostic
+ * leaves it out of the verification: a worktree cannot be given one.
  *
  * The scripts are the given root's own, including where that root is one
  * package of a monorepo: the outcome is about that package and its suite is
@@ -2503,8 +2651,8 @@ const SCRIPT_CHECKS: Array<{ script: string; kind: "typecheck" | "lint" | "unit"
  * manager comes from the workspace, because that is who runs the script.
  */
 export function proposedChecks(checkout: string): Array<Record<string, unknown>> {
-  const manager = detectPackageManager(checkout)?.manager ?? null;
-  return manager ? checksFromScripts(checkout, manager) : [];
+  const detected = detectPackageManager(checkout);
+  return detected?.supported ? checksFromScripts(checkout, detected.manager) : [];
 }
 
 /**
@@ -2525,12 +2673,21 @@ function checksFromScripts(checkout: string, manager: string): Array<Record<stri
   const kinds = new Set<string>();
   for (const { script, kind } of SCRIPT_CHECKS) {
     if (typeof scripts[script] !== "string" || kinds.has(kind)) continue;
+    const command = [manager, "run", script];
+    // A test script that starts a service is not the suite, as it is not the
+    // verification; a lint or typecheck script is judged as it is.
+    if (
+      kind === "unit" &&
+      verificationServiceNeed(checkout, command)?.reason === "verification_requires_service"
+    ) {
+      continue;
+    }
     kinds.add(kind);
     checks.push({
       check_id: `check_${kind}`,
       name: script,
       kind,
-      command: [manager, "run", script],
+      command,
       timeout_ms: 900_000,
       definition_path: "package.json",
     });
@@ -2756,7 +2913,7 @@ export function requireBase(
 }
 
 /**
- * The `.focrux/config.json` a checkout with none would get: the checks its
+ * The `.perbo/config.json` a checkout with none would get: the checks its
  * own scripts declare, the base its checkout names, the manifest the diagnostic
  * proposed with a portable `source_checkout`, and every default limit spelled
  * out so each ceiling has a key to raise when an attempt hits it.
@@ -2771,7 +2928,7 @@ export function proposeRepoConfig(
 ): Record<string, unknown> {
   return {
     _comment: [
-      "Proposed by `focrux doctor`. The checks come from package.json scripts, the base branch",
+      "Proposed by `perbo doctor`. The checks come from package.json scripts, the base branch",
       "from the checkout, the materialisation manifest from what the checkout needs that Git",
       "does not carry, and the limits are the laptop defaults written out so each ceiling has",
       "a key to raise. Keys beginning with `_` are ignored.",
@@ -2813,7 +2970,7 @@ function withoutDeliveryBranch<T>(layer: T, source: string, warn: (line: string)
  * The run configuration for one run of the loop.
  *
  * Three layers, narrowest last: what the run already knows (its repository,
- * where its worktrees and bundles go), then `.focrux/config.json` — the things
+ * where its worktrees and bundles go), then `.perbo/config.json` — the things
  * a repository agrees **once** rather than per ticket, which is what the checks
  * and the materialisation manifest are — then an explicit `--config` for the
  * run in front of you.
@@ -2830,7 +2987,7 @@ function withoutDeliveryBranch<T>(layer: T, source: string, warn: (line: string)
  */
 export function mergeRunConfig(
   run: {
-    /** The store: `<repo>/.focrux` unless `--store` moved it. */
+    /** The store: `<repo>/.perbo` unless `--store` moved it. */
     dir: string;
     /**
      * What labels the run — the branch, the seal's commit message, the seed the
@@ -2852,6 +3009,18 @@ export function mergeRunConfig(
      * GitHub anyway may ask it which branch is the default.
      */
     publish?: boolean;
+    /**
+     * The spec's No-Gos, from the ticket's approach record (D-096, D-100).
+     * Passed in rather than read here, because nothing in this file reads a
+     * ticket. Empty for a run with nothing admitted behind it.
+     */
+    no_gos?: readonly string[];
+    /**
+     * The files the loop commits first on the ticket's branch, from its
+     * admission record (D-103). Passed in for the same reason as the No-Gos,
+     * and empty for a ticket admitted without a spec.
+     */
+    spec_files?: readonly SpecFile[];
   },
   override: unknown,
 ): unknown {
@@ -2879,9 +3048,9 @@ export function mergeRunConfig(
     // Outside the repository, and that is not a preference.
     //
     // pnpm resolves its workspace root by walking **up**, so a worktree under
-    // `<repo>/.focrux/worktrees` inherits the repository's own
+    // `<repo>/.perbo/worktrees` inherits the repository's own
     // `pnpm-workspace.yaml` and every install and every `pnpm exec` inside it
-    // fails, naming neither directory. `focrux doctor` reports exactly this as
+    // fails, naming neither directory. `perbo doctor` reports exactly this as
     // `nested_package_manager_workspace`, and it reported it against this
     // default — the diagnostic caught a defect in the command it exists to
     // protect.
@@ -2890,7 +3059,7 @@ export function mergeRunConfig(
     // they are small, and nothing runs a package manager in them.
     worktree_root: join(
       homedir(),
-      ".focrux",
+      ".perbo",
       "worktrees",
       // The basename alone collides: ~/work/api and ~/clients/api share a
       // directory, and `reclaimStaleWorktrees` iterates every lease under the
@@ -2906,13 +3075,21 @@ export function mergeRunConfig(
     bundle_root: join(run.dir, "bundles"),
     quarantine_root: join(run.dir, "quarantine"),
     state_root: join(run.dir, "state"),
-    // The store the ticket was admitted into is where `focrux principle add`
+    // The store the ticket was admitted into is where `perbo principle add`
     // writes, so it is where the loop must read (D-065) — a --store user's
     // principles would otherwise never reach a brief.
     principles_path: join(run.dir, "principles.md"),
+    // Approach, not contract: it briefs the executor and gates nothing, so a
+    // configuration file that set it would be stating the spec's intent
+    // somewhere the spec cannot correct.
+    no_gos: [...(run.no_gos ?? [])],
+    // D-103: what the loop commits first on the branch. Derived from the
+    // ticket's admission record, because a configuration file naming other
+    // files would put a spec on the branch the contract was not drafted from.
+    spec_files: [...(run.spec_files ?? [])],
   };
   // The derived keys win over the repository config, and lose only to an
-  // explicit `--config`. Letting `.focrux/config.json` set `worktree_root`
+  // explicit `--config`. Letting `.perbo/config.json` set `worktree_root`
   // would silently reproduce the nested-workspace failure the derived default
   // exists to prevent; letting it set `ticket_key` would run every ticket under
   // one name.

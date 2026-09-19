@@ -1,7 +1,7 @@
 import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LimitsTableSchema, type TerminationReason } from "@focrux/contracts";
+import { LimitsTableSchema, type TerminationReason } from "@perbo/contracts";
 import type { AgentResult } from "../src/adapter.js";
 import {
   AttemptIdCollisionError,
@@ -141,7 +141,7 @@ describe("writing the attempts record", () => {
   };
 
   it("appends the new run's attempts after the ones already on the record", () => {
-    const { path, prior } = seed("focrux-append-");
+    const { path, prior } = seed("perbo-append-");
 
     const second = makeAttempt({
       attempt_id: "att_run2round0",
@@ -172,7 +172,7 @@ describe("writing the attempts record", () => {
   });
 
   it("refuses an id the record already holds, names each run either side of it, and writes nothing", () => {
-    const { path, prior } = seed("focrux-collide-");
+    const { path, prior } = seed("perbo-collide-");
     // Run 1 took a remediation round, so the attempt at risk carries a root
     // that is not its own id and the record says which run wrote it.
     const priorRound1 = makeAttempt({
@@ -223,7 +223,7 @@ describe("writing the attempts record", () => {
   });
 
   it("counts a record written before attempts carried a root as the one run it held", () => {
-    const path = join(scratch("focrux-legacy-"), "state", `${RECORD_TICKET}.attempts.json`);
+    const path = join(scratch("perbo-legacy-"), "state", `${RECORD_TICKET}.attempts.json`);
     mkdirSync(join(path, ".."), { recursive: true });
     // The record as it was written before attempts carried a root: the file
     // held one run's attempts and the next run replaced it, so its three
@@ -259,7 +259,7 @@ describe("writing the attempts record", () => {
   });
 
   it("refuses to append over a record it cannot read", () => {
-    const path = join(scratch("focrux-unreadable-"), "state", `${RECORD_TICKET}.attempts.json`);
+    const path = join(scratch("perbo-unreadable-"), "state", `${RECORD_TICKET}.attempts.json`);
     mkdirSync(join(path, ".."), { recursive: true });
     writeFileSync(path, "{ this is not the record }\n");
 
@@ -286,7 +286,7 @@ describe("writing the attempts record", () => {
  */
 describe("replacing the attempts record", () => {
   it("swaps the file rather than writing through it", () => {
-    const state = join(scratch("focrux-atomic-"), "state");
+    const state = join(scratch("perbo-atomic-"), "state");
     const path = join(state, `${RECORD_TICKET}.attempts.json`);
     appendAttempts({
       path,
@@ -316,7 +316,7 @@ describe("replacing the attempts record", () => {
   });
 
   it("leaves nothing beside the record when the write completes", () => {
-    const state = join(scratch("focrux-nothing-beside-"), "state");
+    const state = join(scratch("perbo-nothing-beside-"), "state");
     const path = join(state, `${RECORD_TICKET}.attempts.json`);
     appendAttempts({
       path,
@@ -340,7 +340,7 @@ describe("a re-run of the same ticket", () => {
     const repo = makeRepo();
     const contract = makeContract();
     contract.base.base_commit = repo.head;
-    const root = scratch("focrux-rerun-");
+    const root = scratch("perbo-rerun-");
     const attemptsPath = join(root, "state", `${contract.ticket_id}.attempts.json`);
     const bundleStore = () => new BundleStore({ root: join(root, "bundles"), retainContext: true });
 
@@ -416,7 +416,7 @@ describe("a re-run of the same ticket", () => {
     const repo = makeRepo();
     const contract = makeContract();
     contract.base.base_commit = repo.head;
-    const root = scratch("focrux-rerun-bare-");
+    const root = scratch("perbo-rerun-bare-");
     const attemptsPath = join(root, "state", `${contract.ticket_id}.attempts.json`);
 
     // A bare `--config` run has no ticket history behind it, so `runs_started`

@@ -1,0 +1,111 @@
+{
+  "files": [
+    {
+      "path": "apps/web/src/helpers/index.ts",
+      "exports": [{ "name": "helpers", "kind": "variable", "line": 1 }],
+      "imports": []
+    },
+    {
+      "path": "apps/web/src/main.ts",
+      "exports": [
+        { "name": "main", "kind": "function", "line": 7 },
+        { "name": "default", "kind": "default", "line": 13 }
+      ],
+      "imports": [
+        { "specifier": "@fixture/core", "resolved": "packages/core/src/index.ts", "external": false, "line": 1 },
+        { "specifier": "@fixture/ui", "resolved": "packages/ui/src/index.ts", "external": false, "line": 2 },
+        { "specifier": "node:fs", "resolved": null, "external": true, "line": 3 },
+        { "specifier": "zod", "resolved": null, "external": true, "line": 4 },
+        { "specifier": "./helpers", "resolved": "apps/web/src/helpers/index.ts", "external": false, "line": 5 },
+        { "specifier": "@fixture/ui", "resolved": "packages/ui/src/index.ts", "external": false, "line": 8 }
+      ]
+    },
+    {
+      "path": "packages/core/src/index.ts",
+      "exports": [
+        { "name": "Button", "kind": "re-export", "line": 1 },
+        { "name": "*", "kind": "re-export", "line": 2 },
+        { "name": "theme", "kind": "re-export", "line": 3 },
+        { "name": "VendorOptions", "kind": "re-export", "line": 4 },
+        { "name": "CORE_VERSION", "kind": "variable", "line": 6 }
+      ],
+      "imports": [
+        { "specifier": "@fixture/ui", "resolved": "packages/ui/src/index.ts", "external": false, "line": 1 },
+        { "specifier": "./shapes.js", "resolved": "packages/core/src/shapes.ts", "external": false, "line": 2 },
+        { "specifier": "./theme.js", "resolved": "packages/core/src/theme.ts", "external": false, "line": 3 },
+        { "specifier": "./vendor.js", "resolved": "packages/core/src/vendor.d.ts", "external": false, "line": 4 }
+      ]
+    },
+    {
+      "path": "packages/core/src/legacy.cjs",
+      "exports": [
+        { "name": "describe", "kind": "commonjs", "line": 8 },
+        { "name": "VERSION", "kind": "commonjs", "line": 8 },
+        { "name": "legacyOnly", "kind": "commonjs", "line": 9 }
+      ],
+      "imports": [
+        { "specifier": "node:path", "resolved": null, "external": true, "line": 1 },
+        { "specifier": "./not-here.js", "resolved": null, "external": false, "line": 2 }
+      ]
+    },
+    {
+      "path": "packages/core/src/shapes.ts",
+      "exports": [
+        { "name": "Shape", "kind": "interface", "line": 1 },
+        { "name": "Area", "kind": "type", "line": 5 },
+        { "name": "Corner", "kind": "enum", "line": 7 },
+        { "name": "Circle", "kind": "class", "line": 11 },
+        { "name": "area", "kind": "function", "line": 15 },
+        { "name": "ORIGIN", "kind": "variable", "line": 19 },
+        { "name": "x", "kind": "variable", "line": 20 },
+        { "name": "y", "kind": "variable", "line": 20 },
+        { "name": "Geometry", "kind": "namespace", "line": 22 },
+        { "name": "helper", "kind": "function", "line": 30 },
+        { "name": "alias", "kind": "function", "line": 30 }
+      ],
+      "imports": []
+    },
+    {
+      "path": "packages/core/src/theme.ts",
+      "exports": [{ "name": "theme", "kind": "variable", "line": 3 }],
+      "imports": [
+        { "specifier": "@fixture/ui", "resolved": "packages/ui/src/index.ts", "external": false, "line": 1 }
+      ]
+    },
+    {
+      "path": "packages/core/src/vendor.d.ts",
+      "exports": [
+        { "name": "VENDOR_NAME", "kind": "variable", "line": 1 },
+        { "name": "VendorOptions", "kind": "interface", "line": 3 },
+        { "name": "connect", "kind": "function", "line": 7 }
+      ],
+      "imports": []
+    },
+    {
+      "path": "packages/ui/src/button.tsx",
+      "exports": [
+        { "name": "ButtonProps", "kind": "interface", "line": 4 },
+        { "name": "default", "kind": "default", "line": 8 },
+        { "name": "SIZES", "kind": "variable", "line": 12 }
+      ],
+      "imports": [
+        { "specifier": "react", "resolved": null, "external": true, "line": 1 },
+        { "specifier": "@fixture/core", "resolved": "packages/core/src/index.ts", "external": false, "line": 2 }
+      ]
+    },
+    {
+      "path": "packages/ui/src/index.ts",
+      "exports": [
+        { "name": "*", "kind": "re-export", "line": 3 },
+        { "name": "Button", "kind": "re-export", "line": 4 },
+        { "name": "measured", "kind": "variable", "line": 6 }
+      ],
+      "imports": [
+        { "specifier": "@fixture/core", "resolved": "packages/core/src/index.ts", "external": false, "line": 1 },
+        { "specifier": "./button.js", "resolved": "packages/ui/src/button.tsx", "external": false, "line": 3 },
+        { "specifier": "./button.js", "resolved": "packages/ui/src/button.tsx", "external": false, "line": 4 }
+      ]
+    }
+  ],
+  "skipped": []
+}

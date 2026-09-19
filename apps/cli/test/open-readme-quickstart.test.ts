@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { preflight, type PreflightRequest } from "@focrux/runner";
+import { preflight, type PreflightRequest } from "@perbo/runner";
 import { parseReviewArgs } from "../src/args.js";
 import { FULL_COMMAND_SET, parseExecuteArgs, runDoctorCommand } from "../src/execute.js";
 import { buildCli, REPO_ROOT, removeStagedBundles, spawnBuilt } from "./open-build.js";
@@ -169,7 +169,7 @@ function checkAgainstTheCli(step: Step): void {
     new Error(`quick-start step ${step.position} — \`${step.text}\` — ${why}`);
   if (!FULL_COMMAND_SET.includes(command as (typeof FULL_COMMAND_SET)[number])) {
     throw named(
-      `names \`${command}\`, which \`focrux\` does not dispatch (it has: ${FULL_COMMAND_SET.join(", ")})`,
+      `names \`${command}\`, which \`perbo\` does not dispatch (it has: ${FULL_COMMAND_SET.join(", ")})`,
     );
   }
   const parse = PARSERS[command];
@@ -234,7 +234,7 @@ function withOneStepMutated(find: string, replace: string): { text: string; step
   return { text, step: changed[0]! };
 }
 
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), "focrux-readme-")));
+const scratch = realpathSync(mkdtempSync(join(tmpdir(), "perbo-readme-")));
 
 const gitEnv = {
   ...process.env,
@@ -252,7 +252,7 @@ const git = (dir: string, ...argv: string[]): string =>
 /**
  * The repository the quick start is pointed at: one commit, a `test` script the
  * loop will pin as its check, `src/` and `test/` for the scope the README
- * names, no `.focrux/` at all — and a bare repository as `origin`, so the
+ * names, no `.perbo/` at all — and a bare repository as `origin`, so the
  * publish step's push is a push and not a stub.
  */
 function repository(name: string): string {
@@ -686,9 +686,9 @@ describe("the prerequisites the quick start states before its first command", ()
 
   it("doctor refuses, naming the provider credential, when the configured provider has none", () => {
     const configured = repository("no-key");
-    mkdirSync(join(configured, ".focrux"), { recursive: true });
+    mkdirSync(join(configured, ".perbo"), { recursive: true });
     writeFileSync(
-      join(configured, ".focrux", "config.json"),
+      join(configured, ".perbo", "config.json"),
       `${JSON.stringify({ reviewer_provider: "anthropic" }, null, 2)}\n`,
     );
     const ran = doctor(configured, stubbedGh("no-key").dir);
@@ -741,7 +741,7 @@ interface DoctorRun {
 }
 
 /**
- * `focrux doctor --repo <dir> --publish --json`, as the built binary runs it,
+ * `perbo doctor --repo <dir> --publish --json`, as the built binary runs it,
  * on a PATH this test states in full: the stubs, then the system directories
  * `git` is on. Never the caller's PATH — a developer's own `claude` or `gh`
  * would answer a question this is asking about a machine that has neither.
@@ -880,7 +880,7 @@ describe("the quick start, run in order on a scratch repository", () => {
     // What the loop did on the way there, in the record it wrote: the agent's
     // two files sealed, the repository's own check run, the review passed.
     const attempts = JSON.parse(
-      readFileSync(join(repo, ".focrux", "state", `${report.ticket_id}.attempts.json`), "utf8"),
+      readFileSync(join(repo, ".perbo", "state", `${report.ticket_id}.attempts.json`), "utf8"),
     ) as { attempts: Array<{ head_commit: string | null; base_commit: string }> };
     const one = attempts.attempts[0]!;
     expect(

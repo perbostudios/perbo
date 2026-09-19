@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Checkbox, Notice, Segmented, Switch } from "@focrux/ui";
+import { Button, Checkbox, Notice, Segmented, Switch } from "@perbo/ui";
 import { InkIcon } from "../InkIcon.js";
 import { Brand, IconButton, PageHeader, useElapsed } from "../Screen.js";
 import { errorMessage, useAction } from "../data.js";
@@ -10,7 +10,7 @@ import type { Settings } from "../../shared/protocol.js";
 const MOMENTS: { key: keyof Settings["notifyOn"]; label: string }[] = [
   { key: "decision", label: "A ticket needs a decision" },
   { key: "review", label: "A review finishes" },
-  { key: "ceiling", label: "A ceiling is hit and the loop stops" },
+  { key: "ceiling", label: "A run stops short — it stalls, or hits a ceiling you set" },
   { key: "stage", label: "Any stage changes" },
 ];
 
@@ -216,7 +216,7 @@ export function GeneralPage({ workspace, navigate }: PageProps) {
         <span className="small muted">Signed in on this machine as</span>
         <strong>{settings.name}</strong>
         <span className="spacer" />
-        <span className="mono muted small">focrux {workspace.version}</span>
+        <span className="mono muted small">perbo {workspace.version}</span>
         <Button className="small" onClick={() => navigate({ page: "home" })}>
           Done
         </Button>

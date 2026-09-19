@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Dialog, Notice } from "@focrux/ui";
+import { Button, Dialog, Notice } from "@perbo/ui";
 import {
   ManifestEditorSchema,
   type ManifestEditor,
@@ -166,7 +166,7 @@ export function ManifestDialog({
                     strategy: "copy",
                     secret: true,
                     required: true,
-                    reason: "Selected by the engineer in Focrux",
+                    reason: "Selected by the engineer in Perbo",
                   },
                 ],
               })

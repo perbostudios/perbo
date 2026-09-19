@@ -4,7 +4,7 @@ import {
   type ChangeSet,
   type CheckResult,
   type Finding,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 
 /**
  * ADR-0030. Repository-supplied agent configuration — hooks, tool-server

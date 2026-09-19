@@ -19,7 +19,7 @@ const judge = (command: string) =>
     detail: command,
     allow_list: DEFAULT_COMMAND_ALLOW_LIST,
     deny_list: DEFAULT_COMMAND_DENY_LIST,
-    scope: { root: "/tmp/focrux-scp201-fixture", home: "/Users/nobody" },
+    scope: { root: "/tmp/perbo-scp201-fixture", home: "/Users/nobody" },
   }).admission;
 
 describe("a program position the resolver cannot read", () => {

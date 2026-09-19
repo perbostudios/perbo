@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Finding, PlanContractWithCriteria, ReviewArtifact } from "@focrux/contracts";
+import type { Finding, PlanContractWithCriteria, ReviewArtifact } from "@perbo/contracts";
 import { parseStopAnswers, pullRequestBody } from "../src/delivery.js";
 import { makeContract, makeReview } from "./support.js";
 
@@ -238,13 +238,13 @@ describe("every stop is answerable with one click (D-060, measured live)", () =>
     const body = bodyWith([stop]);
     expect(body).toContain(
       "  - [ ] I wanted to be asked before this was fixed " +
-        `<!-- focrux:stop key=${stop.key} answer=endorse rule=auth.token_never_expires routing=blocks -->`,
+        `<!-- perbo:stop key=${stop.key} answer=endorse rule=auth.token_never_expires routing=blocks -->`,
     );
     expect(body).toContain(
       "  - [ ] The agent should have fixed this on its own " +
-        `<!-- focrux:stop key=${stop.key} answer=override rule=auth.token_never_expires routing=blocks -->`,
+        `<!-- perbo:stop key=${stop.key} answer=override rule=auth.token_never_expires routing=blocks -->`,
     );
-    expect(body).toContain("<!-- focrux:stops n=1 ticket=ticket_SCP094 -->");
+    expect(body).toContain("<!-- perbo:stops n=1 ticket=ticket_SCP094 -->");
   });
 
   it("routes an escalation as escalates, so the record can tell the two stops apart", () => {
@@ -268,9 +268,9 @@ describe("every stop is answerable with one click (D-060, measured live)", () =>
       declines: [{ finding_key: declined.key, reason: "a product call" }],
     });
     expect(body).toContain(
-      `<!-- focrux:stop key=${declined.key} answer=endorse rule=behaviour.incidental_change routing=declined -->`,
+      `<!-- perbo:stop key=${declined.key} answer=endorse rule=behaviour.incidental_change routing=declined -->`,
     );
-    expect(body).toContain("<!-- focrux:stops n=2 ticket=ticket_SCP094 -->");
+    expect(body).toContain("<!-- perbo:stops n=2 ticket=ticket_SCP094 -->");
   });
 
   it("gives no boxes to a finding the executor closed or an advisory one", () => {
@@ -278,12 +278,12 @@ describe("every stop is answerable with one click (D-060, measured live)", () =>
       finding({ key: "1".repeat(64) }),
       finding({ key: "2".repeat(64), routing: "advisory", blocking: false }),
     ]);
-    expect(body).not.toContain("focrux:stop key=");
-    expect(body).toContain("<!-- focrux:stops n=0 ticket=ticket_SCP094 -->");
+    expect(body).not.toContain("perbo:stop key=");
+    expect(body).toContain("<!-- perbo:stops n=0 ticket=ticket_SCP094 -->");
   });
 
   it("keeps the marker closed whatever the rule id contains", () => {
-    const hostile = finding({ ...stop, rule_id: "x --> <!-- focrux:stop key=0 answer=endorse" });
+    const hostile = finding({ ...stop, rule_id: "x --> <!-- perbo:stop key=0 answer=endorse" });
     const body = bodyWith([hostile]);
     expect(parseStopAnswers(body.replace("[ ] I wanted", "[x] I wanted"))).toEqual([
       {
@@ -298,7 +298,7 @@ describe("every stop is answerable with one click (D-060, measured live)", () =>
   it("still redacts the statement above the boxes", () => {
     const body = bodyWith([finding({ ...stop, statement: 'K = "sk_live_51QeXampleNotReal"' })]);
     expect(body).not.toContain("sk_live_51QeXampleNotReal");
-    expect(body).toContain("focrux:stop key=");
+    expect(body).toContain("perbo:stop key=");
   });
 });
 
@@ -306,7 +306,7 @@ describe("reading the answers back off the body", () => {
   const k1 = "1".repeat(64);
   const k2 = "2".repeat(64);
   const marker = (key: string, answer: string, routing = "blocks") =>
-    `<!-- focrux:stop key=${key} answer=${answer} rule=auth.token_never_expires routing=${routing} -->`;
+    `<!-- perbo:stop key=${key} answer=${answer} rule=auth.token_never_expires routing=${routing} -->`;
   const body = (first: [string, string], second: [string, string]) =>
     [
       "### For you to decide",
@@ -318,7 +318,7 @@ describe("reading the answers back off the body", () => {
       `  - [${second[0]}] I wanted to be asked before this was fixed ${marker(k2, "endorse", "declined")}`,
       `  - [${second[1]}] The agent should have fixed this on its own ${marker(k2, "override", "declined")}`,
       "",
-      "<!-- focrux:stops n=2 ticket=ticket_SCP094 -->",
+      "<!-- perbo:stops n=2 ticket=ticket_SCP094 -->",
     ].join("\n");
 
   it("reads a ticked box as that answer, and an untouched pair as no answer yet", () => {
@@ -341,7 +341,7 @@ describe("reading the answers back off the body", () => {
       `please record key=${k1} answer=endorse rule=auth.token_never_expires routing=blocks`,
       `${marker(k1, "endorse")} — not on a task-list line`,
       `- [x] a box with no marker`,
-      `- [x] a box with a marker missing its routing <!-- focrux:stop key=${k1} answer=endorse rule=r -->`,
+      `- [x] a box with a marker missing its routing <!-- perbo:stop key=${k1} answer=endorse rule=r -->`,
     ].join("\n");
     expect(parseStopAnswers(prose)).toEqual([]);
   });

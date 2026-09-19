@@ -3,8 +3,8 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { EXIT_CODES, transition, type Ticket } from "@focrux/contracts";
-import { branchName } from "@focrux/workspace";
+import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
+import { branchName } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { recordDelivery, runSyncCommand } from "../src/sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.js";
@@ -21,7 +21,7 @@ import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
  * scrolled away.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-sync-mergeable-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-sync-mergeable-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const OUTCOME = "Search results are paginated.";
@@ -116,13 +116,13 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
   });
   const dir = storeDir(repo, null);
   const branch = branchName({
-    ticket_key: "FCX-1",
-    ticket_id: readTicket(dir, "FCX-1").ticket_id,
-    outcome: readContract(dir, "FCX-1").outcome,
+    ticket_key: "PRB-1",
+    ticket_id: readTicket(dir, "PRB-1").ticket_id,
+    outcome: readContract(dir, "PRB-1").outcome,
   });
 
   const at = new Date("2026-09-03T09:00:00.000Z");
-  let ticket: Ticket = readTicket(dir, "FCX-1");
+  let ticket: Ticket = readTicket(dir, "PRB-1");
   ticket = transition(ticket, "provisioning", "run started", at);
   ticket = transition(ticket, "executing", "1 attempt executed", at);
   ticket = transition(ticket, "verifying", "no deterministic checks are configured", at);
@@ -141,14 +141,14 @@ describe("sync records a pull request that stopped being mergeable", () => {
     const streams = capture();
 
     const code = await withGh(fakeGh("conflicting", ghAnswer("CONFLICTING", "DIRTY")), () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    expect(readTicket(dir, "FCX-1").delivery.mergeable).toBe("conflicting");
+    expect(readTicket(dir, "PRB-1").delivery.mergeable).toBe("conflicting");
     const said = streams.err.join("");
     expect(said).toContain("no longer mergeable");
-    expect(said).toContain("focrux run --ticket FCX-1");
+    expect(said).toContain("perbo run --ticket PRB-1");
   });
 
   it("records a mergeable pull request as mergeable and says nothing about it", async () => {
@@ -156,11 +156,11 @@ describe("sync records a pull request that stopped being mergeable", () => {
     const streams = capture();
 
     const code = await withGh(fakeGh("clean", ghAnswer("MERGEABLE", "CLEAN")), () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    expect(readTicket(dir, "FCX-1").delivery.mergeable).toBe("mergeable");
+    expect(readTicket(dir, "PRB-1").delivery.mergeable).toBe("mergeable");
     expect(streams.err.join("")).not.toContain("no longer mergeable");
   });
 
@@ -169,13 +169,13 @@ describe("sync records a pull request that stopped being mergeable", () => {
     const streams = capture();
 
     await withGh(fakeGh("unknown", ghAnswer("UNKNOWN", "UNKNOWN")), () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     // GitHub computes mergeability asynchronously, so `UNKNOWN` is "not yet",
     // not "conflicting" — recording it as a conflict would send a person to
     // re-run a ticket whose branch is fine.
-    expect(readTicket(dir, "FCX-1").delivery.mergeable).toBe("unknown");
+    expect(readTicket(dir, "PRB-1").delivery.mergeable).toBe("unknown");
     expect(streams.err.join("")).not.toContain("no longer mergeable");
   });
 }, SPAWN_TEST_TIMEOUT_MS);

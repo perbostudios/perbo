@@ -9,13 +9,13 @@ A product that does not own the ticket cannot own its contract, its dependencies
 
 ## Decision
 
-Work is admitted to Focrux one ticket at a time, and admission is the moment ownership transfers.
+Work is admitted to Perbo one ticket at a time, and admission is the moment ownership transfers.
 
 | | Before admission | After admission |
 |---|---|---|
-| Where the work lives | The team's tracker, or nowhere | A Focrux `Ticket` |
-| Authoritative for intent, priority, status | The tracker | Focrux |
-| Focrux's role | A reference for discovery and import | Canonical owner of the contract, execution state, review and outcome |
+| Where the work lives | The team's tracker, or nowhere | A Perbo `Ticket` |
+| Authoritative for intent, priority, status | The tracker | Perbo |
+| Perbo's role | A reference for discovery and import | Canonical owner of the contract, execution state, review and outcome |
 | The tracker's role | Everything | Keeps its own fields |
 
 Decided, not built: the tracker receives a one-way status projection ([D-003](../11-open-decisions.md)).
@@ -35,4 +35,4 @@ Attaching to external issues without owning the ticket; full two-way synchronisa
 
 ## Reversal trigger
 
-People routinely maintain the same admitted ticket in both places, or cite admission friction as their reason for using Focrux less.
+People routinely maintain the same admitted ticket in both places, or cite admission friction as their reason for using Perbo less.

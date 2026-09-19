@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LimitsTableSchema } from "@focrux/contracts";
+import { LimitsTableSchema } from "@perbo/contracts";
 import { runAgent, type AgentResult } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
@@ -86,11 +86,11 @@ const TOOL_SEQUENCE_TIMEOUT_MS = 60_000;
 
 describe("a `cd` in one tool call, and the call after it", () => {
   it("judges the AYO-16 pair from where the executor's shell was, and allows it", async () => {
-    const worktree = worktreeFor("focrux-scp170-ayo16-");
+    const worktree = worktreeFor("perbo-scp170-ayo16-");
     const result = await run(worktree, [
       `cd ${worktree}/packages/evaluation && git diff docs/evaluation/regression-suite.md`,
-      "rm -rf ../../.focrux-tmp/focrux-corpus-bundle-* ../../.focrux-tmp/focrux-corpus-state " +
-        "../../.focrux-tmp/focrux-base-test-* && ls ../../.focrux-tmp/",
+      "rm -rf ../../.perbo-tmp/perbo-corpus-bundle-* ../../.perbo-tmp/perbo-corpus-state " +
+        "../../.perbo-tmp/perbo-base-test-* && ls ../../.perbo-tmp/",
     ]);
 
     expect(outside(result)).toEqual([]);
@@ -99,10 +99,10 @@ describe("a `cd` in one tool call, and the call after it", () => {
   }, TOOL_SEQUENCE_TIMEOUT_MS);
 
   it("carries a relative move into the next call", async () => {
-    const worktree = worktreeFor("focrux-scp170-carried-");
+    const worktree = worktreeFor("perbo-scp170-carried-");
     const result = await run(worktree, [
       "cd packages/evaluation",
-      "rm -rf ../../.focrux-tmp/x",
+      "rm -rf ../../.perbo-tmp/x",
     ]);
 
     expect(outside(result)).toEqual([]);
@@ -110,7 +110,7 @@ describe("a `cd` in one tool call, and the call after it", () => {
   }, TOOL_SEQUENCE_TIMEOUT_MS);
 
   it("refuses a relative write in the next call once the move left the worktree", async () => {
-    const worktree = worktreeFor("focrux-scp170-left-");
+    const worktree = worktreeFor("perbo-scp170-left-");
     const result = await run(worktree, ["cd /tmp", "printf x > y"]);
 
     expect(outside(result).map((hit) => hit.detail).join("\n")).toMatch(
@@ -121,7 +121,7 @@ describe("a `cd` in one tool call, and the call after it", () => {
   }, TOOL_SEQUENCE_TIMEOUT_MS);
 
   it("allows an absolute write back into the worktree from outside it", async () => {
-    const worktree = worktreeFor("focrux-scp170-absolute-");
+    const worktree = worktreeFor("perbo-scp170-absolute-");
     const result = await run(worktree, [
       "cd packages/evaluation",
       "cd /tmp",
@@ -133,13 +133,13 @@ describe("a `cd` in one tool call, and the call after it", () => {
   }, TOOL_SEQUENCE_TIMEOUT_MS);
 
   it("does not carry a move the shell made inside a subshell", async () => {
-    const worktree = worktreeFor("focrux-scp170-subshell-");
-    const result = await run(worktree, ["(cd packages/evaluation)", "rm -rf ../../.focrux-tmp/x"]);
+    const worktree = worktreeFor("perbo-scp170-subshell-");
+    const result = await run(worktree, ["(cd packages/evaluation)", "rm -rf ../../.perbo-tmp/x"]);
 
     // The move died at the closing parenthesis, so the target is judged from
     // the root and lands two directories above it.
     expect(outside(result).map((hit) => hit.detail).join("\n")).toMatch(
-      /the rm target \S*\.focrux-tmp\/x .*outside the worktree/,
+      /the rm target \S*\.perbo-tmp\/x .*outside the worktree/,
     );
     expect(cwds(result)).toEqual([".", "."]);
   }, TOOL_SEQUENCE_TIMEOUT_MS);
@@ -147,7 +147,7 @@ describe("a `cd` in one tool call, and the call after it", () => {
 
 describe("a move the guard cannot read", () => {
   it("refuses every later relative write by name, and records the directory as unknown", async () => {
-    const worktree = worktreeFor("focrux-scp170-unknown-");
+    const worktree = worktreeFor("perbo-scp170-unknown-");
     const result = await run(worktree, ["cd $DIR", "printf x > y"]);
 
     expect(outside(result).map((hit) => hit.detail).join("\n")).toMatch(
@@ -157,7 +157,7 @@ describe("a move the guard cannot read", () => {
   }, TOOL_SEQUENCE_TIMEOUT_MS);
 
   it("stays unknown through a later relative move, which resolves from nowhere", async () => {
-    const worktree = worktreeFor("focrux-scp170-still-unknown-");
+    const worktree = worktreeFor("perbo-scp170-still-unknown-");
     const result = await run(worktree, ["cd $DIR", "cd packages/evaluation", "printf x > y"]);
 
     expect(cwds(result)).toEqual([".", "unknown", "unknown"]);
@@ -167,7 +167,7 @@ describe("a move the guard cannot read", () => {
   }, TOOL_SEQUENCE_TIMEOUT_MS);
 
   it("is reset by an absolute move, and the write after that is judged again", async () => {
-    const worktree = worktreeFor("focrux-scp170-reset-");
+    const worktree = worktreeFor("perbo-scp170-reset-");
     const result = await run(worktree, [
       "cd $DIR",
       `cd ${worktree}/packages/evaluation`,
@@ -191,7 +191,7 @@ describe("a move the guard cannot read", () => {
  */
 describe("a move the real shell would have rejected", () => {
   it("is tracked anyway, because the runner does not see exit codes", async () => {
-    const worktree = worktreeFor("focrux-scp170-nonexistent-");
+    const worktree = worktreeFor("perbo-scp170-nonexistent-");
     const result = await run(worktree, ["cd no-such-directory", "printf x > y"]);
 
     expect(cwds(result)).toEqual([".", "no-such-directory"]);
@@ -345,8 +345,8 @@ const WRITE_GUARD_TIMEOUT_MS = 60_000;
 
 describe("a file tool whose destination resolves outside the worktree", () => {
   it("refuses the Write before the file is created, as a shell writer is refused", async () => {
-    const worktree = worktreeFor("focrux-scp177-write-");
-    const elsewhere = scratch("focrux-scp177-elsewhere-");
+    const worktree = worktreeFor("perbo-scp177-write-");
+    const elsewhere = scratch("perbo-scp177-elsewhere-");
     const target = join(elsewhere, "escape.txt");
 
     const { result, announced } = await runHeld(worktree, {
@@ -369,8 +369,8 @@ describe("a file tool whose destination resolves outside the worktree", () => {
   }, WRITE_GUARD_TIMEOUT_MS);
 
   it("refuses the Edit before the file is modified", async () => {
-    const worktree = worktreeFor("focrux-scp177-edit-");
-    const elsewhere = scratch("focrux-scp177-edited-");
+    const worktree = worktreeFor("perbo-scp177-edit-");
+    const elsewhere = scratch("perbo-scp177-edited-");
     const target = join(elsewhere, "notes.md");
     writeFileSync(target, "original\n");
 
@@ -389,8 +389,8 @@ describe("a file tool whose destination resolves outside the worktree", () => {
   }, WRITE_GUARD_TIMEOUT_MS);
 
   it("refuses a path that reaches outside through a symlink inside the worktree", async () => {
-    const worktree = worktreeFor("focrux-scp177-symlink-");
-    const elsewhere = scratch("focrux-scp177-linked-");
+    const worktree = worktreeFor("perbo-scp177-symlink-");
+    const elsewhere = scratch("perbo-scp177-linked-");
     symlinkSync(elsewhere, join(worktree, "hatch"));
     const target = join(worktree, "hatch", "escape.txt");
 
@@ -408,7 +408,7 @@ describe("a file tool whose destination resolves outside the worktree", () => {
   }, WRITE_GUARD_TIMEOUT_MS);
 
   it("lets a Write inside the worktree proceed, and the file is there", async () => {
-    const worktree = worktreeFor("focrux-scp177-inside-");
+    const worktree = worktreeFor("perbo-scp177-inside-");
     const target = join(worktree, "src", "generated.ts");
 
     const result = await runWriting(worktree, {
@@ -426,7 +426,7 @@ describe("a file tool whose destination resolves outside the worktree", () => {
 
 describe("a tool call that is not a shell line", () => {
   it("is judged from the root and records no directory, because it moves no shell", async () => {
-    const worktree = worktreeFor("focrux-scp170-file-tool-");
+    const worktree = worktreeFor("perbo-scp170-file-tool-");
     const result = await run(worktree, [
       "cd /tmp",
       { tool: "Write", input: { file_path: join(worktree, "src", "a.ts") } },
@@ -449,7 +449,7 @@ describe("a tool call that is not a shell line", () => {
  * line.
  */
 describe("the directory a line reports leaving the shell in", () => {
-  const root = scratch("focrux-scp170-unit-");
+  const root = scratch("perbo-scp170-unit-");
   mkdirSync(join(root, "packages", "evaluation"), { recursive: true });
   const at = (command: string) =>
     inspectCommandWithCwd(command, { root, home: "/Users/nobody" }).cwd.relative;
@@ -496,11 +496,11 @@ describe("the directory a line reports leaving the shell in", () => {
       join("packages", "evaluation"),
     );
     expect(inspectCommandWithCwd("cd ..", scope).cwd.relative).toBe("packages");
-    expect(inspectCommandWithCwd("rm -rf ../../.focrux-tmp/x", scope).hits).toEqual([]);
+    expect(inspectCommandWithCwd("rm -rf ../../.perbo-tmp/x", scope).hits).toEqual([]);
   });
 
   it("defaults to the root, so a caller that names no directory reads as before", () => {
-    expect(inspectCommandWithCwd("rm -rf ../../.focrux-tmp/x", { root }).hits).toHaveLength(1);
+    expect(inspectCommandWithCwd("rm -rf ../../.perbo-tmp/x", { root }).hits).toHaveLength(1);
     expect(inspectCommandWithCwd("git status", { root }).cwd.relative).toBe(".");
   });
 });

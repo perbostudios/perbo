@@ -18,7 +18,7 @@ async function runSuites(
   suites: readonly string[],
   env: Record<string, string>,
 ): Promise<{ report: Report }> {
-  const outputFile = join(mkdtempSync(join(tmpdir(), "focrux-absence-")), "report.json");
+  const outputFile = join(mkdtempSync(join(tmpdir(), "perbo-absence-")), "report.json");
   await runVitest(
     "pnpm",
     ["exec", "vitest", "run", ...suites, "--reporter=json", `--outputFile=${outputFile}`],

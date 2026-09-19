@@ -1,4 +1,4 @@
-import { ScopeSchema, type PlanLevel, type Scope } from "@focrux/contracts";
+import { ScopeSchema, type PlanLevel, type Scope } from "@perbo/contracts";
 import { describe, expect, it } from "vitest";
 import { chooseLevel, levelAdditions } from "../src/admit.js";
 import { USAGE } from "../src/usage.js";

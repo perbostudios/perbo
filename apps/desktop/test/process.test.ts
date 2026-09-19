@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { delimiter, join } from "node:path";
 import {
+  LINE_CHAR_CAP,
   childEnvironment,
   forgetRegistryPath,
   installLocations,
   registryPath,
   searchPath,
+  startLineProcess,
 } from "../src/host/process.js";
+import type { LineProcess } from "../src/host/process.js";
 
 const windows = process.platform === "win32";
 /** Two spellings of one Windows directory compare equal. */
@@ -145,5 +148,107 @@ describe("childEnvironment", () => {
     expect(env.NO_COLOR).toBe("1");
     expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined();
     expect(env.NODE_OPTIONS).toBeUndefined();
+  });
+});
+
+/**
+ * The long-lived child the interview needs (D-102, SCP-313): stdin stays open
+ * and is written a line at a time, stdout comes back a line at a time, and a
+ * stop ends stdin and then signals the process group, as the runner does.
+ */
+describe("startLineProcess", () => {
+  const script = (body: string): string[] => ["-e", body];
+  const lines = async (
+    args: string[],
+    drive: (child: LineProcess) => void,
+  ): Promise<{ out: string[]; stderr: string[]; close: { code: number; stopped: boolean } }> => {
+    const out: string[] = [];
+    const stderr: string[] = [];
+    return new Promise((resolve, reject) => {
+      const child = startLineProcess(process.execPath, args, {
+        cwd: process.cwd(),
+        onLine: (line) => out.push(line),
+        onStderr: (text) => stderr.push(text),
+        onClose: (close) => resolve({ out, stderr, close }),
+        onError: reject,
+      });
+      drive(child);
+    });
+  };
+
+  it("writes a line to stdin and reads one back, whole, however the child chunked it", async () => {
+    const { out, close } = await lines(
+      script(
+        "const rl=require('node:readline').createInterface({input:process.stdin});" +
+          "rl.on('line',l=>{process.stdout.write('{\"echo\":');process.stdout.write(l);process.stdout.write('}\\n');});" +
+          "rl.on('close',()=>process.exit(0));",
+      ),
+      (child) => {
+        child.write('{"type":"turn","text":"one"}\n');
+        child.write('{"type":"turn","text":"two"}\n');
+        setTimeout(() => child.stop(), 200);
+      },
+    );
+    expect(out).toEqual([
+      '{"echo":{"type":"turn","text":"one"}}',
+      '{"echo":{"type":"turn","text":"two"}}',
+    ]);
+    expect(close.stopped).toBe(true);
+  });
+
+  it("ends stdin first, so a child that leaves on its own is never signalled", async () => {
+    const { out, close } = await lines(
+      script(
+        "const rl=require('node:readline').createInterface({input:process.stdin});" +
+          "rl.on('close',()=>{process.stdout.write('closed\\n');process.exit(7);});",
+      ),
+      (child) => child.stop(),
+    );
+    expect(out).toEqual(["closed"]);
+    expect(close.code).toBe(7);
+  });
+
+  it("redacts a credential on the child's stderr rather than streaming it", async () => {
+    const { stderr } = await lines(
+      script("process.stderr.write('starting with sk-ant-abcdefghijklmnop\\n');process.exit(0);"),
+      () => undefined,
+    );
+    expect(stderr.join("")).toContain("[redacted]");
+    expect(stderr.join("")).not.toContain("sk-ant-abcdefghijklmnop");
+  });
+
+  it("takes a line the child has not read yet: a full buffer is not a closed stdin", async () => {
+    const taken: boolean[] = [];
+    const { out, close } = await lines(
+      // A child that reads nothing until it is told to, so the writes below
+      // fill the pipe's buffer rather than draining through it.
+      script(
+        "setTimeout(()=>{const rl=require('node:readline').createInterface({input:process.stdin});" +
+          "let n=0;rl.on('line',()=>{n+=1;});rl.on('close',()=>{process.stdout.write(`read ${n}\n`);" +
+          "process.exit(0);});},300);",
+      ),
+      (child) => {
+        for (let each = 0; each < 4; each++) taken.push(child.write(`${"x".repeat(200_000)}\n`));
+        setTimeout(() => child.stop(), 1200);
+      },
+    );
+    expect(taken).toEqual([true, true, true, true]);
+    expect(out).toEqual(["read 4"]);
+    expect(close.code).toBe(0);
+  });
+
+  it("says so rather than growing without a bound when one line never ends", async () => {
+    const { out, stderr, close } = await lines(
+      script(
+        // No `process.exit` after a megabyte: a pipe write that large is not
+        // finished when it returns, and exiting would truncate what is being
+        // measured.
+        `process.stdout.write('x'.repeat(${String(LINE_CHAR_CAP + 16)}));process.stdout.write('\\ntail\\n');`,
+      ),
+      () => undefined,
+    );
+    expect(out).toEqual(["tail"]);
+    expect(stderr.join("")).toContain("longer than");
+    expect(close.code).toBe(0);
   });
 });

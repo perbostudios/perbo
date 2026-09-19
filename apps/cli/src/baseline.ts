@@ -14,7 +14,7 @@ import {
   stopBaseline,
   summarizeBaseline,
   type BaselineFile,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { UsageError } from "./args.js";
 import { E1_COMMANDS, isE1Command, runE1Command } from "./e1.js";
 import { formatDuration } from "./execute.js";
@@ -23,10 +23,10 @@ import type { Streams } from "./streams.js";
 import { listTickets } from "./tickets.js";
 
 /**
- * `focrux baseline` — the partner's direct-agent wall clock (D-038, SCP-080).
+ * `perbo baseline` — the partner's direct-agent wall clock (D-038, SCP-080).
  *
- * A stopwatch over the workflow Focrux is to be compared against, kept in the
- * repository's own `.focrux/baseline.json`. It has to be run before the first
+ * A stopwatch over the workflow Perbo is to be compared against, kept in the
+ * repository's own `.perbo/baseline.json`. It has to be run before the first
  * ticket goes through the loop, and the file records whether it was: `start`
  * asks whether work is already admitted here and, if it is, marks the capture
  * as late rather than refusing — a late number is still a number, it just is
@@ -105,7 +105,7 @@ export function parseBaselineArgs(argv: readonly string[]): BaselineArgs {
   }
   if (args.command === "start") {
     if (positional.length !== 1 || positional[0]!.trim() === "") {
-      throw new UsageError('baseline start takes one title, e.g. focrux baseline start "Paginate search"');
+      throw new UsageError('baseline start takes one title, e.g. perbo baseline start "Paginate search"');
     }
     args.title = positional[0]!;
   } else if (positional.length > 0) {

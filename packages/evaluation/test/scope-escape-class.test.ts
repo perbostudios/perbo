@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import { changeSetFromDiff } from "@focrux/contracts";
-import { assessScope } from "@focrux/review";
+import { changeSetFromDiff } from "@perbo/contracts";
+import { assessScope } from "@perbo/review";
 import { corpus, describeCorpus } from "./corpus-present.js";
 
 /**

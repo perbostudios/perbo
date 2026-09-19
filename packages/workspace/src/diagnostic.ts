@@ -12,7 +12,7 @@ import {
   type PackageManager,
   type DiagnosticResult,
   isRefusal,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { gitEnv } from "./worktree.js";
 import { run, type RunResult } from "./exec.js";
 import { DEFAULT_PORT_BASE, DEFAULT_PORT_SPAN } from "./ports.js";
@@ -72,6 +72,13 @@ interface ManagerProfile {
   manager: PackageManager;
   /** The lockfile that names this manager and pins what its install resolves. */
   lockfile: string;
+  /**
+   * What its install reads beside that lockfile, any one of which gives it
+   * something to install: `package.json`, and for pnpm also
+   * `pnpm-workspace.yaml`, from which pnpm installs a workspace that has no
+   * root manifest.
+   */
+  manifests: string[];
   /** With that lockfile: reproduces it, and fails rather than updating it. */
   install: string[];
   /**
@@ -96,7 +103,7 @@ interface ManagerProfile {
    *
    * pnpm is the one: `--config.lockfile=false` on the argv says the same thing,
    * but it is the argv that `doctor --write-config` writes into
-   * `.focrux/config.json` and that a person runs by hand to reproduce what the
+   * `.perbo/config.json` and that a person runs by hand to reproduce what the
    * runner did, and a setting of the runner's own is not part of that command.
    * npm, yarn and bun say it on the command line, because there it reads as
    * what it is.
@@ -130,6 +137,7 @@ interface ManagerProfile {
 const MANAGERS: ManagerProfile[] = [
   {
     manager: "pnpm",
+    manifests: ["package.json", "pnpm-workspace.yaml"],
     lockfile: "pnpm-lock.yaml",
     install: ["pnpm", "install", "--frozen-lockfile", "--prefer-offline", "--ignore-scripts"],
     // The pinned install without the flag that needs a lockfile, so the two
@@ -144,6 +152,7 @@ const MANAGERS: ManagerProfile[] = [
   },
   {
     manager: "npm",
+    manifests: ["package.json"],
     lockfile: "package-lock.json",
     install: ["npm", "ci", "--prefer-offline", "--ignore-scripts"],
     unpinned: ["npm", "install", "--ignore-scripts", "--no-package-lock"],
@@ -153,6 +162,7 @@ const MANAGERS: ManagerProfile[] = [
   },
   {
     manager: "yarn",
+    manifests: ["package.json"],
     lockfile: "yarn.lock",
     install: ["yarn", "install", "--frozen-lockfile", "--prefer-offline", "--ignore-scripts"],
     unpinned: ["yarn", "install", "--ignore-scripts", "--no-lockfile"],
@@ -162,6 +172,7 @@ const MANAGERS: ManagerProfile[] = [
   },
   {
     manager: "bun",
+    manifests: ["package.json"],
     lockfile: "bun.lockb",
     install: ["bun", "install", "--frozen-lockfile", "--ignore-scripts"],
     unpinned: ["bun", "install", "--ignore-scripts", "--no-save"],
@@ -171,6 +182,7 @@ const MANAGERS: ManagerProfile[] = [
   },
   {
     manager: "uv",
+    manifests: ["pyproject.toml"],
     lockfile: "uv.lock",
     install: ["uv", "sync", "--frozen"],
     unpinned: ["uv", "sync"],
@@ -246,6 +258,14 @@ export interface DetectedManager {
   pin_with: string[];
   /** The file that named the manager: a lockfile, or the manifest standing in for one. */
   named_by: string;
+  /** What the install reads, any one of which gives it something to install. */
+  manifests: string[];
+  /**
+   * Whether one of those is where the install runs. A lockfile names its
+   * manager on its own, and one with none of them beside it names an install
+   * with nothing to install.
+   */
+  manifest_present: boolean;
 }
 
 /**
@@ -512,9 +532,8 @@ export function workspaceMembership(checkout: string): WorkspaceMembership {
  * A lockfile is the strongest answer and is read first: it names the manager
  * *and* pins what the install resolves. Where there is none, the manifest names
  * the manager on its own — a repository somebody is trying for the first time
- * often has no lockfile yet, and reading nothing from such a checkout meant not
- * reading its scripts either, so it was refused for declaring no test script
- * when its manifest declared one.
+ * often has no lockfile yet, and its scripts are read through that manager all
+ * the same.
  *
  * Both are read at the **workspace** root where the checkout is a member of
  * one, because that is where the manager reads them: a package of a pnpm
@@ -553,6 +572,8 @@ export function detectPackageManager(
       // does not pin its own.
       pin_with: profile.pin,
       named_by: namedBy(profile.lockfile),
+      manifests: profile.manifests,
+      manifest_present: profile.manifests.some((file) => visible(join(root, file))),
     };
   }
   for (const manifest of MANIFESTS) {
@@ -570,20 +591,105 @@ export function detectPackageManager(
       pinned_install: filtered(profile, profile.install),
       pin_with: profile.pin,
       named_by: namedBy(manifest.file),
+      manifests: profile.manifests,
+      manifest_present: true,
     };
   }
   return null;
 }
 
 /**
- * The verification proposed where nothing names a package manager this build
- * reads. Nothing is installed and no script is read, so what verification can
- * prove is that the worktree is a checkout Git can read; this exits non-zero on
- * one it cannot, and takes no value from a model or from repository content.
- * Exported so that the read-back of a configuration can recognise the manifest
- * `doctor --write-config` pins for such a checkout.
+ * The verification proposed where the checkout declares none a worktree can
+ * run: nothing names a package manager this build installs with, there is no
+ * manifest for its install to read, the package declares no test script, or
+ * each one it declares starts a service. What it proves is that the worktree is
+ * a checkout Git can read; it exits non-zero on one it cannot, and takes no
+ * value from a model or from repository content. Exported so that the
+ * read-back of a configuration can recognise the manifest `doctor
+ * --write-config` pins for such a checkout.
  */
 export const GREENFIELD_VERIFY: readonly string[] = ["git", "status", "--porcelain"];
+
+/**
+ * Whether a verification is `GREENFIELD_VERIFY`. It passes on any checkout Git
+ * can read, so a base it passed is a base nothing measured, and it is no suite.
+ */
+export function isGreenfieldVerify(command: readonly string[]): boolean {
+  return (
+    command.length === GREENFIELD_VERIFY.length &&
+    command.every((part, index) => part === GREENFIELD_VERIFY[index])
+  );
+}
+
+/**
+ * What a finding says where the verification is `GREENFIELD_VERIFY`: what that
+ * command proves, and so what an attempt there is judged by instead. Checks a
+ * person pins in `.perbo/config.json` judge it whatever the manifest says.
+ */
+const UNVERIFIED =
+  `Verification is \`${GREENFIELD_VERIFY.join(" ")}\`, which any checkout Git can read passes, ` +
+  "so an attempt here is judged by the review and whichever checks are pinned.";
+
+/**
+ * The verification a checkout gets, and the only place it is derived.
+ *
+ * A command the diagnostic is given is the caller's, and runs as given; the
+ * finding says what it starts. Otherwise it is the first test script the
+ * package declares — `test`, then `test:unit` — that starts no service, where
+ * this build installs with the package manager and its manifest is there to
+ * install. A script that starts a service is passed over, as the proposed
+ * checks pass it over. Null where there is none a worktree can run, and the
+ * verification is then `GREENFIELD_VERIFY`.
+ *
+ * The finding is what the package's scripts made of it: that it declares no
+ * test script, that each one it declares starts a service, or that it depends
+ * on services the script it runs may need. Where no manager this build
+ * installs with is named, or its manifest is missing, no script was read, and
+ * the manager's own finding says so.
+ */
+function verification(
+  checkout: string,
+  detected: DetectedManager | null,
+  given: string[] | undefined,
+): { command: string[] | null; finding: DiagnosticFinding | null } {
+  if (given !== undefined) {
+    return { command: given, finding: verificationServiceNeed(checkout, given, { given: true }) };
+  }
+  if (!detected?.supported || !detected.manifest_present) return { command: null, finding: null };
+  let passedOver: DiagnosticFinding | null = null;
+  for (const candidate of declaredTestScripts(checkout, detected.manager)) {
+    const service = verificationServiceNeed(checkout, candidate);
+    if (service?.reason !== "verification_requires_service") {
+      return { command: candidate, finding: service };
+    }
+    passedOver ??= service;
+  }
+  return {
+    command: null,
+    finding: passedOver ?? {
+      reason: "no_verification_command",
+      severity: "advisory",
+      detail:
+        "the repository declares no test script, so there is no command whose success defines " +
+        `'the worktree can run this repository'. ${UNVERIFIED} Declare a \`test\` script to have ` +
+        "it run; `doctor --write-config` pins this manifest, and a later `doctor` says so once " +
+        "the repository declares one.",
+      path: existsSync(join(checkout, "package.json")) ? "package.json" : null,
+    },
+  };
+}
+
+/**
+ * The verification this checkout declares that a worktree can run, as the
+ * diagnostic derives it where it is given none; null where it would verify with
+ * `GREENFIELD_VERIFY`. The read-back of a pinned manifest compares against it.
+ */
+export function declaredVerifyCommand(
+  checkout: string,
+  detected: DetectedManager | null = detectPackageManager(checkout),
+): string[] | null {
+  return verification(checkout, detected, undefined).command;
+}
 
 /**
  * The install a checkout's own lockfile or manifest implies, and the only place
@@ -595,17 +701,21 @@ export function proposedInstall(
   checkout: string,
   detected: DetectedManager | null = detectPackageManager(checkout),
 ): InstallStrategy {
-  const pinned = detected?.pinned ?? true;
+  // A manager this build detects but does not install with installs nothing,
+  // as one it does not detect does, and so does one with no manifest beside
+  // its lockfile for the install to read.
+  const installs = detected?.supported && detected.manifest_present ? detected : null;
+  const pinned = installs?.pinned ?? true;
   return {
-    kind: detected ? "shared_store" : "none",
-    package_manager: detected?.manager ?? "none",
+    kind: installs ? "shared_store" : "none",
+    package_manager: installs?.manager ?? "none",
     // Read off the command rather than from the pinning: this field describes
     // what the install below does, and a strategy that claimed the offline
     // store for a command that never asks for it would be describing a
     // different install.
-    offline_preferred: (detected?.install ?? []).includes("--prefer-offline"),
+    offline_preferred: (installs?.install ?? []).includes("--prefer-offline"),
     lifecycle_scripts: { policy: "disabled", exception: null },
-    command: detected?.install ?? ["true"],
+    command: installs?.install ?? ["true"],
     // An install that installs nothing resolves nothing, so nothing about it
     // can drift.
     pinned,
@@ -693,23 +803,20 @@ export function unpinnedInstallEnv(install: InstallStrategy): Record<string, str
   return MANAGERS.find((profile) => profile.manager === install.package_manager)?.unpinned_env ?? {};
 }
 
-/** The repository's own test command, read from `package.json`, never invented. */
-export function detectVerifyCommand(checkout: string, manager: PackageManager): string[] | null {
+/** The test scripts a package declares, `test` then `test:unit`, read from `package.json`, never invented. */
+function declaredTestScripts(checkout: string, manager: PackageManager): string[][] {
   const packageJson = join(checkout, "package.json");
-  if (!existsSync(packageJson)) return null;
+  if (!existsSync(packageJson)) return [];
   let scripts: Record<string, unknown>;
   try {
     const parsed = JSON.parse(readFileSync(packageJson, "utf8")) as { scripts?: Record<string, unknown> };
     scripts = parsed.scripts ?? {};
   } catch {
-    return null;
+    return [];
   }
-  for (const name of ["test", "test:unit"]) {
-    if (typeof scripts[name] === "string") {
-      return manager === "npm" ? ["npm", "run", name] : [manager, "run", name];
-    }
-  }
-  return null;
+  return ["test", "test:unit"]
+    .filter((name) => typeof scripts[name] === "string")
+    .map((name) => [manager, "run", name]);
 }
 
 /**
@@ -783,7 +890,11 @@ export interface DiagnoseRequest {
    * it — a location it was not told about is not one it can vouch for.
    */
   worktree_root?: string | undefined;
-  /** Override the proposed verification command where the repository has none. */
+  /**
+   * The verification to propose in place of the one the diagnostic would
+   * derive. It runs as given, including where it starts a service, which the
+   * findings then report.
+   */
   verify_command?: string[] | undefined;
   verify_timeout_ms?: number | undefined;
   port_base?: number | undefined;
@@ -797,15 +908,15 @@ export interface DiagnoseRequest {
  * Materialization copies files. It cannot start a database, and the failure that
  * produces is the dangerous kind: the suite runs, the tests that need the
  * service error or skip, and the attempt reports **green with its verification
- * unrun**. ADR-0025's rule is that a repository that cannot be materialized
- * fails the diagnostic before an attempt rather than inside one, so this is
- * where that is said.
+ * unrun**. So it is said here, before an attempt rather than inside one
+ * (ADR-0025).
  *
- * Two severities, because the two signals are not equally strong. A verify
- * command that itself runs `docker compose up` cannot work and is refused. A
- * repository that merely *declares* services — a compose file, a
- * testcontainers dependency — usually runs its unit suite without them, so
- * refusing it would lock out repositories that are fine; that is reported.
+ * Two findings, because the two signals are not equally strong. A verify
+ * command that itself runs `docker compose up` cannot work, so it is not run
+ * and the verification is `GREENFIELD_VERIFY`. A repository that merely
+ * *declares* services — a compose file, a testcontainers dependency — usually
+ * runs its unit suite without them, so its command still runs and the finding
+ * says what that may leave unrun. Neither refuses the repository (D-013).
  */
 const SERVICE_STARTERS = [
   /\bdocker[- ]compose\b/,
@@ -823,6 +934,13 @@ const SERVICE_DECLARATIONS = ["testcontainers", "@testcontainers/postgresql", "d
 export function verificationServiceNeed(
   checkout: string,
   verify: readonly string[] | null,
+  options: {
+    /**
+     * The command is one the diagnostic was given, which runs as given, rather
+     * than one it read from the scripts and would pass over.
+     */
+    given?: boolean;
+  } = {},
 ): DiagnosticFinding | null {
   let pkg: { scripts?: Record<string, unknown>; devDependencies?: Record<string, unknown>; dependencies?: Record<string, unknown> };
   try {
@@ -836,26 +954,24 @@ export function verificationServiceNeed(
   // runs before it — which is where a service is usually started, precisely so
   // the test script stays clean.
   const scriptName = verify && verify.length >= 3 && verify[1] === "run" ? (verify[2] ?? null) : null;
-  const bodies: string[] = [];
   for (const name of scriptName === null ? [] : [`pre${scriptName}`, scriptName]) {
     const body = scripts[name];
-    if (typeof body === "string") bodies.push(body);
-  }
-
-  for (const body of bodies) {
-    const matched = SERVICE_STARTERS.find((pattern) => pattern.test(body));
-    if (matched) {
-      return {
-        reason: "verification_requires_service",
-        severity: "refusal",
-        detail:
-          `the verification command runs \`${body}\`, which starts a service. Materialization ` +
-          "copies files into a worktree and cannot start one, so this suite would report green " +
-          "with the tests that need the service not run. Point the repository at a service that " +
-          "is already running, or give it a verification command that does not need one.",
-        path: "package.json",
-      };
+    if (typeof body !== "string" || !SERVICE_STARTERS.some((pattern) => pattern.test(body))) {
+      continue;
     }
+    return {
+      reason: "verification_requires_service",
+      severity: "advisory",
+      detail:
+        `\`${name}\` runs \`${body}\`, which starts a service. Materialization copies files ` +
+        "into a worktree and cannot start one, so this suite would report green with the tests " +
+        "that need the service not run" +
+        (options.given
+          ? ". It is the verification this diagnostic was given, so it runs as given."
+          : `, and it is not run. ${UNVERIFIED} To have the suite run, give it a test script ` +
+            "that does not start a service, against one that is already running."),
+      path: "package.json",
+    };
   }
 
   const declared = [...Object.keys(pkg.devDependencies ?? {}), ...Object.keys(pkg.dependencies ?? {})]
@@ -1000,7 +1116,7 @@ export async function signableCommit(
   const tree = await treeToSign(checkout);
   if (tree === null) return null;
 
-  const scratch = mkdtempSync(join(tmpdir(), "focrux-signing-probe-"));
+  const scratch = mkdtempSync(join(tmpdir(), "perbo-signing-probe-"));
   try {
     const askpass = join(scratch, "askpass");
     writeFileSync(askpass, "#!/bin/sh\nexit 1\n", { mode: 0o700 });
@@ -1014,10 +1130,10 @@ export async function signableCommit(
       ).join(":"),
       // The identity is the probe's own, so a checkout that has not set one
       // fails here for that rather than being reported as unable to sign.
-      GIT_AUTHOR_NAME: "focrux",
-      GIT_AUTHOR_EMAIL: "focrux@localhost",
-      GIT_COMMITTER_NAME: "focrux",
-      GIT_COMMITTER_EMAIL: "focrux@localhost",
+      GIT_AUTHOR_NAME: "perbo",
+      GIT_AUTHOR_EMAIL: "perbo@localhost",
+      GIT_COMMITTER_NAME: "perbo",
+      GIT_COMMITTER_EMAIL: "perbo@localhost",
       SSH_ASKPASS: askpass,
       SSH_ASKPASS_REQUIRE: "force",
     };
@@ -1104,9 +1220,8 @@ export async function diagnose(request: DiagnoseRequest): Promise<DiagnosticResu
   if (!detected) {
     findings.push({
       reason: "package_manager_undetected",
-      // Advisory, by decision: a repository whose package manager this build
-      // cannot read is accepted with nothing installed, and judged by the review
-      // alone.
+      // Advisory, by decision (D-013): a repository whose package manager this
+      // build cannot read is accepted with nothing installed.
       severity: "advisory",
       detail:
         `nothing ${inWorkspace ? `in the workspace at ${membership.workspace_root}` : "here"} ` +
@@ -1115,8 +1230,7 @@ export async function diagnose(request: DiagnoseRequest): Promise<DiagnosticResu
         `${MANIFESTS.map((m) => m.file).join(" and ")}), so nothing is installed and no ` +
         "scripts are read" +
         (request.verify_command === undefined
-          ? `. Verification is \`${GREENFIELD_VERIFY.join(" ")}\`, which any checkout Git can ` +
-            "read passes, so an attempt here is judged by the review alone. " +
+          ? `. ${UNVERIFIED} ` +
             "`doctor --write-config` pins that manifest, and a later `doctor` says so once the " +
             "repository names a package manager this build reads."
           : "."),
@@ -1125,10 +1239,32 @@ export async function diagnose(request: DiagnoseRequest): Promise<DiagnosticResu
   } else if (!detected.supported) {
     findings.push({
       reason: "unsupported_package_manager",
-      severity: "refusal",
+      // Advisory, by the same decision: a manager this build detects but does
+      // not install with is answered as one it does not detect.
+      severity: "advisory",
       detail:
-        `${detected.manager} is outside the declared Phase 1 support boundary ` +
-        "(D-013: pnpm/npm monorepos first). The manifest below is a starting point, not a supported path.",
+        // A lockfile names its manager. A manifest standing in for one names
+        // nothing: a `pyproject.toml` is read as uv whatever built it.
+        (detected.pinned
+          ? `${detected.named_by} names ${detected.manager}, which this build does not install with`
+          : `this build reads ${detected.named_by} as ${detected.manager}, which it does not install with`) +
+        ", so nothing is installed and no scripts are read" +
+        (request.verify_command === undefined
+          ? `. ${UNVERIFIED} \`doctor --write-config\` pins that manifest.`
+          : "."),
+      path: detected.named_by,
+    });
+  } else if (!detected.manifest_present) {
+    findings.push({
+      reason: "package_manifest_missing",
+      // Advisory, by the same decision: an install with nothing to install is
+      // not run, and the repository is answered as one that names no manager.
+      severity: "advisory",
+      detail:
+        `${detected.named_by} names ${detected.manager}, but there is no ` +
+        `${detected.manifests.join(" or ")} beside it to install, so nothing is installed and ` +
+        "no scripts are read" +
+        (request.verify_command === undefined ? `. ${UNVERIFIED}` : "."),
       path: detected.named_by,
     });
   } else if (!detected.pinned) {
@@ -1145,26 +1281,9 @@ export async function diagnose(request: DiagnoseRequest): Promise<DiagnosticResu
     });
   }
 
-  const manager: PackageManager = detected?.manager ?? "none";
-  const verify =
-    request.verify_command ??
-    (detected ? detectVerifyCommand(checkout, manager) : [...GREENFIELD_VERIFY]);
-  // Said only where the scripts were read. A checkout with no `package.json`
-  // declares no test script to be missing, and what is wrong with it is already
-  // named above.
-  if (!verify && existsSync(join(checkout, "package.json"))) {
-    findings.push({
-      reason: "no_verification_command",
-      severity: "refusal",
-      detail:
-        "the repository declares no test script, so there is no command whose success defines " +
-        "'the worktree can run this repository'",
-      path: "package.json",
-    });
-  }
-
-  const serviceNeed = verificationServiceNeed(checkout, verify);
-  if (serviceNeed) findings.push(serviceNeed);
+  const verified = verification(checkout, detected, request.verify_command);
+  if (verified.finding) findings.push(verified.finding);
+  const verify = verified.command ?? [...GREENFIELD_VERIFY];
 
   const signing = await signableCommit(checkout);
   if (signing) findings.push(signing);
@@ -1186,29 +1305,27 @@ export async function diagnose(request: DiagnoseRequest): Promise<DiagnosticResu
 
   const span = request.port_span ?? DEFAULT_PORT_SPAN;
   const base = request.port_base ?? DEFAULT_PORT_BASE;
-  const proposed: MaterializationManifest | null = verify
-    ? MaterializationManifestSchema.parse({
-        manifest_version: MATERIALIZATION_MANIFEST_VERSION,
-        repository_id: request.repository_id,
-        source_checkout: checkout,
-        entries,
-        install,
-        verify: { command: verify, timeout_ms: request.verify_timeout_ms ?? 900_000 },
-        isolation: {
-          mode: "parallel",
-          port_range_size: span,
-          port_range_start: base,
-          port_range_end: base + span - 1,
-          database_schema_prefix: null,
-        },
-      } satisfies MaterializationManifest)
-    : null;
+  const proposed: MaterializationManifest = MaterializationManifestSchema.parse({
+    manifest_version: MATERIALIZATION_MANIFEST_VERSION,
+    repository_id: request.repository_id,
+    source_checkout: checkout,
+    entries,
+    install,
+    verify: { command: verify, timeout_ms: request.verify_timeout_ms ?? 900_000 },
+    isolation: {
+      mode: "parallel",
+      port_range_size: span,
+      port_range_start: base,
+      port_range_end: base + span - 1,
+      database_schema_prefix: null,
+    },
+  } satisfies MaterializationManifest);
 
   return {
     // Advisories do not disqualify: a badly placed worktree root is the
     // operator's setting, fixable by moving one path, and refusing the
     // repository for it would be a lie about the repository.
-    materializable: !findings.some(isRefusal) && proposed !== null,
+    materializable: !findings.some(isRefusal),
     findings,
     proposed,
   };

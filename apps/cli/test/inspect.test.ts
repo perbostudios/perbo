@@ -9,8 +9,8 @@ import {
   type ReviewArtifact,
   type RunBundle,
   type RunBundleKind,
-} from "@focrux/contracts";
-import { BundleStore } from "@focrux/runner";
+} from "@perbo/contracts";
+import { BundleStore } from "@perbo/runner";
 import { UsageError } from "../src/args.js";
 import {
   buildInspectReport,
@@ -21,7 +21,7 @@ import {
 } from "../src/inspect.js";
 import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "./attempt-fixture.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-inspect-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const TICKET_ID = "ticket_inspect0001";
@@ -84,7 +84,7 @@ function storeWithAttempts(
   checks?: ReviewArtifact["checks"],
 ): { repo: string; store: string } {
   const repo = join(scratch, name);
-  const store = join(repo, ".focrux");
+  const store = join(repo, ".perbo");
   mkdirSync(join(store, "tickets"), { recursive: true });
   mkdirSync(join(store, "state"), { recursive: true });
   writeFileSync(
@@ -259,7 +259,7 @@ function storeWithAttempts(
  */
 function storeWithRejectedVerdicts(name: string): { repo: string; store: string } {
   const repo = join(scratch, name);
-  const store = join(repo, ".focrux");
+  const store = join(repo, ".perbo");
   mkdirSync(join(store, "tickets"), { recursive: true });
   mkdirSync(join(store, "state"), { recursive: true });
   writeFileSync(
@@ -356,7 +356,7 @@ const UNRECORDED_ADMISSION = {
 /** A ticket alone in a store, with the admission record written verbatim. */
 function storeWithAdmission(name: string, admission: unknown): { repo: string; store: string } {
   const repo = join(scratch, name);
-  const store = join(repo, ".focrux");
+  const store = join(repo, ".perbo");
   mkdirSync(join(store, "tickets"), { recursive: true });
   mkdirSync(join(store, "state"), { recursive: true });
   const ticket = {
@@ -391,7 +391,7 @@ function storeWithAdmission(name: string, admission: unknown): { repo: string; s
  */
 function storeWithCarriedForward(name: string): { repo: string; store: string } {
   const repo = join(scratch, name);
-  const store = join(repo, ".focrux");
+  const store = join(repo, ".perbo");
   mkdirSync(join(store, "tickets"), { recursive: true });
   mkdirSync(join(store, "state"), { recursive: true });
   writeFileSync(
@@ -423,10 +423,10 @@ function storeWithCarriedForward(name: string): { repo: string; store: string } 
   return { repo, store };
 }
 
-describe("focrux inspect argument parsing", () => {
+describe("perbo inspect argument parsing", () => {
   it("counts tokens against the ceiling the way the runner does: cache reads excluded", () => {
     const repo = join(scratch, "tokens-cache");
-    const store = join(repo, ".focrux");
+    const store = join(repo, ".perbo");
     mkdirSync(join(store, "tickets"), { recursive: true });
     mkdirSync(join(store, "state"), { recursive: true });
     const ticketId = "ticket_0000000000cache";
@@ -458,9 +458,11 @@ describe("focrux inspect argument parsing", () => {
     );
     const report = buildInspectReport({ storeDirectory: store, key: "AYO-9", attempt: null });
     const rendered = renderInspect(report, { color: false, detail: false, version: "test" });
-    // 6,778,856 − 5,000,000 + 283: the fresh input plus output the ceiling saw.
-    expect(rendered).toMatch(/tokens\s+1,779,139 \/ 2,000,000/);
-    expect(rendered).not.toMatch(/1,779,139 \/ 2,000,000 — ceiling hit/);
+    // 6,778,856 − 5,000,000 + 283: the fresh input plus output the counter saw.
+    // D-096 removed the ceiling it used to be tested against, so the count is
+    // what the row is for, and it says there is nothing bounding it.
+    expect(rendered).toMatch(/tokens\s+1,779,139 \/ no ceiling/);
+    expect(rendered).not.toContain("ceiling hit");
     expect(rendered).toContain("6,778,856 in, 5,000,000 cached · 283 out");
   });
 
@@ -487,7 +489,7 @@ describe("focrux inspect argument parsing", () => {
   });
 });
 
-describe("focrux inspect", () => {
+describe("perbo inspect", () => {
   it("names the ceiling that was hit, at the value in force when it was hit", () => {
     const { store } = storeWithAttempts("ceiling");
     const report = buildInspectReport({ storeDirectory: store, key: "AYO-7", attempt: null });
@@ -537,7 +539,10 @@ describe("focrux inspect", () => {
 
     expect(rendered).toContain("cost unavailable");
     expect(rendered).not.toContain("$0.0000");
-    expect(rendered).toContain("$1.2300 reported / $5.0000");
+    // D-096: the attempt authenticated on a subscription, so no cost cap
+    // applied to it and the row says so rather than printing the per-token
+    // default as though it had been in force.
+    expect(rendered).toContain("$1.2300 reported / no ceiling");
     expect(rendered).toContain("not incurred");
   });
 
@@ -571,7 +576,7 @@ describe("focrux inspect", () => {
       from: "failed" | "failed-unrecorded" | "independent_review",
     ): { store: string } {
       const repo = join(scratch, name);
-      const store = join(repo, ".focrux");
+      const store = join(repo, ".perbo");
       mkdirSync(join(store, "tickets"), { recursive: true });
       const ticket = makeTicket({
         key,
@@ -588,12 +593,12 @@ describe("focrux inspect", () => {
             to: "pr_open",
             note:
               from === "failed"
-                ? "reconciled after the fact by `focrux sync` from `gh`: https://example.invalid/pull/77 " +
+                ? "reconciled after the fact by `perbo sync` from `gh`: https://example.invalid/pull/77 " +
                   "exists on ayo/fixture/x — handed off: a person opened it, the loop did not"
                 : from === "failed-unrecorded"
                   // SCP-176: neither a hand-off note nor a `handed_off` flag —
                   // the row `resumeWithUnrecordedOpener` writes.
-                  ? "reconciled after the fact by `focrux sync` from `gh`: https://example.invalid/pull/77 " +
+                  ? "reconciled after the fact by `perbo sync` from `gh`: https://example.invalid/pull/77 " +
                     "exists on ayo/fixture/x — the opener is not recorded"
                   : "approved; a human merges it",
           },
@@ -764,7 +769,7 @@ describe("focrux inspect", () => {
 
   it("says in one sentence when nothing has run", async () => {
     const repo = join(scratch, "never-ran");
-    const store = join(repo, ".focrux");
+    const store = join(repo, ".perbo");
     mkdirSync(join(store, "tickets"), { recursive: true });
     writeFileSync(
       join(store, "tickets", "AYO-2.json"),
@@ -778,7 +783,7 @@ describe("focrux inspect", () => {
 
   it("distinguishes a ticket that never ran from one whose record is in another store", async () => {
     const repo = join(scratch, "ran-elsewhere");
-    const store = join(repo, ".focrux");
+    const store = join(repo, ".perbo");
     mkdirSync(join(store, "tickets"), { recursive: true });
     writeFileSync(
       join(store, "tickets", "AYO-1.json"),
@@ -1021,10 +1026,20 @@ describe("focrux inspect", () => {
         "pull_request_url",
         // SCP-227: where the ticket stands in the queue and what it waits on.
         "queue",
+        // SCP-315: whether the spec this contract was drafted from is still
+        // that spec. Null for a ticket drafted from anything else (D-103).
+        "spec_staleness",
         // SCP-260: why a run stopped before an attempt existed. Null for a
         // ticket, whose history is on its own file, and never absent — a
         // refusal that is only printed is one nobody can read back.
         "refusal",
+        // SCP-333: the plan's execution graph, and how big the plan is. Both
+        // nodes and edges are null for a flat plan; the size is a reading of
+        // every plan (D-100, D-104).
+        "nodes",
+        "edges",
+        "approach_problem",
+        "size",
         "runs_started",
         "source",
         "state",
@@ -1045,6 +1060,8 @@ describe("focrux inspect", () => {
       criteria_source: "typed",
       criteria_count: 1,
       drafted_at: null,
+      // Null for every source but a spec (D-103).
+      spec: null,
       human_elapsed_ms: null,
       edit_count: null,
       counter_sealed_at: null,
@@ -1077,7 +1094,7 @@ describe("focrux inspect", () => {
 
   it("lists a re-run's attempts in run order, each labelled with the run that made it", () => {
     const repo = join(scratch, "re-run");
-    const store = join(repo, ".focrux");
+    const store = join(repo, ".perbo");
     mkdirSync(join(store, "tickets"), { recursive: true });
     mkdirSync(join(store, "state"), { recursive: true });
     const ticket_id = "ticket_rerun00001";
@@ -1200,7 +1217,7 @@ describe("formatHumanElapsed", () => {
  */
 function storeWithTerminatedCosts(name: string): { repo: string; store: string } {
   const repo = join(scratch, name);
-  const store = join(repo, ".focrux");
+  const store = join(repo, ".perbo");
   mkdirSync(join(store, "tickets"), { recursive: true });
   mkdirSync(join(store, "state"), { recursive: true });
   const ticketId = "ticket_terminated001";
@@ -1288,6 +1305,73 @@ describe("what a terminated attempt says it cost", () => {
     // The ceiling row says the same thing, against the ceiling in force.
     expect(rendered).toContain("$5.1100 partial / $5.0000");
     for (const line of rendered.split("\n")) expect(line.length).toBeLessThanOrEqual(80);
+  });
+
+  /**
+   * SCP-323: the one resource no attempt keeps a running count of, so the row
+   * reads the silence out of the refusal's own message.
+   */
+  it("shows the stall window an attempt reached, and the cost cap a subscription never had", () => {
+    const repo = join(scratch, "terminated-stalled");
+    const store = join(repo, ".perbo");
+    mkdirSync(join(store, "tickets"), { recursive: true });
+    mkdirSync(join(store, "state"), { recursive: true });
+    const ticketId = "ticket_stalled000001";
+    writeFileSync(
+      join(store, "tickets", "AYO-16.json"),
+      JSON.stringify(makeTicket({ key: "AYO-16", ticket_id: ticketId, repository_root: repo })),
+    );
+    writeFileSync(
+      join(store, "state", `${ticketId}.attempts.json`),
+      `${JSON.stringify(
+        {
+          ticket_id: ticketId,
+          attempts: [
+            makeAttempt({
+              attempt_id: "att_stalled00000001",
+              ticket_id: ticketId,
+              created_at: "2026-09-02T09:00:00.000Z",
+              termination: {
+                reason: "stalled",
+                detail:
+                  "attempt_stall_ms would reach 1200001, above the limit of 1200000",
+              },
+              usage: {
+                iterations: 4,
+                commands: 3,
+                wall_clock_ms: 5_400_000,
+                cost_micros: 9_000_000,
+                cost_basis: "transport_reported",
+              },
+              changeset_id: null,
+              head_commit: null,
+            }),
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const report = buildInspectReport({ storeDirectory: store, key: "AYO-16", attempt: null });
+    const rendered = renderInspect(report, { color: false, detail: false, version: "test" });
+    const use = (resource: string) =>
+      report.attempts[0]!.ceilings.find((entry) => entry.resource === resource)!;
+
+    expect(rendered).toContain("termination stalled");
+    expect(use("attempt_stall_ms")).toEqual({
+      resource: "attempt_stall_ms",
+      used: 1_200_001,
+      ceiling: 1_200_000,
+      hit: true,
+    });
+    expect(rendered).toContain("20m / 20m — ceiling hit");
+    // Ninety minutes of work and $9 spent, and nothing bounded either: the
+    // attempt authenticated on a subscription, so no cost cap applied to it
+    // (D-096), and no wall clock was ever set.
+    expect(use("attempt_cost_micros").ceiling).toBeNull();
+    expect(use("attempt_wall_clock_ms").ceiling).toBeNull();
+    expect(rendered).toContain("$9.0000 reported / no ceiling");
   });
 
   it("says unavailable, never $0.00, when the stop came before any usage", () => {
@@ -1385,7 +1469,7 @@ function storeWithUnpricedAttempt(name: string): {
   attempt: ExecutionAttempt;
 } {
   const repo = join(scratch, name);
-  const store = join(repo, ".focrux");
+  const store = join(repo, ".perbo");
   mkdirSync(join(store, "tickets"), { recursive: true });
   mkdirSync(join(store, "state"), { recursive: true });
   const ticketId = "ticket_unpriced0001";
@@ -1422,7 +1506,7 @@ function storeWithUnpricedAttempt(name: string): {
  * all four failed — measured, not reasoned about, and re-measurable by anyone:
  *
  *   git checkout 6e86387 -- apps/cli/src/inspect.ts
- *   pnpm --filter @focrux/cli exec vitest run test/inspect.test.ts \
+ *   pnpm --filter @perbo/cli exec vitest run test/inspect.test.ts \
  *     -t "what an attempt leads with"
  *
  *   × leads a stopped attempt …    expected 4 to be 1
@@ -1546,7 +1630,7 @@ describe("the denials of an attempt that ended without changes", () => {
 
   const storeWithDenials = (name: string): string => {
     const repo = join(scratch, name);
-    const store = join(repo, ".focrux");
+    const store = join(repo, ".perbo");
     mkdirSync(join(store, "tickets"), { recursive: true });
     mkdirSync(join(store, "state"), { recursive: true });
     writeFileSync(
@@ -1628,5 +1712,76 @@ describe("the denials of an attempt that ended without changes", () => {
       .split("\n")
       .filter((line) => line.includes("write_outside_worktree") || line.includes("command_allow_list"));
     expect(lines).toHaveLength(2);
+  });
+
+  /**
+   * D-106: a refusal a subagent earned is not the executor's, and a person
+   * reading the round has to be able to tell which agent to brief differently.
+   */
+  it("names the subagent a refusal belongs to, and names none on the session's own", () => {
+    const repo = join(scratch, "denials-by-agent");
+    const store = join(repo, ".perbo");
+    mkdirSync(join(store, "tickets"), { recursive: true });
+    mkdirSync(join(store, "state"), { recursive: true });
+    writeFileSync(
+      join(store, "tickets", "AYO-7.json"),
+      JSON.stringify(makeTicket({ key: "AYO-7", ticket_id: TICKET_ID, repository_root: repo })),
+    );
+    const attempt = makeAttempt({
+      attempt_id: "att_byagent00000001",
+      ticket_id: TICKET_ID,
+      created_at: "2026-09-02T09:00:00.000Z",
+      termination: { reason: "completed", detail: "" },
+      usage: { iterations: 4, commands: 2, wall_clock_ms: 1_000 },
+      changeset_id: null,
+      head_commit: null,
+      commands: [
+        {
+          sequence: 0,
+          tool: "Write",
+          detail: "Write /tmp/evidence",
+          decision: "denied",
+          denial_reason: "the Write destination resolves outside the worktree",
+          denial_rule: "write_outside_worktree",
+          denial_target: "/tmp/evidence",
+          cwd: null,
+          agent: "perbo-implementer",
+          at: "2026-09-02T09:01:00.000Z",
+        },
+        {
+          sequence: 1,
+          tool: "Bash",
+          detail: "curl https://example.invalid",
+          decision: "denied",
+          denial_reason: "curl is on the runner's command deny-list",
+          denial_rule: "command_deny_list",
+          denial_target: "curl https://example.invalid",
+          cwd: ".",
+          agent: null,
+          at: "2026-09-02T09:02:00.000Z",
+        },
+      ],
+    });
+    writeFileSync(
+      join(store, "state", `${TICKET_ID}.attempts.json`),
+      JSON.stringify({ schema_version: 1, ticket_id: TICKET_ID, attempts: [attempt] }),
+    );
+
+    const report = buildInspectReport({ storeDirectory: store, key: "AYO-7", attempt: null });
+    expect(report.attempts[0]!.denials.map((denial) => denial.agent)).toEqual([
+      "perbo-implementer",
+      null,
+    ]);
+
+    const section = renderInspect(report, { color: false, detail: false, version: "test" }).slice(
+      0,
+    );
+    const denials = section.slice(section.indexOf("DENIALS"));
+    expect(denials).toContain("perbo-implementer");
+    // The executor's own refusal reads as it always did: the role is printed
+    // where there is one, and nothing stands in for it where there is not.
+    const named = denials.split("\n").filter((line) => line.includes("perbo-implementer"));
+    expect(named).toHaveLength(1);
+    expect(named[0]).toContain("Write /tmp/evidence");
   });
 });

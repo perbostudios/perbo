@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Dialog, Notice } from "@focrux/ui";
+import { Button, Dialog, Notice } from "@perbo/ui";
 import { FactList, Rename, SectionLabel, WizardHeader } from "../Screen.js";
 import { InkIcon } from "../InkIcon.js";
 import { errorMessage, useAction } from "../data.js";
@@ -9,7 +9,7 @@ import { costLabel, taskRecords } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
 export function ContractScreen(context: TaskContext) {
   const { detail, repoId, navigate, show } = context;
-  const { contract, ticket, criteria, models, repo, busy, title, latest } =
+  const { contract, ticket, criteria, models, repo, busy, held, title, latest } =
     taskRecords(context);
   const [publish, setPublish] = useState(false),
     [recover, setRecover] = useState(false),
@@ -159,11 +159,16 @@ export function ContractScreen(context: TaskContext) {
             <FactList
               className="run-facts"
               rows={[
-                ["Wall clock", detail.effective.minutes + " min"],
-                ["Commands", detail.effective.commands],
                 [
-                  "Cost measure",
-                  "$" + detail.effective.ticketDollars.toFixed(2),
+                  "Stops after",
+                  detail.effective.stallMinutes + " min with no tool activity",
+                ],
+                ["Time, tokens, commands", "No ceiling"],
+                [
+                  "Cost cap",
+                  "$" +
+                    detail.effective.ticketDollars.toFixed(2) +
+                    " a ticket, on an API key",
                 ],
               ]}
             />
@@ -172,8 +177,9 @@ export function ContractScreen(context: TaskContext) {
             <span className="small muted">Likely cost</span>
             <div className="cost-estimate">Not estimated</div>
             <p className="small muted">
-              Your subscription applies. Missing prices stay unknown; the
-              runner’s cost measure is not your subscription bill.
+              On a subscription nothing caps the spend, because the figure the
+              runner measures is not your bill. The cost cap above applies only
+              where your executor authenticates with an API key.
             </p>
           </section>
           <div className="approval-buttons">
@@ -231,7 +237,7 @@ export function ContractScreen(context: TaskContext) {
               </Button>
             </div>
             {unrun && (
-              <button className="text-button small muted contract-delete" disabled={busy} onClick={() => setDeleting(true)}>
+              <button className="text-button small muted contract-delete" disabled={held} onClick={() => setDeleting(true)}>
                 Delete this contract
               </button>
             )}

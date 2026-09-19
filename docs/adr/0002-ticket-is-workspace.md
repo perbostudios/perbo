@@ -8,7 +8,7 @@ A person should not have to reconcile a board card with a disconnected agent wor
 
 ## Decision
 
-The desktop and the CLI present one ticket as the workspace. The store keeps a stable `Ticket` and one-to-many `ExecutionAttempt` records under `.focrux/`.
+The desktop and the CLI present one ticket as the workspace. The store keeps a stable `Ticket` and one-to-many `ExecutionAttempt` records under `.perbo/`.
 
 ## Consequences
 

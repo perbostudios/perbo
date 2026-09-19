@@ -1,0 +1,41 @@
+{
+  "plan_id": "plan_req011",
+  "version": 1,
+  "ticket_id": "ticket_req011",
+  "level": "P1",
+  "outcome": "A write-through cache is added in front of the user-profile store.",
+  "acceptance_criteria": [
+    {
+      "id": "ac_1",
+      "text": "A write to the store also invalidates the cache entry for that key.",
+      "expected_verification": {
+        "kind": "test",
+        "assertion": "writing key k then reading it misses the stale cache entry"
+      }
+    },
+    {
+      "id": "ac_2",
+      "text": "Writes go through the cache-aware wrapper, not the raw store client.",
+      "expected_verification": {
+        "kind": "test",
+        "assertion": "write() calls the wrapper, asserted by its own test"
+      }
+    }
+  ],
+  "nodes": [
+    { "id": "node_cache", "title": "Cache layer", "criteria": ["ac_1"], "paths": ["packages/store/src/cache.ts", "packages/store/test/cache.test.ts"] },
+    { "id": "node_write", "title": "Store write path", "criteria": ["ac_2"], "paths": ["packages/store/src/write.ts", "packages/store/test/write.test.ts"] }
+  ],
+  "scope": {
+    "repository_id": "repo_fixture",
+    "paths_allowed": ["packages/store/**"],
+    "paths_prohibited": [".github/**", "**/.env*"],
+    "generated_paths": [],
+    "expansion_budget_files": 2
+  },
+  "base": {
+    "base_commit": "085ae91",
+    "context_manifest_hash": "sha256:085ae91719b9b982dec9b1a33a5c82d1a0b03c84292638b8ef5062a65dcc0289",
+    "captured_at": "2026-09-17T09:00:00Z"
+  }
+}

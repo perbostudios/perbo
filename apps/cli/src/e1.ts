@@ -23,7 +23,7 @@ import {
   type E1ProductRun,
   type E1Result,
   type E1Thresholds,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { UsageError } from "./args.js";
 import { baselinePath, readBaselineFile } from "./baseline.js";
 import { formatDuration } from "./execute.js";
@@ -31,7 +31,7 @@ import { storeDir } from "./store.js";
 import type { Streams } from "./streams.js";
 
 /**
- * `focrux baseline` beyond the stopwatch: the E1 harness (D-038, SCP-080).
+ * `perbo baseline` beyond the stopwatch: the E1 harness (D-038, SCP-080).
  *
  * `baseline.ts` times one piece of work. These six subcommands are what
  * turns a pile of readings into a claim: a partner's ten, the thresholds they
@@ -39,9 +39,9 @@ import type { Streams } from "./streams.js";
  * the product is ever used, the product runs of those same ten, and the
  * confounders recorded beside the ratio rather than inside it.
  *
- * The rules live in `@focrux/contracts`, which refuses what must be refused.
+ * The rules live in `@perbo/contracts`, which refuses what must be refused.
  * What is here is the file, the flags and the words a person reads back —
- * `<repo>/.focrux/e1.json`, on one machine like everything else `focrux`
+ * `<repo>/.perbo/e1.json`, on one machine like everything else `perbo`
  * touches.
  */
 
@@ -450,7 +450,7 @@ export function renderE1Report(ledger: E1Ledger, path: string): string {
   const report = e1Report(ledger);
   const lines = [`E1  ${path}`];
   if (report.partners.length === 0 && report.agent_direct.length === 0) {
-    lines.push("  no baseline is open here yet: focrux baseline open --partner <id> …");
+    lines.push("  no baseline is open here yet: perbo baseline open --partner <id> …");
     return lines.join("\n");
   }
   if (report.partners.length > 0) {

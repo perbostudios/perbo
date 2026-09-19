@@ -31,12 +31,14 @@ import {
  * fact about a word.
  *
  * Everything else is admitted, including a verb the allow-list does not carry.
- * The runner authors three refusals — the deny-list, the write rule, and the
- * scope rule (SCP-195) —
- * and absence from a list is not one of them. The allow-list is not the whole
- * of what the agent's permission layer admits: it also admits `cd` inside the
- * worktree, `echo`, `pwd`, `true`, `test`, `command -v` and the other built-ins
- * with no entry of their own. A runner that refused every unlisted name wrote
+ * The runner's refusals are the entries of `ADMISSION_RULES` below — the
+ * deny-list, the three write rules (outside the worktree, a prohibited path,
+ * outside the contract's globs), a write to git's credential wiring, and the
+ * two programs the guard cannot read — and absence from a list is not one of
+ * them. The allow-list is not the whole of what the agent's
+ * permission layer admits: it also admits `cd` inside the worktree, `echo`,
+ * `pwd`, `true`, `test`, `command -v` and the other built-ins with no entry of
+ * their own. A runner that refused every unlisted name wrote
  * `denied` against commands that had run — the mirror of the AYO-13 defect this
  * ticket exists to remove, and what turned an attempt whose only commands were
  * `cd` and `echo` into `no_changes_after_denials`.
@@ -48,8 +50,9 @@ import {
  *
  *   1. the runner's deny-list, read against the segment and against every
  *      command the resolver found it runs;
- *   2. the runner's write rule, by resolved target — outside the worktree, or
- *      inside it and outside the contract's globs;
+ *   2. the runner's write rule, by resolved target — outside the worktree,
+ *      inside it and prohibited by the contract, or inside it and outside the
+ *      contract's globs;
  *   3. otherwise admitted — and only the agent's reported refusal turns that
  *      into a denial, on the strength of a refusal that actually happened.
  *
@@ -81,6 +84,13 @@ export const ADMISSION_RULES = {
    */
   scope: "write_outside_scope",
   /**
+   * A write to a path the approved contract prohibits, wherever the globs above
+   * put it (D-105). Judged before the scope rule, because a path that is both
+   * prohibited and unadmitted is not answered by widening the contract: the
+   * contract already decided that path is not to be touched.
+   */
+  prohibited_path: "write_prohibited_path",
+  /**
    * A `git config` write to git's own credential wiring — `credential.*`,
    * `core.sshCommand`, a `url.*.insteadOf`/`pushInsteadOf`, or
    * `include.*`/`includeIf.*` — at any scope (SCP-201). Not a write-target
@@ -106,6 +116,41 @@ export const ADMISSION_RULES = {
    * being one rule.
    */
   unreadable_inline_program: "unreadable_inline_program",
+  /**
+   * A call naming a subagent role Perbo does not define — `Agent`, or `Task`
+   * under its former name (D-106). Not a deny-list entry: the tool itself is
+   * admitted, and what is refused is which role it names — Claude Code offers
+   * the executor its own built-in agents and the ones a plugin or the
+   * person's `~/.claude/agents` supplies, and none of those passed through
+   * the approved plan.
+   */
+  subagent_role: "subagent_role_undefined",
+  /**
+   * A call to that same tool a subagent made (D-106, ADR-0038). Distinct from
+   * the rule above because the role it names may well be one Perbo defines:
+   * what is refused is who is asking. No role carries `Agent` or `Task`, so
+   * the binary's own tool list refuses this first — this rule is the holder
+   * that does not depend on the binary honouring that list, and nesting is
+   * the one property of the set whose breach is unbounded rather than
+   * bounded by the set's size.
+   */
+  subagent_nesting: "subagent_nesting_refused",
+  /**
+   * A call refused because the guard cannot keep track of where an agent's
+   * shell stands (D-106). Not a write rule: what it refuses is the call, not a
+   * target the call names.
+   *
+   * Two doors reach it, and they are one fact. Reading: the file holding that
+   * agent's directory is there and will not read back, and that file is
+   * written only by a call that moved the agent, so this agent moved and where
+   * it went went with the bytes. Writing: this call moves the agent and its
+   * new directory cannot be recorded, so the next call would be judged from a
+   * directory the shell has left. A file that is simply absent is neither —
+   * that is an agent that has not moved, and the directory the attempt started
+   * it at is the right answer for it, for as long as nothing removes a file
+   * the guard wrote before the attempt ends.
+   */
+  agent_directory_unknown: "agent_directory_unknown",
 } as const;
 
 export type AdmissionRule = (typeof ADMISSION_RULES)[keyof typeof ADMISSION_RULES];
@@ -135,7 +180,11 @@ const denied = (rule: AdmissionRule, target: string, reason: string): AdmissionD
 
 /** The rule a write finding was refused by, as an admission rule. */
 const writeRule = (finding: WriteFinding): AdmissionRule =>
-  finding.rule === "write_outside_scope" ? ADMISSION_RULES.scope : ADMISSION_RULES.write;
+  finding.rule === "write_prohibited_path"
+    ? ADMISSION_RULES.prohibited_path
+    : finding.rule === "write_outside_scope"
+      ? ADMISSION_RULES.scope
+      : ADMISSION_RULES.write;
 
 /**
  * git's own credential wiring (SCP-201): the helper it shells out to, the SSH
@@ -231,8 +280,13 @@ const GIT_GLOBAL_CONFIG_FLAGS = new Set(["-c", "--config-env"]);
  * reads a prefix rather than the whole line; an option this table does not
  * know stops the walk rather than guessing past it, the same conservative
  * reading the rest of the guard gives an option it cannot place.
+ *
+ * Exported for the interview's own guard (SCP-355), which bans a flag by
+ * `git`'s subcommand and needs the same walk past `-C`, `-c` and the rest to
+ * find it — `git -C . log --output=<path>` is `log` past its global option,
+ * not `words[1]`.
  */
-function gitGlobalOptions(words: readonly string[]): { verbIndex: number; configuredKeys: string[] } {
+export function gitGlobalOptions(words: readonly string[]): { verbIndex: number; configuredKeys: string[] } {
   const configuredKeys: string[] = [];
   let i = 1;
   while (i < words.length) {

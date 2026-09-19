@@ -110,6 +110,11 @@ export const MaterializationManifestSchema = z.strictObject({
    * exit status is the definition of "time to first successful execution": a
    * materialization that installs cleanly and cannot run the suite has not
    * succeeded, it has failed later.
+   *
+   * Where the repository gives a worktree no suite to run (D-013), it is
+   * `git status --porcelain`, which proves only that Git can read the worktree:
+   * the loop reads a base it passed as unmeasured, and the materialization
+   * measurement does not time it.
    */
   verify: z.strictObject({
     command: ArgvSchema,
@@ -142,7 +147,8 @@ export function manifestHash(manifest: MaterializationManifest): string {
  * A diagnostic finding is a refusal or an advisory, and the difference decides
  * `materializable`. A repository is refused for what makes it unrunnable; it is
  * never refused for where the operator chose to keep worktrees, which is a
- * setting they can change by moving one path.
+ * setting they can change by moving one path, nor for the kind of repository it
+ * is (D-013).
  */
 export const DIAGNOSTIC_SEVERITIES = ["refusal", "advisory"] as const;
 export const DiagnosticSeveritySchema = z.enum(DIAGNOSTIC_SEVERITIES);
@@ -151,11 +157,8 @@ export type DiagnosticSeverity = (typeof DIAGNOSTIC_SEVERITIES)[number];
 export const UNMATERIALIZABLE_REASONS = [
   "source_checkout_missing",
   "required_entry_missing",
-  "unsupported_package_manager",
-  "no_verification_command",
   "port_range_unavailable",
   "workspace_budget_exceeded",
-  "verification_requires_service",
   /**
    * The untracked files a worktree would need could not be listed at all — the
    * checkout is not a git repository, or `git ls-files` failed or timed out.
@@ -213,18 +216,46 @@ export type UnmaterializableReason = (typeof UNMATERIALIZABLE_REASONS)[number];
  * lockfile yet and refusing it is a wall in the first hour. The finding says
  * what writes one.
  *
+ * The five below describe a kind of repository rather than something wrong
+ * with one, and an attempt can be made against any repository (D-013). Each
+ * leaves the checkout without a command whose success says a worktree runs it,
+ * so unless the diagnostic is given one, the verification is
+ * `git status --porcelain`, which any checkout Git can read passes, and an
+ * attempt there is judged by the review and whichever checks are pinned.
+ *
  * `package_manager_undetected`: nothing in the checkout names a package manager
  * this build reads — no lockfile and no manifest — which is true of an empty
- * repository and of one in another ecosystem, such as Rust or Go. Reported
- * rather than refused: nothing is installed and the verification is
- * `git status --porcelain`, which any checkout Git can read passes, so an
- * attempt there is judged by the review alone.
+ * repository and of one in another ecosystem, such as Rust or Go. Nothing is
+ * installed and no scripts are read.
+ *
+ * `unsupported_package_manager`: the checkout names a package manager this
+ * build detects but does not install with, such as uv. The same as undetected:
+ * nothing is installed and no scripts are read.
+ *
+ * `package_manifest_missing`: a lockfile names a manager this build installs
+ * with, and nothing its install reads is beside it: no `package.json`, and for
+ * pnpm no `pnpm-workspace.yaml` either, from which pnpm installs a workspace
+ * that has no root manifest. The same again: an install with nothing to
+ * install is not run.
+ *
+ * `no_verification_command`: the package declares no test script.
+ *
+ * `verification_requires_service`: a test script, or the `pre` script the
+ * package manager runs before it, starts a service. Materialization copies
+ * files and cannot start one, so the suite would run with the tests that need
+ * the service erroring or skipping and report green. A script the diagnostic
+ * read is not run; a command it was given runs as given, and the finding says
+ * what it starts.
  */
 export const DIAGNOSTIC_ADVISORY_REASONS = [
   "nested_package_manager_workspace",
   "undeclared_service_dependency",
   "lockfile_missing",
   "package_manager_undetected",
+  "unsupported_package_manager",
+  "package_manifest_missing",
+  "no_verification_command",
+  "verification_requires_service",
 ] as const;
 export const DiagnosticAdvisoryReasonSchema = z.enum(DIAGNOSTIC_ADVISORY_REASONS);
 export type DiagnosticAdvisoryReason = (typeof DIAGNOSTIC_ADVISORY_REASONS)[number];

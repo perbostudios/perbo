@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { SecretIndex } from "@focrux/contracts";
-import { BundleStore } from "@focrux/runner";
+import { SecretIndex } from "@perbo/contracts";
+import { BundleStore } from "@perbo/runner";
 import { buildInspectReport, renderInspect } from "../src/inspect.js";
 import {
   BLOCKING_RULE,
@@ -22,7 +22,7 @@ import {
  * and the reason the routing came from — so nothing is hidden, only not shown.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-inspect-routed-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-routed-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const TICKET_ID = "ticket_routed000001";
@@ -31,7 +31,7 @@ const review = makeRoutedReview({ review_id: "rev_routed00001", changeset_id: CH
 
 function storeWithRoutedReview(name: string): string {
   const repo = join(scratch, name);
-  const store = join(repo, ".focrux");
+  const store = join(repo, ".perbo");
   mkdirSync(join(store, "tickets"), { recursive: true });
   mkdirSync(join(store, "state"), { recursive: true });
   writeFileSync(
@@ -103,7 +103,7 @@ function storeWithRoutedReview(name: string): string {
   return store;
 }
 
-describe("focrux inspect, on a review whose findings went four ways", () => {
+describe("perbo inspect, on a review whose findings went four ways", () => {
   const store = storeWithRoutedReview("four-ways");
   const report = buildInspectReport({ storeDirectory: store, key: "AYO-1", attempt: null });
 

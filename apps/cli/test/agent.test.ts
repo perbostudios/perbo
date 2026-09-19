@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { EXIT_CODES } from "@focrux/contracts";
+import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "../src/args.js";
 import { agentLaunch, parseAgentArgs, runAgentCommand, sweepStaleLaunchFiles, type AgentLaunch } from "../src/agent.js";
 import { ENDPOINT_FILE, type EndpointRecord } from "../src/endpoint.js";
@@ -10,12 +10,12 @@ import { parseMcpArgs, runMcpCommand } from "../src/mcp.js";
 import type { Streams } from "../src/streams.js";
 
 /**
- * `focrux agent` and `focrux mcp`: the launch and the handover. Both read the
+ * `perbo agent` and `perbo mcp`: the launch and the handover. Both read the
  * endpoint's record and nothing else; neither writes another tool's
  * configuration; and the token never travels as an argument.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-agent-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-agent-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function capture(): Streams & { out: string[]; err: string[] } {
@@ -34,8 +34,8 @@ const record: EndpointRecord = {
 let repos = 0;
 function repository(served: boolean): string {
   const dir = join(scratch, `repo-${repos++}`);
-  mkdirSync(join(dir, ".focrux", "state"), { recursive: true });
-  if (served) writeFileSync(join(dir, ".focrux", "state", ENDPOINT_FILE), JSON.stringify(record));
+  mkdirSync(join(dir, ".perbo", "state"), { recursive: true });
+  if (served) writeFileSync(join(dir, ".perbo", "state", ENDPOINT_FILE), JSON.stringify(record));
   return dir;
 }
 
@@ -54,13 +54,13 @@ describe("parseAgentArgs", () => {
 });
 
 describe("the launch", () => {
-  const common = { record, repository_root: "/work/repo", state_root: "/work/repo/.focrux/state", passthrough: ["--verbose"], pid: 4242 };
+  const common = { record, repository_root: "/work/repo", state_root: "/work/repo/.perbo/state", passthrough: ["--verbose"], pid: 4242 };
 
   it("hands Claude Code a 0600 file and an appended orientation, never the token as an argument", () => {
     const launch = agentLaunch({ ...common, provider: "claude" });
     expect(launch.command).toBe("claude");
     expect(launch.cwd).toBe("/work/repo");
-    expect(launch.file).toBe("/work/repo/.focrux/state/agent-4242.mcp.json");
+    expect(launch.file).toBe("/work/repo/.perbo/state/agent-4242.mcp.json");
     expect(launch.argv.slice(0, 2)).toEqual(["--mcp-config", launch.file]);
     expect(launch.argv).toContain("--append-system-prompt");
     expect(launch.argv[launch.argv.length - 1]).toBe("--verbose");
@@ -77,18 +77,18 @@ describe("the launch", () => {
   it("hands Codex the URL as an override and the token through the environment", () => {
     const launch = agentLaunch({ ...common, provider: "codex" });
     expect(launch.command).toBe("codex");
-    expect(launch.argv).toContain('mcp_servers.focrux.url="http://127.0.0.1:41999/mcp"');
-    expect(launch.argv).toContain('mcp_servers.focrux.bearer_token_env_var="FOCRUX_ENDPOINT_TOKEN"');
+    expect(launch.argv).toContain('mcp_servers.perbo.url="http://127.0.0.1:41999/mcp"');
+    expect(launch.argv).toContain('mcp_servers.perbo.bearer_token_env_var="PERBO_ENDPOINT_TOKEN"');
     expect(launch.argv.join(" ")).not.toContain(record.tokens.person);
-    expect(launch.env).toEqual({ FOCRUX_ENDPOINT_TOKEN: record.tokens.person });
+    expect(launch.env).toEqual({ PERBO_ENDPOINT_TOKEN: record.tokens.person });
     expect(launch.file).toBeNull();
     // Passthrough before the orientation, which Codex reads as its first prompt.
     expect(launch.argv.indexOf("--verbose")).toBeLessThan(launch.argv.length - 1);
-    expect(launch.argv[launch.argv.length - 1]).toContain("Focrux");
+    expect(launch.argv[launch.argv.length - 1]).toContain("Perbo");
   });
 });
 
-describe("focrux agent", () => {
+describe("perbo agent", () => {
   it("refuses without a running queue, naming what to start", async () => {
     const repo = repository(false);
     const streams = capture();
@@ -104,7 +104,7 @@ describe("focrux agent", () => {
     });
     expect(code).toBe(EXIT_CODES.did_not_complete);
     expect(launches).toEqual([]);
-    expect(streams.err.join("")).toContain("focrux serve");
+    expect(streams.err.join("")).toContain("perbo serve");
   });
 
   it("writes the Claude file for the launch alone and removes it afterwards", async () => {
@@ -127,15 +127,15 @@ describe("focrux agent", () => {
     expect(seen!.exists).toBe(true);
     if (process.platform !== "win32") expect(seen!.mode).toBe(0o600);
     expect(JSON.parse(seen!.body)).toEqual({
-      mcpServers: { focrux: { type: "http", url: record.url, headers: { Authorization: `Bearer ${record.tokens.person}` } } },
+      mcpServers: { perbo: { type: "http", url: record.url, headers: { Authorization: `Bearer ${record.tokens.person}` } } },
     });
-    expect(existsSync(join(repo, ".focrux", "state", `agent-${process.pid}.mcp.json`))).toBe(false);
+    expect(existsSync(join(repo, ".perbo", "state", `agent-${process.pid}.mcp.json`))).toBe(false);
     expect(streams.err.join("")).toContain("cannot approve, publish or merge");
   });
 
   it("removes a launch file left by a session that was killed, and keeps a live one", async () => {
     const repo = repository(true);
-    const state = join(repo, ".focrux", "state");
+    const state = join(repo, ".perbo", "state");
     writeFileSync(join(state, "agent-2147483647.mcp.json"), "{}");
     writeFileSync(join(state, `agent-${process.pid}.mcp.json`), "{}");
     writeFileSync(join(state, "not-a-launch.json"), "{}");
@@ -147,7 +147,7 @@ describe("focrux agent", () => {
 
   it("says which directory it cannot write the launch file to, and starts nothing", async () => {
     const repo = repository(true);
-    const state = join(repo, ".focrux", "state");
+    const state = join(repo, ".perbo", "state");
     chmodSync(state, 0o500);
     try {
       const streams = capture();
@@ -177,7 +177,7 @@ describe("focrux agent", () => {
   });
 });
 
-describe("focrux mcp", () => {
+describe("perbo mcp", () => {
   it("prints the person's block, or the drafter's, and writes nothing", () => {
     const repo = repository(true);
     const streams = capture();
@@ -188,13 +188,13 @@ describe("focrux mcp", () => {
     expect(text).toContain(record.tokens.person);
     expect(text).not.toContain(record.tokens.drafter);
     expect(text).toContain("claude --mcp-config");
-    expect(text).toContain("claude mcp add --transport http focrux");
+    expect(text).toContain("claude mcp add --transport http perbo");
     expect(text).toContain("bearer_token_env_var");
 
     const json = capture();
     runMcpCommand({ argv: ["--repo", repo, "--drafter", "--json"], streams: json, cwd: repo });
     expect(JSON.parse(json.out.join(""))).toEqual({
-      mcpServers: { focrux: { type: "http", url: record.url, headers: { Authorization: `Bearer ${record.tokens.drafter}` } } },
+      mcpServers: { perbo: { type: "http", url: record.url, headers: { Authorization: `Bearer ${record.tokens.drafter}` } } },
     });
   });
 
@@ -202,7 +202,7 @@ describe("focrux mcp", () => {
     const repo = repository(false);
     const streams = capture();
     expect(runMcpCommand({ argv: ["--repo", repo], streams, cwd: repo })).toBe(EXIT_CODES.did_not_complete);
-    expect(streams.err.join("")).toContain("focrux serve");
+    expect(streams.err.join("")).toContain("perbo serve");
     expect(streams.out).toEqual([]);
   });
 });

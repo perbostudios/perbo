@@ -1,4 +1,4 @@
-# `@focrux/review`
+# `@perbo/review`
 
 Checks, findings, coverage and independent verification.
 
@@ -17,8 +17,9 @@ The verdict is structured output over criteria supplied by the plan, never parse
 
 ## The shape
 
-Sixteen modules, three transports onto one model call surface, no abstraction that does not yet
-have two users. `index.ts` re-exports them, and `redact.test.ts` sits in `src/` beside its subject.
+Seventeen modules, three transports onto one model call surface, no abstraction that does not yet
+have two users. `index.ts` re-exports all but `provider-structured.ts`, which only the two CLI
+transports import, and `redact.test.ts` sits in `src/` beside its subject.
 
 | | |
 |---|---|
@@ -38,6 +39,7 @@ have two users. `index.ts` re-exports them, and `redact.test.ts` sits in `src/` 
 | `legibility.ts` | Whether the change set is one a person can read (SCP-114) |
 | `agent-config.ts` | Repository-supplied agent configuration, failed closed (ADR-0030) |
 | `review.ts` | The orchestrator |
+| `graph.ts` | Each node of an execution graph reviewed beside the whole change, combined for the gate (D-107) |
 
 ## The blocking matrix
 
@@ -76,7 +78,7 @@ criterion has not completed, whatever else it found, and exit 3 is the safer sig
 
 `ReviewInput` has no field for the executor's narrative or transcript at any risk level. There is
 exactly one instruction position — the system prompt — and everything else arrives inside
-`<focrux:… trust="user|repo">` blocks preceded by a standing instruction identifying it as data.
+`<perbo:… trust="user|repo">` blocks preceded by a standing instruction identifying it as data.
 `assertReviewerContextKind` rejects any context kind outside the admissible list at runtime, and a
 test asserts the assembled prompt is free of the words.
 

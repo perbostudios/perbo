@@ -13,13 +13,13 @@ import {
   type Finding,
   type PlanContractWithCriteria,
   type ReviewArtifact,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import {
   TicketDeliveryStateSchema,
   parseStopAnswers,
   pullRequestBody,
   type TicketDeliveryState,
-} from "@focrux/runner";
+} from "@perbo/runner";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { recordDelivery, runSyncCommand } from "../src/sync.js";
 import { readTicket, storeDir, writeTicket } from "../src/tickets.js";
@@ -27,13 +27,13 @@ import { makeAttempt, makeReview } from "./attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * `focrux sync` reads the answers ticked against each stop off the pull
+ * `perbo sync` reads the answers ticked against each stop off the pull
  * request and writes them beside the attempt record (D-060, measured live).
  * The record is rewritten whole every time; what it remembers across syncs is
  * when each answer first appeared.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-sync-stops-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-sync-stops-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function repository(name: string): string {
@@ -82,7 +82,7 @@ const observed = (
 ): TicketDeliveryState =>
   TicketDeliveryStateSchema.parse({
     ticket_id: "ticket_x",
-    branch: "focrux/FCX-1",
+    branch: "perbo/PRB-1",
     pull_request_url: PR,
     pull_request_number: 7,
     state: "open",
@@ -105,8 +105,8 @@ function delivered(name: string): { repo: string; dir: string; ticket_id: string
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-02T01:00:00.000Z");
   let ticket = recordDelivery(
-    readTicket(dir, "FCX-1"),
-    { workspace: { branch: "focrux/FCX-1" }, pull_request: { url: PR, number: 7 } },
+    readTicket(dir, "PRB-1"),
+    { workspace: { branch: "perbo/PRB-1" }, pull_request: { url: PR, number: 7 } },
     at,
   );
   for (const to of ["provisioning", "executing", "verifying", "independent_review", "pr_open"] as const) {
@@ -123,12 +123,12 @@ const readStops = (dir: string, ticket_id: string) =>
 const T1 = "2026-09-02T02:00:00.000Z";
 const T2 = "2026-09-03T02:00:00.000Z";
 
-describe("focrux sync writes the stop answers beside the attempt record", () => {
+describe("perbo sync writes the stop answers beside the attempt record", () => {
   it("records what gh read off the pull request, keyed by finding", async () => {
     const { repo, dir, ticket_id } = delivered("stops-first");
     const streams = capture();
     await runSyncCommand({
-      argv: ["FCX-1", "--repo", repo],
+      argv: ["PRB-1", "--repo", repo],
       streams,
       cwd: repo,
       now: new Date(T1),
@@ -144,7 +144,7 @@ describe("focrux sync writes the stop answers beside the attempt record", () => 
         ),
     });
     const stops = readStops(dir, ticket_id);
-    expect(stops.ticket_key).toBe("FCX-1");
+    expect(stops.ticket_key).toBe("PRB-1");
     expect(stops.pull_request_url).toBe(PR);
     expect(stops.shown_to_person).toBe(true);
     expect(stops.stops).toEqual([
@@ -178,7 +178,7 @@ describe("focrux sync writes the stop answers beside the attempt record", () => 
     ];
     const sync = (at: string) =>
       runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date(at),
@@ -199,7 +199,7 @@ describe("focrux sync writes the stop answers beside the attempt record", () => 
     const { repo, dir, ticket_id } = delivered("stops-changed");
     const sync = (answer: "endorse" | "override", at: string) =>
       runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date(at),
@@ -216,7 +216,7 @@ describe("focrux sync writes the stop answers beside the attempt record", () => 
   it("records a pull request on which nothing was shown, so the companion has a denominator", async () => {
     const { repo, dir, ticket_id } = delivered("stops-none");
     await runSyncCommand({
-      argv: ["FCX-1", "--repo", repo],
+      argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
       now: new Date(T1),
@@ -231,7 +231,7 @@ describe("focrux sync writes the stop answers beside the attempt record", () => 
   it("writes nothing when gh could not be asked", async () => {
     const { repo, dir, ticket_id } = delivered("stops-unreachable");
     await runSyncCommand({
-      argv: ["FCX-1", "--repo", repo],
+      argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
       now: new Date(T1),
@@ -252,7 +252,7 @@ describe("focrux sync writes the stop answers beside the attempt record", () => 
  * person's; the stand-in edits the body through `gh` and signs the line it
  * ticked. Everything below is the real machinery — this repository's own
  * `pullRequestBody` writes the body, its own `parseStopAnswers` reads the ticks
- * back, and `focrux sync` writes the record that is then read off disk.
+ * back, and `perbo sync` writes the record that is then read off disk.
  */
 
 const STOPS = [
@@ -329,7 +329,7 @@ function tick(
   answer: "endorse" | "override",
   by: "unsigned" | "person" | "stand_in",
 ): string {
-  const signature = by === "unsigned" ? "" : ` <!-- focrux:answered-by who=${by} -->`;
+  const signature = by === "unsigned" ? "" : ` <!-- perbo:answered-by who=${by} -->`;
   return text
     .split("\n")
     .map((line) =>
@@ -338,7 +338,7 @@ function tick(
     .join("\n");
 }
 
-describe("focrux sync records who answered each stop", () => {
+describe("perbo sync records who answered each stop", () => {
   it("labels the stand-in's answer dogfood and the person's not, from one body", async () => {
     const { repo, dir, ticket_id } = delivered("stops-dogfood");
     const body = pullRequestBody({
@@ -350,7 +350,7 @@ describe("focrux sync records who answered each stop", () => {
     const answered = tick(tick(body, STAND_IN_STOP!, "endorse", "stand_in"), PERSON_STOP!, "endorse", "unsigned");
 
     await runSyncCommand({
-      argv: ["FCX-1", "--repo", repo],
+      argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
       now: new Date(T1),
@@ -382,7 +382,7 @@ describe("focrux sync records who answered each stop", () => {
     });
     const sync = (text: string, at: string) =>
       runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date(at),
@@ -411,7 +411,7 @@ describe("focrux sync records who answered each stop", () => {
     });
     const sync = (text: string, at: string) =>
       runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date(at),
@@ -456,7 +456,7 @@ describe("focrux sync records who answered each stop", () => {
     const signed = tick(tick(body, STAND_IN_STOP!, "endorse", "stand_in"), PERSON_STOP!, "override", "stand_in");
 
     await runSyncCommand({
-      argv: ["FCX-1", "--repo", repo],
+      argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
       now: new Date(T1),

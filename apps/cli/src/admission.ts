@@ -22,6 +22,29 @@ export const StoredAdmissionSchema = z.looseObject({
   criteria_source: z.string().min(1).nullable().optional(),
   criteria_count: z.number().int().min(0).nullable().optional(),
   drafted_at: z.string().min(1).nullable().optional(),
+  /** The spec a contract was drafted from (D-103), read as loosely as the rest. */
+  spec: z
+    .looseObject({
+      path: z.string().min(1),
+      content_sha256: z.string().min(1),
+      /**
+       * The names the repository had when the plan was approved: the baseline
+       * the stale-spec reading measures against. Declared here and not left to
+       * the loose remainder so the reading is handed a list and not an
+       * `unknown`; absent on a record written before it existed, which is the
+       * same answer as `null`.
+       */
+      names_that_resolved: z.array(z.string().min(1)).nullable().optional(),
+      /**
+       * Whether the symbol index could be believed when the plan was approved,
+       * and so whether the `@Symbol` half of the baseline was taken. Declared
+       * here for the same reason as the names above; absent is `true`, which is
+       * what a record written before it was recorded means.
+       */
+      symbols_judged_at_approval: z.boolean().optional(),
+    })
+    .nullable()
+    .optional(),
   human_elapsed_ms: z.number().int().min(0).nullable().optional(),
   edit_count: z.number().int().min(0).nullable().optional(),
   level_source: z.string().min(1).nullable().optional(),

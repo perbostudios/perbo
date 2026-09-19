@@ -15,7 +15,7 @@ import {
   type StopRouting,
   type Ticket,
   type VerdictDecision,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { UsageError } from "./args.js";
 import {
   buildInspectReport,
@@ -41,10 +41,10 @@ import {
 } from "./verdicts.js";
 
 /**
- * `focrux verdict` — a person answers a review from the command line (SCP-181).
+ * `perbo verdict` — a person answers a review from the command line (SCP-181).
  *
  * Today a stop is answered by ticking one of two boxes on the pull request and
- * read back by `focrux sync` through `gh`. That is the only way there is, and
+ * read back by `perbo sync` through `gh`. That is the only way there is, and
  * it needs a pull request, a network and a credential for a decision that is
  * about this checkout and nobody else. This command is the same answer, taken
  * here: `--endorse`/`--override` for a stop, `--accept`/`--reject` for any
@@ -53,7 +53,7 @@ import {
  * Nothing in it leaves the machine, and nothing in it asks the network — the
  * findings it resolves a key against are already on disk: the review artifacts
  * in the bundles, the executor's declines, the stops record `sync` left behind,
- * and the reviews in `<store>/reviews/` that `focrux review` wrote for a change
+ * and the reviews in `<store>/reviews/` that `perbo review` wrote for a change
  * nothing ran here.
  *
  * The key is the join. It is the finding key — `hash(rule_id | criterion_id |
@@ -88,7 +88,7 @@ export interface VerdictRecordArgs extends VerdictCommonArgs {
   /**
    * `--stand-in`: the AI acting as the founder's partner took this decision,
    * not a person (D-058). It is recorded on the row and keeps the answer out of
-   * every partner reading `focrux stops` prints — the same label the pull
+   * every partner reading `perbo stops` prints — the same label the pull
    * request carries when the stand-in signs a tick there.
    */
   standIn: boolean;
@@ -194,7 +194,7 @@ export function parseVerdictArgs(argv: readonly string[]): VerdictArgs {
   if (positional.length !== 1) {
     throw new UsageError(
       "verdict takes exactly one review — a ticket key, a pull request or a review id, " +
-        "e.g. focrux verdict FCX-7 --override <key>",
+        "e.g. perbo verdict PRB-7 --override <key>",
     );
   }
   if (list) {
@@ -257,7 +257,7 @@ const DECLINED_RULE_UNRECORDED = "declined (rule not recorded)";
  * Every finding of one piece of work this store can name, by key.
  *
  * Four sources, read in the order that makes the last one right: the reviews in
- * `<store>/reviews/` say what `focrux review` found on a change nobody ran here
+ * `<store>/reviews/` say what `perbo review` found on a change nobody ran here
  * (SCP-249); the review artifacts in the bundles say what a run's own reviewer
  * found; the executor's declines say which of those it declared no determinable
  * practice for, which is the third routing that stops for a person; and the
@@ -317,7 +317,7 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
   return [...found.values()];
 }
 
-/** The stops `focrux sync` read off the pull request; none, where it never ran. */
+/** The stops `perbo sync` read off the pull request; none, where it never ran. */
 function readStopsRecord(dir: string, ticket_id: string): Array<{
   finding_key: string;
   rule_id: string;
@@ -329,7 +329,7 @@ function readStopsRecord(dir: string, ticket_id: string): Array<{
     return StopVerdictsSchema.parse(JSON.parse(readFileSync(path, "utf8"))).stops;
   } catch {
     // Unreadable here is not fatal: the artifacts above still name the
-    // findings, and `focrux stops` is where a broken stops record is reported.
+    // findings, and `perbo stops` is where a broken stops record is reported.
     return [];
   }
 }
@@ -356,7 +356,7 @@ export function resolveFindingKey(findings: readonly KnownFinding[], key: string
       ? `no findings are recorded for this review, so '${key}' cannot be one: ` +
           // `inspect` rather than `sync`: it is what shows whether this
           // store holds the bundles the findings would have been read from.
-          "`focrux inspect` shows what this store holds for it"
+          "`perbo inspect` shows what this store holds for it"
       : `'${key}' is not a finding on this review. Its ${findings.length} finding(s): ${findings
           .map((finding) => `${finding.finding_key.slice(0, 12)} ${finding.rule_id}`)
           .join(", ")}`,
@@ -409,7 +409,7 @@ function whoDecided(row: LocalVerdict): string {
 }
 
 /**
- * `focrux verdict --list <change>` — what has already been decided here.
+ * `perbo verdict --list <change>` — what has already been decided here.
  *
  * Newest first, because the question a person asks of this record is "where
  * did we get to", and superseded rows are shown too and marked: a decision
@@ -450,7 +450,7 @@ function listDecisions(args: VerdictListArgs, streams: Streams, dir: string, sub
     streams.stdout("no decisions recorded\n");
     streams.stderr(
       `  nothing has been decided here about ${subject.ticket}. ` +
-        `\`focrux verdict ${args.reference} --endorse|--override|--accept|--reject <key>\` ` +
+        `\`perbo verdict ${args.reference} --endorse|--override|--accept|--reject <key>\` ` +
         // Not `inspect`, which reads the attempts a run left and so has nothing
         // to say about a review no run filed. The command being typed here
         // knows every finding of either, and says so when a key is not one.
@@ -527,7 +527,7 @@ export function resolveReview(dir: string, reference: string): Ticket {
 
   throw new UsageError(
     `no review in ${dir} is '${reference}': it matches no ticket key, no pull request on a ` +
-      `ticket and no review id. \`focrux list --all\` names the tickets this store holds`,
+      `ticket and no review id. \`perbo list --all\` names the tickets this store holds`,
   );
 }
 
@@ -564,7 +564,7 @@ export interface VerdictOptions {
  * `resolve` is the store's own record, and it is asked first, so a review an
  * attempt filed resolves exactly as it always did. A review nothing ran for reaches that
  * record as a name it has never heard of, and `<store>/reviews/` is the second
- * place to look before the reference is refused: `focrux review --pr` files no
+ * place to look before the reference is refused: `perbo review --pr` files no
  * attempt, so the bundle it wrote is the only record its id appears in.
  *
  * Only a {@link UsageError} is caught. A store that cannot be read is a
@@ -606,10 +606,9 @@ export async function runVerdictCommand(input: VerdictOptions): Promise<number> 
   if (author === null) return refuseUnnamed(input.streams, args.json, repositoryRoot);
   const decided_by = args.author === null ? decidedBy(identity) : authorIdentity(args.author);
 
-  // `subject.ticket` is what a person calls this work: a ticket key in the
-  // build that admits, and the id the attempts record is filed under in the one
-  // that does not. The record carries the key where the name is one and `null`
-  // where it is not, rather than inventing a key nothing minted.
+  // `subject.ticket` is what a person calls this work (`InspectSubject.ticket`).
+  // The record carries it as the ticket key where it is one and `null` where it
+  // is not, rather than inventing a key nothing minted.
   const key = TicketKeySchema.safeParse(subject.ticket);
   const verdict: LocalVerdict = {
     review: {
@@ -687,7 +686,7 @@ export async function runVerdictCommand(input: VerdictOptions): Promise<number> 
       (args.note === null ? "" : `  note: ${args.note}\n`) +
       (args.standIn
         ? "  recorded as the AI stand-in's answer: dogfood, and outside every partner reading " +
-          "`focrux stops` prints (D-058)\n"
+          "`perbo stops` prints (D-058)\n"
         : "") +
       (superseded ? "  the decision it replaces stays on the record, superseded\n" : "") +
       `  ${verdictsPath(dir)} — this machine only; nothing was sent anywhere\n`,

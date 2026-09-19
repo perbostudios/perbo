@@ -174,8 +174,8 @@ const ROWS: Array<[string, Decision, string]> = [
   ["/usr/bin/env FOO=1 sh -c 'echo x > /etc/passwd'", "refused", "review-3"],
   ["/usr/bin/nice -n 10 cp a ~/b", "refused", "review-3"],
   ["pnpm -r exec cp a ~/b", "refused", "review-3"],
-  ["pnpm --filter @focrux/cli exec sh -c 'echo x > /etc/passwd'", "refused", "review-3"],
-  ["pnpm --filter=@focrux/cli exec cp a ~/b", "refused", "review-3"],
+  ["pnpm --filter @perbo/cli exec sh -c 'echo x > /etc/passwd'", "refused", "review-3"],
+  ["pnpm --filter=@perbo/cli exec cp a ~/b", "refused", "review-3"],
   ["pnpm exec -- cp a ~/b", "refused", "review-3"],
   ["yarn workspace cli exec cp a ~/b", "refused", "review-3"],
   ["bun x sh -c 'echo x > /etc/passwd'", "refused", "review-3"],
@@ -197,7 +197,7 @@ const ROWS: Array<[string, Decision, string]> = [
   ["pnpm install --frozen-lockfile", "allowed", "review-3"],
   ["pnpm run build", "allowed", "review-3"],
   ["pnpm -r run build", "allowed", "review-3"],
-  ["pnpm --filter @focrux/cli exec vitest run > <root>/log.txt", "allowed", "review-3"],
+  ["pnpm --filter @perbo/cli exec vitest run > <root>/log.txt", "allowed", "review-3"],
   ["cd deep && echo x > ../real.txt", "allowed", "review-3"],
   ["cd deep; echo x > ../real.txt", "allowed", "review-3"],
   ["(cd deep && echo x > ../real.txt)", "allowed", "review-3"],
@@ -363,7 +363,7 @@ const ROWS: Array<[string, Decision, string]> = [
 /**
  * SCP-166: the runner names a scratch directory inside the worktree and hands
  * it to the executor as `$TMPDIR`, so the guard resolves the variable instead
- * of refusing it by name. `<tmp>` is that directory, `<root>/.focrux-tmp`.
+ * of refusing it by name. `<tmp>` is that directory, `<root>/.perbo-tmp`.
  */
 const SCRATCH_ROWS: Array<[string, Decision, string]> = [
   ["printf x > $TMPDIR/x", "allowed", "scp-166"],
@@ -406,7 +406,7 @@ const WITHOUT_SCRATCH: Array<[string, Decision]> = [
 ];
 
 describe("the probe lists, by round", () => {
-  const root = mkdtempSync(join(tmpdir(), "focrux-scp156-probe-"));
+  const root = mkdtempSync(join(tmpdir(), "perbo-scp156-probe-"));
   mkdirSync(join(root, "sub"), { recursive: true });
   mkdirSync(join(root, "packages", "runner"), { recursive: true });
   const scope = { root, home: "/Users/nobody" };
@@ -423,8 +423,8 @@ describe("the probe lists, by round", () => {
 });
 
 describe("the probe list for the runner's scratch directory", () => {
-  const root = mkdtempSync(join(tmpdir(), "focrux-scp166-probe-"));
-  const tmp = join(root, ".focrux-tmp");
+  const root = mkdtempSync(join(tmpdir(), "perbo-scp166-probe-"));
+  const tmp = join(root, ".perbo-tmp");
   mkdirSync(tmp, { recursive: true });
   const scope = { root, tmpdir: tmp, home: "/Users/nobody" };
 
@@ -490,8 +490,8 @@ const SCOPE_ROWS: Array<[string, Action, Action]> = [
 ];
 
 describe("the probe list for the contract's allowed paths", () => {
-  const root = mkdtempSync(join(tmpdir(), "focrux-scp195-probe-"));
-  const tmp = join(root, ".focrux-tmp");
+  const root = mkdtempSync(join(tmpdir(), "perbo-scp195-probe-"));
+  const tmp = join(root, ".perbo-tmp");
   mkdirSync(tmp, { recursive: true });
   mkdirSync(join(root, "apps", "cli"), { recursive: true });
   mkdirSync(join(root, "packages", "contracts", "src"), { recursive: true });

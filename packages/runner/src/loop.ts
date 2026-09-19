@@ -10,10 +10,15 @@ import {
   LimitsTableSchema,
   MaterializationManifestSchema,
   MergeModeSchema,
+  NodeReviewsSchema,
   ReviewArtifactSchema,
   TicketSourceSchema,
+  DEFAULT_SPEC_FOLDER,
+  SpecFileSchema,
   admittedWriteGlobs,
   matchesAny,
+  StandingProhibitedSchema,
+  isRepositoryRelativeFolder,
   assertProviderEnabled,
   assertWithinLimits,
   attemptId as makeAttemptId,
@@ -22,24 +27,34 @@ import {
   hasAcceptanceCriteria,
   isRefusal,
   limitFor,
+  limitsForCredential,
+  planNodes,
+  standingProhibitedPaths,
+  wholeChangeChecks,
   type AttemptWait,
   type CheckResult,
+  type CredentialClass,
   type ExecutionAttempt,
   type Finding,
   type GithubCredential,
   type IncompleteReviewPath,
   type LimitedResource,
+  type NodeReview,
   type PlanContract,
   type PlanContractWithCriteria,
   type ReviewArtifact,
+  type RunBundle,
   type SealedCommit,
   type SecretIndex,
+  type SpecFile,
+  type StandingProhibitedEntry,
   type TerminationReason,
   type VerifiedCommit,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import {
   cleanup,
   diagnose,
+  isGreenfieldVerify,
   materialize,
   provision,
   signableCommit,
@@ -48,7 +63,7 @@ import {
   run,
   type MaterializedWorkspace,
   type Workspace,
-} from "@focrux/workspace";
+} from "@perbo/workspace";
 import {
   PROMPT_VERSION,
   anthropicModel,
@@ -58,13 +73,14 @@ import {
   isRemediableFamily,
   redactCredentials,
   remediableFindings,
+  reviewGraph,
   runReview,
   verdictSchemas,
   verifyClosures,
   type ClosureVerification,
   type ReviewModel,
   redactReviewArtifact,
-} from "@focrux/review";
+} from "@perbo/review";
 import {
   appendAttempts,
   lastAttemptBranch,
@@ -99,6 +115,7 @@ import { githubCredential } from "./github-credential.js";
 import { mergeUp, pathsWithConflictMarkers, type MergeUpResult } from "./merge-up.js";
 import { sweepWorktree } from "./orphans.js";
 import { mergeLoopPullRequest, type LoopMergeOutcome } from "./merge.js";
+import type { BriefRecords } from "./brief.js";
 import { buildAgentEnvironment, buildPermissionProfile } from "./profile.js";
 import {
   EXECUTOR_PROMPT_VERSION,
@@ -119,6 +136,7 @@ import {
   type ResumeSource,
 } from "./resume.js";
 import { RunRefusedError } from "./refusal.js";
+import { commitSpec } from "./spec-commit.js";
 import { allowedPathsSentence } from "./prohibited.js";
 import { parseDeclines, type Decline } from "./declines.js";
 import { readPrinciples, readPrinciplesFile } from "./principles.js";
@@ -242,9 +260,42 @@ export const TicketRunConfigSchema = z.strictObject({
   /**
    * Globs that judge an attempt on this repository — its review policy, its
    * corpus, its fixtures (D-045). The runner refuses a change to any of them.
-   * `.focrux/**` is always protected; this names the rest.
+   * `.perbo/**` is always protected; this names the rest.
    */
   protected_paths: z.array(z.string().min(1)).default([]),
+  /**
+   * The standing prohibited list: what this repository refuses a write to for
+   * every ticket, whatever the contract says (D-105). Read when a run starts
+   * rather than copied onto the contract at admission, so an entry added after
+   * a ticket was admitted binds its later runs. A hand-written file may hold
+   * bare globs; the desktop's explorer writes each entry with what put it there.
+   */
+  paths_prohibited: StandingProhibitedSchema.default([]),
+  /**
+   * Where this repository keeps its specs (D-103). Its folder is a standing
+   * prohibited path for the executor, beside the default `specs/`: a spec is
+   * the intent the contract was drafted from, and an attempt that edited one
+   * would be rewriting the statement it is judged against.
+   */
+  specs: z
+    .string()
+    .min(1)
+    .refine(isRepositoryRelativeFolder, {
+      message: "specs names a repository-relative folder, for example \"specs\" or \"docs/specs\"",
+    })
+    .default(DEFAULT_SPEC_FOLDER),
+  /**
+   * The files the loop commits first on the ticket's branch (D-103): the spec
+   * folder as it stood at approval, with the `CONTEXT.md` and ADR changes the
+   * interview made beside it, each with the SHA-256 of those bytes —
+   * admission's, on a spec approval could not read.
+   *
+   * Derived from the ticket's admission record by the caller, because the
+   * runner holds no ticket store. Empty for a ticket admitted from an issue or
+   * by hand, and for a run with no ticket behind it: the loop then makes no
+   * spec commit and excludes nothing from the change set.
+   */
+  spec_files: z.array(SpecFileSchema).default([]),
   agent_binary: z.string().min(1).optional(),
   agent_provider: z.enum(["claude-cli", "codex-cli"]).default("claude-cli"),
   executor_skills: ExecutorSkillsSchema.default([]),
@@ -290,10 +341,17 @@ export const TicketRunConfigSchema = z.strictObject({
   materialization_manifest: MaterializationManifestSchema.nullable().default(null),
   /**
    * Where the person's recorded principles live (D-065 option 3). Defaults to
-   * `<repository_root>/.focrux/principles.md`; the CLI sets it from the ticket
+   * `<repository_root>/.perbo/principles.md`; the CLI sets it from the ticket
    * store so `--store` users' principles are the ones consulted.
    */
   principles_path: z.string().nullable().default(null),
+  /**
+   * The spec's No-Gos, read from the ticket's approach record (D-100). They
+   * are approach rather than contract, so they brief the executor and gate
+   * nothing; the caller reads the record, because the runner holds no ticket
+   * store. Empty for a ticket with none and for a run with no ticket behind it.
+   */
+  no_gos: z.array(z.string().min(1)).default([]),
   /**
    * How many runs this ticket has started, its own history included, with this
    * one counted: the run number the root attempt id is minted from, which is
@@ -328,6 +386,33 @@ export const TicketRunConfigSchema = z.strictObject({
   delivery_checks_bound_ms: z.number().int().min(0).default(DEFAULT_DELIVERED_CHECKS_BOUND_MS),
 }).transform((value) => ({ ...value, agent_binary: value.agent_binary ?? (value.agent_provider === "codex-cli" ? "codex" : "claude"), model: value.model ?? (value.agent_provider === "codex-cli" ? "gpt-5.6-terra" : "claude-opus-5") }));
 export type TicketRunConfig = z.infer<typeof TicketRunConfigSchema>;
+
+/**
+ * What the write guard refuses: the contract's own prohibitions, and whatever
+ * this repository standing-prohibited when the run started (D-105): the run
+ * configuration is read once, at the start of the run. One list, so the hook,
+ * the transcript reading, the seal's assertion and the brief's sentence cannot
+ * hold different answers.
+ */
+export function guardProhibitedPaths(
+  contractProhibited: readonly string[],
+  config: {
+    paths_prohibited: readonly StandingProhibitedEntry[];
+    spec_files?: readonly SpecFile[];
+  },
+): string[] {
+  return [
+    ...new Set([
+      ...contractProhibited,
+      ...config.paths_prohibited.map((entry) => entry.path),
+      // D-103: the files the branch's spec commit holds. The loop made that
+      // commit before the executor started, and the change set the review
+      // reads leaves them out — so a write to one would land in the pull
+      // request with nothing judging it.
+      ...(config.spec_files ?? []).map((file) => file.path),
+    ]),
+  ];
+}
 
 /**
  * What a round was for (SCP-192).
@@ -369,6 +454,12 @@ export interface RoundRecord {
    * and the verdict is the new review's.
    */
   review: ReviewArtifact | null;
+  /**
+   * Each reviewed node's own artifact beside the round's combined review
+   * (D-107): `null` for a node with no file inside its paths this round,
+   * empty for a flat plan.
+   */
+  node_reviews: NodeReview[];
   /** A round that answered routed findings: the closure verification (D-061). */
   verification: ClosureVerification | null;
   checks: CheckResult[];
@@ -383,6 +474,8 @@ export interface TicketRunResult {
   workspace: Workspace;
   rounds: RoundRecord[];
   final_review: ReviewArtifact | null;
+  /** `final_review`'s per-node artifacts, beside it (D-107); empty for a flat plan. */
+  node_reviews: NodeReview[];
   pull_request: { url: string; number: number | null } | null;
   /**
    * SCP-202: what the post-approval merge step did, where a pull request was
@@ -518,6 +611,7 @@ export function incompleteReviewCauses(review: ReviewArtifact): {
 
 /** The limits-table key behind each ceiling termination, so the stop names its setting. */
 const CEILING_RESOURCE: Partial<Record<TerminationReason, LimitedResource>> = {
+  stalled: "attempt_stall_ms",
   wall_clock_exceeded: "attempt_wall_clock_ms",
   command_ceiling_exceeded: "attempt_commands",
   iteration_ceiling_exceeded: "attempt_iterations",
@@ -541,7 +635,7 @@ function withCeilingGuidance(
     reason: termination.reason,
     detail:
       `${termination.detail} — raise limits.limits.${resource} in ` +
-      `${join(config.repository_root, ".focrux", "config.json")}` +
+      `${join(config.repository_root, ".perbo", "config.json")}` +
       (current === null ? "" : ` (currently ${current})`),
   };
 }
@@ -565,6 +659,23 @@ function sealedByAttempt(record: AttemptsRecord | null): Map<string, string> {
 }
 
 /**
+ * The commit this ticket's spec is in, as its attempts record names it, or
+ * null where no run has made one (D-103).
+ *
+ * Read from the record rather than derived from the branch, because the
+ * question a resumed run asks is whether the branch still starts where the
+ * record says it does — and a branch is not evidence about itself.
+ */
+function specCommitOnRecord(record: AttemptsRecord | null): string | null {
+  const shape = z.object({ spec_commit: z.string().nullable().optional() });
+  for (const attempt of [...(record?.attempts ?? [])].reverse()) {
+    const parsed = shape.safeParse(attempt);
+    if (parsed.success && parsed.data.spec_commit) return parsed.data.spec_commit;
+  }
+  return null;
+}
+
+/**
  * The remediation a re-run continues, or null where there is nothing to
  * continue (SCP-194).
  *
@@ -584,7 +695,7 @@ function sealedByAttempt(record: AttemptsRecord | null): Map<string, string> {
 function remediationToContinue(input: {
   bundles: BundleStore;
   ticket_id: string;
-}): { review: ReviewArtifact; findings: Finding[]; head_commit: string } | null {
+}): { review: ReviewArtifact; node_reviews: NodeReview[]; findings: Finding[]; head_commit: string } | null {
   const forTicket = input.bundles.forTicket(input.ticket_id);
   const reviews = forTicket.filter(
     (bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("rev_"),
@@ -603,6 +714,10 @@ function remediationToContinue(input: {
   }
   if (!parsed.success) return null;
   const review = parsed.data;
+  // The per-node reviews recorded beside it (D-107). Absent on a bundle
+  // written before per-node review existed, or unreadable: [] either way,
+  // the same default the schema gives a record that never held them.
+  const node_reviews = readNodeReviews(input.bundles, last);
 
   /**
    * The closures the rounds after that review already verified. The last
@@ -639,7 +754,21 @@ function remediationToContinue(input: {
     .filter((finding) => isRemediableFamily(finding.rule_id))
     .filter((finding) => openKeys === null || openKeys.has(finding.key));
   if (findings.length === 0) return null;
-  return { review, findings, head_commit: head };
+  return { review, node_reviews, findings, head_commit: head };
+}
+
+/** A review bundle's per-node reviews (D-107), `[]` where the bundle holds none. */
+function readNodeReviews(bundles: BundleStore, bundle: RunBundle): NodeReview[] {
+  const artifact = bundle.artifacts.find((entry) => entry.name === "node-reviews.json");
+  if (!artifact || !artifact.retained) return [];
+  const body = bundles.readObject(artifact.sha256);
+  if (body === null) return [];
+  try {
+    const parsed = NodeReviewsSchema.safeParse(JSON.parse(body));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface TicketRunRequest {
@@ -690,7 +819,7 @@ export interface TicketRunRequest {
  * One run of one ticket, under the ticket's run lock (SCP-193).
  *
  * The lock is taken before anything is read, provisioned or paid for, and
- * released whatever ends the run — including a throw. A second `focrux run` on
+ * released whatever ends the run — including a throw. A second `perbo run` on
  * a ticket this one is still working, or parked on, is refused with the pid and
  * the wait rather than provisioning a second worktree on the same branch and
  * racing this one to the attempts record.
@@ -800,11 +929,19 @@ async function runLockedTicket(
   }
 
   /** Where a ceiling, a budget or a wait bound is raised. */
-  const configPath = join(config.repository_root, ".focrux", "config.json");
+  const configPath = join(config.repository_root, ".perbo", "config.json");
   /** The longest the loop will sit out one provider wait (SCP-193). */
   const waitBoundMs = limitFor(config.limits, "wait_for_provider_ms");
-  /** What one ticket may spend before the loop stops restarting itself. */
-  const ticketBudgetMicros = limitFor(config.limits, "ticket_cost_micros");
+  /**
+   * What one ticket may spend before the loop stops restarting itself, which is
+   * nothing unless the executor is billed per token (D-096).
+   *
+   * The credential is the attempt's own, read from the invocation it recorded:
+   * on a subscription the dollar figure is a measure of work and not a bill, so
+   * no number of them adds up to a budget.
+   */
+  const ticketBudgetMicros = (credential: CredentialClass): number | null =>
+    limitFor(limitsForCredential(config.limits, credential), "ticket_cost_micros");
 
   /**
    * SCP-193: a wait a previous process was killed in the middle of.
@@ -908,6 +1045,15 @@ async function runLockedTicket(
       repository_root: checkout,
     });
   }
+
+  /**
+   * Whether the manifest's verify command measures anything. `git status
+   * --porcelain` passes on any checkout Git can read, so what it says of a base
+   * is no measurement: the base is left unmeasured, the review is told nothing
+   * about it, no attempt records an answer, and no answer on record is read
+   * back while the verification measures nothing.
+   */
+  const verifyMeasures = !isGreenfieldVerify(manifest.verify.command);
 
   /**
    * The branch this ticket already has, which every worktree this run
@@ -1021,6 +1167,40 @@ async function runLockedTicket(
     );
   }
 
+  /**
+   * D-103: the spec the change is judged against, put on the branch before
+   * anything else — before the materialization, before the base is merged up
+   * and before the executor is invoked, so it is the branch's first commit
+   * past the contract's base and every later step measures a branch that
+   * already carries it.
+   *
+   * A refusal here leaves the worktree swept and removed, as every refusal
+   * after provisioning does: nothing has been materialized, nothing has been
+   * executed and nothing has been paid for.
+   */
+  let specCommit: string | null;
+  let specPaths: string[];
+  try {
+    const sealed = await commitSpec({
+      worktree: workspace.path,
+      repository_root: config.repository_root,
+      base_commit: workspace.base_commit,
+      ticket_key: config.ticket_key,
+      attempt_id: rootAttemptId,
+      files: config.spec_files,
+      recorded: specCommitOnRecord(priorAttempts),
+      onProgress: progress,
+    });
+    specCommit = sealed.commit;
+    specPaths = sealed.paths;
+  } catch (error) {
+    await sweepWorktree({ worktree: workspace.path, onProgress: progress });
+    await cleanup({ workspace, root: config.worktree_root, outcome: "failure" }).catch(() => undefined);
+    throw error;
+  }
+  /** What the change set never lists, whichever round it is (SCP-314). */
+  const sealExclusions = specPaths.length === 0 ? {} : { spec_paths: specPaths };
+
   let materialized: MaterializedWorkspace;
   try {
     materialized = await materialize({
@@ -1062,7 +1242,7 @@ async function runLockedTicket(
    */
   const provisioningHead = await headCommit({ worktree: workspace.path });
   const provisioningVerify: VerifiedCommit | null =
-    materialized.verify === null || provisioningHead === null
+    materialized.verify === null || provisioningHead === null || !verifyMeasures
       ? null
       : { commit: provisioningHead, verified: materialized.verify.code === 0 };
 
@@ -1072,18 +1252,20 @@ async function runLockedTicket(
    *
    * Measured once, by the attempt that provisions at the base, and read back
    * from the ticket's attempts record by every attempt after it. Where nothing
-   * has measured it — a record written before the field existed, or a ticket
-   * whose branch already carried commits the first time this ran — the review
-   * is told nothing rather than told the base is broken.
+   * has measured it — a record written before the field existed, a ticket
+   * whose branch already carried commits the first time this ran, or a
+   * manifest whose verify command measures nothing — the review is told
+   * nothing rather than told the base is broken or sound.
    *
    * The base a merge-up moves to mid-run is not re-verified: this answers the
    * commit the contract pins, which is what `caused_by_change` is about.
    */
-  const baseVerification: VerifiedCommit | null =
-    recordedBaseVerification(priorAttempts, workspace.base_commit) ??
-    (provisioningVerify !== null && sameCommit(provisioningVerify.commit, workspace.base_commit)
-      ? provisioningVerify
-      : null);
+  const baseVerification: VerifiedCommit | null = !verifyMeasures
+    ? null
+    : (recordedBaseVerification(priorAttempts, workspace.base_commit) ??
+      (provisioningVerify !== null && sameCommit(provisioningVerify.commit, workspace.base_commit)
+        ? provisioningVerify
+        : null));
   progress(
     baseVerification === null
       ? `nothing has verified ${workspace.base_commit.slice(0, 12)}, so a failing check is ` +
@@ -1107,7 +1289,7 @@ async function runLockedTicket(
   /** D-065: every decline across rounds, for the notification and the record. */
   const allDeclines: Decline[] = [];
   // The product principles the person has recorded (D-065 option 3). Read from
-  // the repository root — the agent cannot write there (.focrux/** is
+  // the repository root — the agent cannot write there (.perbo/** is
   // prohibited) — and handed to every brief as data.
   const principles = config.principles_path
     ? readPrinciplesFile(config.principles_path)
@@ -1118,6 +1300,8 @@ async function runLockedTicket(
    */
   let openFindings: ReturnType<typeof remediableFindings> = [];
   let finalReview: ReviewArtifact | null = null;
+  /** The graph's per-node reviews beside `finalReview` (D-107); empty for a flat plan. */
+  let nodeReviews: NodeReview[] = [];
   /**
    * Whether the round now running answers a review that could not resolve every
    * criterion.
@@ -1143,9 +1327,13 @@ async function runLockedTicket(
    * no transport-reported figure contributes nothing and is counted
    * separately, because a budget that read "unmeasured" as `$0` would never be
    * reached — which is the one way a ticket budget can fail open.
+   *
+   * An attempt on a subscription is left out (D-096): the dollar figure it
+   * reports is a measure of work and not a bill, and the budget is a bill.
    */
   const ticketSpend = (): { micros: number; priced: number; unpriced: number } => {
     const usage = z.looseObject({
+      agent: z.looseObject({ credential_class: z.string() }).optional(),
       usage: z.looseObject({
         cost_micros: z.number().int().min(0),
         cost_basis: z.string(),
@@ -1160,6 +1348,7 @@ async function runLockedTicket(
         unpriced += 1;
         continue;
       }
+      if (parsed.data.agent?.credential_class === "subscription") continue;
       const basis = parsed.data.usage.cost_basis;
       if (basis === "unavailable") unpriced += 1;
       else if (basis === "not_incurred") continue;
@@ -1229,6 +1418,7 @@ async function runLockedTicket(
       : remediationToContinue({ bundles, ticket_id: contract.ticket_id });
   if (continuing !== null) {
     finalReview = continuing.review;
+    nodeReviews = continuing.node_reviews;
     openFindings = continuing.findings;
     progress(
       `${config.ticket_key}'s last review left ${continuing.findings.length} finding(s) open on ` +
@@ -1338,7 +1528,12 @@ async function runLockedTicket(
     branch: string;
     worktree: string;
     base_before: string;
-  }): Promise<{ outcome: TicketRunResult["outcome"]; detail: string; review: ReviewArtifact | null }> => {
+  }): Promise<{
+    outcome: TicketRunResult["outcome"];
+    detail: string;
+    review: ReviewArtifact | null;
+    node_reviews: NodeReview[];
+  }> => {
     const merged = `merged ${config.base_ref} at ${baseCommit.slice(0, 12)} into ${input.branch}`;
     // What the base brought in, read in the repository where both commits are,
     // against the contract's own globs rather than the wider write guard.
@@ -1365,6 +1560,7 @@ async function runLockedTicket(
       base_commit: baseCommit,
       judging,
       paths_allowed: pathsAllowed,
+      ...sealExclusions,
     });
     const environment = buildAgentEnvironment({
       base: process.env,
@@ -1382,8 +1578,14 @@ async function runLockedTicket(
             env: environment.env,
             secrets,
             onProgress: progress,
+            nodes: planNodes(contract),
+            changed_files: sealed.changed_paths,
           });
-    const red = checks.filter((check) => check.status === "failed" || check.status === "errored");
+    // D-107: a node's results are evidence for that node's review and gate
+    // nothing. What decides the re-level is the whole-change result, which is
+    // the whole of what a flat plan measures.
+    const gating = wholeChangeChecks(checks);
+    const red = gating.filter((check) => check.status === "failed" || check.status === "errored");
     if (red.length > 0) {
       return {
         outcome: "changes_requested",
@@ -1391,6 +1593,7 @@ async function runLockedTicket(
           `${merged}, and the pinned checks fail on the result: ` +
           `${red.map((check) => `${check.check_id} ${check.status}`).join(", ")}; a person decides`,
         review: null,
+        node_reviews: [],
       };
     }
     if (touched !== null && touched.length === 0) {
@@ -1400,6 +1603,7 @@ async function runLockedTicket(
           `${merged}: the checks pass and the base brought in nothing inside the contract's scope, ` +
           "so the review that approved this change set carries",
         review: null,
+        node_reviews: [],
       };
     }
     progress(
@@ -1408,23 +1612,33 @@ async function runLockedTicket(
         : `the base brought in ${touched.length} path(s) inside the contract's scope ` +
             `(${touched.slice(0, 5).join(", ")}); reviewing the merged change set afresh`,
     );
-    const reviewOutcome = await reviewRunner({
-      contract,
-      diff: sealed.diff,
-      changeset: sealed.changeset ?? undefined,
-      checks,
-      repoDir: input.worktree,
-      model: reviewerModel(config, contract, checks),
-      head_commit: sealed.head_commit ?? undefined,
-      remediationAvailable: false,
-      baseVerified: materialized.verify === null ? undefined : materialized.verify.code === 0,
-      onProgress: progress,
-    });
+    const graphOutcome = await reviewGraph(
+      {
+        contract,
+        diff: sealed.diff,
+        changeset: sealed.changeset ?? undefined,
+        checks,
+        repoDir: input.worktree,
+        model: reviewerModel(config, contract, gating),
+        head_commit: sealed.head_commit ?? undefined,
+        remediationAvailable: false,
+        baseVerified:
+          materialized.verify === null || !verifyMeasures ? undefined : materialized.verify.code === 0,
+        onProgress: progress,
+      },
+      reviewRunner,
+      { modelFor: (nodeContract, nodeChecks) => reviewerModel(config, contractWithCriteria(nodeContract, contract), nodeChecks) },
+    );
+    const reviewOutcome = graphOutcome.overall;
     const review: ReviewArtifact = {
-      ...reviewOutcome.artifact,
-      target: { ...reviewOutcome.artifact.target, prior_commits: [] },
-      findings: [...reviewOutcome.artifact.findings, ...flakyCheckFindings(checks)],
+      ...graphOutcome.combined,
+      target: { ...graphOutcome.combined.target, prior_commits: [] },
+      findings: [...graphOutcome.combined.findings, ...flakyCheckFindings(gating)],
     };
+    const node_reviews: NodeReview[] = graphOutcome.nodes.map((entry) => ({
+      node_id: entry.node_id,
+      review: entry.outcome?.artifact ?? null,
+    }));
     writeReviewBundle({
       bundles,
       contract,
@@ -1432,13 +1646,19 @@ async function runLockedTicket(
       clock,
       review,
       outcome: reviewOutcome,
+      node_reviews,
       // Nothing was sealed by this run, so nothing was excluded from a seal.
       sealed: { excluded_paths: [] },
       round: 0,
       remediation_available: false,
     });
     if (review.decision === "approve") {
-      return { outcome: "relevelled", detail: `${merged}, and a fresh review approved the merged change set`, review };
+      return {
+        outcome: "relevelled",
+        detail: `${merged}, and a fresh review approved the merged change set`,
+        review,
+        node_reviews,
+      };
     }
     if (review.decision === "error") {
       return {
@@ -1447,12 +1667,14 @@ async function runLockedTicket(
           `${merged}, and the review of the result did not complete: ` +
           `${review.error?.kind ?? "unknown"} — ${review.error?.message ?? "no reason recorded"}`,
         review,
+        node_reviews,
       };
     }
     return {
       outcome: review.decision === "escalate" || review.decision === "incomplete" ? "escalated" : "changes_requested",
       detail: `${merged}, and a fresh review of the merged change set decided ${review.decision}; a person decides`,
       review,
+      node_reviews,
     };
   };
 
@@ -1487,6 +1709,7 @@ async function runLockedTicket(
           remediationRound = 0;
           openFindings = [];
           finalReview = null;
+          nodeReviews = [];
         }
         continuing = null;
       }
@@ -1621,17 +1844,21 @@ async function runLockedTicket(
           });
           outcome = levelled.outcome;
           detail = levelled.detail;
-          if (levelled.review !== null) finalReview = levelled.review;
+          if (levelled.review !== null) {
+            finalReview = levelled.review;
+            nodeReviews = levelled.node_reviews;
+          }
           break;
         }
       }
 
       // Read before the executor runs, so a commit the executor makes itself is
-      // this attempt's rather than one it inherited.
-      const inherited = await commitsSince({
-        worktree: workspaceForRound.path,
-        base_commit: baseCommit,
-      });
+      // this attempt's rather than one it inherited. The spec commit is left
+      // out: the loop made it before any executor ran, and the change set the
+      // review reads does not contain it (D-103).
+      const inherited = (
+        await commitsSince({ worktree: workspaceForRound.path, base_commit: baseCommit })
+      ).filter((sha) => sha !== specCommit);
       const prior_commits: SealedCommit[] = inherited.map((sha) => ({
         sha,
         attempt_id: sealedBy.get(sha) ?? null,
@@ -1672,6 +1899,11 @@ async function runLockedTicket(
       // reading, by the seal's assertion and by the sentence in the brief — so
       // none of the four can hold a different contract than the others.
       const pathsAllowed = admittedWriteGlobs(contract.scope);
+      // D-105: the contract's own prohibitions and the repository's standing
+      // list, beside the globs above and judged before them, so the guard
+      // refuses a prohibited path inside the admitted ones rather than leaving
+      // it to the reviewer's backstop.
+      const pathsProhibited = guardProhibitedPaths(contract.scope.paths_prohibited, config);
 
       const basePrompt =
         kind === "resolve_conflict"
@@ -1708,6 +1940,36 @@ async function runLockedTicket(
               });
 
       const { prompt, receipts: executorSkills } = withExecutorSkills(basePrompt, config.executor_skills);
+
+      /**
+       * D-096: what a compaction's state block is composed from.
+       *
+       * The records, not the brief: the contract's outcome and criteria with
+       * the graph that groups them, the two path lists the guard judges by,
+       * the approach record's No-Gos, the principles file, what the checks
+       * have measured so far and what this round is open on. The composer
+       * reads them at the moment of injection, in the hook or the adapter,
+       * so both transports state the same round.
+       */
+      const briefRecords: BriefRecords = {
+        outcome: contract.outcome,
+        acceptance_criteria: contract.acceptance_criteria,
+        nodes: [...planNodes(contract)],
+        paths_allowed: pathsAllowed,
+        // Joined as the guard joins them, so the block states the boundary
+        // rather than the half of it the contract happened to name (D-103).
+        paths_prohibited: [
+          ...new Set([...pathsProhibited, ...standingProhibitedPaths(config.specs)]),
+        ],
+        no_gos: [...config.no_gos],
+        principles,
+        // What the pinned set measured on the round before this one, per node
+        // where the plan has a graph (D-107). Empty on a run's first round,
+        // which nothing has measured yet, and on a round whose predecessor was
+        // cut before its checks ran.
+        checks: rounds[rounds.length - 1]?.checks ?? [],
+        open_findings: [...toClose],
+      };
 
       progress(
         kind === "resolve_conflict"
@@ -1749,11 +2011,14 @@ async function runLockedTicket(
           binary: config.agent_binary,
           worktree: workspaceForRound.path,
           prompt,
+          brief_records: briefRecords,
           model: config.model,
           profile,
           ceilings,
           env: environment.env,
           paths_allowed: pathsAllowed,
+          paths_prohibited: pathsProhibited,
+          spec_folder: config.specs,
           onProgress: progress,
           redact: (text) => secrets.redact(text).text,
         });
@@ -1786,6 +2051,7 @@ async function runLockedTicket(
         judging,
         exclude_paths: checkArtifacts,
         paths_allowed: pathsAllowed,
+        ...sealExclusions,
       });
 
       // The attempt left the branch head where it found it: whatever the change
@@ -1837,12 +2103,16 @@ async function runLockedTicket(
                 judging,
                 paths_allowed: pathsAllowed,
                 fallback_paths: rawSeal.changed_paths,
+                ...sealExclusions,
               })),
             };
           }
         }
       }
 
+      // D-107: the pinned set runs over the whole change and then once per
+      // node of the execution graph, narrowed to that node's paths. A flat
+      // plan has no nodes and runs exactly what it ran before.
       const checks =
         sealed.changeset === null
           ? []
@@ -1852,7 +2122,21 @@ async function runLockedTicket(
               env: environment.env,
               secrets,
               onProgress: progress,
+              nodes: planNodes(contract),
+              changed_files: sealed.changed_paths,
             });
+
+      /**
+       * What judges the whole change this round.
+       *
+       * The node results are recorded with the round and reach that node's
+       * own review (`reviewGraph`), never this list. `gating` is what the
+       * overall review, the closure verification and the reviewer's own check
+       * schema are given — exactly the list a flat plan produces, since a flat
+       * plan tags none. A node's own check result gates nothing on its own;
+       * the review it feeds can, once the gate reads the combination.
+       */
+      const gating = wholeChangeChecks(checks);
 
       checkArtifacts = sealed.changeset === null ? checkArtifacts : await untrackedAfterChecks({ worktree: workspaceForRound.path });
 
@@ -2063,8 +2347,12 @@ async function runLockedTicket(
         // D-092: the executor's own account, read from its final message and
         // already redacted by the adapter. Null where it wrote none.
         executor_account: executorAccount(agentResult.final_message),
+        // D-096: every time this round's brief went back after a compaction,
+        // as the mechanism that carried it recorded them.
+        brief_reinjections: agentResult.reinjections ?? [],
         resumed_from: resumedHere === null ? null : resumedFromRecord(resumedHere),
         merged_base: mergedBase,
+        spec_commit: specCommit,
         // What the check attribution above rests on, and — separately — what
         // this attempt's own worktree started from.
         base_verification: baseVerification,
@@ -2183,6 +2471,7 @@ async function runLockedTicket(
         attempt,
         superseded_attempts: superseded,
         review: null,
+        node_reviews: [],
         verification: null,
         checks,
         remediable_findings: 0,
@@ -2256,8 +2545,15 @@ async function runLockedTicket(
          * Only the two ceilings a continuation can make progress against. A
          * wall clock or a command ceiling ends attempts the same way each time,
          * and a token ceiling is the same spend under another name; those still
-         * stop the run. The two iteration ceilings reach this path only where
-         * the repository configured them (D-096).
+         * stop the run, and so does a stall, which is a hang rather than
+         * progress. The two iteration ceilings reach this path only where the
+         * repository configured them (D-096).
+         *
+         * And only where there is a ticket budget to measure the continuation
+         * against, which means an executor billed per token (D-096). On a
+         * subscription the dollar figure an attempt reports is a measure of
+         * work rather than a bill, so no number of them adds up to a budget,
+         * and the run ends here saying so.
          *
          * And only where the cut attempt sealed something of its own. There is
          * no "sealed work" to continue over otherwise, and an attempt that
@@ -2274,8 +2570,9 @@ async function runLockedTicket(
             termination.reason === "round_iteration_ceiling_exceeded")
         ) {
           const spend = ticketSpend();
-          const room = ticketBudgetMicros - spend.micros;
-          if (spend.priced > 0 && room > 0) {
+          const budget = ticketBudgetMicros(agentResult.invocation.credential_class);
+          const room = (budget ?? 0) - spend.micros;
+          if (budget !== null && spend.priced > 0 && room > 0) {
             superseded = [...superseded, attempt];
             ceiling_continuation += 1;
             // The transport's one retry is about consecutive transport
@@ -2286,7 +2583,7 @@ async function runLockedTicket(
               `${termination.reason} on ${attempt.attempt_id}; its work is sealed on ` +
                 `${workspaceForRound.branch}, and run ${runNumber} attempt ${attempts.length + 1} ` +
                 `continues over it — $${(spend.micros / 1_000_000).toFixed(2)} of the ` +
-                `$${(ticketBudgetMicros / 1_000_000).toFixed(2)} ticket budget is spent`,
+                `$${((budget ?? 0) / 1_000_000).toFixed(2)} ticket budget is spent`,
             );
             continue;
           }
@@ -2294,18 +2591,25 @@ async function runLockedTicket(
           outcome = "terminated";
           detail =
             `${termination.reason}: ${termination.detail} ` +
-            (spend.priced === 0
-              ? `No attempt of ${config.ticket_key} carries a dollar figure, so the ` +
-                "limits.limits.ticket_cost_micros budget cannot be measured and the run does not " +
-                "start another attempt."
-              : `The ticket has spent $${(spend.micros / 1_000_000).toFixed(2)} of the ` +
-                `$${(ticketBudgetMicros / 1_000_000).toFixed(2)} in ` +
-                `limits.limits.ticket_cost_micros (${configPath}), so no further attempt ` +
-                `continues it` +
-                (spend.unpriced > 0
-                  ? `; ${spend.unpriced} attempt(s) carry no dollar figure and are not in that sum`
-                  : "") +
-                ".");
+            (budget === null
+              ? // D-096: on a subscription the dollar figure an attempt reports
+                // is a measure of work rather than a bill, so no number of them
+                // adds up to a budget a continuation could be allowed against.
+                `${config.ticket_key} is running on a credential nothing bills per token, so ` +
+                "limits.limits.ticket_cost_micros measures nothing and the run does not start " +
+                "another attempt over the sealed work."
+              : spend.priced === 0
+                ? `No attempt of ${config.ticket_key} carries a dollar figure, so the ` +
+                  "limits.limits.ticket_cost_micros budget cannot be measured and the run does not " +
+                  "start another attempt."
+                : `The ticket has spent $${(spend.micros / 1_000_000).toFixed(2)} of the ` +
+                  `$${(budget / 1_000_000).toFixed(2)} in ` +
+                  `limits.limits.ticket_cost_micros (${configPath}), so no further attempt ` +
+                  `continues it` +
+                  (spend.unpriced > 0
+                    ? `; ${spend.unpriced} attempt(s) carry no dollar figure and are not in that sum`
+                    : "") +
+                  ".");
           break;
         }
         rounds.push(record());
@@ -2460,7 +2764,7 @@ async function runLockedTicket(
         const verification = await verifyRunner({
           findings: toVerify,
           diff: sealed.diff ?? "",
-          checks,
+          checks: gating,
           scope: contract.scope,
           changeset: sealed.changeset!,
           model: verifierModel(
@@ -2539,6 +2843,7 @@ async function runLockedTicket(
           attempt,
           superseded_attempts: superseded,
           review: null,
+          node_reviews: [],
           verification,
           checks,
           // Open after verification plus declined: everything a person still
@@ -2613,6 +2918,9 @@ async function runLockedTicket(
           break;
         }
         const spentSoFar = ticketSpend();
+        const remediationBudget = ticketBudgetMicros(
+          agentResult.invocation.credential_class,
+        );
         if (remediationRound >= maxRounds) {
           outcome = "remediation_exhausted";
           detail =
@@ -2623,13 +2931,17 @@ async function runLockedTicket(
             (allDeclines.length > 0 ? ` (and ${allDeclines.length} declined for a person)` : "");
           break;
         }
-        if (spentSoFar.priced > 0 && spentSoFar.micros >= ticketBudgetMicros) {
+        if (
+          remediationBudget !== null &&
+          spentSoFar.priced > 0 &&
+          spentSoFar.micros >= remediationBudget
+        ) {
           outcome = "remediation_exhausted";
           detail =
             `remediation round ${remediationRound} closed ${closedHere} finding(s) and ` +
             `${openFindings.length} remain, but the ticket has spent ` +
             `$${(spentSoFar.micros / 1_000_000).toFixed(2)} of the ` +
-            `$${(ticketBudgetMicros / 1_000_000).toFixed(2)} in ` +
+            `$${(remediationBudget / 1_000_000).toFixed(2)} in ` +
             `limits.limits.ticket_cost_micros (${configPath}). Still open: ` +
             `${openKeys.join(", ")}` +
             (allDeclines.length > 0 ? ` (and ${allDeclines.length} declined for a person)` : "");
@@ -2655,30 +2967,39 @@ async function runLockedTicket(
       // executor's: the review asks once for a correction and, failing that,
       // records `review_failed` with the reasons (SCP-165). The change set is
       // sealed either way and stays on the branch.
-      const reviewOutcome = await reviewRunner({
-        contract,
-        diff: sealed.diff,
-        // The sealed form: its file list is complete whatever the diff's
-        // size, and a withheld diff is refused rather than reviewed.
-        changeset: sealed.changeset ?? undefined,
-        checks,
-        repoDir: workspaceForRound.path,
-        model: reviewerModel(config, contract, checks),
-        head_commit: sealed.head_commit ?? undefined,
-        remediationAvailable: remediationRound < maxRounds,
-        // Whether the contract's base commit passed the workspace's verify
-        // command (d069 reads a pinned check failing now as the change's own
-        // breakage). It is the ticket's answer, measured on the attempt that
-        // provisioned at the base and read back from the record by every
-        // attempt after it, so an attempt continuing over commits an earlier
-        // one sealed is not told its own predecessor's breakage is the base's.
-        // Verify may run fewer checks than the pinned set, and a base merged up
-        // mid-run is not re-verified: a wrong reading costs one round, which the
-        // verifier's own run of the checks then stops. Undefined where nothing
-        // has measured the base, which the review reads as unknown.
-        baseVerified: baseVerification === null ? undefined : baseVerification.verified,
-        onProgress: progress,
-      });
+      const graphOutcome = await reviewGraph(
+        {
+          contract,
+          diff: sealed.diff,
+          // The sealed form: its file list is complete whatever the diff's
+          // size, and a withheld diff is refused rather than reviewed.
+          changeset: sealed.changeset ?? undefined,
+          // The full pinned set: whole-change and, on a graphed plan, every
+          // node's own run beside it (D-107). reviewGraph narrows this to
+          // each node's own results and to wholeChangeChecks for the overall
+          // call, which is what `gating` already is for a flat plan.
+          checks,
+          repoDir: workspaceForRound.path,
+          model: reviewerModel(config, contract, gating),
+          head_commit: sealed.head_commit ?? undefined,
+          remediationAvailable: remediationRound < maxRounds,
+          // Whether the contract's base commit passed the workspace's verify
+          // command (d069 reads a pinned check failing now as the change's own
+          // breakage). It is the ticket's answer, measured on the attempt that
+          // provisioned at the base and read back from the record by every
+          // attempt after it, so an attempt continuing over commits an earlier
+          // one sealed is not told its own predecessor's breakage is the base's.
+          // Verify may run fewer checks than the pinned set, and a base merged up
+          // mid-run is not re-verified: a wrong reading costs one round, which the
+          // verifier's own run of the checks then stops. Undefined where nothing
+          // has measured the base, which the review reads as unknown.
+          baseVerified: baseVerification === null ? undefined : baseVerification.verified,
+          onProgress: progress,
+        },
+        reviewRunner,
+        { modelFor: (nodeContract, nodeChecks) => reviewerModel(config, contractWithCriteria(nodeContract, contract), nodeChecks) },
+      );
+      const reviewOutcome = graphOutcome.overall;
 
       // The artifact is the review as written. Provenance stamping belonged to
       // the retired second-review design; artifacts that carry a remediation
@@ -2693,11 +3014,20 @@ async function runLockedTicket(
       // on. The flake is still the round's to report, so the runner states it
       // here as its own advisory finding: deterministic, never blocking, and
       // naming the tests.
+      //
+      // The combined view (D-107): a graphed plan's gate reads the overall
+      // review and every reviewed node's together, so a node-local blocking
+      // finding closes the gate exactly as a whole-change one does. A flat
+      // plan's combined view is the overall artifact itself.
       const review: ReviewArtifact = {
-        ...reviewOutcome.artifact,
-        target: { ...reviewOutcome.artifact.target, prior_commits },
-        findings: [...reviewOutcome.artifact.findings, ...flakyCheckFindings(checks)],
+        ...graphOutcome.combined,
+        target: { ...graphOutcome.combined.target, prior_commits },
+        findings: [...graphOutcome.combined.findings, ...flakyCheckFindings(gating)],
       };
+      const nodeReviewsThisRound: NodeReview[] = graphOutcome.nodes.map((entry) => ({
+        node_id: entry.node_id,
+        review: entry.outcome?.artifact ?? null,
+      }));
 
       writeReviewBundle({
         bundles,
@@ -2706,18 +3036,21 @@ async function runLockedTicket(
         clock,
         review,
         outcome: reviewOutcome,
+        node_reviews: nodeReviewsThisRound,
         sealed,
         round,
         remediation_available: remediationRound < maxRounds,
       });
 
       finalReview = review;
+      nodeReviews = nodeReviewsThisRound;
       rounds.push({
         round,
         kind,
         attempt,
         superseded_attempts: superseded,
         review,
+        node_reviews: nodeReviewsThisRound,
         verification: null,
         checks,
         remediable_findings: remediableFindings(review.findings).length,
@@ -2954,13 +3287,13 @@ async function runLockedTicket(
       progress(`pull request ${pull_request.url}`);
       args.onPullRequest?.(pull_request);
 
-      // SCP-202, D-077: the last mile. The step is the same one `focrux sync
+      // SCP-202, D-077: the last mile. The step is the same one `perbo sync
       // --merge` calls and it decides on the switch first, so a repository
       // that merges by hand reaches no further than that. The six conditions
       // are read against the pull request as it is now — which, seconds after
       // it opened, is a pull request whose checks have not run and which no
       // separate review run has approved, so the ordinary answer here is a
-      // stop, and the merge happens on a later `focrux sync --merge`.
+      // stop, and the merge happens on a later `perbo sync --merge`.
       //
       // A stop leaves `outcome` alone: the change was approved and the pull
       // request is open, and what is missing is a condition of the merge.
@@ -3094,6 +3427,7 @@ async function runLockedTicket(
       workspace,
       rounds,
       final_review: finalReview,
+      node_reviews: nodeReviews,
       pull_request,
       merge,
       delivery_checks,
@@ -3178,18 +3512,20 @@ function writeReviewBundle(args: {
   clock: () => Date;
   review: ReviewArtifact;
   outcome: Awaited<ReturnType<typeof runReview>>;
+  /** The graph's per-node reviews, recorded beside `review` (D-107); empty for a flat plan. */
+  node_reviews: NodeReview[];
   sealed: { excluded_paths: string[] };
   round: number;
   remediation_available: boolean;
 }): void {
-  const { bundles, contract, secrets, clock, review, outcome: reviewOutcome, sealed, round } = args;
+  const { bundles, contract, secrets, clock, review, outcome: reviewOutcome, node_reviews, sealed, round } = args;
   bundles.write({
     kind: "review",
     subject_id: review.review_id,
     ticket_id: contract.ticket_id,
     inputs: {
       // The target the verdict states, which is the key every reader joins
-      // a review to its attempt by — `focrux inspect` among them. Copied,
+      // a review to its attempt by — `perbo inspect` among them. Copied,
       // never restated from the seal: what a bundle records as reviewed is
       // what the review says it reviewed.
       changeset_id: review.target.id,
@@ -3222,6 +3558,19 @@ function writeReviewBundle(args: {
         name: "review.json",
         media_type: "application/json",
         body: JSON.stringify(redactReviewArtifact(review).artifact, null, 2),
+      },
+      // D-107: each reviewed node's own artifact, redacted the same way.
+      {
+        name: "node-reviews.json",
+        media_type: "application/json",
+        body: JSON.stringify(
+          node_reviews.map((entry) => ({
+            node_id: entry.node_id,
+            review: entry.review ? redactReviewArtifact(entry.review).artifact : null,
+          })),
+          null,
+          2,
+        ),
       },
       { name: "reviewer-system-prompt.txt", media_type: "text/plain", body: reviewOutcome.bundle.system_prompt },
       // A rejected verdict is the reviewer's own output and is kept beside
@@ -3311,6 +3660,22 @@ function reviewerModel(
     : config.reviewer_provider === "codex-cli"
       ? codexCliModel({ submitSchema: schema, ...(modelId ? { modelId } : {}) })
     : anthropicModel({ submitSchema: schema, ...(modelId ? { modelId } : {}) });
+}
+
+/**
+ * `reviewGraph`'s `modelFor` hands back whatever contract a node or the
+ * overall call is reviewing under, typed as broadly as `ReviewInput.contract`
+ * is. Every one `reviewerModel` is ever actually asked to build a schema for
+ * carries criteria — a node's own, narrowed, or the ticket's own contract,
+ * already `PlanContractWithCriteria` — so this narrows without discarding a
+ * P0 contract it should never see, falling back to the ticket's own only to
+ * keep the type total.
+ */
+function contractWithCriteria(
+  contract: PlanContract,
+  ticketContract: PlanContractWithCriteria,
+): PlanContractWithCriteria {
+  return hasAcceptanceCriteria(contract) ? contract : ticketContract;
 }
 
 /**

@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { PreflightRequest, PreflightResult } from "@focrux/runner";
+import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import {
   parseExecuteArgs,
   runDoctorCommand,
@@ -35,8 +35,8 @@ import { storeDir } from "../src/store.js";
  * run — has a second answer when the checkout is one package of a monorepo,
  * and the last three groups below are about that: the install runs at the
  * workspace root filtered to the package, `doctor` reports both roots, and a
- * workspace whose manager this build does not support is refused as such a
- * manager at a plain root already is.
+ * workspace whose manager this build does not install with is answered as
+ * such a manager at a plain root is.
  *
  * The reviewer is a double and the executor is a real program this file writes;
  * the argument parsing, the configuration merge, the diagnostic, the worktree,
@@ -46,7 +46,7 @@ import { storeDir } from "../src/store.js";
  * commit before it and each test fails on the behaviour it is about.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-no-lockfile-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-no-lockfile-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const gitEnv = {
@@ -63,7 +63,7 @@ const git = (dir: string, ...argv: string[]): string =>
   execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
 
 /**
- * One commit, a `test` script, no lockfile and no `.focrux/` — the two-file npm
+ * One commit, a `test` script, no lockfile and no `.perbo/` — the two-file npm
  * package a person points the loop at in their first hour. `node_modules` is
  * ignored because the worktree's install writes it and it is not the change.
  */
@@ -530,25 +530,41 @@ describe("doctor --write-config on a repository that names no package manager", 
     expect(shown.code).toBe(0);
   }, 120_000);
 
-  it("says so as well when the repository names a manager this build refuses", async () => {
+  it("says nothing when the repository gains a lockfile with no package.json to install", async () => {
+    const repo = checkout("write-bare-lock-only", { "README.md": "# fixture\n" });
+    await doctor(repo, { write: true });
+
+    // A lockfile names pnpm, and there is no manifest beside it: nothing is
+    // installed, which is what the pinned manifest already holds.
+    writeFileSync(join(repo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "lockfile");
+
+    const later = await reportedBy(repo);
+    const finding = later.findings.find((f) => f.reason === "package_manifest_missing");
+    expect(finding?.severity).toBe("advisory");
+    expect(later.config.install?.consistent).toBe(true);
+    expect(later.config.install?.advisory).toBeNull();
+  }, 120_000);
+
+  it("says nothing when the repository names a manager this build does not install with", async () => {
     const repo = checkout("write-bare-uv", { "README.md": "# fixture\n" });
     await doctor(repo, { write: true });
 
-    // uv is detected, and refused where no manifest is pinned; a run on the
-    // pinned manifest skips the diagnostic and does not refuse it.
+    // uv is detected and answered as no manager is — nothing installed,
+    // `git status --porcelain` as the verification — which is what the pinned
+    // manifest already holds.
     writeFileSync(join(repo, "pyproject.toml"), '[project]\nname = "fixture"\n');
     writeFileSync(join(repo, "uv.lock"), "version = 1\n");
     git(repo, "add", "-A");
     git(repo, "commit", "-qm", "uv");
 
     const later = await reportedBy(repo);
-    expect(later.findings.map((finding) => finding.reason)).toContain(
-      "unsupported_package_manager",
-    );
-    const advisory = later.config.install?.advisory;
-    expect(advisory?.reason).toBe("install_outgrown");
-    expect(advisory?.detail).toContain("uv.lock now names uv, which this build does not support");
-    expect(advisory?.detail).toContain("does not refuse this repository");
+    const finding = later.findings.find((f) => f.reason === "unsupported_package_manager");
+    expect(finding?.severity).toBe("advisory");
+    expect(later.materializable).toBe(true);
+    expect(later.config.install?.consistent).toBe(true);
+    expect(later.config.install?.advisory).toBeNull();
   }, 120_000);
 });
 
@@ -630,6 +646,70 @@ describe("doctor on a repository whose configuration is already written", () => 
     const shown = await doctor(repo, { human: true });
     expect(shown.text).toContain("advisory  install_could_pin");
     expect(shown.code).toBe(0);
+  }, 120_000);
+
+  it("says the configuration could now verify once the package declares a test script", async () => {
+    // A package that declares no test script: the manifest written for it
+    // installs it and verifies with `git status --porcelain`.
+    const repo = repository("read-could-verify", {
+      packageManager: "pnpm@9.1.0",
+      scripts: { deploy: "wrangler deploy" },
+    });
+    commitLockfile(repo);
+    await doctor(repo, { write: true });
+    expect((await reportedBy(repo)).config.install?.advisory).toBeNull();
+
+    // The package then declares a suite.
+    writeFileSync(
+      join(repo, "package.json"),
+      json({
+        name: "fixture",
+        private: true,
+        packageManager: "pnpm@9.1.0",
+        scripts: { deploy: "wrangler deploy", test: "node --test" },
+      }),
+    );
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "test script");
+
+    const later = await reportedBy(repo);
+    // The install still matches; the verification is what the file predates.
+    expect(later.config.install?.consistent).toBe(true);
+    const advisory = later.config.install?.advisory;
+    expect(advisory?.reason).toBe("verify_outgrown");
+    expect(advisory?.detail).toContain("pnpm run test");
+    const shown = await doctor(repo, { human: true });
+    expect(shown.text).toContain("advisory  verify_outgrown");
+    expect(shown.code).toBe(0);
+  }, 120_000);
+
+  it("says in the same advisory that the install could pin, when both have moved", async () => {
+    // No test script and no lockfile when the manifest was written.
+    const repo = repository("read-both-moved", {
+      packageManager: "pnpm@9.1.0",
+      scripts: { deploy: "wrangler deploy" },
+    });
+    await doctor(repo, { write: true });
+
+    // Then a suite and a lockfile, in one commit.
+    writeFileSync(
+      join(repo, "package.json"),
+      json({
+        name: "fixture",
+        private: true,
+        packageManager: "pnpm@9.1.0",
+        scripts: { deploy: "wrangler deploy", test: "node --test" },
+      }),
+    );
+    writeFileSync(join(repo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "test script and lockfile");
+
+    const advisory = (await reportedBy(repo)).config.install?.advisory;
+    expect(advisory?.reason).toBe("verify_outgrown");
+    expect(advisory?.detail).toContain("pnpm run test");
+    // One advisory, and neither drift hidden behind the other.
+    expect(advisory?.detail).toContain(FROZEN.join(" "));
   }, 120_000);
 
   it("says nothing of an install a person set to none beside the repository's own verification", async () => {
@@ -835,17 +915,17 @@ const refusals = (report: DoctorReport): Refusal[] =>
     .filter((finding) => finding.severity === "refusal")
     .map((finding) => ({ reason: finding.reason, detail: finding.detail }));
 
-describe("a package whose workspace names a manager this build does not support", () => {
-  it("is refused naming the manager, exactly as that manager at a plain root is", async () => {
-    // uv: a manager this build knows of and does not support. The workspace
-    // declares it and the member is what the run was given.
+describe("a package whose workspace names a manager this build does not install with", () => {
+  it("is answered naming the manager, exactly as that manager at a plain root is", async () => {
+    // uv: a manager this build knows of and does not install with. The
+    // workspace declares it and the member is what the run was given.
     const workspace = checkout("uv-workspace", {
       "pyproject.toml": '[tool.uv.workspace]\nmembers = ["services/*"]\n',
       "uv.lock": "version = 1\n",
       "services/api/package.json": json({ name: "@fixture/api", scripts: MEMBER_SCRIPTS }),
       "services/api/src/index.ts": "export const version = 1;\n",
     });
-    // The same manager at a plain root: the refusal that already exists, and
+    // The same manager at a plain root: the answer that already exists, and
     // the one this has to match.
     const plain = checkout("uv-plain", {
       "uv.lock": "version = 1\n",
@@ -858,22 +938,34 @@ describe("a package whose workspace names a manager this build does not support"
     const memberReport = JSON.parse(member.text) as DoctorReport;
     const controlReport = JSON.parse(control.text) as DoctorReport;
 
-    // The same failure: the same exit status, the same refusal, nothing
-    // materializable about either.
+    // The same answer: the same exit status, no refusal, and both
+    // materializable with nothing installed.
     expect(member.code).toBe(control.code);
-    expect(member.code).toBe(1);
-    expect(memberReport.materializable).toBe(false);
-    expect(controlReport.materializable).toBe(false);
-    expect(refusals(memberReport).map((finding) => finding.reason)).toEqual(
-      refusals(controlReport).map((finding) => finding.reason),
-    );
-    expect(refusals(memberReport).map((finding) => finding.reason)).toEqual([
-      "unsupported_package_manager",
-    ]);
+    expect(member.code).toBe(0);
+    expect(refusals(memberReport)).toEqual([]);
+    expect(refusals(controlReport)).toEqual([]);
+    expect(memberReport.materializable).toBe(true);
+    expect(controlReport.materializable).toBe(true);
+    expect(memberReport.proposed?.install.command).toEqual(["true"]);
+    expect(controlReport.proposed?.install.command).toEqual(["true"]);
 
-    // And both name the manager, so the report says what was not supported
-    // rather than only that something was not.
-    expect(refusals(memberReport)[0]?.detail).toContain("uv");
-    expect(refusals(controlReport)[0]?.detail).toContain("uv");
+    // And both name the manager, so the report says what was not installed
+    // rather than only that nothing was.
+    const named = (report: DoctorReport) =>
+      report.findings.filter((finding) => finding.reason === "unsupported_package_manager");
+    expect(named(memberReport).map((finding) => finding.severity)).toEqual(["advisory"]);
+    expect(named(controlReport).map((finding) => finding.severity)).toEqual(["advisory"]);
+    expect(named(memberReport)[0]?.detail).toContain("uv");
+    expect(named(controlReport)[0]?.detail).toContain("uv");
+
+    // And the report a person reads names no install directory or filter for
+    // an install that installs nothing.
+    const shown = (await doctor(join(workspace, "services", "api"), { human: true })).text;
+    const workspaceLine = rootLines(shown).find((line) => line.startsWith("WORKSPACE"));
+    expect(workspaceLine).toContain("nothing is installed");
+    expect(workspaceLine).not.toContain("filtered to");
+    const installLine = shown.split("\n").find((line) => line.trimStart().startsWith("install "));
+    expect(installLine).toBeDefined();
+    expect(installLine).not.toContain("(in ");
   }, 120_000);
 });

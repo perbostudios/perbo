@@ -3,8 +3,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { EXIT_CODES, transition, type Ticket } from "@focrux/contracts";
-import { branchName } from "@focrux/workspace";
+import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
+import { branchName } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { derivedBranch, runSyncCommand } from "../src/sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.js";
@@ -12,7 +12,7 @@ import { makeAttempt } from "./attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * `focrux sync` brings a **stranded** ticket back.
+ * `perbo sync` brings a **stranded** ticket back.
  *
  * A run killed between opening the pull request and moving the ticket leaves the
  * ticket saying `executing` for ever, and until this there was no command that
@@ -26,7 +26,7 @@ import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
  * prove that a function this file also wrote was called.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-sync-reconcile-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-sync-reconcile-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const OUTCOME = "Search results are paginated.";
@@ -163,16 +163,16 @@ function stranded(
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-01T09:00:00.000Z");
 
-  let ticket = readTicket(dir, "FCX-1");
+  let ticket = readTicket(dir, "PRB-1");
   const route = ["provisioning", "executing", "verifying", "independent_review"] as const;
   for (const to of route.slice(0, route.indexOf(state as (typeof route)[number]) + 1)) {
     ticket = transition(ticket, to, "run started", at);
   }
   writeTicket(dir, ticket);
   const branch = branchName({
-    ticket_key: "FCX-1",
+    ticket_key: "PRB-1",
     ticket_id: ticket.ticket_id,
-    outcome: readContract(dir, "FCX-1").outcome,
+    outcome: readContract(dir, "PRB-1").outcome,
   });
 
   if (options.writeAttemptsFile !== false) {
@@ -204,10 +204,10 @@ function stranded(
   return { repo, dir, ticket, branch };
 }
 
-const ticketFile = (dir: string) => join(dir, "tickets", "FCX-1.json");
+const ticketFile = (dir: string) => join(dir, "tickets", "PRB-1.json");
 const NOW = new Date("2026-09-02T10:00:00.000Z");
 
-describe("focrux sync derives the stranded ticket's branch and asks gh about it once", () => {
+describe("perbo sync derives the stranded ticket's branch and asks gh about it once", () => {
   const states = ["provisioning", "executing", "verifying", "independent_review"] as const;
 
   for (const state of states) {
@@ -215,37 +215,37 @@ describe("focrux sync derives the stranded ticket's branch and asks gh about it 
       const { repo, dir, ticket, branch } = stranded(`derive-${state}`, state);
       const gh = fakeGh(`derive-${state}`, { stdout: ghAnswer("OPEN") });
 
-      // Independently of the naming function: `fcx/<ticket id>/<outcome slug>`.
+      // Independently of the naming function: `prb/<ticket id>/<outcome slug>`.
       const slug = "search-results-are-paginated";
-      expect(branch).toBe(`fcx/${ticket.ticket_id.replace("ticket_", "")}/${slug}`);
-      expect(readTicket(dir, "FCX-1").delivery.branch).toBeNull();
+      expect(branch).toBe(`prb/${ticket.ticket_id.replace("ticket_", "")}/${slug}`);
+      expect(readTicket(dir, "PRB-1").delivery.branch).toBeNull();
 
       await withGh(gh.bin, () =>
-        runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+        runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
       );
 
       const calls = gh.invocations();
       expect(calls).toHaveLength(1);
       expect(calls[0]?.slice(0, 3)).toEqual(["pr", "view", branch]);
       // And the branch it derived is now on the record it could not find one on.
-      expect(readTicket(dir, "FCX-1").delivery.branch).toBe(branch);
+      expect(readTicket(dir, "PRB-1").delivery.branch).toBe(branch);
     });
   }
 
   it("keeps the branch the attempts record names, whatever the ticket's key derives now", async () => {
-    // The branch the ticket's attempts were on: `ayo/`, which FCX-1 does not derive.
+    // The branch the ticket's attempts were on: `ayo/`, which PRB-1 does not derive.
     const onAyo = (ticket: Ticket) => `ayo/${ticket.ticket_id.replace("ticket_", "")}/search-results-are-paginated`;
     const { repo, dir, ticket } = stranded("recorded-ayo", "executing", undefined, { attemptsOn: onAyo });
     const gh = fakeGh("recorded-ayo", { stdout: ghAnswer("OPEN") });
 
     await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     const calls = gh.invocations();
     expect(calls).toHaveLength(1);
     expect(calls[0]?.slice(0, 3)).toEqual(["pr", "view", onAyo(ticket)]);
-    expect(readTicket(dir, "FCX-1").delivery.branch).toBe(onAyo(ticket));
+    expect(readTicket(dir, "PRB-1").delivery.branch).toBe(onAyo(ticket));
   });
 
   it("derives a new name only where nothing records one", async () => {
@@ -253,13 +253,13 @@ describe("focrux sync derives the stranded ticket's branch and asks gh about it 
     const gh = fakeGh("recorded-none", { stdout: ghAnswer("OPEN") });
 
     await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     expect(gh.invocations()[0]?.slice(0, 3)).toEqual([
       "pr",
       "view",
-      `fcx/${ticket.ticket_id.replace("ticket_", "")}/search-results-are-paginated`,
+      `prb/${ticket.ticket_id.replace("ticket_", "")}/search-results-are-paginated`,
     ]);
   });
 
@@ -267,8 +267,8 @@ describe("focrux sync derives the stranded ticket's branch and asks gh about it 
     const { dir, ticket } = stranded("recorded-delivery", "executing", [], { writeAttemptsFile: false });
     const recorded = `ayo/${ticket.ticket_id.replace("ticket_", "")}/search-results-are-paginated`;
     // With a branch on record, nothing has to be derived, so the contract is never read.
-    rmSync(join(dir, "tickets", "FCX-1.contract.json"));
-    expect(derivedBranch(dir, "FCX-1", { ...ticket, delivery: { ...ticket.delivery, branch: recorded } })).toBe(
+    rmSync(join(dir, "tickets", "PRB-1.contract.json"));
+    expect(derivedBranch(dir, "PRB-1", { ...ticket, delivery: { ...ticket.delivery, branch: recorded } })).toBe(
       recorded,
     );
   });
@@ -281,11 +281,11 @@ describe("what gh and the attempts record say decides where the ticket lands", (
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const ticket = readTicket(dir, "FCX-1");
+    const ticket = readTicket(dir, "PRB-1");
     expect(ticket.state).toBe("pr_open");
     expect(ticket.delivery).toMatchObject({ state: "open", pull_request_url: PR_URL, pull_request_number: 41 });
   });
@@ -295,11 +295,11 @@ describe("what gh and the attempts record say decides where the ticket lands", (
     const gh = fakeGh("evidence-closed", { stdout: ghAnswer("CLOSED") });
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const ticket = readTicket(dir, "FCX-1");
+    const ticket = readTicket(dir, "PRB-1");
     expect(ticket.state).toBe("changes_requested");
     expect(ticket.delivery.state).toBe("closed");
   });
@@ -316,12 +316,12 @@ describe("what gh and the attempts record say decides where the ticket lands", (
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.did_not_complete);
     expect(readFileSync(ticketFile(dir), "utf8")).toBe(before);
-    expect(readTicket(dir, "FCX-1").state).toBe("executing");
+    expect(readTicket(dir, "PRB-1").state).toBe("executing");
     expect(streams.err.join("")).toContain("found no pull request");
   });
 
@@ -330,10 +330,10 @@ describe("what gh and the attempts record say decides where the ticket lands", (
     const gh = fakeGh("evidence-merged", { stdout: ghAnswer("MERGED") });
 
     await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
-    const ticket = readTicket(dir, "FCX-1");
+    const ticket = readTicket(dir, "PRB-1");
     expect(ticket.state).toBe("merged");
     expect(ticket.history.map((entry) => entry.to)).toContain("pr_open");
   });
@@ -345,10 +345,10 @@ describe("the history a reconciliation writes says it is a reconciliation", () =
     const gh = fakeGh("provenance", { stdout: ghAnswer("OPEN") });
 
     await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     const written = after.history.slice(before.history.length);
     expect(written.map((entry) => entry.to)).toEqual([
       "executing",
@@ -358,7 +358,7 @@ describe("the history a reconciliation writes says it is a reconciliation", () =
     ]);
     for (const entry of written) {
       expect(entry.at).toBe(NOW.toISOString());
-      expect(entry.note).toContain("reconciled after the fact by `focrux sync`");
+      expect(entry.note).toContain("reconciled after the fact by `perbo sync`");
       expect(entry.note).toMatch(/from the attempts record|from `gh`/);
       // Nothing here was watched happening: the run that would have been
       // watched is the one that died and left the ticket stranded.
@@ -380,7 +380,7 @@ describe("sync refuses rather than inventing a history it cannot walk", () => {
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.did_not_complete);
@@ -398,7 +398,7 @@ describe("sync refuses rather than inventing a history it cannot walk", () => {
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.did_not_complete);

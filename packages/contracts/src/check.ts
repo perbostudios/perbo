@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CheckIdSchema } from "./ids.js";
+import { CheckIdSchema, NodeIdSchema, type NodeId } from "./ids.js";
 
 export const CHECK_KINDS = [
   "typecheck",
@@ -57,6 +57,33 @@ export const CheckRerunSchema = z.strictObject({
 });
 export type CheckRerun = z.infer<typeof CheckRerunSchema>;
 
+/**
+ * The node of an execution graph a result belongs to (D-107).
+ *
+ * A graphed ticket runs each pinned check once over the whole change and once
+ * per node. `scope` says which run this was: `files` narrowed it to `paths` —
+ * the changed test files inside the node's paths — and `task` ran the check's
+ * whole command over the change for that node because it could not be
+ * narrowed, with `note` saying why.
+ */
+export const CheckNodeSchema = z.discriminatedUnion("scope", [
+  z.strictObject({
+    node_id: NodeIdSchema,
+    scope: z.literal("files"),
+    /** Worktree-relative: the changed test files the run was narrowed to. */
+    paths: z.array(z.string().min(1)).min(1),
+    note: z.null().default(null),
+  }),
+  z.strictObject({
+    node_id: NodeIdSchema,
+    scope: z.literal("task"),
+    paths: z.array(z.string().min(1)).max(0).default([]),
+    /** Why the run could not be narrowed. */
+    note: z.string().min(1),
+  }),
+]);
+export type CheckNode = z.infer<typeof CheckNodeSchema>;
+
 export const CheckResultSchema = z.strictObject({
   check_id: CheckIdSchema,
   name: z.string().min(1),
@@ -76,7 +103,7 @@ export const CheckResultSchema = z.strictObject({
   source: z.enum(["file", "computed"]).default("file"),
   /**
    * Where the check came from: `configured` — the repository's own
-   * `.focrux/config.json` — or `proposed`, derived from the scripts
+   * `.perbo/config.json` — or `proposed`, derived from the scripts
    * `package.json` declares because that file does not exist yet (SCP-259).
    *
    * Absent means configured: a record written before the field existed parses
@@ -108,6 +135,11 @@ export const CheckResultSchema = z.strictObject({
    * that readable off the record instead of reproducible only by rerunning.
    */
   tmpdir: z.string().min(1).nullable().optional(),
+  /**
+   * The node this result was run for (D-107). Absent on a whole-change result,
+   * which is what every result on a flat plan is and what judges the change.
+   */
+  node: CheckNodeSchema.optional(),
 });
 export type CheckResult = z.infer<typeof CheckResultSchema>;
 
@@ -115,6 +147,28 @@ export const CheckResultsFileSchema = z.union([
   z.array(CheckResultSchema),
   z.strictObject({ checks: z.array(CheckResultSchema) }).transform((value) => value.checks),
 ]);
+
+/**
+ * The results that judge the change as a whole: every one run over the
+ * whole change.
+ *
+ * Everything that decides an outcome over the whole change — the overall
+ * review, the closure verification, the re-level and the desktop — reads
+ * this rather than the list; a node's own review reads `checksForNode`
+ * instead, and gates nothing on its own until that review does (D-107). A
+ * flat plan's list passes through unchanged, since nothing in it is tagged.
+ */
+export function wholeChangeChecks(checks: readonly CheckResult[]): CheckResult[] {
+  return checks.filter((check) => check.node === undefined);
+}
+
+/**
+ * The results that judge one node: every one run for that node (D-107), and
+ * nothing else — not the whole-change results, and not another node's.
+ */
+export function checksForNode(checks: readonly CheckResult[], nodeId: NodeId): CheckResult[] {
+  return checks.filter((check) => check.node?.node_id === nodeId);
+}
 
 export function checkPassed(check: CheckResult): boolean {
   return check.status === "passed";

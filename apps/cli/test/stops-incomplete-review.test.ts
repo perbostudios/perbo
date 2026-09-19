@@ -8,7 +8,7 @@ import {
   TicketSchema,
   type IncompleteReviewPath,
   type Ticket,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import type { Streams } from "../src/admit.js";
 import { runStopsCommand } from "../src/stops.js";
 import { writeTicket } from "../src/tickets.js";
@@ -25,7 +25,7 @@ import { writeTicket } from "../src/tickets.js";
  * escalations.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-incomplete-review-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-incomplete-review-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function capture(): Streams & { out: string[]; err: string[] } {
@@ -75,9 +75,9 @@ const fixtureTicket = (input: {
 describe("`stops` over a store holding both kinds of incomplete review", () => {
   it("prints an escalation that followed remediation apart from one that did not", async () => {
     const repo = join(scratch, "store");
-    mkdirSync(join(repo, ".focrux", "tickets"), { recursive: true });
-    mkdirSync(join(repo, ".focrux", "state"), { recursive: true });
-    const dir = join(repo, ".focrux");
+    mkdirSync(join(repo, ".perbo", "tickets"), { recursive: true });
+    mkdirSync(join(repo, ".perbo", "state"), { recursive: true });
+    const dir = join(repo, ".perbo");
     writeTicket(
       dir,
       fixtureTicket({
@@ -115,8 +115,8 @@ describe("`stops` over a store holding both kinds of incomplete review", () => {
 
   it("says nothing about incomplete reviews where the store holds none", async () => {
     const repo = join(scratch, "empty");
-    mkdirSync(join(repo, ".focrux", "tickets"), { recursive: true });
-    mkdirSync(join(repo, ".focrux", "state"), { recursive: true });
+    mkdirSync(join(repo, ".perbo", "tickets"), { recursive: true });
+    mkdirSync(join(repo, ".perbo", "state"), { recursive: true });
 
     const streams = capture();
     await runStopsCommand({ argv: ["--repo", repo], streams, cwd: process.cwd() });

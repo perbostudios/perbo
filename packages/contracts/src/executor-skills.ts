@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** The versioned catalogue shipped with Focrux (D-094). */
+/** The versioned catalogue shipped with Perbo (D-094). */
 export const EXECUTOR_SKILLS = [
   {
     id: "ask-matt",

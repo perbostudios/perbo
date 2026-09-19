@@ -72,13 +72,13 @@ const FIXTURE_ENTRIES = new Set(["fixture.json", "contract.json", "checks.json",
 // legitimate fixture content and must not trip the guard meant for this
 // repository's uppercase SCP-nnn ticket ids.
 const INTERNAL_REFERENCE_PATTERNS = [
-  { id: "product-name", label: "the product name", pattern: /focrux/i },
-  { id: "package-scope", label: "an @focrux/ package reference", pattern: /@focrux\// },
+  { id: "product-name", label: "the product name", pattern: /perbo/i },
+  { id: "package-scope", label: "an @perbo/ package reference", pattern: /@perbo\// },
   { id: "adr", label: "an ADR-nnnn reference", pattern: /\bADR-\d{4}\b/ },
   { id: "docs-nn", label: "a docs/NN reference", pattern: /\bdocs\/\d{2}\b/ },
   { id: "decision", label: "a D-0nn decision reference", pattern: /\bD-0\d{2}\b/ },
   { id: "ticket-scp", label: "an SCP-nnn ticket reference", pattern: /\bSCP-\d{3}\b/ },
-  { id: "ticket-ayo", label: "an AYO-n ticket reference", pattern: /\bAYO-\d+\b/ },
+  { id: "ticket-key", label: "a PRB-n or AYO-n ticket reference", pattern: /\b(?:PRB|AYO)-\d+\b/ },
   {
     id: "prompt-version",
     label: "a reviewer_v/executor_v prompt version",
@@ -271,7 +271,7 @@ function selfTest() {
     mkdirSync(fixtureDir, { recursive: true });
     const planted =
       "Planted by assemble-corpus.mjs --self-test, one of each pattern: " +
-      "Focrux, @focrux/reviewer, ADR-9999, docs/99, D-099, SCP-999, AYO-9, " +
+      "Perbo, @perbo/reviewer, ADR-9999, docs/99, D-099, SCP-999, PRB-9, " +
       "reviewer_v9, executor_v9, evidence-archive.local/ — all must be refused.";
     writeFileSync(
       join(fixtureDir, "fixture.json"),

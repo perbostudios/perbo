@@ -1,9 +1,11 @@
 name: Release
 
-# The install channel D-046 names: one tarball, a SHA-256 beside it, and build
-# provenance attested by CI — attached to a draft release on this repository,
-# which the founder verifies and publishes. Nothing here reaches an installed copy: there is no auto-update
-# (D-046), so a newer version is a new tarball and a message.
+# The install channel for a design partner until the public release replaces
+# it (D-116): one private tarball, a SHA-256 beside it, and build
+# provenance attested by CI — attached to a draft release, which only the
+# repository's maintainers see and the founder verifies and hands over out of
+# band. Nothing here reaches an installed copy: a newer version is a new tarball
+# and a message.
 
 on:
   push:
@@ -48,7 +50,7 @@ jobs:
         run: pnpm exec turbo run build typecheck test lint
 
       # The tag (or the dispatch input) and the CLI's own manifest must agree:
-      # `focrux --version` reads the manifest, and the archive is named after it.
+      # `perbo --version` reads the manifest, and the archive is named after it.
       - name: Resolve the version
         id: version
         env:
@@ -71,11 +73,11 @@ jobs:
 
       # The archive's contents in the log, and a refusal before anything is
       # attested or attached if the runner's write-guard hook is not among
-      # them: without it an installed `focrux run` stops at its first tool call.
+      # them: without it an installed `perbo run` stops at its first tool call.
       - name: List the tarball and check it carries the write-guard hook
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: node tooling/package/verify-tarball.mjs "release/focrux-$VERSION.tgz"
+        run: node tooling/package/verify-tarball.mjs "release/perbo-$VERSION.tgz"
 
       # Build provenance (D-046): an attestation binding the tarball's digest to
       # this workflow, this commit and this run. It is stored with the repository,
@@ -86,11 +88,11 @@ jobs:
       # step runs only when the repository is public. Skipping it, rather than
       # letting it fail, keeps a genuine attestation failure loud once it can
       # run. Until then the signed tag and the published SHA-256 are the
-      # provenance (D-046).
+      # provenance.
       - if: ${{ !github.event.repository.private }}
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: release/focrux-${{ steps.version.outputs.version }}.tgz
+          subject-path: release/perbo-${{ steps.version.outputs.version }}.tgz
 
       # A draft: the release exists for the founder to download, verify and hand
       # over, and nothing is announced. One draft per version — a second run for
@@ -104,4 +106,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
           TARGET: ${{ github.event_name == 'workflow_dispatch' && github.sha || '' }}
-        run: node tooling/package/draft-release.mjs "$VERSION" "release/focrux-$VERSION.tgz" "$TARGET"
+        run: node tooling/package/draft-release.mjs "$VERSION" "release/perbo-$VERSION.tgz" "$TARGET"

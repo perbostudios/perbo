@@ -2,19 +2,22 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
-import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@focrux/contracts";
+import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
+import { PERBO_AGENT_ROLES, type AgentRole } from "./agents.js";
 
 export const CODEX_EXECUTOR_ARGV = [
   "-c",
-  "agents.enabled=false",
+  "agents.enabled=true",
   "-c",
   'model_provider="openai"',
   "-c",
@@ -23,15 +26,68 @@ export const CODEX_EXECUTOR_ARGV = [
   'chatgpt_base_url="https://chatgpt.com/backend-api"',
   "app-server",
 ] as const;
+
+/**
+ * One role's `$CODEX_HOME/agents/<name>.toml` (D-106, AC2): `name`,
+ * `description` and `developer_instructions` as TOML basic strings, which is
+ * the shape 0.145.0 loads with no warning (scp327-research/notes/design.md).
+ * A basic string may hold no control character unescaped, so every one is
+ * escaped — the seven TOML spells by letter, the rest by code point — and a
+ * role's text can never split, end or corrupt the value that carries it.
+ * `tools` carries no Codex-side equivalent — `AgentRoleToml` has no per-role
+ * tool allowlist field — so it is left out; the ticket's scope guard is what
+ * bounds a write on this transport, the same as it is on Claude's.
+ */
+function roleToml(name: string, role: Pick<AgentRole, "description" | "prompt">): string {
+  const lettered: Record<string, string> = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\f": "\\f",
+    "\r": "\\r",
+  };
+  const escaped = (char: string): string =>
+    lettered[char] ??
+    (char < " " || char === "\u007f"
+      ? `\\u${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`
+      : char);
+  const string = (value: string): string => `"${[...value].map(escaped).join("")}"`;
+  return (
+    `name = ${string(name)}\n` +
+    `description = ${string(role.description)}\n` +
+    `developer_instructions = ${string(role.prompt)}\n`
+  );
+}
+
+/**
+ * Writes Perbo's roles into the isolated `CODEX_HOME`, one file under
+ * `agents/` per role (D-106, AC2). This is the only role directory 0.145.0
+ * reads, and the runner's `home` is a fresh, disposable temporary directory
+ * on every attempt, so there is no built-in role set to displace and no
+ * personal or repository definition this attempt can ever reach.
+ */
+export function writeAgentRoleFiles(
+  home: string,
+  roles: Readonly<Record<string, Pick<AgentRole, "description" | "prompt">>> = PERBO_AGENT_ROLES,
+): void {
+  const dir = join(home, "agents");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  for (const [name, role] of Object.entries(roles))
+    writeFileSync(join(dir, `${name}.toml`), roleToml(name, role), { mode: 0o600 });
+}
 const UsageSchema = z.object({
   inputTokens: z.number().min(0),
   cachedInputTokens: z.number().min(0),
   outputTokens: z.number().min(0),
 });
-type Usage = z.infer<typeof UsageSchema>;
+export type Usage = z.infer<typeof UsageSchema>;
 const ParamsSchema = z
   .object({
     turnId: z.string().optional(),
+    /** D-106: which thread this notification is about — the wire carries it on every one (ADR-0038). */
+    threadId: z.string().optional(),
     item: z
       .object({ type: z.string(), text: z.string().optional() })
       .passthrough()
@@ -52,6 +108,14 @@ const ParamsSchema = z
     toModel: z.string().optional(),
   })
   .passthrough();
+/**
+ * What `thread/inject_items` answers with: a result the runner reads nothing
+ * out of. An error reply already rejects in {@link CodexExecutorSession.request},
+ * so what is left to check is that the app-server answered with a result at
+ * all rather than with something of another shape.
+ */
+const InjectItemsResultSchema = z.object({}).passthrough().nullish();
+
 interface TurnState {
   text: string | null;
   status: string | null;
@@ -80,8 +144,9 @@ export class CodexExecutorSession {
   private eventBuffer = "";
   private eventBytes = 0;
   private eventDecoder = new StringDecoder("utf8");
-  private readonly onUsage: (usage: Usage) => void;
-  private readonly timeout: ReturnType<typeof setTimeout>;
+  /** D-106: `thread/tokenUsage/updated` is cumulative per thread, so every call names the thread it is for. */
+  private readonly onUsage: (threadId: string, usage: Usage) => void;
+  private readonly timeout: ReturnType<typeof setTimeout> | null;
   private readonly onEvent: (method: string, params: unknown) => void;
   private readonly approve: (method: string, params: unknown) => boolean;
   private readonly worktree: string;
@@ -93,15 +158,20 @@ export class CodexExecutorSession {
   constructor(options: {
     binary: string;
     env: NodeJS.ProcessEnv;
-    timeoutMs: number;
-    onUsage: (usage: Usage) => void;
+    /**
+     * A hard deadline on the whole session, where the repository set a wall
+     * clock. Null is the default (D-096): nothing bounds how long a Codex
+     * attempt runs, and the adapter's stall detector is what ends a hang.
+     */
+    timeoutMs: number | null;
+    onUsage: (threadId: string, usage: Usage) => void;
     worktree: string;
     onEvent: (method: string, params: unknown) => void;
     approve: (method: string, params: unknown) => boolean;
     codexHome?: string;
   }) {
-    this.home = mkdtempSync(join(tmpdir(), "focrux-codex-home-"));
-    this.cwd = mkdtempSync(join(tmpdir(), "focrux-codex-session-"));
+    this.home = mkdtempSync(join(tmpdir(), "perbo-codex-home-"));
+    this.cwd = mkdtempSync(join(tmpdir(), "perbo-codex-session-"));
     chmodSync(this.home, 0o700);
     const auth = join(
       options.codexHome ?? process.env.CODEX_HOME ?? join(homedir(), ".codex"),
@@ -115,16 +185,17 @@ export class CodexExecutorSession {
       );
     }
     symlinkSync(auth, join(this.home, "auth.json"));
+    writeAgentRoleFiles(this.home);
     const { env } = scrubEnvironment({
       base: options.env,
       // These values were assigned by buildAgentEnvironment for this attempt.
       // Keep its isolation contract while excluding host/provider overrides.
       allow: [
         ...DEFAULT_ENV_ALLOW_LIST,
-        "FOCRUX_WORKTREE",
-        "FOCRUX_PORT_START",
-        "FOCRUX_PORT_END",
-        "FOCRUX_DB_SCHEMA",
+        "PERBO_WORKTREE",
+        "PERBO_PORT_START",
+        "PERBO_PORT_END",
+        "PERBO_DB_SCHEMA",
         "CI",
       ],
       extra: { CODEX_HOME: this.home },
@@ -160,10 +231,13 @@ export class CodexExecutorSession {
           ),
         );
     });
-    this.timeout = setTimeout(
-      () => this.close(new Error("Codex executor session timed out")),
-      options.timeoutMs,
-    );
+    this.timeout =
+      options.timeoutMs === null
+        ? null
+        : setTimeout(
+            () => this.close(new Error("Codex executor session timed out")),
+            options.timeoutMs,
+          );
   }
   private capture(chunk: Buffer): void {
     let offset = 0;
@@ -252,7 +326,7 @@ export class CodexExecutorSession {
       if (!parsed.success) return;
       const params = parsed.data;
       if (message.method === "thread/tokenUsage/updated" && params.tokenUsage)
-        this.onUsage(params.tokenUsage.total);
+        this.onUsage(params.threadId ?? "", params.tokenUsage.total);
       if (message.method === "model/rerouted")
         this.rerouted = params.toModel ?? "unknown";
       const id = params.turnId ?? params.turn?.id ?? this.activeTurnId;
@@ -297,7 +371,7 @@ export class CodexExecutorSession {
   }
   async start(model: string, instructions: string): Promise<string> {
     await this.request("initialize", {
-      clientInfo: { name: "focrux_executor", version: "0.1.0" },
+      clientInfo: { name: "perbo_executor", version: "0.1.0" },
       capabilities: { experimentalApi: true, requestAttestation: false },
     });
     this.child.stdin.write(
@@ -347,6 +421,38 @@ export class CodexExecutorSession {
       );
     return started.thread.id;
   }
+  /**
+   * Put text into a thread's context (D-096).
+   *
+   * What this carries is the attempt's own brief and a state block composed
+   * from its records — never anything the transport suggested, and never
+   * anything a model returned. The thread is the one the `contextCompaction`
+   * item completed on, which is how a child thread gets its own brief back
+   * (ADR-0038).
+   */
+  async injectItems(threadId: string, text: string): Promise<void> {
+    InjectItemsResultSchema.parse(
+      await this.request("thread/inject_items", {
+        threadId,
+        items: [{ type: "text", text }],
+      }),
+    );
+  }
+  /**
+   * A child thread's own role, so a command it runs can be recorded against
+   * it (D-106, Q7): `subAgentActivity` names the thread but not its role, and
+   * no `thread/started` notification announces a child (ADR-0038's live
+   * test), so this is the one way to learn it. Null where Codex reports none.
+   */
+  async threadRead(threadId: string): Promise<string | null> {
+    const response = z
+      .object({
+        thread: z.object({ agentRole: z.string().nullable().optional() }).passthrough(),
+      })
+      .passthrough()
+      .parse(await this.request("thread/read", { threadId }));
+    return response.thread.agentRole ?? null;
+  }
   async turn(threadId: string, model: string, prompt: string): Promise<string> {
     const response = z
       .object({ turn: z.object({ id: z.string() }).passthrough() })
@@ -384,7 +490,7 @@ export class CodexExecutorSession {
   close(error = new Error("Codex session closed")): void {
     if (this.closed) return;
     this.closed = true;
-    clearTimeout(this.timeout);
+    if (this.timeout) clearTimeout(this.timeout);
     this.fail(error);
     this.child.stdin.end();
     if (this.child.pid) {

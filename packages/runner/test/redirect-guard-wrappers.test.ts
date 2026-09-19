@@ -26,7 +26,7 @@ import { UNKNOWN_CWD, inspectCommandWithCwd } from "../src/prohibited.js";
 /** AYO-31's first command, as the executor sent it. Its 23rd, and the attempt died on it. */
 const AYO31 = "ls node_modules/.bin | head && pnpm -v && node -v";
 
-const root = mkdtempSync(join(tmpdir(), "focrux-scp186-"));
+const root = mkdtempSync(join(tmpdir(), "perbo-scp186-"));
 mkdirSync(join(root, "sub"), { recursive: true });
 
 /** Every directory the executor's shell could be standing in when the line runs. */

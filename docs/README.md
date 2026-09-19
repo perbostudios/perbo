@@ -4,7 +4,7 @@ Start with the [README](../README.md). This index finds the document that answer
 
 | If you want to know | Read |
 |---|---|
-| What Focrux is, and what it is not | [00 — product thesis](00-product-thesis.md) |
+| What Perbo is, and what it is not | [00 — product thesis](00-product-thesis.md) |
 | How it is built | [02 — system architecture](02-system-architecture.md), [05 — components](05-component-specifications.md), [07 — repository layout and release](07-monorepo-and-deployment.md) |
 | How a ticket, a contract and a review work | [04 — ticket, workspace and review](04-ticket-workspace-and-review.md), [03 — domain and records](03-domain-and-event-model.md) |
 | How large work will be planned | [planning mode and execution graphs](planning-mode-and-execution-graphs.md) |

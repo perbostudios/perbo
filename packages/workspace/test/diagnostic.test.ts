@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { diagnose, enclosingWorkspaceRoot } from "../src/diagnostic.js";
 import { makeRepo } from "./support.js";
 
-const scratch = () => mkdtempSync(join(tmpdir(), "focrux-nest-"));
+const scratch = () => mkdtempSync(join(tmpdir(), "perbo-nest-"));
 
 /** A directory tree `a/b/c` under `root`, returning the deepest directory. */
 function nest(root: string): string {
@@ -117,20 +117,21 @@ describe("diagnose with a worktree root", () => {
   });
 
   it("still refuses a repository whose own failure is real, alongside the advisory", async () => {
-    const repo = makeRepo();
-    writeFileSync(join(repo.dir, "package.json"), JSON.stringify({ name: "x" }));
+    // A checkout that is not there, which no environment can make present:
+    // the refusal holds wherever the temporary directory sits.
+    const dir = join(scratch(), "gone");
     const workspace = scratch();
     writeFileSync(join(workspace, "pnpm-workspace.yaml"), "packages: []\n");
 
     const result = await diagnose({
-      checkout: repo.dir,
+      checkout: dir,
       repository_id: "repo_fixture",
       worktree_root: join(workspace, "worktrees"),
     });
 
     expect(result.findings.map((f) => f.reason).sort()).toEqual([
       "nested_package_manager_workspace",
-      "no_verification_command",
+      "source_checkout_missing",
     ]);
     expect(result.materializable).toBe(false);
   });

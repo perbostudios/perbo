@@ -1,5 +1,5 @@
-import type { Finding, ReviewArtifact } from "@focrux/contracts";
-import { redactReviewArtifact } from "@focrux/review";
+import type { Finding, ReviewArtifact } from "@perbo/contracts";
+import { redactReviewArtifact } from "@perbo/review";
 import type { Fixture } from "./fixture.js";
 import { wilson } from "./metrics.js";
 import type { CorpusSummary, MetricSummary } from "./summarise.js";

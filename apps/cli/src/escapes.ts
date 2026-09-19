@@ -16,7 +16,7 @@ import {
   type ObservedHead,
   type TicketCommit,
   type TicketEscapes,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { UsageError } from "./args.js";
 import type { Streams } from "./admit.js";
 import { baselinePath } from "./baseline.js";
@@ -34,11 +34,11 @@ import {
 import { listChanges, storeDir, type SyncedChange } from "./tickets.js";
 
 /**
- * `focrux escapes` — of the changes that merged, how many were undone or
+ * `perbo escapes` — of the changes that merged, how many were undone or
  * reworked within fourteen days (`SCP-145`).
  *
  * Two halves, deliberately split. The **collection** half runs under
- * `focrux sync`: local `git` and `gh`, writing
+ * `perbo sync`: local `git` and `gh`, writing
  * `<store>/state/<ticket_id>.escapes.json` whole every time. The **reporting**
  * half is this command, and it reads nothing but those files and the tickets
  * beside them — no network, no `gh`, no `git`. A weekly read that needs a
@@ -90,7 +90,7 @@ export function parseEscapesArgs(argv: readonly string[]): EscapesArgs {
 }
 
 /* ------------------------------------------------------------------ *
- * Collection: local `git` and `gh`, under `focrux sync`.
+ * Collection: local `git` and `gh`, under `perbo sync`.
  * ------------------------------------------------------------------ */
 
 /** A command runner, so a test can drive real `git` over a real fixture history. */
@@ -526,7 +526,7 @@ const shortSha = (sha: string): string => sha.slice(0, 7);
 const day = (at: string | null): string => (at === null ? "—" : at.slice(0, 10));
 
 /**
- * The escape rate's rows, in the shape `focrux stops` prints its two in.
+ * The escape rate's rows, in the shape `perbo stops` prints its two in.
  *
  * The `n` cell carries two counts and never their sum: how many changes have
  * had their own fourteen days, and how many have not yet. Adding them would
@@ -612,11 +612,11 @@ export function renderEscapeRows(rows: readonly EscapeRow[], now: Date): string 
       // the command that extends it are named.
       lines.push(
         `    watched only to ${source.observed_through ?? "no time recorded"}, fell due ` +
-          `${dueAt(source) ?? "—"}: \`focrux sync ${source.ticket_key}\``,
+          `${dueAt(source) ?? "—"}: \`perbo sync ${source.ticket_key}\``,
       );
     }
     if (reading === "not observed") {
-      lines.push(`    no history read yet: \`focrux sync ${source.ticket_key}\``);
+      lines.push(`    no history read yet: \`perbo sync ${source.ticket_key}\``);
     }
   }
   return lines.join("\n");
@@ -676,7 +676,7 @@ export async function runEscapesCommand(input: {
     `${renderMetricTable([METRIC_TABLE_HEADER, ...stopsRows(stops), ...escapesRows(escapes, due)])}\n`,
   );
   // Precision of stopping is a partner reading wherever it is printed, and this
-  // command prints it in the same rows `focrux stops` does (D-058). What the
+  // command prints it in the same rows `perbo stops` does (D-058). What the
   // dogfood label cannot promise travels with it here for the same reason it
   // does there: a number quoted out of this table is quoted as a partner's.
   if (stops.precision.n > 0 || stops.dogfood_stops > 0) {
@@ -685,13 +685,13 @@ export async function runEscapesCommand(input: {
   input.streams.stdout(rows.length === 0 ? "\nno merged tickets yet\n" : `\n${renderEscapeRows(rows, now)}\n`);
   // The stops half of the table above counts the decisions taken here beside
   // the ones ticked on a pull request, so who took each is printed here too,
-  // in the one shape `focrux stops` prints it in.
+  // in the one shape `perbo stops` prints it in.
   const decided = renderDecisions(decisions);
   if (decided !== null) input.streams.stdout(`\n${decided}\n`);
   if (escapes.not_observed > 0) {
     input.streams.stderr(
       `${escapes.not_observed} merged ticket(s) have no escapes record in ${join(dir, "state")}: ` +
-        "`focrux sync <KEY>` reads the history after the merge through git and gh; this command " +
+        "`perbo sync <KEY>` reads the history after the merge through git and gh; this command " +
         "never does.\n",
     );
   }
@@ -701,7 +701,7 @@ export async function runEscapesCommand(input: {
     input.streams.stderr(
       `${escapes.stale} merged ticket(s) have a record that stops short of their ${ESCAPE_WINDOW_DAYS}-day ` +
         "window — synced while it was still open, or from a checkout behind the default branch — and " +
-        "are out of the rate until `focrux sync <KEY>` reads the rest.\n",
+        "are out of the rate until `perbo sync <KEY>` reads the rest.\n",
     );
   }
   return EXIT_CODES.approve;

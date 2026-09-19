@@ -18,8 +18,8 @@ import {
   type RunBundle,
   type RunBundleKind,
   type StopVerdicts,
-} from "@focrux/contracts";
-import { BundleStore, parseStopAnswers, pullRequestBody } from "@focrux/runner";
+} from "@perbo/contracts";
+import { BundleStore, parseStopAnswers, pullRequestBody } from "@perbo/runner";
 import { UsageError } from "../src/args.js";
 import { runEscapesCommand } from "../src/escapes.js";
 import { runInspectCommand } from "../src/inspect.js";
@@ -29,7 +29,7 @@ import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "./attempt-fixt
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * `focrux verdict` (SCP-181): a person answers a review here instead of on the
+ * `perbo verdict` (SCP-181): a person answers a review here instead of on the
  * pull request, and the answer is the same answer.
  *
  * Every test in this file runs against a store built the way the loop builds
@@ -64,7 +64,7 @@ vi.stubGlobal("fetch", () => {
   throw new Error("refused: recording a verdict asked the network");
 });
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-verdict-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-verdict-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const TICKET_ID = "ticket_verdict0001";
@@ -190,7 +190,7 @@ function tick(text: string, key: string, answer: "endorse" | "override"): string
     .join("\n");
 }
 
-/** The stops record `focrux sync` writes from a body, through the real parser. */
+/** The stops record `perbo sync` writes from a body, through the real parser. */
 function stopsRecordFor(text: string, at: string): StopVerdicts {
   return reconcileStopVerdicts({
     previous: null,
@@ -204,14 +204,14 @@ function stopsRecordFor(text: string, at: string): StopVerdicts {
 /**
  * A store as the loop leaves one: the ticket, its attempt, the bundles holding
  * the review artifact, and — when `pullRequest` is given — the stops record
- * `focrux sync` would have written from that body.
+ * `perbo sync` would have written from that body.
  */
 function storeWith(name: string, options: { pullRequest?: string; bundles?: boolean } = {}): {
   repo: string;
   store: string;
 } {
   const repo = join(scratch, name);
-  const store = join(repo, ".focrux");
+  const store = join(repo, ".perbo");
   mkdirSync(join(store, "tickets"), { recursive: true });
   mkdirSync(join(store, "state"), { recursive: true });
   writeFileSync(
@@ -270,7 +270,7 @@ function storeWith(name: string, options: { pullRequest?: string; bundles?: bool
 const readVerdicts = (store: string) =>
   LocalVerdictsSchema.parse(JSON.parse(readFileSync(join(store, "verdicts.json"), "utf8")));
 
-describe("focrux verdict records the decision locally", () => {
+describe("perbo verdict records the decision locally", () => {
   it("writes one row carrying the review, the key, the decision, who, when and the note", async () => {
     const { repo, store } = storeWith("records");
     const streams = capture();
@@ -823,7 +823,7 @@ describe("SCP-189: a decline resolves from the attempts record alone once the re
    */
   function storeWithPrunedDecline(name: string, includeRoutingEvidence = true): { repo: string; store: string } {
     const repo = join(scratch, name);
-    const store = join(repo, ".focrux");
+    const store = join(repo, ".perbo");
     mkdirSync(join(store, "tickets"), { recursive: true });
     mkdirSync(join(store, "state"), { recursive: true });
     writeFileSync(
@@ -965,7 +965,7 @@ describe("SCP-189: a decline resolves from the attempts record alone once the re
 }, SPAWN_TEST_TIMEOUT_MS);
 
 /**
- * `focrux verdict --list <change>`: the record read back.
+ * `perbo verdict --list <change>`: the record read back.
  *
  * The command that takes a decision is only half of what a person needs from
  * this file — the other half is "what have we already decided about this", and
@@ -974,7 +974,7 @@ describe("SCP-189: a decline resolves from the attempts record alone once the re
  * `verdicts.json` by hand. This prints the decisions themselves: what was
  * decided, who decided it as far as the record can say, and when.
  */
-describe("focrux verdict --list reads back what was decided about a change", () => {
+describe("perbo verdict --list reads back what was decided about a change", () => {
   /** Prose naming a group: not a name and an address, so no pair is recorded. */
   const A_TEAM = "the platform team";
 
@@ -1069,11 +1069,11 @@ describe("focrux verdict --list reads back what was decided about a change", () 
 }, SPAWN_TEST_TIMEOUT_MS);
 
 /**
- * `focrux verdict --stand-in`: the command line's half of D-058's label.
+ * `perbo verdict --stand-in`: the command line's half of D-058's label.
  *
  * A stop becomes dogfood two ways, and this is the one that needs no pull
  * request: the AI acting as the founder's partner takes a decision here and
- * says so, the row carries who answered, and every partner number `focrux
+ * says so, the row carries who answered, and every partner number `perbo
  * stops` prints is read without it. The flag has to be typed — an answer taken
  * here says nothing about who took it unless somebody says it, and the silent
  * reading is "a person", which is what every row written before the flag
@@ -1082,8 +1082,8 @@ describe("focrux verdict --list reads back what was decided about a change", () 
  * What is asserted below is the record on disk and the numbers the reading
  * prints from it, over stores this file builds the way the loop builds one.
  */
-describe("focrux verdict --stand-in labels the answer dogfood", () => {
-  const STAND_IN = "Focrux stand-in <stand-in@example.invalid>";
+describe("perbo verdict --stand-in labels the answer dogfood", () => {
+  const STAND_IN = "Perbo stand-in <stand-in@example.invalid>";
 
   const answer = (repo: string, argv: readonly string[], author: string) =>
     runVerdictCommand({
@@ -1146,7 +1146,7 @@ describe("focrux verdict --stand-in labels the answer dogfood", () => {
   it("keeps the stand-in's decision out of the partner reading, and a person's in it", async () => {
     // The same store, the same key, the same decision, one flag apart. The
     // pull request lists all three stops with nothing ticked, so the record
-    // the decision lands on is one `focrux sync` wrote.
+    // the decision lands on is one `perbo sync` wrote.
     const { repo: byStandIn } = storeWith("stand-in-excluded", { pullRequest: body() });
     const { repo: byPerson } = storeWith("stand-in-counted", { pullRequest: body() });
     expect(await answer(byStandIn, ["AYO-7", "--endorse", STOP_ONE!, "--stand-in"], STAND_IN)).toBe(0);

@@ -7,18 +7,28 @@ import {
   invocationShapeHash,
   type AgentInvocation,
   type AttemptCostBasis,
+  type BriefReinjection,
   type CommandRecord,
   type NeutralisationRecord,
   type PermissionProfile,
   type TerminationReason,
-} from "@focrux/contracts";
-import { MODEL_ID, costMicros as providerListCostMicros } from "@focrux/review";
+} from "@perbo/contracts";
+import { MODEL_ID, costMicros as providerListCostMicros } from "@perbo/review";
 import {
   DEFAULT_SUSPEND_INTERVAL_MS,
   DEFAULT_SUSPEND_THRESHOLD_MS,
   SuspendDetector,
-} from "@focrux/workspace";
+} from "@perbo/workspace";
 import { ADMISSION_RULES, judgeCommand } from "./admission.js";
+import {
+  agentsFlagValue,
+  PERBO_AGENT_ROLE_NAMES,
+  PERBO_AGENT_ROLES,
+  isSubagentTool,
+  judgeSubagentStart,
+  subagentRoleOf,
+} from "./agents.js";
+import { readReinjections, type BriefRecords } from "./brief.js";
 import type { AttemptCeilings, CeilingBreach } from "./ceilings.js";
 import { EgressLog } from "./egress.js";
 import {
@@ -53,12 +63,17 @@ import { describeTransportFailure, transportExhaustion } from "./transport.js";
  * |---|---|
  * | `--setting-sources user` | project `settings.json` and `.mcp.json` are not read (ADR-0030 req 1), and subscription login survives, which `--bare` does not (D-009) |
  * | `--strict-mcp-config --mcp-config {}` | no tool server from any source, which is threat 18 |
- * | `--settings <the attempt's guard file>` | the runner's own `PreToolUse` hook, and no other hook from any source, which is threat 17 |
+ * | `--settings <the attempt's settings file>` | the runner's own two hooks — the write guard before a tool, the brief again after a compaction — and no hook from any other source, which is threat 17 |
  * | `--disable-slash-commands` | every skill, measured off with this flag alone |
  * | `CLAUDE_CODE_DISABLE_CLAUDE_MDS`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY` | instruction files and the auto-memory directory |
  * | `--permission-mode manual` + allow/deny lists | the command allow-list, enforced rather than requested |
- * | `--max-budget-usd` | a ceiling the agent cannot spend past even if the runner's counter lags |
+ * | `--agents <roles>` | the subagent roles Perbo defines, and the only ones the guard admits a call to `Agent` (or `Task`) for (D-106) |
  * | `--no-session-persistence` | no transcript left in the user's session store |
+ *
+ * `--max-budget-usd` is not among them. The flag is chosen before the executor
+ * has said what it authenticated with, and D-096 keeps a cost cap only where
+ * it is billed per token, so the runner's own counter is the cap: it reads the
+ * charge the transport reports on each event and stops at the first past it.
  *
  * ## Why `--safe-mode` is no longer among them (SCP-177)
  *
@@ -71,10 +86,11 @@ import { describeTransportFailure, transportExhaustion } from "./transport.js";
  *
  * What the flag closed is closed by name instead, and what it closed that the
  * named flags do not is user-scoped rather than repository-supplied: plugin
- * subagents on the user's own machine, which `--tools` and the `Task` deny-list
- * put out of reach anyway. Measured against a worktree committing a hostile
- * `.claude/settings.json` hook, a `.mcp.json`, a `.claude/agents/` entry and a
- * `CLAUDE.md`: none of the four loaded. The probes are in `docs/08`.
+ * subagents on the user's own machine, which the write guard refuses by name
+ * when the executor tries to start one (D-106). Measured against a worktree
+ * committing a hostile `.claude/settings.json` hook, a `.mcp.json`, a
+ * `.claude/agents/` entry and a `CLAUDE.md`: none of the four loaded. The
+ * probes are in `docs/08`.
  *
  * And three flags that are **never** passed: `--add-dir` loads skills from an
  * added directory even under `--bare`; `--plugin-dir` and `--plugin-url` are
@@ -114,6 +130,13 @@ export interface AgentRequest {
   worktree: string;
   /** Built from the plan. No repository content reaches it. */
   prompt: string;
+  /**
+   * The round's records, from which the state block of a re-injected brief is
+   * composed after a compaction (D-096). The recorded brief is `prompt`
+   * itself. Omitted, no brief is recorded for the attempt and a compaction
+   * gets nothing back.
+   */
+  brief_records?: BriefRecords;
   model: string;
   profile: PermissionProfile;
   ceilings: AttemptCeilings;
@@ -126,6 +149,17 @@ export interface AgentRequest {
    * contract to hand gets.
    */
   paths_allowed?: readonly string[];
+  /**
+   * The paths the approved contract prohibits a write to (D-105). They reach
+   * both readings from here beside the globs above, and are judged before them:
+   * a prohibited path inside the admitted ones is refused all the same.
+   */
+  paths_prohibited?: readonly string[];
+  /**
+   * Where this repository keeps its specs, from `.perbo/config.json` (D-103).
+   * Prohibited whatever the contract says, beside the default `specs/`.
+   */
+  spec_folder?: string | null;
   tools?: readonly string[];
   onProgress?: (message: string) => void;
   /** Redacts a line against the attempt's materialized secrets before recording it. */
@@ -192,6 +226,12 @@ export interface AgentResult {
   final_message: string | null;
   /** Raw stream-json lines, redacted. The bundle decides whether to retain them. */
   transcript: string[];
+  /**
+   * Every time this attempt's brief went back after a compaction (D-096), as
+   * the mechanism that carried it recorded them. Absent where the adapter
+   * records none.
+   */
+  reinjections?: BriefReinjection[];
 }
 
 export class AgentConfigurationPresentError extends Error {
@@ -210,12 +250,11 @@ export function buildArgv(request: {
   prompt: string;
   model: string;
   profile: PermissionProfile;
-  costLimitMicros: number;
   tools?: readonly string[];
   /**
-   * The attempt's guard settings file: the runner's `PreToolUse` hook and
-   * nothing else (SCP-177). It is the only settings source the invocation
-   * names, so it is also what keeps every other hook out.
+   * The attempt's own settings file: the runner's two hooks and nothing else
+   * (SCP-177, D-096). It is the only settings source the invocation names, so
+   * it is also what keeps every other hook out.
    */
   settingsPath: string;
 }): { argv: string[]; promptIndexes: number[] } {
@@ -244,8 +283,12 @@ export function buildArgv(request: {
     request.profile.command_deny_list.join(","),
     "--model",
     request.model,
-    "--max-budget-usd",
-    (request.costLimitMicros / 1_000_000).toFixed(2),
+    // The roles the executor may start a subagent from (D-106). Passing them
+    // is half the enforcement: the guard's hook refuses a `subagent_type`
+    // outside this set, so a definition from the repository or from the
+    // person's own machine cannot be started even where Claude Code offers it.
+    "--agents",
+    agentsFlagValue(PERBO_AGENT_ROLES),
     "--no-session-persistence",
   ];
   return { argv, promptIndexes: [1] };
@@ -441,11 +484,12 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
   const scratch = prepareScratchDirectory(request.worktree);
 
   /**
-   * The write guard, installed before the process starts (SCP-177).
+   * The write guard, installed before the process starts (SCP-177), and the
+   * brief a compaction gets back beside it (D-096).
    *
-   * Its settings file is the only one the invocation names, so the same
-   * argument that installs the runner's hook is what keeps every other hook
-   * out. Its state directory is outside the worktree, which is what makes it
+   * Their settings file is the only one the invocation names, so the same
+   * argument that installs the runner's two hooks is what keeps every other
+   * hook out. Its state directory is outside the worktree, which is what makes it
    * unwritable by the executor: a write to it is a write outside the root, and
    * refusing those is what the guard does.
    */
@@ -457,7 +501,15 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
           tmpdir: scratch,
           profile: request.profile,
           paths_allowed: request.paths_allowed ?? [],
+          paths_prohibited: request.paths_prohibited ?? [],
+          ...(request.spec_folder ? { spec_folder: request.spec_folder } : {}),
           ...(request.hookProgram ? { hookProgram: request.hookProgram } : {}),
+          // D-096: the round's brief, where the settings file installs the
+          // hook that gives it back. The direct-agent arm below installs no
+          // hook of the runner's, so it records none either.
+          ...(request.brief_records
+            ? { brief: { text: request.prompt, records: request.brief_records } }
+            : {}),
         })
       : prepareUnguardedSettings();
 
@@ -466,7 +518,6 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
     prompt: request.prompt,
     model: request.model,
     profile: request.profile,
-    costLimitMicros: request.ceilings.costLimitMicros,
     settingsPath: guard.settingsPath,
     ...(request.tools ? { tools: request.tools } : {}),
   });
@@ -496,7 +547,18 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
    * component under a plain file, or one under a directory this process may not
    * read — and refusing marks the directory unknown.
    */
-  let shell: ShellCwd = { path: request.worktree, unknown: false, relative: "." };
+  const START: ShellCwd = { path: request.worktree, unknown: false, relative: "." };
+  /**
+   * One per agent, because each of them has its own Bash session (D-106).
+   * Keyed by the id of the subagent-starting call, which is unique per
+   * subagent where its role is not, and by the empty string for the
+   * executor's own session. A shared entry would judge one agent's relative
+   * path from another's directory and raise a prohibited-action hit against a
+   * write that never left the worktree.
+   */
+  const shells = new Map<string, ShellCwd>();
+  const shellKeyOf = (event: Record<string, unknown>): string =>
+    typeof event.parent_tool_use_id === "string" ? event.parent_tool_use_id : "";
 
   const fingerprint = binaryFingerprint(request.binary);
   const egress = new EgressLog(request.profile.network_allow_list);
@@ -540,6 +602,28 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
   const recordOfToolUse = new Map<string, number>();
   const reconciled = new Set<string>();
   /**
+   * The role each subagent was started from, by the id of the subagent-starting
+   * call that started it — named `Agent`, or `Task` under its former name (D-106).
+   *
+   * A subagent's `assistant` and `user` events carry `parent_tool_use_id`, the
+   * id of that call (ADR-0038) — so the stream says which agent made a tool
+   * call, but only by way of the call that started it. The role comes from the
+   * block's own `subagent_type`, which the runner reads as it goes past.
+   */
+  const roleOfTask = new Map<string, string>();
+  /**
+   * Which agent an event belongs to: the role for a subagent's, and null for
+   * the top-level session's. A `parent_tool_use_id` the runner never saw the
+   * starting block for is still not the session — the id itself says a
+   * subagent made it, so it is named by that id rather than recorded as the
+   * executor's.
+   */
+  const agentOf = (event: Record<string, unknown>): string | null => {
+    const parent = event.parent_tool_use_id;
+    if (typeof parent !== "string" || parent.length === 0) return null;
+    return roleOfTask.get(parent) ?? parent;
+  };
+  /**
    * Prohibited actions read out of a `tool_use` block, held until the guard's
    * answer for that call is known (SCP-177).
    *
@@ -558,6 +642,8 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
   const pendingHits: Array<{ hit: ProhibitedHit; at: string; toolUseId: string | undefined }> = [];
   const prohibited: Array<ProhibitedHit & { at: string }> = [];
   const transcript: string[] = [];
+  /** D-096: filled from the hook's own file as the guard directory is retired. */
+  const reinjections: BriefReinjection[] = [];
 
   let reported: NeutralisationRecord["reported"] = {
     mcp_servers: [],
@@ -739,6 +825,9 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
           cwd: decision.cwd,
           decided_by: "pre_execution_hook",
           second_reading: "the runner never read this call's tool_use block",
+          // The hook is handed the role directly, so a call whose block the
+          // stream never carried is still named.
+          agent: decision.agent,
           at: decision.at,
         });
         continue;
@@ -815,6 +904,12 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
      * for a write the guard had just refused.
      */
     if (type === "user" || type === "assistant") settlePendingHits();
+    /**
+     * A tool result, which is the second half of the tool activity the stall
+     * detector watches for (D-096). The executor's prompt arrives as argv, so
+     * every `user` event on this stream is a tool answering.
+     */
+    if (type === "user") request.ceilings.noteToolActivity();
     // A child can flush several stream lines in one stdout chunk before the
     // stop signal lands. Continue reading their audit evidence, as before, but
     // freeze accounting at the event that tripped the stop.
@@ -854,6 +949,9 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
           : typeof event.apiKeySource === "string"
             ? "user_api_key"
             : "unknown";
+      // D-096: the cost caps bind from here, or stop binding, according to what
+      // the executor authenticated with.
+      request.ceilings.useCredential(credentialClass);
       progress(
         `agent ready: ${reported.mcp_servers.length} tool servers, ` +
           `${reported.skills.length} skills, credential ${credentialClass}`,
@@ -891,26 +989,48 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         noteProviderListEstimate();
       }
 
+      // Which agent this turn belongs to (D-106): it names the turn's tool
+      // calls, decides whether the turn's words are the executor's own, and
+      // keys the shell that agent's `cd` chain moves.
+      const agent = agentOf(event);
+      const shellKey = shellKeyOf(event);
+
       /**
        * The model's own words on this turn, kept so the last of them survives
        * the run (D-092). Only `text` blocks: a tool result echoing repository
        * content is not the executor speaking, and the account is read from
        * what the executor said.
+       *
+       * And only the top-level session's (D-106): a subagent's closing summary
+       * is not the executor's account, and taking it would brief the ticket's
+       * next round with a child's words as its predecessor's. A child's turn
+       * is the last text on the stream whenever the executor ends on a tool
+       * call rather than on words, so this is not only the cut attempt's case.
        */
       const spoken = (message.content ?? [])
         .filter((block) => block.type === "text" && typeof block.text === "string")
         .map((block) => block.text as string)
         .join("\n")
         .trim();
-      if (spoken.length > 0) finalMessage = redact(spoken);
+      if (agent === null && spoken.length > 0) finalMessage = redact(spoken);
 
       for (const block of message.content ?? []) {
         if (block.type !== "tool_use" || typeof block.name !== "string") continue;
         const detail = redact(describeTool(block.name, block.input));
+        // The role this call starts a subagent from, so the child's own calls
+        // can be named by it when they arrive carrying this call's id.
+        if (isSubagentTool(block.name) && typeof block.id === "string") {
+          const role = subagentRoleOf(block.input);
+          if (role !== null) roleOfTask.set(block.id, role);
+        }
+        request.ceilings.noteToolActivity();
         breach(request.ceilings.noteCommand());
         // Only `Bash` runs in the shell the `cd` chain moved. A file tool takes
-        // an absolute path and is judged from the root, as it always was.
+        // an absolute path and is judged from the root, as it always was. Read
+        // per block rather than per turn: two Bash calls in one message move
+        // the same shell one after the other.
         const shellCommand = block.name === "Bash";
+        const shell = shells.get(shellKey) ?? START;
         const { admission, inspection } = judgeCommand({
           tool: block.name,
           detail,
@@ -920,6 +1040,8 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
             root: request.worktree,
             tmpdir: scratch,
             paths_allowed: request.paths_allowed ?? [],
+            paths_prohibited: request.paths_prohibited ?? [],
+            spec_folder: request.spec_folder ?? null,
             ...(shellCommand
               ? { cwd: shell.unknown ? UNKNOWN_CWD : (shell.path ?? request.worktree) }
               : {}),
@@ -936,7 +1058,44 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
           root: request.worktree,
           tmpdir: scratch,
           paths_allowed: request.paths_allowed ?? [],
+          paths_prohibited: request.paths_prohibited ?? [],
+          spec_folder: request.spec_folder ?? null,
         }).map((hit) => ({ ...hit, detail: redact(hit.detail) }));
+        /**
+         * The second reading of a subagent-starting call (D-106 criterion 1).
+         *
+         * The hook refuses a role outside Perbo's set, and a call a subagent
+         * made whatever role it names, before either one starts; and
+         * `settlePendingHits` drops this hit for every call it answered. What
+         * is left is a call nothing judged before it ran: a subagent from a
+         * definition the approved plan never saw, or a generation below the
+         * one it approved — either way the executor widening its own
+         * permissions.
+         *
+         * A hit rather than a `denied` record, because the call is not one the
+         * runner refused — it happened. Saying otherwise would write `denied`
+         * against a subagent that read the repository, which is the AYO-13
+         * mistake in the other direction.
+         */
+        const startedOutside = isSubagentTool(block.name)
+          ? judgeSubagentStart(block.name, block.input, PERBO_AGENT_ROLE_NAMES, agent)
+          : null;
+        const startedOutsideRoles: ProhibitedHit[] =
+          startedOutside === null || startedOutside.decision === "allowed"
+            ? []
+            : [
+                {
+                  action: "enable_own_tooling",
+                  detail: redact(
+                    startedOutside.rule === ADMISSION_RULES.subagent_nesting
+                      ? `${agent ?? "a subagent"} started ` +
+                        `${subagentRoleOf(block.input) ?? "a subagent"}, and a subagent may not ` +
+                        "start one"
+                      : `the executor started ${subagentRoleOf(block.input) ?? "a subagent"}, ` +
+                        "which is not a role Perbo defines",
+                  ),
+                },
+              ];
         decided(block.name, detail, commands.length);
         if (typeof block.id === "string") recordOfToolUse.set(block.id, commands.length);
         commands.push({
@@ -950,14 +1109,17 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
           cwd: shellCommand ? shell.relative : null,
           decided_by: "transcript_reading",
           second_reading: null,
+          agent,
           at: at.toISOString(),
         });
-        if (shellCommand) shell = inspection.cwd;
+        if (shellCommand) shells.set(shellKey, inspection.cwd);
         // SCP-228: under the agent's own permissions the runner keeps no
         // prohibited-action list — the arm's `git push` and `gh pr create` are
         // its work, not an escape from an attempt's scope. The command is still
         // recorded above; what is dropped is the runner's veto over it.
-        for (const hit of supervision === "runner_guard" ? [...targets, ...inspection.hits] : []) {
+        for (const hit of supervision === "runner_guard"
+          ? [...targets, ...inspection.hits, ...startedOutsideRoles]
+          : []) {
           pendingHits.push({
             hit,
             at: at.toISOString(),
@@ -1036,6 +1198,9 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
           cwd: null,
           decided_by: "agent_permission_layer",
           second_reading: null,
+          // The result envelope names the tool and its input and no agent, so
+          // a refusal the runner learns of only from it cannot be named.
+          agent: null,
           at: at.toISOString(),
         });
       }
@@ -1115,6 +1280,8 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
   } finally {
     process.removeListener("SIGTERM", cancel);
     process.removeListener("SIGINT", cancel);
+    // D-096: what the hook recorded, read while the directory is still there.
+    reinjections.push(...readReinjections(guard.directory));
     // The decisions carry unredacted targets, and the directory is outside the
     // worktree, so nothing else will ever collect it — including on the throw
     // that a binary which could not be spawned raises.
@@ -1136,7 +1303,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
       suppressed_at_invocation: [
         "--setting-sources user",
         "--strict-mcp-config --mcp-config {}",
-        "--settings <the attempt's write-guard hook, and no other hook>",
+        "--settings <the attempt's own two hooks, and no hook from anywhere else>",
         "--disable-slash-commands",
         `env: ${Object.keys(CUSTOMIZATION_CLOSURES).join(", ")}`,
         `never passed: ${FORBIDDEN_FLAGS.join(", ")}`,
@@ -1168,5 +1335,6 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
     termination,
     final_message: finalMessage,
     transcript,
+    reinjections,
   };
 }

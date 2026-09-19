@@ -8,7 +8,7 @@ A tempting architecture gives agents roles, such as a planner, a manager or an o
 
 ## Decision
 
-Focrux is typed records and deterministic processes over them. Models perform bounded functions (drafting, executing, reviewing, verifying) and hold no authority because of a role. Ordering and scheduling are computed from records ([ADR-0036](0036-queue.md)), never decided by an overseer agent.
+Perbo is typed records and deterministic processes over them. Models perform bounded functions (drafting, executing, reviewing, verifying) and hold no authority because of a role. Ordering and scheduling are computed from records ([ADR-0036](0036-queue.md)), never decided by an overseer agent.
 
 ## Consequences
 

@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LimitsTableSchema, type ReviewArtifact } from "@focrux/contracts";
+import { LimitsTableSchema, type ReviewArtifact } from "@perbo/contracts";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
@@ -68,7 +68,7 @@ const agentDouble = () => {
 };
 
 function makeConfig(repositoryRoot: string) {
-  const root = scratch("focrux-incomplete-");
+  const root = scratch("perbo-incomplete-");
   return TicketRunConfigSchema.parse({
     ticket_key: "SCP232",
     repository_root: repositoryRoot,

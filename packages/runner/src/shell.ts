@@ -1,6 +1,6 @@
 import { lstatSync, readlinkSync } from "node:fs";
-import { dirname, sep } from "node:path";
-import { insideAllowedPaths } from "@focrux/contracts";
+import { dirname, posix } from "node:path";
+import { insideAllowedPaths, matchesAny, standingProhibitedPaths } from "@perbo/contracts";
 
 /**
  * Where an attempt may write, and how a shell command line is read to find out.
@@ -52,9 +52,36 @@ export interface WorktreeScope {
    * leave bytes, not about what it may look at.
    */
   paths_allowed?: readonly string[];
+  /**
+   * The paths the approved contract prohibits a write to, relative to the root
+   * (D-105). Judged before the globs above, so a path inside the allowed ones
+   * is refused all the same. Absent or empty prohibits nothing.
+   */
+  paths_prohibited?: readonly string[];
+  /**
+   * Where this repository keeps its specs, from `.perbo/config.json` (D-103).
+   * Its folder is prohibited whatever the contract says, together with the
+   * default `specs/`, which {@link resolveScope} adds for every scope.
+   */
+  spec_folder?: string | null;
+  /**
+   * Whether this caller may write the spec folders above. False for an
+   * attempt, whose contract was drafted from the spec it would be rewriting
+   * (D-103). The interview writes them, and is the one caller that states
+   * true (D-102); what bounds it there is `paths_allowed`.
+   */
+  spec_folder_writable?: boolean;
+  /**
+   * How to read a separator. Defaults to this host, and is named explicitly
+   * only by a test, which has to be able to state the semantics it means
+   * rather than inherit whichever machine it happens to run on.
+   */
+  semantics?: PathSemantics;
 }
 
 export interface ResolvedScope {
+  /** How this scope reads a separator (see {@link PathSemantics}). */
+  semantics: PathSemantics;
   /** Null when the caller named no root, which is the conservative mode below. */
   root: string | null;
   base: string | null;
@@ -69,6 +96,8 @@ export interface ResolvedScope {
    * and `**` alike.
    */
   paths_allowed: readonly string[];
+  /** The contract's prohibited paths. Empty where it named none (D-105). */
+  paths_prohibited: readonly string[];
 }
 
 export interface WriteFinding {
@@ -86,7 +115,8 @@ export interface WriteFinding {
    * Which refusal this is. Absent is `write_outside_worktree`, which is every
    * finding the resolver could not place and every one it placed outside the
    * root; `write_outside_scope` is a destination inside the root that the
-   * contract's globs do not admit (SCP-195).
+   * contract's globs do not admit (SCP-195); `write_prohibited_path` is one the
+   * contract prohibits by name, wherever the globs put it (D-105).
    */
   rule?: WriteRule;
   /**
@@ -96,8 +126,11 @@ export interface WriteFinding {
   cause?: WriteCause;
 }
 
-/** The two refusals a resolved destination can earn. */
-export type WriteRule = "write_outside_worktree" | "write_outside_scope";
+/** The three refusals a resolved destination can earn. */
+export type WriteRule =
+  | "write_outside_worktree"
+  | "write_outside_scope"
+  | "write_prohibited_path";
 
 /**
  * What a write finding actually shows (SCP-234).
@@ -119,6 +152,21 @@ export type WriteCause = "outside_target" | "unreadable_program";
 export function allowedPathsSentence(globs: readonly string[]): string {
   const quoted = globs.map((glob) => `\`${glob}\``).join(", ");
   return `writes are admitted only under: ${quoted} — anything else is refused before it happens`;
+}
+
+/**
+ * The same pairing for the paths a write is prohibited under (D-105): one
+ * sentence the guard refuses in and the executor's brief states the
+ * prohibition in, so the two cannot describe different boundaries. The list is
+ * what the contract named and the standing spec folder beside it (D-103), so
+ * the sentence names the boundary rather than where each glob came from.
+ */
+export function prohibitedPathsSentence(globs: readonly string[]): string {
+  const quoted = globs.map((glob) => `\`${glob}\``).join(", ");
+  return (
+    `writes are prohibited under: ${quoted} — refused before they happen, ` +
+    "inside the admitted globs as much as outside them"
+  );
 }
 
 /** One command of a line, as the reading of that line found it. */
@@ -203,9 +251,140 @@ type Destination =
    * recognise as a file it may not write.
    */
   | { kind: "outside_scope"; resolved: string; at: string; allowed: readonly string[] }
+  /**
+   * Inside the worktree and named by the contract's `paths_prohibited` (D-105).
+   * Its own kind rather than a flavour of the one above because the two ask a
+   * person for opposite things: one is a path the contract has to be revised to
+   * reach, the other a path the contract already decided is not to be touched.
+   */
+  | { kind: "prohibited_path"; resolved: string; at: string; prohibited: readonly string[] }
   | { kind: "unresolvable"; reason: string };
 
 /* ------------------------------------------------------------------ paths */
+
+/**
+ * Whether this resolver reads paths the way Windows does. Carried rather than
+ * assumed, so the semantics are a property of the run and a test can state
+ * which one it means on any host.
+ */
+export type PathSemantics = "windows" | "posix";
+
+const HOST_SEMANTICS: PathSemantics = process.platform === "win32" ? "windows" : "posix";
+
+/**
+ * A backslash is a separator on Windows and an ordinary filename character on
+ * POSIX, so which it is cannot be decided by looking at the path.
+ *
+ * Converting unconditionally is a hole rather than a convenience: on POSIX a
+ * single-quoted `'tests\support\color.js'` is one top-level file whose name
+ * contains backslashes, and normalising it to `tests/support/color.js` matches
+ * `tests/**` and admits a write the shell then performs somewhere the contract
+ * never admitted. The guard would be judging a destination that does not exist.
+ * So the conversion happens only where the host actually spells paths that way.
+ *
+ * Under Windows semantics the resolver holds one alphabet — `/` — which is the
+ * alphabet a contract glob is written in, so nothing downstream moves:
+ * `globToRegExp`, the globs themselves and the seal are untouched.
+ */
+function normalise(path: string, semantics: PathSemantics): string {
+  return semantics === "windows" ? path.replaceAll("\\", "/") : path;
+}
+
+/**
+ * A path as a comparison under these semantics sees it.
+ *
+ * Windows resolves a name without its case: `c:/users/A` and `C:/Users/a` are
+ * one directory there, so the root, the scratch directory and the contract's
+ * globs are compared folded — a case-variant of a prohibited path is the
+ * prohibited file, and must be refused as one. POSIX keeps case, so nothing is
+ * folded there.
+ *
+ * Only A–Z are folded here. That keeps a path's length, so a prefix a
+ * comparison finds is the prefix to slice off the original. A name that differs
+ * from the root, the scratch directory or an allowed glob only in another
+ * letter's case therefore does not match it, and is refused. The prohibited
+ * globs are compared through {@link prohibitedComparable} instead, where the
+ * same doubt also refuses.
+ */
+function comparable(path: string, semantics: PathSemantics): string {
+  return semantics === "windows" ? path.replace(/[A-Z]/g, (letter) => letter.toLowerCase()) : path;
+}
+
+/**
+ * A path as the prohibited comparison sees it. Windows compares names through
+ * their uppercase, one character for one, in every script and not only A–Z, so
+ * under Windows semantics each character becomes its uppercase here: `ſecrets`
+ * compares as `SECRETS`, as `secrets` does, and a final `ς` as a `σ` does. A
+ * character whose uppercase is longer than itself (`ß` is `SS`) stays as it is,
+ * as Windows leaves it. One for one keeps a name's length, which a `?` counts,
+ * and no character's fold depends on its neighbours, so — the globs having no
+ * character classes — a path an exact match would refuse is refused here too.
+ */
+function prohibitedComparable(path: string, semantics: PathSemantics): string {
+  if (semantics !== "windows") return path;
+  let folded = "";
+  for (const character of path) {
+    const upper = character.toUpperCase();
+    folded += upper.length === character.length ? upper : character;
+  }
+  return folded;
+}
+
+/**
+ * Whether a path names a drive with no root after it — `C:foo`, `C:` — under
+ * Windows semantics. Windows resolves one against that drive's own current
+ * directory, which this guard does not follow, so it is refused rather than
+ * read from the drive's root.
+ */
+function driveRelative(path: string, semantics: PathSemantics): boolean {
+  return semantics === "windows" && /^[A-Za-z]:(?!\/)/.test(path);
+}
+
+const DRIVE_RELATIVE =
+  "a drive with no root after it, which Windows resolves against that drive's own current directory";
+
+/**
+ * The first component of a repository-relative path that Windows may read as
+ * another name, or null. Windows drops trailing dots and spaces from the last
+ * name in a path and a trailing dot from a directory on the way, so `key.pem.`
+ * is `key.pem` and `specs.\auth` is `specs\auth`; a colon names a stream, and
+ * `key.pem::$DATA` is `key.pem` itself and `secrets::$INDEX_ALLOCATION` is the
+ * directory `secrets`; and a short 8.3 name such as `CREDEN~1` can stand for
+ * `credentials`. None of these can be matched against a glob as written, so
+ * under Windows semantics a component ending in a dot or a space, carrying a
+ * colon, or shaped like a short name is refused wherever it is. A name that
+ * contains `~` and a digit but is too long for an 8.3 name is not one.
+ */
+function windowsAlias(at: string, semantics: PathSemantics): string | null {
+  if (semantics !== "windows") return null;
+  const shortName = (part: string) => {
+    const [base = "", extension = "", ...rest] = part.split(".");
+    return rest.length === 0 && base.length <= 8 && extension.length <= 3 && /~\d/.test(base);
+  };
+  return at.split("/").find((part) => /[. ]$/.test(part) || part.includes(":") || shortName(part)) ?? null;
+}
+
+/**
+ * What a path is rooted at, or null where it is relative: `""` for a POSIX
+ * absolute path and `"C:"` for a drive-qualified Windows one. A drive with no
+ * root after it reads as anchored here, so where no root is named it is refused
+ * as outside; the walk refuses it before any anchor is used ({@link driveRelative}).
+ *
+ * A drive letter is the part a separator test cannot see. `C:\worktree` begins
+ * with no separator under either alphabet, so a test for one reads every
+ * absolute Windows path as relative and joins it onto the base — which is a
+ * destination that does not exist, judged against globs it cannot match.
+ *
+ * A drive is an anchor only under Windows semantics: on POSIX `C:` is a
+ * perfectly ordinary directory name and a path starting with it is relative.
+ */
+function anchorOf(path: string, semantics: PathSemantics): string | null {
+  if (semantics === "windows") {
+    const drive = /^[A-Za-z]:/.exec(path);
+    if (drive) return drive[0];
+  }
+  return path.startsWith("/") ? "" : null;
+}
 
 /**
  * Resolve a path the way the kernel does: component by component from the
@@ -215,16 +394,30 @@ type Destination =
  * component that does not exist is kept verbatim, and a link whose target does
  * not exist resolves to that target, which is where the write would land.
  */
-function walkPath(base: string, target: string, depth = 0): Resolved {
+function walkPath(base: string, target: string, semantics: PathSemantics, depth = 0): Resolved {
   if (depth > 32) return { ok: false, reason: "a symlink chain too long to follow" };
-  let current = target.startsWith(sep) ? sep : base;
-  for (const part of target.split(sep)) {
+  const path = normalise(target, semantics);
+  if (driveRelative(path, semantics)) return { ok: false, reason: DRIVE_RELATIVE };
+  const anchor = anchorOf(path, semantics);
+  // Where a climb stops: the target's own root, or, for a relative target, the
+  // root of the base it is walked from.
+  const root = anchor ?? anchorOf(normalise(base, semantics), semantics) ?? "";
+  // Held without its trailing separator, so joining a component is always
+  // `current + "/" + part`: a base of `/` (which is what a relative symlink
+  // target directly under the root is re-walked from) would otherwise join to
+  // `//private`, and a drive base of `C:/` to `C://Users`.
+  let current = (anchor ?? normalise(base, semantics)).replace(/\/$/, "");
+  for (const part of path.slice(anchor?.length ?? 0).split("/")) {
     if (part === "" || part === ".") continue;
     if (part === "..") {
-      current = dirname(current);
+      // A root is its own parent: climbing out of `/` or out of `C:` leaves the
+      // path where it was rather than inventing a segment above the anchor. The
+      // path is held in `/` whatever the host, so POSIX's `dirname` reads it.
+      const up = posix.dirname(current);
+      current = up === "/" || up === "." || up === current ? root : up;
       continue;
     }
-    const next = current === sep ? `${sep}${part}` : `${current}${sep}${part}`;
+    const next = `${current}/${part}`;
     let entry;
     try {
       entry = lstatSync(next, { throwIfNoEntry: false });
@@ -241,7 +434,7 @@ function walkPath(base: string, target: string, depth = 0): Resolved {
     } catch {
       return { ok: false, reason: `the symlink ${next} cannot be read` };
     }
-    const followed = walkPath(dirname(next), link, depth + 1);
+    const followed = walkPath(posix.dirname(next), link, semantics, depth + 1);
     if (!followed.ok) return followed;
     current = followed.path;
   }
@@ -260,38 +453,63 @@ function allowedGlobs(globs: readonly string[] | undefined): readonly string[] {
 }
 
 export function resolveScope(scope?: WorktreeScope): ResolvedScope {
+  const semantics = scope?.semantics ?? HOST_SEMANTICS;
   if (scope === undefined) {
     return {
+      semantics,
       root: null,
       base: null,
       baseUnknown: false,
       home: process.env.HOME,
       tmpdir: null,
       paths_allowed: [],
+      paths_prohibited: standingProhibitedPaths(),
     };
   }
   const home = scope.home ?? process.env.HOME;
   const paths_allowed = allowedGlobs(scope.paths_allowed);
+  // Not flattened the way the allowed globs are: `**` there means everything is
+  // admitted and the list can be emptied, and `**` here means the opposite.
+  //
+  // The spec folder joins whatever the contract named (D-103): a spec is the
+  // intent the contract was drafted from, so an attempt that edited one would
+  // be rewriting the statement it is judged against. It is standing rather than
+  // contractual so it holds for a ticket admitted before the folder existed and
+  // for a run with no ticket behind it. The interview is the caller that writes
+  // the spec, and the only one that states the folders writable (D-102).
+  const standing = scope.spec_folder_writable === true ? [] : standingProhibitedPaths(scope.spec_folder);
+  const paths_prohibited = [...new Set([...(scope.paths_prohibited ?? []), ...standing])];
   // Resolved the same way the root is, so a scratch directory reached through a
   // symlinked prefix is compared against the root in the same spelling.
-  const scratch = scope.tmpdir === undefined ? null : walkPath(sep, scope.tmpdir);
+  const scratch = scope.tmpdir === undefined ? null : walkPath("/", scope.tmpdir, semantics);
   const tmpdir = scratch !== null && scratch.ok ? scratch.path : null;
-  const root = walkPath(sep, scope.root);
+  const root = walkPath("/", scope.root, semantics);
   if (!root.ok) {
-    return { root: null, base: null, baseUnknown: false, home, tmpdir, paths_allowed };
+    return {
+      semantics,
+      root: null,
+      base: null,
+      baseUnknown: false,
+      home,
+      tmpdir,
+      paths_allowed,
+      paths_prohibited,
+    };
   }
   // An unknown directory keeps the root as its path, which nothing reads: a
   // relative target is refused before the path is consulted, and an absolute
   // one does not need it.
   const unknown = scope.cwd === UNKNOWN_CWD;
-  const base = scope.cwd === undefined || unknown ? root : walkPath(sep, scope.cwd);
+  const base = scope.cwd === undefined || unknown ? root : walkPath("/", scope.cwd, semantics);
   return {
+    semantics,
     root: root.path,
     base: base.ok ? base.path : root.path,
     baseUnknown: unknown,
     home,
     tmpdir,
     paths_allowed,
+    paths_prohibited,
   };
 }
 
@@ -357,13 +575,13 @@ function judgeTarget(target: string, scope: ResolvedScope, cwd: Cwd, shell: bool
   if (path.length === 0) return { kind: "unresolvable", reason: "the operator has no target" };
   if (DEVICE_TARGET.test(path)) return { kind: "inside", resolved: path };
 
-  const relative = !path.startsWith(sep);
+  const relative = anchorOf(normalise(path, scope.semantics), scope.semantics) === null;
   if (scope.root === null) {
     // With no root named, only a relative target that never climbs above its
     // own starting point can be shown to stay inside one.
     if (!relative) return { kind: "outside", resolved: path };
     let depth = 0;
-    for (const part of path.split(sep)) {
+    for (const part of normalise(path, scope.semantics).split("/")) {
       if (part === "" || part === ".") continue;
       depth += part === ".." ? -1 : 1;
       if (depth < 0) return { kind: "outside", resolved: path };
@@ -377,41 +595,61 @@ function judgeTarget(target: string, scope: ResolvedScope, cwd: Cwd, shell: bool
     };
   }
 
-  const walked = walkPath(cwd.path ?? scope.root, path);
+  const walked = walkPath(cwd.path ?? scope.root, path, scope.semantics);
   if (!walked.ok) return { kind: "unresolvable", reason: walked.reason };
   // `/dev/stdout` is a symlink to `/dev/fd/1` on some hosts, so the resolved
   // spelling is checked as well as the written one.
   if (DEVICE_TARGET.test(walked.path)) return { kind: "inside", resolved: walked.path };
-  const root = scope.root.endsWith(sep) ? scope.root.slice(0, -1) : scope.root;
-  const inside = walked.path === root || walked.path.startsWith(`${root}${sep}`);
+  const root = scope.root.endsWith("/") ? scope.root.slice(0, -1) : scope.root;
+  const fold = (value: string) => comparable(value, scope.semantics);
+  const inside = fold(walked.path) === fold(root) || fold(walked.path).startsWith(`${fold(root)}/`);
   if (!inside) return { kind: "outside", resolved: walked.path };
-  const at = withinScope(walked.path, root, scope);
-  return at === null
-    ? { kind: "inside", resolved: walked.path }
-    : { kind: "outside_scope", resolved: walked.path, at, allowed: scope.paths_allowed };
+  const at = repositoryRelative(walked.path, root, scope);
+  if (at === null) return { kind: "inside", resolved: walked.path };
+  const alias = windowsAlias(at, scope.semantics);
+  if (alias !== null) {
+    return { kind: "unresolvable", reason: `Windows may read \`${alias}\` as another name` };
+  }
+  // Prohibited first, so a path that is both prohibited and unadmitted is
+  // refused as prohibited (D-105). The other order would tell the reader to
+  // widen the contract to reach a path the contract forbids.
+  const prohibitedFold = (value: string) => prohibitedComparable(value, scope.semantics);
+  if (matchesAny(prohibitedFold(at), scope.paths_prohibited.map(prohibitedFold))) {
+    return {
+      kind: "prohibited_path",
+      resolved: walked.path,
+      at,
+      prohibited: scope.paths_prohibited,
+    };
+  }
+  if (scope.paths_allowed.length === 0 || insideAllowedPaths(fold(at), scope.paths_allowed.map(fold))) {
+    return { kind: "inside", resolved: walked.path };
+  }
+  return { kind: "outside_scope", resolved: walked.path, at, allowed: scope.paths_allowed };
 }
 
 /**
- * A destination the worktree holds but the contract does not admit a write to,
- * as the path relative to the root — or null where it is admitted (SCP-195).
+ * A destination inside the worktree as the path relative to the root — the
+ * spelling the contract, the change set and the review all use — or null where
+ * the contract's paths have nothing to say about it.
  *
- * Two things inside the root are never judged by the globs. The scratch
- * directory is the runner's own: it is excluded from every list the seal
- * builds, so no contract names it and nothing written there can be a scope
- * escape. And the root itself is not a repository-relative path at all; there
- * is nothing for a glob to match.
+ * Two things inside the root are never judged by them. The scratch directory is
+ * the runner's own: it is excluded from every list the seal builds, so no
+ * contract names it and nothing written there can be a scope escape or a
+ * prohibited path. And the root itself is not a repository-relative path at
+ * all; there is nothing for a glob to match.
  */
-function withinScope(resolved: string, root: string, scope: ResolvedScope): string | null {
-  if (scope.paths_allowed.length === 0) return null;
-  if (
-    scope.tmpdir !== null &&
-    (resolved === scope.tmpdir || resolved.startsWith(`${scope.tmpdir}${sep}`))
-  ) {
-    return null;
+function repositoryRelative(resolved: string, root: string, scope: ResolvedScope): string | null {
+  if (scope.tmpdir !== null) {
+    const path = comparable(resolved, scope.semantics);
+    const tmpdir = comparable(scope.tmpdir, scope.semantics);
+    if (path === tmpdir || path.startsWith(`${tmpdir}/`)) return null;
   }
   const at = resolved.slice(root.length + 1);
-  if (at.length === 0) return null;
-  return insideAllowedPaths(at, scope.paths_allowed) ? null : at;
+  // Already in the contract's spelling: a glob is written with `/` whatever the
+  // platform's separator, and the resolver holds that one alphabet on every
+  // host, so the path it is matched against needs no further conversion.
+  return at.length === 0 ? null : at;
 }
 
 /* ------------------------------------------------------------------ lexer */
@@ -517,6 +755,9 @@ function readSubstitution(text: string, from: number): { body: string; end: numb
   return null;
 }
 
+/** What a backslash inside double quotes escapes, as bash reads it. */
+const DOUBLE_QUOTED_ESCAPES = new Set(["$", "`", '"', "\\", "\n"]);
+
 function readWord(text: string, from: number): { word: Word; end: number; balanced: boolean } {
   let value = "";
   const substitutions: string[] = [];
@@ -533,7 +774,12 @@ function readWord(text: string, from: number): { word: Word; end: number; balanc
       continue;
     }
     if (ch === "\\") {
-      value += text[i + 1] ?? "";
+      // Inside double quotes a backslash escapes only `$`, a backtick, `"`, `\`
+      // and a newline, as bash reads it; before any other character it stays in
+      // the word, which on Windows makes it a separator.
+      const next = text[i + 1] ?? "";
+      if (quote === '"' && !DOUBLE_QUOTED_ESCAPES.has(next)) value += ch;
+      value += next;
       i += 2;
       continue;
     }
@@ -646,7 +892,7 @@ function skipHeredocBodies(
  * where the command is an interpreter or a shell, that data **is** its program,
  * and the guard reads it as such (SCP-177).
  */
-function withoutHeredocBodies(command: string): { text: string; bodies: HeredocBody[] } {
+export function withoutHeredocBodies(command: string): { text: string; bodies: HeredocBody[] } {
   const bodies: HeredocBody[] = [];
   if (!command.includes("<<")) return { text: command, bodies };
   let kept = "";
@@ -1271,18 +1517,30 @@ function describe(label: string, raw: string, destination: Destination): string 
       `admit — ${allowedPathsSentence(destination.allowed)}`
     );
   }
+  if (destination.kind === "prohibited_path") {
+    return (
+      `${label} ${raw} resolves to ${destination.at}, which this ticket's contract prohibits ` +
+      `— ${prohibitedPathsSentence(destination.prohibited)}`
+    );
+  }
   return `${label} ${raw} cannot be resolved — ${destination.reason}`;
 }
 
 /** Where a resolved destination landed, for a finding that can name one. */
 function landed(destination: Destination): string | null {
-  return destination.kind === "outside" || destination.kind === "outside_scope"
+  return destination.kind === "outside" ||
+    destination.kind === "outside_scope" ||
+    destination.kind === "prohibited_path"
     ? destination.resolved
     : null;
 }
 
 const ruleOf = (destination: Destination): WriteRule =>
-  destination.kind === "outside_scope" ? "write_outside_scope" : "write_outside_worktree";
+  destination.kind === "prohibited_path"
+    ? "write_prohibited_path"
+    : destination.kind === "outside_scope"
+      ? "write_outside_scope"
+      : "write_outside_worktree";
 
 /** A finding about a path, carrying the word it was written as and where it went. */
 function pathFinding(
@@ -2647,8 +2905,12 @@ function inlineCodeFindings(
             ? `the path ${literal} in the code passed to ${how} resolves to ${destination.at}, ` +
               `which this ticket's contract does not admit — ` +
               `${allowedPathsSentence(destination.allowed)}${tail}`
-            : `the path ${literal} in the code passed to ${how} cannot be resolved — ` +
-              `${destination.reason}${tail}`,
+            : destination.kind === "prohibited_path"
+              ? `the path ${literal} in the code passed to ${how} resolves to ${destination.at}, ` +
+                `which this ticket's contract prohibits — ` +
+                `${prohibitedPathsSentence(destination.prohibited)}${tail}`
+              : `the path ${literal} in the code passed to ${how} cannot be resolved — ` +
+                `${destination.reason}${tail}`,
       target: literal,
       resolved: landed(destination),
       rule: ruleOf(destination),
@@ -3668,7 +3930,10 @@ export function inspectWritePath(path: string, scope: ResolvedScope): WriteFindi
         : destination.kind === "outside_scope"
           ? `${path} resolves to ${destination.at}, which this ticket's contract does not ` +
             `admit — ${allowedPathsSentence(destination.allowed)}`
-          : `${path} cannot be resolved — ${destination.reason}`,
+          : destination.kind === "prohibited_path"
+            ? `${path} resolves to ${destination.at}, which this ticket's contract prohibits ` +
+              `— ${prohibitedPathsSentence(destination.prohibited)}`
+            : `${path} cannot be resolved — ${destination.reason}`,
     target: path,
     resolved: landed(destination),
     rule: ruleOf(destination),

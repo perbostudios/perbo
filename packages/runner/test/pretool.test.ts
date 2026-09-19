@@ -6,7 +6,7 @@ import {
   PRE_TOOL_JUDGED_TOOLS,
   discardPreToolGuard,
   judgePreToolCall,
-  preToolSettings,
+  attemptSettings,
   preparePreToolGuard,
   readPreToolDecisions,
   runPreToolHook,
@@ -29,9 +29,9 @@ import { scratch } from "./support.js";
 
 // The resolver walks symlinks, and on macOS `/var` is one, so the root a
 // decision names is the resolved spelling.
-const root = realpathSync(resolve(scratch("focrux-pretool-")));
+const root = realpathSync(resolve(scratch("perbo-pretool-")));
 mkdirSync(join(root, "packages", "evaluation"), { recursive: true });
-const tmp = join(root, ".focrux-tmp");
+const tmp = join(root, ".perbo-tmp");
 mkdirSync(tmp, { recursive: true });
 const profile = buildPermissionProfile({ worktree: root });
 
@@ -40,6 +40,7 @@ const stateAt = (cwd: string = root, paths_allowed: string[] = []): PreToolGuard
   tmpdir: tmp,
   cwd,
   paths_allowed,
+  paths_prohibited: [],
   allow_list: [...profile.command_allow_list],
   deny_list: [...profile.command_deny_list],
 });
@@ -63,7 +64,7 @@ describe("what the guard vouches for", () => {
   // built a fixture store inside its own worktree and could not remove it.
   it("admits AYO-13's three commands, none of whose verbs is on the allow-list", () => {
     for (const command of [
-      "mkdir -p .scratch-judging/.focrux && printf '{}' > .scratch-judging/package.json",
+      "mkdir -p .scratch-judging/.perbo && printf '{}' > .scratch-judging/package.json",
       "rm -r .scratch-judging",
       `rm -rf ${root}/.scratch-judging`,
     ]) {
@@ -118,7 +119,7 @@ describe("the shell the refusal did not move", () => {
     expect(moved.decision.decision).toBe("allowed");
     expect(moved.next_cwd).toBe(join(root, "packages", "evaluation"));
     // SCP-170's pair: the second line is judged from where the first one left it.
-    expect(judgeBash("rm -rf ../../.focrux-tmp/x", moved.next_cwd).decision.decision).toBe(
+    expect(judgeBash("rm -rf ../../.perbo-tmp/x", moved.next_cwd).decision.decision).toBe(
       "allowed",
     );
   });
@@ -158,11 +159,11 @@ describe("a file tool's path, judged before the write", () => {
   });
 
   it("refuses a path outside it, with the write rule and the path (SCP-161)", () => {
-    const decision = judgeFile("Write", "/tmp/focrux-scp177-unit").decision;
+    const decision = judgeFile("Write", "/tmp/perbo-scp177-unit").decision;
     expect(decision.answer).toBe("deny");
     expect(decision.decision).toBe("denied");
     expect(decision.rule).toBe(ADMISSION_RULES.write);
-    expect(decision.target).toBe("/tmp/focrux-scp177-unit");
+    expect(decision.target).toBe("/tmp/perbo-scp177-unit");
   });
 
   it("refuses a path that climbs out of the worktree however it is spelled", () => {
@@ -175,13 +176,13 @@ describe("a file tool's path, judged before the write", () => {
     // `write_outside_worktree`, which is a sentence about the wrong act. The
     // matcher never sends one here; the function says so itself now.
     for (const tool of ["Read", "Glob", "Grep", "WebFetch"]) {
-      const decision = judgeFile(tool, "/tmp/focrux-scp177-read").decision;
+      const decision = judgeFile(tool, "/tmp/perbo-scp177-read").decision;
       expect(decision.answer, tool).toBe("defer");
       expect(decision.rule, tool).toBeNull();
     }
     // And the five it was built for still answer.
     for (const tool of PRE_TOOL_JUDGED_TOOLS.filter((name) => name !== "Bash")) {
-      expect(judgeFile(tool, "/tmp/focrux-scp177-read").decision.answer, tool).toBe("deny");
+      expect(judgeFile(tool, "/tmp/perbo-scp177-read").decision.answer, tool).toBe("deny");
     }
   });
 });
@@ -336,7 +337,7 @@ describe("the hook and the transcript reading agree on the same call", () => {
   });
 
   it("refuses a file tool's path outside the root under that same rule", () => {
-    const target = "/tmp/focrux-agreement-outside.txt";
+    const target = "/tmp/perbo-agreement-outside.txt";
     const hook = judgeFile("Write", target).decision;
     expect(hook.answer).toBe("deny");
     expect(hook.rule).toBe(ADMISSION_RULES.write);
@@ -425,11 +426,12 @@ describe("the hook and the transcript reading agree on the same call", () => {
 });
 
 describe("the hook the adapter installs", () => {
-  it("matches every tool that can write, and installs no other hook", () => {
-    const settings = preToolSettings("/bin/true") as {
+  it("matches every tool that can write, and is one of the file's two hooks", () => {
+    const settings = attemptSettings("/bin/true") as {
       hooks: { PreToolUse: Array<{ matcher: string; hooks: Array<{ command: string }> }> };
     };
-    expect(Object.keys(settings.hooks)).toEqual(["PreToolUse"]);
+    // The other is the brief a compaction gets back (D-096); nothing else.
+    expect(Object.keys(settings.hooks).sort()).toEqual(["PreToolUse", "SessionStart"]);
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     for (const tool of PRE_TOOL_JUDGED_TOOLS) {
       expect(settings.hooks.PreToolUse[0]!.matcher).toContain(tool);
@@ -462,7 +464,7 @@ describe("the hook the adapter installs", () => {
       JSON.stringify({
         tool_name: "Bash",
         tool_use_id: "toolu_b",
-        tool_input: { command: "rm -rf ../../.focrux-tmp/x" },
+        tool_input: { command: "rm -rf ../../.perbo-tmp/x" },
       }),
     );
     expect(second?.hookSpecificOutput.permissionDecision).toBe("allow");
@@ -472,12 +474,12 @@ describe("the hook the adapter installs", () => {
       JSON.stringify({
         tool_name: "Write",
         tool_use_id: "toolu_c",
-        tool_input: { file_path: "/tmp/focrux-scp177-hook" },
+        tool_input: { file_path: "/tmp/perbo-scp177-hook" },
       }),
     );
     expect(third?.hookSpecificOutput.permissionDecision).toBe("deny");
     expect(third?.hookSpecificOutput.permissionDecisionReason).toContain(
-      "/tmp/focrux-scp177-hook",
+      "/tmp/perbo-scp177-hook",
     );
 
     // A call it has nothing to say about prints nothing at all.

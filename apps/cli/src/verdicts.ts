@@ -6,7 +6,7 @@ import {
   LocalVerdictsSchema,
   type DecidedBy,
   type LocalVerdicts,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import type { Streams } from "./streams.js";
 
 /**
@@ -15,10 +15,10 @@ import type { Streams } from "./streams.js";
  *
  * It sits at the root of the store rather than under `state/`, beside the
  * tickets and the config, because it is not working state: `state/` holds what
- * `focrux sync` can rebuild from a pull request, and nothing can rebuild a
+ * `perbo sync` can rebuild from a pull request, and nothing can rebuild a
  * decision a person took here. Losing it loses the decision.
  *
- * Reading is split in two on purpose. `focrux verdict` uses the strict reader
+ * Reading is split in two on purpose. `perbo verdict` uses the strict reader
  * and refuses to write over a file it cannot parse — a new file started on top
  * of an unreadable one is decisions destroyed silently. `stops` and `inspect`
  * use the lenient one, which names the problem on stderr and reports what it

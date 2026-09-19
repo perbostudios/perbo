@@ -3,15 +3,15 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { EXIT_CODES, transition, type Ticket } from "@focrux/contracts";
-import { branchName } from "@focrux/workspace";
+import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
+import { branchName } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { recordDelivery, runSyncCommand } from "../src/sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * SCP-200 criterion 1, for `focrux sync`: which credential `gh` was read
+ * SCP-200 criterion 1, for `perbo sync`: which credential `gh` was read
  * through, decided before the read and recorded beside what it returned.
  *
  * A machine's one `gh` login is not shared safely by every process on it, so a
@@ -26,7 +26,7 @@ import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 const SPAWN_DEADLINE_MS = 20_000;
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-sync-credential-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-sync-credential-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const OUTCOME = "Search results are paginated.";
@@ -139,13 +139,13 @@ function publishedTicket(name: string): { repo: string; dir: string } {
   });
   const dir = storeDir(repo, null);
   const branch = branchName({
-    ticket_key: "FCX-1",
-    ticket_id: readTicket(dir, "FCX-1").ticket_id,
-    outcome: readContract(dir, "FCX-1").outcome,
+    ticket_key: "PRB-1",
+    ticket_id: readTicket(dir, "PRB-1").ticket_id,
+    outcome: readContract(dir, "PRB-1").outcome,
   });
 
   const at = new Date("2026-09-04T09:00:00.000Z");
-  let ticket: Ticket = readTicket(dir, "FCX-1");
+  let ticket: Ticket = readTicket(dir, "PRB-1");
   ticket = transition(ticket, "provisioning", "run started", at);
   ticket = transition(ticket, "executing", "1 attempt executed", at);
   ticket = transition(ticket, "verifying", "no deterministic checks are configured", at);
@@ -157,7 +157,7 @@ function publishedTicket(name: string): { repo: string; dir: string } {
 }
 
 const NOW = new Date("2026-09-04T11:40:00.000Z");
-const ticketFile = (dir: string) => join(dir, "tickets", "FCX-1.json");
+const ticketFile = (dir: string) => join(dir, "tickets", "PRB-1.json");
 const SENTINEL = "ghp_scp200syncsentinelvalue";
 
 describe("sync says which credential it read GitHub through", () => {
@@ -168,11 +168,11 @@ describe("sync says which credential it read GitHub through", () => {
       const gh = fakeGh("sync-token", 1);
 
       const code = await withGh(gh.path, SENTINEL, () =>
-        runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+        runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
-      expect(readTicket(dir, "FCX-1").delivery.github_credential).toBe("GH_TOKEN");
+      expect(readTicket(dir, "PRB-1").delivery.github_credential).toBe("GH_TOKEN");
       // The token is the credential, so `gh auth status` is not asked — which
       // is one fewer process rewriting the machine's `gh` configuration.
       expect(gh.calls().some((call) => call.startsWith("auth"))).toBe(false);
@@ -187,11 +187,11 @@ describe("sync says which credential it read GitHub through", () => {
       const gh = fakeGh("sync-login", 0);
 
       const code = await withGh(gh.path, null, () =>
-        runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+        runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
-      expect(readTicket(dir, "FCX-1").delivery.github_credential).toBe("gh_login");
+      expect(readTicket(dir, "PRB-1").delivery.github_credential).toBe("gh_login");
       expect(gh.calls()[0]).toBe("auth status");
     },
     SPAWN_DEADLINE_MS,
@@ -206,7 +206,7 @@ describe("sync says which credential it read GitHub through", () => {
       const streams = capture();
 
       const code = await withGh(gh.path, null, () =>
-        runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+        runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.did_not_complete);
@@ -223,7 +223,7 @@ describe("sync says which credential it read GitHub through", () => {
 describe("the record a publishing run leaves", () => {
   it("carries the credential the run opened the pull request through", () => {
     const { dir } = publishedTicket("publish-record");
-    const ticket = readTicket(dir, "FCX-1");
+    const ticket = readTicket(dir, "PRB-1");
     const at = new Date("2026-09-04T12:00:00.000Z");
 
     const recorded = recordDelivery(

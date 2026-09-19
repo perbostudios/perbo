@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { Button, Notice, cx } from "@focrux/ui";
+import { Button, Notice, cx } from "@perbo/ui";
 import { bridge, errorMessage, useAction } from "../data.js";
+import { exclusiveJob } from "../../shared/jobs.js";
+import { decisionQuestions } from "../../shared/decisions.js";
 import { InkIcon } from "../InkIcon.js";
 import { NumberPop, PageHeader, SectionLabel } from "../Screen.js";
 import { useShortcut } from "../shell/shortcuts.js";
@@ -45,20 +47,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
     projection,
   } = taskRecords(context);
   const action = useAction();
-  const questions: DecisionQuestion[] = sample
-    ? sample.decisions
-    : (
-        review?.findings.filter(
-          (finding) =>
-            finding.status === "open" &&
-            (finding.routing === "escalates" || finding.closure === "human"),
-        ) ?? []
-      ).map((finding) => ({
-        id: finding.key,
-        title: finding.statement,
-        context: finding.blocking_reason ?? "",
-        options: [],
-      }));
+  const questions: DecisionQuestion[] = sample ? sample.decisions : decisionQuestions(review);
   const observed = projection.observed;
   const paused = ticket.state === "changes_requested" && !active && questions.length > 0,
     stage = paused
@@ -197,15 +186,15 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
           <div>
             <dt>Commands</dt>
             <dd>
-              <NumberPop value={commands?.used ?? "—"} />{" "}
-              <small>/ {detail.effective.commands}</small>
+              {/* No denominator: nothing bounds a run by commands (D-096). */}
+              <NumberPop value={commands?.used ?? "—"} />
             </dd>
           </div>
           <div>
             <dt>Spent</dt>
             <dd>
               <NumberPop value={active ? "Pending" : costLabel(detail)} />{" "}
-              <small>/ ${detail.effective.ticketDollars}</small>
+              <small>stops after {detail.effective.stallMinutes} min idle</small>
             </dd>
           </div>
           <div>
@@ -292,7 +281,7 @@ function DecisionOverlay(
   context: TaskContext & { questions: DecisionQuestion[] },
 ) {
   const { questions, detail, repoId, show, navigate, workspace } = context;
-  const storageKey = "focrux:decisions:" + repoId + ":" + detail.ticket.key;
+  const storageKey = "perbo:decisions:" + repoId + ":" + detail.ticket.key;
   const [answers, setAnswers] = useState<z.infer<typeof AnswersSchema>>(() => {
     try {
       const parsed = AnswersSchema.safeParse(
@@ -313,9 +302,7 @@ function DecisionOverlay(
   const action = useAction(),
     question = questions[index]!,
     selected = answers[question.id];
-  const busy = workspace.jobs.some(
-    (job) => job.state === "running" || job.state === "stopping",
-  );
+  const busy = Boolean(exclusiveJob(workspace.jobs));
   useEffect(() => {
     sessionStorage.setItem(storageKey, JSON.stringify(answers));
   }, [answers, storageKey]);

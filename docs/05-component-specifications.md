@@ -2,27 +2,27 @@
 
 One entry per real component in this repository. **Owns** is what only this component writes. **Consumes** is what it reads, calls or links against. **Emits** is what it writes, returns or hands off to the next component.
 
-## `apps/cli` — the `focrux` command
+## `apps/cli` — the `perbo` command
 
-One binary carries every command: `doctor`, `baseline`, `review`, `inspect`, `verdict`, `run`, `admit`, `edit`, `approve`, `list`, `sync`, `serve`, `mcp`, `agent`, `stops`, `escapes` and `principle`. `tooling/package` bundles it into the design-partner tarball, linking `@focrux/contracts`, `@focrux/planning`, `@focrux/review`, `@focrux/runner` and `@focrux/workspace` ([D-075](11-open-decisions.md), [ADR-0032](adr/0032-open-source-the-local-cli-and-the-reviewer.md)).
+One binary carries every command: `doctor`, `baseline`, `review`, `inspect`, `verdict`, `run`, `admit`, `edit`, `approve`, `list`, `sync`, `serve`, `mcp`, `agent`, `interview`, `stops`, `escapes`, `principle` and `index`. `tooling/package` bundles it into the design-partner tarball, linking `@perbo/contracts`, `@perbo/planning`, `@perbo/review`, `@perbo/runner` and `@perbo/workspace` ([D-075](11-open-decisions.md), [ADR-0032](adr/0032-open-source-the-local-cli-and-the-reviewer.md)).
 
-**Owns:** the ticket store under `.focrux/` — admission, contracts, drafts, approval and edit history; `focrux serve`, the queue over that store: it fetches the base ref, reads open pull requests through `sync`, decides who waits by set arithmetic over approved scope, re-levels open branches behind the base, starts runs up to the configured concurrency, drafts labelled tracker issues into `plan_review`, and, under `merge: loop`, merges the head pull request once [D-041](11-open-decisions.md)'s conditions hold ([D-108](11-open-decisions.md)); the loopback tool endpoint `focrux serve` hosts and `focrux mcp` / `focrux agent` reach, one capability token per role, scoped to reads plus `admit`, `edit`, `sync` and pause/resume — never approve, publish or merge ([D-109](11-open-decisions.md)); the stops/escapes ledger and the baseline stopwatch ([D-038](11-open-decisions.md)).
+**Owns:** the ticket store under `.perbo/` — admission, contracts, drafts, approval and edit history; `perbo serve`, the queue over that store: it fetches the base ref, reads open pull requests through `sync`, decides who waits by set arithmetic over approved scope, re-levels open branches behind the base, starts runs up to the configured concurrency, drafts labelled tracker issues into `plan_review`, and, under `merge: loop`, merges the head pull request once [D-041](11-open-decisions.md)'s conditions hold ([D-108](11-open-decisions.md)); the loopback tool endpoint `perbo serve` hosts and `perbo mcp` / `perbo agent` reach, one capability token per role, scoped to reads plus `admit`, `edit`, `sync` and pause/resume — never approve, publish or merge ([D-109](11-open-decisions.md)); `perbo interview`, the person's own Claude Code session through the Claude Agent SDK or Codex session through `codex app-server`, which writes the spec folder, `CONTEXT.md` and the ADR folder under the runner's write guard, drafts the plan from the spec and edits it afterwards through the validated edit path alone ([D-102](11-open-decisions.md)); the stops/escapes ledger and the baseline stopwatch ([D-038](11-open-decisions.md)); `perbo index`, the symbol and import index over a TypeScript and JavaScript repository, read off the tracked tree with TypeScript's own parser and written to `<repo>/.perbo/index.json`, and the stale-spec check that reads it beside the spec's own bytes — stopping a run on a stale spec at `plan_invalid` and flagging one already in flight ([D-015](11-open-decisions.md), [D-103](11-open-decisions.md)).
 
-**Consumes:** `@focrux/contracts`, `@focrux/review`, `@focrux/workspace`, `@focrux/runner` and `@focrux/planning`; local `git` and `gh`; the person's own coding-agent and reviewer credentials — Focrux never reads, stores or forwards one.
+**Consumes:** `@perbo/contracts`, `@perbo/review`, `@perbo/workspace`, `@perbo/runner` and `@perbo/planning`; local `git` and `gh`; the person's own coding-agent and reviewer credentials — Perbo never reads, stores or forwards one.
 
 **Emits:** `ReviewArtifact` and `ExecutionAttempt` records, ticket state transitions, the stop and verdict ledgers, and, with `--publish`, a branch and a pull request for a person to merge.
 
 **Trust boundary:** a model's drafted contract or proposed scope is data until a person's `approve` confirms it; only then does a scope glob become an action parameter ([ADR-0023](adr/0023-untrusted-context-boundary.md), [D-072](11-open-decisions.md)).
 
-Decided, not built: planning mode, the interview, specs as a committed folder ([D-101](11-open-decisions.md), [D-102](11-open-decisions.md), [D-103](11-open-decisions.md)); the precondition `merge: loop` needs before use (SCP-229, [D-041](11-open-decisions.md)).
+Built: Create, its picker, the Spec pane, which writes the spec folder, the Explorer pane, the Graph pane, the Impact pane, `perbo interview` itself on both transports and the chat docking it beside every pane, and the loop committing the spec folder first on the ticket's branch ([D-101](11-open-decisions.md), [D-102](11-open-decisions.md), [D-103](11-open-decisions.md)). Decided, not built: the precondition `merge: loop` needs before use (SCP-229, [D-041](11-open-decisions.md)).
 
-## `apps/desktop` — the Focrux desktop
+## `apps/desktop` — the Perbo desktop
 
 A local Electron host and a shared React renderer over the bundled CLI ([ADR-0033](adr/0033-focrux-local-desktop-and-subscription-providers.md)) — process composition, not one app importing another's source.
 
-**Owns:** the native shell — validated IPC between host and renderer, native dialogs, fixed CLI subprocess argv, provider sign-in through a fixed terminal command per provider; the contract editor, the one durable edit surface the desktop offers, against one workspace projection ([D-095](11-open-decisions.md), [ADR-0034](adr/0034-desktop-editing-and-workspace-projection.md)); the local profile/job journal in Electron's own user-data directory.
+**Owns:** the native shell — validated IPC between host and renderer, native dialogs, fixed CLI subprocess argv, provider sign-in through a fixed terminal command per provider; the contract editor, the one durable edit surface the desktop offers, against one workspace projection ([D-095](11-open-decisions.md), [ADR-0034](adr/0034-desktop-editing-and-workspace-projection.md)); the Spec pane's `@Symbol` completion over `perbo index`, which the host runs over the registered repository so that no name, path or file a renderer sent reaches it ([D-015](11-open-decisions.md), [ADR-0023](adr/0023-untrusted-context-boundary.md) §4); the local profile/job journal in Electron's own user-data directory; the two lanes a command runs in — drafting, admission, contract edits and impact checks any number at a time; runs, decisions, findings, delivery refreshes, product decisions and readiness checks one at a time; disconnecting a repository, deleting a contract or changing a manifest waits for every command running in that repository ([D-101](11-open-decisions.md)).
 
-**Consumes:** the bundled `@focrux/cli` and its write-guard hook, a pinned Node 22.22.0 runtime, `@focrux/ui` tokens and components, each repository's own `.focrux/` store — read, never a second source of truth. Claude Code and Codex authenticate on the person's own subscription login; an API key is optional ([D-093](11-open-decisions.md)).
+**Consumes:** the bundled `@perbo/cli` and its write-guard hook, run on the Node inside Electron, `@perbo/ui` tokens and components, each repository's own `.perbo/` store — read, never a second source of truth. Claude Code and Codex authenticate on the person's own subscription login; an API key is optional ([D-093](11-open-decisions.md)).
 
 **Emits:** nothing canonical — tickets and evidence stay in the repository's own store; the desktop writes only its local profile/job journal, and a native package under `apps/desktop/release`.
 
@@ -30,11 +30,11 @@ A local Electron host and a shared React renderer over the bundled CLI ([ADR-003
 
 Decided, not built: the phone's surfaces, which follow pairing ([D-097](11-open-decisions.md)).
 
-## `packages/contracts` — `@focrux/contracts`
+## `packages/contracts` — `@perbo/contracts`
 
 Versioned Zod schemas and inferred types — files, not tables — for every artifact the loop passes between its own components. The dependency floor: every other package here builds on it, and it depends on none of them.
 
-**Owns:** `PlanContract` (the immutable outcome, criteria, scope and base, [ADR-0016](adr/0016-minimal-machine-maintained-planning.md)), `Ticket`, `ChangeSet`, `CheckResult`, `ReviewArtifact`, `ExecutionAttempt`, `RunBundle`, `MaterializationManifest`, `PermissionProfile`, `LimitsTable`, `SecretIndex` (materialized secrets indexed by the sha256 of file and value, [D-012](11-open-decisions.md)), `issueAuthoredAttempts`, which reports rather than filters every line of an issue that claims the work is already done or addresses the drafter, the queue's scheduling primitives, and risk derivation (`derivePlannedRisk` from declared scope, `deriveActualRisk` from the sealed diff — a level may rise, never fall).
+**Owns:** `PlanContract` (the immutable outcome, criteria, scope, base and — where the work divides — the execution graph's nodes, [ADR-0016](adr/0016-minimal-machine-maintained-planning.md), [D-100](11-open-decisions.md)), `ApproachRecord` (the order between nodes and the spec's No-Gos, which may change after approval), `GraphEdit` (the eight operations the one validated edit path applies), the size estimate (`sizeEstimate` and `planSizeCounts`, [D-104](11-open-decisions.md)), `Ticket`, `ChangeSet`, `CheckResult`, `ReviewArtifact`, `ExecutionAttempt`, `RunBundle`, `MaterializationManifest`, `PermissionProfile`, `LimitsTable`, `SecretIndex` (materialized secrets indexed by the sha256 of file and value, [D-012](11-open-decisions.md)), `SymbolIndex` (the exported names and import edges of a TypeScript and JavaScript repository, stamped with the commit they were read at and whether the working tree was clean, [D-015](11-open-decisions.md)), `issueAuthoredAttempts`, which reports rather than filters every line of an issue that claims the work is already done or addresses the drafter, the queue's scheduling primitives, and risk derivation (`derivePlannedRisk` from declared scope, `deriveActualRisk` from the sealed diff — a level may rise, never fall).
 
 **Consumes:** nothing in this repository.
 
@@ -42,7 +42,7 @@ Versioned Zod schemas and inferred types — files, not tables — for every art
 
 Decided, not built: grouping a large ticket's plan into an execution graph, and a size derived from it ([D-100](11-open-decisions.md), [D-104](11-open-decisions.md)).
 
-## `packages/review` — `@focrux/review`
+## `packages/review` — `@perbo/review`
 
 Independent review: checks, findings, coverage and structured verdicts, over three model transports (the Anthropic SDK, a local `claude` binary, a local `codex` binary).
 
@@ -52,43 +52,43 @@ Independent review: checks, findings, coverage and structured verdicts, over thr
 
 **Emits:** the `ReviewArtifact` — structured per-criterion verdicts and findings, never parsed prose; deterministic check results outrank a model's claim about them.
 
-Decided, not built: review per node of an execution graph, routing findings other review tools leave on the pull request, and a reviewer of a different model family at P3 ([D-107](11-open-decisions.md), [D-088](11-open-decisions.md), [D-037](11-open-decisions.md)).
+Decided, not built: routing findings other review tools leave on the pull request, and a reviewer of a different model family at P3 ([D-088](11-open-decisions.md), [D-037](11-open-decisions.md)).
 
-## `packages/workspace` — `@focrux/workspace`
+## `packages/workspace` — `@perbo/workspace`
 
 The local worktree provider, and the harder half of it: making the worktree runnable.
 
-**Owns:** one isolated worktree and branch per attempt chain from an exact base commit, with leases and stale reclaim; the materialization diagnostic, which proposes a manifest from the checkout and refuses by name, before an attempt starts, a repository that cannot be materialized ([ADR-0025](adr/0025-worktree-environment-contract.md)); the install/verify strategy for a monorepo member, keeping the workspace root — where the lockfile and the install live — and the package root — whose scripts are the checks — apart. Supported: GitHub, standard git worktrees, pnpm, npm, yarn and bun repositories and monorepos, against a declared manifest ([D-013](11-open-decisions.md)).
+**Owns:** one isolated worktree and branch per attempt chain from an exact base commit, with leases and stale reclaim; the materialization diagnostic, which proposes a manifest from the checkout and refuses by name, before an attempt starts, a repository that cannot be materialized ([ADR-0025](adr/0025-worktree-environment-contract.md)); the install/verify strategy for a monorepo member, keeping the workspace root — where the lockfile and the install live — and the package root — whose scripts are the checks — apart. It installs pnpm, npm, yarn and bun repositories and monorepos against a declared manifest, and materializes any other GitHub repository a standard git worktree can check out with nothing installed; a repository with no test script a worktree can run is verified with `git status --porcelain` and reported, not refused ([D-013](11-open-decisions.md)).
 
 **Consumes:** the checkout it is pointed at. `exec.ts` runs every process as argv, never a shell string.
 
-**Emits:** a materialized worktree and a first-run diagnostic report; `focrux-materialisation` runs the [ADR-0025](adr/0025-worktree-environment-contract.md) diagnostic on its own as a standalone measurement.
+**Emits:** a materialized worktree and a first-run diagnostic report; `perbo-materialisation` runs the [ADR-0025](adr/0025-worktree-environment-contract.md) diagnostic on its own as a standalone measurement.
 
 A remediation round shares its predecessor's worktree and lease rather than provisioning a second one — Git refuses to check one branch out in two worktrees — so the unit is the attempt chain, not the attempt.
 
-## `packages/runner` — `@focrux/runner`
+## `packages/runner` — `@perbo/runner`
 
 The half of execution that is not the agent.
 
-**Owns:** the permission profile (command allow-list, deny-list, an environment built from an allow-list, a pinned provider base URL); one coding-agent adapter per provider, each asserting the agent loaded nothing originating in the repository; quarantine of every known agent-configuration path out of the worktree before handover and back after ([ADR-0030](adr/0030-neutralise-repository-supplied-agent-configuration.md)); the ceilings the runner enforces rather than requests of the model — wall clock, commands, iterations, tokens and cost, each with a typed stop reason; the prohibited-action list, checked against commands and against the sealed paths; the sealed change set, with materialized secrets removed by content hash; immutable, content-addressed run bundles with a computed replayability tier ([ADR-0026](adr/0026-replay-claim-tiering.md)); delivery — push and pull request through local `git`/`gh`, holding the credential so the agent never sees a token; the remediation loop: contract, worktree, agent, seal, checks, review, routing, pull request.
+**Owns:** the permission profile (command allow-list, deny-list, an environment built from an allow-list, a pinned provider base URL); one coding-agent adapter per provider, each asserting the agent loaded nothing originating in the repository; quarantine of every known agent-configuration path out of the worktree before handover and back after ([ADR-0030](adr/0030-neutralise-repository-supplied-agent-configuration.md)); the stall detector and the ceilings the runner enforces rather than requests of the model — no tool activity for `attempt_stall_ms`, a cost cap where the executor is billed per token, and whatever wall clock, commands, iterations or tokens a repository sets, each with a typed stop reason ([D-096](11-open-decisions.md)); the prohibited-action list, checked against commands and against the sealed paths; the sealed change set, with materialized secrets removed by content hash; immutable, content-addressed run bundles with a computed replayability tier ([ADR-0026](adr/0026-replay-claim-tiering.md)); delivery — push and pull request through local `git`/`gh`, holding the credential so the agent never sees a token; the remediation loop: contract, worktree, agent, seal, checks, review, routing, pull request.
 
 **Consumes:** the approved plan, the materialized worktree, the executor's own tool calls.
 
 **Emits:** the `ExecutionAttempt` record, the run bundle, the pull request.
 
-Decided, not built: a stall detector replacing the ceilings above ([D-096](11-open-decisions.md)); subagents started from Focrux-defined roles, scope-guarded and invisible to review ([D-106](11-open-decisions.md)); a merge step that accepts unsigned commits and leaves signing to the repository's own rule ([D-091](11-open-decisions.md), SCP-280).
+On both transports the executor starts subagents from the roles Perbo defines, scope-guarded and invisible to review ([D-106](11-open-decisions.md)). Decided, not built: a merge step that accepts unsigned commits and leaves signing to the repository's own rule ([D-091](11-open-decisions.md), SCP-280).
 
-## `packages/planning` — `@focrux/planning`
+## `packages/planning` — `@perbo/planning`
 
 The contract draft, and the measurement of what a person did to it.
 
-**Owns:** `draftContract` — one model call that turns an issue into a proposed outcome, two to four criteria and a one-to-eight-glob scope, never executed and never approved by drafting alone ([D-071](11-open-decisions.md), [D-072](11-open-decisions.md)); `contractEditCount`, which counts the fields a person changed between the contract as first rendered and the one approved ([D-072](11-open-decisions.md)).
+**Owns:** `draftContract` — one model call that turns an issue or a spec into a proposed outcome, the criteria the work has, a one-to-eight-glob scope and, where it divides, the nodes and suggested edges of an execution graph, never executed and never approved by drafting alone ([D-071](11-open-decisions.md), [D-072](11-open-decisions.md), [D-100](11-open-decisions.md)); `parseSpec`, which reads a spec's Outcome, Requirements, No-Gos, Rabbit holes and Notes and the requirement ids a criterion may cite, and the writing that is its other half — the slug a title takes, `writeSpecFile`, which gives each requirement an id and hands out none twice, `requirementNodes`, which says which node each requirement landed in, and `writeNodePages`, the page per node beside the spec ([D-103](11-open-decisions.md)); `contractEditCount`, which counts the fields a person changed between the contract as first rendered and the one approved ([D-072](11-open-decisions.md)); `impactReport`, which derives a draft's impact warnings from the tracked tree, the draft's allowed scope, the spec's text and the symbol index — files outside the scope importing what the draft changes or what the spec names, and the path classes `risk.ts` recognises in a package the scope or the spec reaches — reading no file and starting no process, so the desktop's browser preview derives what its host does ([D-015](11-open-decisions.md)).
 
-**Consumes:** an issue or a Markdown file, read as external, trust-tagged data — never as instruction — and the repository's own file tree, two levels deep, for proposed globs to be checked against; nothing else of the repository ([ADR-0023](adr/0023-untrusted-context-boundary.md)).
+**Consumes:** an issue or a Markdown file, read as external, trust-tagged data — never as instruction — and the repository's own file tree, two levels deep, for proposed globs to be checked against; for impact warnings, its caller's tracked-path list and symbol index, and the spec's own text, matched against that list and never opened; nothing else of the repository ([ADR-0023](adr/0023-untrusted-context-boundary.md)).
 
 **Emits:** the validated draft and its provenance (model, cost, prompt version); the approved contract is written by `apps/cli`, not this package.
 
-## `packages/ui` — `@focrux/ui`
+## `packages/ui` — `@perbo/ui`
 
 Shared React primitives and design tokens: buttons, badges, panels, fields, notices, empty states, focus-contained native dialogs, and the desktop's design tokens and motion primitives ([D-097](11-open-decisions.md)).
 
@@ -96,7 +96,7 @@ Shared React primitives and design tokens: buttons, badges, panels, fields, noti
 
 **Consumes:** nothing beyond React.
 
-**Emits:** components imported from `@focrux/ui` and tokens from `@focrux/ui/tokens.css`, consumed by `apps/desktop`.
+**Emits:** components imported from `@perbo/ui` and tokens from `@perbo/ui/tokens.css`, consumed by `apps/desktop`.
 
 ## `packages/evaluation` — the corpus and the regression suite
 
@@ -104,17 +104,17 @@ Scoped here to the seeded-defect corpus and the fixed regression suite drawn fro
 
 **Owns:** the corpus — fixtures under `corpus/fixtures`, each a directory of `fixture.json`, `contract.json`, `checks.json`, `before/`/`after/` trees or a pinned real repository and commit pair, and a generated `change.diff`; `expected_detection`, fixed before a fixture is ever run and never edited after; the regression suite, a fixed subset of the corpus that runs when the reviewer prompt, the blocking matrix or the default model or provider changes, gating on two bars — no `must_not_approve` fixture ends `approve`, and every cited credential is redacted — with every other reading taken against the previous suite run on the same model ([D-010](11-open-decisions.md)). The fixture format is Apache-2.0 and the fixtures CC-BY-4.0, published as `plantedbugs` ([D-075](11-open-decisions.md)).
 
-**Consumes:** a directory named by `FOCRUX_EVAL_CORPUS_DIR`, or the packaged corpus beside this package — refused, never silently substituted, when the named directory is absent; for pinned fixtures, a prepared clone under `.local/corpus-cache`.
+**Consumes:** a directory named by `PERBO_EVAL_CORPUS_DIR`, or the packaged corpus beside this package — refused, never silently substituted, when the named directory is absent; for pinned fixtures, a prepared clone under `.local/corpus-cache`.
 
 **Emits:** `runs.json`, `summary.json`, `report.md` and `rule-authority.json`, and, spawning the built CLI binary itself once per fixture per repeat, the same review artifacts a real run produces.
 
 ## `tooling/package` — the tarball and the corpus
 
-**Owns:** the CLI tarball a design partner installs — one bundled file, the runner's write-guard hook beside it, a version manifest and a licence notice, archived with a published SHA-256 ([D-046](11-open-decisions.md), `pack.mjs`); the public corpus assembly from a named commit ([D-075](11-open-decisions.md), `assemble-corpus.mjs`); tarball verification and draft-release scripting consumed by `.github/workflows/release.yml`; the gate's protected-paths check and regression delta under `.github/scripts/`.
+**Owns:** the CLI tarball a design partner installs — one bundled file, the runner's write-guard hook beside it, a version manifest and a licence notice, archived with a published SHA-256 (`pack.mjs`); the public corpus assembly from a named commit ([D-075](11-open-decisions.md), `assemble-corpus.mjs`); tarball verification and draft-release scripting consumed by `.github/workflows/release.yml`; the gate's protected-paths check and regression delta under `.github/scripts/`.
 
 **Consumes:** the built workspace; a named commit — assembly is reproducible from a sha, never from an uncommitted edit.
 
-**Emits:** `release/focrux-<version>.tgz` and its digest; the assembled public corpus tree.
+**Emits:** `release/perbo-<version>.tgz` and its digest; the assembled public corpus tree.
 
 ## `tooling/skills` — executor skill guidance
 

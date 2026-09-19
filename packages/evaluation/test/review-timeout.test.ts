@@ -24,7 +24,7 @@ import { sampleDir } from "./sample-fixtures.js";
  * the deadline is visible on the command line and in the run manifest.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-review-timeout-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-review-timeout-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 let runs = 0;

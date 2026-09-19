@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SecretIndex } from "@focrux/contracts";
+import { SecretIndex } from "@perbo/contracts";
 import { runPinnedChecks } from "../src/checks.js";
 import { scratch } from "./support.js";
 
@@ -50,7 +50,7 @@ function failingUnitCheck(worktree: string): {
 
 describe("a quarantined test", () => {
   it("does not close the gate, and is reported by name and ticket", async () => {
-    const worktree = scratch("focrux-checks-quarantined-");
+    const worktree = scratch("perbo-checks-quarantined-");
     const { checks } = failingUnitCheck(worktree);
 
     const [result] = await runPinnedChecks({
@@ -78,7 +78,7 @@ describe("a quarantined test", () => {
 
 describe("a failing test off the quarantine list", () => {
   it("closes the gate, as it does today", async () => {
-    const worktree = scratch("focrux-checks-unquarantined-");
+    const worktree = scratch("perbo-checks-unquarantined-");
     const { checks } = failingUnitCheck(worktree);
 
     const [result] = await runPinnedChecks({
@@ -128,7 +128,7 @@ function unresolvableUnitCheck(worktree: string): {
 
 describe("a failure that named no test file", () => {
   it("closes the gate rather than reporting an empty quarantine entry", async () => {
-    const worktree = scratch("focrux-checks-unresolvable-");
+    const worktree = scratch("perbo-checks-unresolvable-");
     const { checks } = unresolvableUnitCheck(worktree);
 
     const [result] = await runPinnedChecks({

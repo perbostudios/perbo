@@ -12,7 +12,7 @@ import {
   type DeliveryArm,
   type EscapeCommit,
   type Ticket,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import type { Streams } from "../src/admit.js";
 import { runStopsCommand } from "../src/stops.js";
 import { storeDir, writeTicket } from "../src/tickets.js";
@@ -25,10 +25,10 @@ import { storeDir, writeTicket } from "../src/tickets.js";
  * twenty reopen this decision" — and it is a count of the loop's **own**
  * merges: a pull request a person merged and then reverted says nothing about
  * whether the loop should merge. So the population is `delivery.merged_by`,
- * and what charges a row is the escape record `focrux sync` already writes.
+ * and what charges a row is the escape record `perbo sync` already writes.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-loop-merges-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-loop-merges-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function capture(): Streams & { out: string[]; err: string[] } {
@@ -43,8 +43,8 @@ const NOW = new Date("2026-09-04T00:00:00.000Z");
 
 function fixtureStore(name: string): string {
   const repo = join(scratch, name);
-  mkdirSync(join(repo, ".focrux", "tickets"), { recursive: true });
-  mkdirSync(join(repo, ".focrux", "state"), { recursive: true });
+  mkdirSync(join(repo, ".perbo", "tickets"), { recursive: true });
+  mkdirSync(join(repo, ".perbo", "state"), { recursive: true });
   return repo;
 }
 

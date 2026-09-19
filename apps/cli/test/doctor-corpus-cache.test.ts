@@ -1,15 +1,15 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DiagnosticResultSchema, type DiagnosticResult } from "@focrux/contracts";
-import type { PreflightResult } from "@focrux/runner";
+import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts";
+import type { PreflightResult } from "@perbo/runner";
 import { afterAll, describe, expect, it } from "vitest";
 import { runDoctorCommand, type DoctorOptions } from "../src/execute.js";
 import { USAGE } from "../src/usage.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * The CORPUS line: what `focrux doctor` says about the corpus cache this
+ * The CORPUS line: what `perbo doctor` says about the corpus cache this
  * checkout would review against.
  *
  * Every case here builds a real checkout on disk — a real cache directory with
@@ -101,7 +101,7 @@ function checkout(
   cache: { pin?: string | null; fixtures?: string[] } | null,
   scored: string | null = SCORED_COMMIT,
 ): string {
-  const dir = mkdtempSync(join(tmpdir(), `focrux-doctor-corpus-${name}-`));
+  const dir = mkdtempSync(join(tmpdir(), `perbo-doctor-corpus-${name}-`));
   temporary.push(dir);
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture" }));
   write(dir, SCORE, `${JSON.stringify({ corpus: { commit: scored, fixtures: 30 } }, null, 2)}\n`);
@@ -155,13 +155,13 @@ function corpusJson(text: string): Record<string, unknown> {
   return parsed.corpus_cache;
 }
 
-describe("focrux doctor, on a checkout with no corpus cache", () => {
+describe("perbo doctor, on a checkout with no corpus cache", () => {
   it("says the cache is absent and names the command that fetches it", async () => {
     const { text, code } = await doctor(checkout("absent", null));
 
     const line = corpusLine(text);
     expect(line).toContain("absent");
-    expect(line).toContain("focrux-corpus prepare");
+    expect(line).toContain("perbo-corpus prepare");
     // The line is a warning: a machine that has never prepared the corpus can
     // still run everything `doctor` is otherwise reporting on.
     expect(code).toBe(0);
@@ -180,7 +180,7 @@ describe("focrux doctor, on a checkout with no corpus cache", () => {
   });
 }, SPAWN_TEST_TIMEOUT_MS);
 
-describe("focrux doctor, on a cache pinned to the commit the score was measured against", () => {
+describe("perbo doctor, on a cache pinned to the commit the score was measured against", () => {
   const fixtures = ["cln-011-trim-with-number-modifier", "reg-001-pause-tracking", "adv-002-hostile-agent"];
 
   it("names that commit and counts the fixtures the cache holds", async () => {
@@ -208,7 +208,7 @@ describe("focrux doctor, on a cache pinned to the commit the score was measured 
   });
 }, SPAWN_TEST_TIMEOUT_MS);
 
-describe("focrux doctor, on a cache pinned to some other commit", () => {
+describe("perbo doctor, on a cache pinned to some other commit", () => {
   it("says behind, names both commits, and gives the same fix", async () => {
     const { text, code } = await doctor(
       checkout("behind", { pin: OLDER_COMMIT, fixtures: ["cln-011-trim-with-number-modifier"] }),
@@ -218,7 +218,7 @@ describe("focrux doctor, on a cache pinned to some other commit", () => {
     expect(line).toContain("behind");
     expect(line).toContain(OLDER_COMMIT);
     expect(line).toContain(SCORED_COMMIT);
-    expect(line).toContain("focrux-corpus prepare");
+    expect(line).toContain("perbo-corpus prepare");
     expect(code).toBe(0);
   });
 }, SPAWN_TEST_TIMEOUT_MS);
@@ -271,13 +271,13 @@ describe("what the help says about the corpus cache", () => {
   it("describes it", () => {
     const flat = USAGE.replace(/\\/g, "").replace(/\s+/g, " ");
     expect(flat).toContain(".local/corpus-cache");
-    expect(flat).toContain("focrux-corpus");
+    expect(flat).toContain("perbo-corpus");
     for (const state of ["absent", "behind", "commit"]) expect(flat).toContain(state);
     expect(flat).toContain("never moves the exit code");
   });
 });
 
-describe("focrux doctor, on a cache whose pin cannot be compared", () => {
+describe("perbo doctor, on a cache whose pin cannot be compared", () => {
   const fixtures = ["cln-011-trim-with-number-modifier"];
 
   it("reports a cache that records no commit as present, saying so", async () => {

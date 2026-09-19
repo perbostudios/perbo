@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PACKAGE_ROOT, REPO_ROOT, buildCli, removeStagedBundles } from "./open-build.js";
 
 /**
- * `apps/cli` is a package somebody can install (D-046, ADR-0032).
+ * `apps/cli` is a package somebody can install (ADR-0032).
  *
  * It was marked `private` and its `bin` named `./dist/main.js`, a file whose
  * every import was a workspace package that is not published — so the manifest
@@ -53,9 +53,9 @@ interface Manifest {
 const manifest = (): Manifest => JSON.parse(readFileSync(manifestPath, "utf8")) as Manifest;
 
 /** Everything a bundle of ours must not still be importing by name once installed. */
-const UNPUBLISHED_IMPORT = /^\s*(?:import|export)\s[^;]*from\s*"(?:@focrux\/|zod)/m;
+const UNPUBLISHED_IMPORT = /^\s*(?:import|export)\s[^;]*from\s*"(?:@perbo\/|zod)/m;
 
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), "focrux-packaging-")));
+const scratch = realpathSync(mkdtempSync(join(tmpdir(), "perbo-packaging-")));
 
 /** Directories staged under the package (see `.gitignore`), removed with it. */
 const underPackage: string[] = [];
@@ -94,7 +94,7 @@ interface Staged {
  * The staged root is `<scratch>/apps/cli`, mirroring the repository, because
  * that is what `bundleCliPackage` lays its outputs out under; and the scratch
  * is made *under this package* so the compiled entry points still resolve
- * `@focrux/*` and `zod` through `apps/cli/node_modules` while they are bundled.
+ * `@perbo/*` and `zod` through `apps/cli/node_modules` while they are bundled.
  */
 async function stagePackage(): Promise<Staged> {
   const scratchRoot = realpathSync(mkdtempSync(join(PACKAGE_ROOT, ".test-dist-pack-")));
@@ -102,7 +102,7 @@ async function stagePackage(): Promise<Staged> {
   const root = join(scratchRoot, "apps", "cli");
   mkdirSync(root, { recursive: true });
   // The compiled tree this run made from the working sources, where the
-  // bundler's entry points (`dist/main.js`, `dist/open.js`, `dist/index.js`) are.
+  // bundler's entry points (`dist/main.js`, `dist/index.js`) are.
   cpSync(buildCli(), join(root, "dist"), { recursive: true });
   const bundler = (await import(join(REPO_ROOT, "tooling", "package", "bundle.mjs"))) as {
     bundleCliPackage(options: { root: string }): Promise<string[]>;
@@ -128,7 +128,7 @@ describe("the CLI package's manifest", () => {
 
   it("names binaries that exist after a build", () => {
     const bin = manifest().bin ?? {};
-    expect(Object.keys(bin)).toContain("focrux");
+    expect(Object.keys(bin)).toContain("perbo");
     for (const [name, target] of Object.entries(bin)) {
       expect(isAbsolute(target)).toBe(false);
       const path = join(built.root, target);
@@ -210,7 +210,7 @@ describe("the CLI package, packed and installed", () => {
     mkdirSync(into, { recursive: true });
     writeFileSync(
       join(into, "package.json"),
-      `${JSON.stringify({ name: "focrux-install-probe", version: "0.0.0", private: true }, null, 2)}\n`,
+      `${JSON.stringify({ name: "perbo-install-probe", version: "0.0.0", private: true }, null, 2)}\n`,
     );
     execFileSync(
       "npm",
@@ -231,9 +231,9 @@ describe("the CLI package, packed and installed", () => {
   let installed: Installed | undefined;
   const installation = (): Installed => (installed ??= install());
 
-  it("installs an `focrux` that runs outside this checkout", () => {
+  it("installs an `perbo` that runs outside this checkout", () => {
     const { into } = installation();
-    const executable = join(into, "node_modules", ".bin", "focrux");
+    const executable = join(into, "node_modules", ".bin", "perbo");
     expect(existsSync(executable), `${executable} was not installed`).toBe(true);
 
     const run = spawnSync(executable, ["--version"], {
@@ -250,14 +250,14 @@ describe("the CLI package, packed and installed", () => {
     // The manifest's `main` and `exports` are an offer to import the package,
     // and the packages behind that offer are never published — so the entry
     // has to be one that needs none of them. Importing it from the install is
-    // the whole of that claim: a bare `@focrux/…` left anywhere in its module
+    // the whole of that claim: a bare `@perbo/…` left anywhere in its module
     // graph is a resolution failure here.
     const imported = spawnSync(
       process.execPath,
       [
         "--input-type=module",
         "-e",
-        'const cli = await import("@focrux/cli"); process.stdout.write(cli.VERSION);',
+        'const cli = await import("@perbo/cli"); process.stdout.write(cli.VERSION);',
       ],
       {
         cwd: installation().into,
@@ -266,7 +266,7 @@ describe("the CLI package, packed and installed", () => {
         timeout: DEADLINE_MS,
       },
     );
-    expect(imported.status, `importing @focrux/cli wrote: ${imported.stderr}`).toBe(0);
+    expect(imported.status, `importing @perbo/cli wrote: ${imported.stderr}`).toBe(0);
     expect(imported.stdout).toBe(manifest().version);
   }, DEADLINE_MS);
 
@@ -281,7 +281,7 @@ describe("the CLI package, packed and installed", () => {
       .trim()
       .split("\n");
     expect(entries).toContain("package/dist/guard-hook.js");
-    expect(entries).toContain("package/dist/focrux.js");
+    expect(entries).toContain("package/dist/perbo.js");
   }, DEADLINE_MS);
 
   it("installs a write-guard hook that runs on its own and refuses a write outside the worktree", () => {
@@ -290,7 +290,7 @@ describe("the CLI package, packed and installed", () => {
     // reachable. A hook that still imported a workspace package by name would
     // fail to load here, and a hook that loaded but could not judge would
     // answer something other than a refusal naming the path.
-    const hook = join(installation().into, "node_modules", "@focrux", "cli", "dist", "guard-hook.js");
+    const hook = join(installation().into, "node_modules", "@perbo", "cli", "dist", "guard-hook.js");
     expect(existsSync(hook), `${hook} was not installed`).toBe(true);
 
     const worktree = join(scratch, "guarded-worktree");
@@ -331,7 +331,7 @@ describe("the CLI package, packed and installed", () => {
   }, DEADLINE_MS);
 
   it("installs nothing that could not run there", () => {
-    const dir = join(installation().into, "node_modules", "@focrux", "cli");
+    const dir = join(installation().into, "node_modules", "@perbo", "cli");
     const shipped = readdirSync(join(dir, "dist"));
     expect(shipped.length).toBeGreaterThan(0);
     for (const name of shipped) {

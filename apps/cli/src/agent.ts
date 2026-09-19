@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { EXIT_CODES } from "@focrux/contracts";
+import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "./args.js";
 import { readEndpoint, type EndpointRecord } from "./endpoint.js";
 import { agentOrientation } from "./endpoint-tools.js";
@@ -10,7 +10,7 @@ import type { Streams } from "./streams.js";
 import { repositoryRootOf, storeDir } from "./tickets.js";
 
 /**
- * `focrux agent` — the person's own session, launched with the queue's
+ * `perbo agent` — the person's own session, launched with the queue's
  * endpoint injected (the founder's decision of 2026-09-10).
  *
  * Paseo's launch, kept whole: the tool server is handed to the provider's
@@ -114,15 +114,15 @@ export function agentLaunch(input: {
     command: "codex",
     argv: [
       "-c",
-      `mcp_servers.focrux.url=${JSON.stringify(input.record.url)}`,
+      `mcp_servers.perbo.url=${JSON.stringify(input.record.url)}`,
       "-c",
-      'mcp_servers.focrux.bearer_token_env_var="FOCRUX_ENDPOINT_TOKEN"',
+      'mcp_servers.perbo.bearer_token_env_var="PERBO_ENDPOINT_TOKEN"',
       ...input.passthrough,
       // Codex takes no system prompt; the orientation is the first thing it reads.
       orientation,
     ],
     cwd: input.repository_root,
-    env: { FOCRUX_ENDPOINT_TOKEN: input.record.tokens.person },
+    env: { PERBO_ENDPOINT_TOKEN: input.record.tokens.person },
     file: null,
   };
 }
@@ -140,7 +140,7 @@ export async function runAgentCommand(input: {
   const record = readEndpoint(dir);
   if (record === null) {
     input.streams.stderr(
-      `no queue is serving ${dir}: start \`focrux serve\` first, which hosts the endpoint this session ` +
+      `no queue is serving ${dir}: start \`perbo serve\` first, which hosts the endpoint this session ` +
         "would read, and run this again\n",
     );
     return EXIT_CODES.did_not_complete;

@@ -11,7 +11,7 @@ import { commandSegments, inspectCommand, inspectPaths } from "../src/prohibited
  */
 
 const AYO6_ROOT =
-  "/Users/nobody/.focrux/worktrees/focrux-adversarial-review-7eea98-0a500fe1e40b/att_619d57cdcd5a2eaf";
+  "/Users/nobody/.perbo/worktrees/perbo-adversarial-review-7eea98-0a500fe1e40b/att_619d57cdcd5a2eaf";
 
 const HOME = "/Users/nobody";
 
@@ -99,8 +99,8 @@ describe("a redirect target the guard cannot resolve", () => {
 
 describe("a symlink inside the worktree that points out of it", () => {
   it("is refused, because the destination is what counts", () => {
-    const root = mkdtempSync(join(tmpdir(), "focrux-scp156-root-"));
-    const elsewhere = mkdtempSync(join(tmpdir(), "focrux-scp156-out-"));
+    const root = mkdtempSync(join(tmpdir(), "perbo-scp156-root-"));
+    const elsewhere = mkdtempSync(join(tmpdir(), "perbo-scp156-out-"));
     symlinkSync(elsewhere, join(root, "escape-hatch"));
 
     outside(`git show HEAD > ${root}/escape-hatch/r1.diff`, root);
@@ -229,8 +229,8 @@ describe("a file-touching verb that is not the first word", () => {
 
 describe("a symlink met part way along a path", () => {
   it("is followed before `..` climbs, and a dangling link resolves to its target", () => {
-    const root = mkdtempSync(join(tmpdir(), "focrux-scp156-walk-"));
-    const elsewhere = mkdtempSync(join(tmpdir(), "focrux-scp156-away-"));
+    const root = mkdtempSync(join(tmpdir(), "perbo-scp156-walk-"));
+    const elsewhere = mkdtempSync(join(tmpdir(), "perbo-scp156-away-"));
     symlinkSync(elsewhere, join(root, "escape-hatch"));
     symlinkSync(`${HOME}/.ssh/config`, join(root, "dangling"));
     writeFileSync(join(root, "real.txt"), "x");
@@ -337,8 +337,8 @@ describe("a wrapper named by path, or reached through a workspace flag", () => {
 
   it("sees through the package-manager forms this repository allow-lists", () => {
     outside("pnpm -r exec cp a ~/b");
-    outside("pnpm --filter @focrux/cli exec sh -c 'echo x > /etc/passwd'");
-    outside("pnpm --filter=@focrux/cli exec cp a ~/b");
+    outside("pnpm --filter @perbo/cli exec sh -c 'echo x > /etc/passwd'");
+    outside("pnpm --filter=@perbo/cli exec cp a ~/b");
     outside("pnpm exec -- cp a ~/b");
     outside("yarn workspace cli exec cp a ~/b");
     outside("bun x sh -c 'echo x > /etc/passwd'");
@@ -373,7 +373,7 @@ describe("a wrapper named by path, or reached through a workspace flag", () => {
     allowed("pnpm run build");
     allowed("pnpm -r run build");
     allowed("pnpm exec turbo run test");
-    allowed(`pnpm --filter @focrux/cli exec vitest run > ${AYO6_ROOT}/log.txt`);
+    allowed(`pnpm --filter @perbo/cli exec vitest run > ${AYO6_ROOT}/log.txt`);
   });
 });
 

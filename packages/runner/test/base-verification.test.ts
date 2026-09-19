@@ -5,9 +5,9 @@ import {
   LimitsTableSchema,
   type MaterializationManifest,
   type ReviewArtifact,
-} from "@focrux/contracts";
-import { runReview, type ReviewModel } from "@focrux/review";
-import { branchName } from "@focrux/workspace";
+} from "@perbo/contracts";
+import { runReview, type ReviewModel } from "@perbo/review";
+import { branchName } from "@perbo/workspace";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
@@ -40,7 +40,7 @@ function manifestVerifying(repositoryRoot: string, command: string[]): Materiali
 }
 
 function makeConfig(repositoryRoot: string, manifest: MaterializationManifest, unit: string[]) {
-  const root = scratch("focrux-base-verify-");
+  const root = scratch("perbo-base-verify-");
   return TicketRunConfigSchema.parse({
     materialization_manifest: manifest,
     ticket_key: "SCP094",
@@ -345,5 +345,60 @@ describe("a check failure on an attempt that continued a sealed commit", () => {
     expect(finding?.caused_by_change).toBeNull();
     expect(result.rounds[0]?.attempt.base_verification).toBeNull();
     expect(result.rounds[0]?.attempt.provisioning_verify?.verified).toBe(false);
+  }, 120_000);
+
+  it("tells the review nothing where the verify measures nothing, whatever the record says", async () => {
+    const repo = makeRepo();
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    // `git status --porcelain` passes on any checkout Git can read, and the
+    // pinned check fails on the base and on the change alike.
+    const manifest = manifestVerifying(repo.dir, ["git", "status", "--porcelain"]);
+    const config = makeConfig(repo.dir, manifest, ["node", "-e", "process.exit(1)"]);
+
+    // The ticket's record answers "verified" for this very base, from an
+    // attempt whose verify was the same command.
+    const branch = branchName({
+      ticket_key: "SCP094",
+      ticket_id: contract.ticket_id,
+      outcome: contract.outcome,
+    });
+    git(repo.dir, "branch", branch);
+    const recorded = {
+      ...makeAttempt({
+        attempt_id: "att_00000000000000fe",
+        ticket_id: contract.ticket_id,
+        head_commit: repo.head,
+        branch,
+      }),
+      base_verification: { commit: repo.head, verified: true },
+    };
+    mkdirSync(config.state_root, { recursive: true });
+    writeFileSync(
+      join(config.state_root, `${contract.ticket_id}.attempts.json`),
+      `${JSON.stringify({ ticket_id: contract.ticket_id, attempts: [recorded] }, null, 2)}\n`,
+    );
+
+    const model = cleanModel();
+    const result = await runTicket({
+      config,
+      contract,
+      hooks: {
+        agent: agentDouble([
+          { write: (worktree) => writeFileSync(join(worktree, "src/feature.ts"), "export const total = 3;\n") },
+        ]).run as never,
+        review: ((input: Parameters<typeof runReview>[0]) =>
+          runReview({ ...input, model })) as never,
+        verify: closesEverything as never,
+      },
+    });
+
+    // Neither the base nor the change is blamed, and nothing is recorded that
+    // a later attempt would read back as a measurement.
+    const finding = checkFinding(result.rounds[0]?.review);
+    expect(finding, "the failing pinned check produced no finding").toBeDefined();
+    expect(finding?.caused_by_change).toBeNull();
+    expect(result.rounds[0]?.attempt.base_verification).toBeNull();
+    expect(result.rounds[0]?.attempt.provisioning_verify).toBeNull();
   }, 120_000);
 });

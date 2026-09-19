@@ -8,7 +8,7 @@ import { TicketKeySchema } from "./ticket.js";
  *
  * Every stop the pull-request body lists carries two task-list boxes a person
  * ticks in the GitHub UI — *I wanted to be asked before this was fixed* and
- * *the agent should have fixed this on its own* — and `focrux sync` reads the
+ * *the agent should have fixed this on its own* — and `perbo sync` reads the
  * ticks back through `gh`. One of these files exists per ticket, written whole
  * on every sync from what `gh` reported, so the record is idempotent for the
  * same reason the ticket's delivery record is.
@@ -59,7 +59,7 @@ export const DOGFOOD_ANSWERER: StopAnswerer = "stand_in";
  * The label is self-declared, and it can be wrong in both directions:
  *
  * - **Overstating the partner population.** A stop is dogfood because the
- *   answer says it is — a signed tick on the pull request, or `focrux verdict
+ *   answer says it is — a signed tick on the pull request, or `perbo verdict
  *   --stand-in` at the command line. Nothing here can tell a stand-in that
  *   ticks a box through the GitHub UI, or forgets to sign, from a person, so
  *   such an answer is counted as a person's, and the partner `n` is an upper
@@ -79,7 +79,7 @@ export const DOGFOOD_ANSWERER: StopAnswerer = "stand_in";
  * surface that reports a partner number prints this beside it.
  */
 export const PARTNER_READING_CAVEAT =
-  "an answer is dogfood only where it says so — a signed tick, or `focrux verdict --stand-in` — " +
+  "an answer is dogfood only where it says so — a signed tick, or `perbo verdict --stand-in` — " +
   "so a stand-in that ticks a box unsigned is counted here as a person: n is an upper bound on " +
   "the answers a person gave, not a guarantee. It reads low as readily as high: a signature is " +
   "text in a pull-request body, so whoever can edit the body can sign ticks out of the partner " +
@@ -178,10 +178,10 @@ export interface ObservedStop {
  * That stickiness is one-way and it is not a trap. Silence cannot clear a
  * signature — otherwise deleting a comment would erase who answered — but a
  * person who did answer a stop the stand-in is recorded against says so the way
- * the stand-in did, by signing the line: `<!-- focrux:answered-by who=person -->`
+ * the stand-in did, by signing the line: `<!-- perbo:answered-by who=person -->`
  * on the ticked box, which is read here as a person's answer and puts the stop
  * back into the partner population without the answer itself having to change.
- * `focrux verdict --endorse|--override` with no `--stand-in` is the same
+ * `perbo verdict --endorse|--override` with no `--stand-in` is the same
  * statement made at the command line. So the label is a claim somebody made
  * rather than a verdict nobody can revise, and the only thing that cannot
  * revise it is nobody saying anything.
@@ -309,7 +309,7 @@ export interface StopsSummary {
  * The companion is computed over the changes that reached a person either way,
  * whether or not anybody answered: one with a pull request, where there were
  * boxes to tick, and one somebody was shown something on without a pull
- * request — a stop answered by `focrux verdict` on a ticket that has none yet
+ * request — a stop answered by `perbo verdict` on a ticket that has none yet
  * (SCP-181). It is the share on which a person was shown something at all, and
  * precision improves trivially when that share falls.
  *

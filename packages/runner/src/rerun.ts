@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, sep } from "node:path";
+import { matchesAny } from "@perbo/contracts";
 
 /**
  * Reading a test runner's own output, and turning what it names into a second
@@ -287,7 +288,7 @@ export function planRerun(args: {
   }
 
   return {
-    steps: [...byPackage].map(([cwd, files]) => ({ argv: [...VITEST_RUN, ...files], cwd })),
+    steps: [...byPackage].map(([cwd, files]) => narrowedStep(cwd, files)),
     scope: "files",
     note: null,
   };
@@ -295,3 +296,108 @@ export function planRerun(args: {
 
 /** The narrow form: vitest, told exactly which files to run, and nothing else. */
 const VITEST_RUN = ["pnpm", "exec", "vitest", "run"] as const;
+
+/** That form, aimed at one package: the only place the argv is composed. */
+const narrowedStep = (cwd: string, files: readonly string[]): RerunStep => ({
+  argv: [...VITEST_RUN, ...files],
+  cwd,
+});
+
+/**
+ * A file the narrow form can be told to run: what vitest itself collects,
+ * `*.test.*` and `*.spec.*` on a JavaScript or TypeScript extension. A test
+ * under a `test/` folder without that suffix, a helper beside the tests, or a
+ * test for another runner is not one, and a node whose changed tests are only
+ * those runs the check's whole command instead.
+ */
+const TEST_FILE = /(^|\/)[^/]+\.(test|spec)\.[cm]?[jt]sx?$/;
+
+export interface NodeRunPlan extends RerunPlan {
+  /** The worktree-relative files the run was narrowed to; empty for `task`. */
+  files: string[];
+}
+
+/**
+ * What one node of an execution graph runs a check as (D-107).
+ *
+ * The narrow form is the failed check's re-run: the test files in the package
+ * that owns them, run as that package's own vitest invocation. What differs is
+ * where the files come from — the sealed change set, filtered to the node's
+ * paths, rather than a runner's own report of what failed. Without a changed
+ * test file inside those paths, or with none this worktree can place in a
+ * package and find on disk, the check's whole command runs for the node
+ * instead and the note says which: a narrowed run of the wrong files would
+ * answer a question nobody asked.
+ */
+export function planNodeRun(args: {
+  command: readonly string[];
+  worktree: string;
+  paths: readonly string[];
+  changed_files: readonly string[];
+}): NodeRunPlan {
+  const whole = (note: string): NodeRunPlan => ({
+    steps: [{ argv: [...args.command], cwd: args.worktree }],
+    scope: "task",
+    note,
+    files: [],
+  });
+
+  const inside = args.changed_files.filter((file) => matchesAny(file, args.paths));
+  const tests = inside.filter((file) => TEST_FILE.test(file));
+  if (tests.length === 0) {
+    return whole(
+      inside.length === 0
+        ? "the change touched no file inside the node's paths"
+        : "no changed file inside the node's paths is a test file the narrow form runs",
+    );
+  }
+
+  const directories = [...workspacePackages(args.worktree).values()];
+  const byPackage = new Map<string, string[]>();
+  const placed: string[] = [];
+  for (const file of tests) {
+    const dir = owningPackage(file, args.worktree, directories);
+    if (dir === null) continue;
+    const inPackage = safeRelativePath(
+      relative(dir, join(args.worktree, file)).split(sep).join("/"),
+      dir,
+    );
+    if (inPackage === null) continue;
+    const files = byPackage.get(dir) ?? [];
+    if (!files.includes(inPackage)) {
+      files.push(inPackage);
+      placed.push(file);
+    }
+    byPackage.set(dir, files);
+  }
+
+  if (byPackage.size === 0) {
+    return whole(
+      "the node's changed test files are in no package of this worktree, or are no longer " +
+        `on disk: ${tests.join(", ")}`,
+    );
+  }
+
+  return {
+    steps: [...byPackage].map(([cwd, files]) => narrowedStep(cwd, files)),
+    scope: "files",
+    note: null,
+    files: placed,
+  };
+}
+
+/** The deepest workspace package a worktree-relative path lies inside. */
+function owningPackage(
+  file: string,
+  worktree: string,
+  directories: readonly string[],
+): string | null {
+  const absolute = join(worktree, file);
+  let owner: string | null = null;
+  for (const dir of directories) {
+    const inside = relative(dir, absolute);
+    if (inside.length === 0 || inside.startsWith("..") || isAbsolute(inside)) continue;
+    if (owner === null || dir.length > owner.length) owner = dir;
+  }
+  return owner;
+}

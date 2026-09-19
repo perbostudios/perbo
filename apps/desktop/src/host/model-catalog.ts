@@ -9,7 +9,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@focrux/contracts";
+import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
 import { ModelCatalogSchema, ProviderModelSchema } from "../shared/protocol.js";
 import type {
   ModelCatalog,
@@ -255,7 +255,7 @@ export async function discoverModels(
       if (after) seen.add(after);
     } while (after);
   } else {
-    const scratch = mkdtempSync(join(tmpdir(), "focrux-models-"));
+    const scratch = mkdtempSync(join(tmpdir(), "perbo-models-"));
     try {
       const { env } = scrubEnvironment({
         base,
@@ -361,7 +361,7 @@ export async function discoverModels(
             id,
             method: "initialize",
             params: {
-              clientInfo: { name: "focrux_models", version: "0.1.0" },
+              clientInfo: { name: "perbo_models", version: "0.1.0" },
               capabilities: {},
             },
           },

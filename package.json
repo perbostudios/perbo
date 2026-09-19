@@ -1,5 +1,5 @@
 {
-  "name": "focrux",
+  "name": "perbo",
   "private": true,
   "version": "0.0.0",
   "license": "Apache-2.0",
@@ -17,11 +17,11 @@
     "typecheck": "turbo run typecheck",
     "release:pack": "node tooling/package/pack.mjs",
     "issues:apply": "python3 scripts/sync_github_issues.py --apply",
-    "desktop:build": "turbo run build --filter=@focrux/desktop...",
-    "desktop:dev": "pnpm desktop:build && pnpm --filter @focrux/desktop dev",
-    "desktop:preview": "pnpm --filter @focrux/desktop preview",
-    "desktop:start": "pnpm --filter @focrux/desktop start",
-    "desktop:package": "pnpm desktop:build && pnpm --filter @focrux/desktop package"
+    "desktop:build": "turbo run build --filter=@perbo/desktop...",
+    "desktop:dev": "pnpm desktop:build && pnpm --filter @perbo/desktop dev",
+    "desktop:preview": "pnpm --filter @perbo/desktop preview",
+    "desktop:start": "pnpm --filter @perbo/desktop start",
+    "desktop:package": "pnpm desktop:build && pnpm --filter @perbo/desktop package"
   },
   "devDependencies": {
     "turbo": "2.10.12"

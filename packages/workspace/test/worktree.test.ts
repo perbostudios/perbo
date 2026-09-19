@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve, toNamespacedPath } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_LIMITS_TABLE, LimitExceededError, LimitsTableSchema } from "@focrux/contracts";
+import { DEFAULT_LIMITS_TABLE, LimitExceededError, LimitsTableSchema } from "@perbo/contracts";
 import {
   WorkspaceError,
   cleanup,
@@ -23,12 +23,12 @@ import {
 } from "../src/worktree.js";
 import { makeRepo } from "./support.js";
 
-const scratch = () => mkdtempSync(join(tmpdir(), "focrux-wt-"));
+const scratch = () => mkdtempSync(join(tmpdir(), "perbo-wt-"));
 
 const base = (dir: string, head: string, root: string) => ({
   repository_root: dir,
   repository_id: "repo_fixture",
-  ticket_key: "FCX-16",
+  ticket_key: "PRB-16",
   ticket_id: "ticket_SCP016",
   outcome: "provision an isolated worktree",
   base_commit: head,
@@ -37,12 +37,12 @@ const base = (dir: string, head: string, root: string) => ({
 });
 
 describe("provision", () => {
-  it("creates from the exact base commit on the fcx/<ticket id>/<slug> branch", async () => {
+  it("creates from the exact base commit on the prb/<ticket id>/<slug> branch", async () => {
     const repo = makeRepo();
     const root = scratch();
     const workspace = await provision({ ...base(repo.dir, repo.first, root), attempt_id: "att_1" });
 
-    expect(workspace.branch).toBe("fcx/scp016/provision-an-isolated-worktree");
+    expect(workspace.branch).toBe("prb/scp016/provision-an-isolated-worktree");
     expect(workspace.base_commit).toBe(repo.first);
     // The exact base commit, not the tip: the second commit's file is absent.
     expect(existsSync(join(workspace.path, "src.ts"))).toBe(false);
@@ -117,20 +117,20 @@ describe("provision", () => {
       recorded: { attempt: recorded },
     });
     expect(workspace.branch).toBe(recorded);
-    expect(execFileSync("git", ["branch", "--list", "fcx/*"], { cwd: repo.dir, encoding: "utf8" })).toBe("");
+    expect(execFileSync("git", ["branch", "--list", "prb/*"], { cwd: repo.dir, encoding: "utf8" })).toBe("");
   });
 
-  it("continues on the branch its lease holds, whatever its key would derive now", async () => {
+  it("continues on the branch its lease holds, whatever its outcome would derive now", async () => {
     const repo = makeRepo();
     const root = scratch();
-    // A chain begun on `ayo/`, which an AYO key derives and an FCX key does not.
-    const first = await provision({ ...base(repo.dir, repo.head, root), ticket_key: "AYO-16", attempt_id: "att_1" });
+    // A chain begun under another outcome, whose slug the current one does not derive.
+    const first = await provision({ ...base(repo.dir, repo.head, root), outcome: "an earlier outcome", attempt_id: "att_1" });
     const second = await provision({
       ...base(repo.dir, repo.head, root),
       attempt_id: "att_2",
       continues: { root_attempt_id: "att_1" },
     });
-    expect(first.branch).toBe("ayo/scp016/provision-an-isolated-worktree");
+    expect(first.branch).toBe("prb/scp016/an-earlier-outcome");
     expect(second.continued).toBe(true);
     expect(second.branch).toBe(first.branch);
   });
@@ -141,9 +141,9 @@ describe("provision", () => {
     const workspace = await provision({
       ...base(repo.dir, repo.head, root),
       attempt_id: "att_1",
-      recorded: { delivery: "direct/fcx-16/provision" },
+      recorded: { delivery: "direct/prb-16/provision" },
     });
-    expect(workspace.branch).toBe("fcx/scp016/provision-an-isolated-worktree");
+    expect(workspace.branch).toBe("prb/scp016/provision-an-isolated-worktree");
   });
 
   it("refuses a worktree path that would land outside the workspace root", async () => {

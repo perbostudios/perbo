@@ -11,9 +11,18 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { parseUnifiedDiff } from "@focrux/contracts";
-import type { Ticket } from "@focrux/contracts";
-import type { TaskSummary, UsageLedger } from "../shared/protocol.js";
+import { matchesAny, parseUnifiedDiff } from "@perbo/contracts";
+import type { Ticket } from "@perbo/contracts";
+import { nodeState } from "../shared/graph-state.js";
+import type {
+  GraphCriterionState,
+  GraphEditView,
+  GraphLiveView,
+  GraphNodeLive,
+  InterviewEdit,
+  TaskSummary,
+  UsageLedger,
+} from "../shared/protocol.js";
 
 /**
  * Reads of the CLI's own records that the desktop makes directly: the attempts
@@ -25,6 +34,8 @@ export const StoredAttemptSchema = z.looseObject({
   attempt_id: z.string().min(1),
   branch: z.string().min(1).optional(),
   created_at: z.string().optional(),
+  /** Absent, or null, where the attempt sealed no change set at all. */
+  changeset_id: z.string().min(1).nullable().optional(),
   usage: z
     .looseObject({
       cost_micros: z.number().int().min(0).optional(),
@@ -42,6 +53,13 @@ const AttemptsRecordSchema = z.looseObject({
 const BundleManifestSchema = z.looseObject({
   bundle_id: z.string().min(1),
   kind: z.string(),
+  created_at: z.string().optional(),
+  /**
+   * What the bundle was made from. A closure verification's manifest carries
+   * `findings_closed`, which the loop writes as the finding keys whose row
+   * came back `closed`, comma-separated (`loop.ts`, the `cv_` bundle).
+   */
+  inputs: z.looseObject({ findings_closed: z.string().optional() }).optional(),
   subject_id: z.string(),
   ticket_id: z.string(),
   artifacts: z
@@ -57,7 +75,15 @@ const BundleManifestSchema = z.looseObject({
 });
 export type BundleManifest = z.infer<typeof BundleManifestSchema>;
 
-const CEILING_REASONS = new Set([
+/**
+ * An attempt the runner stopped rather than one that finished (D-096).
+ *
+ * `stalled` is the only one of these a run has by default — no tool activity
+ * for the stall window — and the rest happen where a repository set a ceiling
+ * or where the executor is billed per token.
+ */
+const EARLY_STOP_REASONS = new Set([
+  "stalled",
   "wall_clock_exceeded",
   "command_ceiling_exceeded",
   "iteration_ceiling_exceeded",
@@ -65,8 +91,8 @@ const CEILING_REASONS = new Set([
   "token_ceiling_exceeded",
   "cost_ceiling_exceeded",
 ]);
-export const isCeilingStop = (reason: string | undefined): boolean =>
-  reason !== undefined && CEILING_REASONS.has(reason);
+export const isEarlyStop = (reason: string | undefined): boolean =>
+  reason !== undefined && EARLY_STOP_REASONS.has(reason);
 /** A priced attempt reported a cost; `unavailable` and `not_incurred` are not zero dollars. */
 export const isPriced = (attempt: StoredAttempt): boolean =>
   attempt.usage?.cost_micros !== undefined &&
@@ -90,6 +116,100 @@ export function readAttempts(path: string): {
     return { attempts: [], error: "The attempts record could not be read." };
   }
 }
+
+/**
+ * The edits `<KEY>.draft.json` records, as the Graph pane lists them (D-100).
+ *
+ * Loose like the attempts record above and for the same reason: the snapshot is
+ * `perbo edit`'s file and outlives the desktop version reading it, and an edit
+ * written before summaries existed still has to list. Its number is its place
+ * in the array, one upward, because that is what `--undo` takes.
+ */
+const AppliedEditSchema = z.looseObject({
+  at: z.string().min(1),
+  author: z.enum(["you", "interview"]).default("you"),
+  summary: z.string().min(1).nullable().default(null),
+  changes: z.array(z.string()).default([]),
+  undone: z.boolean().default(false),
+  replaced: z.boolean().default(false),
+  undoes: z.number().int().positive().nullable().default(null),
+  /** The entity keys it changed either side: `node:<id>`, `criterion:<id>`, `edge:<from>-><to>`. */
+  before: z.record(z.string(), z.unknown()).default({}),
+  after: z.record(z.string(), z.unknown()).default({}),
+});
+const DraftSnapshotSchema = z.looseObject({ edits: z.array(AppliedEditSchema).default([]) });
+
+function readDraftEditRecords(path: string): z.infer<typeof AppliedEditSchema>[] {
+  if (!existsSync(path)) return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    raw = undefined;
+  }
+  const parsed = DraftSnapshotSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(
+      "This ticket's draft record could not be read, and it is what says who changed the plan. Restore it from version control.",
+    );
+  }
+  return parsed.data.edits;
+}
+
+/** Every edit, as the Graph pane and the plan's history list them. */
+export function readDraftEdits(path: string): GraphEditView[] {
+  return readDraftEditRecords(path).map((edit, index) => ({
+    n: index + 1,
+    at: edit.at,
+    author: edit.author,
+    // A flag edit carries no summary, only the fields it replaced.
+    summary: edit.summary ?? (edit.changes.length > 0 ? edit.changes.join(", ") : "an edit"),
+    undone: edit.undone,
+    replaced: edit.replaced,
+    undoes: edit.undoes,
+  }));
+}
+
+/**
+ * The last edit `<KEY>.draft.json` records with `by` as its author, or null
+ * where it records none.
+ *
+ * What the chat's card for an `edit_plan` or an `undo_edit` is drawn from: the
+ * edit the command wrote down, rather than the session's own account of what
+ * it did ([ADR-0023](../../../docs/adr/0023-untrusted-context-boundary.md)).
+ * An undo is itself an edit, and names the one it reversed.
+ *
+ * The author is what links the record to the card, because the last edit of
+ * all is not always the interview's: the Graph pane edits the same plan
+ * through the same path, and one made there while the interview was working
+ * lands after it.
+ */
+export function readLatestDraftEdit(path: string, by: InterviewEdit["author"]): InterviewEdit | null {
+  const edits = readDraftEditRecords(path);
+  const at = edits.findLastIndex((edit) => edit.author === by);
+  const last = edits[at];
+  if (!last) return null;
+  const summary = last.summary ?? (last.changes.length > 0 ? last.changes.join(", ") : "an edit");
+  return {
+    n: at + 1,
+    author: last.author,
+    // Clipped to what a conversation line holds. `perbo edit` caps none of
+    // these — a `set_node_paths` summary carries every glob it was given — and
+    // a line the record rejects is one the chat never draws.
+    summary: summary.slice(0, 300),
+    undone: last.undone,
+    undoes: last.undoes,
+    before: entityKeys(last.before),
+    after: entityKeys(last.after),
+  };
+}
+
+/** The entity keys of one side of an edit, clipped to what the line holds. */
+const entityKeys = (side: Record<string, unknown>): string[] =>
+  Object.keys(side)
+    .filter((key) => key.length > 0)
+    .slice(0, 200)
+    .map((key) => key.slice(0, 200));
 
 export function listBundles(directory: string): BundleManifest[] {
   if (!existsSync(directory)) return [];
@@ -262,7 +382,7 @@ export function ledgerFor(
     unpricedAttempts: 0,
     ticketsRun: 0,
     ticketsMerged: 0,
-    stoppedAtCeiling: 0,
+    stoppedShort: 0,
     averageMergedMicros: null,
   };
   let mergedSpend = 0,
@@ -272,9 +392,9 @@ export function ledgerFor(
       (attempt) => monthOf(attempt.created_at) === month,
     );
     if (inMonth.length) ledger.ticketsRun++;
-    // A ticket, not an attempt: three ceiling stops on one ticket read as one ticket stopped.
-    if (inMonth.some((attempt) => isCeilingStop(attempt.termination?.reason)))
-      ledger.stoppedAtCeiling++;
+    // A ticket, not an attempt: three early stops on one ticket read as one ticket stopped.
+    if (inMonth.some((attempt) => isEarlyStop(attempt.termination?.reason)))
+      ledger.stoppedShort++;
     for (const attempt of inMonth) {
       if (isPriced(attempt)) {
         ledger.pricedAttempts++;
@@ -297,4 +417,233 @@ export function ledgerFor(
     ? Math.round(mergedSpend / mergedPriced)
     : null;
   return ledger;
+}
+
+/**
+ * A pinned check result as this file reads one: the node it ran for, and
+ * whether it passed. Loose for the same reason the records above are.
+ */
+const StoredCheckSchema = z.looseObject({
+  name: z.string().min(1).optional(),
+  check_id: z.string().min(1).optional(),
+  status: z.string(),
+  /**
+   * The node it was narrowed to, and how far: `files` is a run over that node's
+   * own changed test files, `task` the whole command where it could not be
+   * narrowed (D-107). Only the first is evidence about the node.
+   */
+  node: z.looseObject({ node_id: z.string().min(1), scope: z.string().optional() }).optional(),
+});
+const StoredChecksSchema = z.union([
+  z.array(StoredCheckSchema),
+  z.looseObject({ checks: z.array(StoredCheckSchema) }).transform((value) => value.checks),
+]);
+/**
+ * The review artifact as this file reads one: the evidence bindings and the
+ * findings, which are the only account of a criterion's state that is not the
+ * executor's own (ADR-0023). Loose, so an artifact a later version wrote still
+ * reads here rather than leaving the pane with nothing.
+ */
+const StoredReviewSchema = z.looseObject({
+  /**
+   * The plan it judged. A criterion id is only unique within a plan version —
+   * a re-draft from the spec renumbers them — so a review of an older version
+   * is not an account of these criteria. Absent on a record written before the
+   * field, which is read as the plan it is beside.
+   */
+  plan_version: z.number().int().positive().optional(),
+  created_at: z.string().optional(),
+  coverage: z
+    .array(
+      z.looseObject({
+        criterion_id: z.string().min(1),
+        status: z.enum(["met", "not_met", "cannot_determine"]),
+        verification_strength: z.enum(["directly_verified", "proxy", "asserted_only"]).optional(),
+        evidence: z
+          .looseObject({
+            ref: z.string().min(1).nullable().optional(),
+            location: z
+              .looseObject({
+                file: z.string().min(1),
+                line: z.number().int().min(1).nullable().optional(),
+              })
+              .nullable()
+              .optional(),
+          })
+          .nullable()
+          .optional(),
+      }),
+    )
+    .default([]),
+  findings: z
+    .array(
+      z.looseObject({
+        key: z.string().min(1).optional(),
+        criterion_id: z.string().min(1).nullable().optional(),
+        status: z.string().optional(),
+        statement: z.string().min(1).optional(),
+      }),
+    )
+    .default([]),
+});
+
+/** One node of the plan, as the live read needs it: its globs and its criteria. */
+export interface LiveNodeInput {
+  id: string;
+  paths: readonly string[];
+  criteria: readonly string[];
+}
+
+/**
+ * What a run's records say about a plan's execution graph (D-100, SCP-317).
+ *
+ * The records and no others: the sealed change set, whose paths say which of a
+ * node's globs the branch has touched; the pinned checks, each carrying the
+ * node it was narrowed to (D-107); the review artifact's evidence bindings,
+ * which are the only account of a criterion's state that is not the executor's
+ * own, read only where that review judged the plan the ticket now carries; and
+ * the verifications the rounds since have recorded beside it, because a review
+ * artifact is immutable and a finding it opened would otherwise read open for
+ * ever (D-061). The executor's transcript and its account of its own change
+ * are in the same bundle and are read by nothing here, which is the rule
+ * ADR-0023 states and the reason this exists.
+ *
+ * The latest attempt is the one read: a change set is the branch against the
+ * base rather than an attempt's own delta, so the latest holds all of it. The
+ * latest review artifact is the one read for the same kind of reason — a
+ * change gets one full review and every later round is verified rather than
+ * reviewed again (D-061), so there is no newer account of a criterion.
+ */
+export function liveGraph(input: {
+  nodes: readonly LiveNodeInput[];
+  attempts: readonly StoredAttempt[];
+  bundles: readonly BundleManifest[];
+  ticketId: string;
+  /** The plan the ticket carries now, which a review has to have judged. */
+  planVersion?: number;
+  objectsDirectory: string;
+}): GraphLiveView {
+  const latest = input.attempts.at(-1);
+  const mine = input.bundles.filter((bundle) => bundle.ticket_id === input.ticketId);
+  const execution = latest
+    ? mine.find((bundle) => bundle.kind === "execution" && bundle.subject_id === latest.attempt_id)
+    : undefined;
+  const read = (bundle: BundleManifest | undefined, name: string): string | null => {
+    const artifact = bundle?.artifacts.find((entry) => entry.name === name && entry.retained);
+    if (!artifact) return null;
+    try {
+      return readObject(join(input.objectsDirectory, artifact.sha256), artifact).text;
+    } catch {
+      return null;
+    }
+  };
+  const parse = <T>(body: string | null, schema: z.ZodType<T>): T | null => {
+    if (body === null) return null;
+    try {
+      const parsed = schema.safeParse(JSON.parse(body));
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const diff = read(execution, "change.diff");
+  const changed = diff === null ? [] : parseUnifiedDiff(diff).map((file) => file.path);
+  // A change set was sealed and its bytes are not here to read: withheld above
+  // the reviewable cap, or not retained. Saying so is the difference between a
+  // node nobody touched and a node nothing could be read about.
+  const note =
+    latest && latest.changeset_id && diff === null
+      ? "This attempt's sealed change set is not in the bundle store, so no path could be read from it."
+      : null;
+  let reviewNote: string | null = null;
+
+  const checks = parse(read(execution, "checks.json"), StoredChecksSchema) ?? [];
+  const newest = <T extends BundleManifest>(bundles: T[]): T | undefined =>
+    [...bundles].sort((left, right) => (left.created_at ?? "").localeCompare(right.created_at ?? "")).at(-1);
+  // The review on record, which a remediation round does not replace: a round
+  // is verified rather than reviewed again (D-061), so it seals a change set
+  // this review never judged and no newer review appears. What does make the
+  // review not an account of these criteria is a re-draft, because criterion
+  // ids are only unique within a plan version.
+  const reviewBundle = newest(
+    mine.filter((bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("rev_")),
+  );
+  const reviewed = parse(read(reviewBundle, "review.json"), StoredReviewSchema);
+  const stale =
+    reviewed?.plan_version !== undefined &&
+    input.planVersion !== undefined &&
+    reviewed.plan_version !== input.planVersion;
+  const review = stale ? null : reviewed;
+  if (stale) {
+    reviewNote =
+      "The plan has been re-drafted since it was reviewed, so the review on record is not an account " +
+      "of these criteria.";
+  }
+  // What the rounds since that review closed. A review artifact is immutable,
+  // so a finding it opened reads open for ever unless the closures beside it
+  // are read too (D-061) — every one of them, because a round's list names
+  // only what that round closed, and only those made after the review, so a
+  // finding a later review raised again is not answered by an older closure.
+  const since = reviewBundle?.created_at ?? reviewed?.created_at ?? "";
+  const closed = new Set(
+    mine
+      .filter(
+        (bundle) => bundle.subject_id.startsWith("cv_") && (bundle.created_at ?? "").localeCompare(since) >= 0,
+      )
+      .flatMap((bundle) => (bundle.inputs?.findings_closed ?? "").split(","))
+      .map((key) => key.trim())
+      .filter((key) => key.length > 0),
+  );
+  const bound = new Map((review?.coverage ?? []).map((entry) => [entry.criterion_id, entry]));
+  const open = new Map<string, string>();
+  for (const finding of review?.findings ?? [])
+    if (
+      finding.criterion_id &&
+      finding.status === "open" &&
+      finding.statement &&
+      !(finding.key && closed.has(finding.key))
+    )
+      open.set(finding.criterion_id, open.get(finding.criterion_id) ?? finding.statement);
+
+  const nodes = input.nodes.map((node): GraphNodeLive => {
+    const touched = changed.filter((path) => matchesAny(path, node.paths)).sort();
+    // A run the loop could not narrow to this node is the whole command with
+    // the node's name on it: the loop runs every pinned check once per node
+    // for every node, so a node the change never reached has one, it passes,
+    // and counting it would read that node as further along than a node the
+    // change did reach (D-107).
+    const ran = checks
+      .filter((check) => check.node?.node_id === node.id && check.node.scope === "files")
+      .map((check) => ({ name: check.name ?? check.check_id ?? "Check", status: check.status }));
+    const criteria = node.criteria.map((id): GraphCriterionState => {
+      const binding = bound.get(id);
+      const location = binding?.evidence?.location ?? null;
+      return {
+        id,
+        state: binding?.status ?? "unbound",
+        strength: binding?.verification_strength ?? null,
+        evidence: location
+          ? location.line
+            ? `${location.file}:${location.line}`
+            : location.file
+          : (binding?.evidence?.ref ?? null),
+        finding: open.get(id) ?? null,
+      };
+    });
+    return { id: node.id, state: nodeState({ touched, ran, criteria }), changed: touched, criteria, checks: ran };
+  });
+  return {
+    attempt: latest?.attempt_id ?? null,
+    nodes,
+    // A flat plan has no node for a path to be outside of, so nothing is: its
+    // whole change set is the change, and the task screen is where it is read.
+    outside:
+      input.nodes.length === 0
+        ? []
+        : changed
+            .filter((path) => !input.nodes.some((node) => matchesAny(path, node.paths)))
+            .sort(),
+    note: note ?? reviewNote,
+  };
 }

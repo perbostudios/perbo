@@ -50,7 +50,7 @@ export interface ReviewArgs {
   criteria: string[];
   /** What the change may touch. Nothing typed means `**`: no scope was stated. */
   paths: string[];
-  /** Where the local store lives (default `<repo>/.focrux`). */
+  /** Where the local store lives (default `<repo>/.perbo`). */
   store: string | null;
   suppressions: string | null;
   ruleAuthority: string | null;
@@ -101,7 +101,7 @@ const TAKES_VALUE = new Set([
 
 const FLAGS = new Set(["--json", "--no-color", "--color", "--quiet"]);
 
-export const DEFAULT_STATE_DIR = ".focrux/reviews";
+export const DEFAULT_STATE_DIR = ".perbo/reviews";
 
 export function parseReviewArgs(argv: string[]): ReviewArgs {
   const args: ReviewArgs = {

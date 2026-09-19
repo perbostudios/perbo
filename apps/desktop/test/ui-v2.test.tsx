@@ -24,7 +24,7 @@ beforeEach(() => {
     HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) { this.removeAttribute("open"); };
   }
   sessionStorage.clear();
-  localStorage.removeItem("focrux:preview-editing");
+  localStorage.removeItem("perbo:preview-editing");
   location.hash = "home";
   setPlatformForTests(true);
   client = new QueryClient({
@@ -118,9 +118,9 @@ describe("UI v2", () => {
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     await screen.findByText("General", { selector: ".header-section" });
     fireEvent.keyDown(window, { key: "n", metaKey: true });
-    expect(screen.queryByText("Create a task", { selector: ".header-title" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Plan a piece of work" })).toBeNull();
     fireEvent.keyDown(window, { key: "j", metaKey: true });
-    await screen.findByLabelText("Outcome");
+    await screen.findByRole("dialog", { name: "Plan a piece of work" });
     await resetPreviewSettings();
   });
 
@@ -129,7 +129,7 @@ describe("UI v2", () => {
     const card = await screen.findByRole("button", { name: "Retry the webhook dispatcher three times" });
     expect(card.className).toContain("task-card--complete");
     expect(screen.getByText("1 completed")).toBeTruthy();
-    await within(card).findByText("focrux/409-webhook-retry");
+    await within(card).findByText("perbo/409-webhook-retry");
     await within(card).findByText("+72");
     fireEvent.click(within(card).getByRole("button", { name: "Archive" }));
     await waitFor(() =>
@@ -167,13 +167,13 @@ describe("UI v2", () => {
       if (request.kind === "usage")
         return {
           readAt: new Date().toISOString(),
-          ledger: { month: "2026-09", spentMicros: 2_140_000, pricedAttempts: 3, unpricedAttempts: 1, ticketsRun: 2, ticketsMerged: 1, stoppedAtCeiling: 1, averageMergedMicros: null },
+          ledger: { month: "2026-09", spentMicros: 2_140_000, pricedAttempts: 3, unpricedAttempts: 1, ticketsRun: 2, ticketsMerged: 1, stoppedShort: 1, averageMergedMicros: null },
           providers: [
             { id: "claude", name: "Claude Code", role: "default executor", plan: null, windows: null, detail: "Claude Code reports a limit only when a run meets one; there is no window to read without spending a turn." },
             { id: "codex", name: "Codex", role: "default reviewer", plan: "Pro", windows: [{ label: "Session · 5-hour window", usedPercent: 82, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }], detail: "Read from the Codex app-server." },
             { id: "anthropic", name: "Anthropic API", role: null, plan: null, windows: null, detail: "No API key in the app environment." },
           ],
-          notes: ["webstore · FCX-2: The attempts record could not be read."],
+          notes: ["webstore · PRB-2: The attempts record could not be read."],
         } as ReplyMap[T["kind"]];
       return original(request);
     });
@@ -185,7 +185,9 @@ describe("UI v2", () => {
     expect(screen.getByText(/no window to read without spending a turn/)).toBeTruthy();
     expect(document.querySelector(".usage-facts")?.textContent).toContain("$2.14");
     expect(screen.getByText(/1 unpriced attempt/)).toBeTruthy();
-    expect(screen.getByText(/1 stopped at a ceiling/)).toBeTruthy();
+    // D-096: a ticket counted here stopped short of finishing, which is a
+    // stall as often as a ceiling the repository set.
+    expect(screen.getByText(/1 stopped short/)).toBeTruthy();
     expect(screen.getByText(/not every attempt was priced/)).toBeTruthy();
     expect(screen.getByText(/Codex’s session · 5-hour window is at 82%/)).toBeTruthy();
     expect(screen.getByText(/could not be read/)).toBeTruthy();
@@ -199,7 +201,7 @@ describe("UI v2", () => {
     expect(document.querySelector(".settings-pill")).toBeNull();
     expect(document.querySelector(".rail")).toBeNull();
     expect(document.querySelector(".titlebar .rail-toggle")).toBeTruthy();
-    expect(JSON.parse(localStorage.getItem("focrux:rail")!)).toMatchObject({ collapsed: true });
+    expect(JSON.parse(localStorage.getItem("perbo:rail")!)).toMatchObject({ collapsed: true });
     fireEvent.click(screen.getByRole("button", { name: "Expand the sidebar" }));
     expect((document.querySelector(".rail") as HTMLElement).style.width).toBe("66px");
     expect(document.querySelector(".settings-pill")?.getAttribute("aria-hidden")).toBe("true");
@@ -214,7 +216,7 @@ describe("UI v2", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
     await waitFor(async () => {
       const workspace = await previewBridge.request({ kind: "snapshot" });
-      expect(workspace.tasks.some((row) => row.ticket.key === "FCX-421")).toBe(false);
+      expect(workspace.tasks.some((row) => row.ticket.key === "PRB-421")).toBe(false);
     });
     await screen.findByRole("heading", { name: /Hi, / });
     expect(screen.queryByRole("button", { name: "Split the settings page into tabs" })).toBeNull();
@@ -231,6 +233,6 @@ describe("UI v2", () => {
     expect(notices.some((notice) => /sample workspace/.test(notice.textContent ?? "") && notice.textContent?.includes("claude auth login"))).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: /Refresh connections/ }));
     await screen.findByText("Connections refreshed");
-    expect(screen.queryByRole("button", { name: "Focrux home" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Perbo home" })).toBeNull();
   });
 });

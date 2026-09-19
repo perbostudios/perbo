@@ -3,12 +3,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { LimitExceededError } from "@focrux/contracts";
-import { ProviderError, type ReviewModel } from "@focrux/review";
-import { AgentConfigurationPresentError, DeliveryError } from "@focrux/runner";
-import { WorkspaceError } from "@focrux/workspace";
+import { LimitExceededError, PlanContractSchema, hasAcceptanceCriteria } from "@perbo/contracts";
+import { ProviderError, type ReviewModel } from "@perbo/review";
+import { AgentConfigurationPresentError, DeliveryError } from "@perbo/runner";
+import { WorkspaceError } from "@perbo/workspace";
 import { parseReviewArgs, UsageError } from "../src/args.js";
-import { ResumeRecordSchema, mergeResumed } from "../src/resume.js";
+import { ResumeRecordSchema, contractForUnresolved, mergeResumed } from "../src/resume.js";
 import { VERSION, describeFailure, runReviewCommand, type RunOptions, type Streams } from "../src/run.js";
 import { spawnBuilt } from "./open-build.js";
 
@@ -25,7 +25,7 @@ if (
   throw new Error("apps/cli/package.json has no string version");
 }
 const manifestVersion = packageMetadata.version;
-const scratch = mkdtempSync(join(tmpdir(), "focrux-cli-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-cli-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const contract = {
@@ -331,7 +331,7 @@ describe("streams", () => {
     expect(result.out).toContain("error");
     expect(result.out).toContain("timeout");
     expect(result.out).toContain("no verdict reached on ac_1, ac_2");
-    expect(result.out).toContain("focrux review --resume rev_");
+    expect(result.out).toContain("perbo review --resume rev_");
     expect(result.out).toContain("re-runs only the unresolved criteria");
     expect(result.out).not.toContain("[BLOCK]");
     for (const line of result.out.split("\n")) expect(line.length).toBeLessThanOrEqual(80);
@@ -380,7 +380,7 @@ describe("a reviewer that could not be reached", () => {
 
   it("still saves a resume for a failure a re-run can clear", async () => {
     const result = await invoke([...base, "--no-color"], failingModel("timeout"), true);
-    expect(result.out).toContain("focrux review --resume rev_");
+    expect(result.out).toContain("perbo review --resume rev_");
     expect(readdirSync(stateDir)).toHaveLength(1);
   });
 });
@@ -425,7 +425,13 @@ describe("preflight", () => {
       },
     });
     expect(requests).toEqual([
-      { agentBinary: null, reviewerProvider: "anthropic", needsGh: false, needsGit: false },
+      {
+        agentBinary: null,
+        agentProvider: null,
+        reviewerProvider: "anthropic",
+        needsGh: false,
+        needsGit: false,
+      },
     ]);
   });
 });
@@ -627,6 +633,22 @@ describe("resume", () => {
     });
     expect(mergeResumed(record, fresh, ["ac_1", "ac_2"]).decision).toBe("escalate");
   });
+
+  it("keeps a resumed graph contract's nodes parseable, dropping the resolved criterion from its node too", () => {
+    const graph = PlanContractSchema.parse({
+      ...contract,
+      nodes: [
+        { id: "node_1", title: "Page the results", criteria: ["ac_1"], paths: ["packages/search/**"] },
+        { id: "node_2", title: "Report the total", criteria: ["ac_2"], paths: ["packages/search/**"] },
+      ],
+    });
+    if (!hasAcceptanceCriteria(graph)) throw new Error("fixture has no acceptance criteria");
+    // ac_1 is resolved; only ac_2, alone in node_2, is unresolved.
+    const narrowed = contractForUnresolved(graph, ["ac_2"]);
+    if (!hasAcceptanceCriteria(narrowed)) throw new Error("narrowed contract lost its criteria");
+    expect(narrowed.acceptance_criteria.map((criterion) => criterion.id)).toEqual(["ac_2"]);
+    expect(narrowed.nodes?.map((node) => node.id)).toEqual(["node_2"]);
+  });
 });
 
 describe("the run bundle", () => {
@@ -664,7 +686,7 @@ describe("argument parsing", () => {
     expect(args.repo).toBe("/tmp");
   });
 
-  it("reviews on the local claude login by default, as `focrux run` does", () => {
+  it("reviews on the local claude login by default, as `perbo run` does", () => {
     expect(parseReviewArgs(["--contract", "c.json", "--diff", "d.diff"]).provider).toBe("claude-cli");
   });
 
@@ -716,7 +738,7 @@ describe("a failure that reaches the top level", () => {
       new WorkspaceError("port_allocation_unavailable", "no free range under the lock"),
     );
     expect(failure.message).toContain("could not prepare a worktree");
-    expect(failure.message).toContain("focrux doctor");
+    expect(failure.message).toContain("perbo doctor");
     noStack(failure.message);
   });
 
@@ -800,4 +822,240 @@ describe.sequential("the built binary", () => {
     const result = run(["review", "--contract", "contract.json", "--diff", "change.diff", "--nope"]);
     expect(result.code, result.stderr).toBe(1);
   }, 20_000);
+});
+
+/**
+ * `reviewSchema`'s doc comment says a node's call and the whole-change call
+ * are never built from two different expressions of the same thing — but a
+ * flat contract's one call never goes through `modelFor` at all
+ * (`reviewGraph` calls `run` on `input.model` directly when the contract has
+ * no nodes), so this is the one place a checks file carrying a stray node
+ * tag could still let the schema promise a check id the call never shows.
+ */
+describe("the flat review's verdict schema", () => {
+  it("is built from wholeChangeChecks, not a checks file's stray node tag", async () => {
+    const flatChecksWithNodeTag = [
+      {
+        check_id: "check_ut",
+        name: "unit",
+        kind: "unit",
+        status: "passed",
+        summary: "2 passed",
+        command: "vitest run",
+        detail: null,
+        duration_ms: null,
+        source: "file",
+      },
+      {
+        // A stray node tag: this contract has no `nodes` at all, but the
+        // checks file still carries one — the one shape reviewSchema's
+        // unfiltered `checks` and the call's own wholeChangeChecks(checks)
+        // disagree on.
+        check_id: "check_node_stray",
+        name: "unit",
+        kind: "unit",
+        status: "passed",
+        summary: "1 passed",
+        command: "vitest run packages/search/test/other.test.ts",
+        detail: null,
+        duration_ms: null,
+        source: "file",
+        node: {
+          node_id: "node_ghost",
+          scope: "files",
+          paths: ["packages/search/test/other.test.ts"],
+          note: null,
+        },
+      },
+    ];
+    writeFileSync(join(scratch, "flat-checks-with-node-tag.json"), JSON.stringify(flatChecksWithNodeTag));
+
+    let capturedSchema: Record<string, unknown> | null = null;
+    const result = await invoke(
+      [
+        "--contract",
+        "contract.json",
+        "--diff",
+        "change.diff",
+        "--checks",
+        "flat-checks-with-node-tag.json",
+        "--repo",
+        "repo",
+      ],
+      stubModel(bothMet),
+      false,
+      {
+        makeModel: (submitSchema) => {
+          capturedSchema = submitSchema;
+          return stubModel(bothMet);
+        },
+      },
+    );
+
+    expect(result.code, result.err).toBe(0);
+    const checkIds = (
+      capturedSchema as {
+        properties: { check_assertions: { items: { properties: { check_id: { enum: string[] } } } } };
+      }
+    ).properties.check_assertions.items.properties.check_id.enum;
+    expect(checkIds).toContain("check_ut");
+    expect(checkIds).toContain("check_scope");
+    expect(checkIds).not.toContain("check_node_stray");
+  });
+});
+
+/**
+ * D-107, through `perbo review`: a graphed contract is reviewed once per
+ * node and once overall, and what is printed is the combined artifact — a
+ * flat contract's own tests above are untouched and still pass unmodified.
+ */
+describe("a graphed contract", () => {
+  const graphContract = {
+    plan_id: "plan_cli_graph",
+    version: 1,
+    ticket_id: "ticket_cli_graph",
+    level: "P1",
+    outcome: "search results are paginated",
+    acceptance_criteria: [
+      {
+        id: "ac_1",
+        text: "A search returns at most 25 hits per page.",
+        expected_verification: { kind: "test", assertion: "a 140-hit query returns 25" },
+      },
+      {
+        id: "ac_2",
+        text: "The total number of matches is reported.",
+        expected_verification: { kind: "test", assertion: "total is 140" },
+      },
+    ],
+    nodes: [
+      { id: "node_page", title: "Page size", criteria: ["ac_1"], paths: ["packages/search/src/query.ts"] },
+      { id: "node_total", title: "Total count", criteria: ["ac_2"], paths: ["packages/search/src/total.ts"] },
+    ],
+    scope: contract.scope,
+    base: contract.base,
+  };
+
+  const graphDiff = `diff --git a/packages/search/src/query.ts b/packages/search/src/query.ts
+index 1111111..2222222 100644
+--- a/packages/search/src/query.ts
++++ b/packages/search/src/query.ts
+@@ -1,1 +1,1 @@
+-export const PAGE = 0;
++export const PAGE = 25;
+diff --git a/packages/search/src/total.ts b/packages/search/src/total.ts
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/packages/search/src/total.ts
+@@ -0,0 +1,1 @@
++export const total = 140;
+`;
+
+  const graphArgs = [
+    "--contract",
+    "graph-contract.json",
+    "--diff",
+    "graph-change.diff",
+    "--checks",
+    "checks.json",
+    "--repo",
+    "repo",
+  ];
+
+  /** A model that answers each `.turn()` in order from a fixed script, once each. */
+  function sequentialModel(inputs: unknown[]): ReviewModel & { calls: number } {
+    const model = {
+      provider: "double",
+      model_id: "scripted",
+      calls: 0,
+      async turn() {
+        const input = inputs[model.calls];
+        model.calls += 1;
+        return {
+          toolCalls: [{ id: `t${model.calls}`, name: "submit_review", input }],
+          usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+          stop_reason: "tool_use" as const,
+        };
+      },
+    };
+    return model;
+  }
+
+  it("reviews each node and the overall — three model runs — and prints the combined artifact", async () => {
+    writeFileSync(join(scratch, "graph-contract.json"), JSON.stringify(graphContract));
+    writeFileSync(join(scratch, "graph-change.diff"), graphDiff);
+    writeFileSync(join(repoDir, "packages/search/src/total.ts"), "export const total = 140;\n");
+
+    // Node order (plan order): node_page, then node_total, then the overall.
+    const model = sequentialModel([
+      { coverage: [entry({ criterion_id: "ac_1" })], findings: [], check_assertions: [], overall_confidence: 0.9 },
+      { coverage: [entry({ criterion_id: "ac_2" })], findings: [], check_assertions: [], overall_confidence: 0.9 },
+      {
+        coverage: [entry({ criterion_id: "ac_1" }), entry({ criterion_id: "ac_2" })],
+        findings: [],
+        check_assertions: [],
+        overall_confidence: 0.9,
+      },
+    ]);
+
+    const result = await invoke(graphArgs, model);
+
+    expect(model.calls).toBe(3);
+    expect(result.code).toBe(0);
+    const artifact = JSON.parse(result.out);
+    expect(artifact.decision).toBe("approve");
+    expect(artifact.coverage.map((entry: { criterion_id: string }) => entry.criterion_id).sort()).toEqual([
+      "ac_1",
+      "ac_2",
+    ]);
+  });
+
+  it("prints the combined artifact, not the overall's alone: a node-only finding still reaches it", async () => {
+    writeFileSync(join(scratch, "graph-contract.json"), JSON.stringify(graphContract));
+    writeFileSync(join(scratch, "graph-change.diff"), graphDiff);
+    writeFileSync(join(repoDir, "packages/search/src/total.ts"), "export const total = 140;\n");
+
+    // node_page blocks on its own criterion; node_total and the overall both
+    // approve — so the print can only carry the finding by combining them.
+    const model = sequentialModel([
+      {
+        coverage: [entry({ criterion_id: "ac_1", status: "not_met" })],
+        findings: [
+          {
+            // The "security" family is never remediable (blocking.ts), so a
+            // blocker-severity, high-confidence finding here routes to
+            // "blocks" rather than "remediable" — the decision this test
+            // needs to tell the combined artifact from the overall's alone.
+            rule_id: "security.unbounded_query",
+            criterion_id: "ac_1",
+            severity: "blocker",
+            confidence: 0.95,
+            file: "packages/search/src/query.ts",
+            line: 1,
+            symbol: null,
+            statement: "PAGE is set but nothing bounds a query to it.",
+          },
+        ],
+        check_assertions: [],
+        overall_confidence: 0.9,
+      },
+      { coverage: [entry({ criterion_id: "ac_2" })], findings: [], check_assertions: [], overall_confidence: 0.9 },
+      {
+        coverage: [entry({ criterion_id: "ac_1" }), entry({ criterion_id: "ac_2" })],
+        findings: [],
+        check_assertions: [],
+        overall_confidence: 0.9,
+      },
+    ]);
+
+    const result = await invoke(graphArgs, model);
+
+    expect(model.calls).toBe(3);
+    const artifact = JSON.parse(result.out);
+    expect(artifact.decision).toBe("changes_requested");
+    expect(
+      artifact.findings.some((finding: { rule_id: string }) => finding.rule_id === "security.unbounded_query"),
+    ).toBe(true);
+  });
 });

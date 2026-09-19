@@ -10,8 +10,8 @@ import {
   type LoopMergeObservation,
   type LoopMergeStop,
   type MergeMode,
-} from "@focrux/contracts";
-import { gitEnv, run } from "@focrux/workspace";
+} from "@perbo/contracts";
+import { gitEnv, run } from "@perbo/workspace";
 import { MergeLockedError, acquireMergeLock } from "./lock.js";
 import { requireGithubCredential } from "./github-credential.js";
 
@@ -55,7 +55,7 @@ export interface LoopMergeRequest {
   /**
    * The base the merge is into, where the caller knows it — the run
    * configuration's `base_ref`. Null takes GitHub's own answer, which is what
-   * `focrux sync` has: it holds a ticket, not a run configuration.
+   * `perbo sync` has: it holds a ticket, not a run configuration.
    */
   base_ref: string | null;
   /** Where the merge lock goes, beside the ticket's run lock. */

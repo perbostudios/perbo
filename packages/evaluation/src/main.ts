@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import type { CheckResult } from "@focrux/contracts";
+import type { CheckResult } from "@perbo/contracts";
 import {
   DEFAULT_REVIEW_TIMEOUT_MS,
   matchesFilter,
@@ -29,20 +29,20 @@ import {
 } from "./run-manifest.js";
 
 /**
- * `focrux-corpus` — run the seeded-defect corpus and report the numbers D-010
+ * `perbo-corpus` — run the seeded-defect corpus and report the numbers D-010
  * states thresholds against.
  *
- * It spawns the real `focrux` binary, so a corpus run and a real run are the
+ * It spawns the real `perbo` binary, so a corpus run and a real run are the
  * same program. Anthropic uses ANTHROPIC_API_KEY; CLI transports use their own
  * local credentials. It makes fixtures × repeats reviews — the default is a
  * dry listing, and `--run` is the flag that spends provider usage.
  */
 
-const USAGE = `focrux-corpus — run the seeded-defect corpus
+const USAGE = `perbo-corpus — run the seeded-defect corpus
 
-  focrux-corpus --run --repeats 3 --out .local/corpus
-  focrux-corpus runnable [--write]
-  focrux-corpus prepare
+  perbo-corpus --run --repeats 3 --out .local/corpus
+  perbo-corpus runnable [--write]
+  perbo-corpus prepare
 
   --run              actually invoke the reviewer. Without it, list the corpus and stop
   --dry-run          say that out loud: list the selection and spend nothing. Refused with --run
@@ -220,10 +220,10 @@ function parse(argv: string[]): Args {
   return args;
 }
 
-/** The reviewer entry point the harness spawns: the real `focrux` binary. */
+/** The reviewer entry point the harness spawns: the real `perbo` binary. */
 function cliPath(): string {
   const require = createRequire(import.meta.url);
-  return join(dirname(require.resolve("@focrux/cli")), "main.js");
+  return join(dirname(require.resolve("@perbo/cli")), "main.js");
 }
 
 const SuiteSchema = z.object({ name: z.string(), fixtures: z.array(z.string()).min(1) });
@@ -274,7 +274,7 @@ function suiteFilter(
  * record it leaves rather than only in the code that started it.
  */
 export interface CorpusOverrides {
-  /** The reviewer entry point to spawn, instead of the installed `focrux`. */
+  /** The reviewer entry point to spawn, instead of the installed `perbo`. */
   cliPath?: string;
 }
 
@@ -398,7 +398,7 @@ export async function main(
           .join("\n") +
         (excluded_unprepared.length > 0
           ? `\n\n${excluded_unprepared.length} fixture(s) excluded — they pin a repository that ` +
-            `is not prepared (run \`focrux-corpus prepare\`): ${excluded_unprepared.join(", ")}`
+            `is not prepared (run \`perbo-corpus prepare\`): ${excluded_unprepared.join(", ")}`
           : "") +
         `\n\nPass --run to invoke the reviewer. That makes ${selected.length * args.repeats} model ` +
         "calls and costs money.\n",
@@ -429,7 +429,7 @@ export async function main(
       cliPath: runnerCliPath,
       providerBinaryPath:
         args.provider === "codex-cli"
-          ? (process.env.FOCRUX_CODEX_BINARY ?? "codex")
+          ? (process.env.PERBO_CODEX_BINARY ?? "codex")
           : args.provider === "claude-cli"
             ? "claude"
             : undefined,
@@ -517,7 +517,7 @@ export async function main(
  * Where it does not, the two paths are compared *after* `realpathSync`: Node
  * resolves the module URL through symlinks but leaves `process.argv[1]` as
  * written, so a package manager's `bin` symlink (this package declares
- * `focrux-corpus`) makes the two spellings differ for the same file — and the
+ * `perbo-corpus`) makes the two spellings differ for the same file — and the
  * command would exit 0 having silently done nothing.
  */
 function sameFile(left: string | undefined, right: string): boolean {

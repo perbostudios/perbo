@@ -34,7 +34,7 @@ function work(prefix) {
  * argument line rather than as a silent pass.
  */
 function fakeGh(releases) {
-  const bin = work("focrux-draft-gh-");
+  const bin = work("perbo-draft-gh-");
   const log = join(bin, "calls");
   const list = join(bin, "releases.json");
   writeFileSync(log, "");
@@ -62,10 +62,10 @@ function fakeGh(releases) {
 
 /** A packed tarball and the checksum file beside it, as `pack.mjs` leaves them. */
 function tarball() {
-  const dir = work("focrux-draft-");
-  const archive = join(dir, `focrux-${VERSION}.tgz`);
+  const dir = work("perbo-draft-");
+  const archive = join(dir, `perbo-${VERSION}.tgz`);
   writeFileSync(archive, "archive\n");
-  writeFileSync(`${archive}.sha256`, `${"a".repeat(64)}  focrux-${VERSION}.tgz\n`);
+  writeFileSync(`${archive}.sha256`, `${"a".repeat(64)}  perbo-${VERSION}.tgz\n`);
   return archive;
 }
 
@@ -82,8 +82,8 @@ const writes = (gh) =>
 
 test("no draft for the version: the release is created", () => {
   const gh = fakeGh([
-    { tagName: "v0.0.9", isDraft: true, name: "focrux 0.0.9" },
-    { tagName: "v0.0.1", isDraft: false, name: "focrux 0.0.1" },
+    { tagName: "v0.0.9", isDraft: true, name: "perbo 0.0.9" },
+    { tagName: "v0.0.1", isDraft: false, name: "perbo 0.0.1" },
   ]);
   const run = draft(gh);
 
@@ -95,8 +95,8 @@ test("no draft for the version: the release is created", () => {
 
 test("a draft for the version: its assets are clobbered and its notes edited, and none is created", () => {
   const gh = fakeGh([
-    { tagName: "v0.0.0", isDraft: true, name: "focrux 0.0.0" },
-    { tagName: "v0.0.9", isDraft: true, name: "focrux 0.0.9" },
+    { tagName: "v0.0.0", isDraft: true, name: "perbo 0.0.0" },
+    { tagName: "v0.0.9", isDraft: true, name: "perbo 0.0.9" },
   ]);
   const run = draft(gh);
 
@@ -104,15 +104,15 @@ test("a draft for the version: its assets are clobbered and its notes edited, an
   const upload = gh.calls().filter((call) => call.startsWith("release upload v0.0.0 "));
   assert.equal(upload.length, 1, gh.calls().join("\n"));
   assert.match(upload[0], /--clobber/);
-  assert.match(upload[0], /focrux-0\.0\.0\.tgz\.sha256/);
+  assert.match(upload[0], /perbo-0\.0\.0\.tgz\.sha256/);
   assert.equal(gh.calls().filter((call) => call.startsWith("release edit v0.0.0 ")).length, 1);
   assert.equal(gh.calls().filter((call) => call.startsWith("release create")).length, 0);
 });
 
 test("a published release with the tag: the run fails naming it, and nothing is written", () => {
   const gh = fakeGh([
-    { tagName: "v0.0.0", isDraft: false, name: "focrux 0.0.0" },
-    { tagName: "v0.0.9", isDraft: true, name: "focrux 0.0.9" },
+    { tagName: "v0.0.0", isDraft: false, name: "perbo 0.0.0" },
+    { tagName: "v0.0.9", isDraft: true, name: "perbo 0.0.9" },
   ]);
   const run = draft(gh);
 
@@ -124,8 +124,8 @@ test("a published release with the tag: the run fails naming it, and nothing is 
 
 test("two drafts share the tag: the run fails rather than picking one, and nothing is written", () => {
   const gh = fakeGh([
-    { tagName: "v0.0.0", isDraft: true, name: "focrux 0.0.0" },
-    { tagName: "v0.0.0", isDraft: true, name: "focrux 0.0.0" },
+    { tagName: "v0.0.0", isDraft: true, name: "perbo 0.0.0" },
+    { tagName: "v0.0.0", isDraft: true, name: "perbo 0.0.0" },
   ]);
   const run = draft(gh);
 

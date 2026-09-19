@@ -20,7 +20,7 @@ digraph G {
   deployed [label="DEPLOYED\n(opt-in)", fillcolor="#DCFCE7", style="rounded,filled,dashed", color="#9CA3AF"];
   observe [label="OBSERVING\n(opt-in)", fillcolor="#DBEAFE", style="rounded,filled,dashed", color="#9CA3AF"];
   changes [label="CHANGES_REQUESTED", fillcolor="#FED7AA"];
-  invalid [label="PLAN_INVALID", fillcolor="#FDE68A", style="rounded,filled,dashed", color="#9CA3AF"];
+  invalid [label="PLAN_INVALID", fillcolor="#FDE68A"];
   blocked [label="BLOCKED", fillcolor="#FECACA"];
   failed [label="FAILED", fillcolor="#FECACA"];
   cancelled [label="CANCELLED", fillcolor="#E5E7EB"];
@@ -35,8 +35,7 @@ digraph G {
   review -> changes [label="blocking finding"];
   changes -> spec [label="revise contract"];
   changes -> ready [label="new attempt"];
-  ready -> invalid [label="scope-overlapping change"];
-  invalid -> spec [label="revalidate"];
+  ready -> invalid [label="the spec it was drafted from is stale"];
   ready -> blocked [label="waits: a dependency unmerged, or a scope a ticket ahead holds"];
   blocked -> ready [label="what it waited on merged"];
   blocked -> cancelled;

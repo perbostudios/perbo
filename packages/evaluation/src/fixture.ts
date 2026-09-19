@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CriterionIdSchema, PlanLevelSchema } from "@focrux/contracts";
+import { CriterionIdSchema, PlanLevelSchema } from "@perbo/contracts";
 
 /**
  * The seeded-defect corpus (SCP-081, docs/14).
@@ -147,7 +147,7 @@ export type FixtureRuntime = z.infer<typeof FixtureRuntimeSchema>;
  * That cannot be done with a self-contained `before/`/`after/` tree: extracting
  * a real commit into one is a reconstruction, and reconstruction is the thing
  * being avoided. So the fixture pins the repository and the two commits, and
- * `focrux-corpus prepare` materialises them into a cache that is never checked
+ * `perbo-corpus prepare` materialises them into a cache that is never checked
  * in. **No upstream code enters this repository**, which also keeps the licence
  * question where it belongs: at clone time, against a permissive licence.
  *
@@ -211,13 +211,13 @@ export const FixtureSchema = z.strictObject({
   authored_before_reviewer: z.boolean(),
   /**
    * Absent on a fixture whose runtime has never been surveyed. Present means
-   * `focrux-corpus runnable` measured it on the date in `notes`.
+   * `perbo-corpus runnable` measured it on the date in `notes`.
    */
   runtime: FixtureRuntimeSchema.nullable().default(null),
   /**
    * Set when the change is a real merged commit rather than an authored tree.
    * Such a fixture has no `before/`, no `after/` and no `change.diff` checked
-   * in; `focrux-corpus prepare` materialises all three into a cache.
+   * in; `perbo-corpus prepare` materialises all three into a cache.
    */
   pinned_repository: PinnedRepositorySchema.nullable().default(null),
   notes: z.string().default(""),

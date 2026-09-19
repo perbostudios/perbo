@@ -3,9 +3,9 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { EXIT_CODES, transition, type Ticket } from "@focrux/contracts";
-import { pollPullRequest, type TicketDeliveryState } from "@focrux/runner";
-import { branchName } from "@focrux/workspace";
+import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
+import { pollPullRequest, type TicketDeliveryState } from "@perbo/runner";
+import { branchName } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { recordDelivery, runSyncCommand } from "../src/sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.js";
@@ -23,7 +23,7 @@ import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
  * and mergeability a fact about a branch the pull request no longer has.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-sync-closed-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-sync-closed-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const OUTCOME = "Search results are paginated.";
@@ -130,13 +130,13 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
   });
   const dir = storeDir(repo, null);
   const branch = branchName({
-    ticket_key: "FCX-1",
-    ticket_id: readTicket(dir, "FCX-1").ticket_id,
-    outcome: readContract(dir, "FCX-1").outcome,
+    ticket_key: "PRB-1",
+    ticket_id: readTicket(dir, "PRB-1").ticket_id,
+    outcome: readContract(dir, "PRB-1").outcome,
   });
 
   const at = new Date("2026-09-03T09:00:00.000Z");
-  let ticket: Ticket = readTicket(dir, "FCX-1");
+  let ticket: Ticket = readTicket(dir, "PRB-1");
   ticket = transition(ticket, "provisioning", "run started", at);
   ticket = transition(ticket, "executing", "1 attempt executed", at);
   ticket = transition(ticket, "verifying", "no deterministic checks are configured", at);
@@ -159,7 +159,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
       fakeGh("closed-conflicting", ghAnswer("CONFLICTING", "DIRTY", { state: "CLOSED", closedAt: "2026-09-03T04:00:00.000Z" })),
       () =>
         runSyncCommand({
-          argv: ["FCX-1", "--repo", repo],
+          argv: ["PRB-1", "--repo", repo],
           streams,
           cwd: repo,
           now: NOW,
@@ -172,7 +172,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const ticket = readTicket(dir, "FCX-1");
+    const ticket = readTicket(dir, "PRB-1");
     expect(ticket.delivery.state).toBe("closed");
     // D-083: no verdict on the pull request, so the record is simply terminal.
     expect(ticket.state).toBe("closed");
@@ -200,11 +200,11 @@ describe("sync records a pull request GitHub closed without merging", () => {
           comments: [{ body: "thanks" }, verdictComment("CHANGES REQUESTED")],
         }),
       ),
-      () => runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const ticket = readTicket(dir, "FCX-1");
+    const ticket = readTicket(dir, "PRB-1");
     // The verdict is the fact about the review; the delivery record still says
     // what `gh` said about the pull request itself.
     expect(ticket.state).toBe("changes_requested");
@@ -230,11 +230,11 @@ describe("sync records a pull request GitHub closed without merging", () => {
           comments: [verdictComment("APPROVE")],
         }),
       ),
-      () => runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const ticket = readTicket(dir, "FCX-1");
+    const ticket = readTicket(dir, "PRB-1");
     expect(ticket.state).toBe("closed");
     expect(ticket.delivery.state).toBe("closed");
     expect(streams.err.join("")).not.toContain("is now changes_requested");
@@ -245,11 +245,11 @@ describe("sync records a pull request GitHub closed without merging", () => {
     const streams = capture();
 
     const code = await withGh(fakeGh("still-open-conflicting", ghAnswer("CONFLICTING", "DIRTY")), () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    expect(readTicket(dir, "FCX-1").delivery.mergeable).toBe("conflicting");
+    expect(readTicket(dir, "PRB-1").delivery.mergeable).toBe("conflicting");
     const said = streams.err.join("");
     expect(said).toContain("no longer mergeable");
     expect(said).not.toContain("closed without merging");

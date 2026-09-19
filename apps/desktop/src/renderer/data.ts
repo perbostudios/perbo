@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isLive } from "../shared/jobs.js";
 import { useEffect } from "react";
 import type { DesktopBridge, Request } from "../shared/protocol.js";
 import { previewBridge } from "./preview.js";
@@ -7,7 +8,7 @@ import { workspaceRefresh } from "./workspace-refresh.js";
 const missingHost: DesktopBridge = {
   async request() {
     throw new Error(
-      "The desktop connection did not load. Restart Focrux to reconnect to your local records.",
+      "The desktop connection did not load. Restart Perbo to reconnect to your local records.",
     );
   },
   subscribe() {
@@ -15,7 +16,7 @@ const missingHost: DesktopBridge = {
   },
 };
 export const bridge: DesktopBridge =
-  window.focrux ??
+  window.perbo ??
   (navigator.userAgent.includes("Electron/") ? missingHost : previewBridge);
 function useRefresh() {
   const client = useQueryClient();
@@ -30,9 +31,7 @@ export function useWorkspace() {
     queryFn: refresh.snapshot,
     networkMode: "always",
     refetchInterval: (query) =>
-      query.state.data?.jobs.some(
-        (job) => job.state === "running" || job.state === "stopping",
-      )
+      query.state.data?.jobs.some(isLive)
         ? 2000
         : 15_000,
     staleTime: 1000,

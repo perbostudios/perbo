@@ -6,7 +6,7 @@ import {
   type Finding,
   type ReviewArtifact,
   type Ticket,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 
 /**
  * Records shaped exactly as the loop writes them, validated through the same
@@ -115,13 +115,13 @@ export function makeAttempt(input: {
     base_commit: "a1b2c3d",
     provider: "local_worktree",
     branch: input.branch ?? "ayo/fixture/search-results-are-paginated",
-    worktree_path: "/tmp/focrux-fixture-worktree",
+    worktree_path: "/tmp/perbo-fixture-worktree",
     autonomy_class: "A2b",
     permission_profile: {
       autonomy_class: "A2b",
       command_allow_list: ["Bash", "Edit"],
       command_deny_list: ["gh"],
-      path_jail_root: "/tmp/focrux-fixture-worktree",
+      path_jail_root: "/tmp/perbo-fixture-worktree",
       env_allow_list: ["HOME", "PATH"],
       network_allow_list: ["api.anthropic.com"],
       provider_base_url: "https://api.anthropic.com",
@@ -193,7 +193,7 @@ export function makeReview(input: {
     actual_risk: "P1",
     escalated: false,
     independence: {
-      context_builder: "focrux",
+      context_builder: "perbo",
       executor_narrative_visible: false,
       executor_transcript_visible: false,
       separate_process: true,

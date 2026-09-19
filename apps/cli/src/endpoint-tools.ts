@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EXIT_CODES } from "@focrux/contracts";
+import { EXIT_CODES } from "@perbo/contracts";
 import { isAbsolute } from "node:path";
 import { parseAdmitArgs, parseListArgs, runAdmitCommand, runListCommand, type AdmitArgs } from "./admit.js";
 import { runEdit, type EditArgs } from "./edit.js";
@@ -12,7 +12,7 @@ import { runSyncCommand } from "./sync.js";
 
 /**
  * The tools the queue's endpoint offers a session (the founder's decision of
- * 2026-09-10; paseo's mechanism, Focrux's authority).
+ * 2026-09-10; paseo's mechanism, Perbo's authority).
  *
  * Each tool is one of this build's own commands, run in this process with
  * the arguments a person would type, built as values, so the endpoint cannot
@@ -118,7 +118,7 @@ async function captured(
   };
 }
 
-const KeySchema = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/).describe("A ticket key, e.g. FCX-118.");
+const KeySchema = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/).describe("A ticket key, e.g. PRB-118.");
 
 /**
  * Every string a session supplies is a value and only ever a value. The
@@ -209,7 +209,7 @@ const escapes = tool({
 const queueState = tool({
   name: "queue_state",
   description:
-    "The queue's last tick as `focrux serve --json` printed it — order, who waits on what, what " +
+    "The queue's last tick as `perbo serve --json` printed it — order, who waits on what, what " +
     "started — and whether the queue is paused.",
   role: "read",
   input: z.object({}),
@@ -250,7 +250,7 @@ const admitTicket = tool({
         content: [
           {
             type: "text",
-            text: "approval is a person's own keystroke and this endpoint has no tool for it: admit the draft, then `focrux approve <key>` at the terminal or the contract page.",
+            text: "approval is a person's own keystroke and this endpoint has no tool for it: admit the draft, then `perbo approve <key>` at the terminal or the contract page.",
           },
         ],
         isError: true,
@@ -313,8 +313,16 @@ const editTicket = tool({
       outcome: input.outcome ?? null,
       criteria: [...(input.criteria ?? [])],
       paths: [...(input.paths ?? [])],
+      // The endpoint's tool names outcome, criteria and scope; a prohibited
+      // path is a person's mark in the explorer, not a field a session sets.
+      prohibited: [],
       manualReviewer: null,
       manualReason: null,
+      graphEdit: null,
+      undo: null,
+      // The endpoint is the person's own session: its edits are recorded as
+      // the interview's, so they do not raise the friction count (D-100).
+      author: "interview",
       json: false,
     };
     // No editor can be reached: the fields above are required, and the
@@ -376,20 +384,20 @@ export function toolsFor(role: ToolRole): readonly EndpointTool[] {
 }
 
 /**
- * What a session launched by `focrux agent` is told about Focrux before its
+ * What a session launched by `perbo agent` is told about Perbo before its
  * first turn. Appended to the provider's own system prompt; the person's own
  * configuration still applies.
  */
 export function agentOrientation(input: { repo: string }): string {
-  return `You are working beside a person in ${input.repo}, a repository run by Focrux (the \`focrux\` command).
-Focrux takes a ticket from an approved contract to a pull request on this machine: a person admits work
+  return `You are working beside a person in ${input.repo}, a repository run by Perbo (the \`perbo\` command).
+Perbo takes a ticket from an approved contract to a pull request on this machine: a person admits work
 as a ticket (state plan_review), edits and approves its contract (ready), the queue runs it — a worktree,
 one coding agent under a permission profile, a sealed change set, the pinned checks, an independent
 review, bounded remediation — and opens a pull request (pr_open); \`sync\` records the merge (merged).
 A ticket waits (blocked) while a dependency is unmerged or a ticket ahead in the queue holds a scope it
 reaches; the queue keeps open branches level with the base and re-levels them after each merge.
 
-Through the \`focrux\` tool server you can read every ticket, its attempts, reviews, stops and escapes,
+Through the \`perbo\` tool server you can read every ticket, its attempts, reviews, stops and escapes,
 and the queue's state; admit tickets as drafts; edit an unapproved contract; sync a ticket's pull
 request; pause and resume the queue. Three acts are the person's alone and have no tool: approving a
 contract, publishing a run, and merging. Prepare those and say what is ready for their keystroke.

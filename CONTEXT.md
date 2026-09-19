@@ -1,20 +1,20 @@
-# Focrux glossary
+# Perbo glossary
 
-The words Focrux uses, and the ones to avoid. Decisions are in [docs/11](docs/11-open-decisions.md), and the ticket and contract are specified in [docs/04](docs/04-ticket-workspace-and-review.md).
+The words Perbo uses, and the ones to avoid. Decisions are in [docs/11](docs/11-open-decisions.md), and the ticket and contract are specified in [docs/04](docs/04-ticket-workspace-and-review.md).
 
 **Operating plane**:
-The open-source Focrux: everything that runs on one machine.
+The open-source Perbo: everything that runs on one machine.
 _Avoid_: control plane, for the open product.
 
 **Control plane**:
-The commercial product built on top of Focrux: what a team shares across people and machines ([D-016](docs/11-open-decisions.md)).
+The commercial product built on top of Perbo: what a team shares across people and machines ([D-016](docs/11-open-decisions.md)).
 
 **Ticket**:
-One piece of work, from admission to merge, whatever its size. New keys are `FCX-n`; older tickets keep their `AYO-n` keys.
+One piece of work, from admission to merge, whatever its size. Its key is `PRB-n`.
 _Avoid_: epic, work item.
 
 **Admission**:
-The moment a piece of work becomes a Focrux ticket. Before it, the tracker owns the work.
+The moment a piece of work becomes a Perbo ticket. Before it, the tracker owns the work.
 
 **Contract**:
 The part of a plan fixed at approval: outcome, acceptance criteria, scope and base.
@@ -45,7 +45,7 @@ A change the loop stopped for a person's decision.
 A person's recorded answer to a product question no established practice settles. The executor reads principles and cannot write them.
 
 **Queue**:
-`focrux serve`, the one process that runs tickets, re-levels branches and merges in order.
+`perbo serve`, the one process that runs tickets, re-levels branches and merges in order.
 
 **Re-level**:
 Bringing an open branch up to date with the base. A conflict starts a **reconciliation round**.
@@ -96,7 +96,7 @@ One part of an execution graph: a group of the Ticket's acceptance criteria and 
 _Avoid_: Step (steps belong to the approach), sub-ticket, subtask.
 
 **Impact warning**:
-An advisory note, shown while planning, that code outside a draft's scope depends on something the draft changes.
+An advisory note, shown while planning, that something outside a draft's scope is likely to be touched by it: code that imports what the draft changes or what the spec names, or a path in one of the classes `risk.ts` recognises inside a package the draft reaches.
 _Avoid_: Finding (findings come from review), probe.
 
 **Stale spec**:

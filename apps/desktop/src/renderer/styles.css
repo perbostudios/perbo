@@ -1,4 +1,4 @@
-/* Screen geometry from the supplied Focrux artboards. Shared colour, type and motion tokens live in @focrux/ui. */
+/* Screen geometry from the supplied Perbo artboards. Shared colour, type and motion tokens live in @perbo/ui. */
 html,
 body,
 #root {
@@ -208,6 +208,216 @@ code,
 }
 .rail-item:hover img {
   opacity: 1;
+}
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+}
+.rail-item .line-icon {
+  opacity: 0.42;
+}
+.rail-item.selected .line-icon,
+.rail-item.parent .line-icon,
+.rail-item:hover .line-icon {
+  opacity: 1;
+}
+/* Create while planning: bordered like a parent, with the panes hanging under it. */
+.rail-item.parent {
+  border-color: var(--line);
+}
+.rail-children {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-left: 12px;
+  margin-left: 2px;
+}
+.rail-children::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: -6px;
+  bottom: 15px;
+  width: 1.5px;
+  background: var(--line-strong);
+  border-radius: 1px;
+}
+.rail-child {
+  width: 31px;
+  height: 31px;
+  border-radius: 8px 6px 9px 6px;
+}
+.rail-child::before {
+  content: "";
+  position: absolute;
+  left: -10.5px;
+  top: 50%;
+  width: 8px;
+  height: 1.5px;
+  background: var(--line-strong);
+}
+.empty-actions {
+  display: inline-flex;
+  gap: 10px;
+}
+/* The Create picker, beside the rail. */
+.picker {
+  position: fixed;
+  top: 62px;
+  width: 330px;
+  max-width: calc(100vw - 28px);
+  background: var(--paper);
+  border: 1.5px solid var(--line-strong);
+  border-radius: 14px 11px 15px 12px;
+  box-shadow: 0 16px 40px rgba(var(--shadow-rgb), 0.22);
+  z-index: 45;
+  padding: 14px 12px 12px;
+  /* transitions.dev panel reveal: it grows a hair and fades in, anchored to its
+     left edge — where the pointer arrives from — so it settles toward the
+     content rather than sliding away from the cursor. */
+  transform-origin: left center;
+  animation: picker-reveal 170ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes picker-reveal {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .picker {
+    animation-duration: 1ms;
+  }
+}
+.picker h3 {
+  margin: 0;
+  padding: 0 6px 3px;
+  font-size: calc(15px * var(--text-scale));
+}
+.picker > p {
+  margin: 0 0 10px;
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: calc(12px * var(--text-scale));
+}
+.picker .section-label {
+  padding: 0 6px;
+  margin: 10px 0 6px;
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 9px 7px 10px 7px;
+  border: 1.5px solid transparent;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+.picker-row:hover,
+.picker-row.active {
+  background: var(--soft);
+  border-color: var(--line);
+}
+.picker-row:disabled {
+  opacity: 0.6;
+}
+.picker-row-wrap {
+  position: relative;
+}
+/* A draft row leaves room on the right for its bin, which sits over that gap. */
+.picker-row.removable {
+  padding-right: 34px;
+}
+.picker-row-delete {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 8px 6px 8px 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease,
+    background 120ms ease;
+}
+/* The bin is quiet until the row is under the pointer or the keyboard cursor. */
+.picker-row-wrap:hover .picker-row-delete,
+.picker-row-wrap:focus-within .picker-row-delete,
+.picker-row-wrap:has(.picker-row.active) .picker-row-delete {
+  opacity: 1;
+}
+.picker-row-delete:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.picker-row-delete:disabled {
+  opacity: 0;
+  cursor: default;
+}
+@media (prefers-reduced-motion: reduce) {
+  .picker-row-delete {
+    transition: none;
+  }
+}
+.picker-text {
+  min-width: 0;
+}
+.picker-row strong {
+  display: block;
+  font-weight: 500;
+  font-size: calc(13px * var(--text-scale));
+  overflow-wrap: anywhere;
+}
+.picker-row.mono strong {
+  font-family: var(--mono);
+  font-size: calc(12.5px * var(--text-scale));
+}
+.picker-row small {
+  display: block;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: calc(11.5px * var(--text-scale));
+}
+.picker-row .repo-glyph {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px dashed rgba(var(--ink-rgb), 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.picker-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 9px 6px 0;
+  border-top: 1.5px solid var(--line);
+  color: var(--muted);
+  font-size: calc(11.5px * var(--text-scale));
 }
 .ink-icon {
   display: inline-block;
@@ -3218,4 +3428,1625 @@ kbd {
 }
 .settings-identity {
   flex: none;
+}
+
+/* ── The Explorer pane: the tree on the left, one file read-only on the right ── */
+.screen[data-screen="explorer"] {
+  overflow: hidden;
+}
+.pane-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1.5px solid var(--line);
+}
+.pane-head h2 {
+  margin: 0;
+  font-size: calc(16px * var(--text-scale));
+}
+.pane-head .sub {
+  font: calc(11.5px * var(--text-scale)) var(--mono);
+  color: var(--muted);
+}
+.explorer {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.tree-col {
+  width: 320px;
+  flex: none;
+  border-right: 1.5px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--soft);
+}
+.tree-filter {
+  padding: 10px 10px 4px;
+}
+.tree-filter input {
+  width: 100%;
+  font: calc(12px * var(--text-scale)) var(--mono);
+  padding: 6px 9px;
+  border: 1.5px solid rgba(var(--ink-rgb), 0.2);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--text);
+  outline: none;
+}
+.tree-filter input:focus {
+  border-color: var(--ink);
+}
+.tree {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 6px 12px;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 2px 6px 2px 0;
+  border-radius: 7px 5px 8px 5px;
+  font: calc(12px * var(--text-scale)) var(--mono);
+  color: var(--text);
+  text-align: left;
+  min-height: 26px;
+  cursor: pointer;
+}
+.tree-row:hover {
+  background: rgba(var(--ink-rgb), 0.05);
+}
+.tree-row.selected {
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+  color: var(--ink);
+}
+.tree-row:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+.tree-row .chev {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  border-radius: 4px;
+}
+.tree-row .chev[data-open="true"] svg {
+  transform: rotate(90deg);
+}
+.tree-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-row.is-dir .name {
+  color: var(--ink);
+}
+.tree-row.inherited .name {
+  color: var(--muted);
+}
+.mark-chip {
+  font: 500 calc(9px * var(--text-scale)) var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex: none;
+  line-height: 14px;
+}
+.mark--allowed {
+  background: var(--green-paper);
+  color: var(--green);
+  border: 1px solid rgba(var(--green-rgb), 0.5);
+}
+.mark--prohibited {
+  background: var(--red-paper);
+  color: var(--red);
+  border: 1px solid var(--red-line);
+}
+.mark--standing {
+  background: var(--red);
+  color: var(--paper);
+  border: 1px solid var(--red);
+}
+.mark--via {
+  color: var(--red);
+  border: 1px dashed var(--red-line);
+  background: transparent;
+}
+.mark-via-note {
+  color: var(--red);
+}
+.node-tag {
+  font: calc(10px * var(--text-scale)) var(--mono);
+  color: var(--amber-text);
+  flex: none;
+  white-space: nowrap;
+}
+.tree-foot {
+  flex: none;
+  border-top: 1.5px solid var(--line);
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 46%;
+  overflow: auto;
+}
+.tree-foot .section-label {
+  margin-bottom: 5px;
+  display: block;
+}
+.edit-row,
+.standing-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font: calc(11.5px * var(--text-scale)) var(--mono);
+  padding: 1px 4px;
+  margin: 0 -4px;
+}
+.edit-row small,
+.standing-row small {
+  font: calc(11px * var(--text-scale)) var(--font);
+  color: var(--muted);
+  margin-left: auto;
+  white-space: nowrap;
+}
+.edit-row span:first-child,
+.standing-row span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.edit-row.is-undone {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.edit-row .text-btn {
+  flex: none;
+  margin-left: 6px;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--ink);
+  font: calc(11px * var(--text-scale)) var(--font);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.hidden-note {
+  font-size: calc(11px * var(--text-scale));
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+}
+/* The Impact pane (SCP-320): one column of warnings, grouped by package. */
+.impact {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.impact-note {
+  font-size: calc(12px * var(--text-scale));
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+  max-width: 68ch;
+}
+.impact-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.impact-group .section-label {
+  display: block;
+}
+.impact-row {
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--paper);
+}
+.impact-path {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: calc(12px * var(--text-scale)) var(--mono);
+  flex-wrap: wrap;
+}
+.mark--impact {
+  background: var(--amber-paper);
+  color: var(--amber-text);
+  border: 1px solid rgba(var(--amber-rgb), 0.5);
+}
+.impact-reasons {
+  margin: 0;
+  padding-left: 18px;
+  font-size: calc(12px * var(--text-scale));
+  color: var(--muted);
+  line-height: 1.5;
+}
+.impact-actions {
+  display: flex;
+  gap: 8px;
+}
+.preview {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.preview-head {
+  flex: none;
+  padding: 11px 18px;
+  border-bottom: 1.5px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.preview-path {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: calc(12.5px * var(--text-scale)) var(--mono);
+  flex-wrap: wrap;
+}
+.ro-chip {
+  font: calc(9.5px * var(--text-scale)) var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  padding: 0 7px;
+  line-height: 17px;
+}
+.mark-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: calc(12px * var(--text-scale));
+  color: var(--text);
+}
+.code {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 12px 0 30px;
+  font: calc(12px * var(--text-scale)) / 1.7 var(--mono);
+  color: var(--ink);
+  background: var(--paper);
+}
+.code .l {
+  display: block;
+  padding-right: 18px;
+  white-space: pre;
+}
+.code .ln {
+  display: inline-block;
+  width: 46px;
+  text-align: right;
+  padding-right: 16px;
+  color: var(--faint);
+  user-select: none;
+}
+.folder-sum {
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 660px;
+  color: var(--text);
+  line-height: 1.6;
+  overflow: auto;
+}
+.folder-sum h3 {
+  margin: 0;
+}
+.folder-sum p {
+  margin: 0;
+}
+.folder-sum ul {
+  margin: 0;
+  padding-left: 18px;
+  font: calc(12px * var(--text-scale)) / 1.8 var(--mono);
+}
+
+/* The Spec pane: the spec in the repository, and the contract steps under it (D-103). */
+.spec-screen {
+  overflow-y: auto;
+}
+.spec-screen .pane-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 18px 30px 0;
+}
+.spec-screen .pane-head h2 {
+  margin: 0;
+}
+.spec-screen .pane-head .sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+.spec-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 14px 30px 0;
+}
+.spec-title-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.spec-title {
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid var(--line);
+  padding: 4px 0 6px;
+}
+.spec-title:focus-visible {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+.spec-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.spec-h {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.spec-h h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.spec-h .hint {
+  font-size: 12px;
+  color: var(--faint);
+}
+/* The `@Symbol` marks are a second copy of the same text behind the textarea
+   (D-015). The two have to lay out identically or a mark lands beside its word,
+   so every property that decides where a line breaks is set on both, the field
+   carries the background rather than the textarea, and the textarea grows to
+   its content instead of scrolling. */
+.spec-field {
+  position: relative;
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+.spec-backdrop,
+.spec-input {
+  font: inherit;
+  line-height: 1.7;
+  letter-spacing: normal;
+  margin: 0;
+  padding: 9px 11px;
+  border: 1.5px solid transparent;
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  tab-size: 4;
+}
+.spec-backdrop {
+  position: absolute;
+  inset: 0;
+  color: var(--text);
+  pointer-events: none;
+  overflow: hidden;
+}
+.spec-input {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  border-color: var(--line);
+  /* The letters are the backdrop's; what the textarea still shows is the caret,
+     the selection and the placeholder. */
+  color: transparent;
+  caret-color: var(--text);
+}
+.spec-input::placeholder {
+  color: var(--faint);
+}
+.spec-input::selection {
+  background: rgba(var(--amber-rgb), 0.3);
+  color: transparent;
+}
+.sym {
+  background: rgba(var(--amber-rgb), 0.17);
+  color: var(--amber-text);
+  border-radius: 3px;
+}
+.sym--unknown {
+  background: none;
+  color: var(--red);
+  text-decoration: underline wavy var(--red);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}
+.spec-missing {
+  color: var(--red);
+}
+.spec-warn {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--red);
+}
+.spec-warn .text-button {
+  color: var(--ink);
+}
+.sym-pop {
+  position: absolute;
+  z-index: 30;
+  width: 340px;
+  padding: 5px;
+  background: var(--paper);
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.sym-pop-head {
+  display: flex;
+  padding: 4px 7px 5px;
+  font: 10px var(--mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sym-opt {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 8px;
+  width: 100%;
+  padding: 5px 8px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 7px 5px 8px 5px;
+}
+.sym-opt.active,
+.sym-opt:hover {
+  background: var(--soft);
+}
+.sym-opt b {
+  font: 500 12px var(--mono);
+  color: var(--ink);
+}
+.sym-opt i {
+  font: normal 11px var(--mono);
+  color: var(--muted);
+}
+.sym-opt small {
+  grid-column: 1 / -1;
+  font: 11px var(--mono);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sym-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+/* Both texts of a refused save, so neither side's words are lost (SCP-321). */
+.spec-conflicts {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.spec-conflicts h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+.spec-conflict-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.spec-conflict-sides pre {
+  margin: 2px 0 0;
+  padding: 7px 9px;
+  max-height: 140px;
+  overflow: auto;
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+  font: 12px var(--mono);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.spec-conflict-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.spec-requirements {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.spec-requirements li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.spec-requirement-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spec-generate {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 20px 30px;
+  border-bottom: 1.5px solid var(--line);
+}
+.spec-typed {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.spec-typed > .column-heading {
+  padding: 20px 30px 0;
+}
+
+/* ── The Graph pane: the canvas, one node open under it, and the approval ── */
+.screen[data-screen="graph"] {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.screen[data-screen="graph"] .pane-head {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.screen[data-screen="graph"] .pane-head h2 {
+  white-space: nowrap;
+}
+.graph-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.size-holder {
+  position: relative;
+}
+.size {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 8px 3px 3px;
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--text);
+}
+.size:hover {
+  border-color: var(--line-strong);
+}
+.size-scale {
+  display: flex;
+  gap: 1px;
+}
+.size-scale span {
+  font: 500 calc(10.5px * var(--text-scale)) var(--mono);
+  min-width: 23px;
+  text-align: center;
+  padding: 2px 3px;
+  border-radius: 5px 4px 6px 4px;
+  color: var(--faint);
+}
+.size-scale span.on {
+  background: var(--ink);
+  color: var(--on-ink);
+}
+.size-counts {
+  font: calc(11px * var(--text-scale)) var(--mono);
+  white-space: nowrap;
+}
+.size-counts b {
+  font-weight: 500;
+  color: var(--ink);
+}
+.size-counts .drv {
+  text-decoration: underline;
+  text-decoration-color: var(--amber);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+}
+.size-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 360px;
+  z-index: 25;
+  background: var(--paper);
+  border: 1.5px solid rgba(var(--ink-rgb), 0.35);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 30px rgba(var(--shadow-rgb), 0.2);
+  padding: 12px 14px;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.5;
+}
+.size-pop table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 2px;
+  font: calc(11px * var(--text-scale)) var(--mono);
+  margin: 8px 0;
+}
+.size-pop td,
+.size-pop th {
+  padding: 2px 4px;
+  text-align: center;
+  font-weight: 400;
+  color: var(--muted);
+}
+.size-pop th:first-child,
+.size-pop td:first-child {
+  text-align: left;
+  color: var(--text);
+}
+/* The canvas clips; one translated layer inside it holds the nodes and edges. */
+.canvas {
+  flex: 1;
+  min-height: 150px;
+  overflow: hidden;
+  position: relative;
+  cursor: grab;
+  background-color: var(--paper);
+  background-image: radial-gradient(rgba(var(--ink-rgb), 0.13) 1px, transparent 1.3px);
+  background-size: 18px 18px;
+}
+.canvas.panning {
+  cursor: grabbing;
+  user-select: none;
+}
+.canvas.connecting {
+  cursor: crosshair;
+}
+.canvas-inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 70px;
+  padding: 26px 40px 34px 34px;
+  min-width: max-content;
+  min-height: 100%;
+}
+.canvas-inner .col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: relative;
+  z-index: 1;
+}
+.node {
+  position: relative;
+  width: 236px;
+  background: var(--surface);
+  border: 1.5px solid rgba(var(--ink-rgb), 0.3);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 140ms, box-shadow 140ms;
+}
+.node:hover {
+  border-color: rgba(var(--ink-rgb), 0.55);
+  box-shadow: 0 6px 16px rgba(var(--shadow-rgb), 0.1);
+}
+.node.selected {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink), 0 8px 20px rgba(var(--shadow-rgb), 0.14);
+}
+.node-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+.node-label {
+  font: 500 calc(11px * var(--text-scale)) var(--mono);
+  color: var(--muted);
+  flex: none;
+}
+.node-title {
+  font-size: calc(13.5px * var(--text-scale));
+  font-weight: 600;
+  line-height: 1.3;
+}
+.crit {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.4;
+  margin-top: 5px;
+}
+.kind {
+  font: 500 calc(8.5px * var(--text-scale)) var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  flex: none;
+  line-height: 14px;
+}
+.kind--test {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+.kind--metric {
+  color: var(--amber-text);
+  border-color: rgba(var(--amber-rgb), 0.6);
+}
+.kind--artifact {
+  color: var(--green);
+  border-color: rgba(var(--green-rgb), 0.6);
+}
+.kind--query {
+  color: var(--red);
+  border-color: var(--red-line);
+}
+.node-paths {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1.5px dashed var(--line);
+  font: calc(10.5px * var(--text-scale)) / 1.55 var(--mono);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+/* SCP-317: what the run's records say about a node, on the node. */
+.state {
+  font: 500 calc(8.5px * var(--text-scale)) / 14px var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.state--changed,
+.state--checks_passed {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+.state--covered {
+  color: var(--green);
+  border-color: rgba(var(--green-rgb), 0.6);
+}
+.state--checks_failed,
+.state--finding_open {
+  color: var(--red);
+  border-color: var(--red-line);
+}
+.node-changed {
+  margin-top: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: calc(10.5px * var(--text-scale)) / 1.55 var(--mono);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.outside {
+  flex: none;
+  padding: 10px 14px 12px;
+  border-top: 1.5px dashed var(--line);
+  background: var(--soft);
+}
+.outside .path-chips {
+  margin: 4px 0 6px;
+}
+.crit-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--line);
+}
+.crit-state .state-word {
+  font: 500 calc(8.5px * var(--text-scale)) / 14px var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.crit-state--met .state-word {
+  color: var(--green);
+}
+.crit-state--not_met .state-word,
+.crit-state--cannot_determine .state-word {
+  color: var(--red);
+}
+.crit-state .mono {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+.crit-finding {
+  flex-basis: 100%;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.4;
+  color: var(--red);
+}
+.handle {
+  position: absolute;
+  right: -8px;
+  top: 50%;
+  width: 15px;
+  height: 15px;
+  margin-top: -7.5px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1.5px solid var(--ink);
+  opacity: 0;
+  cursor: crosshair;
+  transition: opacity 120ms;
+  z-index: 2;
+}
+.node:hover .handle,
+.node.selected .handle,
+.canvas.connecting .handle {
+  opacity: 1;
+}
+.edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 0;
+}
+.edge {
+  fill: none;
+  stroke: rgba(var(--ink-rgb), 0.4);
+  stroke-width: 1.6;
+}
+.edge.sel {
+  stroke: var(--amber);
+  stroke-width: 2.4;
+}
+.edge.temp {
+  stroke: var(--amber);
+  stroke-dasharray: 5 4;
+}
+.edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.arrow {
+  fill: rgba(var(--ink-rgb), 0.5);
+}
+.edge-x {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--on-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  z-index: 3;
+}
+.graph-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  text-align: center;
+  gap: 14px;
+}
+.graph-empty p {
+  color: var(--text);
+  max-width: 48ch;
+  line-height: 1.6;
+}
+.ghost {
+  display: flex;
+  gap: 34px;
+  align-items: center;
+}
+.ghost i {
+  width: 110px;
+  height: 60px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius);
+  display: block;
+}
+.ghost i:nth-child(2) {
+  height: 84px;
+}
+.ghost i:nth-child(3) {
+  height: 50px;
+}
+/* One node, open under the canvas: what it has to prove, where, and its page. */
+.inspector {
+  flex: none;
+  height: 44%;
+  min-height: 230px;
+  max-height: 420px;
+  border-top: 1.5px solid var(--line-strong);
+  background: var(--soft);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.insp-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 8px 18px;
+  border-bottom: 1.5px solid var(--line);
+}
+.insp-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(200px, 1fr) minmax(0, 1.1fr);
+  gap: 20px;
+  padding: 12px 18px 16px;
+}
+.insp-main,
+.insp-side,
+.insp-page {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.insp-page .section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+.node-page {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+}
+.crit-edit {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 6px 8px;
+  align-items: start;
+  padding: 8px 10px;
+  background: var(--paper);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+}
+.crit-edit:focus-within {
+  border-color: var(--ink);
+}
+.crit-edit textarea {
+  border: 0;
+  background: transparent;
+  resize: vertical;
+  width: 100%;
+  line-height: 1.45;
+  padding: 0;
+  outline: none;
+  font: inherit;
+  color: var(--ink);
+}
+.crit-n {
+  font: calc(11px * var(--text-scale)) var(--mono);
+  color: var(--muted);
+  padding-top: 2px;
+}
+.kind-seg,
+.seg {
+  display: flex;
+  gap: 3px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.kind-seg button,
+.seg button {
+  font: 500 calc(9px * var(--text-scale)) var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: transparent;
+}
+.kind-seg button[aria-pressed="true"],
+.seg button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--on-ink);
+  border-color: var(--ink);
+}
+.inspector .path-chip {
+  padding: 2px 4px 2px 8px;
+  gap: 5px;
+}
+.inspector .path-chip button {
+  color: var(--muted);
+  padding: 0 3px;
+  background: transparent;
+  border: 0;
+}
+.inspector .path-chip button:hover:enabled {
+  color: var(--ink);
+}
+.mini-input {
+  font: calc(11.5px * var(--text-scale)) var(--mono);
+  padding: 5px 8px;
+  border: 1.5px dashed rgba(var(--ink-rgb), 0.28);
+  border-radius: var(--radius);
+  background: transparent;
+  width: 100%;
+  outline: none;
+  color: var(--ink);
+  margin-top: 7px;
+}
+.mini-input:focus {
+  border-style: solid;
+  border-color: var(--ink);
+  background: var(--paper);
+}
+.select-mini {
+  font: calc(11.5px * var(--text-scale)) var(--mono);
+  padding: 4px 6px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  max-width: 100%;
+}
+.split-names {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0;
+}
+.split-names input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 6px 9px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+}
+.split-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 40vh;
+  overflow: auto;
+}
+.split-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: calc(12.5px * var(--text-scale));
+}
+.split-row > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.split-row .seg {
+  margin-top: 0;
+}
+.split-row.mono > span:first-child {
+  font: calc(11.5px * var(--text-scale)) var(--mono);
+}
+/* What approving freezes, the edits since the draft, and the approval. */
+.approve-bar {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 11px 20px;
+  border-top: 1.5px solid var(--line);
+  background: var(--canvas);
+}
+.approve-bar p {
+  font-size: calc(12px * var(--text-scale));
+  color: var(--text);
+  line-height: 1.5;
+  flex: 1;
+  min-width: 0;
+}
+.approve-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+.graph-history {
+  flex: 1;
+  min-width: 0;
+  max-height: 120px;
+  overflow: auto;
+}
+.graph-history ol {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.graph-history li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: calc(12px * var(--text-scale));
+}
+.graph-history li.is-undone .hist-line {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.hist-n {
+  font: calc(10.5px * var(--text-scale)) var(--mono);
+  color: var(--faint);
+}
+.hist-line {
+  flex: 1;
+  min-width: 0;
+}
+.author {
+  font: 500 calc(10px * var(--text-scale)) var(--mono);
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1.5px solid;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.author--you {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.author--interview {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: var(--paper);
+}
+
+/* ── Planning mode: one pane, and the interview docked beside it (D-102) ──── */
+.plan {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.plan > .pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+/* Wide enough to read a paragraph in, narrow enough to leave the pane the room. It does not collapse: the chat is beside every pane from the first question to the approval. */
+.dock {
+  width: clamp(300px, 28vw, 384px);
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--soft);
+  border-left: 1.5px solid var(--line);
+}
+.dock-head {
+  flex: none;
+  padding: 10px 14px 11px;
+  background: var(--paper);
+  border-bottom: 1.5px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.dock-session {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: calc(12.5px * var(--text-scale));
+}
+.dock-session .mono {
+  font: calc(11.5px * var(--text-scale)) var(--mono);
+  color: var(--muted);
+}
+.prov-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--amber);
+  flex: none;
+}
+.prov-dot--codex {
+  background: var(--muted);
+}
+.write-scope {
+  font-size: calc(11px * var(--text-scale));
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0;
+}
+.dock-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.msg {
+  border-radius: var(--radius);
+  padding: 8px 11px 9px;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin: 0;
+}
+.msg-who {
+  display: block;
+  font: 400 calc(10px * var(--text-scale)) var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  margin-bottom: 3px;
+}
+.msg--you {
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  align-self: flex-end;
+  max-width: 92%;
+}
+.msg--interview {
+  background: var(--paper);
+  border: 1.5px solid var(--line);
+}
+.msg--note {
+  font-size: calc(11px * var(--text-scale));
+  color: var(--muted);
+  padding: 0 2px;
+}
+/* The questions as the transcript keeps them, so one moved past is still there
+   to read and answer. */
+.asked-said {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 2px;
+  font-size: calc(11.5px * var(--text-scale));
+  color: var(--muted);
+}
+.asked-said-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.asked-said p {
+  margin: 0;
+}
+
+/* One group of the interview's questions, put between the conversation and the
+   composer: the person answers by picking, and Send puts the options' own words
+   down as their turn. The choices are the decision card's own markup. */
+.asked-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* A group at the size the protocol allows is taller than the dock, and this
+     sits outside the chat's own scroll: without a bound of its own the Send
+     below it cannot be reached. */
+  max-height: 45vh;
+  overflow-y: auto;
+  padding: 12px 13px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px 10px 13px 10px;
+  background: var(--paper);
+}
+.asked-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.asked-head b {
+  font-size: calc(12.5px * var(--text-scale));
+}
+.asked-part {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.asked-part legend {
+  display: block;
+  padding: 0 0 4px;
+  font-size: calc(12px * var(--text-scale));
+}
+.asked-letter {
+  margin-right: 6px;
+  font: calc(11px * var(--text-scale)) var(--mono);
+  color: var(--muted);
+}
+.asked-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* The card scrolls when a group is long, and Send is the one control in it
+     that must never be the thing below the fold. */
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  padding-top: 8px;
+  background: var(--paper);
+}
+
+/* What the interview is doing, under the last line it wrote: the mark pulses
+   while the answer is on its way, and the whole line goes as the answer lands. */
+.chat-working {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 0 2px;
+  font-size: calc(11px * var(--text-scale));
+  color: var(--muted);
+}
+.chat-working-mark {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border-radius: 50%;
+  animation: inkpulse 1500ms ease-in-out infinite;
+}
+.chat-working .t-think {
+  font: inherit;
+  text-align: left;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-working-mark {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* A refusal is reported and never asked: a card with nothing on it to answer. */
+.refusal {
+  border: 1.5px solid var(--red-line);
+  background: var(--red-paper);
+  border-radius: var(--radius);
+  padding: 9px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.refusal-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: calc(12.5px * var(--text-scale));
+  color: var(--red);
+}
+.refusal code {
+  font: calc(11.5px * var(--text-scale)) var(--mono);
+  background: var(--paper);
+  padding: 1px 5px;
+  border-radius: 6px;
+}
+.refusal p {
+  margin: 0;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.5;
+}
+.tool-card {
+  border: 1.5px solid var(--line);
+  background: var(--paper);
+  border-radius: var(--radius);
+  padding: 9px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+}
+.tool-card--failed {
+  border-color: var(--red-line);
+}
+.tool-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font: calc(12px * var(--text-scale)) var(--mono);
+}
+.tool-detail {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  width: 100%;
+  font: calc(11px * var(--text-scale)) var(--mono);
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.edit-title {
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.4;
+}
+.ba {
+  display: flex;
+  gap: 8px;
+  font-size: calc(11.5px * var(--text-scale));
+  width: 100%;
+}
+.ba-label {
+  font: 400 calc(10px * var(--text-scale)) var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  flex: none;
+  width: 46px;
+}
+.composer {
+  flex: none;
+  padding: 10px 14px 12px;
+  background: var(--paper);
+  border-top: 1.5px solid var(--line);
+}
+.composer-box {
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 8px 10px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.composer-box:focus-within {
+  border-color: var(--ink);
+}
+.composer textarea {
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  height: 44px;
+  width: 100%;
+  line-height: 1.45;
+  padding: 0;
+  color: var(--ink);
+  font: inherit;
+}
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* The plan's history: a drawer over the current pane, so the chat stays visible. */
+.hist-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(var(--ink-rgb), 0.18);
+  z-index: 4;
+}
+.hist-drawer {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: min(460px, 100%);
+  z-index: 5;
+  background: var(--paper);
+  border-left: 1.5px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px 18px;
+  overflow: auto;
+}
+.hist-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.hist-head h3 {
+  margin: 0;
+  font-size: calc(14px * var(--text-scale));
+}
+.hist-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.hist-rows li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: calc(12.5px * var(--text-scale));
+}
+.hist-rows li.is-undone .hist-line {
+  text-decoration: line-through;
+  color: var(--muted);
 }

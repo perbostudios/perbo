@@ -33,17 +33,17 @@ function listReleases() {
 /** The notes the release carries, written to a file for `gh` to read. */
 function writeNotes(version, tarball) {
   const digest = readFileSync(`${tarball}.sha256`, "utf8").replace(/\n+$/, "");
-  const notes = join(mkdtempSync(join(tmpdir(), "focrux-release-notes-")), "release-notes.md");
+  const notes = join(mkdtempSync(join(tmpdir(), "perbo-release-notes-")), "release-notes.md");
   writeFileSync(
     notes,
     [
-      `focrux ${version}, for design partners. The digest to verify against:`,
+      `perbo ${version}, for design partners. The digest to verify against:`,
       "",
       "```",
       digest,
       "```",
       "",
-      "Install instructions are the README inside the archive. There is no auto-update: a newer version is a new archive and a message (D-046).",
+      "Install instructions are the README inside the archive. The archive does not update itself: a newer version is a new archive and a message.",
       "",
     ].join("\n"),
   );
@@ -82,7 +82,7 @@ export function draftRelease({ version, tarball, target }) {
   }
 
   const assets = [tarball, `${tarball}.sha256`];
-  const title = `focrux ${version}`;
+  const title = `perbo ${version}`;
   const where = target === "" ? [] : ["--target", target];
 
   try {

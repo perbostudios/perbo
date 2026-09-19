@@ -9,17 +9,17 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ChangeEvent, ReactNode, SelectHTMLAttributes } from "react";
-import { Button, cx } from "@focrux/ui";
+import { Button, cx } from "@perbo/ui";
 import { InkIcon } from "./InkIcon.js";
 
-/** These primitives reproduce the repeated geometry in Focrux Screens, S1–S18. */
+/** These primitives reproduce the repeated geometry in Perbo Screens, S1–S18. */
 export function Brand({ wordmark = false }: { wordmark?: boolean }) {
   return (
     <span className="brand-lockup">
       <span className="brand-disc">
-        <img src="./brand/focrux-mark.png" alt="Focrux" />
+        <img src="./brand/perbo-mark.png" alt="Perbo" />
       </span>
-      {wordmark && <span>focrux</span>}
+      {wordmark && <span>perbo</span>}
     </span>
   );
 }
@@ -89,7 +89,7 @@ export function PageHeader({
         className={cx(
           "header-title",
           (crumbs ||
-            ["focrux", "Archive", "Settings"].includes(String(title))) &&
+            ["perbo", "Archive", "Settings"].includes(String(title))) &&
             "header-title--section",
         )}
       >

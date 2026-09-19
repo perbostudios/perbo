@@ -50,7 +50,7 @@ import { fileURLToPath } from "node:url";
  * the backlog, the architecture records. A metric name may carry one in a
  * trailing note; the note is for maintainers and does not travel.
  */
-const INTERNAL_ID = /\bSCP-\d{3}\b|\bD-0\d{2}\b|\bADR-\d{4}\b|\bAYO-\d+\b/;
+const INTERNAL_ID = /\bSCP-\d{3}\b|\bD-0\d{2}\b|\bADR-\d{4}\b|\b(?:PRB|AYO)-\d+\b/;
 
 /**
  * The public name of a metric: its name with any parenthetical that cites an

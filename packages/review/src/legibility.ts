@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { CheckResult, Finding } from "@focrux/contracts";
+import type { CheckResult, Finding } from "@perbo/contracts";
 
 /**
  * Is the change set one a person can read? (SCP-114.)

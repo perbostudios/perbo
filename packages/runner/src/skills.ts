@@ -3,7 +3,7 @@ import {
   EXECUTOR_SKILL_REVISION,
   ExecutorSkillsSchema,
   type ExecutorSkillId,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { skillContent } from "./skill-content.js";
 
 /** Fixed, user-selected text only. Never reads a repository or the operator's skill directories. */

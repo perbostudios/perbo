@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Finding, PlanContractWithCriteria, ReviewArtifact } from "@focrux/contracts";
-import { decideBlocking } from "@focrux/review";
+import type { Finding, PlanContractWithCriteria, ReviewArtifact } from "@perbo/contracts";
+import { decideBlocking } from "@perbo/review";
 import { pullRequestBody } from "../src/delivery.js";
 import { finding, makeContract, makeReview } from "./support.js";
 
@@ -81,26 +81,26 @@ describe("the pull request the loop opens", () => {
   });
 
   it("counts them on one line that says where the record is", () => {
-    const line = body.split("\n").find((one) => one.includes("focrux inspect"));
+    const line = body.split("\n").find((one) => one.includes("perbo inspect"));
     expect(line).toBeDefined();
     expect(line).toContain("2 findings");
-    expect(line).toContain("focrux inspect ticket_SCP094");
+    expect(line).toContain("perbo inspect ticket_SCP094");
   });
 
   it("says nothing about the executor's work when it did none", () => {
-    expect(bodyWith([blocks])).not.toContain("focrux inspect");
+    expect(bodyWith([blocks])).not.toContain("perbo inspect");
   });
 
   it("leaves the stops a person answers exactly as they were", () => {
     expect(body).toContain(
       "  - [ ] I wanted to be asked before this was fixed " +
-        `<!-- focrux:stop key=${blocks.key} answer=endorse rule=auth.token_never_expires routing=blocks -->`,
+        `<!-- perbo:stop key=${blocks.key} answer=endorse rule=auth.token_never_expires routing=blocks -->`,
     );
     expect(body).toContain(
       "  - [ ] The agent should have fixed this on its own " +
-        `<!-- focrux:stop key=${blocks.key} answer=override rule=auth.token_never_expires routing=blocks -->`,
+        `<!-- perbo:stop key=${blocks.key} answer=override rule=auth.token_never_expires routing=blocks -->`,
     );
-    expect(body).toContain("<!-- focrux:stops n=1 ticket=ticket_SCP094 -->");
+    expect(body).toContain("<!-- perbo:stops n=1 ticket=ticket_SCP094 -->");
   });
 
   it("keeps the verdict's own counts truthful", () => {
@@ -118,7 +118,7 @@ describe("a routed finding the executor could not close", () => {
     expect(body).toContain("no determinable practice");
     expect(body).toContain("whether total() is exercised is a product call");
     expect(body).toContain(
-      `<!-- focrux:stop key=${routedOne.key} answer=endorse rule=test.assertion_missing routing=declined -->`,
+      `<!-- perbo:stop key=${routedOne.key} answer=endorse rule=test.assertion_missing routing=declined -->`,
     );
   });
 

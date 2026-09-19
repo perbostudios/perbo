@@ -20,7 +20,7 @@ import { wilsonInterval, type WilsonInterval } from "./stops.js";
  * commit is usually in both, because reverting a change touches its paths, so
  * adding them would double-count the one case everybody agrees about.
  *
- * Everything here is arithmetic over a record `focrux sync` wrote from local
+ * Everything here is arithmetic over a record `perbo sync` wrote from local
  * `git` and `gh`. Nothing in this module reads a repository or a network.
  */
 

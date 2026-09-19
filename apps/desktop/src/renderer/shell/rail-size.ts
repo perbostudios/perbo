@@ -5,7 +5,7 @@ export const RAIL_WIDTH = 66;
 export interface RailSize {
   collapsed: boolean;
 }
-const KEY = "focrux:rail";
+const KEY = "perbo:rail";
 const listeners = new Set<() => void>();
 let current: RailSize = read();
 function read(): RailSize {

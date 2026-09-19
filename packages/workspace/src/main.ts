@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { ExperimentConfigSchema, renderExperiment, runExperiment } from "./experiment.js";
 
 /**
- * `focrux-materialisation <config.json> [--out result.json]`
+ * `perbo-materialisation <config.json> [--out result.json]`
  *
  * The harness behind [ADR-0025](../../../docs/adr/0025-worktree-environment-contract.md)'s
  * validation trigger. It prints a table on stdout and writes the full record,
@@ -14,7 +14,7 @@ async function main(argv: string[]): Promise<number> {
   const [configPath, ...rest] = argv;
   if (!configPath || configPath === "--help") {
     process.stderr.write(
-      "usage: focrux-materialisation <config.json> [--out <result.json>]\n" +
+      "usage: perbo-materialisation <config.json> [--out <result.json>]\n" +
         "\n" +
         "Measures clean clone -> provision -> materialize -> install -> green tests\n" +
         "for each repository in the config, cold and warm (ADR-0025, SCP-079).\n",

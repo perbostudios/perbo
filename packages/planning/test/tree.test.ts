@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { PlanningError, repositoryTree } from "../src/index.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-planning-tree-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-planning-tree-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function repository(files: string[]): string {

@@ -7,8 +7,8 @@ import {
   DEFAULT_LIMITS_TABLE,
   LimitsTableSchema,
   SecretIndex,
-} from "@focrux/contracts";
-import { provision } from "@focrux/workspace";
+} from "@perbo/contracts";
+import { provision } from "@perbo/workspace";
 import { runAgent } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { runPinnedChecks } from "../src/checks.js";
@@ -41,7 +41,7 @@ async function worktreeFor(repo: { dir: string; head: string }, attempt: string)
     outcome: "give the executor a scratch directory",
     base_commit: repo.head,
     attempt_id: attempt,
-    root: scratch("focrux-scp166-"),
+    root: scratch("perbo-scp166-"),
     limits: DEFAULT_LIMITS_TABLE,
   });
 }
@@ -98,7 +98,7 @@ describe("the temporary directory the runner hands the executor", () => {
   it("exists before the executor starts, and the three names point into the worktree", async () => {
     const repo = makeRepo();
     const workspace = await worktreeFor(repo, "att_scratch_env");
-    const report = join(scratch("focrux-scp166-report-"), "env.txt");
+    const report = join(scratch("perbo-scp166-report-"), "env.txt");
     const binary = recordingExecutor(workspace.path, report);
 
     await runAgent(
@@ -118,7 +118,7 @@ describe("the temporary directory the runner hands the executor", () => {
   }, 60_000);
 
   it("is named by the runner from the worktree, never by anything a model returned", () => {
-    expect(scratchPath("/w/a")).toBe(join("/w/a", ".focrux-tmp"));
+    expect(scratchPath("/w/a")).toBe(join("/w/a", ".perbo-tmp"));
   });
 
   it("carries the three names through the environment allow-list", () => {
@@ -128,7 +128,7 @@ describe("the temporary directory the runner hands the executor", () => {
   });
 
   it("sets all three to the runner's directory even when the host named /tmp", () => {
-    const worktree = scratch("focrux-scp166-env-");
+    const worktree = scratch("perbo-scp166-env-");
     const { env } = buildAgentEnvironment({
       base: { PATH: "/usr/bin", TMPDIR: "/tmp/host", TMP: "/tmp/host", TEMP: "/tmp/host" },
       profile: buildPermissionProfile({ worktree }),
@@ -281,9 +281,9 @@ const unitCheck = (command: string[]) => [
 
 describe("the temporary directory the pinned checks run under", () => {
   it("hands the checks and the re-run the host's, never the executor's scratch", async () => {
-    const worktree = scratch("focrux-scp168-");
-    const report = join(scratch("focrux-scp168-report-"), "tmpdir.jsonl");
-    const host = scratch("focrux-scp168-host-");
+    const worktree = scratch("perbo-scp168-");
+    const report = join(scratch("perbo-scp168-report-"), "tmpdir.jsonl");
+    const host = scratch("perbo-scp168-host-");
 
     const results = await runPinnedChecks({
       checks: unitCheck(reportingCheck(worktree, report)),
@@ -304,8 +304,8 @@ describe("the temporary directory the pinned checks run under", () => {
   }, 60_000);
 
   it("leaves the three names absent when the runner was started without them", async () => {
-    const worktree = scratch("focrux-scp168-unset-");
-    const report = join(scratch("focrux-scp168-unset-report-"), "tmpdir.jsonl");
+    const worktree = scratch("perbo-scp168-unset-");
+    const report = join(scratch("perbo-scp168-unset-report-"), "tmpdir.jsonl");
 
     const results = await runPinnedChecks({
       checks: unitCheck(reportingCheck(worktree, report)),
@@ -322,8 +322,8 @@ describe("the temporary directory the pinned checks run under", () => {
   }, 60_000);
 
   it("takes the host's values from the runner's own process by default", async () => {
-    const worktree = scratch("focrux-scp168-default-");
-    const report = join(scratch("focrux-scp168-default-report-"), "tmpdir.jsonl");
+    const worktree = scratch("perbo-scp168-default-");
+    const report = join(scratch("perbo-scp168-default-report-"), "tmpdir.jsonl");
 
     const results = await runPinnedChecks({
       checks: unitCheck(reportingCheck(worktree, report)),

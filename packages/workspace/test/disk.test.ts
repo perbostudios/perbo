@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { directoryBytes } from "../src/disk.js";
 
-const scratchRoot = mkdtempSync(join(tmpdir(), "focrux-disk-"));
+const scratchRoot = mkdtempSync(join(tmpdir(), "perbo-disk-"));
 afterAll(() => rmSync(scratchRoot, { recursive: true, force: true }));
 
 const scratch = () => mkdtempSync(join(scratchRoot, "case-"));

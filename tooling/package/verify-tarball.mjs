@@ -5,7 +5,7 @@
 // stops at its first tool call, and the person who finds that out is the
 // partner. Called by .github/workflows/release.yml.
 //
-//   node tooling/package/verify-tarball.mjs release/focrux-<version>.tgz
+//   node tooling/package/verify-tarball.mjs release/perbo-<version>.tgz
 
 import { execFileSync } from "node:child_process";
 import { GUARD_HOOK_FILE, invokedDirectly } from "./bundle.mjs";
@@ -40,7 +40,7 @@ export function verifyTarball(tarball) {
   if (!entries.some((entry) => insideTopLevel(entry) === REQUIRED)) {
     console.log(
       `::error::${tarball} does not carry ${REQUIRED}: the runner's write-guard hook is not in ` +
-        "the archive, so an installed `focrux run` would stop at its first tool call",
+        "the archive, so an installed `perbo run` would stop at its first tool call",
     );
     return false;
   }

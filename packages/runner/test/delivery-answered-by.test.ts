@@ -21,8 +21,8 @@ import { parseStopAnswers } from "../src/delivery.js";
 
 const key = (c: string) => c.repeat(64);
 const marker = (k: string, answer: "endorse" | "override") =>
-  `<!-- focrux:stop key=${k} answer=${answer} rule=auth.token_never_expires routing=blocks -->`;
-const SIGNED = "<!-- focrux:answered-by who=stand_in -->";
+  `<!-- perbo:stop key=${k} answer=${answer} rule=auth.token_never_expires routing=blocks -->`;
+const SIGNED = "<!-- perbo:answered-by who=stand_in -->";
 
 /** The two boxes of one stop, ticked and signed as each argument says. */
 const boxes = (
@@ -74,7 +74,7 @@ describe("the answerer a pull-request body reports", () => {
   });
 
   it("reads an explicit person signature as a person", () => {
-    const body = boxes(key("d"), { ticked: true, sign: "<!-- focrux:answered-by who=person -->" });
+    const body = boxes(key("d"), { ticked: true, sign: "<!-- perbo:answered-by who=person -->" });
     expect(parseStopAnswers(body)[0]?.answered_by).toBe("person");
   });
 
@@ -83,7 +83,7 @@ describe("the answerer a pull-request body reports", () => {
     // the stand-in put its name to being counted as a partner's.
     const body = boxes(
       key("e"),
-      { ticked: true, sign: "<!-- focrux:answered-by who=person -->" },
+      { ticked: true, sign: "<!-- perbo:answered-by who=person -->" },
       { ticked: true, sign: SIGNED },
     );
     expect(parseStopAnswers(body)[0]).toMatchObject({ answer: "conflict", answered_by: "stand_in" });
@@ -105,8 +105,8 @@ describe("the answerer a pull-request body reports", () => {
   it("reads no signature out of prose or a malformed marker", () => {
     const body = [
       `${SIGNED} — a line of prose that ticks nothing`,
-      boxes(key("1"), { ticked: true, sign: "<!-- focrux:answered-by who=nobody -->" }),
-      boxes(key("2"), { ticked: true, sign: "<!-- focrux:answered-by stand_in -->" }),
+      boxes(key("1"), { ticked: true, sign: "<!-- perbo:answered-by who=nobody -->" }),
+      boxes(key("2"), { ticked: true, sign: "<!-- perbo:answered-by stand_in -->" }),
       SIGNED,
     ].join("\n");
     expect(parseStopAnswers(body).map((stop) => stop.answered_by)).toEqual([undefined, undefined]);

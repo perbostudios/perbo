@@ -1,4 +1,4 @@
-import type { TicketState } from "@focrux/contracts";
+import type { TicketState } from "@perbo/contracts";
 import type { TaskRow } from "../shared/protocol.js";
 export { isArchived as archived } from "../shared/archive.js";
 export const stateLabels: Record<TicketState, string> = {

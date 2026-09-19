@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { cx } from "@focrux/ui";
+import { cx } from "@perbo/ui";
 
 /** Transient confirmations — copied, saved, archived — on the transitions.dev toast transition. */
 const ToastContext = createContext<(text: string) => void>(() => undefined);

@@ -5,7 +5,7 @@
 
 ## Decision
 
-Focrux optimises discovery, scope, checks and worktrees for one repository at a time, which is often a monorepo. Every contract carries repository identity, so a ticket could later span repositories. Cross-repository execution does not exist.
+Perbo optimises discovery, scope, checks and worktrees for one repository at a time, which is often a monorepo. Every contract carries repository identity, so a ticket could later span repositories. Cross-repository execution does not exist.
 
 ## Consequences
 

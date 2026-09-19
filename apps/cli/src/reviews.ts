@@ -7,7 +7,7 @@ import { TicketlessReviewBundleSchema, type TicketlessReviewBundle } from "./tic
 /**
  * `<store>/reviews/` — the reviews this store holds that no attempt filed.
  *
- * `focrux review --pr owner/repo#N` and `focrux review --head … --base …` judge
+ * `perbo review --pr owner/repo#N` and `perbo review --head … --base …` judge
  * a change nobody ran here. There is no attempt, so nothing files the review
  * under a run, and the bundle written into `<store>/reviews/` is the whole
  * record of it. This module is that directory read back — which reviews it
@@ -26,7 +26,7 @@ import { TicketlessReviewBundleSchema, type TicketlessReviewBundle } from "./tic
 
 const REVIEW_SUFFIX = ".review.json";
 
-/** `<store>/reviews/`, which is where `focrux review` writes and nowhere else. */
+/** `<store>/reviews/`, which is where `perbo review` writes and nowhere else. */
 export const reviewsDirIn = (storeDirectory: string): string => join(storeDirectory, "reviews");
 
 /** The review ids this store holds a bundle for, in the order it lists them. */
@@ -144,12 +144,19 @@ export function storedReviewSubject(storeDirectory: string, name: string): Inspe
     admission: null,
     source: null,
     queue: null,
+    // Nothing admitted this change, so there is no spec it was drafted from.
+    spec_staleness: null,
     runs_started: null,
+    // A stored review is about a change, not about a plan with a graph.
+    nodes: null,
+    edges: null,
+    approach_problem: null,
+    size: null,
   };
 }
 
 /**
- * The refusal for a reference neither the build's own record nor this directory
+ * The refusal for a reference neither the store's own record nor this directory
  * knows, naming both places that were looked in. `unresolved` is what the
  * record said; what is added is what `<store>/reviews/` holds.
  */
@@ -158,7 +165,7 @@ export function refuseUnknownReview(storeDirectory: string, reference: string, u
   throw new UsageError(
     `${unresolved.message}; and ${reviewsDirIn(storeDirectory)} holds no review '${reference}'` +
       (held.length === 0
-        ? ": `focrux review --pr owner/repo#N` writes one there"
+        ? ": `perbo review --pr owner/repo#N` writes one there"
         : ` (on record: ${held.join(", ")})`),
   );
 }

@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { LimitsTableSchema, type ChangeSet } from "@focrux/contracts";
+import { LimitsTableSchema, type ChangeSet } from "@perbo/contracts";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
@@ -12,7 +12,7 @@ import { makeContract, makeRepo, makeReview, scratch, withoutInstall } from "./s
  * SCP-202: the loop's own post-approval merge step.
  *
  * The run ends `approved` with a pull request open, and what happens next is
- * the `merge` switch's to decide. The step is the same one `focrux sync
+ * the `merge` switch's to decide. The step is the same one `perbo sync
  * --merge` calls, so what is proven here is where the loop calls it and what
  * it does with the answer; the six conditions themselves are proven against a
  * fake `gh` in `apps/cli/test/sync-merge.test.ts`.
@@ -76,7 +76,7 @@ const approving = (async (input: { changeset?: ChangeSet }) => ({
 })) as never;
 
 function makeConfig(repositoryRoot: string, over: Record<string, unknown> = {}) {
-  const root = scratch("focrux-loopmerge-");
+  const root = scratch("perbo-loopmerge-");
   return TicketRunConfigSchema.parse({
     materialization_manifest: withoutInstall(repositoryRoot),
     ticket_key: "SCP202",
@@ -118,7 +118,7 @@ const publishing = {
  * what `merged()` is narrower than "was it called at all" for.
  */
 function refusingGh(name: string): { bin: string; merged: () => boolean } {
-  const root = scratch(`focrux-loopmerge-gh-${name}-`);
+  const root = scratch(`perbo-loopmerge-gh-${name}-`);
   const log = join(root, "argv");
   const script = join(root, "gh");
   writeFileSync(

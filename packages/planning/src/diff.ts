@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { hasAcceptanceCriteria, type AcceptanceCriterion, type PlanContract } from "@focrux/contracts";
+import { hasAcceptanceCriteria, type AcceptanceCriterion, type PlanContract } from "@perbo/contracts";
 
 export interface ContractDiff {
   /** The number of fields a person changed. `admission.edit_count` is this. */

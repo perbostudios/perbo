@@ -40,7 +40,7 @@ const runs: RunRecord[] = fixtures.flatMap((fixture) =>
 const result: HarnessResult = {
   // The reviewer copy the run executed, as `runCorpus` reports it.
   bundle: {
-    path: "/tmp/out/bin/focrux.mjs",
+    path: "/tmp/out/bin/perbo.mjs",
     sha256: "c".repeat(64),
     bytes: 4096,
     source: "apps/cli/dist/main.js",
@@ -142,7 +142,7 @@ describe("corpus run manifests", () => {
  * scoreable.
  */
 describe("run manifests written before the reviewer bundle was recorded", () => {
-  const scratch = mkdtempSync(join(tmpdir(), "focrux-manifest-compat-"));
+  const scratch = mkdtempSync(join(tmpdir(), "perbo-manifest-compat-"));
   afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
   /** Exactly what a run wrote before `<out>/bin/` existed: v1, and no bundle fields. */
@@ -231,12 +231,12 @@ describe("run manifests written before the harness enforced a review deadline", 
 });
 
 describe("a results directory whose reviewer copy is no longer beside it", () => {
-  const scratch = mkdtempSync(join(tmpdir(), "focrux-manifest-bundle-"));
+  const scratch = mkdtempSync(join(tmpdir(), "perbo-manifest-bundle-"));
   afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
   const withBundle = (dir: string, contents: string | null): string => {
     mkdirSync(join(dir, "bin"), { recursive: true });
-    if (contents !== null) writeFileSync(join(dir, "bin", "focrux.mjs"), contents);
+    if (contents !== null) writeFileSync(join(dir, "bin", "perbo.mjs"), contents);
     return dir;
   };
 
@@ -272,7 +272,7 @@ describe("a results directory whose reviewer copy is no longer beside it", () =>
     const executed = {
       ...result,
       bundle: {
-        path: join(kept, "bin", "focrux.mjs"),
+        path: join(kept, "bin", "perbo.mjs"),
         sha256: createHash("sha256").update(contents).digest("hex"),
         bytes: Buffer.byteLength(contents),
         source: "apps/cli/dist/main.js",

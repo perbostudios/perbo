@@ -1,5 +1,5 @@
 {
-  "extends": "@focrux/tsconfig/base.json",
+  "extends": "@perbo/tsconfig/base.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist"

@@ -2,8 +2,9 @@ import { z } from "zod";
 import type { Detail, Snapshot, TaskRow } from "../../shared/protocol.js";
 import type { TaskView } from "../shell/App.js";
 import { runnerProgress } from "../presentation.js";
+import { exclusiveJob, heldRepository, isLive } from "../../shared/jobs.js";
 
-export const displayKey = (key: string): string => "#" + key.replace(/^FCX-/, "");
+export const displayKey = (key: string): string => "#" + key.replace(/^PRB-/, "");
 export const stageName = (stage: number): string =>
   ["contract", "execution", "checks", "decisions required", "refinement", "review"][stage - 1] ?? "contract";
 const stageOf = (state: string): number =>
@@ -25,8 +26,12 @@ export function projectTicket(
 ) {
   const { ticket, repoId } = row;
   const jobs = workspace.jobs.filter((job) => job.repoId === repoId && (job.key === ticket.key || job.resultKey === ticket.key));
-  const active = jobs.find((job) => ["running", "stopping"].includes(job.state));
-  const busy = workspace.jobs.some((job) => ["running", "stopping"].includes(job.state));
+  // The loop is what a ticket's screens watch and stop, so it wins over planning running beside it.
+  const active = exclusiveJob(jobs) ?? jobs.find((job) => isLive(job));
+  // A run, a decision or a publication takes its turn; planning elsewhere does not hold it up (D-101).
+  const busy = Boolean(exclusiveJob(workspace.jobs));
+  // Deleting this contract waits for every command running in its repository, as the host does.
+  const held = heldRepository(workspace.jobs, repoId);
   const lastRun = jobs.filter((job) => ["run", "decide"].includes(job.kind)).at(-1);
   const recoverable = !active && !refreshing && (inProgress.includes(ticket.state) || ["failed", "cancelled"].includes(ticket.state)) &&
     (["interrupted", "failed", "cancelled"].includes(lastRun?.state ?? "") || (workspace.mode === "desktop" && inProgress.includes(ticket.state)));
@@ -79,5 +84,5 @@ export function projectTicket(
   const description = recoverable ? "This task needs recovery. Review the contract and retained changes before another attempt." :
     refreshing ? "Reading the task's recorded outcome…" :
     (workspace.mode === "preview" ? row.summary?.description : undefined) ?? descriptions[observed?.state ?? ticket.state] ?? "Open the ticket to see its contract, latest state and retained evidence.";
-  return { jobs, active, busy, recoverable, resultReady, refreshing, attention, primary, screen, stage, description, observed, latest, review, evidence };
+  return { jobs, active, busy, held, recoverable, resultReady, refreshing, attention, primary, screen, stage, description, observed, latest, review, evidence };
 }

@@ -24,7 +24,7 @@ const git = (dir: string, ...args: string[]): string =>
     env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
   });
 
-const base = realpathSync(mkdtempSync(join(tmpdir(), "focrux-push-")));
+const base = realpathSync(mkdtempSync(join(tmpdir(), "perbo-push-")));
 const root = join(base, "wt");
 const scratch = scratchPath(root);
 const elsewhere = join(base, "elsewhere");
@@ -99,7 +99,7 @@ describe("a push to a remote inside the attempt's own scratch", () => {
   });
 
   it("is permitted through `-C` from the worktree root, the recorded case's shape", () => {
-    expect(pushes("git -C .focrux-tmp/probe/src push -q origin develop", root)).toEqual([]);
+    expect(pushes("git -C .perbo-tmp/probe/src push -q origin develop", root)).toEqual([]);
   });
 
   it("is permitted through `-C` relative to the shell's directory", () => {
@@ -116,9 +116,9 @@ describe("a push to a remote inside the attempt's own scratch", () => {
   });
 
   it("is permitted where the shell moved earlier on the line, whatever follows the push", () => {
-    expect(pushes("cd .focrux-tmp/probe/src && git push origin develop && echo done", root)).toEqual([]);
-    expect(pushes("cd .focrux-tmp/probe/src; git push origin develop; echo done", root)).toEqual([]);
-    expect(pushes("git -C .focrux-tmp/probe/src push origin develop && git log --oneline -1", root)).toEqual([]);
+    expect(pushes("cd .perbo-tmp/probe/src && git push origin develop && echo done", root)).toEqual([]);
+    expect(pushes("cd .perbo-tmp/probe/src; git push origin develop; echo done", root)).toEqual([]);
+    expect(pushes("git -C .perbo-tmp/probe/src push origin develop && git log --oneline -1", root)).toEqual([]);
   });
 
   it("is permitted across a line continuation", () => {

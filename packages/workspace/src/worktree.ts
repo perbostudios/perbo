@@ -13,7 +13,7 @@ import {
 import { hostname } from "node:os";
 import { join, resolve, sep, toNamespacedPath } from "node:path";
 import { z } from "zod";
-import { assertWithinLimits, type LimitsTable } from "@focrux/contracts";
+import { assertWithinLimits, type LimitsTable } from "@perbo/contracts";
 import { run, runOrThrow } from "./exec.js";
 import { branchName, recordedBranch, type RecordedBranches } from "./naming.js";
 
@@ -154,7 +154,28 @@ const DEFAULT_GIT_TIMEOUT_MS = 120_000;
  * a hang.
  */
 export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const forward = ["SSH_AUTH_SOCK", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "XDG_CONFIG_HOME", "GNUPGHOME"];
+  // The last three are where Windows keeps a user's own state: `gh` reads its
+  // host credential from `%AppData%\GitHub CLI\hosts.yml` and keeps its state
+  // under `%LocalAppData%\GitHub CLI`, and `USERPROFILE` is the home Go's
+  // `os.UserHomeDir` reads there. Without them the runner's `gh` is logged into
+  // no host on a machine whose own `gh auth status` answers, and the attempt
+  // fails at `gh pr create` with the work already sealed and reviewed.
+  //
+  // They name directories rather than carry secrets, and this is the runner's
+  // own environment — the one that legitimately performs the commit, the push
+  // and the pull request. The agent's environment is built separately and is
+  // not widened by this. On POSIX the loop below skips a name the host does not
+  // set.
+  const forward = [
+    "SSH_AUTH_SOCK",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_SYSTEM",
+    "XDG_CONFIG_HOME",
+    "GNUPGHOME",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "USERPROFILE",
+  ];
   const env: NodeJS.ProcessEnv = {
     PATH: base.PATH ?? "/usr/bin:/bin",
     HOME: base.HOME ?? "",

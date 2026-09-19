@@ -3,14 +3,14 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { EXIT_CODES, TicketSchema, transition, type Ticket } from "@focrux/contracts";
-import { branchName } from "@focrux/workspace";
+import { EXIT_CODES, TicketSchema, transition, type Ticket } from "@perbo/contracts";
+import { branchName } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { runSyncCommand } from "../src/sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.js";
 
 /**
- * SCP-157: `focrux sync` on a `failed` ticket whose branch a person delivered
+ * SCP-157: `perbo sync` on a `failed` ticket whose branch a person delivered
  * by hand — the loop's own executor never opened this pull request, and the
  * loop's own attempt is the reason the ticket says `failed` at all. `sync`
  * still has to walk it to `merged` once a pull request exists, and leave it
@@ -26,7 +26,7 @@ import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.
  * outrun five seconds on its own.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-sync-handoff-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-sync-handoff-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const OUTCOME = "Search results are paginated.";
@@ -156,12 +156,12 @@ function failedTicket(name: string): { repo: string; dir: string; ticket: Ticket
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-01T09:00:00.000Z");
   const branch = branchName({
-    ticket_key: "FCX-1",
-    ticket_id: readTicket(dir, "FCX-1").ticket_id,
-    outcome: readContract(dir, "FCX-1").outcome,
+    ticket_key: "PRB-1",
+    ticket_id: readTicket(dir, "PRB-1").ticket_id,
+    outcome: readContract(dir, "PRB-1").outcome,
   });
 
-  let ticket = readTicket(dir, "FCX-1");
+  let ticket = readTicket(dir, "PRB-1");
   ticket = transition(ticket, "provisioning", "run started", at);
   ticket = transition(ticket, "failed", "the attempt did not complete: terminated", at);
   ticket = TicketSchema.parse({ ...ticket, delivery: { ...ticket.delivery, branch } });
@@ -170,7 +170,7 @@ function failedTicket(name: string): { repo: string; dir: string; ticket: Ticket
   return { repo, dir, ticket, branch };
 }
 
-const ticketFile = (dir: string) => join(dir, "tickets", "FCX-1.json");
+const ticketFile = (dir: string) => join(dir, "tickets", "PRB-1.json");
 const NOW = new Date("2026-09-03T10:00:00.000Z");
 
 describe("ac_3 — a failed ticket with no pull request is left exactly as it is", () => {
@@ -185,13 +185,13 @@ describe("ac_3 — a failed ticket with no pull request is left exactly as it is
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.did_not_complete);
     expect(readFileSync(ticketFile(dir), "utf8")).toBe(before);
-    expect(readTicket(dir, "FCX-1").state).toBe("failed");
-    expect(readTicket(dir, "FCX-1").history).toHaveLength(4);
+    expect(readTicket(dir, "PRB-1").state).toBe("failed");
+    expect(readTicket(dir, "PRB-1").history).toHaveLength(4);
     expect(streams.err.join("")).toContain("left untouched");
   }, 30_000);
 });
@@ -203,11 +203,11 @@ describe("ac_2 — a failed ticket whose branch a person merged by hand is walke
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     expect(after.state).toBe("merged");
 
     const written = after.history.slice(before.history.length);
@@ -218,7 +218,7 @@ describe("ac_2 — a failed ticket whose branch a person merged by hand is walke
 
     // Both rows are reconciled and name the pull request as the source.
     for (const entry of written) {
-      expect(entry.note).toContain("reconciled after the fact by `focrux sync`");
+      expect(entry.note).toContain("reconciled after the fact by `perbo sync`");
       expect(entry.note).toContain(PR_URL);
       expect(entry.at).toBe(NOW.toISOString());
     }
@@ -233,11 +233,11 @@ describe("ac_2 — a failed ticket whose branch a person merged by hand is walke
     const gh = fakeGh("open-only", { stdout: ghAnswer("OPEN") });
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     expect(after.state).toBe("pr_open");
     expect(after.history.at(-1)).toMatchObject({ from: "failed", to: "pr_open" });
   }, 30_000);

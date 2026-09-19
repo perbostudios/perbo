@@ -6,25 +6,25 @@ import { readPrinciples, PRINCIPLES_MAX_BYTES } from "../src/principles.js";
 
 describe("readPrinciples", () => {
   it("returns null when nothing is recorded", () => {
-    const root = mkdtempSync(join(tmpdir(), "focrux-pr-"));
+    const root = mkdtempSync(join(tmpdir(), "perbo-pr-"));
     expect(readPrinciples(root)).toBeNull();
   });
 
   it("caps an oversized file rather than inflating every brief", () => {
-    const root = mkdtempSync(join(tmpdir(), "focrux-pr-"));
-    mkdirSync(join(root, ".focrux"));
-    writeFileSync(join(root, ".focrux", "principles.md"), "x".repeat(PRINCIPLES_MAX_BYTES * 2));
+    const root = mkdtempSync(join(tmpdir(), "perbo-pr-"));
+    mkdirSync(join(root, ".perbo"));
+    writeFileSync(join(root, ".perbo", "principles.md"), "x".repeat(PRINCIPLES_MAX_BYTES * 2));
     const text = readPrinciples(root)!;
     expect(text.length).toBeLessThanOrEqual(PRINCIPLES_MAX_BYTES + 200);
     expect(text).toContain("truncated");
   });
 
   it("caps by bytes, not by UTF-16 code units", () => {
-    const root = mkdtempSync(join(tmpdir(), "focrux-pr-"));
-    mkdirSync(join(root, ".focrux"));
+    const root = mkdtempSync(join(tmpdir(), "perbo-pr-"));
+    mkdirSync(join(root, ".perbo"));
     // One code unit each, two bytes each: exactly at the cap by length and
     // twice over it by size.
-    writeFileSync(join(root, ".focrux", "principles.md"), "é".repeat(PRINCIPLES_MAX_BYTES));
+    writeFileSync(join(root, ".perbo", "principles.md"), "é".repeat(PRINCIPLES_MAX_BYTES));
     const text = readPrinciples(root)!;
     expect(text).toContain("truncated");
     expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(PRINCIPLES_MAX_BYTES + 200);

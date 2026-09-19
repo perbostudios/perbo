@@ -2,12 +2,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { BaselineFileSchema, type BaselineFile } from "@focrux/contracts";
+import { BaselineFileSchema, type BaselineFile } from "@perbo/contracts";
 import { UsageError } from "../src/args.js";
 import { parseBaselineArgs, runBaselineCommand } from "../src/baseline.js";
 import { makeTicket } from "./attempt-fixture.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-baseline-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-baseline-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const T0 = Date.parse("2026-09-01T09:00:00.000Z");
@@ -32,9 +32,9 @@ async function baseline(dir: string, argv: string[], when: Date, isTTY = false) 
 }
 
 const readFile = (dir: string): BaselineFile =>
-  BaselineFileSchema.parse(JSON.parse(readFileSync(join(dir, ".focrux", "baseline.json"), "utf8")));
+  BaselineFileSchema.parse(JSON.parse(readFileSync(join(dir, ".perbo", "baseline.json"), "utf8")));
 
-describe("focrux baseline argument parsing", () => {
+describe("perbo baseline argument parsing", () => {
   it("needs a subcommand, a title for start, and only the flags that apply", () => {
     expect(() => parseBaselineArgs([])).toThrow(UsageError);
     expect(() => parseBaselineArgs(["begin"])).toThrow(UsageError);
@@ -50,7 +50,7 @@ describe("focrux baseline argument parsing", () => {
   });
 });
 
-describe("focrux baseline", () => {
+describe("perbo baseline", () => {
   it("starts an entry before first use and refuses a second while it is open", async () => {
     const dir = repo("start");
     const started = await baseline(dir, ["start", "Paginate search", "--ref", "acme/api#412"], at(0));
@@ -121,7 +121,7 @@ describe("focrux baseline", () => {
     await expect(baseline(dir, ["resume"], at(0))).rejects.toThrow(/nothing to resume/);
     await expect(baseline(dir, ["stop"], at(0))).rejects.toThrow(/nothing to stop/);
     await expect(baseline(dir, ["abandon"], at(0))).rejects.toThrow(/nothing to abandon/);
-    expect(existsSync(join(dir, ".focrux", "baseline.json"))).toBe(false);
+    expect(existsSync(join(dir, ".perbo", "baseline.json"))).toBe(false);
 
     await baseline(dir, ["start", "Paginate search"], at(0));
     await expect(baseline(dir, ["resume"], at(1))).rejects.toThrow(/is not paused/);
@@ -149,9 +149,9 @@ describe("focrux baseline", () => {
 
   it("records that a ticket already existed rather than refusing", async () => {
     const dir = repo("late");
-    mkdirSync(join(dir, ".focrux", "tickets"), { recursive: true });
+    mkdirSync(join(dir, ".perbo", "tickets"), { recursive: true });
     writeFileSync(
-      join(dir, ".focrux", "tickets", "AYO-1.json"),
+      join(dir, ".perbo", "tickets", "AYO-1.json"),
       JSON.stringify(makeTicket({ key: "AYO-1", ticket_id: "ticket_late0000001", repository_root: dir })),
     );
     const started = await baseline(dir, ["start", "Paginate search"], at(0));
@@ -160,7 +160,7 @@ describe("focrux baseline", () => {
     expect(readFile(dir).captured_before_first_use).toBe(false);
     // It never goes back to true.
     await baseline(dir, ["stop"], at(1));
-    rmSync(join(dir, ".focrux", "tickets"), { recursive: true, force: true });
+    rmSync(join(dir, ".perbo", "tickets"), { recursive: true, force: true });
     await baseline(dir, ["start", "Later"], at(2));
     expect(readFile(dir).captured_before_first_use).toBe(false);
   });
@@ -198,8 +198,8 @@ describe("focrux baseline", () => {
 
   it("names a file it cannot read rather than starting over it", async () => {
     const dir = repo("corrupt");
-    mkdirSync(join(dir, ".focrux"), { recursive: true });
-    writeFileSync(join(dir, ".focrux", "baseline.json"), JSON.stringify({ schema_version: 1, entries: "no" }));
+    mkdirSync(join(dir, ".perbo"), { recursive: true });
+    writeFileSync(join(dir, ".perbo", "baseline.json"), JSON.stringify({ schema_version: 1, entries: "no" }));
     await expect(baseline(dir, ["start", "x"], at(0))).rejects.toThrow(/baseline\.json is not a baseline record/);
   });
 });

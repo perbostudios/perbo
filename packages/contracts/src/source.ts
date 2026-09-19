@@ -11,7 +11,7 @@ import {
 /**
  * A contract that was never admitted (SCP-179).
  *
- * `focrux review` on a pull request Focrux never planned still needs something
+ * `perbo review` on a pull request Perbo never planned still needs something
  * to judge the change against, and the only honest place to get it is the thing
  * the author already wrote: the pull request's title and body, or the flags the
  * person typed. This module is that reading, and its whole discipline is in one
@@ -79,7 +79,7 @@ export const OUTCOME_CRITERION_ID = "ac_outcome";
  */
 export const OUTCOME_CRITERION_ASSERTION = "the change achieves the stated outcome";
 
-/** `text :: assertion [:: kind]`, the separator `focrux admit --criterion` uses. */
+/** `text :: assertion [:: kind]`, the separator `perbo admit --criterion` uses. */
 const CRITERION_SEPARATOR = " :: ";
 
 export class SourceContractError extends Error {}

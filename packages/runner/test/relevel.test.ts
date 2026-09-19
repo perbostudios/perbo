@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { LimitsTableSchema, type ChangeSet } from "@focrux/contracts";
+import { LimitsTableSchema, type ChangeSet } from "@perbo/contracts";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "../src/loop.js";
@@ -92,7 +92,7 @@ function approving() {
 }
 
 function makeConfig(repositoryRoot: string, over: Record<string, unknown> = {}): TicketRunConfig {
-  const root = scratch("focrux-relevel-");
+  const root = scratch("perbo-relevel-");
   return TicketRunConfigSchema.parse({
     materialization_manifest: withoutInstall(repositoryRoot),
     ticket_key: "AYO7",
@@ -156,7 +156,7 @@ function github() {
 
 /** A `gh` that answers nothing, for the checks read after a push. */
 function silentGh(): string {
-  const root = scratch("focrux-relevel-gh-");
+  const root = scratch("perbo-relevel-gh-");
   const script = join(root, "gh");
   writeFileSync(script, ["#!/bin/sh", "exit 1", ""].join("\n"));
   chmodSync(script, 0o755);
@@ -260,6 +260,41 @@ describe("a re-level run", () => {
     expect(reviewer.calls).toHaveLength(1);
     expect(result.final_review?.decision).toBe("approve");
     expect(gh.pushes).toHaveLength(1);
+  }, RUN_TIMEOUT_MS);
+
+  it("tells the fresh review whether the base verified only where its verify measures it", async () => {
+    const told: Record<string, Array<boolean | undefined>> = { measured: [], unmeasured: [] };
+    for (const [name, verify] of [
+      ["measured", ["node", "-e", "process.exit(0)"]],
+      ["unmeasured", ["git", "status", "--porcelain"]],
+    ] as const) {
+      const repo = makeRepo();
+      const { contract, config } = await firstRun(repo);
+      advanceMain(repo.dir, "src/other.ts", "export const other = 2;\n");
+      const gh = github();
+      const reviewer = approving();
+      const result = await runTicket({
+        config: TicketRunConfigSchema.parse({
+          ...config,
+          relevel: true,
+          materialization_manifest: { ...withoutInstall(repo.dir), verify: { command: [...verify], timeout_ms: 30_000 } },
+        }),
+        contract,
+        hooks: {
+          agent: neverAgent.run as never,
+          review: (async (input: { baseVerified?: boolean }) => {
+            told[name]!.push(input.baseVerified);
+            return (reviewer.review as unknown as (input: unknown) => Promise<unknown>)(input);
+          }) as never,
+          ...gh.hooks,
+        },
+      });
+      expect(result.outcome).toBe("relevelled");
+    }
+    // A real verify answers for the base; `git status --porcelain` passes on
+    // any checkout, so the review is told nothing.
+    expect(told["measured"]).toEqual([true]);
+    expect(told["unmeasured"]).toEqual([undefined]);
   }, RUN_TIMEOUT_MS);
 
   it("pushes nothing when the fresh review does not approve, and leaves the merge commit local", async () => {

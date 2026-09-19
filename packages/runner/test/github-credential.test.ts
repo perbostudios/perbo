@@ -22,7 +22,7 @@ import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "../src/pr
 
 const SPAWN_DEADLINE_MS = 20_000;
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-gh-credential-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-gh-credential-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 /**

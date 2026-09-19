@@ -17,15 +17,15 @@ import {
  * is open, and anything that remembers beyond one machine is paid).
  *
  * A stop is answered today by ticking one of two boxes on the pull request,
- * which `focrux sync` reads back through `gh`. That path needs a pull request,
- * a network and a credential. `focrux verdict` is the same answer taken here:
+ * which `perbo sync` reads back through `gh`. That path needs a pull request,
+ * a network and a credential. `perbo verdict` is the same answer taken here:
  * `--endorse`/`--override` answer a stop exactly as the boxes do, and
  * `--accept`/`--reject` judge any finding, stop or not.
  *
  * The two paths meet at the **finding key** — `hash(rule_id | criterion_id |
  * file | symbol)`, the same value the checkbox marker carries — so a decision
  * taken either way names the same finding, and `mergeLocalVerdicts` below is
- * what lets `focrux stops` count them as one population.
+ * what lets `perbo stops` count them as one population.
  *
  * The file is append-only in the sense that matters: replacing a decision
  * supersedes the earlier row rather than overwriting it, because "what did we
@@ -111,7 +111,7 @@ export const LocalVerdictSchema = z
     /**
      * Whether the AI stand-in took this decision rather than a person (D-058),
      * which is the same label the pull-request path records on a signed tick.
-     * Absent is a person: `focrux verdict` is typed by whoever is at the
+     * Absent is a person: `perbo verdict` is typed by whoever is at the
      * machine, and only `--stand-in` says otherwise. A row written before this
      * field existed carries none and reads the same way, which is what it
      * meant — the stand-in had no way to say so yet.
@@ -221,7 +221,7 @@ export function recordVerdict(args: {
 }
 
 /**
- * Local stop answers folded into the stops records `focrux sync` wrote, so that
+ * Local stop answers folded into the stops records `perbo sync` wrote, so that
  * one population answers "of the changes with an answer, how many did a person
  * endorse" however the answer was given.
  *
@@ -238,7 +238,7 @@ export function recordVerdict(args: {
  * Where both a tick and a local decision exist for one stop, the later of the
  * two stands: they are the same person answering the same question twice, and
  * the second answer is the one they meant. `accept` and `reject` are not stop
- * answers and never appear here; `focrux inspect` is where they are read.
+ * answers and never appear here; `perbo inspect` is where they are read.
  */
 export function mergeLocalVerdicts(
   files: readonly StopVerdicts[],

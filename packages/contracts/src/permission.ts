@@ -36,6 +36,7 @@ export const PROHIBITED_ACTIONS = [
   "write_policy_path",
   "write_outside_worktree",
   "write_outside_scope",
+  "write_prohibited_path",
   "destructive_git",
   "registry_publication",
   "non_local_migration",
@@ -57,6 +58,9 @@ export const PROHIBITED_ACTION_STATEMENTS: Record<ProhibitedAction, string> = {
   write_outside_scope:
     "writing inside the worktree but outside the globs the approved contract admits a write " +
     "under (SCP-195)",
+  write_prohibited_path:
+    "writing to a path the approved contract prohibits, inside the allowed paths as much as " +
+    "outside them (D-105)",
   destructive_git:
     "force-push, history rewrite, branch deletion, or a push whose remote is not a path inside " +
     "the attempt's worktree or temporary directory — the runner performs the push",
@@ -69,7 +73,10 @@ export const PROHIBITED_ACTION_STATEMENTS: Record<ProhibitedAction, string> = {
   external_communication:
     "email, chat, webhooks, or issue comments on a repository other than the one under change",
   new_registry_dependency: "adding a dependency not already in the lockfile without approval",
-  enable_own_tooling: "connecting a tool server, registering a hook, or widening its own permissions",
+  enable_own_tooling:
+    "connecting a tool server, registering a hook, starting a subagent from a role Perbo does " +
+    "not define, a subagent starting one of its own whatever role it names (D-106), or " +
+    "widening its own permissions in any other way",
 };
 
 /**
@@ -81,8 +88,8 @@ export const POLICY_PATTERNS = [
   ".github/**",
   "CODEOWNERS",
   "**/CODEOWNERS",
-  ".focrux/**",
-  "**/.focrux/**",
+  ".perbo/**",
+  "**/.perbo/**",
 ] as const;
 
 export const AGENT_CONFIGURATION_NEUTRALISATION_MODES = [
@@ -170,8 +177,8 @@ export const CREDENTIAL_ENV_DENY_PATTERNS = [
   /^GCP_/,
   /^NPM_TOKEN$/,
   /^NODE_AUTH_TOKEN$/,
-  /^FOCRUX_TOKEN$/,
-  /^FOCRUX_API/,
+  /^PERBO_TOKEN$/,
+  /^PERBO_API/,
   /TOKEN$/,
   /SECRET$/,
   /PASSWORD$/,

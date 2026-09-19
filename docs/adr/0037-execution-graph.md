@@ -1,6 +1,6 @@
 # ADR-0037: Large work is one ticket whose plan carries an execution graph
 
-- Status: accepted; not built
+- Status: accepted
 - Decision: [D-100](../11-open-decisions.md)
 - Extends: [ADR-0016](0016-minimal-machine-maintained-planning.md)
 
@@ -20,6 +20,7 @@ Large work is one ticket. Its plan may group acceptance criteria into nodes, eac
 - The executor may parallelise inside one attempt ([ADR-0038](0038-subagents.md)).
 - The drafter's cap on criteria goes.
 - The queue orders tickets as before.
+- The order between nodes, with the spec's No-Gos, is a record of its own beside the ticket, because it may change after approval and the contract may not.
 
 ## Alternatives considered
 

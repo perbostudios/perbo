@@ -1,7 +1,11 @@
 export * from "./ids.js";
 export * from "./executor-skills.js";
 export * from "./paths.js";
+export * from "./standing.js";
 export * from "./plan.js";
+export * from "./approach.js";
+export * from "./graph-edit.js";
+export * from "./size.js";
 export * from "./ticket.js";
 export * from "./scheduling.js";
 export * from "./changeset.js";
@@ -25,3 +29,4 @@ export * from "./github.js";
 export * from "./authored.js";
 export * from "./unattended.js";
 export * from "./merge.js";
+export * from "./symbol-index.js";

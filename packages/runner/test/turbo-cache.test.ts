@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SecretIndex } from "@focrux/contracts";
+import { SecretIndex } from "@perbo/contracts";
 import { runPinnedChecks } from "../src/checks.js";
 import { scratch } from "./support.js";
 
@@ -132,7 +132,7 @@ describe("a check whose command runs turbo", () => {
   it(
     "fails on a tree that has broken, where turbo's cache would have replayed a pass",
     async () => {
-      const repo = turboRepository("focrux-turbo-cache-");
+      const repo = turboRepository("perbo-turbo-cache-");
 
       const [first] = await runOnce(repo.dir);
       expect(first!.status).toBe("passed");
@@ -152,7 +152,7 @@ describe("a check whose command runs turbo", () => {
   it(
     "records the argv it ran, with the flag that ignores the cache on it",
     async () => {
-      const repo = turboRepository("focrux-turbo-argv-");
+      const repo = turboRepository("perbo-turbo-argv-");
 
       const [result] = await runOnce(repo.dir);
 
@@ -169,7 +169,7 @@ describe("every check, whatever its command", () => {
   it(
     "runs with TURBO_FORCE set, so a turbo under the command is uncached too",
     async () => {
-      const worktree = scratch("focrux-turbo-env-");
+      const worktree = scratch("perbo-turbo-env-");
       const script = join(worktree, "report-env.mjs");
       writeFileSync(
         script,

@@ -23,7 +23,7 @@ import { toolsFor, type QueueSurface, type ToolContext, type ToolRole } from "./
  *
  * The record at `<store>/state/endpoint.json` is written with mode 0600 and
  * removed when the endpoint closes; a record whose pid is gone is stale and
- * reads as none. `focrux mcp` and `focrux agent` read it and nothing else.
+ * reads as none. `perbo mcp` and `perbo agent` read it and nothing else.
  */
 
 export const ENDPOINT_FILE = "endpoint.json";
@@ -206,7 +206,7 @@ export async function startEndpoint(input: {
           result(id, {
             protocolVersion: PROTOCOL_VERSION,
             capabilities: { tools: {} },
-            serverInfo: { name: "focrux", version: VERSION },
+            serverInfo: { name: "perbo", version: VERSION },
           }),
         );
         return;

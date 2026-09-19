@@ -34,15 +34,15 @@ import {
   type Ticket,
   type TicketState,
   type TicketEscapes,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import {
   GithubCredentialError,
   mergeLoopPullRequest,
   pollPullRequest,
   type LoopMergeOutcome,
   type TicketDeliveryState,
-} from "@focrux/runner";
-import { branchName, recordedBranch } from "@focrux/workspace";
+} from "@perbo/runner";
+import { branchName, recordedBranch } from "@perbo/workspace";
 import { UsageError } from "./args.js";
 import { applyObservedPath, parseListArgs, UnreachableStateError, type Streams } from "./admit.js";
 import {
@@ -67,7 +67,7 @@ import {
 import { EscapeCollectionError, readMergeFacts, writeTicketEscapes } from "./escapes.js";
 
 /**
- * `focrux sync` — read delivery state through local `git`/`gh` and write it onto
+ * `perbo sync` — read delivery state through local `git`/`gh` and write it onto
  * the ticket (M1's second exit criterion, now that a ticket exists to update).
  *
  * Local `gh` reads the pull request, its merge state, its checks and its human
@@ -113,7 +113,7 @@ import { EscapeCollectionError, readMergeFacts, writeTicketEscapes } from "./esc
  */
 
 /** The phrase every reconciled row's note carries, stranded or handed off. */
-const RECONCILED_NOTE = "reconciled after the fact by `focrux sync`";
+const RECONCILED_NOTE = "reconciled after the fact by `perbo sync`";
 
 /**
  * The delivery record one poll produces, written the same way whether it came
@@ -199,7 +199,7 @@ function writtenDelivery(
 
 /**
  * The repository's `merge` switch (SCP-202, D-077), from the same
- * `.focrux/config.json` the run configuration is merged from.
+ * `.perbo/config.json` the run configuration is merged from.
  *
  * Absent is `person`, which is the decision rather than a fallback: D-077 is
  * effective when the loop has cleared D-076's bar, and a repository that has
@@ -230,7 +230,7 @@ export async function runSyncCommand(input: {
 }): Promise<number> {
   const now = input.now ?? new Date();
   // SCP-202: taken out before the key is read, so it may be written either
-  // side of it — `sync FCX-1 --merge` and `sync --merge FCX-1` are one thing
+  // side of it — `sync PRB-1 --merge` and `sync --merge PRB-1` are one thing
   // said two ways, and neither is worth a usage error.
   const merging = input.argv.includes("--merge");
   const argv = merging ? input.argv.filter((token) => token !== "--merge") : input.argv;
@@ -247,7 +247,7 @@ export async function runSyncCommand(input: {
   if (!key || key.startsWith("--")) {
     // SCP-284: no key is the local-run sweep. A repository whose work was
     // never admitted has no key to name, and the runs in its store are the
-    // whole population, so `focrux sync` on its own is the whole command.
+    // whole population, so `perbo sync` on its own is the whole command.
     if (merging) {
       throw new UsageError(
         "--merge takes one ticket: a sweep over the local runs is a read, and merging every " +
@@ -261,7 +261,7 @@ export async function runSyncCommand(input: {
   // SCP-284: a name that is not a ticket may still be a run this store holds
   // the record of, which is the only kind of name a repository with no ticket
   // store has. The ticket store is asked first, so a store holding both is
-  // read exactly the way it always was — the rule `focrux inspect` follows for
+  // read exactly the way it always was — the rule `perbo inspect` follows for
   // the same two kinds of name.
   const localRun = existsSync(join(dir, "tickets", `${key}.json`)) ? null : readLocalRunRecord(dir, key);
   if (localRun !== null) {
@@ -407,7 +407,7 @@ export async function runSyncCommand(input: {
       reconciling
         ? `${key} unchanged: \`gh\` found no pull request on ${branch}. Nothing was reconciled and ` +
             `${key} is still ${ticket.state}. Either the attempt never opened one, or it opened it ` +
-            `on another branch: focrux run --ticket ${key}\n`
+            `on another branch: perbo run --ticket ${key}\n`
         : `${key} left untouched: \`gh\` found no pull request on ${branch}, so there is nothing to ` +
             `hand off. ${key} is still failed.\n`,
     );
@@ -538,7 +538,7 @@ export async function runSyncCommand(input: {
     escapes,
     stops: stops.stops,
     now,
-    rerun: `focrux run --ticket ${key}`,
+    rerun: `perbo run --ticket ${key}`,
     walked: closedWalk,
     verdict: closedVerdict,
   });
@@ -677,8 +677,8 @@ const answeredStops = (
 export function localRunRerun(record: LocalRunRecord): string {
   const reference = record.source.reference;
   return reference !== null && parsePullRequestReference(reference) !== null
-    ? `focrux run --pr ${reference}`
-    : `focrux run --outcome ${JSON.stringify(record.contract.outcome)}`;
+    ? `perbo run --pr ${reference}`
+    : `perbo run --outcome ${JSON.stringify(record.contract.outcome)}`;
 }
 
 /**
@@ -797,8 +797,8 @@ async function syncLocalRun(input: {
   // and the reason is one line in the record contracts rather than anything
   // this command decides: `TicketEscapesSchema.ticket_key` and
   // `StopVerdictsSchema.ticket_key` are both `TicketKeySchema`, which is
-  // `FCX-118` and nothing else. A run nobody admitted has no such key, and the
-  // one thing not to do about that is invent one — a synthesised `FCX-…` on a
+  // `PRB-118` and nothing else. A run nobody admitted has no such key, and the
+  // one thing not to do about that is invent one — a synthesised `PRB-…` on a
   // measurement record is a claim that a ticket exists, in the two files
   // D-060's and SCP-145's numbers are read out of.
   //
@@ -841,7 +841,7 @@ async function syncLocalRun(input: {
 }
 
 /**
- * `focrux sync` with no key: every local run in the store, one pull request
+ * `perbo sync` with no key: every local run in the store, one pull request
  * each (SCP-284).
  *
  * The whole population, because there is no key to narrow it by and a run is
@@ -851,7 +851,7 @@ async function syncLocalRun(input: {
  * of every run after it.
  *
  * A repository with no store at all is the first thing this says, and it says
- * it in one line: `sync` reaching for `<repo>/.focrux/tickets` and failing on
+ * it in one line: `sync` reaching for `<repo>/.perbo/tickets` and failing on
  * a directory that was never created told a person who had run nothing that
  * their store was broken, when what is true is that nothing has run yet.
  */
@@ -868,7 +868,7 @@ async function runSyncLocalRunsCommand(input: {
   if (!existsSync(dir)) {
     input.streams.stdout(
       `nothing to sync: ${repo} has no ${dir} yet, so nothing has run here — ` +
-        '`focrux run --outcome "..."` runs something, and `focrux sync` reads its pull request back\n',
+        '`perbo run --outcome "..."` runs something, and `perbo sync` reads its pull request back\n',
     );
     return EXIT_CODES.approve;
   }
@@ -877,13 +877,13 @@ async function runSyncLocalRunsCommand(input: {
   if (runs.length === 0) {
     if (tickets.length > 0) {
       throw new UsageError(
-        `${dir} holds tickets and no local runs, so sync needs a ticket key, e.g. FCX-1, or ` +
+        `${dir} holds tickets and no local runs, so sync needs a ticket key, e.g. PRB-1, or ` +
           "--all-merged",
       );
     }
     input.streams.stdout(
       `nothing to sync: ${dir} holds no local runs and no tickets — ` +
-        '`focrux run --outcome "..."` runs something, and `focrux sync` reads its pull request back\n',
+        '`perbo run --outcome "..."` runs something, and `perbo sync` reads its pull request back\n',
     );
     return EXIT_CODES.approve;
   }
@@ -926,8 +926,8 @@ async function runSyncLocalRunsCommand(input: {
     input.streams.stderr(
       `  ${tickets.length} ticket${tickets.length === 1 ? "" : "s"} in ${dir} ` +
         `${tickets.length === 1 ? "was" : "were"} not read: a sync with no key reads the local ` +
-        "runs. Name one — focrux sync FCX-1 — or read every merged one with " +
-        "focrux sync --all-merged\n",
+        "runs. Name one — perbo sync PRB-1 — or read every merged one with " +
+        "perbo sync --all-merged\n",
     );
   }
   return EXIT_CODES.approve;
@@ -1226,7 +1226,7 @@ export function statesReconciled(evidence: {
 }
 
 /**
- * SCP-145: what the escape rate needs, read here so that `focrux escapes`
+ * SCP-145: what the escape rate needs, read here so that `perbo escapes`
  * needs nothing.
  *
  * Only for a merged ticket — before the merge there is no window to open — and
@@ -1327,7 +1327,7 @@ export function writeStopVerdicts(args: {
  * and where the ticket already names one — the loop's own, from the round that
  * published it — that record stands. Overwriting it with an absence said the
  * pull request had gone when it was still open on the branch, and it is the
- * only thing that can tell a later `focrux sync` whose pull request it is: a
+ * only thing that can tell a later `perbo sync` whose pull request it is: a
  * ticket that reached `changes_requested` behind a published pull request and
  * then failed on its re-run came out of the re-run with an empty record and
  * read back as a stranger's hand-off. The branch is still taken from this run,
@@ -1335,7 +1335,7 @@ export function writeStopVerdicts(args: {
  * values it dates rather than being moved forward over an unobserved one.
  *
  * What that changes for a reader, said plainly because it is visible in
- * `focrux inspect` and in `focrux list --json`: a `failed` ticket whose latest
+ * `perbo inspect` and in `perbo list --json`: a `failed` ticket whose latest
  * run produced nothing still shows the pull request url the earlier round
  * published, `state: "open"`, and the `observed_at` of that earlier round. All
  * three are true — the pull request is open, and the timestamp says when that
@@ -1384,13 +1384,13 @@ export function recordDelivery(
             opened_by: opened ? "loop" : null,
             // SCP-192: the loop merged the base up before opening this, but
             // whether GitHub can merge it is GitHub's to say and nothing has
-            // asked yet. `focrux sync` is what fills this in.
+            // asked yet. `perbo sync` is what fills this in.
             mergeable: null,
             // SCP-196: likewise — whether a person's commit later reaches this
             // pull request is `gh`'s to say, and nothing has asked yet.
             commits_outside_loop: null,
             // SCP-200: the path this run's own `gh` published through, which
-            // the run is first-hand about. `focrux sync` overwrites it with
+            // the run is first-hand about. `perbo sync` overwrites it with
             // the path it later polls through.
             github_credential: result.github_credential ?? null,
             // SCP-206: the run being recorded is the loop's own, which is what
@@ -1402,7 +1402,7 @@ export function recordDelivery(
             // write it.
             incomplete_review,
             // The reading the run took of the head it published, before this
-            // record existed. `focrux sync` re-reads it from `gh` afterwards.
+            // record existed. `perbo sync` re-reads it from `gh` afterwards.
             checks: opened && read ? [...read.checks] : [],
             checks_state: opened && read ? read.state : null,
           },

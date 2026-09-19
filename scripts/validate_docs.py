@@ -71,7 +71,7 @@ for path in adr_files:
     if prefix in seen_prefixes:
         error(f"Duplicate ADR file prefix {prefix}")
     seen_prefixes.add(prefix)
-    first_heading = next((line for line in path.read_text().splitlines() if line.startswith("# ")), "")
+    first_heading = next((line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("# ")), "")
     match = re.match(r"# ADR-(\d{4}):\s+.+", first_heading)
     if not match:
         error(f"Invalid ADR heading in {path.relative_to(ROOT)}: {first_heading!r}")
@@ -98,7 +98,7 @@ for path in adr_placeholders:
         continue
     if _arguments.strict:
         error(f"ADR placeholder {rel} is not numbered; scripts/assign_ids.py --apply numbers it at merge")
-    first_heading = next((line for line in path.read_text().splitlines() if line.startswith("# ")), "")
+    first_heading = next((line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("# ")), "")
     match = re.match(rf"# ADR-NEW-({PLACEHOLDER_LABEL}):\s+.+", first_heading)
     if not match:
         error(f"Invalid ADR placeholder heading in {rel}: {first_heading!r}")
@@ -132,7 +132,7 @@ markdown_files = [
     ),
 ]
 for path in markdown_files:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     for match in link_pattern.finditer(text):
         raw = (match.group(1) or match.group(2) or "").strip()
         target = raw.split(maxsplit=1)[0].strip("<>")
@@ -164,7 +164,7 @@ docs_index = DOCS / "README.md"
 if not docs_index.exists():
     error("Missing docs/README.md")
 else:
-    index_text = docs_index.read_text()
+    index_text = docs_index.read_text(encoding="utf-8")
     for path in canonical:
         if path.name not in index_text:
             error(f"docs/README.md does not reference canonical document {path.name}")
@@ -177,7 +177,7 @@ else:
 lifecycle_doc = DOCS / "04-ticket-workspace-and-review.md"
 lifecycle_dot = ROOT / "diagrams" / "ticket-lifecycle.dot"
 if lifecycle_doc.exists() and lifecycle_dot.exists():
-    doc_text = lifecycle_doc.read_text()
+    doc_text = lifecycle_doc.read_text(encoding="utf-8")
     section = re.search(
         r"^## Ticket lifecycle\n(.*?)^## ", doc_text, re.MULTILINE | re.DOTALL
     )
@@ -193,7 +193,7 @@ if lifecycle_doc.exists() and lifecycle_dot.exists():
         doc_states.update(re.findall(r"^- `([A-Z][A-Z_]{2,})`", body, re.MULTILINE))
 
         dot_states = set()
-        for label in re.findall(r'label="([^"]+)"', lifecycle_dot.read_text()):
+        for label in re.findall(r'label="([^"]+)"', lifecycle_dot.read_text(encoding="utf-8")):
             # Only the first line of a node label carries the state name.
             dot_states.update(re.findall(r"\b([A-Z][A-Z_]{2,})\b", label.split("\\n")[0]))
 
@@ -205,7 +205,7 @@ if lifecycle_doc.exists() and lifecycle_dot.exists():
 # No relationship may be expressed both as a foreign key and as an entity edge.
 domain_doc = DOCS / "03-domain-and-event-model.md"
 if domain_doc.exists():
-    domain_text = domain_doc.read_text()
+    domain_text = domain_doc.read_text(encoding="utf-8")
     # Foreign keys are written as `child.parent_id`; the implied relationship is parent -> child.
     fk_pairs = {
         (parent, child)
@@ -222,6 +222,29 @@ if domain_doc.exists():
         error(
             f"Relationship {pair[0]} -> {pair[1]} is expressed as both a foreign key "
             "and an entity edge in docs/03-domain-and-event-model.md"
+        )
+
+# A Markdown file that still carries a merge's conflict markers. Nothing else
+# sees them: Markdown is past the typechecker and the linter, and no test reads
+# a canonical document, so a whole gate comes back green over a file that says
+# both things and neither.
+#
+# Keyed on the two markers no Markdown has a use for. `=======` is left out
+# because it is also a heading's underline, and a rule that counted markers
+# instead would fail a document with three such headings.
+SKIP = {"node_modules", "dist", ".git", "build", "coverage"}
+for path in sorted(ROOT.rglob("*.md")):
+    if SKIP.intersection(path.relative_to(ROOT).parts):
+        continue
+    found = [
+        at + 1
+        for at, line in enumerate(path.read_text(encoding="utf-8").splitlines())
+        if line.startswith("<<<<<<< ") or line.startswith(">>>>>>> ")
+    ]
+    if found:
+        error(
+            f"{path.relative_to(ROOT)} carries conflict markers at "
+            f"{', '.join(str(at) for at in found[:6])}: resolve the merge before committing it"
         )
 
 # Component template is mandatory.

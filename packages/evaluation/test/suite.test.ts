@@ -6,7 +6,7 @@ import { matchesFilter, selectFixtures } from "../src/harness.js";
 
 /**
  * The regression suite (docs/evaluation/regression-suite.md) is a fixed list of
- * thirty fixture ids that `focrux-corpus --suite regression` runs when the
+ * thirty fixture ids that `perbo-corpus --suite regression` runs when the
  * reviewer prompt, the routing policy or the model changes. `--suite` is
  * applied as an exact-id filter through `matchesFilter`, so what is pinned here
  * is exactly what makes that selection honest: the file parses, every id

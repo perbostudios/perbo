@@ -23,4 +23,4 @@ No findings that need you.
 
 > **Legibility**: passed — every changed file renders in the diff
 
-_Reviewed by `double/scripted` · prompt `reviewer_v9` · $0.043 estimated._
+_Reviewed by `double/scripted` · prompt `reviewer_v10` · $0.043 estimated._

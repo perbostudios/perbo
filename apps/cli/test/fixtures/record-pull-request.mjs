@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Record one real public pull request so `focrux review --pr` can be replayed
+ * Record one real public pull request so `perbo review --pr` can be replayed
  * against it with no network and no credential (SCP-179, ac_4).
  *
  * Everything under `captured` in the output is what `gh` printed, verbatim and

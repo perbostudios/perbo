@@ -1,12 +1,28 @@
 import { z } from "zod";
-import { ExecutorSkillsSchema } from "@focrux/contracts/executor-skills";
-import { MaterializationEntrySchema } from "@focrux/contracts/materialisation-entry";
+import { ExecutorSkillsSchema } from "@perbo/contracts/executor-skills";
+import { GraphEditSchema } from "@perbo/contracts/graph-edit";
+import { StandingProhibitedEntrySchema } from "@perbo/contracts/standing";
+import { MaterializationEntrySchema } from "@perbo/contracts/materialisation-entry";
+import {
+  MAX_QUESTION_GROUPS,
+  MAX_QUESTION_OPTIONS,
+  MAX_QUESTION_PARTS,
+} from "@perbo/contracts/interview-protocol";
 import type {
+  CoverageStatus,
+  ExportKind,
   PlanContract,
   ReviewArtifact,
   RunBundle,
   Ticket,
-} from "@focrux/contracts";
+  VerificationStrength,
+} from "@perbo/contracts";
+import type { GraphEdge } from "@perbo/contracts/approach";
+import type { VerificationKind } from "@perbo/contracts/plan";
+import type { SizeEstimate } from "@perbo/contracts/size";
+import type { StandingProhibitedEntry } from "@perbo/contracts/standing";
+import type { SpecField } from "@perbo/planning/spec-text";
+import type { ImpactReport } from "@perbo/planning/impact";
 import { BindingSchema, ShortcutActionSchema } from "./shortcuts.js";
 
 const identifier = z.string().uuid();
@@ -37,8 +53,17 @@ export const SettingsSchema = z.strictObject({
     .enum(["claude-cli", "codex-cli", "anthropic"])
     .default("claude-cli"),
   draftingProvider: z.enum(["claude-cli", "codex-cli"]).default("claude-cli"),
+  /**
+   * Minutes without tool activity before a run is stopped (D-096). The one
+   * setting here that stops a run: nothing bounds how long one takes, what it
+   * spends or how many commands it runs.
+   */
+  stallMinutes: z.number().int().min(1).max(240).default(20),
+  /** The pre-D-096 wall clock, kept so an older profile parses; nothing reads it. */
   minutes: z.number().int().min(1).max(120).default(30),
+  /** The pre-D-096 command ceiling, kept so an older profile parses; nothing reads it. */
   commands: z.number().int().min(1).max(1000).default(200),
+  /** The ticket's cost cap, which binds only an executor billed per token (D-096). */
   ticketDollars: z.number().min(0.1).max(1000).default(60),
   /** The pre-v2 master switch, kept so an older profile parses; `notifyOn` is the setting. */
   notifications: z.boolean().default(false),
@@ -94,8 +119,106 @@ export const DraftSchema = z.strictObject({
   outcome: text,
   criteria: z.array(CriterionSchema).min(1).max(20),
   paths: z.array(z.string().trim().min(1).max(300)).min(1).max(40),
+  /** Paths the executor may not write even inside the allowed ones (D-105); admission passes each as `--prohibit`. */
+  prohibited: z.array(z.string().trim().min(1).max(300)).max(40).default([]),
 });
 export type Draft = z.infer<typeof DraftSchema>;
+/**
+ * The five sections of a spec as the Spec pane edits them, each as the text a
+ * person typed (D-103). The requirement ids are assigned when the file is
+ * written, so they arrive back on {@link SpecView} rather than travelling here.
+ */
+export const SpecSectionsSchema = z.strictObject({
+  outcome: z.string().max(12_000),
+  requirements: z.string().max(12_000),
+  no_gos: z.string().max(12_000),
+  rabbit_holes: z.string().max(12_000),
+  notes: z.string().max(12_000),
+});
+export type SpecSections = z.infer<typeof SpecSectionsSchema>;
+/**
+ * A whole spec as one writer holds it: what a save asks the file to say, and,
+ * beside it, what that writer read before it changed anything (SCP-321).
+ */
+export const SpecDocumentSchema = z.strictObject({
+  title: z.string().trim().max(200),
+  sections: SpecSectionsSchema,
+});
+export type SpecDocument = z.infer<typeof SpecDocumentSchema>;
+/** One exported name the Spec pane completes: what it is, and the file it is in. */
+export interface ExportedName {
+  name: string;
+  kind: ExportKind;
+  /** Repository-relative, with forward slashes. */
+  path: string;
+}
+/**
+ * The exported names of one repository, from `perbo index` ([D-015](../../../../docs/11-open-decisions.md)).
+ *
+ * A repository the index cannot describe answers `supported: false` rather than
+ * an empty list, because the two are different facts and the pane acts
+ * differently on each: an empty index says every name the spec uses has gone,
+ * and this says the question does not apply here, so every reference keeps
+ * its mark and none is marked apart.
+ */
+export type SymbolIndexView =
+  | {
+      supported: false;
+      reason: string;
+      /** The record's `languages_seen`: the extensions the tracked tree does carry. */
+      languages: string[];
+    }
+  | {
+      supported: true;
+      names: ExportedName[];
+      /** The commit the tree was at when the index was built. */
+      headCommit: string;
+      /** Whether a tracked file differed from that commit when it was read. */
+      workingTree: "clean" | "modified";
+      builtAt: string;
+    };
+/** One requirement as the pane shows it: its id, and the nodes it landed in. */
+export interface SpecRequirementView {
+  /** Null only for a requirement typed and not yet saved. */
+  id: string | null;
+  text: string;
+  /** Node ids holding the criteria that cite it; empty where none does yet. */
+  nodes: string[];
+}
+/**
+ * What a save through `specSave` answers (SCP-321).
+ *
+ * Two writers call this — the Spec pane and the Impact pane's No-Go action —
+ * each reading the file, changing part of it and writing the whole of it
+ * back. The interview writes the same file too, through its own tools rather
+ * than this request, so its words simply become what the file says by the
+ * time either pane next saves. A section the file holds differently from what
+ * this save's own writer read is not overwritten by this save: it comes back
+ * named here, with the file itself, so the pane can show both texts and the
+ * person keeps whichever words they want.
+ */
+export interface SpecSaveReply {
+  /**
+   * The spec the repository holds now: what this save wrote, or what the other
+   * writer left there where this one was refused.
+   */
+  view: SpecView;
+  /**
+   * The sections this save did not write. Empty where it landed; where it did
+   * not, nothing at all was written, so a refused save is never half a save.
+   */
+  conflicting: SpecField[];
+}
+/** One spec as the pane reads it back: the file is what this says (D-095). */
+export interface SpecView {
+  /** Null until the first save, which creates the folder. */
+  slug: string | null;
+  /** `specs/<slug>/spec.md`, repository-relative. Null with no slug. */
+  path: string | null;
+  title: string;
+  sections: SpecSections;
+  requirements: SpecRequirementView[];
+}
 // Editing accepts incomplete text. Admission still uses DraftSchema.
 const editableCriterion = z.strictObject({
   text: z.string().max(12_000),
@@ -107,6 +230,7 @@ export const EditingFormSchema = z.strictObject({
     outcome: z.string().max(12_000),
     criteria: z.array(editableCriterion).max(20),
     paths: z.array(z.string().max(300)).max(40),
+    prohibited: z.array(z.string().max(300)).max(40).default([]),
   }),
   models: TaskModelsSchema,
   step: z.union([z.literal(1), z.literal(2)]),
@@ -117,7 +241,7 @@ export const EditingFormSchema = z.strictObject({
 export type EditingForm = z.infer<typeof EditingFormSchema>;
 export const EditingOperationSchema = z.strictObject({
   id: identifier,
-  intent: z.enum(["draft", "compile"]),
+  intent: z.enum(["draft", "compile", "generate", "startOver"]),
   inputRevision: z.number().int().nonnegative(),
   jobId: identifier.nullable(),
   state: z.enum(["accepted", "running", "stopping", "completed", "failed", "cancelled", "interrupted"]),
@@ -125,6 +249,181 @@ export const EditingOperationSchema = z.strictObject({
   error: z.string().nullable(),
   reconciled: z.boolean(),
 });
+/** What a path is marked for a draft: allowed, prohibited, or neither. */
+export const DraftMarkSchema = z.enum(["allowed", "prohibited"]).nullable();
+/**
+ * One edit to a draft, with its author and enough to reverse it.
+ *
+ * The explorer's marks are the only kind so far; `change` is a union on `kind`
+ * so the graph's and the spec's edits join it rather than start a second
+ * history. A mark that moved the repository's standing list carries that move
+ * too, because undoing the mark has to take the standing entry with it.
+ */
+export const DraftEditSchema = z.strictObject({
+  /** Its place in the draft's history, counting from 1. Stable: an undone edit keeps its number. */
+  n: z.number().int().min(1),
+  at: z.string().datetime(),
+  /** Who made it. The explorer's marks are the person's own. */
+  author: z.enum(["you", "interview"]),
+  summary: z.string().min(1).max(300),
+  undone: z.boolean(),
+  change: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("mark"),
+      /** The glob the mark wrote: a directory as `<dir>/**`, a file as itself. */
+      glob: z.string().min(1).max(300),
+      before: DraftMarkSchema,
+      after: DraftMarkSchema,
+      /** The standing entry this mark added or removed, or null where the always box did not move. */
+      standing: z
+        .strictObject({
+          before: StandingProhibitedEntrySchema.nullable(),
+          after: StandingProhibitedEntrySchema.nullable(),
+        })
+        .nullable(),
+    }),
+  ]),
+});
+export type DraftEdit = z.infer<typeof DraftEditSchema>;
+/**
+ * How many lines of one interview's conversation the editing session keeps
+ * (D-102). Past it the oldest go, and the chat says so, because the record
+ * lives in a file this app rewrites on every line and a conversation nobody
+ * ended would otherwise grow without a bound. The session itself is not
+ * shortened: `--session` continues it where the provider left it.
+ */
+export const INTERVIEW_CONVERSATION_CAP = 400;
+/**
+ * What the host says when this planning cannot have an interview yet (D-102).
+ *
+ * Here rather than in the host, because the browser preview stands in for the
+ * host and a second spelling of a sentence the person reads would drift from
+ * this one at the next edit.
+ */
+export const INTERVIEW_NEEDS_A_TITLE =
+  "Give this planning a spec title first. The interview writes specs/<slug>/spec.md, and the slug " +
+  "comes from the title.";
+/**
+ * One plan edit the interview made, as the ticket's own draft record holds it
+ * (D-100), so the chat's card carries an Undo on its number.
+ *
+ * Read from that record rather than from the tool's account of what it did:
+ * the record is written by `perbo edit`, which is the one path a plan changes
+ * through ([ADR-0023](../../../docs/adr/0023-untrusted-context-boundary.md)).
+ */
+export const InterviewEditSchema = z.strictObject({
+  /** Its place in the plan's history, counting from 1: what an undo names. */
+  n: z.number().int().min(1),
+  author: z.enum(["you", "interview"]),
+  summary: z.string().min(1).max(300),
+  undone: z.boolean(),
+  /** The edit this one undid, by its number, or null for an edit of its own. */
+  undoes: z.number().int().min(1).nullable(),
+  /** The entity keys it changed either side: `node:<id>`, `criterion:<id>`, `edge:<from>-><to>`. */
+  before: z.array(z.string().min(1).max(200)).max(200),
+  after: z.array(z.string().min(1).max(200)).max(200),
+});
+export type InterviewEdit = z.infer<typeof InterviewEditSchema>;
+/** Which asking a person is being put, and how many of its groups they have answered. */
+export const AskingSchema = z.strictObject({
+  /** The `asked` entry this is for, by its place in the conversation. */
+  entry: z.number().int().min(1),
+  answered: z.number().int().min(0),
+});
+
+export type Asking = z.infer<typeof AskingSchema>;
+
+/**
+ * One line of the interview's conversation as the chat draws it (D-102).
+ *
+ * The session's own messages arrive as the Claude Agent SDK shaped them and
+ * are read down to their text here rather than kept whole: those shapes are
+ * the provider's, and a record of them would be a second declaration of
+ * somebody else's contract that drifts at their next release. A line of stdout
+ * this build cannot read becomes a `note` saying so, and is never relayed raw.
+ */
+export const InterviewEntrySchema = z.strictObject({
+  /** Its place in the conversation, counting from 1. Kept when the oldest lines are dropped. */
+  n: z.number().int().min(1),
+  at: z.string().datetime(),
+  line: z.discriminatedUnion("kind", [
+    /** The person's turn, as it went down the interview's stdin. */
+    z.strictObject({ kind: z.literal("turn"), text }),
+    /** What the session said. */
+    z.strictObject({ kind: z.literal("said"), text }),
+    /**
+     * A call the guard refused. Shown as refused and never as a question:
+     * there is nothing here to answer, because the session never asks (D-102).
+     */
+    z.strictObject({
+      kind: z.literal("refused"),
+      tool: z.string().min(1).max(200),
+      /** The admission rule that refused it, as the runner names it. */
+      rule: z.string().min(1).max(200),
+      target: z.string().max(1000).nullable(),
+      reason: z.string().min(1).max(2000),
+    }),
+    /** What one of the interview's own tools did, and the plan edit it made. */
+    z.strictObject({
+      kind: z.literal("tool"),
+      tool: z.string().min(1).max(200),
+      ok: z.boolean(),
+      detail: z.string().max(12_000),
+      edit: InterviewEditSchema.nullable(),
+    }),
+    /**
+     * What the session wants to know, in groups it says can be asked apart
+     * (D-117).
+     *
+     * Every group arrives at once because a tool returns to the model rather
+     * than waiting on a person. Putting one group at a time to the person is
+     * the dock's doing, and what it sends back is an ordinary turn in the
+     * options' own words — so nothing the session wrote becomes anything but
+     * the person's own sentence ([ADR-0023](../../../docs/adr/0023-untrusted-context-boundary.md) §4).
+     */
+    z.strictObject({
+      kind: z.literal("asked"),
+      groups: z
+        .array(
+          z.strictObject({
+            title: z.string().max(200).nullable(),
+            parts: z
+              .array(
+                z.strictObject({
+                  question: z.string().min(1).max(600),
+                  options: z
+                    .array(
+                      z.strictObject({
+                        label: z.string().min(1).max(200),
+                        detail: z.string().max(600).nullable(),
+                        recommended: z.boolean(),
+                      }),
+                    )
+                    .min(2)
+                    .max(MAX_QUESTION_OPTIONS),
+                }),
+              )
+              .min(1)
+              .max(MAX_QUESTION_PARTS),
+          }),
+        )
+        .min(1)
+        .max(MAX_QUESTION_GROUPS),
+    }),
+    /** The host's own word: the session started, ended, or wrote something unreadable. */
+    z.strictObject({ kind: z.literal("note"), text }),
+  ]),
+});
+export type InterviewEntry = z.infer<typeof InterviewEntrySchema>;
+/** Whether this planning has a live interview, and the conversation it holds (D-102). */
+export interface InterviewStatus {
+  /** The editing session the interview belongs to. */
+  id: string;
+  running: boolean;
+  /** The session id `--session` continues, once the interview has reported one. */
+  interview: string | null;
+  conversation: InterviewEntry[];
+}
 export const EditingSessionSchema = z.strictObject({
   version: z.literal(1),
   id: identifier,
@@ -133,16 +432,80 @@ export const EditingSessionSchema = z.strictObject({
   digest: z.string().length(64).nullable(),
   revision: z.number().int().nonnegative(),
   resumeNew: z.boolean(),
+  /**
+   * The spec this planning writes, by its slug, so reopening the session opens
+   * the same one (D-103). Null until the first save creates the folder;
+   * defaulted so a session saved before specs existed still parses.
+   *
+   * Held to the shape `specSlug` mints rather than to a length, because it is
+   * a path segment: this record lives in a file on the machine, and a session
+   * that came back carrying `../` would name a folder outside the repository.
+   */
+  specSlug: z
+    .string()
+    .max(120)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "a spec slug is lowercase words joined by hyphens")
+    .nullable()
+    .default(null),
+  /**
+   * The asking being put to the person and how much of it they have answered
+   * (D-117), as {@link AskingSchema} holds it.
+   *
+   * Recorded rather than counted back out of the conversation. Which group a
+   * person is on is a fact about what they have been shown, and reading it off
+   * the turns cannot tell an answer from a question they typed instead: one
+   * reading moves the card past a group nobody answered, the other leaves a
+   * card up for a question the session has already moved on from. It also
+   * outlives the line it came from, which the conversation's own cap can drop.
+   */
+  asking: AskingSchema.nullable().default(null),
   form: EditingFormSchema,
   phase: z.enum(["editing", "working", "ready", "conflict", "outcome-unknown", "discarded"]),
   error: z.string().nullable(),
   operation: EditingOperationSchema.nullable(),
+  /** The draft's edits, oldest first, each undoable. Empty on a session from before it existed. */
+  history: z.array(DraftEditSchema).max(500).default([]),
+  /**
+   * The interview's conversation, oldest first, so leaving planning mode and
+   * restarting the app both come back to it (D-102, D-095). Capped at
+   * {@link INTERVIEW_CONVERSATION_CAP}; defaulted so a session saved before
+   * the chat existed still parses.
+   */
+  conversation: z.array(InterviewEntrySchema).max(INTERVIEW_CONVERSATION_CAP).default([]),
+  /**
+   * The interview's own session id, as its `started` event reported it, which
+   * `--session` continues after the process has gone. Null until one has run.
+   */
+  interviewSession: z.string().min(1).max(200).nullable().default(null),
+  /**
+   * Which provider's id that is (SCP-312). The two keep separate namespaces,
+   * so a planning whose drafting provider has changed since starts a session
+   * of its own rather than continuing one the new provider has never heard of.
+   */
+  interviewProvider: z.enum(["claude", "codex"]).nullable().default(null),
 });
 export type EditingSession = z.infer<typeof EditingSessionSchema>;
 export type EditingOperation = z.infer<typeof EditingOperationSchema>;
+/** An editing session the picker offers to resume: planning that has not been discarded. */
+export interface OpenDraft {
+  id: string;
+  repoId: string;
+  key: string | null;
+  outcome: string;
+  phase: EditingSession["phase"];
+}
 export const EditingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("new"), repoId: identifier }),
+  /** Always a new session in this repository: what the picker starts. */
+  z.strictObject({ kind: z.literal("fresh"), repoId: identifier }),
   z.strictObject({ kind: z.literal("ticket"), repoId: identifier, key }),
+  /**
+   * Planning mode over a ticket that already has a plan (D-101). The same
+   * session a ticket target opens, refused unless the ticket is in
+   * `plan_review`: planning mode curates a plan nobody has approved, and an
+   * approved contract is immutable (ADR-0016).
+   */
+  z.strictObject({ kind: z.literal("planning"), repoId: identifier, key }),
   z.strictObject({ kind: z.literal("session"), id: identifier }),
 ]);
 export type EditingTarget = z.infer<typeof EditingTargetSchema>;
@@ -156,26 +519,288 @@ export const LegacyEditingSchema = z.strictObject({
 export type LegacyEditing = z.infer<typeof LegacyEditingSchema>;
 const reference = { repoId: identifier, key };
 export const HELP_LINKS = {
-  documentation: "https://github.com/lianmatsuo/focrux#readme",
-  problem: "https://github.com/lianmatsuo/focrux/issues/new",
-  releases: "https://github.com/lianmatsuo/focrux/releases",
+  documentation: "https://github.com/perbostudios/perbo#readme",
+  problem: "https://github.com/perbostudios/perbo/issues/new",
+  releases: "https://github.com/perbostudios/perbo/releases",
   privacy:
-    "https://github.com/lianmatsuo/focrux/blob/main/docs/08-security-autonomy-and-data.md",
+    "https://github.com/perbostudios/perbo/blob/main/docs/08-security-autonomy-and-data.md",
 } as const;
 export const ManifestEditorSchema = z.strictObject({
   entries: z.array(MaterializationEntrySchema).max(100),
   offLimits: z.array(z.string().trim().min(1).max(300)).max(100),
 });
 export type ManifestEditor = z.infer<typeof ManifestEditorSchema>;
+/**
+ * The largest file the explorer renders. A spec or a source file fits; a
+ * bundle, a fixture dump or a minified asset does not, and is refused with a
+ * sentence rather than shown truncated, which would read as the whole file.
+ */
+export const PREVIEW_BYTE_CAP = 256 * 1024;
+/**
+ * A repository-relative path a renderer names. Shape only: the host resolves it
+ * under the registered repository and refuses an absolute path, one that leaves
+ * the repository, a symlink and a never-read path with the reason.
+ */
+const repositoryPath = z.string().min(1).max(1000);
+/** What the explorer lists: the tracked files it will show, and what it withholds. */
+export interface ExplorerListing {
+  /** Repository-relative, sorted, never-read paths already removed. */
+  files: string[];
+  /** Tracked paths withheld because nothing here reads them: secrets, `.git`, agent configuration. */
+  hidden: number;
+  /** This repository's standing prohibited list, each entry with what put it there. */
+  standing: StandingProhibitedEntry[];
+}
+/** One file, read-only. `text` is null where `refusal` says why it is not shown. */
+export interface ExplorerFile {
+  path: string;
+  bytes: number;
+  text: string | null;
+  refusal: string | null;
+}
+/**
+ * What the Impact pane shows: the warnings for the draft in hand, the index
+ * state they were derived under, and what the spec names (D-015).
+ *
+ * The report is advice. Turning one warning into a scope change is
+ * `explorerMark`, which is the draft's own scope edit, and turning it into a
+ * No-Go is `specSave`, which is the spec's own save; neither is reachable from
+ * this record without the person's click (ADR-0023 §4).
+ */
+export interface ImpactView extends ImpactReport {
+  /** When these warnings were derived; each ask derives them again. */
+  readAt: string;
+}
+/** One acceptance criterion as the Graph pane shows and edits it. */
+export interface GraphCriterionView {
+  id: string;
+  text: string;
+  kind: VerificationKind;
+  assertion: string;
+  /** The spec requirement it was drafted from, or null where it cites none (D-103). */
+  requirement: string | null;
+  /** Who proves a criterion by hand and why it cannot be automated; null for every other kind. */
+  manual: { reviewer: string; reason: string } | null;
+}
+/** One node: its criteria and paths, which are contract, and its generated page. */
+export interface GraphNodeView {
+  id: string;
+  title: string;
+  criteria: GraphCriterionView[];
+  paths: string[];
+  /**
+   * `specs/<slug>/nodes/<id>.md` as the repository holds it (D-103, SCP-336),
+   * or null where this ticket was not drafted from a spec. Read-only: the page
+   * is generated, and editing it would be editing a rendering.
+   */
+  page: { path: string; text: string } | null;
+}
+/**
+ * What a node's records say about it while the work runs (D-100, SCP-317), the
+ * most conclusive record first: the pane shows the first that holds. Not worst
+ * first — `covered` outranks `checks_passed` because a review that met a
+ * node's criteria says more than a check that passed.
+ *
+ * - `finding_open` — the review artifact holds an open finding against one of
+ *   the node's criteria.
+ * - `checks_failed` — a pinned check narrowed to this node (D-107) did not pass.
+ * - `covered` — every one of its criteria is `met` in the review's coverage.
+ * - `checks_passed` — every pinned check narrowed to it passed, and the review
+ *   has not met all of its criteria. A check the loop could not narrow to this
+ *   node is the whole command under the node's name, and is not counted here.
+ * - `changed` — the sealed change set touched a path its globs match, and
+ *   nothing further is on record.
+ * - `untouched` — no path in the sealed change set matches its globs.
+ *
+ * Nothing here is derived from the executor's own account of its work
+ * ([ADR-0023](../../../docs/adr/0023-untrusted-context-boundary.md)).
+ */
+export const GRAPH_NODE_STATES = [
+  "finding_open",
+  "checks_failed",
+  "covered",
+  "checks_passed",
+  "changed",
+  "untouched",
+] as const;
+export type GraphNodeState = (typeof GRAPH_NODE_STATES)[number];
+/** One criterion, as the review artifact's evidence binding leaves it. */
+export interface GraphCriterionState {
+  id: string;
+  /** The binding's coverage status, or `unbound` where no review has covered it. */
+  state: CoverageStatus | "unbound";
+  /** How it was established: a mock the executor wrote is not a proof (D-035). */
+  strength: VerificationStrength | null;
+  /** Where the binding's evidence points — `file:line`, or the check it names. */
+  evidence: string | null;
+  /** The statement of an open finding the review left against it, or null. */
+  finding: string | null;
+}
+/** One node's state, and the records it came from. */
+export interface GraphNodeLive {
+  id: string;
+  state: GraphNodeState;
+  /** The sealed change set's paths this node's globs match, sorted. */
+  changed: string[];
+  /** The pinned checks narrowed to this node's own changed files (D-107). */
+  checks: { name: string; status: string }[];
+  criteria: GraphCriterionState[];
+}
+/**
+ * What a run has done to a graph so far, read from the records the loop wrote
+ * and from nothing else (SCP-317).
+ */
+export interface GraphLiveView {
+  /**
+   * The attempt these records belong to — the latest on record — or null
+   * before a ticket has run, when every node is `untouched` because no change
+   * set exists for a path to be in.
+   */
+  attempt: string | null;
+  nodes: GraphNodeLive[];
+  /**
+   * Changed paths no node's globs match: work nobody planned for. Empty for a
+   * flat plan, which has no nodes for a path to be outside of.
+   */
+  outside: string[];
+  /** Why the changed paths could not be read, where they could not be. */
+  note: string | null;
+}
+/** One recorded edit, as `<KEY>.draft.json` holds it (D-100). */
+export interface GraphEditView {
+  /** Its place in the log, counting from 1: what an undo names. */
+  n: number;
+  at: string;
+  author: "you" | "interview";
+  summary: string;
+  undone: boolean;
+  /** True once the plan was re-drafted from its spec over the top of it. */
+  replaced: boolean;
+  /** The edit this one undid, by its number, or null for an edit of its own. */
+  undoes: number | null;
+}
+/**
+ * A plan's execution graph as the Graph pane reads it: the contract half, the
+ * approach half, the size and the log of what changed either (D-100, D-104).
+ */
+export interface GraphView {
+  key: string;
+  /** The ticket's state, so a pane opened on one that has moved says so. */
+  state: string;
+  approved: boolean;
+  outcome: string;
+  /** Empty for a flat plan, which has criteria and no graph to curate. */
+  nodes: GraphNodeView[];
+  criteria: GraphCriterionView[];
+  edges: GraphEdge[];
+  pathsAllowed: string[];
+  size: SizeEstimate;
+  /** What admission counts a person having changed (D-072). */
+  editCount: number;
+  history: GraphEditView[];
+  /** The contract as read, so approving approves what was shown. */
+  digest: string;
+  /** What the run's own records say about this graph (SCP-317). */
+  live: GraphLiveView;
+}
 export const RequestSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("snapshot") }),
   z.strictObject({ kind: z.literal("repositorySnapshot"), repoId: identifier }),
+  /**
+   * The explorer's two reads (D-101, D-015), and its marks. A read carries a
+   * repository id and, for one file, a repository-relative path; the host
+   * resolves it and never takes a command or a filesystem target.
+   */
+  z.strictObject({ kind: z.literal("explorerList"), repoId: identifier }),
+  z.strictObject({ kind: z.literal("explorerRead"), repoId: identifier, path: repositoryPath }),
+  /**
+   * The Graph pane's three (D-100): read the plan, apply one operation, undo
+   * one recorded edit. Each names a repository and a ticket and nothing a
+   * filesystem or a shell could take; the host runs `perbo edit`, which is the
+   * one path a graph changes through, and never writes the contract itself.
+   */
+  z.strictObject({ kind: z.literal("graphRead"), repoId: identifier, key }),
+  z.strictObject({ kind: z.literal("graphEdit"), repoId: identifier, key, edit: GraphEditSchema }),
+  z.strictObject({
+    kind: z.literal("graphUndo"),
+    repoId: identifier,
+    key,
+    edit: z.number().int().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal("explorerMark"),
+    id: identifier,
+    revision: z.number().int().nonnegative(),
+    path: repositoryPath,
+    mark: z.enum(["allowed", "prohibited"]).nullable(),
+    /** Null leaves the standing list alone; true adds the path, false removes what this draft added. */
+    always: z.boolean().nullable(),
+  }),
+  z.strictObject({
+    kind: z.literal("explorerUndo"),
+    id: identifier,
+    revision: z.number().int().nonnegative(),
+    edit: z.number().int().min(1),
+  }),
   z.strictObject({ kind: z.literal("editingOpen"), target: EditingTargetSchema, legacy: LegacyEditingSchema.optional() }),
   z.strictObject({ kind: z.literal("editingRead"), id: identifier }),
   z.strictObject({ kind: z.literal("editingSave"), id: identifier, revision: z.number().int().nonnegative(), repoId: identifier, form: EditingFormSchema }),
-  z.strictObject({ kind: z.literal("editingSubmit"), id: identifier, revision: z.number().int().nonnegative(), operationId: identifier, intent: z.enum(["draft", "compile"]) }),
+  z.strictObject({ kind: z.literal("editingSubmit"), id: identifier, revision: z.number().int().nonnegative(), operationId: identifier, intent: EditingOperationSchema.shape.intent }),
   z.strictObject({ kind: z.literal("editingStop"), id: identifier }),
-  z.strictObject({ kind: z.literal("editingDiscard"), id: identifier, revision: z.number().int().nonnegative() }),
+  /** The spec this planning session holds, read from the repository (D-103). */
+  z.strictObject({ kind: z.literal("specRead"), id: identifier }),
+  /**
+   * The impact warnings for this planning's draft (D-015, D-101). On demand:
+   * the pane asks when a person asks it to, because the answer is a fresh
+   * `perbo index` over the tracked tree.
+   *
+   * The session names itself and nothing else. The repository, the scope, the
+   * spec and the index are the host's to derive from the registered repository
+   * and the session's own records, so no field here becomes a path or an
+   * argument (ADR-0023 §4).
+   */
+  z.strictObject({ kind: z.literal("impactRead"), id: identifier }),
+  /**
+   * Write the spec to `specs/<slug>/spec.md`, creating the folders the first
+   * time. The session names itself and its repository; the path is the host's
+   * to derive, as every other repository path is.
+   */
+  z.strictObject({
+    kind: z.literal("specSave"),
+    id: identifier,
+    repoId: identifier,
+    ...SpecDocumentSchema.shape,
+    /**
+     * The spec as this writer last read it, which is what its changes are
+     * against (SCP-321). Required rather than optional: a save that could
+     * leave it out would be a save that silently drops whatever the interview
+     * or the Impact pane put in the file since.
+     */
+    base: SpecDocumentSchema,
+  }),
+  /**
+   * The repository's exported names, for the Spec pane's `@Symbol` completion
+   * and the names it marks (D-015). The request names a repository and nothing
+   * else: the index is built by the host running `perbo index` over the
+   * registered checkout, and no name, path or file the renderer sent reaches it
+   * ([ADR-0023](../../../../docs/adr/0023-untrusted-context-boundary.md) §4).
+   */
+  z.strictObject({ kind: z.literal("symbolIndex"), repoId: identifier }),
+  /**
+   * The interview docked beside the panes (D-102): start it, send one turn,
+   * stop it. A request names a repository and this planning's own editing
+   * session, and for a turn the text the person typed, and carries nothing
+   * else. The spec folder the interview writes, the session it continues and
+   * the model it runs on are the host's to derive from the registered
+   * repository and the session's own records, so nothing here becomes an
+   * argument ([ADR-0023](../../../docs/adr/0023-untrusted-context-boundary.md)).
+   */
+  z.strictObject({ kind: z.literal("interviewStart"), repoId: identifier, id: identifier }),
+  z.strictObject({ kind: z.literal("interviewTurn"), id: identifier, text }),
+  z.strictObject({ kind: z.literal("interviewStop"), id: identifier }),
+  z.strictObject({ kind: z.literal("editingDiscard"), id: identifier, revision: z.number().int().nonnegative().optional() }),
+  /** The open drafts alone, for the picker: cheaper than a snapshot when an editing session changes. */
+  z.strictObject({ kind: z.literal("drafts") }),
   z.strictObject({
     kind: z.literal("openHelp"),
     page: z.enum(["documentation", "problem", "releases", "privacy"]),
@@ -241,6 +866,21 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     ...reference,
     digest: z.string().length(64),
     draft: DraftSchema,
+    models: TaskModelsSchema.optional(),
+  }),
+  /** Draft the first plan from this session's spec: `admit --from-spec`. */
+  z.strictObject({
+    kind: z.literal("generatePlan"),
+    repoId: identifier,
+    id: identifier,
+    models: TaskModelsSchema.optional(),
+  }),
+  /** Re-draft this session's ticket from its spec, keeping the ticket (D-103). */
+  z.strictObject({
+    kind: z.literal("startOver"),
+    repoId: identifier,
+    id: identifier,
+    key,
     models: TaskModelsSchema.optional(),
   }),
   z.strictObject({
@@ -366,6 +1006,14 @@ export interface Snapshot {
   repositoryErrors?: Record<string, string[]>;
   /** Renderer freshness only; never persisted as Ticket state. */
   refreshingRepos?: string[];
+  /** Open planning, newest first, for the Create picker. */
+  drafts?: OpenDraft[];
+  /**
+   * The editing sessions with a live interview beside them (D-102). An
+   * interview outlives the pane it was started from, as drafting outlives the
+   * screen that asked for it (D-095), so this is what says it is still there.
+   */
+  interviews?: string[];
 }
 export interface RepositorySnapshot {
   repository: Repository;
@@ -392,6 +1040,28 @@ export const ChangeSchema = z.discriminatedUnion("kind", [
   }),
   z.object({ kind: z.literal("repositories"), sequence: z.number().int().nonnegative() }),
   z.object({ kind: z.literal("editing"), sequence: z.number().int().nonnegative(), sessionId: identifier }),
+  /**
+   * One line of an interview, as it arrives, and whether the interview is
+   * still running (D-102). The line is null where only the running state
+   * moved: a start, a stop, or a process that ended on its own.
+   */
+  z.object({
+    kind: z.literal("interview"),
+    sequence: z.number().int().nonnegative(),
+    sessionId: identifier,
+    running: z.boolean(),
+    entry: InterviewEntrySchema.nullable(),
+    /**
+     * The asking in front of the person as this change leaves, so the dock has
+     * it without reading the session back.
+     *
+     * The conversation reaches the dock on this stream and the record reaches
+     * it on a refresh the editor holds back while a save is in flight; a card
+     * that waited for the second would come and go with whether the person
+     * happened to be saving something (D-117).
+     */
+    asking: AskingSchema.nullable().default(null),
+  }),
   z.object({ kind: z.literal("power"), sequence: z.number().int().nonnegative(), power: PowerStateSchema }),
 ]);
 export type Change = z.infer<typeof ChangeSchema>;
@@ -410,7 +1080,8 @@ export interface AttemptView {
   ceilings: {
     resource: string;
     used: number | null;
-    ceiling: number;
+    /** Null where nothing bounds the resource ([D-096](../../../docs/11-open-decisions.md)). */
+    ceiling: number | null;
     hit: boolean;
   }[];
   review: ReviewArtifact | null;
@@ -433,7 +1104,11 @@ export interface Detail {
   cost: { micros: number; partial: boolean; unavailable: number };
   principles: string;
   verdicts: unknown[];
-  effective: { minutes: number; commands: number; ticketDollars: number };
+  /**
+   * What this run is actually bounded by (D-096): the stall window, and the
+   * ticket cost cap that applies only where the executor is billed per token.
+   */
+  effective: { stallMinutes: number; ticketDollars: number };
   report: unknown;
   sample?: {
     progress: number;
@@ -492,7 +1167,8 @@ export interface UsageLedger {
   unpricedAttempts: number;
   ticketsRun: number;
   ticketsMerged: number;
-  stoppedAtCeiling: number;
+  /** Tickets an attempt stopped short of finishing — a stall, or a ceiling the repository set. */
+  stoppedShort: number;
   averageMergedMicros: number | null;
 }
 export interface UsageReport {
@@ -503,13 +1179,28 @@ export interface UsageReport {
 }
 export interface ReplyMap {
   repositorySnapshot: RepositorySnapshot;
+  explorerList: ExplorerListing;
+  explorerRead: ExplorerFile;
+  graphRead: GraphView;
+  graphEdit: Job;
+  graphUndo: Job;
+  explorerMark: EditingSession;
+  explorerUndo: EditingSession;
   snapshot: Snapshot;
+  drafts: OpenDraft[];
   editingOpen: EditingSession;
   editingRead: EditingSession;
   editingSave: EditingSession;
   editingSubmit: EditingSession;
   editingStop: EditingSession;
   editingDiscard: EditingSession;
+  interviewStart: InterviewStatus;
+  interviewTurn: InterviewStatus;
+  interviewStop: InterviewStatus;
+  specRead: SpecView;
+  specSave: SpecSaveReply;
+  symbolIndex: SymbolIndexView;
+  impactRead: ImpactView;
   openHelp: null;
   chooseRepository: Repository | null;
   forgetRepository: null;
@@ -531,6 +1222,8 @@ export interface ReplyMap {
   draft: Job;
   admit: Job;
   edit: Job;
+  generatePlan: Job;
+  startOver: Job;
   run: Job;
   sync: Job;
   principle: Job;
@@ -550,14 +1243,14 @@ export interface DesktopBridge {
 export type Response =
   | { ok: true; value: unknown }
   | { ok: false; error: string };
-export const CHANNEL = "focrux:request";
-export const CHANGED = "focrux:changed";
-export const CLOSE_REQUEST = "focrux:close-request";
-export const CLOSE_RESPONSE = "focrux:close-response";
-export const CLOSE_CANCEL = "focrux:close-cancel";
+export const CHANNEL = "perbo:request";
+export const CHANGED = "perbo:changed";
+export const CLOSE_REQUEST = "perbo:close-request";
+export const CLOSE_RESPONSE = "perbo:close-response";
+export const CLOSE_CANCEL = "perbo:close-cancel";
 export const CloseResponseSchema = z.strictObject({ token: identifier, ok: z.boolean(), error: z.string().max(2000).nullable() });
 declare global {
   interface Window {
-    focrux?: DesktopBridge;
+    perbo?: DesktopBridge;
   }
 }

@@ -46,7 +46,7 @@ const TEST_DIR = import.meta.dirname;
 const SRC_DIR = resolve(TEST_DIR, "..", "src");
 
 /** This package's own name, since `src/index.ts` re-exports the loader too. */
-const PACKAGE_NAME = "@focrux/evaluation";
+const PACKAGE_NAME = "@perbo/evaluation";
 
 /** The single file allowed to leave the corpus directory to the loader. */
 const GATE = "corpus-present.ts";
@@ -533,7 +533,7 @@ function unguardedCorpusReads(
     }
     if (!suite && TEXTUAL_BARE.test(source)) {
       reasons.push(
-        `calls ${CALL_TEXT} with no directory, so what it reads depends on FOCRUX_EVAL_CORPUS_DIR ` +
+        `calls ${CALL_TEXT} with no directory, so what it reads depends on PERBO_EVAL_CORPUS_DIR ` +
           "and nothing here says so.",
       );
     }
@@ -580,7 +580,7 @@ describe("no suite reads the corpus outside the gate", () => {
    * may collect.
    */
   function scratchDir(): string {
-    scratch ??= mkdtempSync(join(tmpdir(), "focrux-corpus-guard-"));
+    scratch ??= mkdtempSync(join(tmpdir(), "perbo-corpus-guard-"));
     return scratch;
   }
 

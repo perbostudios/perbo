@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Button, Notice } from "@focrux/ui";
+import { Button, Notice } from "@perbo/ui";
 import { errorMessage, useDetail } from "../data.js";
 import type { PageProps, TaskView } from "../shell/App.js";
 import { Composer } from "./Composer.js";

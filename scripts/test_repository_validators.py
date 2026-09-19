@@ -811,17 +811,17 @@ class GithubRepositoryFromRemote(unittest.TestCase):
 
     def test_reads_both_url_forms(self) -> None:
         for url in (
-            "git@github.com:lianmatsuo/focrux.git",
-            "ssh://git@github.com/lianmatsuo/focrux.git",
-            "https://github.com/lianmatsuo/focrux.git",
-            "https://github.com/lianmatsuo/focrux",
-            "  git@github.com:lianmatsuo/focrux.git\n",
+            "git@github.com:perbostudios/perbo.git",
+            "ssh://git@github.com/perbostudios/perbo.git",
+            "https://github.com/perbostudios/perbo.git",
+            "https://github.com/perbostudios/perbo",
+            "  git@github.com:perbostudios/perbo.git\n",
         ):
             with self.subTest(url=url):
-                self.assertEqual(github_repository_from_remote(url), "lianmatsuo/focrux")
+                self.assertEqual(github_repository_from_remote(url), "perbostudios/perbo")
 
     def test_refuses_a_remote_that_is_not_github(self) -> None:
-        for url in ("git@gitlab.com:lianmatsuo/focrux.git", "/srv/git/focrux.git", ""):
+        for url in ("git@gitlab.com:perbostudios/perbo.git", "/srv/git/perbo.git", ""):
             with self.subTest(url=url):
                 with self.assertRaises(ValueError):
                     github_repository_from_remote(url)

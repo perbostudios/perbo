@@ -11,8 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { EXIT_CODES } from "@focrux/contracts";
-import type { PreflightRequest, PreflightResult } from "@focrux/runner";
+import { EXIT_CODES } from "@perbo/contracts";
+import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { exitForThrown } from "../src/entry.js";
 import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "../src/execute.js";
 import { attemptsRecordSubject, runInspectCommand } from "../src/inspect.js";
@@ -38,7 +38,7 @@ import { storeDir } from "../src/store.js";
  * test fails on the behaviour it is about rather than on an import.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-refused-run-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-refused-run-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const gitEnv = {
@@ -55,12 +55,10 @@ const git = (dir: string, ...argv: string[]): string =>
   execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
 
 /**
- * A repository with one commit and — where `scripts` is false — a manifest that
- * declares nothing whose success would define a working worktree, which is what
- * the diagnostic refuses it for. A lockfile is not required to run: a checkout
- * without one installs unpinned and is told so.
+ * A repository with one commit and a test script. A lockfile is not required
+ * to run: a checkout without one installs unpinned and is told so.
  */
-function repository(name: string, options: { lockfile: boolean; scripts?: boolean }): string {
+function repository(name: string, options: { lockfile: boolean }): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
   execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
   git(dir, "config", "user.name", "t");
@@ -68,13 +66,7 @@ function repository(name: string, options: { lockfile: boolean; scripts?: boolea
   git(dir, "config", "commit.gpgsign", "false");
   writeFileSync(
     join(dir, "package.json"),
-    `${JSON.stringify(
-      options.scripts === false
-        ? { name: "fixture" }
-        : { name: "fixture", scripts: { test: "node --test" } },
-      null,
-      2,
-    )}\n`,
+    `${JSON.stringify({ name: "fixture", scripts: { test: "node --test" } }, null, 2)}\n`,
   );
   if (options.lockfile) writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
   mkdirSync(join(dir, "src"), { recursive: true });
@@ -84,7 +76,7 @@ function repository(name: string, options: { lockfile: boolean; scripts?: boolea
   return dir;
 }
 
-/** The repository's own `.focrux/config.json`, as a run with no ticket reads it. */
+/** The repository's own `.perbo/config.json`, as a run with no ticket reads it. */
 function repoConfig(repo: string, config: Record<string, unknown>): void {
   const dir = storeDir(repo, null);
   mkdirSync(dir, { recursive: true });
@@ -176,7 +168,7 @@ const capture = (isTTY = false) => {
 const uncoloured = (text: string): string => text.replace(/\u001b\[[0-9;]*m/g, "");
 
 /**
- * `focrux run …` as the program runs it: the command, and — for anything that
+ * `perbo run …` as the program runs it: the command, and — for anything that
  * escapes it — `exitForThrown` writing onto the same stderr, which is
  * `startEntryPoint`'s own body.
  */
@@ -235,17 +227,24 @@ function onlyRunId(store: string): string {
 /** Whitespace collapsed, so a sentence a renderer wrapped still matches as one. */
 const flat = (text: string): string => text.replace(/\s+/g, " ");
 
+/** Whitespace removed, so a path a renderer broke across lines still matches as one. */
+const squashed = (text: string): string => text.replace(/\s+/g, "");
+
 const OUTCOME = "The feature module exports a computed total";
 
 describe("a repository the diagnostic refuses", () => {
   it("says what was found and what to run, with no stack trace", async () => {
-    const repo = repository("no-verification", { lockfile: false, scripts: false });
+    const repo = repository("unsignable", { lockfile: false });
+    // It signs its commits with a key that is not there, so nothing can.
+    git(repo, "config", "commit.gpgsign", "true");
+    git(repo, "config", "gpg.format", "ssh");
+    git(repo, "config", "user.signingkey", join(scratch, "absent-key.pub"));
     repoConfig(repo, {});
 
     const result = await program(repo, [
       "--outcome", OUTCOME,
       "--path", "src/**",
-      "--config", worktreeOverride("no-verification"),
+      "--config", worktreeOverride("unsignable"),
     ]);
 
     // The run did not complete — the same code it exits with today.
@@ -253,21 +252,21 @@ describe("a repository the diagnostic refuses", () => {
 
     // And it cost nothing on the way there: no branch cut in the person's
     // repository, and nothing under the root the worktree would have gone in.
-    expect(git(repo, "branch", "--list", "ayo/*", "fcx/*").trim()).toBe("");
-    const worktrees = worktreeRoot("no-verification");
+    expect(git(repo, "branch", "--list", "ayo/*", "prb/*").trim()).toBe("");
+    const worktrees = worktreeRoot("unsignable");
     expect(existsSync(worktrees) ? readdirSync(worktrees) : []).toEqual([]);
 
     // What was found, in the diagnostic's own words: the refusal, named by its
     // reason and stating what it means. The advisory this checkout also carries
     // — it has no lockfile — is not printed here: what stopped the run is what
     // a person needs to fix.
-    expect(result.err).toContain("no_verification_command");
-    expect(flat(result.err)).toContain("the repository declares no test script");
+    expect(result.err).toContain("commit_signing_unavailable");
+    expect(flat(result.err)).toContain("this repository signs its commits");
     expect(result.err).not.toContain("lockfile_missing");
 
     // And what to do about it: the command that answers the whole question,
     // against this repository.
-    expect(result.err).toContain(`focrux doctor --repo ${repo}`);
+    expect(result.err).toContain(`perbo doctor --repo ${repo}`);
 
     // Not one frame of this program's own stack.
     expect(result.err).not.toMatch(STACK_FRAME);
@@ -279,12 +278,12 @@ describe("a repository the diagnostic refuses", () => {
     const record = runRecord(store, runId);
     expect(record.refusal).not.toBeNull();
     expect(record.refusal?.findings.map((finding) => finding.reason)).toEqual([
-      "no_verification_command",
+      "commit_signing_unavailable",
     ]);
 
     // And `inspect` reads it back in the same words the record holds — in the
-    // report a script parses, and in the one a person reads.
-    for (const isTTY of [false, true]) {
+    // report a script parses, field for field, and in the one a person reads.
+    const inspected = async (isTTY: boolean): Promise<string> => {
       const read = capture(isTTY);
       await runInspectCommand({
         argv: [runId, "--repo", repo],
@@ -292,12 +291,14 @@ describe("a repository the diagnostic refuses", () => {
         cwd: repo,
         subject: attemptsRecordSubject,
       });
-      const shown = flat(uncoloured(read.out.join("")));
-      expect(shown).toContain(flat(record.refusal!.reason));
-      for (const finding of record.refusal!.findings) {
-        expect(shown).toContain(finding.reason);
-        expect(shown).toContain(flat(finding.detail));
-      }
+      return read.out.join("");
+    };
+    expect((JSON.parse(await inspected(false)) as RecordedRefusal).refusal).toEqual(record.refusal);
+    const shown = uncoloured(await inspected(true));
+    expect(flat(shown)).toContain(flat(record.refusal!.reason));
+    for (const finding of record.refusal!.findings) {
+      expect(shown).toContain(finding.reason);
+      expect(squashed(shown)).toContain(squashed(finding.detail));
     }
   }, 120_000);
 

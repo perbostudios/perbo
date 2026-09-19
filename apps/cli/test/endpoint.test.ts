@@ -3,14 +3,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { EXIT_CODES } from "@focrux/contracts";
+import { EXIT_CODES } from "@perbo/contracts";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { ENDPOINT_FILE, readEndpoint, startEndpoint, type RunningEndpoint } from "../src/endpoint.js";
 import { ENDPOINT_TOOLS, PERSON_ONLY_ACTS } from "../src/endpoint-tools.js";
 import { storeDir } from "../src/tickets.js";
 
 /**
- * The tool endpoint the queue hosts: paseo's mechanism, Focrux's authority.
+ * The tool endpoint the queue hosts: paseo's mechanism, Perbo's authority.
  *
  * Loopback HTTP, one capability token per role, JSON-RPC in the shape a
  * Claude Code or Codex session speaks to a streamable-HTTP tool server. What
@@ -18,7 +18,7 @@ import { storeDir } from "../src/tickets.js";
  * approve, publish or merge — and that the tokens reach nobody else.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-endpoint-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-endpoint-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const gitIdentity = {
@@ -43,8 +43,8 @@ function repository(): string {
   mkdirSync(dir, { recursive: true });
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
   execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
-  mkdirSync(join(dir, ".focrux"), { recursive: true });
-  writeFileSync(join(dir, ".focrux", "config.json"), JSON.stringify({ base_ref: "main" }));
+  mkdirSync(join(dir, ".perbo"), { recursive: true });
+  writeFileSync(join(dir, ".perbo", "config.json"), JSON.stringify({ base_ref: "main" }));
   return dir;
 }
 
@@ -133,7 +133,7 @@ describe("the endpoint", () => {
     expect(json?.result).toMatchObject({
       protocolVersion: "2025-06-18",
       capabilities: { tools: {} },
-      serverInfo: { name: "focrux" },
+      serverInfo: { name: "perbo" },
     });
     // A notification is taken and answered with nothing.
     const initialized = await fetch(endpoint.url, {

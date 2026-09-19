@@ -20,7 +20,7 @@ const judge = (command: string) =>
     detail: command,
     allow_list: DEFAULT_COMMAND_ALLOW_LIST,
     deny_list: DEFAULT_COMMAND_DENY_LIST,
-    scope: { root: "/tmp/focrux-scp201-fixture", home: "/Users/nobody" },
+    scope: { root: "/tmp/perbo-scp201-fixture", home: "/Users/nobody" },
   }).admission;
 
 describe("git's own credential wiring, reached through `git config`", () => {
@@ -75,7 +75,7 @@ describe("what stays admitted", () => {
   it("keeps a non-credential key admitted, however it is set", () => {
     // The mutant this pins: a rule keyed on nothing would refuse every
     // `git config`, and this is the one that would catch it.
-    expect(judge("git config user.name Focrux").decision).toBe("allowed");
+    expect(judge("git config user.name Perbo").decision).toBe("allowed");
     expect(judge("git config --global user.email a@example.com").decision).toBe("allowed");
   });
 

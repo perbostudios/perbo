@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { assessLegibility } from "@focrux/review";
+import { assessLegibility } from "@perbo/review";
 import { defaultCacheDir } from "../src/corpus.js";
 import { corpus, describeCorpus } from "./corpus-present.js";
 

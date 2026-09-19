@@ -1,7 +1,7 @@
 # How the reviewer is scored
 
 This package is the harness. It runs a set of fixtures — changes with a known
-planted defect, and correct changes with none — through the same `focrux` binary
+planted defect, and correct changes with none — through the same `perbo` binary
 a person runs, scores each review against what the fixture declared before it
 was ever run, and reports every number with an interval and an `n`.
 
@@ -149,7 +149,7 @@ fixtures are not a population" means in practice.
 ## How a round is run and scored
 
 **Run.** Before the first fixture, a `--run` copies the reviewer into
-`<out>/bin/focrux.mjs` and spawns only that copy, so a rebuild during the run
+`<out>/bin/perbo.mjs` and spawns only that copy, so a rebuild during the run
 cannot swap the binary underneath it. Each review is a separate process
 receiving the fixture's contract, check results and diff — and nothing else. If
 `--max-spend` is in force, the projected total is checked before each launch
@@ -182,7 +182,7 @@ a result.
 | `run-manifest.json` | what this run *was* — below |
 | `summary.json` | the metric rows, each with point, interval, `n` and `resolves` |
 | `report.md` | the same, rendered, with `NOT MET` written where it is not met |
-| `bin/focrux.mjs` | the reviewer copy every review in the run was spawned against |
+| `bin/perbo.mjs` | the reviewer copy every review in the run was spawned against |
 
 The manifest is what makes a result checkable a month later. It records the run
 id and its start and end; the source commit and whether the tracked tree was

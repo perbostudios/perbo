@@ -8,6 +8,7 @@ import {
   CheckIdSchema,
   CommitShaSchema,
   CriterionIdSchema,
+  NodeIdSchema,
   PlanIdSchema,
   ReviewIdSchema,
 } from "./ids.js";
@@ -490,6 +491,25 @@ export const ReviewArtifactSchema = z.strictObject({
 export type ReviewArtifact = z.infer<typeof ReviewArtifactSchema>;
 
 /**
+ * One node's review, recorded beside the combined artifact (D-107). `review`
+ * is null where the node held no file inside its paths to review on its own.
+ */
+export const NodeReviewSchema = z.strictObject({
+  node_id: NodeIdSchema,
+  review: ReviewArtifactSchema.nullable(),
+});
+export type NodeReview = z.infer<typeof NodeReviewSchema>;
+
+/**
+ * A ticket's per-node reviews, recorded as their own artifact beside the
+ * combined one. A bundle written before D-107's per-node review existed
+ * carries no such artifact at all; the two places that read one back
+ * (`readNodeReviews` in the runner, the inspect reader) both take that as
+ * `[]` before this schema is ever reached, rather than parsing anything.
+ */
+export const NodeReviewsSchema = z.array(NodeReviewSchema);
+
+/**
  * docs/04, "Review CLI contract".
  *
  * `2` and `3` are separate because they fail differently: a caller checking
@@ -524,7 +544,7 @@ export function exitCodeForDecision(decision: ReviewDecision): number {
  *
  * The loop has always computed this — it is what decides whether a round is
  * spent on the executor or a person is shown the findings — but it computed it
- * inside itself, over a ticket. `focrux review` on a pull request nobody
+ * inside itself, over a ticket. `perbo review` on a pull request nobody
  * admitted routes the same change the same way with no loop to run it, so the
  * mapping lives here beside `exitCodeForDecision`, which is the other thing
  * every caller derives from a decision.

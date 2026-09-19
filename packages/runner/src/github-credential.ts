@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { GH_NOT_LOGGED_IN, type GithubCredential } from "@focrux/contracts";
+import { GH_NOT_LOGGED_IN, type GithubCredential } from "@perbo/contracts";
 
 /**
  * Which credential GitHub is read through, and whether it answers (SCP-200).
@@ -63,7 +63,7 @@ function ghAnswers(request: GithubCredentialRequest): boolean {
 /**
  * The path and whether it answers, asking `gh` on both.
  *
- * For a diagnostic — `focrux doctor` — where "GitHub answers" is the thing
+ * For a diagnostic — `perbo doctor` — where "GitHub answers" is the thing
  * being reported, and a token that GitHub has since revoked is exactly what a
  * person is looking for.
  */

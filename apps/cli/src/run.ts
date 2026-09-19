@@ -7,12 +7,13 @@ import {
   PlanContractSchema,
   exitCodeForDecision,
   hasAcceptanceCriteria,
+  wholeChangeChecks,
   type CheckResult,
   type PlanContract,
   type ReviewRouting,
   type PlanContractWithCriteria,
   type ReviewArtifact,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import {
   PlanNotReviewableError,
   RuleAuthorityFileSchema,
@@ -24,10 +25,11 @@ import {
   buildSuppressions,
   redactCredentials,
   redactReviewArtifact,
+  reviewGraph,
   runReview,
   verdictSchemas,
   type ReviewModel,
-} from "@focrux/review";
+} from "@perbo/review";
 import {
   AgentConfigurationPresentError,
   DeliveryError,
@@ -37,8 +39,8 @@ import {
   renderPreflight,
   type PreflightRequest,
   type PreflightResult,
-} from "@focrux/runner";
-import { CommandFailedError, WorkspaceError } from "@focrux/workspace";
+} from "@perbo/runner";
+import { CommandFailedError, WorkspaceError } from "@perbo/workspace";
 import { STDIN, UsageError, isTicketlessArgs, type ReviewArgs } from "./args.js";
 import { renderReviewMarkdown } from "./markdown.js";
 import { renderArtifact } from "./render.js";
@@ -132,7 +134,7 @@ function readStandardInput(flag: string): string {
   if (process.stdin.isTTY) {
     throw new UsageError(
       `${flag} - reads standard input, and standard input here is a terminal: pipe it in ` +
-        `(\`… | focrux review ${flag} -\`), or name a file.`,
+        `(\`… | perbo review ${flag} -\`), or name a file.`,
     );
   }
   try {
@@ -173,7 +175,7 @@ function refusalReport(noun: string, error: RunRefusedError): string {
   const found = error.findings.map((finding) => `\n  ${finding.reason} — ${finding.detail}`).join("");
   return (
     `${noun} did not start: ${error.message}.${found}\n` +
-    `Nothing was executed. \`focrux doctor --repo ${error.repository_root}\` reports the whole ` +
+    `Nothing was executed. \`perbo doctor --repo ${error.repository_root}\` reports the whole ` +
     "diagnostic."
   );
 }
@@ -186,19 +188,19 @@ function refusalReport(noun: string, error: RunRefusedError): string {
  */
 export function describeFailure(command: string, error: unknown): { message: string; code: number } {
   const noun =
-    command === "review" ? "the review" : command === "run" ? "the run" : `\`focrux ${command}\``;
+    command === "review" ? "the review" : command === "run" ? "the run" : `\`perbo ${command}\``;
   const code = EXIT_CODES.did_not_complete;
   if (error instanceof RunRefusedError) return { message: refusalReport(noun, error), code };
   if (error instanceof LimitExceededError) {
     const raise =
       error.reason === "limit_exceeded" && error.resource
-        ? ` Raise limits.limits.${error.resource} in .focrux/config.json to allow it.`
+        ? ` Raise limits.limits.${error.resource} in .perbo/config.json to allow it.`
         : " Clear the kill switch in the limits table to allow it.";
     return { message: `${noun} was refused by a limit: ${error.message}.${raise}`, code };
   }
   if (error instanceof WorkspaceError) {
     return {
-      message: `${noun} could not prepare a worktree (${error.reason}): ${error.message}. Run \`focrux doctor --repo .\` for the specific reason.`,
+      message: `${noun} could not prepare a worktree (${error.reason}): ${error.message}. Run \`perbo doctor --repo .\` for the specific reason.`,
       code,
     };
   }
@@ -381,6 +383,20 @@ function writeBundle(dir: string, artifact: ReviewArtifact, bundle: unknown): nu
   return redacted.count;
 }
 
+/**
+ * The verdict schema a contract and its checks bind the reviewer's transport
+ * to, so the tool schema itself cannot express a criterion the contract does
+ * not have. The one place this is built from, so a node's call (D-107) and
+ * the whole-change call are never built from two different expressions of
+ * the same thing.
+ */
+function reviewSchema(contract: PlanContract, checks: readonly CheckResult[]): Record<string, unknown> {
+  const criteria = hasAcceptanceCriteria(contract)
+    ? contract.acceptance_criteria.map((criterion) => criterion.id)
+    : [];
+  return verdictSchemas(criteria, [...checks.map((check) => check.check_id), "check_scope"]).toolInputSchema;
+}
+
 export async function runReviewCommand(options: RunOptions): Promise<number> {
   const { args, streams } = options;
   const progress = args.quiet ? undefined : (message: string) => streams.stderr(`  ${message}\n`);
@@ -449,6 +465,9 @@ export async function runReviewCommand(options: RunOptions): Promise<number> {
         }
       })();
 
+  // The full pinned set: whole-change and, on a graphed contract, every
+  // node's own run beside it (D-107). reviewGraph narrows this to each
+  // node's own results and to wholeChangeChecks for the overall call.
   const checks = record
     ? record.checks
     : args.checks === STDIN
@@ -490,9 +509,6 @@ export async function runReviewCommand(options: RunOptions): Promise<number> {
   const reviewedContract: PlanContract = record
     ? contractForUnresolved(contract, record.unresolved)
     : contract;
-  const reviewedCriteria = hasAcceptanceCriteria(reviewedContract)
-    ? reviewedContract.acceptance_criteria.map((criterion) => criterion.id)
-    : [];
 
   const makeModel =
     options.makeModel ??
@@ -503,12 +519,11 @@ export async function runReviewCommand(options: RunOptions): Promise<number> {
           ? codexCliModel({ submitSchema, ...(modelId ? { modelId } : {}) })
         : anthropicModel({ submitSchema, ...(modelId ? { modelId } : {}) }));
 
-  // The submit schema is built from the criteria this review is judging, so a
-  // verdict cannot name one that is not there.
-  const schema = verdictSchemas(
-    reviewedCriteria,
-    [...checks.map((check) => check.check_id), "check_scope"],
-  ).toolInputSchema;
+  // The submit schema is built from the criteria this review is judging and
+  // wholeChangeChecks(checks) — the same narrowing reviewGraph applies to a
+  // flat contract's one call — so a verdict cannot name a criterion or a
+  // check that is not there, a stray node tag included.
+  const schema = reviewSchema(reviewedContract, wholeChangeChecks(checks));
 
   // A missing binary or credential is reported before anything is read or
   // spent, with its fix, rather than as an outage half-way through.
@@ -516,6 +531,7 @@ export async function runReviewCommand(options: RunOptions): Promise<number> {
   if (check) {
     const result = check({
       agentBinary: null,
+      agentProvider: null,
       reviewerProvider: args.provider,
       needsGh: false,
       needsGit: false,
@@ -526,30 +542,38 @@ export async function runReviewCommand(options: RunOptions): Promise<number> {
     }
   }
 
-  let outcome;
+  let graphOutcome;
   try {
-    outcome = await runReview({
-      contract: reviewedContract,
-      diff,
-      checks,
-      repoDir: repo,
-      model: makeModel(schema, args.model),
-      head_commit: head ?? undefined,
-      suppressions,
-      ruleAuthority,
-      now: options.now,
-      ...(args.maxTurns !== null ? { maxTurns: args.maxTurns } : {}),
-      ...(progress ? { onProgress: progress } : {}),
-    });
+    // D-107: reviewed once per node of reviewedContract's graph, and once
+    // over the whole change; a flat contract reviews exactly as runReview
+    // alone always has. No per-node artifact is written by this command.
+    graphOutcome = await reviewGraph(
+      {
+        contract: reviewedContract,
+        diff,
+        checks,
+        repoDir: repo,
+        model: makeModel(schema, args.model),
+        head_commit: head ?? undefined,
+        suppressions,
+        ruleAuthority,
+        now: options.now,
+        ...(args.maxTurns !== null ? { maxTurns: args.maxTurns } : {}),
+        ...(progress ? { onProgress: progress } : {}),
+      },
+      runReview,
+      { modelFor: (nodeContract, nodeChecks) => makeModel(reviewSchema(nodeContract, nodeChecks), args.model) },
+    );
   } catch (error) {
     if (error instanceof PlanNotReviewableError) throw new UsageError(error.message);
     throw error;
   }
+  const outcome = graphOutcome.overall;
 
   const allCriteria = contract.acceptance_criteria.map((criterion) => criterion.id);
   const artifact = record
-    ? mergeResumed(record, outcome.artifact, allCriteria)
-    : outcome.artifact;
+    ? mergeResumed(record, graphOutcome.combined, allCriteria)
+    : graphOutcome.combined;
 
   // The one deliberate exception to redaction: the corpus harness asks for the
   // artifact as the reviewer produced it, in a file it names, because the
@@ -586,7 +610,7 @@ export async function runReviewCommand(options: RunOptions): Promise<number> {
   // anything. A run that never reached a verdict writes nothing here: a
   // preflight that refuses the machine has returned above, and a failure inside
   // the review leaves through `describeFailure`. There is no review to record
-  // in either case. It goes to the repository's `.focrux/` and nowhere else.
+  // in either case. It goes to the repository's `.perbo/` and nowhere else.
   let ticketlessOutcome: {
     source: TicketlessSource;
     routing: ReviewRouting;
@@ -656,7 +680,7 @@ export async function runReviewCommand(options: RunOptions): Promise<number> {
       };
       const path = saveResumeRecord(resolve(options.cwd, args.state), next);
       streams.stderr(`  unfinished review saved to ${path}\n`);
-      resumeCommand = `focrux review --resume ${redacted.review_id}`;
+      resumeCommand = `perbo review --resume ${redacted.review_id}`;
     }
   }
 

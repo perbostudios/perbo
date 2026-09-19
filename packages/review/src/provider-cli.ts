@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@focrux/contracts";
+import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
 import {
   ProviderError,
   providerFailureText,
@@ -248,7 +248,7 @@ export function claudeCliModel(options: ClaudeCliOptions): ClaudeCliModel {
       // opens the session, so a turn that fails still leaves one to remove.
       sessionId = id;
 
-      scratch ??= await mkdtemp(join(tmpdir(), "focrux-review-cli-"));
+      scratch ??= await mkdtemp(join(tmpdir(), "perbo-review-cli-"));
       const systemPromptFile = join(scratch, "system-prompt.txt");
       await writeFile(systemPromptFile, request.system, "utf8");
 

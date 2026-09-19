@@ -1,12 +1,12 @@
 {
-  "name": "@focrux/desktop",
-  "productName": "Focrux",
+  "name": "@perbo/desktop",
+  "productName": "Perbo",
   "version": "0.1.0",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "description": "A local workspace for software engineering orchestration",
-  "author": "Focrux",
+  "author": "Perbo",
   "main": "dist/host/main.cjs",
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -19,7 +19,8 @@
     "lint": "eslint src test"
   },
   "dependencies": {
-    "@focrux/ui": "workspace:*",
+    "@perbo/planning": "workspace:*",
+    "@perbo/ui": "workspace:*",
     "@fontsource/caveat": "5.2.8",
     "@fontsource/instrument-sans": "5.3.0",
     "@fontsource/jetbrains-mono": "5.2.8",
@@ -29,9 +30,9 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@focrux/cli": "workspace:*",
-    "@focrux/contracts": "workspace:*",
-    "@focrux/tsconfig": "workspace:*",
+    "@perbo/cli": "workspace:*",
+    "@perbo/contracts": "workspace:*",
+    "@perbo/tsconfig": "workspace:*",
     "@testing-library/react": "16.3.3",
     "@types/node": "catalog:",
     "@types/react": "19.2.18",
@@ -46,10 +47,10 @@
     "typescript": "catalog:",
     "vite": "8.2.2",
     "vitest": "catalog:",
-    "@focrux/workspace": "workspace:*"
+    "@perbo/workspace": "workspace:*"
   },
   "build": {
-    "appId": "dev.focrux.desktop",
+    "appId": "dev.perbo.desktop",
     "asar": true,
     "files": [
       "dist/host/**",
@@ -62,8 +63,8 @@
         "to": "cli"
       },
       {
-        "from": "dist/runtime",
-        "to": "runtime"
+        "from": "dist/cli/node_modules",
+        "to": "cli/node_modules"
       },
       {
         "from": "../../tooling/skills/mattpocock/LICENSE",
@@ -107,6 +108,6 @@
         "dir"
       ]
     },
-    "icon": "public/brand/focrux-app-icon.png"
+    "icon": "public/brand/perbo-app-icon.png"
   }
 }

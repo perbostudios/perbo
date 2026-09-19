@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LimitsTableSchema } from "@focrux/contracts";
+import { LimitsTableSchema } from "@perbo/contracts";
 import { AttemptCeilings } from "../src/ceilings.js";
 
 /**

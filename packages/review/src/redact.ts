@@ -1,4 +1,4 @@
-import type { ReviewArtifact } from "@focrux/contracts";
+import type { ReviewArtifact } from "@perbo/contracts";
 import { redactCredentials } from "./credential.js";
 
 /**

@@ -6,6 +6,7 @@ import { z } from "zod";
  * saved binding reads the same on both.
  */
 export const SHORTCUT_ACTIONS = [
+  "plan",
   "home",
   "archive",
   "settings",
@@ -168,13 +169,19 @@ export const SHORTCUT_GROUPS: {
 ];
 
 export const DEFAULT_SHORTCUTS: readonly ShortcutDefinition[] = [
-  { action: "home", label: "Home", group: "move", binding: "Meta+1" },
-  { action: "archive", label: "Archive", group: "move", binding: "Meta+2" },
+  {
+    action: "plan",
+    label: "Create — opens the picker",
+    group: "move",
+    binding: "Meta+1",
+  },
+  { action: "home", label: "Home", group: "move", binding: "Meta+2" },
+  { action: "archive", label: "Archive", group: "move", binding: "Meta+3" },
   {
     action: "settings",
     label: "Settings — opens the drop-up",
     group: "move",
-    binding: "Meta+3",
+    binding: "Meta+4",
   },
   {
     action: "search",

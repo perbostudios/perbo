@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LimitsTableSchema, type ChangeSet } from "@focrux/contracts";
+import { LimitsTableSchema, type ChangeSet } from "@perbo/contracts";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
@@ -70,7 +70,7 @@ const agentDouble = (write: (worktree: string, round: number) => void) => {
 };
 
 function makeConfig(repositoryRoot: string) {
-  const root = scratch("focrux-mergeup-");
+  const root = scratch("perbo-mergeup-");
   return TicketRunConfigSchema.parse({
     materialization_manifest: withoutInstall(repositoryRoot),
     ticket_key: "SCP192",
@@ -417,7 +417,7 @@ describe("the branch is level with the base before the review reads it", () => {
 describe("mergeUp itself", () => {
   /** A branch beside `main` in its own worktree, at `main`'s current tip. */
   function branchWorktree(repo: string, name: string): string {
-    const path = join(scratch("focrux-mergeup-wt-"), name);
+    const path = join(scratch("perbo-mergeup-wt-"), name);
     git(repo, "worktree", "add", "-b", name, path, "HEAD");
     return path;
   }

@@ -3,8 +3,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { EXIT_CODES, HAND_OFF_NOTE, OPENER_UNKNOWN_NOTE, transition, type Ticket } from "@focrux/contracts";
-import { branchName } from "@focrux/workspace";
+import { EXIT_CODES, HAND_OFF_NOTE, OPENER_UNKNOWN_NOTE, transition, type Ticket } from "@perbo/contracts";
+import { branchName } from "@perbo/workspace";
 import {
   ListJsonSchema,
   parseAdmitArgs,
@@ -18,7 +18,7 @@ import { recordDelivery, runSyncCommand } from "../src/sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.js";
 
 /**
- * SCP-173: `focrux sync` on a `failed` ticket whose branch carries a pull
+ * SCP-173: `perbo sync` on a `failed` ticket whose branch carries a pull
  * request the **loop** opened.
  *
  * SCP-157 read every pull request on a failed ticket's branch as a person
@@ -36,7 +36,7 @@ import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.
  * outrun five seconds on its own.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-sync-loop-pr-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-sync-loop-pr-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const OUTCOME = "Search results are paginated.";
@@ -149,15 +149,15 @@ function publishedTicket(name: string): { repo: string; dir: string; ticket: Tic
   runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
   const dir = storeDir(repo, null);
   const branch = branchName({
-    ticket_key: "FCX-1",
-    ticket_id: readTicket(dir, "FCX-1").ticket_id,
-    outcome: readContract(dir, "FCX-1").outcome,
+    ticket_key: "PRB-1",
+    ticket_id: readTicket(dir, "PRB-1").ticket_id,
+    outcome: readContract(dir, "PRB-1").outcome,
   });
 
   // Run one: escalated, which publishes (D-065) and leaves the ticket in
   // changes_requested with the loop's pull request on its record.
   const first = new Date("2026-09-01T09:00:00.000Z");
-  let ticket = readTicket(dir, "FCX-1");
+  let ticket = readTicket(dir, "PRB-1");
   ticket = transition(ticket, "provisioning", "run started", first);
   ticket = transition(ticket, "executing", "1 attempt executed", first);
   ticket = transition(ticket, "verifying", "6 deterministic checks ran", first);
@@ -178,7 +178,7 @@ function publishedTicket(name: string): { repo: string; dir: string; ticket: Tic
  * pull request, so it says nothing about the one that is still open.
  */
 function failTheReRun(dir: string, branch: string, at = new Date("2026-09-02T09:00:00.000Z")): Ticket {
-  let ticket = readTicket(dir, "FCX-1");
+  let ticket = readTicket(dir, "PRB-1");
   ticket = transition(ticket, "ready", "new attempt after changes_requested", at);
   ticket = transition(ticket, "provisioning", "run started", at);
   ticket = transition(ticket, "executing", "1 attempt executed", at);
@@ -218,11 +218,11 @@ describe("ac_1 — the loop's own pull request outlives a failed re-run", () => 
     const streams = capture();
 
     const code = await withGh(gh, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     expect(after.state).toBe("merged");
 
     const written = after.history.slice(before.history.length);
@@ -232,7 +232,7 @@ describe("ac_1 — the loop's own pull request outlives a failed re-run", () => 
     ]);
 
     const opened = written[0]!;
-    expect(opened.note).toContain("reconciled after the fact by `focrux sync`");
+    expect(opened.note).toContain("reconciled after the fact by `perbo sync`");
     expect(opened.note).toContain(url(LOOP_PR));
     expect(opened.note).toContain("the loop opened it");
     // Not a hand-off: not by the phrase a hand-off note carries, and not by
@@ -240,7 +240,7 @@ describe("ac_1 — the loop's own pull request outlives a failed re-run", () => 
     expect(opened.note).not.toContain(HAND_OFF_NOTE);
     expect(opened.handed_off).toBe(false);
     // On the file too, not only on the object this process built.
-    const stored = JSON.parse(readFileSync(join(dir, "tickets", "FCX-1.json"), "utf8")) as Ticket;
+    const stored = JSON.parse(readFileSync(join(dir, "tickets", "PRB-1.json"), "utf8")) as Ticket;
     expect(stored.history.some((entry) => entry.handed_off === true)).toBe(false);
   }, 30_000);
 
@@ -249,11 +249,11 @@ describe("ac_1 — the loop's own pull request outlives a failed re-run", () => 
     const gh = fakeGh("loop-open", { stdout: ghAnswer(LOOP_PR, "OPEN") });
 
     const code = await withGh(gh, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     expect(after.state).toBe("pr_open");
     expect(lastPullRequestRow(after)).toMatchObject({ from: "failed", to: "pr_open", handed_off: false });
   }, 30_000);
@@ -265,11 +265,11 @@ describe("ac_2 — a pull request the record has never seen is still a hand-off"
     const gh = fakeGh("stranger-pr", { stdout: ghAnswer(77, "MERGED") });
 
     const code = await withGh(gh, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     expect(after.state).toBe("merged");
 
     const opened = lastPullRequestRow(after);
@@ -277,7 +277,7 @@ describe("ac_2 — a pull request the record has never seen is still a hand-off"
     expect(opened.note).toContain(HAND_OFF_NOTE);
     expect(opened.note).toContain(url(77));
     // The marking is on the file, not only on the object this process built.
-    const stored = JSON.parse(readFileSync(join(dir, "tickets", "FCX-1.json"), "utf8")) as Ticket;
+    const stored = JSON.parse(readFileSync(join(dir, "tickets", "PRB-1.json"), "utf8")) as Ticket;
     expect(lastPullRequestRow(stored).handed_off).toBe(true);
   }, 30_000);
 });
@@ -292,10 +292,10 @@ describe("ac_2 — a pull request the record only ever saw as a stranger's stays
     // there is nothing to walk to. The record still takes the number, because
     // that is what `gh` says is on the branch.
     const first = await withGh(closed, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
     expect(first).toBe(EXIT_CODES.approve);
-    const between = readTicket(dir, "FCX-1");
+    const between = readTicket(dir, "PRB-1");
     expect(between.state).toBe("failed");
     expect(between.delivery).toMatchObject({ pull_request_number: 77, state: "closed", opened_by: "hand_off" });
 
@@ -304,18 +304,18 @@ describe("ac_2 — a pull request the record only ever saw as a stranger's stays
     // stranger's pull request and not.
     const second = await withGh(merged, () =>
       runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date("2026-09-04T10:00:00.000Z"),
       }),
     );
     expect(second).toBe(EXIT_CODES.approve);
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     expect(after.state).toBe("merged");
     expect(lastPullRequestRow(after)).toMatchObject({ from: "failed", to: "pr_open", handed_off: true });
     expect(lastPullRequestRow(after).note).toContain(HAND_OFF_NOTE);
-    expect(buildInspectReport({ storeDirectory: dir, key: "FCX-1", attempt: null }).handed_off).toBe(true);
+    expect(buildInspectReport({ storeDirectory: dir, key: "PRB-1", attempt: null }).handed_off).toBe(true);
   }, 30_000);
 
   it("remembers a stranger's number first seen on a ticket that was not failed yet", async () => {
@@ -326,9 +326,9 @@ describe("ac_2 — a pull request the record only ever saw as a stranger's stays
     const stranger = fakeGh("stranger-before-failing", { stdout: ghAnswer(77, "OPEN") });
 
     await withGh(stranger, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
-    expect(readTicket(dir, "FCX-1")).toMatchObject({
+    expect(readTicket(dir, "PRB-1")).toMatchObject({
       state: "changes_requested",
       delivery: { pull_request_number: 77, opened_by: "hand_off" },
     });
@@ -336,14 +336,14 @@ describe("ac_2 — a pull request the record only ever saw as a stranger's stays
     failTheReRun(dir, branch, new Date("2026-09-04T09:00:00.000Z"));
     await withGh(stranger, () =>
       runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date("2026-09-04T10:00:00.000Z"),
       }),
     );
 
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     expect(after.state).toBe("pr_open");
     expect(lastPullRequestRow(after)).toMatchObject({ handed_off: true });
   }, 30_000);
@@ -354,19 +354,19 @@ describe("ac_2 — a pull request the record only ever saw as a stranger's stays
     const open = fakeGh("loop-reopened", { stdout: ghAnswer(LOOP_PR, "OPEN") });
 
     await withGh(closed, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
-    expect(readTicket(dir, "FCX-1").delivery).toMatchObject({ state: "closed", opened_by: "loop" });
+    expect(readTicket(dir, "PRB-1").delivery).toMatchObject({ state: "closed", opened_by: "loop" });
 
     await withGh(open, () =>
       runSyncCommand({
-        argv: ["FCX-1", "--repo", repo],
+        argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date("2026-09-04T10:00:00.000Z"),
       }),
     );
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     expect(after.state).toBe("pr_open");
     expect(lastPullRequestRow(after)).toMatchObject({ handed_off: false });
   }, 30_000);
@@ -375,11 +375,11 @@ describe("ac_2 — a pull request the record only ever saw as a stranger's stays
 describe("what a failed ticket whose latest run produced nothing shows a reader", () => {
   it("names the pull request the earlier round published, dated when it was observed", () => {
     const { repo, dir } = reRunFailedTicket("reader-surfaces");
-    const ticket = readTicket(dir, "FCX-1");
+    const ticket = readTicket(dir, "PRB-1");
 
     // `inspect` first: the pull request is the one still open on the branch,
     // and no hand-off is claimed for it.
-    const report = buildInspectReport({ storeDirectory: dir, key: "FCX-1", attempt: null });
+    const report = buildInspectReport({ storeDirectory: dir, key: "PRB-1", attempt: null });
     expect(report.state).toBe("failed");
     expect(report.pull_request_url).toBe(url(LOOP_PR));
     expect(report.handed_off).toBe(false);
@@ -399,7 +399,7 @@ describe("what a failed ticket whose latest run produced nothing shows a reader"
       state: "open",
       observed_at: "2026-09-01T09:00:00.000Z",
       opened_by: "loop",
-      // SCP-192/SCP-196: written by `focrux sync` from `gh`, and this record
+      // SCP-192/SCP-196: written by `perbo sync` from `gh`, and this record
       // was left by the loop's own run, which never asked either.
       mergeable: null,
       commits_outside_loop: null,
@@ -432,12 +432,12 @@ describe("ac_3 — inspect reads the hand-off off the row, not off the edge", ()
   it("reports handed_off false for the loop's pull request, whose row is still failed -> pr_open", async () => {
     const { repo, dir } = reRunFailedTicket("inspect-loop");
     const gh = fakeGh("inspect-loop", { stdout: ghAnswer(LOOP_PR, "MERGED") });
-    await withGh(gh, () => runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }));
+    await withGh(gh, () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }));
 
-    const report = buildInspectReport({ storeDirectory: dir, key: "FCX-1", attempt: null });
+    const report = buildInspectReport({ storeDirectory: dir, key: "PRB-1", attempt: null });
     expect(report.handed_off).toBe(false);
     // The edge the old derivation read is still there, and still says nothing.
-    expect(readTicket(dir, "FCX-1").history).toContainEqual(
+    expect(readTicket(dir, "PRB-1").history).toContainEqual(
       expect.objectContaining({ from: "failed", to: "pr_open" }),
     );
   }, 30_000);
@@ -445,9 +445,9 @@ describe("ac_3 — inspect reads the hand-off off the row, not off the edge", ()
   it("reports handed_off true for a pull request the record never saw", async () => {
     const { repo, dir } = reRunFailedTicket("inspect-handoff");
     const gh = fakeGh("inspect-handoff", { stdout: ghAnswer(77, "MERGED") });
-    await withGh(gh, () => runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }));
+    await withGh(gh, () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }));
 
-    const report = buildInspectReport({ storeDirectory: dir, key: "FCX-1", attempt: null });
+    const report = buildInspectReport({ storeDirectory: dir, key: "PRB-1", attempt: null });
     expect(report.handed_off).toBe(true);
   }, 30_000);
 });
@@ -460,16 +460,16 @@ describe("ac_4 — SCP-176: an opener neither the record nor the history can att
     // no opener on it — and this ticket's history never reached `pr_open` (it
     // went to `changes_requested` instead), so there is nothing else to
     // attribute it from.
-    const before = readTicket(dir, "FCX-1");
+    const before = readTicket(dir, "PRB-1");
     writeTicket(dir, { ...before, delivery: { ...before.delivery, opened_by: null } });
     const gh = fakeGh("unrecorded-opener", { stdout: ghAnswer(LOOP_PR, "OPEN") });
 
     const code = await withGh(gh, () =>
-      runSyncCommand({ argv: ["FCX-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
-    const after = readTicket(dir, "FCX-1");
+    const after = readTicket(dir, "PRB-1");
     expect(after.state).toBe("pr_open");
 
     const opened = lastPullRequestRow(after);
@@ -477,10 +477,10 @@ describe("ac_4 — SCP-176: an opener neither the record nor the history can att
     expect(opened.note).toContain(OPENER_UNKNOWN_NOTE);
     expect(opened.note).not.toContain(HAND_OFF_NOTE);
     // On the file too, not only on the object this process built.
-    const stored = JSON.parse(readFileSync(join(dir, "tickets", "FCX-1.json"), "utf8")) as Ticket;
+    const stored = JSON.parse(readFileSync(join(dir, "tickets", "PRB-1.json"), "utf8")) as Ticket;
     expect(lastPullRequestRow(stored)).not.toHaveProperty("handed_off");
 
-    const report = buildInspectReport({ storeDirectory: dir, key: "FCX-1", attempt: null });
+    const report = buildInspectReport({ storeDirectory: dir, key: "PRB-1", attempt: null });
     expect(report.handed_off).toBeNull();
   }, 30_000);
 });

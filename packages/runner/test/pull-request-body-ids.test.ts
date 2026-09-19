@@ -5,7 +5,7 @@ import {
   type MergeMode,
   type PlanContractWithCriteria,
   type ReviewArtifact,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { pullRequestBody } from "../src/delivery.js";
 import { finding, makeContract, makeReview } from "./support.js";
 

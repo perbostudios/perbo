@@ -1,4 +1,4 @@
-# ADR-0033: Focrux desktop projects the local CLI and supports both subscription providers
+# ADR-0033: Perbo desktop projects the local CLI and supports both subscription providers
 
 - Status: accepted
 - Decision: [D-093](../11-open-decisions.md)
@@ -9,8 +9,8 @@
 
 - **Structure.** `packages/ui` owns shared primitives and visual tokens. Feature modules own presentation, and one typed, runtime-validated request protocol separates them from native capabilities. TanStack Query manages local projections and refreshes without becoming a second ticket store.
 - **Browser preview.** It uses clearly labelled sample records and cannot reach a repository or start a provider.
-- **The host and the CLI.** The host bundles the full CLI, its guard hook and a pinned standalone Node runtime, and calls fixed CLI entry points with argv, never a shell string.
-  - Native folder selection registers a canonical git checkout; later requests use repository ids.
+- **The host and the CLI.** The host bundles the full CLI and its guard hook, runs the CLI on the Node inside Electron (`ELECTRON_RUN_AS_NODE`), and calls fixed CLI entry points with argv, never a shell string.
+  - Native folder selection registers a canonical git checkout. Later requests carry repository ids, and a repository-relative path only where a surface reads one file; the host resolves it under the registered repository and refuses an absolute path, one that leaves the repository, one reached through a symlink and one nothing reads at all.
   - Contract edits and approval carry the digest of the bytes the person viewed.
   - The CLI still enforces immutable approval, scope, worktree materialization, checks, review, remediation, bundles and publication.
   - One host mutation runs at a time. Stop terminates the process group, and an interrupted command is recorded as interrupted after a restart.
@@ -18,11 +18,11 @@
 
 **Providers.** Claude Code and Codex can each be chosen for planning, execution and review, and the review's inputs do not change. The Codex executor uses native app-server tools:
 - It runs with an isolated `CODEX_HOME`, a provider-owned authentication link, a pinned provider, empty external capabilities, and an assertion that no instruction sources loaded.
-- Its native sandbox starts read-only. Focrux answers each command or file approval request with the runner's guard, never with a session-wide approval, and never executes a command or path a model returned.
+- Its native sandbox starts read-only. Perbo answers each command or file approval request with the runner's guard, never with a session-wide approval, and never executes a command or path a model returned.
 - A missing patch change list, a model reroute, or an unexpected tool capability is refused.
 - Command records distinguish native permission decisions from the runner's own admission decisions.
 
-**Cost and limits.** Codex reports no dollar measure, so its cost is `unavailable`, never free ([D-070](../11-open-decisions.md)). Limits follow [D-096](../11-open-decisions.md). Until the stall detector lands, the runner enforces cost, wall-clock and token ceilings, and any iteration or command ceiling a repository sets.
+**Cost and limits.** Codex reports no dollar measure, so its cost is `unavailable`, never free ([D-070](../11-open-decisions.md)). Limits follow [D-096](../11-open-decisions.md): a stall detector stops an attempt that shows no tool activity for the window, the cost caps bind only an executor billed per token, and any ceiling a repository sets in its own configuration still applies.
 
 **Credentials** stay owned by the provider CLIs, and the renderer never asks for them.
 

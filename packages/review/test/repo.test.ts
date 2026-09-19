@@ -12,7 +12,7 @@ import { RepoReader } from "../src/repo.js";
 const scratch: string[] = [];
 
 const repository = (): string => {
-  const root = mkdtempSync(join(tmpdir(), "focrux-repo-reader-"));
+  const root = mkdtempSync(join(tmpdir(), "perbo-repo-reader-"));
   scratch.push(root);
   mkdirSync(join(root, "src"), { recursive: true });
   writeFileSync(join(root, "src/index.ts"), "export const answer = 42;\n");

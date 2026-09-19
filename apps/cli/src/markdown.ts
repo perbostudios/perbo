@@ -1,9 +1,9 @@
-import type { CheckResult, CriterionEvidenceBinding, Finding, ReviewArtifact } from "@focrux/contracts";
+import type { CheckResult, CriterionEvidenceBinding, Finding, ReviewArtifact } from "@perbo/contracts";
 
 /**
  * The verdict as a pull-request comment (SCP-219).
  *
- * `focrux review` writes JSON, which is what the loop reads. A person posting
+ * `perbo review` writes JSON, which is what the loop reads. A person posting
  * the same verdict onto a pull request has been reformatting it by hand — and a
  * rendering done by hand is one where the finding that did not fit gets left
  * out. This is that comment body, written from the artifact.
@@ -26,7 +26,7 @@ import type { CheckResult, CriterionEvidenceBinding, Finding, ReviewArtifact } f
 /**
  * The deterministic legibility row, by the id `assessLegibility` gives it.
  *
- * `@focrux/review` exports the rule (SCP-114) and it writes this row into every
+ * `@perbo/review` exports the rule (SCP-114) and it writes this row into every
  * artifact the reviewer produces; the footer below is that row's own status and
  * summary, quoted. It is not recomputed here — there is no diff to recompute it
  * from, and a second opinion about whether the change set was readable is

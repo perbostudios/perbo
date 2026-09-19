@@ -8,7 +8,7 @@ import {
   sourceContractFromArguments,
   type PlanContractWithCriteria,
   type RunBundle,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import { BundleStore } from "../src/bundle.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import {
@@ -24,11 +24,11 @@ import {
 /**
  * The loop on a contract nobody admitted (AYO-32).
  *
- * `focrux run --ticket AYO-1` hands the loop a contract a person approved. This
+ * `perbo run --ticket AYO-1` hands the loop a contract a person approved. This
  * file hands it one minted here from what a person typed — the same
  * `sourceContractFromArguments` and `planContractFromSource` the command uses,
  * with no ticket, no admission and no key — and points the store at the
- * repository's own `.focrux/`. What is asserted is what the run leaves on disk
+ * repository's own `.perbo/`. What is asserted is what the run leaves on disk
  * afterwards: the attempts record, the bundles, the results of the pinned
  * checks that judged each round, and the one independent review, all read back
  * with the shipped `BundleStore` rather than from anything this file wrote.
@@ -58,7 +58,7 @@ const CRITERION = "total() returns the sum of its inputs :: total([1,2]) is 3 ::
 afterEach(() => vi.restoreAllMocks());
 
 /**
- * The contract as `focrux run --outcome … --criterion …` mints it, and the
+ * The contract as `perbo run --outcome … --criterion …` mints it, and the
  * label that stands where a ticket key would.
  *
  * The label is the plan's own identity, read off the contract: with nothing
@@ -94,10 +94,10 @@ function localConfig(
     ticket_key: label,
     repository_root: repo.dir,
     base_ref: "main",
-    worktree_root: join(scratch("focrux-ticketless-"), "worktrees"),
-    bundle_root: join(repo.dir, ".focrux", "bundles"),
-    quarantine_root: join(repo.dir, ".focrux", "quarantine"),
-    state_root: join(repo.dir, ".focrux", "state"),
+    worktree_root: join(scratch("perbo-ticketless-"), "worktrees"),
+    bundle_root: join(repo.dir, ".perbo", "bundles"),
+    quarantine_root: join(repo.dir, ".perbo", "quarantine"),
+    state_root: join(repo.dir, ".perbo", "state"),
     checks: [
       {
         check_id: "check_unit",
@@ -161,7 +161,7 @@ const verifier = async (input: { findings: ReadonlyArray<{ key: string }> }) => 
 });
 
 const storeOf = (repo: { dir: string }) =>
-  new BundleStore({ root: join(repo.dir, ".focrux", "bundles"), retainContext: true });
+  new BundleStore({ root: join(repo.dir, ".perbo", "bundles"), retainContext: true });
 
 /** One artifact's bytes, as the store retained them. */
 function artifactOf(store: BundleStore, bundle: RunBundle, name: string): string {
@@ -201,7 +201,7 @@ const writes = (file: string, contents: string) =>
   ({ kind: "succeed", file, contents }) as const;
 
 describe("a run with nothing admitted behind it", () => {
-  it("leaves attempts, bundles, checks and review in the repository's own .focrux/", async () => {
+  it("leaves attempts, bundles, checks and review in the repository's own .perbo/", async () => {
     const repo = makeRepo();
     const { contract, label } = mint(repo);
     const agent = fakeAgent([
@@ -225,7 +225,7 @@ describe("a run with nothing admitted behind it", () => {
 
     const attempt = result.rounds[0]!.attempt;
     const attempts = JSON.parse(
-      readFileSync(join(repo.dir, ".focrux", "state", `${contract.ticket_id}.attempts.json`), "utf8"),
+      readFileSync(join(repo.dir, ".perbo", "state", `${contract.ticket_id}.attempts.json`), "utf8"),
     ) as { ticket_id: string; attempts: Array<{ attempt_id: string }> };
     expect(attempts.ticket_id).toBe(contract.ticket_id);
     expect(attempts.attempts.map((entry) => entry.attempt_id)).toEqual([attempt.attempt_id]);
@@ -264,7 +264,7 @@ describe("a run with nothing admitted behind it", () => {
     expect(attempt.egress).toEqual([]);
 
     // And no ticket key is anywhere in what was kept.
-    const store_dir = join(repo.dir, ".focrux");
+    const store_dir = join(repo.dir, ".perbo");
     const written = filesUnder(store_dir);
     expect(written.some((path) => path.startsWith("state"))).toBe(true);
     expect(written.some((path) => path.startsWith("bundles"))).toBe(true);
@@ -311,8 +311,12 @@ describe("the ceilings a run with nothing admitted stops at", () => {
   it("stops where the spend crosses the ceiling, and keeps the stopped attempt's record", async () => {
     const repo = makeRepo();
     const { contract, label } = mint(repo);
-    // The executor reports $0.002; the ceiling is a tenth of that.
-    const agent = fakeAgent([writes("src/feature.ts", "export const total = 1;\n")]);
+    // The executor reports $0.002; the ceiling is a tenth of that. D-096: a
+    // cost ceiling cuts only an executor billed per token, so the credential
+    // the attempt records has to be an API key for one to be in force at all.
+    const agent = fakeAgent([writes("src/feature.ts", "export const total = 1;\n")], {
+      apiKeySource: "ANTHROPIC_API_KEY",
+    });
 
     const result = await runTicket({
       config: localConfig(repo, label, {
@@ -335,12 +339,12 @@ describe("the ceilings a run with nothing admitted stops at", () => {
     expect(attempt.termination.reason).toBe("cost_ceiling_exceeded");
     // The setting that raises it, named with the file it lives in.
     expect(result.detail).toContain("limits.limits.attempt_cost_micros");
-    expect(result.detail).toContain(join(repo.dir, ".focrux", "config.json"));
+    expect(result.detail).toContain(join(repo.dir, ".perbo", "config.json"));
 
     // It spent money on the way to being stopped, and the record says how much.
     expect(attempt.usage.cost_micros).toBe(2_000);
     const attempts = JSON.parse(
-      readFileSync(join(repo.dir, ".focrux", "state", `${contract.ticket_id}.attempts.json`), "utf8"),
+      readFileSync(join(repo.dir, ".perbo", "state", `${contract.ticket_id}.attempts.json`), "utf8"),
     ) as { attempts: Array<{ attempt_id: string; usage: { cost_micros: number } }> };
     expect(attempts.attempts).toHaveLength(1);
     expect(attempts.attempts[0]!.usage.cost_micros).toBe(2_000);
@@ -375,7 +379,7 @@ describe("the ceilings a run with nothing admitted stops at", () => {
     expect(agent.invocations()).toHaveLength(1);
     const attempt = result.rounds[0]!.attempt;
     const attempts = JSON.parse(
-      readFileSync(join(repo.dir, ".focrux", "state", `${contract.ticket_id}.attempts.json`), "utf8"),
+      readFileSync(join(repo.dir, ".perbo", "state", `${contract.ticket_id}.attempts.json`), "utf8"),
     ) as { attempts: unknown[] };
     expect(attempts.attempts).toHaveLength(1);
 

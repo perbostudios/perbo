@@ -1,12 +1,12 @@
-digraph FocruxDesktop {
+digraph PerboDesktop {
   graph [rankdir=LR, bgcolor="transparent", fontname="Arial", pad=0.3];
   node [shape=box, style="rounded,filled", fontname="Arial", fontsize=11, fillcolor="#FBFAF6", color="#5C4741"];
   edge [fontname="Arial", fontsize=9, color="#8A7A74"];
   engineer [label="Engineer\nContract approval and merge decision", shape=oval, fillcolor="#F7F1E6"];
-  renderer [label="Focrux renderer\nShared task projection and workspace refresh\nNo Node or credential access"];
-  host [label="Electron host\nValidated IPC and shared native reads\nOne command job and cancellation"];
+  renderer [label="Perbo renderer\nShared task projection and workspace refresh\nNo Node or credential access"];
+  host [label="Electron host\nValidated IPC and shared native reads\nPlanning jobs beside one exclusive job, and cancellation"];
   editing [label="Private local editing sessions\nIncomplete fields, revisions and operation receipts", shape=cylinder];
-  cli [label="Bundled CLI + Node runtime\nAdmission, approval, execution, inspect, sync"];
+  cli [label="Bundled CLI on Electron's Node\nAdmission, approval, execution, inspect, sync"];
   store [label="Local canonical records\nTickets, contracts, attempts, bundles", shape=cylinder];
   runner [label="Existing runner\nWorktree, scope, checks, ceilings and repair"];
   skills [label="Pinned engineering skills\nUser-selected text and hash receipt\nNo additional tools or permissions"];

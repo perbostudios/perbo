@@ -23,10 +23,10 @@ import {
   type Ticket,
   type TicketState,
   type Wait,
-} from "@focrux/contracts";
-import { RunRefusedError, ServeLockedError, acquireServeLock, liveRunLocks } from "@focrux/runner";
+} from "@perbo/contracts";
+import { RunRefusedError, ServeLockedError, acquireServeLock, liveRunLocks } from "@perbo/runner";
 import { startEndpoint, type RunningEndpoint } from "./endpoint.js";
-import { gitEnv, run } from "@focrux/workspace";
+import { gitEnv, run } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type DraftProvider } from "./admit.js";
 import { UsageError } from "./args.js";
 import { effectiveLimits, readRepoConfig, requireBase, resolveBase } from "./execute.js";
@@ -36,7 +36,7 @@ import { listTickets, readContract, readTicket, storeDir, writeTicket } from "./
 import { describeWaits } from "./waits.js";
 
 /**
- * `focrux serve` — the queue over one store (SCP-008 criterion 5, SCP-227).
+ * `perbo serve` — the queue over one store (SCP-008 criterion 5, SCP-227).
  *
  * One process that outlives a run, and does five things on a tick, in this
  * order:
@@ -44,7 +44,7 @@ import { describeWaits } from "./waits.js";
  * 1. **Fetches the base ref**, and nothing else. The runner still fetches
  *    nothing; a merge somebody made in the browser is noticed here, by the
  *    one process that is allowed to ask.
- * 2. **Reads every open pull request** through `focrux sync`, and — under
+ * 2. **Reads every open pull request** through `perbo sync`, and — under
  *    `merge: "loop"` and only then — asks the first one in queue order to
  *    merge, under every one of D-077's conditions. A ticket a killed run left
  *    mid-state, with no live run inside it, is reconciled the same way.
@@ -54,7 +54,7 @@ import { describeWaits } from "./waits.js";
  *    by the paths it changed afterwards. A wait moves the ticket to `blocked`
  *    with the reason on its record; the end of one moves it back. Set
  *    arithmetic over approved records, no model anywhere (ADR-0011).
- * 4. **Starts runs**, as child `focrux run --ticket` processes, up to
+ * 4. **Starts runs**, as child `perbo run --ticket` processes, up to
  *    `concurrent_local_attempts` minus whatever is already running — including
  *    a run a person started by hand. The run is the unit every measurement is
  *    taken on and it stays that; this only decides when it starts.
@@ -152,7 +152,7 @@ export function parseServeArgs(argv: readonly string[]): ServeArgs {
  * without a coding agent, a network or a `gh` login behind them.
  */
 export interface ServeDeps {
-  /** Start `focrux run` with `argv` as a child, and resolve when it exits. Each line says which stream it came from. */
+  /** Start `perbo run` with `argv` as a child, and resolve when it exits. Each line says which stream it came from. */
   spawnRun: (input: {
     key: string;
     argv: string[];
@@ -161,7 +161,7 @@ export interface ServeDeps {
   }) => Promise<{ code: number | null }>;
   /** `git fetch origin <base_ref>` in the checkout. */
   fetchBase: (input: { repository_root: string; base_ref: string }) => Promise<{ ok: boolean; detail: string }>;
-  /** `focrux sync <key> [--merge]`, in this process. Returns sync's own exit code. */
+  /** `perbo sync <key> [--merge]`, in this process. Returns sync's own exit code. */
   sync: (input: { key: string; merge: boolean; onLine: (line: string) => void }) => Promise<number>;
   /** The paths a sealed branch changed against the base, or null where git cannot say. */
   sealedPaths: (input: {
@@ -186,7 +186,7 @@ export interface ServeDeps {
     repository: string;
     label: string;
   }) => Promise<{ ok: true; issues: ReadonlyArray<{ number: number; title: string }> } | { ok: false; detail: string }>;
-  /** `focrux admit --from <reference> --json`, in this process: admit's exit code and the key it wrote, if it wrote one. */
+  /** `perbo admit --from <reference> --json`, in this process: admit's exit code and the key it wrote, if it wrote one. */
   draft: (input: {
     reference: string;
     provider: DraftProvider | null;
@@ -380,7 +380,7 @@ export function keyFromAdmitJson(stdout: string): string | null {
 }
 
 /**
- * `.focrux/config.json`'s `tracker`: the repository whose open issues carrying
+ * `.perbo/config.json`'s `tracker`: the repository whose open issues carrying
  * `draft_label` the queue drafts from, and the drafting provider and model
  * where the command's defaults are not wanted. Absent, the queue drafts nothing.
  */
@@ -738,7 +738,7 @@ async function runTick(queue: Queue): Promise<ServeTick> {
     live.add(ticket.key);
     running += 1;
     relevelled.push(ticket.key);
-    say(`re-levelling ${ticket.key}: focrux ${argv.join(" ")}`);
+    say(`re-levelling ${ticket.key}: perbo ${argv.join(" ")}`);
   }
 
   // 4. Starts, up to the ceiling, counting every run alive whoever started it.
@@ -773,7 +773,7 @@ async function runTick(queue: Queue): Promise<ServeTick> {
     live.add(ticket.key);
     running += 1;
     started.push(ticket.key);
-    say(`started ${ticket.key}: focrux ${argv.join(" ")}`);
+    say(`started ${ticket.key}: perbo ${argv.join(" ")}`);
   }
 
   // 5. One labelled tracker issue, drafted into plan_review: the one call a
@@ -974,7 +974,7 @@ export async function runServeCommand(input: {
         },
         now: queue.clock,
       });
-      streams.stderr(`endpoint ${endpoint.url} (\`focrux mcp\` prints the block a session pastes; \`focrux agent\` launches one)\n`);
+      streams.stderr(`endpoint ${endpoint.url} (\`perbo mcp\` prints the block a session pastes; \`perbo agent\` launches one)\n`);
     }
 
 

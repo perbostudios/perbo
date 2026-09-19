@@ -2,14 +2,14 @@ import { hostname } from "node:os";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { AttemptWaitSchema, type AttemptWait } from "@focrux/contracts";
+import { AttemptWaitSchema, type AttemptWait } from "@perbo/contracts";
 
 /**
  * One run per ticket at a time (SCP-193).
  *
  * A run can now sit out a provider's session limit for hours, which turns a
  * question nobody had to ask into one somebody will: *is this ticket already
- * running?* Without an answer, the second `focrux run` provisions a second
+ * running?* Without an answer, the second `perbo run` provisions a second
  * worktree on the same branch, mints attempt ids the first run is about to
  * mint, and one of the two loses its attempts record to a collision — after
  * both have paid for an executor.
@@ -293,7 +293,7 @@ export function acquireMergeLock(args: {
 /**
  * Every run lock under the state root whose process is still alive (SCP-227).
  *
- * `focrux serve` counts these against `concurrent_local_attempts` so a run a
+ * `perbo serve` counts these against `concurrent_local_attempts` so a run a
  * person started by hand takes a place in the same count as one the queue
  * started: the ceiling is about the laptop, not about who typed the command.
  * A stale lock is a run that ended without cleaning up, and counts for nothing.
@@ -312,7 +312,7 @@ export function liveRunLocks(state_root: string): RunLock[] {
 }
 
 /**
- * One `focrux serve` per store (SCP-227).
+ * One `perbo serve` per store (SCP-227).
  *
  * Two queues over one store would each read the same `ready` ticket and both
  * start it; the run lock would refuse the second, after both had paid for the
@@ -339,7 +339,7 @@ export class ServeLockedError extends Error {
   constructor(held: ServeLock, path: string) {
     super(
       `a queue is already running over ${held.repository_root}: pid ${held.pid} on ${held.host}, ` +
-        `started ${held.started_at}. One \`focrux serve\` per store; stop that one to start another ` +
+        `started ${held.started_at}. One \`perbo serve\` per store; stop that one to start another ` +
         `(the lock is ${path}, and a queue that ended leaves none)`,
     );
     this.name = "ServeLockedError";

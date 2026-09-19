@@ -1,15 +1,15 @@
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
-import { isCredentialEnvName, scrubEnvironment } from "@focrux/contracts";
+import { isCredentialEnvName, scrubEnvironment } from "@perbo/contracts";
 import {
   CLAUDE_CLI_ENV_ALLOW_LIST,
   providerFailureText,
   redactCredentials,
   codexCliModel,
-} from "@focrux/review";
+} from "@perbo/review";
 
 /**
- * One minimal call to the reviewer, made by `focrux doctor --probe` before an
+ * One minimal call to the reviewer, made by `perbo doctor --probe` before an
  * attempt has spent anything.
  *
  * Every other check `doctor` makes is local: a binary is on PATH, a version is
@@ -204,7 +204,7 @@ function fixFor(
             "reviewer_provider to `claude-cli` to review on your Claude Code login";
     case "unknown_model":
       return (
-        `set reviewer_model in .focrux/config.json to a model this account can call — \`${request.model}\` ` +
+        `set reviewer_model in .perbo/config.json to a model this account can call — \`${request.model}\` ` +
         "is not one — or remove it to take the default"
       );
     case "rate_limit":
@@ -522,7 +522,7 @@ export function configuredReviewer(
  * reported and the exit code is the one `doctor` would have had anyway. It
  * becomes blocking exactly where this checkout's own reasons say a command
  * would depend on the provider — `--publish` opens the pull request only after
- * a review, and a `.focrux/config.json` is the file `focrux run` is configured
+ * a review, and a `.perbo/config.json` is the file `perbo run` is configured
  * from, and every run reviews.
  *
  * The reason states only what is true of the file in front of it. A config that
@@ -566,7 +566,7 @@ export function reviewerDependency(input: {
           `the default \`${input.provider}\``;
     return {
       blocking: true,
-      reason: `\`focrux run\` here reviews through this provider — ${names} — so a provider that will not answer is blocking`,
+      reason: `\`perbo run\` here reviews through this provider — ${names} — so a provider that will not answer is blocking`,
     };
   }
   return {

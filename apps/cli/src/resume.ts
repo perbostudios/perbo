@@ -14,8 +14,8 @@ import {
   type PlanContract,
   type PlanContractWithCriteria,
   type ReviewArtifact,
-} from "@focrux/contracts";
-import { deriveDecision } from "@focrux/review";
+} from "@perbo/contracts";
+import { deriveDecision } from "@perbo/review";
 
 /**
  * Resuming an unfinished review.
@@ -79,7 +79,18 @@ export function contractForUnresolved(
   if (remaining.length === 0) {
     throw new Error("the resumed review has no unresolved criteria left");
   }
-  return PlanContractSchema.parse({ ...contract, acceptance_criteria: remaining });
+  // A node's own criteria narrow with the plan's: one still naming a
+  // resolved criterion is not a contract the schema's node/criteria check
+  // would parse, and a node left with none of the unresolved criteria has
+  // nothing left to gate.
+  const nodes = contract.nodes
+    ?.map((node) => ({ ...node, criteria: node.criteria.filter((id) => wanted.has(id)) }))
+    .filter((node) => node.criteria.length > 0);
+  return PlanContractSchema.parse({
+    ...contract,
+    acceptance_criteria: remaining,
+    ...(nodes === undefined ? {} : { nodes }),
+  });
 }
 
 /**

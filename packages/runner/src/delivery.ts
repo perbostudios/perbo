@@ -22,9 +22,9 @@ import {
   type StopAnswerer,
   type StopRouting,
   type TicketSource,
-} from "@focrux/contracts";
-import { gitEnv, isAttemptBranch, run } from "@focrux/workspace";
-import { redactCredentials } from "@focrux/review";
+} from "@perbo/contracts";
+import { gitEnv, isAttemptBranch, run } from "@perbo/workspace";
+import { redactCredentials } from "@perbo/review";
 import { requireGithubCredential } from "./github-credential.js";
 
 /**
@@ -84,7 +84,7 @@ export interface PushRequest {
  * branch behind. The name is a digest of the outcome, so the next run on the
  * same outcome mints the same name over a different commit and its push is
  * rejected non-fast-forward — and stays rejected on every later run until the
- * branch is deleted. The loop owns the `fcx/` and `ayo/` namespaces, so a
+ * branch is deleted. The loop owns the `prb/` and `ayo/` namespaces, so a
  * leftover there with no open pull request standing on it is the loop's own to
  * replace, under a lease on the tip it read: a branch that moved between the
  * read and the push is not overwritten.
@@ -99,12 +99,12 @@ export async function pushAttemptBranch(request: PushRequest): Promise<{ pushed:
   // else. That is the branch provisioning chose — derived from the plan, or one
   // already recorded for this ticket under its own id (`recordedBranch`) — and
   // never anything the agent produced. This check reads only the namespace: it
-  // is what keeps the replacement below to `fcx/` and `ayo/`, since nothing
+  // is what keeps the replacement below to `prb/` and `ayo/`, since nothing
   // else ever reaches the push at all.
   if (!isAttemptBranch(request.branch)) {
     throw new DeliveryError(
       "refusing to push",
-      `${request.branch} is not an attempt branch (fcx/<ticket id>/<slug> or ayo/<ticket id>/<slug>)`,
+      `${request.branch} is not an attempt branch (prb/<ticket id>/<slug> or ayo/<ticket id>/<slug>)`,
     );
   }
   const remote = request.remote ?? "origin";
@@ -289,13 +289,13 @@ export function pullRequestBody(args: {
    * ticks in the pull-request UI, and `pollPullRequest` reads the ticks back.
    * The visible text is the pinned question in the person's own words. The
    * comment carries the finding key, so the answer survives any rewording, and
-   * the rule id and routing, so the record `focrux sync` writes needs nothing
+   * the rule id and routing, so the record `perbo sync` writes needs nothing
    * but the body. The rule id is reduced to marker-safe characters first: it
    * is model output, and must not be able to close the comment.
    */
   const stopBoxes = (finding: (typeof review.findings)[number], routing: StopRouting): string => {
     const marker = (answer: StopAnswer) =>
-      `<!-- focrux:stop key=${finding.key} answer=${answer} rule=${markerSafe(finding.rule_id)} routing=${routing} -->`;
+      `<!-- perbo:stop key=${finding.key} answer=${answer} rule=${markerSafe(finding.rule_id)} routing=${routing} -->`;
     return [
       `  - [ ] I wanted to be asked before this was fixed ${marker("endorse")}`,
       `  - [ ] The agent should have fixed this on its own ${marker("override")}`,
@@ -465,7 +465,7 @@ export function pullRequestBody(args: {
           "",
           `${remediable.length} finding${remediable.length === 1 ? " was" : "s were"} returned to the ` +
             "executor and verified closed before this was opened; " +
-            `\`focrux inspect ${contract.ticket_id}\` lists them.`,
+            `\`perbo inspect ${contract.ticket_id}\` lists them.`,
         ]),
     ...findingSections,
     ...(redactions > 0
@@ -490,20 +490,20 @@ export function pullRequestBody(args: {
     // somebody who holds none of this repository's decision records: it says
     // what merging waits on and names no document of ours.
     (args.merge ?? "person") === "loop"
-      ? "Opened by Focrux. **The loop merges this**, and only when a separate review run has " +
+      ? "Opened by Perbo. **The loop merges this**, and only when a separate review run has " +
         "approved this head by name, the checks on it are green, GitHub reports it mergeable, " +
         "every commit carries the loop's attempt trailer and a verified signature, and nothing " +
         "outside the loop has touched the branch since the approval. Any of those missing is a " +
         "stop that names itself and comes to you."
-      : "Opened by Focrux. **A human merges this.** The executor and the reviewer are the same " +
+      : "Opened by Perbo. **A human merges this.** The executor and the reviewer are the same " +
         "system, so auto-merge would collapse the independence the verification gate depends on.",
     "",
-    `<!-- focrux:stops n=${blocking.length + declined.length} ticket=${contract.ticket_id} -->`,
+    `<!-- perbo:stops n=${blocking.length + declined.length} ticket=${contract.ticket_id} -->`,
     // Invisible to a reader and read by nothing: the convention is written
     // beside the boxes so that whoever answers them — a person clicking, or the
     // stand-in editing the body through `gh` — meets the rule where the boxes
     // are rather than in a document they do not have.
-    `<!-- focrux:answered-by-convention ${ANSWERED_BY_CONVENTION} -->`,
+    `<!-- perbo:answered-by-convention ${ANSWERED_BY_CONVENTION} -->`,
   ].join("\n");
 }
 
@@ -518,13 +518,13 @@ const markerSafe = (value: string): string => value.replace(/[^A-Za-z0-9_.:-]/g,
  * interpreted — it is content read back from GitHub, and it is data.
  */
 const STOP_LINE =
-  /^\s*[-*]\s+\[([ xX])\]\s.*<!--\s*focrux:stop\s+key=([0-9a-f]{64})\s+answer=(endorse|override)\s+rule=([A-Za-z0-9_.:-]+)\s+routing=(blocks|escalates|declined)\s*-->(.*)$/;
+  /^\s*[-*]\s+\[([ xX])\]\s.*<!--\s*perbo:stop\s+key=([0-9a-f]{64})\s+answer=(endorse|override)\s+rule=([A-Za-z0-9_.:-]+)\s+routing=(blocks|escalates|declined)\s*-->(.*)$/;
 
 /**
  * A tick signed by whoever made it (D-058). The GitHub UI writes no such
  * marker, which is the point: a person clicking the box leaves an unsigned
  * tick, and the AI stand-in answering through `gh` writes
- * `<!-- focrux:answered-by who=stand_in -->` on the line it ticks so that its
+ * `<!-- perbo:answered-by who=stand_in -->` on the line it ticks so that its
  * answer can be told from a person's and kept out of every partner reading.
  *
  * A body is untrusted text, so what it may do is bounded, and the bound is
@@ -538,7 +538,7 @@ const STOP_LINE =
  * a partner number is, so a body that signs its whole population away shrinks
  * a visible count rather than a silent one.
  */
-const ANSWERED_BY_MARKER = /<!--\s*focrux:answered-by\s+who=(person|stand_in)\s*-->/;
+const ANSWERED_BY_MARKER = /<!--\s*perbo:answered-by\s+who=(person|stand_in)\s*-->/;
 
 /**
  * The convention itself, written into the body beside the boxes so that whoever
@@ -554,10 +554,10 @@ const ANSWERED_BY_MARKER = /<!--\s*focrux:answered-by\s+who=(person|stand_in)\s*
  */
 export const ANSWERED_BY_CONVENTION =
   "an AI standing in for a person, answering these boxes on their behalf, marks the line it " +
-  "ticks with an focrux:answered-by who=stand_in HTML comment, so that its answer is recorded " +
+  "ticks with an perbo:answered-by who=stand_in HTML comment, so that its answer is recorded " +
   "as the machine's and left out of every number reported as a person's. An unsigned tick is " +
   "a person's. A tick already recorded as the stand-in's stays the stand-in's until somebody " +
-  "says otherwise: mark the line with an focrux:answered-by who=person HTML comment to record " +
+  "says otherwise: mark the line with an perbo:answered-by who=person HTML comment to record " +
   "it as your own answer.";
 
 /**
@@ -711,7 +711,7 @@ export const TicketDeliveryStateSchema = z.strictObject({
    * recorded and never leave — the same rule `finding_outcomes` below follows,
    * and it is why this is read here rather than by handing the bodies on.
    *
-   * `focrux sync` reads it to decide where a ticket behind a closed pull
+   * `perbo sync` reads it to decide where a ticket behind a closed pull
    * request goes (D-083). Defaulted so a record written before it parses.
    */
   d073_verdicts: z

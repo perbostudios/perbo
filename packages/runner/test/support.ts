@@ -21,7 +21,8 @@ import {
   type MaterializationManifest,
   type PlanContract,
   type ReviewArtifact,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
+import { BriefRecordsSchema, type BriefRecords } from "../src/brief.js";
 
 /**
  * How long a test that starts processes is given before vitest kills it.
@@ -73,7 +74,7 @@ export const git = (cwd: string, ...args: string[]) =>
  */
 const madeScratch: string[] = [];
 
-export const scratch = (prefix = "focrux-runner-") => {
+export const scratch = (prefix = "perbo-runner-") => {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   madeScratch.push(dir);
   return dir;
@@ -95,7 +96,7 @@ afterAll(() => {
 
 /** A repository with a lockfile, a test script, and committed agent configuration. */
 export function makeRepo(options: { agentConfig?: boolean } = {}): { dir: string; head: string } {
-  const dir = scratch("focrux-repo-");
+  const dir = scratch("perbo-repo-");
   git(dir, "init", "-q", "-b", "main");
   // Repository-local identity, so a fixture does not depend on the developer's
   // global Git configuration — and does not fail on a machine that signs
@@ -178,16 +179,48 @@ export type FakeAgentBehaviour =
   | { kind: "scripted"; steps: readonly ScriptedStep[] }
   | { kind: "succeed"; file: string; contents: string };
 
+/**
+ * The subagent a step belongs to, as the stream and the hook name it
+ * (ADR-0038): `parent` is the id of the subagent-starting call that started
+ * it — named `Agent`, or `Task` under its former name — which the child's own
+ * events carry as `parent_tool_use_id`; `id` and `type` are the `agent_id`
+ * and role the child's hook payload carries and the top-level session's does
+ * not. Omitted, the step is the top-level session's own.
+ */
+export interface ScriptedAgent {
+  parent: string;
+  id: string;
+  type: string;
+}
+
 /** One step of a `scripted` behaviour. */
 export type ScriptedStep =
-  /** An assistant message carrying one `tool_use` block with this id. */
-  | { step: "tool_use"; id: string; tool: string; input: Record<string, unknown> }
+  /**
+   * An assistant message carrying one `tool_use` block with this id.
+   *
+   * `input` is null for the block a torn or truncated line leaves behind,
+   * which carries a tool name and no input at all — the shape every reader of
+   * `block.input` has to survive.
+   */
+  | {
+      step: "tool_use";
+      id: string;
+      tool: string;
+      input: Record<string, unknown> | null;
+      agent?: ScriptedAgent;
+    }
   /** An assistant message that is only words — what the executor's account arrives as. */
-  | { step: "text"; text: string }
+  | { step: "text"; text: string; agent?: ScriptedAgent }
   /** Run the `PreToolUse` hook from the invocation's own `--settings` file. */
-  | { step: "hook"; id: string; tool: string; input: Record<string, unknown> }
+  | {
+      step: "hook";
+      id: string;
+      tool: string;
+      input: Record<string, unknown>;
+      agent?: ScriptedAgent;
+    }
   /** The tool's result, as a `user` message — the first event that follows the hook. */
-  | { step: "tool_result"; id: string; text: string; is_error?: boolean }
+  | { step: "tool_result"; id: string; text: string; is_error?: boolean; agent?: ScriptedAgent }
   /** A `system` event, which is emitted while the hook is still running. */
   | { step: "system"; subtype: string }
   /** The result envelope, with any refusals the agent's own layer reports. */
@@ -205,11 +238,23 @@ export type ScriptedStep =
  * and the last one repeats, and `--version` answers the fingerprint without
  * consuming one.
  */
-export function fakeAgent(behaviours: readonly FakeAgentBehaviour[]): {
+export function fakeAgent(
+  behaviours: readonly FakeAgentBehaviour[],
+  options: {
+    /**
+     * What the init line reports the executor's credential came from, which is
+     * what the runner reads to decide whether a cost cap applies (D-096).
+     * `none` is a subscription login, which is what the real binary reports on
+     * a developer machine and what a caller that says nothing gets; a name is
+     * an API key, billed per token.
+     */
+    apiKeySource?: string;
+  } = {},
+): {
   binary: string;
   invocations: () => Array<{ cwd: string }>;
 } {
-  const dir = scratch("focrux-fake-agent-");
+  const dir = scratch("perbo-fake-agent-");
   const binary = join(dir, "agent.cjs");
   const calls = join(dir, "invocations.json");
   const source = `#!/usr/bin/env node
@@ -237,7 +282,7 @@ const emit = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
 emit({
   type: "system",
   subtype: "init",
-  apiKeySource: "none",
+  apiKeySource: ${JSON.stringify(options.apiKeySource ?? "none")},
   mcp_servers: [],
   plugins: [],
   skills: [],
@@ -357,9 +402,11 @@ if (behaviour.kind === "scripted") {
     return settings.hooks.PreToolUse[0].hooks[0].command;
   };
   for (const step of behaviour.steps) {
+    const child = step.agent ? { parent_tool_use_id: step.agent.parent } : {};
     if (step.step === "tool_use") {
       emit({
         type: "assistant",
+        ...child,
         message: {
           content: [{ type: "tool_use", id: step.id, name: step.tool, input: step.input }],
           usage: { input_tokens: 7, output_tokens: 2 },
@@ -368,6 +415,7 @@ if (behaviour.kind === "scripted") {
     } else if (step.step === "text") {
       emit({
         type: "assistant",
+        ...child,
         message: {
           content: [{ type: "text", text: step.text }],
           usage: { input_tokens: 7, output_tokens: 2 },
@@ -381,11 +429,13 @@ if (behaviour.kind === "scripted") {
         tool_name: step.tool,
         tool_input: step.input,
         tool_use_id: step.id,
+        ...(step.agent ? { agent_id: step.agent.id, agent_type: step.agent.type } : {}),
       });
       execFileSync("/bin/sh", ["-c", hookCommand()], { input, encoding: "utf8" });
     } else if (step.step === "tool_result") {
       emit({
         type: "user",
+        ...child,
         message: {
           content: [
             {
@@ -817,3 +867,69 @@ export function makeReview(overrides: {
     error: overrides.error ?? null,
   });
 }
+
+/**
+ * A round's records as the re-injected brief's state block reads them (D-096).
+ *
+ * A graph with two nodes, one of which has a failed check, so the two things
+ * the block must get right — criteria grouped by node, and a node's state read
+ * from the per-node results — are both exercised by the default. Overrides
+ * empty `nodes` for a flat plan and `checks` for a round nothing has measured.
+ */
+export const briefRecords = (overrides: Record<string, unknown> = {}): BriefRecords =>
+  BriefRecordsSchema.parse({
+    outcome: "The feature module exports a computed total",
+    acceptance_criteria: [
+      {
+        id: "ac_1",
+        text: "total() returns the sum of its inputs",
+        expected_verification: { kind: "test", assertion: "total([1,2]) is 3" },
+      },
+      {
+        id: "ac_2",
+        text: "the report renders the total",
+        expected_verification: { kind: "test", assertion: "the row shows 3" },
+      },
+    ],
+    nodes: [
+      { id: "node_total", title: "The total", criteria: ["ac_1"], paths: ["src/total/**"] },
+      { id: "node_report", title: "The report", criteria: ["ac_2"], paths: ["src/report/**"] },
+    ],
+    paths_allowed: ["src/**", "test/**"],
+    paths_prohibited: [".github/**", "specs/**"],
+    no_gos: ["No new dependency reaches the lockfile"],
+    principles: null,
+    checks: [
+      {
+        check_id: "check_unit",
+        name: "unit",
+        kind: "unit",
+        status: "failed",
+        summary: "Tests  1 failed (12)",
+        command: "pnpm exec vitest run test/total.test.ts",
+        detail: null,
+        duration_ms: 1200,
+        source: "file",
+        node: { node_id: "node_total", paths: ["test/total.test.ts"], scope: "files", note: null },
+      },
+      {
+        check_id: "check_unit",
+        name: "unit",
+        kind: "unit",
+        status: "passed",
+        summary: "Tests  12 passed (12)",
+        command: "pnpm exec turbo run test",
+        detail: null,
+        duration_ms: 900,
+        source: "file",
+        node: {
+          node_id: "node_report",
+          paths: [],
+          scope: "task",
+          note: "no changed file inside the node's paths is a test file",
+        },
+      },
+    ],
+    open_findings: [finding()],
+    ...overrides,
+  });

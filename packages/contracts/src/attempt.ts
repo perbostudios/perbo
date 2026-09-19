@@ -84,6 +84,19 @@ export const TERMINATION_REASONS = [
   "round_iteration_ceiling_exceeded",
   "token_ceiling_exceeded",
   "cost_ceiling_exceeded",
+  /**
+   * The executor showed no tool activity for `attempt_stall_ms` (D-096).
+   *
+   * A hang, not a ceiling on the work: nothing bounds how long an attempt runs
+   * or what it spends, and what the stall detector measures is the gap since
+   * the last tool call or tool result the runner saw on the stream. A long
+   * attempt working steadily never reaches it, and an attempt that reaches it
+   * had stopped doing anything a while ago. The run ends here rather than
+   * starting another attempt over the sealed work: a cost cut stopped an
+   * attempt that was making progress, and this one stopped an attempt that was
+   * not, so the same brief against the same tree would hang the same way.
+   */
+  "stalled",
   "prohibited_action",
   "unlisted_egress_host",
   "agent_configuration_present",
@@ -108,12 +121,13 @@ export type TerminationReason = (typeof TERMINATION_REASONS)[number];
 
 /**
  * BYOK, recorded (D-009). `subscription` means the agent authenticated with the
- * user's own login and Focrux never saw a credential; `user_api_key` means the
+ * user's own login and Perbo never saw a credential; `user_api_key` means the
  * user's key was already in the environment. There is no third value, because
  * there is no arrangement in which the platform funds inference.
  */
 export const CREDENTIAL_CLASSES = ["subscription", "user_api_key", "unknown"] as const;
 export const CredentialClassSchema = z.enum(CREDENTIAL_CLASSES);
+export type CredentialClass = (typeof CREDENTIAL_CLASSES)[number];
 
 export const AgentInvocationSchema = z.strictObject({
   adapter: z.string().min(1),
@@ -194,6 +208,19 @@ export const CommandRecordSchema = z.strictObject({
    * changing between them, and it is worth a person's attention either way.
    */
   second_reading: z.string().min(1).nullable().default(null),
+  /**
+   * The agent that made the call (D-106): the role a subagent was started
+   * from, and null for the executor's own top-level session. The role rather
+   * than the agent's id, because it is the name a person reads and the one
+   * both of the runner's readings can produce — the stream carries the
+   * subagent-starting call's `subagent_type` (the call is named `Agent`, or
+   * `Task` under its former name) and the guard's hook is handed `agent_type`,
+   * while only the hook is handed the id. Two subagents of one role are told
+   * apart by their calls' `sequence`, not by this.
+   *
+   * Defaults to null so a record written before the field existed parses.
+   */
+  agent: z.string().min(1).nullable().default(null),
   at: z.iso.datetime(),
 });
 export type CommandRecord = z.infer<typeof CommandRecordSchema>;
@@ -299,7 +326,7 @@ export const EnvironmentRecordSchema = z.strictObject({
  * Where a resumed attempt's starting tree came from (SCP-154).
  *
  * An attempt a ceiling cut leaves its work in the retained `change.diff` of its
- * execution bundle. `focrux run --resume-from <bundle_id>` applies those bytes
+ * execution bundle. `perbo run --resume-from <bundle_id>` applies those bytes
  * into the new attempt's worktree before the executor is invoked, and this is
  * the record of it: which bundle, whose attempt, and the exact bytes by hash.
  * The predecessor is named on `continues_attempt_id` as well, because a resume
@@ -367,6 +394,40 @@ export const VerifiedCommitSchema = z.strictObject({
   verified: z.boolean(),
 });
 export type VerifiedCommit = z.infer<typeof VerifiedCommitSchema>;
+
+/**
+ * The longest agent or thread id a re-injection's target carries. Neither id in
+ * use is longer than a UUID, so a value past this is the wrong field in the record,
+ * not a long id; the room above a UUID is for a provider that lengthens its
+ * ids without a schema change here.
+ */
+export const BRIEF_TARGET_MAX_CHARS = 200;
+
+/**
+ * One time this attempt's brief was given back after a compaction (D-096).
+ *
+ * Small on purpose. What the record has to answer is that it happened, where
+ * it went and when; the text itself is the round's brief, which the execution
+ * bundle holds as `prompt.txt`, plus a state block composed from the records
+ * this same attempt carries. A second copy of either would be a second thing
+ * to drift.
+ */
+export const BriefReinjectionSchema = z.strictObject({
+  /**
+   * The agent or thread it went to: a subagent's `agent_id` on Claude, the
+   * thread id on Codex, and null for the attempt's own top-level session
+   * (ADR-0038).
+   */
+  target: z.string().min(1).max(BRIEF_TARGET_MAX_CHARS).nullable().default(null),
+  /**
+   * Which mechanism carried it: Claude Code's `SessionStart` hook under the
+   * `compact` matcher, or `thread/inject_items` answering a Codex
+   * `contextCompaction` item.
+   */
+  mechanism: z.enum(["session_start_hook", "thread_inject_items"]),
+  at: z.iso.datetime(),
+});
+export type BriefReinjection = z.infer<typeof BriefReinjectionSchema>;
 
 /**
  * The longest executor account an attempt record carries (D-092).
@@ -461,6 +522,13 @@ export const ExecutionAttemptSchema = z.strictObject({
    */
   executor_account: z.string().min(1).max(EXECUTOR_ACCOUNT_MAX_CHARS).nullable().default(null),
   /**
+   * Every time this attempt's brief was given back after a compaction (D-096),
+   * oldest first: the executor's own session and each subagent or thread of
+   * it. Empty where nothing compacted, which is the ordinary case, and
+   * defaulted so a record written before the field existed parses.
+   */
+  brief_reinjections: z.array(BriefReinjectionSchema).default([]),
+  /**
    * The cut attempt's execution bundle this attempt was resumed from, or null
    * where the attempt started from the base commit alone. Defaulted, so a
    * record written before resuming existed parses.
@@ -478,6 +546,20 @@ export const ExecutionAttemptSchema = z.strictObject({
    * the executor. Defaulted, so a record written before merging up parses.
    */
   merged_base: CommitShaSchema.nullable().default(null),
+  /**
+   * D-103: the commit the branch's spec sits in — the first commit past the
+   * contract's base, holding the files approval recorded and nothing else.
+   *
+   * The loop makes it before the executor is invoked and the run that made it
+   * and every round after it name the same commit, so a reader asking which
+   * part of the branch the review did not read has the answer here rather than
+   * deriving it from the range. Null in four cases: a ticket admitted without
+   * a spec, a base that already holds every recorded file so there was nothing
+   * for a commit to add, a branch that already had commits when no run had
+   * recorded a spec commit for it, and a record written before the loop
+   * committed one at all.
+   */
+  spec_commit: CommitShaSchema.nullable().default(null),
   /**
    * SCP-263: the processes still running from inside the worktree when this
    * attempt ended, which the runner signalled before the worktree was removed.
@@ -502,9 +584,11 @@ export const ExecutionAttemptSchema = z.strictObject({
    * earlier attempt sealed.
    *
    * Null where nothing has measured it — a record written before the field
-   * existed, and a ticket whose every attempt so far started somewhere other
-   * than the base. The review is then told nothing, which it reads as unknown;
-   * `false` would say the base is broken, which is a different claim.
+   * existed, a ticket whose every attempt so far started somewhere other than
+   * the base, and a manifest whose verify command measures nothing
+   * (`git status --porcelain`, D-013). The review is then told nothing, which it
+   * reads as unknown; `false` would say the base is broken, which is a
+   * different claim.
    */
   base_verification: VerifiedCommitSchema.nullable().default(null),
   /**
@@ -513,7 +597,8 @@ export const ExecutionAttemptSchema = z.strictObject({
    * For an attempt that took over a branch, that commit is the ticket's own
    * sealed head rather than the contract's base, so it is recorded under its
    * own name and never stands in for `base_verification`. Null where the
-   * manifest's verify did not run, and on a record written before the field
+   * manifest's verify did not run, where it measures nothing
+   * (`git status --porcelain`, D-013), and on a record written before the field
    * existed.
    */
   provisioning_verify: VerifiedCommitSchema.nullable().default(null),
@@ -521,7 +606,7 @@ export const ExecutionAttemptSchema = z.strictObject({
    * SCP-193: the wait the loop sat out before the attempt that followed this
    * one, or null where nothing parked the run. Written when the wait starts
    * rather than when it ends, so a process killed mid-wait leaves the record
-   * that lets the next `focrux run` honour the remainder. Defaulted, so a
+   * that lets the next `perbo run` honour the remainder. Defaulted, so a
    * record written before parking existed parses.
    */
   wait: AttemptWaitSchema.nullable().default(null),

@@ -1,0 +1,29 @@
+{
+  "id": "ver-010-node-local-verification-proxy",
+  "class": "verification_defect",
+  "defective": true,
+  "plan_level": "P1",
+  "source": {
+    "kind": "documented_pattern",
+    "reference": "Off-by-one pagination offset, with a test authored against the same wrong intuition",
+    "url": ["https://en.wikipedia.org/wiki/Off-by-one_error"],
+    "derivation": "reconstructed",
+    "upstream_licence": "n/a",
+    "code_copied": false
+  },
+  "defect": "page.ts computes the pagination offset as page*page_size instead of (page-1)*page_size, so every page returns the next page's rows: page 1 skips the first page_size rows entirely.",
+  "why_it_is_hard": "page.test.ts asserts only that a full page has exactly page_size rows, never which rows — a proxy for the real criterion, which is that page N starts at (N-1)*page_size. The count-only assertion passes on the off-by-one implementation exactly as it would on a correct one, so the node's own check is green and its own test is green.",
+  "expected_detection": {
+    "mode": "coverage",
+    "criterion_ids": ["ac_1"],
+    "files": ["packages/audit/src/page.ts"],
+    "rule_prefixes": [],
+    "statuses": ["not_met"],
+    "strengths": ["proxy", "asserted_only"]
+  },
+  "forbidden_strings": [],
+  "must_not_approve": false,
+  "authored_on": "2026-09-17",
+  "authored_before_reviewer": false,
+  "notes": "Exercises per-node review (D-107, SCP-328): the defect and its own weak test are both entirely inside node_page's own diff and own criterion (ac_1), reachable by a node-scoped review reading only page.ts, page.test.ts and ac_1 — the hypothesis D-107 states, that a review sized to the change it judges is more likely to notice a test that does not pin down what it claims to. Paired with req-011, which exercises the opposite direction."
+}

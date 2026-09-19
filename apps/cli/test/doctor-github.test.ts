@@ -3,11 +3,11 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { DiagnosticResultSchema, type DiagnosticResult } from "@focrux/contracts";
+import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts";
 import { runDoctorCommand, type DoctorOptions } from "../src/execute.js";
 
 /**
- * SCP-200 criterion 2: `focrux doctor` says which credential path GitHub is
+ * SCP-200 criterion 2: `perbo doctor` says which credential path GitHub is
  * read through and whether it answers — and never the token.
  *
  * The machine is real here: the `gh` on PATH is a fake binary and the preflight
@@ -18,7 +18,7 @@ import { runDoctorCommand, type DoctorOptions } from "../src/execute.js";
 
 const SPAWN_DEADLINE_MS = 20_000;
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-doctor-github-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-doctor-github-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const SENTINEL = "ghp_scp200doctorsentinelvalue";
@@ -190,7 +190,7 @@ function checksBlock(text: string): string[] {
   return block;
 }
 
-describe("what `focrux doctor` reports about the checks on a pull request", () => {
+describe("what `perbo doctor` reports about the checks on a pull request", () => {
   it(
     "says no, beside the pinned checks it proposes, where nothing triggers on one",
     async () => {
@@ -349,7 +349,7 @@ async function doctor(
   return out.join("");
 }
 
-describe("what `focrux doctor` reports about the GitHub credential", () => {
+describe("what `perbo doctor` reports about the GitHub credential", () => {
   it(
     "names GH_TOKEN as the path and says it answers, without printing it",
     async () => {

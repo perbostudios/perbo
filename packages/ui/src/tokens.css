@@ -1,5 +1,5 @@
-/* Focrux colour, type and geometry tokens. Light is the base palette; the dark
-   palette is the Focrux Desktop Dark canvas, applied by the viewer's system
+/* Perbo colour, type and geometry tokens. Light is the base palette; the dark
+   palette is the Perbo Desktop Dark canvas, applied by the viewer's system
    preference unless data-theme on the document says otherwise. */
 :root {
   color-scheme: light;

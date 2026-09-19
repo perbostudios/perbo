@@ -9,8 +9,8 @@ import {
   WARM_START_TARGET_MS,
   manifestHash,
   type MaterializationManifest,
-} from "@focrux/contracts";
-import { diagnose, validateManifest } from "./diagnostic.js";
+} from "@perbo/contracts";
+import { diagnose, isGreenfieldVerify, validateManifest } from "./diagnostic.js";
 import { run } from "./exec.js";
 import { materialize } from "./materialize.js";
 import { cleanup, gitEnv, provision, type Workspace } from "./worktree.js";
@@ -291,13 +291,17 @@ export async function runExperiment(
       ...(spec.verify_command ? { verify_command: spec.verify_command } : {}),
       ...(spec.verify_timeout_ms ? { verify_timeout_ms: spec.verify_timeout_ms } : {}),
     });
-    if (!diagnostic.proposed) {
+    // What is measured is a start up to the repository's own suite, green. A
+    // proposal that verifies with `git status --porcelain` has no suite, so
+    // timing it would report a start nothing proved; it is not measured, and
+    // the findings say why.
+    if (!diagnostic.proposed || isGreenfieldVerify(diagnostic.proposed.verify.command)) {
       results.push({
         name: spec.name,
         label: spec.label ?? spec.name,
         diagnosed_from: sourceCheckout,
         repository_id: spec.repository_id,
-        package_manager: "unknown",
+        package_manager: diagnostic.proposed?.install.package_manager ?? "unknown",
         workspaces: null,
         head_commit: "",
         clone_ms,
@@ -315,8 +319,16 @@ export async function runExperiment(
       ...diagnostic.proposed,
       source_checkout: sourceCheckout,
       entries: [...diagnostic.proposed.entries, ...(spec.extra_entries ?? [])],
+      // A spec's install runs: where the proposal installs nothing, its kind
+      // would skip the command the spec names.
       ...(spec.install_command
-        ? { install: { ...diagnostic.proposed.install, command: spec.install_command } }
+        ? {
+            install: {
+              ...diagnostic.proposed.install,
+              kind: diagnostic.proposed.install.kind === "none" ? "shared_store" : diagnostic.proposed.install.kind,
+              command: spec.install_command,
+            },
+          }
         : {}),
       isolation: {
         ...diagnostic.proposed.isolation,

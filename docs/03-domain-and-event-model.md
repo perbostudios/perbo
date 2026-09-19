@@ -1,6 +1,6 @@
 # Domain and Event Model
 
-Focrux keeps one local domain: a directory of JSON records under `.focrux/`, validated by the Zod schemas in `@focrux/contracts`, which are the truth about the shape of every record below. Attempts, bundles and verdicts are appended and never rewritten, and a ticket's `history` records every transition, so there is no separate event bus or outbox.
+Perbo keeps one local domain: a directory of JSON records under `.perbo/`, validated by the Zod schemas in `@perbo/contracts`, which are the truth about the shape of every record below. Attempts, bundles and verdicts are appended and never rewritten, and a ticket's `history` records every transition, so there is no separate event bus or outbox.
 
 ```text
 Ticket → PlanContract → ExecutionAttempt → ChangeSet + CheckResult[] → ReviewArtifact → pull request → MERGED
@@ -10,7 +10,7 @@ Each planning, execution, review or delivery step along that trace also writes a
 
 ## Ticket
 
-The unit of intent, keyed `FCX-<n>` — a ticket already carrying an `AYO-<n>` key keeps it. A ticket exists only because someone **admitted** it with `focrux admit`, typically from an existing GitHub, Jira or Linear issue, a pasted file, or nothing (`kind: none`). There is no importer and no bulk create, so "no backlog migration" is a property of the schema, not a promise ([ADR-0027](adr/0027-own-the-ticket-natively.md), [D-003](11-open-decisions.md)). Before admission Focrux holds no claim; from admission it is authoritative for the ticket's intent, priority, status and acceptance-criteria contract. GitHub stays authoritative for refs, commits, pull requests and checks.
+The unit of intent, keyed `PRB-<n>`. A ticket exists only because someone **admitted** it with `perbo admit`, typically from an existing GitHub, Jira or Linear issue, a pasted file, or nothing (`kind: none`). There is no importer and no bulk create, so "no backlog migration" is a property of the schema, not a promise ([ADR-0027](adr/0027-own-the-ticket-natively.md), [D-003](11-open-decisions.md)). Before admission Perbo holds no claim; from admission it is authoritative for the ticket's intent, priority, status and acceptance-criteria contract. GitHub stays authoritative for refs, commits, pull requests and checks.
 
 States, in the order the primary flow reaches them:
 
@@ -19,13 +19,13 @@ DRAFT → SPECIFYING → PLAN_REVIEW → READY → PROVISIONING → EXECUTING �
   → INDEPENDENT_REVIEW → PR_OPEN → MERGED → DONE
 ```
 
-The schema also carries `MERGED → DEPLOYED → OBSERVING → DONE`. Side states: `CHANGES_REQUESTED`, `PLAN_INVALID`, `BLOCKED`, `FAILED`, `CANCELLED`, `INCONCLUSIVE`, `ROLLED_BACK`, `CLOSED`. The transition table, and which states a command reaches, are in [docs/04](04-ticket-workspace-and-review.md#ticket-lifecycle), with [the lifecycle diagram](../diagrams/ticket-lifecycle.svg). A ticket closes at `MERGED`, or at `CLOSED`; nothing else gates closure ([D-011](11-open-decisions.md)). `BLOCKED` is `focrux serve` holding a `READY` ticket on an unmet `depends_on` key or a scope a ticket ahead of it holds, recorded on the ticket's own `scheduling`, and releasing it once that clears.
+The schema also carries `MERGED → DEPLOYED → OBSERVING → DONE`. Side states: `CHANGES_REQUESTED`, `PLAN_INVALID`, `BLOCKED`, `FAILED`, `CANCELLED`, `INCONCLUSIVE`, `ROLLED_BACK`, `CLOSED`. The transition table, and which states a command reaches, are in [docs/04](04-ticket-workspace-and-review.md#ticket-lifecycle), with [the lifecycle diagram](../diagrams/ticket-lifecycle.svg). A ticket closes at `MERGED`, or at `CLOSED`; nothing else gates closure ([D-011](11-open-decisions.md)). `BLOCKED` is `perbo serve` holding a `READY` ticket on an unmet `depends_on` key or a scope a ticket ahead of it holds, recorded on the ticket's own `scheduling`, and releasing it once that clears.
 
-**Admission and the draft.** `focrux admit` writes the ticket together with a draft: a model proposes `outcome`, two to four `acceptance_criteria` and a `proposed_scope` from the issue text — read as data, never obeyed, whatever it asks for — or a person types the contract by hand. The draft and its model provenance (`provider`, `model_id`, cost and token usage) are kept beside the contract; the ticket's `admission` record carries `criteria_source` (`typed | imported | file | drafted`), `criteria_count`, how long approval took a person, and `edit_count` — how many fields `focrux edit` changed before approval. `admit` and `edit` write the contract and its draft snapshot together as a counter-seal, and `focrux approve` and `focrux run` refuse a ticket whose pair disagrees.
+**Admission and the draft.** `perbo admit` writes the ticket together with a draft: a model proposes `outcome`, the `acceptance_criteria` the work has, a `proposed_scope` and, where it divides the work, the nodes of an execution graph with the order it suggests between them — all from the issue or spec text, read as data, never obeyed, whatever it asks for — or a person types the contract by hand. The draft and its model provenance (`provider`, `model_id`, cost and token usage) are kept beside the contract; the ticket's `admission` record carries `criteria_source` (`typed | imported | file | drafted | spec`), `criteria_count`, the spec's path and content hash where one was drafted from, how long approval took a person, and `edit_count` — how many fields the person's own `perbo edit` changed before approval. `admit` and `edit` write the contract and its draft snapshot together as a counter-seal, and `perbo approve` and `perbo run` refuse a ticket whose pair disagrees.
 
 ## Plan contract
 
-A ticket owns one plan, versioned. `focrux approve` makes a version's **contract** immutable and binds execution and review to it ([ADR-0016](adr/0016-minimal-machine-maintained-planning.md)); a change creates a new version, and execution pins to one approved version. There is no separate "approach" document — the executor owns its own steps, and what it actually did is captured afterwards as the attempt's own account, not planned in advance.
+A ticket owns one plan, versioned. `perbo approve` makes a version's **contract** immutable and binds execution and review to it ([ADR-0016](adr/0016-minimal-machine-maintained-planning.md)); a change creates a new version, and execution pins to one approved version. The executor owns its own steps, and what it actually did is captured afterwards as the attempt's own account, not planned in advance. The one part of the approach that is written down is the order between a graph's nodes and the spec's No-Gos, in `<KEY>.approach.json` beside the ticket: it may change after approval, through `perbo edit`, and the reviewer never receives it ([D-100](11-open-decisions.md)).
 
 The P1 contract is exactly four fields:
 
@@ -47,13 +47,13 @@ The P1 contract is exactly four fields:
 
 `actual_risk` is then recomputed from the sealed diff; where it exceeds `planned_risk` the attempt is escalated, never discarded. A person may raise a level, never lower one.
 
-Decided, not built: work too large for one contract still admits as a single Ticket, whose plan groups criteria into nodes of an execution graph — node criteria and paths are contract, order between nodes is approach — curated and approved once ([D-100](11-open-decisions.md), [ADR-0037](adr/0037-execution-graph.md)).
+Work too large for one flat contract still admits as a single Ticket, whose plan groups criteria into nodes of an execution graph: node criteria and paths are contract and live in the plan, the order between nodes and the spec's No-Gos are approach and live in `<KEY>.approach.json`, and a person curates the graph through one validated edit path and approves once ([D-100](11-open-decisions.md), [ADR-0037](adr/0037-execution-graph.md)).
 
 ## Execution attempt
 
-One run pinned to a plan version and a base commit. Retries and remediation rounds append attempts; none is ever rewritten. Each records the provider, branch and worktree, the agent invocation and its permission profile, every command and outbound host asked for (allowed or denied), usage with its `cost_basis`, the change set it sealed, and a `termination.reason` (`completed`, `no_changes`, a named ceiling, `prohibited_action`, `scope_escape`, `runner_defect`, …).
+One run pinned to a plan version and a base commit. Retries and remediation rounds append attempts; none is ever rewritten. Each records the provider, branch and worktree, the agent invocation and its permission profile, every command and outbound host asked for (allowed or denied), usage with its `cost_basis`, the change set it sealed, and a `termination.reason` (`completed`, `no_changes`, `stalled`, a named ceiling, `prohibited_action`, `scope_escape`, `runner_defect`, …).
 
-An attempt is bounded by cost, wall-clock and fresh-token ceilings, and by any command or iteration ceiling the repository sets; the ticket's priced spend across its attempts is bounded by `limits.ticket_cost_micros` ($60 by default). An attempt cut by its cost ceiling after sealing work of its own is continued over those commits while the ticket is under that budget. The limits and their defaults are in [docs/04](04-ticket-workspace-and-review.md#limits). Decided, not built: every one of those ceilings except the remediation-round cap is removed, and a stall detector that stops an attempt with no tool activity takes their place; a cost cap then applies only when the executor bills per token against an API key ([D-096](11-open-decisions.md)).
+An attempt is bounded by nothing but a stall — `limits.attempt_stall_ms`, 20 minutes with no tool activity on the executor's stream — plus any cost, wall-clock, token, command or iteration ceiling the repository sets ([D-096](11-open-decisions.md)). Where the executor is billed per token, `limits.attempt_cost_micros` ($5) and `limits.ticket_cost_micros` ($60) apply as well; on a subscription neither does. An attempt cut by its cost ceiling after sealing work of its own is continued over those commits while the ticket is under that budget; a stalled attempt ends the run. The limits and their defaults are in [docs/04](04-ticket-workspace-and-review.md#limits).
 
 A **remediation round** is a new attempt continuing a prior one (`continues_attempt_id`, `remediation_round`), briefed with the predecessor's own account of what it changed and why ([D-092](11-open-decisions.md)) and with exactly the findings that were routed to it. A round that closes none of them ends the run `remediation_stalled`, naming the keys still open; `max_remediation_rounds` (default six) is the hard cap above that rule. Before the executor's first round, after every round's seal, and again before the pull request opens, the loop merges the base branch's current tip into the attempt's branch (`merged_base`); a conflict earns one further round briefed with only the conflicting paths, and a conflict that survives it ends the run `base_conflict` with the files named.
 
@@ -80,24 +80,24 @@ Every planning, execution, review or delivery step writes an immutable, content-
 
 ## Stops and local verdicts
 
-A `StopVerdicts` record per ticket carries the change's `blocks`/`escalates`/declined findings and the answer read off the pull request's own tick-boxes — *I wanted to be asked* or *the agent should have fixed this alone* — refreshed on every `focrux sync`. `focrux verdict --endorse|--override|--accept|--reject` records the same kind of answer locally, keyed by the same finding hash, for a change with no pull request yet or one reviewed with `focrux review` on a repository Focrux never admitted; the two merge into one population. Precision of stopping — endorsed over endorsed-plus-overridden, read as a Wilson interval against a 70% bar — is computed live from that merged population, never asserted ([D-060](11-open-decisions.md)).
+A `StopVerdicts` record per ticket carries the change's `blocks`/`escalates`/declined findings and the answer read off the pull request's own tick-boxes — *I wanted to be asked* or *the agent should have fixed this alone* — refreshed on every `perbo sync`. `perbo verdict --endorse|--override|--accept|--reject` records the same kind of answer locally, keyed by the same finding hash, for a change with no pull request yet or one reviewed with `perbo review` on a repository Perbo never admitted; the two merge into one population. Precision of stopping — endorsed over endorsed-plus-overridden, read as a Wilson interval against a 70% bar — is computed live from that merged population, never asserted ([D-060](11-open-decisions.md)).
 
 ## Principles
 
-`.focrux/principles.md` accumulates a person's answer whenever an executor's brief declares `NO_PRACTICE` for a finding it could not close. `focrux principle add` is the only writer; the agent's write guard refuses every other path under `.focrux/**`; every later brief reads the file as data that resolves unspecified behaviour and never widens scope, weakens security or excuses a failing check.
+`.perbo/principles.md` accumulates a person's answer whenever an executor's brief declares `NO_PRACTICE` for a finding it could not close. `perbo principle add` is the only writer; the agent's write guard refuses every other path under `.perbo/**`; every later brief reads the file as data that resolves unspecified behaviour and never widens scope, weakens security or excuses a failing check.
 
 ## Store layout
 
 ```text
-.focrux/
-  config.json                 repository policy: scope defaults, checks, protected paths/tests, limits
+.perbo/
+  config.json                 repository policy: scope defaults, checks, protected and prohibited paths/tests, limits, the spec and ADR folders
   principles.md                the ratchet above
   verdicts.json                 LocalVerdict[]
   tickets/
     sequence.json               per-prefix high-water mark for minted keys
-    FCX-118.json                 the Ticket: state, history, delivery, scheduling
-    FCX-118.contract.json        the PlanContract — immutable once approved
-    FCX-118.draft.json           the draft: proposal, model provenance, edit history
+    PRB-118.json                 the Ticket: state, history, delivery, scheduling
+    PRB-118.contract.json        the PlanContract — immutable once approved
+    PRB-118.draft.json           the draft: proposal, model provenance, edit history
   state/
     <ticket_id>.attempts.json    ExecutionAttempt[], appended on every run
     <ticket_id>.stops.json       StopVerdicts

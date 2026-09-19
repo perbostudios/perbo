@@ -1,13 +1,9 @@
-# Bundled Node runtime license
+# The Node runtime
 
-`node-22.22.0-LICENSE.txt` is the unmodified [Node.js v22.22.0 license](https://github.com/nodejs/node/blob/v22.22.0/LICENSE), including its third-party notices.
-
-- Source: `https://raw.githubusercontent.com/nodejs/node/v22.22.0/LICENSE`
-- SHA-256: `e991d81497a85bb24fc6bffae0a3637a6accd6c6bc5ce1f2c5698bd555cf9d49`
-
-The Windows `node-win-x64@22.22.0` npm package contains only its executable and package metadata. The desktop build therefore copies this checked-in license to `dist/runtime/LICENSE` on every platform. Packaging already includes that directory.
-
-When changing the pinned `node` dependency, update the build's runtime version, this upstream license and its recorded hash together. The build regression and `scripts/check-runtime.mjs` check the bundled result. Keep the license's LF line endings so Windows checkout settings do not change its bytes.
+Nothing is checked in for it. The app runs the CLI on the Node inside Electron
+(`ELECTRON_RUN_AS_NODE`), so the only Node distributed is Electron's own, and
+Electron's `LICENSE` and `LICENSES.chromium.html` ship beside the binary in
+every package electron-builder produces.
 
 # Bundled font licenses
 

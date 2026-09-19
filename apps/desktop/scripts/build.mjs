@@ -1,35 +1,9 @@
 import { createRequire } from "node:module";
-import { execFileSync } from "node:child_process";
+import { dirname, join, relative, resolve } from "node:path";
 import { build } from "esbuild";
 import { build as buildRenderer } from "vite";
-import {
-  copyFile,
-  mkdir,
-  writeFile,
-  readFile,
-  rename,
-  chmod,
-} from "node:fs/promises";
+import { cp, copyFile, mkdir, writeFile, readFile } from "node:fs/promises";
 
-await mkdir("dist/runtime", { recursive: true });
-const runtimeName = process.platform === "win32" ? "node.exe" : "node";
-const runtimeTemporary = `dist/runtime/${runtimeName}.${process.pid}`;
-const require = createRequire(import.meta.url);
-const runtimeSource = require.resolve(`node/bin/${runtimeName}`);
-if (
-  execFileSync(runtimeSource, ["--version"], { encoding: "utf8" }).trim() !==
-  "v22.22.0"
-)
-  throw new Error(
-    "The desktop requires the pinned Node 22.22.0 runtime. Run pnpm install.",
-  );
-await copyFile(runtimeSource, runtimeTemporary);
-await copyFile(
-  new URL("../licenses/node-22.22.0-LICENSE.txt", import.meta.url),
-  "dist/runtime/LICENSE",
-);
-await chmod(runtimeTemporary, 0o755);
-await rename(runtimeTemporary, `dist/runtime/${runtimeName}`);
 await mkdir("dist/host", { recursive: true });
 await build({
   entryPoints: ["src/host/main.ts"],
@@ -51,11 +25,43 @@ await build({
   external: ["electron"],
 });
 await mkdir("dist/cli/dist", { recursive: true });
-for (const name of ["focrux.js", "guard-hook.js"])
+for (const name of ["perbo.js", "guard-hook.js"])
   await copyFile(`../cli/dist/${name}`, `dist/cli/dist/${name}`);
 const cli = JSON.parse(await readFile("../cli/package.json", "utf8"));
 await writeFile(
   "dist/cli/package.json",
   JSON.stringify({ name: cli.name, version: cli.version, type: "module" }),
 );
+
+// The Claude Agent SDK, beside the bundled CLI rather than inside it.
+//
+// `tooling/package/bundle.mjs` keeps it external, and `loadInterviewSdk`
+// imports it by name at the moment a session starts, which resolves here —
+// `dist/cli/dist/perbo.js` walks up to `dist/cli/node_modules` — and says what
+// to install when it is not there.
+//
+// Its own `node_modules` is left behind, which is where the published package
+// keeps the per-platform copies of Claude Code it carries as optional
+// dependencies: about 198 MB each, against roughly 3 MB of JavaScript. The
+// interview passes `pathToClaudeCodeExecutable`, so the copy the SDK would
+// otherwise reach for is one this app never runs.
+const sdkName = "@anthropic-ai/claude-agent-sdk";
+// Resolved through the package's entry point rather than its manifest: the
+// `exports` map does not expose `./package.json`, so asking for that is a
+// refusal rather than a path.
+const sdkPackage = dirname(createRequire(resolve("../cli/package.json")).resolve(sdkName));
+const sdkTarget = join("dist/cli/node_modules", sdkName);
+await mkdir(dirname(sdkTarget), { recursive: true });
+await cp(sdkPackage, sdkTarget, {
+  recursive: true,
+  dereference: true,
+  // Judged on the path *within* the package: the package itself lives under a
+  // `node_modules`, so testing the whole source path would exclude its own root
+  // and copy nothing.
+  filter: (source) => {
+    const within = relative(sdkPackage, source);
+    return within === "" || !within.split(/[\\/]/).includes("node_modules");
+  },
+});
+
 await buildRenderer();

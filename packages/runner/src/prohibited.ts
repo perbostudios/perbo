@@ -5,15 +5,17 @@ import {
   isAgentConfigPath,
   matchesAny,
   type ProhibitedAction,
-} from "@focrux/contracts";
+} from "@perbo/contracts";
 import {
   UNKNOWN_CWD,
   WRITERS,
   allowedPathsSentence,
   inspectWritePath,
+  prohibitedPathsSentence,
   readCommandLine,
   resolveScope,
   splitCommandSegments,
+  withoutHeredocBodies,
   type CommandSegment,
   type Cwd,
   type ResolvedScope,
@@ -25,7 +27,14 @@ import {
 } from "./shell.js";
 import { describePushDestination, readPush, resolvePushDestination } from "./push-remote.js";
 
-export { UNKNOWN_CWD, WRITERS, allowedPathsSentence, inspectWritePath, resolveScope };
+export {
+  UNKNOWN_CWD,
+  WRITERS,
+  allowedPathsSentence,
+  inspectWritePath,
+  prohibitedPathsSentence,
+  resolveScope,
+};
 export type {
   CommandSegment,
   ResolvedScope,
@@ -37,9 +46,9 @@ export type {
 };
 
 /**
- * The refusal a write finding carries, as a prohibited action. Absent is the
- * worktree rule, which is every finding written before the contract's globs
- * were one of the two answers (SCP-195).
+ * The refusal a write finding carries, as a prohibited action. A finding about
+ * a path names its rule; one about a command the guard could not read carries
+ * none, and the worktree rule stands in for it.
  */
 const writeAction = (finding: WriteFinding): ProhibitedAction =>
   finding.rule ?? "write_outside_worktree";
@@ -270,6 +279,19 @@ function describeCwd(cwd: Cwd, scope: ResolvedScope): ShellCwd {
 }
 
 /**
+ * Where a shell stands before any line moves it, spelled the way a record
+ * carries it.
+ *
+ * The same resolution and the same spelling `inspectCommandWithCwd` gives the
+ * directory a line leaves the shell in, so a decision made without reading a
+ * line names its directory the way every other decision does.
+ */
+export function describeShellCwd(scope: WorktreeScope): ShellCwd {
+  const resolved = resolveScope(scope);
+  return describeCwd({ path: resolved.base, unknown: resolved.baseUnknown }, resolved);
+}
+
+/**
  * `scope` names the attempt's worktree, which is what `write_outside_worktree`
  * is judged against, and the directory the shell stands in, which is what a
  * relative target resolves against. Without a root the guard reads
@@ -301,6 +323,24 @@ function somethingBeforeThePush(earlier: readonly string[]): string | null {
     }
   }
   return null;
+}
+
+/**
+ * The bodies of the here-documents `command` opens whose delimiter is not
+ * quoted — the ones a shell expands `$(…)`, `` `…` `` and `$name` inside, so
+ * what a command runs is not only what its line spells. Read by the runner's
+ * own `withoutHeredocBodies`, which takes every `<<` on a line in order — two
+ * on one line (`cat <<A <<B`) each take their body in turn — so a caller that
+ * must judge what those bodies run reads them the way the shell feeds them,
+ * not just the first. A quoted delimiter (`<<'E'`) makes its body literal and
+ * is left out. Exposed for the interview's read-only guard, which holds a
+ * here-document body to the read-only shapes the same as any other command
+ * (SCP-355).
+ */
+export function expandableHeredocBodies(command: string): string[] {
+  return withoutHeredocBodies(command)
+    .bodies.filter((heredoc) => !heredoc.quoted)
+    .map((heredoc) => heredoc.body);
 }
 
 export function inspectCommandWithCwd(
@@ -454,7 +494,7 @@ export interface JudgingArtifacts {
   protected_tests: readonly string[];
   /**
    * Globs the run configuration names as judging this attempt — a review
-   * policy, a corpus, a fixture tree. They come from `<repo>/.focrux/config.json`
+   * policy, a corpus, a fixture tree. They come from `<repo>/.perbo/config.json`
    * (`protected_paths`), because what judges an attempt is a property of the
    * repository being worked on, not of the runner.
    */
@@ -463,10 +503,10 @@ export interface JudgingArtifacts {
 
 /**
  * The one judging path every repository has: the ticket store, the recorded
- * principles and the run configuration itself live under `.focrux/`. Anything
+ * principles and the run configuration itself live under `.perbo/`. Anything
  * repository-specific is declared in that configuration rather than here.
  */
-export const REVIEW_POLICY_PATTERNS = [".focrux/**", "**/.focrux/**"] as const;
+export const REVIEW_POLICY_PATTERNS = [".perbo/**", "**/.perbo/**"] as const;
 
 export function inspectPaths(
   paths: readonly string[],

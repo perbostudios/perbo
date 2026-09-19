@@ -1,11 +1,11 @@
 {
-  "name": "@focrux/cli",
+  "name": "@perbo/cli",
   "version": "0.1.1",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.bundle.js",
   "bin": {
-    "focrux": "./dist/focrux.js"
+    "perbo": "./dist/perbo.js"
   },
   "exports": {
     ".": {
@@ -13,7 +13,7 @@
     }
   },
   "files": [
-    "dist/focrux.js",
+    "dist/perbo.js",
     "dist/guard-hook.js",
     "dist/index.bundle.js"
   ],
@@ -24,12 +24,13 @@
     "lint": "eslint src test"
   },
   "devDependencies": {
-    "@focrux/contracts": "workspace:*",
-    "@focrux/planning": "workspace:*",
-    "@focrux/review": "workspace:*",
-    "@focrux/runner": "workspace:*",
-    "@focrux/tsconfig": "workspace:*",
-    "@focrux/workspace": "workspace:*",
+    "@anthropic-ai/claude-agent-sdk": "catalog:",
+    "@perbo/contracts": "workspace:*",
+    "@perbo/planning": "workspace:*",
+    "@perbo/review": "workspace:*",
+    "@perbo/runner": "workspace:*",
+    "@perbo/tsconfig": "workspace:*",
+    "@perbo/workspace": "workspace:*",
     "@eslint/js": "catalog:",
     "@types/node": "catalog:",
     "eslint": "catalog:",

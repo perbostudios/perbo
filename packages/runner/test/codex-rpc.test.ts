@@ -17,7 +17,7 @@ function fixture(
   mode: "normal" | "reroute" | "instructions" | "hang" | "oversized" = "normal",
   environment?: (worktree: string) => NodeJS.ProcessEnv,
 ) {
-  const root = mkdtempSync(join(tmpdir(), "focrux-rpc-test-"));
+  const root = mkdtempSync(join(tmpdir(), "perbo-rpc-test-"));
   roots.push(root);
   writeFileSync(join(root, "auth.json"), "{}");
   const log = join(root, "protocol.jsonl");
@@ -31,7 +31,7 @@ const fs = require('node:fs');
 const readline = require('node:readline');
 const mode = ${JSON.stringify(mode)}, log = ${JSON.stringify(log)};
 fs.writeFileSync(${JSON.stringify(environmentFile)}, JSON.stringify(Object.fromEntries(
-  ['FOCRUX_WORKTREE', 'FOCRUX_PORT_START', 'FOCRUX_PORT_END', 'FOCRUX_DB_SCHEMA', 'CI',
+  ['PERBO_WORKTREE', 'PERBO_PORT_START', 'PERBO_PORT_END', 'PERBO_DB_SCHEMA', 'CI',
    'TMPDIR', 'CODEX_HOME', 'GH_TOKEN', 'OPENAI_BASE_URL'].flatMap(name =>
     process.env[name] === undefined ? [] : [[name, process.env[name]]])
 )));
@@ -41,6 +41,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   if (m.method === 'initialize') send({id:m.id,result:{}});
   if (m.method === 'account/read') send({id:m.id,result:{account:{type:'chatgpt'}}});
   if (m.method === 'thread/start') send({id:m.id,result:{thread:{id:'thread'},model:m.params.model,instructionSources:mode === 'instructions' ? ['untrusted AGENTS.md'] : []}});
+  if (m.method === 'thread/read') send({id:m.id,result:{thread:{id:m.params.threadId,agentRole: m.params.threadId === 'roleless-child' ? null : 'perbo-implementer'}}});
   if (m.method === 'turn/start') {
     send({id:m.id,result:{turn:{id:'turn'}}});
     if (mode === 'hang') {
@@ -53,7 +54,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     send({id:'capability',method:'item/tool/call',params:{tool:'untrusted'}});
   }
   if (m.id === 'approval') {
-    send({method:'thread/tokenUsage/updated',params:{tokenUsage:{total:{inputTokens:20,cachedInputTokens:5,outputTokens:3}}}});
+    send({method:'thread/tokenUsage/updated',params:{threadId:'thread',tokenUsage:{total:{inputTokens:20,cachedInputTokens:5,outputTokens:3}}}});
     if (mode === 'reroute') send({method:'model/rerouted',params:{toModel:'a-different-model'}});
     send({method:'item/completed',params:{turnId:'turn',item:{id:'final',type:'agentMessage',text:'Finished'}}});
     send({method:'turn/completed',params:{turn:{id:'turn',status:'completed'}}});
@@ -63,7 +64,8 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     { mode: 0o700 },
   );
   const events: string[] = [],
-    usage: number[] = [];
+    usage: number[] = [],
+    usageThreads: string[] = [];
   const turnStarted = Promise.withResolvers<void>();
   const session = new CodexExecutorSession({
     binary,
@@ -71,7 +73,10 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     codexHome: root,
     worktree: root,
     timeoutMs: mode === "hang" ? 1500 : 5000,
-    onUsage: (value) => usage.push(value.inputTokens),
+    onUsage: (threadId, value) => {
+      usageThreads.push(threadId);
+      usage.push(value.inputTokens);
+    },
     onEvent: (method) => {
       events.push(method);
       if (method === "turn/started") turnStarted.resolve();
@@ -84,6 +89,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     root,
     events,
     usage,
+    usageThreads,
     turnStarted: turnStarted.promise,
     environment: () => JSON.parse(readFileSync(environmentFile, "utf8")) as Record<string, string>,
     messages: () =>
@@ -111,10 +117,10 @@ describe("Codex native execution protocol", () => {
     await f.session.start("test-model", "Approved instructions");
     const environment = f.environment();
     expect(environment).toMatchObject({
-      FOCRUX_WORKTREE: f.root,
-      FOCRUX_PORT_START: "41000",
-      FOCRUX_PORT_END: "41031",
-      FOCRUX_DB_SCHEMA: "ayo_attempt",
+      PERBO_WORKTREE: f.root,
+      PERBO_PORT_START: "41000",
+      PERBO_PORT_END: "41031",
+      PERBO_DB_SCHEMA: "ayo_attempt",
       CI: "1",
     });
     expect(environment.TMPDIR).toContain(f.root);
@@ -130,6 +136,7 @@ describe("Codex native execution protocol", () => {
     ).toBe("Finished");
     expect(f.session.credentialClass).toBe("subscription");
     expect(f.usage).toEqual([20]);
+    expect(f.usageThreads).toEqual(["thread"]);
     const messages = f.messages();
     expect(messages.find((message) => message.id === "approval")).toMatchObject(
       { result: { decision: "decline" } },
@@ -148,6 +155,12 @@ describe("Codex native execution protocol", () => {
         selectedCapabilityRoots: [],
       },
     });
+  });
+  it("reads a child thread's own role, and null where Codex reports none (D-106)", async () => {
+    const f = fixture();
+    await f.session.start("test-model", "Approved instructions");
+    expect(await f.session.threadRead("child-1")).toBe("perbo-implementer");
+    expect(await f.session.threadRead("roleless-child")).toBeNull();
   });
   it("rejects a provider model fallback even when its event has no turn id", async () => {
     const f = fixture("reroute");

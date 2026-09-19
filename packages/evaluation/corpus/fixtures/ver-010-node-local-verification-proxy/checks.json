@@ -1,0 +1,142 @@
+[
+  {
+    "check_id": "check_tc",
+    "name": "typecheck",
+    "kind": "typecheck",
+    "status": "passed",
+    "summary": "0 errors",
+    "command": "tsc --noEmit",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file"
+  },
+  {
+    "check_id": "check_ut",
+    "name": "unit",
+    "kind": "unit",
+    "status": "passed",
+    "summary": "2 passed",
+    "command": "vitest run",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file"
+  },
+  {
+    "check_id": "check_lt",
+    "name": "lint",
+    "kind": "lint",
+    "status": "passed",
+    "summary": "0 problems",
+    "command": "eslint .",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file"
+  },
+  {
+    "check_id": "check_ss",
+    "name": "secret-scan",
+    "kind": "secret-scan",
+    "status": "passed",
+    "summary": "0 findings",
+    "command": "gitleaks detect",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file"
+  },
+  {
+    "check_id": "check_tc",
+    "name": "typecheck",
+    "kind": "typecheck",
+    "status": "passed",
+    "summary": "0 errors",
+    "command": "tsc --noEmit",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file",
+    "node": { "node_id": "node_page", "scope": "task", "paths": [], "note": "a typecheck check is not a test run, so a file list does not narrow it" }
+  },
+  {
+    "check_id": "check_ut",
+    "name": "unit",
+    "kind": "unit",
+    "status": "passed",
+    "summary": "1 passed",
+    "command": "vitest run packages/audit/test/page.test.ts",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file",
+    "node": { "node_id": "node_page", "scope": "files", "paths": ["packages/audit/test/page.test.ts"], "note": null }
+  },
+  {
+    "check_id": "check_lt",
+    "name": "lint",
+    "kind": "lint",
+    "status": "passed",
+    "summary": "0 problems",
+    "command": "eslint .",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file",
+    "node": { "node_id": "node_page", "scope": "task", "paths": [], "note": "a lint check is not a test run, so a file list does not narrow it" }
+  },
+  {
+    "check_id": "check_ss",
+    "name": "secret-scan",
+    "kind": "secret-scan",
+    "status": "passed",
+    "summary": "0 findings",
+    "command": "gitleaks detect",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file",
+    "node": { "node_id": "node_page", "scope": "task", "paths": [], "note": "a secret-scan check is not a test run, so a file list does not narrow it" }
+  },
+  {
+    "check_id": "check_tc",
+    "name": "typecheck",
+    "kind": "typecheck",
+    "status": "passed",
+    "summary": "0 errors",
+    "command": "tsc --noEmit",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file",
+    "node": { "node_id": "node_route", "scope": "task", "paths": [], "note": "a typecheck check is not a test run, so a file list does not narrow it" }
+  },
+  {
+    "check_id": "check_ut",
+    "name": "unit",
+    "kind": "unit",
+    "status": "passed",
+    "summary": "1 passed",
+    "command": "vitest run packages/audit/test/route.test.ts",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file",
+    "node": { "node_id": "node_route", "scope": "files", "paths": ["packages/audit/test/route.test.ts"], "note": null }
+  },
+  {
+    "check_id": "check_lt",
+    "name": "lint",
+    "kind": "lint",
+    "status": "passed",
+    "summary": "0 problems",
+    "command": "eslint .",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file",
+    "node": { "node_id": "node_route", "scope": "task", "paths": [], "note": "a lint check is not a test run, so a file list does not narrow it" }
+  },
+  {
+    "check_id": "check_ss",
+    "name": "secret-scan",
+    "kind": "secret-scan",
+    "status": "passed",
+    "summary": "0 findings",
+    "command": "gitleaks detect",
+    "detail": null,
+    "duration_ms": null,
+    "source": "file",
+    "node": { "node_id": "node_route", "scope": "task", "paths": [], "note": "a secret-scan check is not a test run, so a file list does not narrow it" }
+  }
+]

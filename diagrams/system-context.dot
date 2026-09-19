@@ -1,19 +1,19 @@
-digraph FocruxSystemContext {
+digraph PerboSystemContext {
   graph [rankdir=LR, bgcolor="transparent", fontname="Arial", pad=0.3, nodesep=0.35, ranksep=0.65];
   node [shape=box, style="rounded,filled", fontname="Arial", fontsize=11, fillcolor="#FBFAF6", color="#5C4741"];
   edge [fontname="Arial", fontsize=9, color="#8A7A74"];
 
   person [label="Person\nApproves contracts, decides stops\nMerges by default (D-041)", shape=oval, fillcolor="#F7F1E6"];
   desktop [label="Desktop\nElectron host + renderer\nClosed IPC protocol"];
-  cli [label="CLI\n`focrux`, one entry point\ntwo builds"];
-  queue [label="Queue — `focrux serve`\nRe-levels branches, drafts tickets\nLoopback MCP endpoint"];
+  cli [label="CLI\n`perbo`, one entry point"];
+  queue [label="Queue — `perbo serve`\nRe-levels branches, drafts tickets\nLoopback MCP endpoint"];
   runner [label="Runner\nGuard, seal, checks\nRemediation loop, delivery, merge"];
   worktree [label="Worktree\nGit worktree + branch\nper attempt chain", shape=cylinder];
   executor [label="Claude Code or Codex CLI\nSubscription login owned by the person"];
   reviewer [label="Independent review\nContract + diff + checks only\nNo executor narrative (D-037)", fillcolor="#F7F1E6"];
   providers [label="Model providers\nAnthropic, OpenAI", shape=cylinder];
   github [label="GitHub\nPull request, checks"];
-  store [label="Local store\n`.focrux/`\nTickets, contracts, bundles, state", shape=cylinder];
+  store [label="Local store\n`.perbo/`\nTickets, contracts, bundles, state", shape=cylinder];
 
   person -> desktop;
   person -> cli [label="or a terminal"];

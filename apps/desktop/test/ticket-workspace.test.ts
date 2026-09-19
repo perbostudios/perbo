@@ -8,7 +8,7 @@ async function fixture() {
   const workspace = structuredClone(await previewBridge.request({ kind: "snapshot" }));
   workspace.mode = "desktop";
   workspace.jobs = [];
-  const row = workspace.tasks.find((task) => task.ticket.key === "FCX-412")!;
+  const row = workspace.tasks.find((task) => task.ticket.key === "PRB-412")!;
   const detail = structuredClone(await previewBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }));
   detail.ticket = row.ticket;
   delete detail.sample;
@@ -69,6 +69,33 @@ describe("ticket workspace projection", () => {
     const result = projectTicket(workspace, row, detail);
     expect(result).toMatchObject({ primary: { label: "Review result" }, evidence: { kind: "closure", ready: true, verified: null, review: undefined, priorReview: prior.review, closuresVerified: true } });
     expect(projectTicket(workspace, row, detail, "output").screen).toBe("output");
+  });
+
+  it("watches the exclusive command on a ticket, and is not held up by planning elsewhere (SCP-335)", async () => {
+    const { workspace, row, detail, job } = await fixture();
+    row.ticket.state = "executing";
+    const live = { ...job, state: "running" as const, error: null, endedAt: null };
+    const planning = { ...live, id: crypto.randomUUID(), kind: "edit", label: "Update task contract" };
+    const run = { ...live, id: crypto.randomUUID(), label: "Run engineering loop", log: "  worktree /tmp/w on ayo/task at 123\n  executing\n" };
+    // Planning on another ticket is not something this one waits for.
+    workspace.jobs = [{ ...planning, key: "PRB-999" }];
+    expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: false, active: undefined });
+    // A run is, and the loop watches the run rather than the edit that started before it.
+    workspace.jobs = [planning, run];
+    const result = projectTicket(workspace, row, detail);
+    expect(result.busy).toBe(true);
+    expect(result.active?.id).toBe(run.id);
+    expect(result.observed).not.toBeNull();
+  });
+
+  it("holds a contract's deletion while any command runs in its repository, and not for another repository's (SCP-335)", async () => {
+    const { workspace, row, detail, job } = await fixture();
+    const live = { ...job, state: "running" as const, error: null, endedAt: null };
+    const planning = { ...live, id: crypto.randomUUID(), kind: "edit", label: "Update task contract", key: "PRB-999" };
+    workspace.jobs = [planning];
+    expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: false, held: true });
+    workspace.jobs = [{ ...planning, repoId: crypto.randomUUID() }];
+    expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: false, held: false });
   });
 
   it("withholds recovery while a completed command's canonical records are being refreshed", async () => {

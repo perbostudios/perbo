@@ -1,5 +1,5 @@
 {
-  "name": "@focrux/review",
+  "name": "@perbo/review",
   "version": "0.1.0",
   "license": "Apache-2.0",
   "private": true,
@@ -21,11 +21,11 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "catalog:",
-    "@focrux/contracts": "workspace:*",
+    "@perbo/contracts": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@focrux/tsconfig": "workspace:*",
+    "@perbo/tsconfig": "workspace:*",
     "@eslint/js": "catalog:",
     "@types/node": "catalog:",
     "eslint": "catalog:",

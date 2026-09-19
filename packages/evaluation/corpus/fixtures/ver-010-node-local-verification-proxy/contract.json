@@ -1,0 +1,41 @@
+{
+  "plan_id": "plan_ver010",
+  "version": 1,
+  "ticket_id": "ticket_ver010",
+  "level": "P1",
+  "outcome": "Pagination is added to the audit-log listing.",
+  "acceptance_criteria": [
+    {
+      "id": "ac_1",
+      "text": "Requesting page N returns exactly page_size rows starting at offset (N-1)*page_size.",
+      "expected_verification": {
+        "kind": "test",
+        "assertion": "page(2) returns rows 26 through 50, in order"
+      }
+    },
+    {
+      "id": "ac_2",
+      "text": "The /audit?page=N endpoint calls the paginator and returns its rows as JSON.",
+      "expected_verification": {
+        "kind": "test",
+        "assertion": "a request for page=1 returns a 200 with 25 rows as JSON"
+      }
+    }
+  ],
+  "nodes": [
+    { "id": "node_page", "title": "Page math", "criteria": ["ac_1"], "paths": ["packages/audit/src/page.ts", "packages/audit/test/page.test.ts"] },
+    { "id": "node_route", "title": "API wiring", "criteria": ["ac_2"], "paths": ["packages/audit/src/route.ts", "packages/audit/test/route.test.ts"] }
+  ],
+  "scope": {
+    "repository_id": "repo_fixture",
+    "paths_allowed": ["packages/audit/**"],
+    "paths_prohibited": [".github/**", "**/.env*"],
+    "generated_paths": [],
+    "expansion_budget_files": 2
+  },
+  "base": {
+    "base_commit": "34193e1",
+    "context_manifest_hash": "sha256:34193e13b0f214af0f6b6bb211995dc92e70a672cc220add64c28e5432e2c04c",
+    "captured_at": "2026-09-17T09:00:00Z"
+  }
+}

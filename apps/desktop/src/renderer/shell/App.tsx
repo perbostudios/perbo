@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Button, Notice, cx } from "@focrux/ui";
+import { Button, Notice, cx } from "@perbo/ui";
 import { errorMessage, useWorkspace } from "../data.js";
 import { InkIcon } from "../InkIcon.js";
 import { Brand, HeaderSlotProvider, TitleBar } from "../Screen.js";
@@ -9,6 +9,9 @@ import { Onboarding } from "../settings/Onboarding.js";
 import { projectTicket } from "../tasks/ticket-workspace.js";
 import { isFiled } from "../../shared/archive.js";
 import type { Settings, Snapshot } from "../../shared/protocol.js";
+import { PlanningMode } from "../planning/PlanningMode.js";
+import { isPlanningPane, type PlanningPane } from "../planning/panes.js";
+import { CreateProvider } from "./create.js";
 import { Rail, RailToggle, SETTINGS_PAGES } from "./Rail.js";
 import { useRailSize } from "./rail-size.js";
 import { ShortcutProvider, useShortcut } from "./shortcuts.js";
@@ -16,11 +19,6 @@ import { ToastProvider } from "./Toast.js";
 const SettingsPage = lazy(() =>
   import("../settings/SettingsPage.js").then((module) => ({
     default: module.SettingsPage,
-  })),
-);
-const Composer = lazy(() =>
-  import("../tasks/Composer.js").then((module) => ({
-    default: module.Composer,
   })),
 );
 const TaskPage = lazy(() =>
@@ -49,8 +47,9 @@ export type SettingsSection =
   | "shortcuts";
 export type Route =
   | {
-      page: "home" | "archive" | "new" | "setup" | "settings" | SettingsSection;
+      page: "home" | "archive" | "setup" | "settings" | SettingsSection;
     }
+  | { page: "planning"; sessionId: string; pane: PlanningPane }
   | {
       page: "task";
       repoId: string;
@@ -61,7 +60,6 @@ export type Route =
 const PAGES = [
   "home",
   "archive",
-  "new",
   "setup",
   "settings",
   "general",
@@ -76,9 +74,13 @@ export interface PageProps {
   workspace: Snapshot;
   navigate: (route: Route) => void;
 }
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function readRoute(): Route {
   const parts = location.hash.slice(1).split("/").map(decodeURIComponent);
   const [page, repoId, key, view] = parts;
+  // A session id is the host's identifier; a link carrying anything else is not a planning link.
+  if (page === "planning" && repoId && UUID.test(repoId))
+    return { page, sessionId: repoId, pane: isPlanningPane(key) ? key : "spec" };
   if (page === "task" && repoId && key)
     return {
       page,
@@ -125,10 +127,9 @@ function Frame({
   collapsed: boolean;
   children: ReactNode;
 }) {
-  useShortcut("create", () => navigate({ page: "new" }));
   useShortcut("home", () => navigate({ page: "home" }));
   useShortcut("archive", () => navigate({ page: "archive" }));
-  // The rail owns ⌘3 while it is open (it raises the pill); collapsed, the binding still has to reach settings.
+  // The rail owns ⌘4 while it is open (it raises the pill); collapsed, the binding still has to reach settings.
   useShortcut(
     "settings",
     collapsed ? () => navigate({ page: "general" }) : null,
@@ -163,7 +164,9 @@ export function App() {
           ]
             .map(encodeURIComponent)
             .join("/")
-        : next.page;
+        : next.page === "planning"
+          ? ["planning", next.sessionId, next.pane].map(encodeURIComponent).join("/")
+          : next.page;
     location.hash = hash;
     setRoute(next);
   };
@@ -212,7 +215,9 @@ export function App() {
   const frameKey =
     route.page === "task"
       ? ["task", route.repoId, route.key].join("/")
-      : route.page;
+      : route.page === "planning"
+        ? ["planning", route.sessionId].join("/")
+        : route.page;
   const page = setup ? (
     <Onboarding {...props} />
   ) : route.page === "task" ? (
@@ -224,8 +229,8 @@ export function App() {
       view={route.view ?? "auto"}
       edit={route.edit ?? false}
     />
-  ) : route.page === "new" ? (
-    <Composer {...props} />
+  ) : route.page === "planning" ? (
+    <PlanningMode {...props} sessionId={route.sessionId} pane={route.pane} />
   ) : settings ? (
     <SettingsPage {...props} section={section} />
   ) : (
@@ -239,6 +244,7 @@ export function App() {
           navigate={navigate}
           collapsed={!setup && rail.collapsed}
         >
+          <CreateProvider workspace={data} navigate={navigate}>
           <HeaderSlotProvider>
             <div
               className={cx("app-shell", "app--" + data.mode)}
@@ -288,6 +294,7 @@ export function App() {
               )}
             </div>
           </HeaderSlotProvider>
+          </CreateProvider>
         </Frame>
       </ToastProvider>
     </ShortcutProvider>

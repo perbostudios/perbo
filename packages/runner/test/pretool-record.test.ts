@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { LimitsTableSchema } from "@focrux/contracts";
+import { LimitsTableSchema } from "@perbo/contracts";
 import { ADMISSION_RULES } from "../src/admission.js";
 import { runAgent } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
@@ -19,13 +19,13 @@ import { fakeAgent, scratch } from "./support.js";
  * showing. So the assertions are about files on disk as well as about rows.
  */
 
-const outside = join(tmpdir(), `focrux-scp177-record-${process.pid}`);
+const outside = join(tmpdir(), `perbo-scp177-record-${process.pid}`);
 
 const run = async (
   calls: ReadonlyArray<{ tool: string; input: Record<string, unknown> }>,
   extra: { reported_denials?: readonly string[]; hookProgram?: readonly string[] } = {},
 ) => {
-  const worktree = scratch("focrux-scp177-record-");
+  const worktree = scratch("perbo-scp177-record-");
   const agent = fakeAgent([
     {
       kind: "guarded",
@@ -121,7 +121,7 @@ describe("the runner's two readings of one call", () => {
     // after the fact differ on a write the resolver puts outside the worktree.
     // The record has to say which one happened — the call ran — and that the
     // other reading refused it.
-    const stubDir = mkdtempSync(join(tmpdir(), "focrux-scp177-stub-"));
+    const stubDir = mkdtempSync(join(tmpdir(), "perbo-scp177-stub-"));
     const stub = join(stubDir, "always-allow.cjs");
     writeFileSync(
       stub,

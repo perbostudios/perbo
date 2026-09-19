@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SecretIndex } from "@focrux/contracts";
+import { SecretIndex } from "@perbo/contracts";
 import { CHECK_DETAIL_MAX_CHARS, runPinnedChecks } from "../src/checks.js";
 import { parseTestOutput, planRerun, resolveFailures } from "../src/rerun.js";
 import { scratch, SPAWN_TEST_TIMEOUT_MS } from "./support.js";
@@ -15,41 +15,41 @@ const dim = (text: string) => `${ESC}[2m${text}${ESC}[22m`;
  * and the `<package>:<task>:` prefix turbo puts in front of every line.
  */
 const FAILING_STDOUT = [
-  "@focrux/cli:test: cache bypass, force executing 557b8c0864df9f45",
-  "@focrux/cli:test: ",
-  "@focrux/cli:test: > @focrux/cli@0.1.1 test /repo/apps/cli",
-  "@focrux/cli:test: > vitest run",
-  "@focrux/cli:test: ",
-  `@focrux/cli:test:  ${red("❯")} test/x.test.ts ${dim("(")}2 tests | ${red("1 failed")}${dim(")")} 58ms`,
-  `@focrux/cli:test: ${red("     × case")} 5ms`,
-  "@focrux/cli:test: ",
-  `@focrux/cli:test: ${red("⎯⎯⎯")} Failed Tests 1 ${red("⎯⎯⎯")}`,
-  "@focrux/cli:test: ",
-  `@focrux/cli:test: ${ESC}[41m${ESC}[1m FAIL ${ESC}[22m${ESC}[49m test/x.test.ts${dim(" > ")}suite${dim(" > ")}case`,
-  `@focrux/cli:test: ${red("AssertionError: expected 1 to be 2 // Object.is equality")}`,
-  "@focrux/cli:test: ",
-  `@focrux/cli:test: ${dim(" Test Files ")} ${red("1 failed")}${dim(" | ")}12 passed (13)`,
-  `@focrux/cli:test: ${dim("      Tests ")} ${red("1 failed")}${dim(" | ")}142 passed (143)`,
+  "@perbo/cli:test: cache bypass, force executing 557b8c0864df9f45",
+  "@perbo/cli:test: ",
+  "@perbo/cli:test: > @perbo/cli@0.1.1 test /repo/apps/cli",
+  "@perbo/cli:test: > vitest run",
+  "@perbo/cli:test: ",
+  `@perbo/cli:test:  ${red("❯")} test/x.test.ts ${dim("(")}2 tests | ${red("1 failed")}${dim(")")} 58ms`,
+  `@perbo/cli:test: ${red("     × case")} 5ms`,
+  "@perbo/cli:test: ",
+  `@perbo/cli:test: ${red("⎯⎯⎯")} Failed Tests 1 ${red("⎯⎯⎯")}`,
+  "@perbo/cli:test: ",
+  `@perbo/cli:test: ${ESC}[41m${ESC}[1m FAIL ${ESC}[22m${ESC}[49m test/x.test.ts${dim(" > ")}suite${dim(" > ")}case`,
+  `@perbo/cli:test: ${red("AssertionError: expected 1 to be 2 // Object.is equality")}`,
+  "@perbo/cli:test: ",
+  `@perbo/cli:test: ${dim(" Test Files ")} ${red("1 failed")}${dim(" | ")}12 passed (13)`,
+  `@perbo/cli:test: ${dim("      Tests ")} ${red("1 failed")}${dim(" | ")}142 passed (143)`,
 ].join("\n");
 
 /** What turbo writes to stderr — and all the record used to keep. */
 const FAILING_STDERR = [
   "• turbo 2.10.12",
-  "@focrux/cli#test:  ERROR  command (/repo/apps/cli) pnpm run test exited (1)",
+  "@perbo/cli#test:  ERROR  command (/repo/apps/cli) pnpm run test exited (1)",
   " ERROR  run failed: command  exited (1)",
 ].join("\n");
 
 const PASSING_STDOUT = [
-  "@focrux/cli:test:  ✓ test/x.test.ts (2 tests) 12ms",
-  "@focrux/cli:test:  Test Files  13 passed (13)",
-  "@focrux/cli:test:       Tests  143 passed (143)",
+  "@perbo/cli:test:  ✓ test/x.test.ts (2 tests) 12ms",
+  "@perbo/cli:test:  Test Files  13 passed (13)",
+  "@perbo/cli:test:       Tests  143 passed (143)",
 ].join("\n");
 
 describe("parsing a test runner's own output", () => {
   it("names the failing test from the FAIL marker, with its file and its case", () => {
     const parsed = parseTestOutput(`${FAILING_STDOUT}\n${FAILING_STDERR}`);
     expect(parsed.failing).toEqual([
-      { package_name: "@focrux/cli", file: "test/x.test.ts", name: "suite > case" },
+      { package_name: "@perbo/cli", file: "test/x.test.ts", name: "suite > case" },
     ]);
   });
 
@@ -88,11 +88,11 @@ describe("parsing a test runner's own output", () => {
 
 /** A worktree shaped like this repository: one workspace package under apps/. */
 function workspaceFixture(): string {
-  const root = scratch("focrux-rerun-");
+  const root = scratch("perbo-rerun-");
   mkdirSync(join(root, "apps", "cli", "test"), { recursive: true });
   writeFileSync(
     join(root, "apps", "cli", "package.json"),
-    JSON.stringify({ name: "@focrux/cli", scripts: { test: "vitest run" } }),
+    JSON.stringify({ name: "@perbo/cli", scripts: { test: "vitest run" } }),
   );
   writeFileSync(join(root, "apps", "cli", "test", "x.test.ts"), "// a test\n");
   writeFileSync(join(root, "package.json"), JSON.stringify({ name: "root" }));
@@ -105,7 +105,7 @@ describe("planning the re-run", () => {
   it("runs only the failing files, in the package that owns them", () => {
     const worktree = workspaceFixture();
     const resolved = resolveFailures(
-      [{ package_name: "@focrux/cli", file: "test/x.test.ts", name: "suite > case" }],
+      [{ package_name: "@perbo/cli", file: "test/x.test.ts", name: "suite > case" }],
       worktree,
     );
     expect(resolved[0]!.label).toBe("apps/cli/test/x.test.ts > suite > case");
@@ -123,10 +123,10 @@ describe("planning the re-run", () => {
     const worktree = workspaceFixture();
     const resolved = resolveFailures(
       [
-        { package_name: "@focrux/cli", file: "../../../../etc/passwd", name: null },
-        { package_name: "@focrux/cli", file: "/etc/shadow", name: null },
-        { package_name: "@focrux/cli", file: "--reporter=./evil.js", name: null },
-        { package_name: "@focrux/cli", file: "test/absent.test.ts", name: null },
+        { package_name: "@perbo/cli", file: "../../../../etc/passwd", name: null },
+        { package_name: "@perbo/cli", file: "/etc/shadow", name: null },
+        { package_name: "@perbo/cli", file: "--reporter=./evil.js", name: null },
+        { package_name: "@perbo/cli", file: "test/absent.test.ts", name: null },
       ],
       worktree,
     );
@@ -151,9 +151,9 @@ describe("planning the re-run", () => {
     writeFileSync(join(worktree, "apps", "cli", "test", "y.test.ts"), "// another\n");
     const resolved = resolveFailures(
       [
-        { package_name: "@focrux/cli", file: "test/x.test.ts", name: "suite > one" },
-        { package_name: "@focrux/cli", file: "test/x.test.ts", name: "suite > two" },
-        { package_name: "@focrux/cli", file: "test/y.test.ts", name: null },
+        { package_name: "@perbo/cli", file: "test/x.test.ts", name: "suite > one" },
+        { package_name: "@perbo/cli", file: "test/x.test.ts", name: "suite > two" },
+        { package_name: "@perbo/cli", file: "test/y.test.ts", name: null },
       ],
       worktree,
     );
@@ -176,7 +176,7 @@ function fakeUnitCheck(mode: "flaky" | "reproduces" | "unnamed"): {
   command: string[];
   calls: () => number;
 } {
-  const dir = scratch("focrux-fake-check-");
+  const dir = scratch("perbo-fake-check-");
   const counter = join(dir, "calls");
   const script = join(dir, "check.cjs");
   writeFileSync(
@@ -231,7 +231,7 @@ describe("a failing unit check re-runs once before it closes the gate", () => {
     const check = fakeUnitCheck("flaky");
     const results = await runPinnedChecks({
       checks: pinned(check.command),
-      worktree: scratch("focrux-wt-"),
+      worktree: scratch("perbo-wt-"),
       env: process.env,
       secrets: new SecretIndex(),
     });
@@ -240,7 +240,7 @@ describe("a failing unit check re-runs once before it closes the gate", () => {
     expect(unit.status).toBe("passed");
     expect(unit.flaky).toBe(true);
     expect(unit.reruns).toBe(1);
-    expect(unit.failing_tests).toEqual(["@focrux/cli test/x.test.ts > suite > case"]);
+    expect(unit.failing_tests).toEqual(["@perbo/cli test/x.test.ts > suite > case"]);
     expect(unit.rerun?.status).toBe("passed");
     expect(unit.rerun?.failing_tests).toEqual([]);
     expect(check.calls()).toBe(2);
@@ -250,7 +250,7 @@ describe("a failing unit check re-runs once before it closes the gate", () => {
     const check = fakeUnitCheck("reproduces");
     const results = await runPinnedChecks({
       checks: pinned(check.command),
-      worktree: scratch("focrux-wt-"),
+      worktree: scratch("perbo-wt-"),
       env: process.env,
       secrets: new SecretIndex(),
     });
@@ -259,8 +259,8 @@ describe("a failing unit check re-runs once before it closes the gate", () => {
     expect(unit.status).toBe("failed");
     expect(unit.flaky).toBe(false);
     expect(unit.reruns).toBe(1);
-    expect(unit.failing_tests).toEqual(["@focrux/cli test/x.test.ts > suite > case"]);
-    expect(unit.rerun?.failing_tests).toEqual(["@focrux/cli test/x.test.ts > suite > case"]);
+    expect(unit.failing_tests).toEqual(["@perbo/cli test/x.test.ts > suite > case"]);
+    expect(unit.rerun?.failing_tests).toEqual(["@perbo/cli test/x.test.ts > suite > case"]);
     expect(check.calls()).toBe(2);
   });
 
@@ -268,7 +268,7 @@ describe("a failing unit check re-runs once before it closes the gate", () => {
     const check = fakeUnitCheck("reproduces");
     const results = await runPinnedChecks({
       checks: pinned(check.command),
-      worktree: scratch("focrux-wt-"),
+      worktree: scratch("perbo-wt-"),
       env: process.env,
       secrets: new SecretIndex(),
     });
@@ -284,7 +284,7 @@ describe("a failing unit check re-runs once before it closes the gate", () => {
     const check = fakeUnitCheck("unnamed");
     const results = await runPinnedChecks({
       checks: pinned(check.command),
-      worktree: scratch("focrux-wt-"),
+      worktree: scratch("perbo-wt-"),
       env: process.env,
       secrets: new SecretIndex(),
     });
@@ -303,7 +303,7 @@ describe("a failing unit check re-runs once before it closes the gate", () => {
     const check = fakeUnitCheck("flaky");
     const results = await runPinnedChecks({
       checks: pinned(check.command, "lint"),
-      worktree: scratch("focrux-wt-"),
+      worktree: scratch("perbo-wt-"),
       env: process.env,
       secrets: new SecretIndex(),
     });
@@ -329,7 +329,7 @@ describe("a failing unit check re-runs once before it closes the gate", () => {
           definition_path: null,
         },
       ],
-      worktree: scratch("focrux-wt-"),
+      worktree: scratch("perbo-wt-"),
       env: process.env,
       secrets: new SecretIndex(),
       onProgress: (message) => order.push(message),

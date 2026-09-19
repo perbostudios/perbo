@@ -1,14 +1,14 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DiagnosticResultSchema, type DiagnosticResult } from "@focrux/contracts";
-import type { PreflightResult } from "@focrux/runner";
+import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts";
+import type { PreflightResult } from "@perbo/runner";
 import { afterAll, describe, expect, it } from "vitest";
 import { runDoctorCommand, type DoctorOptions } from "../src/execute.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**
- * The CHECKS block: the pinned checks `focrux doctor` can see would read a
+ * The CHECKS block: the pinned checks `perbo doctor` can see would read a
  * build tool's cache instead of the tree they are judging.
  *
  * turbo answers a task from its cache when the inputs the package declares have
@@ -19,7 +19,7 @@ import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
  * so it can be fixed there rather than only in the runner's memory.
  *
  * Advisory: it names something to change, and it never reaches the exit code.
- * Every case builds a real `.focrux/config.json` on disk and reads the answer
+ * Every case builds a real `.perbo/config.json` on disk and reads the answer
  * back out of the command's own output.
  */
 
@@ -76,7 +76,7 @@ afterAll(() => {
 
 /** A checkout with a lockfile and test scripts, and the configuration given. */
 function repository(name: string, config: Record<string, unknown> | null): string {
-  const dir = mkdtempSync(join(tmpdir(), `focrux-doctor-turbo-${name}-`));
+  const dir = mkdtempSync(join(tmpdir(), `perbo-doctor-turbo-${name}-`));
   temporary.push(dir);
   writeFileSync(
     join(dir, "package.json"),
@@ -88,8 +88,8 @@ function repository(name: string, config: Record<string, unknown> | null): strin
   );
   writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
   if (config !== null) {
-    mkdirSync(join(dir, ".focrux"), { recursive: true });
-    writeFileSync(join(dir, ".focrux", "config.json"), `${JSON.stringify(config, null, 2)}\n`);
+    mkdirSync(join(dir, ".perbo"), { recursive: true });
+    writeFileSync(join(dir, ".perbo", "config.json"), `${JSON.stringify(config, null, 2)}\n`);
   }
   return dir;
 }
@@ -167,7 +167,7 @@ const pythonCheck = {
   definition_path: "scripts/validate_docs.py",
 };
 
-describe("focrux doctor, on a config whose turbo check does not say --force", () => {
+describe("perbo doctor, on a config whose turbo check does not say --force", () => {
   it("names the check and the flag, and says where to add it", async () => {
     const repo = repository("missing", { checks: [turboCheck(false), pythonCheck] });
     const { text, code } = await doctor(repo);
@@ -183,7 +183,7 @@ describe("focrux doctor, on a config whose turbo check does not say --force", ()
     expect(advisories[0]).toContain("check_unit");
     expect(advisories[0]).toContain("--force");
     expect(advisories[0]).toContain("pnpm exec turbo run test");
-    expect(advisories[0]).toContain(join(repo, ".focrux", "config.json"));
+    expect(advisories[0]).toContain(join(repo, ".perbo", "config.json"));
     // Advisory: the report says to change something and the command still
     // answers that this checkout is fine.
     expect(code).toBe(0);
@@ -203,7 +203,7 @@ describe("focrux doctor, on a config whose turbo check does not say --force", ()
   });
 }, SPAWN_TEST_TIMEOUT_MS);
 
-describe("focrux doctor, on a config whose turbo check does say --force", () => {
+describe("perbo doctor, on a config whose turbo check does say --force", () => {
   it("says nothing: there is nothing to change", async () => {
     const repo = repository("present", { checks: [turboCheck(true), pythonCheck] });
     const human = await doctor(repo);
@@ -217,7 +217,7 @@ describe("focrux doctor, on a config whose turbo check does say --force", () => 
   });
 }, SPAWN_TEST_TIMEOUT_MS);
 
-describe("focrux doctor, on a checkout with no configuration at all", () => {
+describe("perbo doctor, on a checkout with no configuration at all", () => {
   it("proposes no check the same report would then advise against", async () => {
     const repo = repository("proposed", null);
     const human = await doctor(repo);

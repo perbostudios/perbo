@@ -1,0 +1,143 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button, Notice, cx } from "@perbo/ui";
+import { bridge, errorMessage } from "../data.js";
+import { draftHistory, graphHistory, latestUndoable } from "./history.js";
+import type { HistoryRow } from "./history.js";
+import type { Change } from "../../shared/protocol.js";
+import type { useContractEditing } from "../tasks/contract-editor.js";
+
+/**
+ * Every change to this planning, over the current pane rather than beside it,
+ * so the chat stays where it is and the edit being read about is still in
+ * view (D-100, D-102).
+ *
+ * Two records answer it, and which one depends on how far the planning has
+ * got: the plan's own log once a ticket exists — where the interview's edits
+ * and the person's sit together, because both go through `perbo edit` — and
+ * the editing session's own history before one does, which holds the
+ * explorer's marks. The undo goes to whichever record the entry came from.
+ */
+
+type Editor = ReturnType<typeof useContractEditing>;
+
+export function HistoryDrawer({ editor, onClose }: { editor: Editor; onClose: () => void }) {
+  const client = useQueryClient();
+  const session = editor.session;
+  const repoId = editor.repoId;
+  const key = session?.key ?? null;
+  const close = useRef<HTMLButtonElement>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const graph = useQuery({
+    queryKey: ["graph", repoId, key],
+    queryFn: () => bridge.request({ kind: "graphRead", repoId, key: key ?? "" }),
+    networkMode: "always",
+    enabled: key !== null,
+    staleTime: 1000,
+  });
+  const rows: HistoryRow[] =
+    key !== null ? graphHistory(graph.data?.history ?? []) : draftHistory(session?.history ?? []);
+  const undoable = latestUndoable(rows);
+
+  // The plan moves under this drawer while it is open — the interview edits it
+  // from the chat beside it — and the pane underneath is not always the Graph
+  // pane, which is the only other thing listening.
+  useEffect(
+    () =>
+      bridge.subscribe((change: Change) => {
+        if (change.kind !== "records" || key === null) return;
+        if (change.repoId !== null && change.repoId !== repoId) return;
+        void client.invalidateQueries({ queryKey: ["graph", repoId, key] });
+      }),
+    [client, key, repoId],
+  );
+
+  const dismiss = useRef(onClose);
+  dismiss.current = onClose;
+  useEffect(() => {
+    close.current?.focus();
+    const pressed = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") dismiss.current();
+    };
+    window.addEventListener("keydown", pressed);
+    return () => window.removeEventListener("keydown", pressed);
+  }, []);
+
+  const undo = useCallback(
+    (n: number) => {
+      if (!session) return;
+      setBusy(true);
+      setFailure(null);
+      void (async () => {
+        try {
+          if (key !== null) {
+            await bridge.request({ kind: "graphUndo", repoId, key, edit: n });
+            await client.invalidateQueries({ queryKey: ["graph", repoId, key] });
+          } else {
+            await bridge.request({
+              kind: "explorerUndo",
+              id: session.id,
+              revision: session.revision,
+              edit: n,
+            });
+          }
+        } catch (error) {
+          setFailure(errorMessage(error));
+        } finally {
+          setBusy(false);
+        }
+      })();
+    },
+    [client, key, repoId, session],
+  );
+
+  return (
+    <>
+      <div className="hist-scrim" onClick={onClose} />
+      <aside className="hist-drawer" role="dialog" aria-label="The plan’s history">
+        <div className="hist-head">
+          <h3>History</h3>
+          <span className="small muted">{rows.length}</span>
+          <span className="spacer" />
+          <Button ref={close} className="small" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+        {failure !== null && <Notice tone="danger">{failure}</Notice>}
+        {graph.error && <Notice tone="danger">{errorMessage(graph.error)}</Notice>}
+        {rows.length === 0 ? (
+          <p className="small muted">
+            Nothing yet. Every change to this planning lands here, whether you made it by hand or
+            asked the interview for it.
+          </p>
+        ) : (
+          <ol className="hist-rows">
+            {[...rows].reverse().map((row) => (
+              <li key={row.n} className={cx((row.undone || row.replaced) && "is-undone")}>
+                <span className="hist-n">{row.n}</span>
+                <span className="hist-line">{row.summary}</span>
+                <small className={`author author--${row.author}`}>
+                  {row.author === "you" ? "you" : "the interview"}
+                </small>
+                {row.replaced && <span className="small muted">replaced by a re-draft</span>}
+                {row.n === undoable?.n && (
+                  <button
+                    type="button"
+                    className="text-button small"
+                    disabled={busy}
+                    aria-label={`Undo: ${row.summary}`}
+                    onClick={() => undo(row.n)}
+                  >
+                    Undo
+                  </button>
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+      </aside>
+    </>
+  );
+}

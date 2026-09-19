@@ -25,6 +25,20 @@ export const CriterionIdSchema = z
   .string()
   .regex(/^ac_[0-9A-Za-z][0-9A-Za-z_-]{0,31}$/, "criterion id must look like ac_<id>");
 
+/** Node ids are plan-local too, and carry their own prefix for the same reason. */
+export const NodeIdSchema = z
+  .string()
+  .regex(/^node_[0-9A-Za-z][0-9A-Za-z_-]{0,31}$/, "node id must look like node_<id>");
+
+/**
+ * A requirement's id in a spec: `R1` upward, written into the spec when the
+ * requirement is written and never reused (D-103). Not prefixed like the ids
+ * above, because a person types it in Markdown and reads it back there.
+ */
+export const RequirementIdSchema = z
+  .string()
+  .regex(/^R[1-9]\d*$/, "requirement id must look like R1");
+
 export const CommitShaSchema = z
   .string()
   .regex(/^[0-9a-f]{7,40}$/, "commit must be a 7-40 character lowercase hex sha");
@@ -40,4 +54,6 @@ export type ChangeSetId = z.infer<typeof ChangeSetIdSchema>;
 export type ReviewId = z.infer<typeof ReviewIdSchema>;
 export type CheckId = z.infer<typeof CheckIdSchema>;
 export type CriterionId = z.infer<typeof CriterionIdSchema>;
+export type NodeId = z.infer<typeof NodeIdSchema>;
+export type RequirementId = z.infer<typeof RequirementIdSchema>;
 export type AttemptId = z.infer<typeof AttemptIdSchema>;

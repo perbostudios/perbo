@@ -18,7 +18,7 @@ import {
 /**
  * The local verdicts record (SCP-181): one decision per review and key, an
  * earlier decision kept when it is replaced, and the projection that lets
- * `focrux stops` count a decision taken here beside one read off a pull
+ * `perbo stops` count a decision taken here beside one read off a pull
  * request.
  */
 

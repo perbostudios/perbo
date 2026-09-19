@@ -3,18 +3,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type PropsWithChildren } from "react";
-import { ContractEditing } from "../src/shared/contract-editing.js";
+import type { StandingProhibitedEntry } from "@perbo/contracts";
+import { ContractEditing, interviewProviderFor, interviewSessionArgs } from "../src/shared/contract-editing.js";
 import { WorkspaceReads } from "../src/host/workspace-reads.js";
 import { ContractEditor, flushContractEditors, useContractEditing } from "../src/renderer/tasks/contract-editor.js";
 import { bridge } from "../src/renderer/data.js";
-import { TaskModelsSchema } from "../src/shared/protocol.js";
+import { INTERVIEW_CONVERSATION_CAP, TaskModelsSchema } from "../src/shared/protocol.js";
 import type { Change, DesktopBridge, Detail, EditingSession, Job, ReplyMap, Request } from "../src/shared/protocol.js";
 import { previewBridge } from "../src/renderer/preview.js";
 
 const repoId = "10000000-0000-4000-8000-000000000001";
 const otherRepo = "10000000-0000-4000-8000-000000000002";
 const models = TaskModelsSchema.parse({});
-const draft = { outcome: "Save the result", criteria: [{ text: "Saved", assertion: "The saved text can be read", kind: "test" as const }], paths: ["src/**"] };
+const draft = { outcome: "Save the result", criteria: [{ text: "Saved", assertion: "The saved text can be read", kind: "test" as const }], paths: ["src/**"], prohibited: [] };
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });
@@ -22,12 +23,12 @@ function deferred<T>() {
 }
 async function fixture() {
   const snapshot = await previewBridge.request({ kind: "snapshot" });
-  const row = snapshot.tasks.find((entry) => entry.ticket.key === "FCX-421")!;
+  const row = snapshot.tasks.find((entry) => entry.ticket.key === "PRB-421")!;
   const sample = structuredClone(await previewBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }));
   sample.ticket.approved_at = null;
   let records: EditingSession[] = [];
   const repositories = new Set([repoId, otherRepo]);
-  const details = new Map([[repoId + ":FCX-421", sample], [otherRepo + ":FCX-421", structuredClone(sample)]]);
+  const details = new Map([[repoId + ":PRB-421", sample], [otherRepo + ":PRB-421", structuredClone(sample)]]);
   const persist = vi.fn((next: EditingSession[]) => { records = structuredClone(next); });
   const detail = vi.fn(async (repo: string, key: string): Promise<Detail> => {
     const found = details.get(repo + ":" + key);
@@ -46,7 +47,8 @@ async function fixture() {
     job.state = "cancelled";
     await editing.settled(job);
   });
-  const io = { records: () => records, persist, repository: (id: string) => { if (!repositories.has(id)) throw new Error("Disconnected"); }, defaults: () => models, detail, start, stop, id: () => crypto.randomUUID() };
+  let standing: StandingProhibitedEntry[] = [];
+  const io = { records: () => records, persist, repository: (id: string) => { if (!repositories.has(id)) throw new Error("Disconnected"); }, defaults: () => models, detail, start, stop, id: () => crypto.randomUUID(), standing: () => [...standing], setStanding: (_id: string, entries: StandingProhibitedEntry[]) => { standing = [...entries]; } };
   const editing = new ContractEditing(io);
   const request = vi.fn(async <T extends Request>(input: T): Promise<ReplyMap[T["kind"]]> => {
     let result: unknown;
@@ -89,14 +91,14 @@ describe("contract editing session interface", () => {
     const running = await f.editing.submit(a.id, a.revision, operation, "draft");
     expect(await f.editing.submit(a.id, a.revision, operation, "draft")).toEqual(running);
     await expect(f.editing.submit(a.id, a.revision, operation, "compile")).rejects.toThrow(/different input/);
-    const b = await f.editing.open({ kind: "ticket", repoId: otherRepo, key: "FCX-421" });
+    const b = await f.editing.open({ kind: "ticket", repoId: otherRepo, key: "PRB-421" });
     const savedB = f.editing.save(b.id, b.revision, otherRepo, { ...b.form, criterion: { text: "B's unfinished text", assertion: "", kind: "test" } });
     const job = f.jobs[0]!;
-    await f.editing.settled({ ...job, repoId: otherRepo, state: "completed", resultKey: "FCX-421" });
+    await f.editing.settled({ ...job, repoId: otherRepo, state: "completed", resultKey: "PRB-421" });
     expect(f.editing.read(a.id).phase).toBe("working");
-    await f.editing.settled({ ...job, state: "completed", resultKey: "FCX-421" });
-    expect(f.editing.read(a.id)).toMatchObject({ key: "FCX-421", repoId, phase: "editing", form: { step: 2 } });
-    expect((await f.editing.open({ kind: "ticket", repoId, key: "FCX-421" })).id).toBe(a.id);
+    await f.editing.settled({ ...job, state: "completed", resultKey: "PRB-421" });
+    expect(f.editing.read(a.id)).toMatchObject({ key: "PRB-421", repoId, phase: "editing", form: { step: 2 } });
+    expect((await f.editing.open({ kind: "ticket", repoId, key: "PRB-421" })).id).toBe(a.id);
     expect(f.editing.read(b.id)).toEqual(savedB);
     expect(f.start).toHaveBeenCalledTimes(1);
   });
@@ -121,13 +123,13 @@ describe("contract editing session interface", () => {
     await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "draft");
     const reads = new WorkspaceReads(), held = deferred<Detail>();
     f.detail.mockImplementation((repo, key) => reads.read("detail:" + repo + ":" + key, repo, () => held.promise));
-    const opening = f.editing.open({ kind: "ticket", repoId, key: "FCX-421" });
+    const opening = f.editing.open({ kind: "ticket", repoId, key: "PRB-421" });
     reads.invalidate(repoId);
-    const settling = f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "FCX-421" });
-    held.resolve(f.details.get(repoId + ":FCX-421")!);
+    const settling = f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" });
+    held.resolve(f.details.get(repoId + ":PRB-421")!);
     const [opened] = await Promise.all([opening, settling]);
     expect(opened.id).toBe(initial.id);
-    expect(f.records().filter((entry) => entry.key === "FCX-421")).toHaveLength(1);
+    expect(f.records().filter((entry) => entry.key === "PRB-421")).toHaveLength(1);
   });
 
   it("preserves both buffers when another editor opens before admission reports its identity", async () => {
@@ -135,23 +137,23 @@ describe("contract editing session interface", () => {
     const initial = await f.editing.open({ kind: "new", repoId });
     const saved = f.editing.save(initial.id, 0, repoId, { ...initial.form, draft });
     await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "draft");
-    const other = await f.editing.open({ kind: "ticket", repoId, key: "FCX-421" });
+    const other = await f.editing.open({ kind: "ticket", repoId, key: "PRB-421" });
     const edited = f.editing.save(other.id, other.revision, repoId, { ...other.form, editing: 0, criterion: { text: "Keep this unfinished criterion", assertion: "", kind: "test" } });
-    await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "FCX-421" });
+    await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" });
     const restarted = new ContractEditing(f.io);
-    expect(await restarted.open({ kind: "ticket", repoId, key: "FCX-421" })).toEqual(edited);
+    expect(await restarted.open({ kind: "ticket", repoId, key: "PRB-421" })).toEqual(edited);
     const conflict = await restarted.open({ kind: "new", repoId });
     expect(conflict).toMatchObject({
       id: initial.id, key: null, phase: "conflict", form: saved.form,
-      operation: { state: "completed", resultKey: "FCX-421", reconciled: true },
+      operation: { state: "completed", resultKey: "PRB-421", reconciled: true },
     });
-    expect(f.records().filter((entry) => entry.key === "FCX-421")).toHaveLength(1);
+    expect(f.records().filter((entry) => entry.key === "PRB-421")).toHaveLength(1);
     expect(await restarted.open({ kind: "session", id: conflict.id })).toEqual(conflict);
     expect(await restarted.submit(conflict.id, saved.revision, conflict.operation!.id, "draft")).toEqual(conflict);
     await expect(restarted.submit(conflict.id, conflict.revision, crypto.randomUUID(), "draft")).rejects.toThrow(/Restore/);
     restarted.discard(edited.id, edited.revision);
-    const current = await restarted.open({ kind: "ticket", repoId, key: "FCX-421" });
-    expect(current).toMatchObject({ key: "FCX-421", phase: "editing" });
+    const current = await restarted.open({ kind: "ticket", repoId, key: "PRB-421" });
+    expect(current).toMatchObject({ key: "PRB-421", phase: "editing" });
     expect(current.id).not.toBe(conflict.id);
     expect(current.id).not.toBe(edited.id);
     expect(await restarted.open({ kind: "new", repoId })).toEqual(conflict);
@@ -164,12 +166,12 @@ describe("contract editing session interface", () => {
     const saved = f.editing.save(initial.id, 0, repoId, { ...initial.form, draft });
     await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "draft");
     f.detail.mockRejectedValueOnce(new Error("Temporarily unavailable"));
-    await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "FCX-421" });
+    await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" });
     expect(f.editing.read(initial.id).phase).toBe("outcome-unknown");
-    const opened = await f.editing.open({ kind: "ticket", repoId, key: "FCX-421" });
+    const opened = await f.editing.open({ kind: "ticket", repoId, key: "PRB-421" });
     expect(opened.id).toBe(initial.id);
     const edited = f.editing.save(opened.id, opened.revision, repoId, { ...opened.form, newPath: "packages/unfinished" });
-    expect(await new ContractEditing(f.io).open({ kind: "ticket", repoId, key: "FCX-421" })).toEqual(edited);
+    expect(await new ContractEditing(f.io).open({ kind: "ticket", repoId, key: "PRB-421" })).toEqual(edited);
     expect(f.records()).toHaveLength(1);
   });
 
@@ -190,9 +192,9 @@ describe("contract editing session interface", () => {
     const saved = f.editing.save(initial.id, 0, repoId, { ...initial.form, draft });
     await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "compile");
     f.persist.mockImplementationOnce(() => { throw new Error("Disk full"); });
-    await expect(f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "FCX-421" })).rejects.toThrow("Disk full");
+    await expect(f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" })).rejects.toThrow("Disk full");
     expect(f.editing.read(saved.id)).toMatchObject({ phase: "outcome-unknown", error: expect.stringContaining("could not be saved") });
-    expect(await f.editing.open({ kind: "session", id: saved.id })).toMatchObject({ key: "FCX-421", phase: "editing", operation: { state: "completed" } });
+    expect(await f.editing.open({ kind: "session", id: saved.id })).toMatchObject({ key: "PRB-421", phase: "editing", operation: { state: "completed" } });
     expect(f.start).toHaveBeenCalledTimes(1);
   });
 
@@ -208,13 +210,13 @@ describe("contract editing session interface", () => {
 
   it.each([false, true])("a late canonical read cannot revive discarded edits (failure: %s)", async (failure) => {
     const f = await fixture();
-    const initial = await f.editing.open({ kind: "ticket", repoId, key: "FCX-421" });
+    const initial = await f.editing.open({ kind: "ticket", repoId, key: "PRB-421" });
     const reply = deferred<Detail>();
     f.detail.mockImplementationOnce(() => reply.promise);
     const opening = f.editing.open({ kind: "session", id: initial.id });
     await vi.waitFor(() => expect(f.detail).toHaveBeenCalledTimes(3));
     const discarded = f.editing.discard(initial.id, initial.revision);
-    reply.resolve({ ...f.details.get(repoId + ":FCX-421")!, digest: "b".repeat(64) });
+    reply.resolve({ ...f.details.get(repoId + ":PRB-421")!, digest: "b".repeat(64) });
     if (failure) f.persist.mockImplementationOnce(() => { throw new Error("Disk full"); });
     await opening.catch(() => undefined);
     expect(f.editing.read(initial.id)).toEqual(discarded);
@@ -225,6 +227,41 @@ describe("contract editing session interface", () => {
     const initial = await f.editing.open({ kind: "new", repoId });
     f.io.persist(Array.from({ length: 101 }, () => ({ ...initial, id: crypto.randomUUID(), resumeNew: false, phase: "ready" as const })));
     expect((await f.editing.open({ kind: "new", repoId })).phase).toBe("editing");
+  });
+});
+
+/**
+ * SCP-313: the interview's conversation lives on the editing session, so
+ * leaving planning mode and restarting the app both come back to it (D-102).
+ */
+describe("the interview's conversation on an editing session", () => {
+  it("numbers each line, leaves the revision alone, and drops the oldest past the cap", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "new", repoId });
+    const at = "2026-01-01T00:00:00.000Z";
+    const first = f.editing.converse(session.id, { kind: "turn", text: "why two nodes?" }, at);
+    expect(first).toEqual({ n: 1, at, line: { kind: "turn", text: "why two nodes?" } });
+    f.editing.converse(session.id, { kind: "said", text: "Because the retry path is separate." }, at);
+    // A chat that bumped the revision would make every save in flight stale.
+    expect(f.editing.read(session.id).revision).toBe(session.revision);
+    expect(f.editing.read(session.id).conversation.map((line) => line.n)).toEqual([1, 2]);
+
+    for (let count = 0; count < INTERVIEW_CONVERSATION_CAP; count++)
+      f.editing.converse(session.id, { kind: "note", text: `line ${String(count)}` }, at);
+    const kept = f.editing.read(session.id).conversation;
+    expect(kept).toHaveLength(INTERVIEW_CONVERSATION_CAP);
+    // The numbers keep counting, so the chat can say the beginning is not kept.
+    expect(kept[0]!.n).toBe(3);
+    expect(kept.at(-1)!.n).toBe(INTERVIEW_CONVERSATION_CAP + 2);
+  });
+
+  it("records the interview's own session id, which is what continues it", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "new", repoId });
+    expect(session.interviewSession).toBeNull();
+    const recorded = f.editing.recordInterview(session.id, "sdk-session-1", "claude");
+    expect(recorded.interviewSession).toBe("sdk-session-1");
+    expect(recorded.interviewProvider).toBe("claude");
   });
 });
 
@@ -273,10 +310,10 @@ describe("editor binding lifecycle", () => {
     f.request.mockImplementation(async (request) => request.kind === "editingRead" && ++reads === 1 ? old.promise : original(request));
     const stale = structuredClone(editor.getSnapshot().session!);
     f.emit({ kind: "editing", sequence: 1, sessionId: stale.id });
-    await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "FCX-421" });
-    f.emit({ kind: "records", sequence: 2, repoId, key: "FCX-421" });
+    await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" });
+    f.emit({ kind: "records", sequence: 2, repoId, key: "PRB-421" });
     old.resolve(stale);
-    await vi.waitFor(() => expect(editor.getSnapshot().session).toMatchObject({ phase: "editing", key: "FCX-421" }));
+    await vi.waitFor(() => expect(editor.getSnapshot().session).toMatchObject({ phase: "editing", key: "PRB-421" }));
     expect(reads).toBe(2);
     disconnect();
   });
@@ -336,5 +373,38 @@ describe("editor binding lifecycle", () => {
     await flushContractEditors();
     expect(f.records()[0]!.form.draft).toEqual(draft);
     disconnectAgain();
+  });
+});
+
+describe("which session an interview continues", () => {
+  const recorded = (
+    interviewSession: string | null,
+    interviewProvider: "claude" | "codex" | null,
+  ) => ({ interviewSession, interviewProvider });
+
+  it("carries a recorded id only for the provider that reported it", () => {
+    expect(interviewSessionArgs(recorded("sdk-1", "claude"), "claude")).toEqual([
+      "--session",
+      "sdk-1",
+    ]);
+    expect(interviewSessionArgs(recorded("thread-1", "codex"), "codex")).toEqual([
+      "--session",
+      "thread-1",
+    ]);
+    // The planning's drafting choice has changed since: the new provider has
+    // never heard of this id, so the session starts fresh.
+    expect(interviewSessionArgs(recorded("sdk-1", "claude"), "codex")).toEqual([]);
+    expect(interviewSessionArgs(recorded("thread-1", "codex"), "claude")).toEqual([]);
+    // Nothing recorded, and a record from before the provider was written down.
+    expect(interviewSessionArgs(recorded(null, null), "claude")).toEqual([]);
+    // Recorded before the provider was written down: Claude's, as `perbo
+    // interview` reads it, so a planning in flight keeps its session.
+    expect(interviewSessionArgs(recorded("sdk-1", null), "claude")).toEqual(["--session", "sdk-1"]);
+    expect(interviewSessionArgs(recorded("sdk-1", null), "codex")).toEqual([]);
+  });
+
+  it("reads the provider off the planning's drafting choice", () => {
+    expect(interviewProviderFor({ draftingProvider: "codex-cli" })).toBe("codex");
+    expect(interviewProviderFor({ draftingProvider: "claude-cli" })).toBe("claude");
   });
 });

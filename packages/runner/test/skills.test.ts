@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EXECUTOR_SKILLS, ExecutorSkillsSchema } from "@focrux/contracts";
+import { EXECUTOR_SKILLS, ExecutorSkillsSchema } from "@perbo/contracts";
 import { withExecutorSkills } from "../src/skills.js";
 
 describe("host-selected executor guidance", () => {

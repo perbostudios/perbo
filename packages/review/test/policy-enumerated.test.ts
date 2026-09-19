@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BLOCKING_ROWS, CLOSURE_AUTHORITIES, ROUTING_POLICIES } from "@focrux/contracts";
+import { BLOCKING_ROWS, CLOSURE_AUTHORITIES, ROUTING_POLICIES } from "@perbo/contracts";
 import { decideBlocking, type BlockingInput } from "../src/blocking.js";
 
 /**

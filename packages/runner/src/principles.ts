@@ -5,15 +5,15 @@ import { join } from "node:path";
  * The product-principles ratchet (D-065 option 3).
  *
  * Every time a person answers a question no practice could — for this
- * repository, something like "does `focrux list` show finished tickets by
+ * repository, something like "does `perbo list` show finished tickets by
  * default?" — the answer is recorded here and consulted by every later brief,
  * so the same question is never asked twice and the category of things that
  * must stop for a person shrinks by accumulation. Each repository the runner
  * works on has its own file, because product answers belong to products.
  *
- * The file lives in the ticket store (`.focrux/principles.md`) and is written
- * only by a person, through `focrux principle add`: the runner's prohibited
- * paths already refuse the agent every write under `.focrux/**`, so the
+ * The file lives in the ticket store (`.perbo/principles.md`) and is written
+ * only by a person, through `perbo principle add`: the runner's prohibited
+ * paths already refuse the agent every write under `.perbo/**`, so the
  * executor consults principles it can never author. It reaches the brief as
  * data, with a standing instruction that principles resolve what unspecified
  * behaviour should do and never widen scope, weaken security, or excuse a
@@ -42,6 +42,6 @@ export function readPrinciplesFile(path: string): string | null {
   return `${cut}\n\n(truncated: the principles file exceeds ${PRINCIPLES_MAX_BYTES} bytes; trim it)`;
 }
 
-export function readPrinciples(repositoryRoot: string, storeDirname = ".focrux"): string | null {
+export function readPrinciples(repositoryRoot: string, storeDirname = ".perbo"): string | null {
   return readPrinciplesFile(join(repositoryRoot, storeDirname, PRINCIPLES_FILENAME));
 }

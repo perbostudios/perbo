@@ -1,21 +1,28 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
+import {
+  DEFAULT_ADR_FOLDER,
+  DEFAULT_SPEC_FOLDER,
+  isRepositoryRelativeFolder,
+  readStandingProhibited,
+  type StandingProhibitedEntry,
+} from "@perbo/contracts";
 
 /**
  * The store directory itself: where it is, what it declares, and the error a
  * command raises when it cannot be read.
  *
  * Separate from `tickets.ts`, which is the ticket store *inside* it:
- * `<repo>/.focrux/` holds the run configuration, the attempts, the bundles and
+ * `<repo>/.perbo/` holds the run configuration, the attempts, the bundles and
  * the baseline — local working state of one machine, read regardless of
- * whether anything is admitted — while `<repo>/.focrux/tickets/` is admitted
+ * whether anything is admitted — while `<repo>/.perbo/tickets/` is admitted
  * history, read only by the commands that admit and track work. Nothing in
  * this file names a ticket file.
  */
 
-/** `<repo>/.focrux`, unless a command was pointed somewhere else. */
-export const DEFAULT_STORE_DIRNAME = ".focrux";
+/** `<repo>/.perbo`, unless a command was pointed somewhere else. */
+export const DEFAULT_STORE_DIRNAME = ".perbo";
 
 /**
  * Anything a command could not read out of the store, in the words a person can
@@ -30,7 +37,7 @@ export function storeDir(repositoryRoot: string, override?: string | null): stri
 
 /**
  * What a record in the store says about where the repository is, when it says
- * nothing: the store's own parent, which for `<repo>/.focrux` is `<repo>`.
+ * nothing: the store's own parent, which for `<repo>/.perbo` is `<repo>`.
  *
  * A default rather than a required field, because it is right for every store
  * that has not been moved out of its repository, and because it is what a
@@ -74,7 +81,7 @@ export function storedRepositoryRoot(dir: string, repositoryRoot: string): strin
  * plan is captured against, and the id its scope is keyed by.
  *
  * Here rather than in `tickets.ts` because neither answer comes from a ticket.
- * `focrux run` mints a contract against this checkout's HEAD with nothing
+ * `perbo run` mints a contract against this checkout's HEAD with nothing
  * admitted behind it (SCP-180), so a run with no ticket has no store to read
  * them from; `tickets.ts` re-exports both under the names its callers use.
  */
@@ -91,6 +98,29 @@ export function headCommit(repositoryRoot: string): string {
   }
 }
 
+/**
+ * Every tracked file in the repository, repository-relative, or an empty list
+ * where git cannot say.
+ *
+ * What a plan's size counts over (D-104). Tracked rather than walked, so a
+ * build directory or an uncommitted scratch file cannot change a plan's size;
+ * empty rather than thrown, because a size is a reading beside the plan and a
+ * checkout git will not answer for is not a reason to refuse `inspect`.
+ */
+export function trackedFiles(repositoryRoot: string): string[] {
+  try {
+    return execFileSync("git", ["-C", repositoryRoot, "ls-files", "-z"], {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+      .split("\0")
+      .filter((path) => path.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 /** `repo_` plus the directory name, lowercased to what the id pattern allows. */
 export function repositoryId(repositoryRoot: string): string {
   const name = basename(resolve(repositoryRoot)).replace(/[^0-9A-Za-z_-]/g, "-");
@@ -99,6 +129,70 @@ export function repositoryId(repositoryRoot: string): string {
 
 /** The `<store>/config.json` keys a repository declares judging paths under. */
 export const JUDGING_CONFIG_KEYS = ["protected_paths", "protected_tests"] as const;
+
+/** One key of `<store>/config.json`, or undefined where the file or the key is absent. */
+function configValue(dir: string, key: string): unknown {
+  let raw: Record<string, unknown> | null = null;
+  try {
+    raw = JSON.parse(readFileSync(join(dir, "config.json"), "utf8")) as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new StoreError(
+        `${join(dir, "config.json")} could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return raw === null || typeof raw !== "object" ? undefined : raw[key];
+}
+
+/** The `<store>/config.json` key naming where this repository keeps its specs (D-103). */
+export const SPEC_FOLDER_CONFIG_KEY = "specs";
+
+/** The `<store>/config.json` key naming where this repository keeps its ADRs (D-103). */
+export const ADR_FOLDER_CONFIG_KEY = "adr";
+
+/**
+ * The repository-relative folder a repository keeps its specs in: `specs`
+ * unless `config.json` names another under `specs` (D-103).
+ *
+ * Read here rather than from the run configuration because two things want it
+ * before any run exists — where a new spec's folder is created, and which
+ * paths a contract puts off limits to the executor.
+ */
+export function specFolder(dir: string): string {
+  return configuredFolder(dir, SPEC_FOLDER_CONFIG_KEY, DEFAULT_SPEC_FOLDER, "specs live", '"specs" or "docs/specs"');
+}
+
+/**
+ * The repository-relative folder a repository keeps its ADRs in: `docs/adr`
+ * unless `config.json` names another under `adr` (D-102, D-103).
+ *
+ * Read beside {@link specFolder}, because two things want both: the interview
+ * writes the spec folder, `CONTEXT.md` and this, and a spec's admission records
+ * the ADRs changed with it for the loop to commit on the ticket's branch.
+ */
+export function adrFolder(dir: string): string {
+  return configuredFolder(dir, ADR_FOLDER_CONFIG_KEY, DEFAULT_ADR_FOLDER, "ADRs live", '"docs/adr" or "adr"');
+}
+
+/** One `config.json` key naming a repository-relative folder, or its default. */
+function configuredFolder(
+  dir: string,
+  key: string,
+  fallback: string,
+  what: string,
+  example: string,
+): string {
+  const named = configValue(dir, key);
+  if (named === undefined) return fallback;
+  if (typeof named !== "string" || !isRepositoryRelativeFolder(named)) {
+    throw new StoreError(
+      `${join(dir, "config.json")} sets '${key}' to something that is not a ` +
+        `repository-relative folder. It names where ${what}, for example ${example}`,
+    );
+  }
+  return named;
+}
 
 /**
  * A path a check pins as its definition, named with the checks that pin it:
@@ -159,7 +253,7 @@ function checkDefinitionOwners(raw: Record<string, unknown> | null): Map<string,
  * `<store>/config.json`, the definition each pinned check is run from, plus the
  * store itself, which the runner refuses every write to. Read at approval so a
  * scope that overlaps them is refused with the reason rather than discovered at
- * the seal, after an attempt has been paid for, and reported by `focrux doctor`
+ * the seal, after an attempt has been paid for, and reported by `perbo doctor`
  * so the list can be read before a scope is written against it.
  *
  * A config key contributing nothing is still an entry, with a `null` path:
@@ -170,7 +264,7 @@ function checkDefinitionOwners(raw: Record<string, unknown> | null): Map<string,
  * undeclared.
  */
 export function judgingPaths(dir: string): JudgingPath[] {
-  const entries: JudgingPath[] = [{ path: ".focrux/**", source: "store", set: true }];
+  const entries: JudgingPath[] = [{ path: ".perbo/**", source: "store", set: true }];
   const seen = new Set(entries.map((entry) => entry.path));
   let raw: Record<string, unknown> | null = null;
   try {
@@ -204,6 +298,29 @@ export function judgingPaths(dir: string): JudgingPath[] {
     entries.push({ path, source: `checks[${owners.join(",")}].definition_path`, set: true });
   }
   return entries;
+}
+
+/**
+ * What this repository prohibits a write to for every ticket (D-105), each
+ * entry with what put it there. Admission folds them into a new ticket's
+ * `paths_prohibited`, and the runner's guard reads the same key again at run
+ * time, so an entry added after a ticket was admitted still holds for its runs.
+ *
+ * Not a judging path: an approved scope may name a path this prohibits. What is
+ * refused is the write.
+ */
+export function standingProhibited(dir: string): StandingProhibitedEntry[] {
+  let raw: unknown = null;
+  try {
+    raw = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new StoreError(
+        `${join(dir, "config.json")} could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return readStandingProhibited(raw);
 }
 
 /** One judging path with the key that judges by it. */

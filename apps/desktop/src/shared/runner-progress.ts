@@ -1,4 +1,4 @@
-import type { TicketState } from "@focrux/contracts";
+import type { TicketState } from "@perbo/contracts";
 
 /** Observed CLI milestones, used for display while ticket persistence lags and for the stage-change notification. */
 export function runnerProgress(

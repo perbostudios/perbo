@@ -7,7 +7,7 @@ import { ProviderError } from "../src/provider.js";
 import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL } from "../src/verdict.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "focrux-codex-provider-test-"));
+const scratch = mkdtempSync(join(tmpdir(), "perbo-codex-provider-test-"));
 const authHome = join(scratch, "auth-home");
 mkdirSync(authHome, { recursive: true });
 writeFileSync(join(authHome, "auth.json"), "{}");
@@ -63,7 +63,7 @@ function fakeCodex(
     "      Array.isArray(message.params.runtimeWorkspaceRoots) &&",
     "      existsSync(join(process.env.CODEX_HOME ?? '', 'auth.json')) &&",
     "      process.env.CODEX_THREAD_ID === undefined &&",
-    "      process.env.FOCRUX_TEST_LEAK === undefined;",
+    "      process.env.PERBO_TEST_LEAK === undefined;",
     "    if (!isolated) {",
     "      send({ id: message.id, error: { code: -1, message: 'reviewer was not isolated' } });",
     "      return;",
@@ -124,7 +124,7 @@ describe("the codex-cli transport", () => {
     process.env.CODEX_THREAD_ID = "must-not-leak";
     // Not a Codex variable at all: the environment is an allow-list, so an
     // unlisted name is dropped whatever its prefix.
-    process.env.FOCRUX_TEST_LEAK = "must-not-leak";
+    process.env.PERBO_TEST_LEAK = "must-not-leak";
     try {
       const model = codexCliModel({
         submitSchema: { type: "object" },
@@ -154,7 +154,7 @@ describe("the codex-cli transport", () => {
       });
       expect(result.reported_cost_micros).toBeUndefined();
     } finally {
-      delete process.env.FOCRUX_TEST_LEAK;
+      delete process.env.PERBO_TEST_LEAK;
       if (previous === undefined) delete process.env.CODEX_THREAD_ID;
       else process.env.CODEX_THREAD_ID = previous;
     }

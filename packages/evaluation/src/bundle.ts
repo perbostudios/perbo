@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
  *
  * The snapshot is a *bundle* rather than a copied file because copying the
  * entry point alone would prevent nothing: `main.js` imports `./run.js` and
- * `@focrux/contracts`, and both resolve back into the tree being rebuilt. Only
+ * `@perbo/contracts`, and both resolve back into the tree being rebuilt. Only
  * a single file with every workspace package and dependency inlined is
  * genuinely detached from it, which is what `tooling/package/bundle.mjs`
  * builds — the same bundle the design-partner tarball ships.
@@ -30,9 +30,9 @@ export interface ExecutedBundle {
   source: string;
 }
 
-/** `<out>/bin/focrux.mjs`: the run's own copy, beside the run's own results. */
+/** `<out>/bin/perbo.mjs`: the run's own copy, beside the run's own results. */
 export const BUNDLE_DIRNAME = "bin";
-export const BUNDLE_FILENAME = "focrux.mjs";
+export const BUNDLE_FILENAME = "perbo.mjs";
 
 /** `tooling/package/bundle.mjs`, relative to a checkout of this repository. */
 const BUNDLER_RELATIVE_PATH = join("tooling", "package", "bundle.mjs");
@@ -111,7 +111,7 @@ function stageManifestBeside(entry: string, copy: string): void {
   }
   writeFileSync(
     join(dirname(dirname(copy)), "package.json"),
-    `${JSON.stringify({ name: "focrux", version, private: true, type: "module" }, null, 2)}\n`,
+    `${JSON.stringify({ name: "perbo", version, private: true, type: "module" }, null, 2)}\n`,
   );
 }
 
@@ -121,7 +121,7 @@ function stageManifestBeside(entry: string, copy: string): void {
  * Both halves are checked here rather than being read out of the bundler's
  * stderr, because both have an instruction attached: check out the repository,
  * or install its dependencies. The bundler is spawned rather than imported —
- * esbuild is a dependency of `@focrux/package` and not of this one, and a
+ * esbuild is a dependency of `@perbo/package` and not of this one, and a
  * corpus run has no business pulling a bundler into its own process — so this
  * is also where a missing esbuild is a sentence rather than a stack trace from
  * a child process.

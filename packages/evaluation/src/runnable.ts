@@ -1,13 +1,13 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run } from "@focrux/workspace";
+import { run } from "@perbo/workspace";
 import { RUNTIME_FILES, defaultCacheDir, type LoadedFixture } from "./corpus.js";
 import { cachePathFor } from "./prepare.js";
 import type { FixtureRuntime } from "./fixture.js";
 
 /**
- * Can a fixture's own tree be run? (`focrux-corpus runnable`)
+ * Can a fixture's own tree be run? (`perbo-corpus runnable`)
  *
  * Stage 2 found that this is the corpus's binding constraint on anything
  * involving an executor: an agent asked to close a finding cannot check its own
@@ -99,7 +99,7 @@ async function measurePinned(
       fixture_id: fixture.fixture.id,
       runtime: {
         status: "not_installable",
-        note: `not prepared: run \`focrux-corpus prepare --filter ${fixture.fixture.id}\` first`,
+        note: `not prepared: run \`perbo-corpus prepare --filter ${fixture.fixture.id}\` first`,
       },
       install_ms: 0,
       test_ms: 0,
@@ -163,7 +163,7 @@ export async function measureRunnable(
   if (fixture.fixture.pinned_repository !== null) {
     return measurePinned(fixture, options.cacheRoot ?? defaultCacheDir());
   }
-  const dir = mkdtempSync(join(tmpdir(), `focrux-runnable-${fixture.fixture.id}-`));
+  const dir = mkdtempSync(join(tmpdir(), `perbo-runnable-${fixture.fixture.id}-`));
   mkdirSync(dir, { recursive: true });
   cpSync(fixture.repoDir, dir, { recursive: true });
   for (const file of RUNTIME_FILES) {
