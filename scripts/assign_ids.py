@@ -2,9 +2,11 @@
 """Number the placeholder ids a pull request carries. Whoever merges it runs this.
 
 A branch names a new decision `D-NEW-<label>` (a heading in
-docs/11-open-decisions.md), a new ADR `docs/adr/NEW-<label>.md` (headed
-`# ADR-NEW-<label>: Title`) and a new backlog entry `SCP-NEW-<label>`, where a
-label is lowercase letters and digits in hyphen-separated runs.
+docs/11-open-decisions.md) and a new ADR `docs/adr/NEW-<label>.md` (headed
+`# ADR-NEW-<label>: Title`), where a label is lowercase letters and digits in
+hyphen-separated runs. A backlog entry is numbered where the backlog lives, not
+here: a numbered `SCP-` id is ordinary text to this script, and an
+`SCP-NEW-<label>` is a placeholder that nothing here declares.
 
     git fetch origin
     python3 scripts/assign_ids.py            # print the mapping; write nothing
@@ -12,27 +14,24 @@ label is lowercase letters and digits in hyphen-separated runs.
 
 Each kind continues from the highest number it has ever held: on the base ref
 (default origin/main), in the working tree, or anywhere in the history of the
-base ref and HEAD. A number a deleted decision, ADR or backlog entry once held
-is never reused. A shallow clone is refused, because its history is incomplete.
-Placeholders are numbered in order of first appearance:
-decisions down the register, backlog entries down the backlog, and ADRs down
-the ADR index (docs/adr/README.md), then by filename for any the index does not
-mention.
+base ref and HEAD. A number a deleted decision or ADR once held is never
+reused. A shallow clone is refused, because its history is incomplete.
+Placeholders are numbered in order of first appearance: decisions down the
+register and ADRs down the ADR index (docs/adr/README.md), then by filename for
+any the index does not mention.
 
 --apply rewrites every occurrence in tracked text files, including decision
 heading anchors (`#d-new-<label>--` becomes `#d-nnn--`) and ADR filenames in
 links and paths (`NEW-<label>.md` becomes `nnnn-<label>.md`), renames each ADR
-file with `git mv`, then runs validate_docs.py --strict, validate_backlog.py
---strict and validate_diagrams.py, and exits non-zero if any of them fails. A
-placeholder id or anchor that a tracked file mentions and nothing declares
-stops the run before anything is written.
+file with `git mv`, then runs validate_docs.py --strict and validate_diagrams.py,
+and exits non-zero if either fails. A placeholder id or anchor that a tracked
+file mentions and nothing declares stops the run before anything is written.
 """
 from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
 from dataclasses import dataclass
-import json
 from pathlib import Path
 import re
 import subprocess
@@ -44,28 +43,24 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTER = "docs/11-open-decisions.md"
 ADR_DIRECTORY = "docs/adr"
 ADR_INDEX = "docs/adr/README.md"
-BACKLOG = "backlog/issues.json"
 VALIDATORS = (
     ("validate_docs.py", "--strict"),
-    ("validate_backlog.py", "--strict"),
     ("validate_diagrams.py",),
 )
 
 _BEFORE = r"(?<![A-Za-z0-9_-])"
 _AFTER = r"(?![A-Za-z0-9_-])"
 # Every form a placeholder takes in a tracked file: the id, a decision heading's
-# anchor, and an ADR's filename.
+# anchor, and an ADR's filename. A backlog placeholder matches too, only so that
+# a mention of one is refused.
 PLACEHOLDER = re.compile(
-    rf"{_BEFORE}(?P<kind>D|ADR|SCP)-NEW-(?P<label>{PLACEHOLDER_LABEL}){_AFTER}"
+    rf"{_BEFORE}(?P<kind>D|ADR)-NEW-(?P<label>{PLACEHOLDER_LABEL}){_AFTER}"
     rf"|#d-new-(?P<anchor>{PLACEHOLDER_LABEL})--"
     rf"|{_BEFORE}NEW-(?P<file>{PLACEHOLDER_LABEL})\.md{_AFTER}"
+    rf"|{_BEFORE}(?P<backlog>SCP-NEW-{PLACEHOLDER_LABEL}){_AFTER}"
 )
 ADR_PLACEHOLDER_FILE = re.compile(rf"{ADR_DIRECTORY}/NEW-({PLACEHOLDER_LABEL})\.md")
-ISSUE_PLACEHOLDER = re.compile(rf"SCP-NEW-({PLACEHOLDER_LABEL})")
 NUMBERED_ADR = re.compile(r"([0-9]{4})-.+\.md")
-NUMBERED_ISSUE = re.compile(r"SCP-([0-9]{3,})")
-# A backlog entry's id as a line of backlog/issues.json shows it, in the file or in a patch.
-ISSUE_ID_FIELD = re.compile(r'"id":\s*"SCP-([0-9]{3,})"')
 
 
 class AssignError(Exception):
@@ -74,7 +69,7 @@ class AssignError(Exception):
 
 @dataclass(frozen=True)
 class Placeholder:
-    kind: str  # "D", "ADR" or "SCP"
+    kind: str  # "D" or "ADR"
     label: str
 
     def __str__(self) -> str:
@@ -85,10 +80,9 @@ class Placeholder:
 class Highest:
     decision: int
     adr: int
-    issue: int
 
     def __str__(self) -> str:
-        return f"D-{self.decision:03d}, ADR-{self.adr:04d}, SCP-{self.issue:03d}"
+        return f"D-{self.decision:03d}, ADR-{self.adr:04d}"
 
 
 @dataclass(frozen=True)
@@ -140,27 +134,10 @@ def headings(register: str | None) -> list[re.Match[str]]:
     ]
 
 
-def backlog_ids(text: str | None, source: str) -> list[str]:
-    if text is None:
-        return []
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise AssignError(f"{source} is not valid JSON: {error}") from error
-    issues = data.get("issues") if isinstance(data, dict) else None
-    if not isinstance(issues, list):
-        raise AssignError(f"{source} has no issues list")
-    return [issue["id"] for issue in issues if isinstance(issue, dict) and isinstance(issue.get("id"), str)]
-
-
-def highest(register: str | None, adr_names: Iterable[str], issue_ids: Iterable[str]) -> Highest:
+def highest(register: str | None, adr_names: Iterable[str]) -> Highest:
     return Highest(
         decision=max((int(match.group(1)) for match in headings(register) if match.group(1)), default=0),
         adr=max((int(match.group(1)) for name in adr_names if (match := NUMBERED_ADR.fullmatch(name))), default=0),
-        issue=max(
-            (int(match.group(1)) for issue_id in issue_ids if (match := NUMBERED_ISSUE.fullmatch(issue_id))),
-            default=0,
-        ),
     )
 
 
@@ -177,18 +154,17 @@ def base_highest(ref: str) -> tuple[str, Highest]:
     return resolved.stdout.strip(), highest(
         show(REGISTER),
         (show(f"{ADR_DIRECTORY}/") or "").splitlines(),
-        backlog_ids(show(BACKLOG), f"{BACKLOG} on {ref}"),
     )
 
 
 def history_highest(refs: Iterable[str]) -> Highest:
     """The highest number each kind has held at any commit reachable from the refs.
 
-    The register and the backlog are read from every patch that touched them,
-    added, removed and context lines alike, and the ADR directory from every name
-    it has held, so a deleted entry's number still counts. Every commit is read,
-    and a merge is diffed against each parent, so neither a merge that kept one
-    side's records nor a number only a conflict resolution held can hide one.
+    The register is read from every patch that touched it, added, removed and
+    context lines alike, and the ADR directory from every name it has held, so a
+    deleted entry's number still counts. Every commit is read, and a merge is
+    diffed against each parent, so neither a merge that kept one side's records
+    nor a number only a conflict resolution held can hide one.
     """
     if git("rev-parse", "--is-shallow-repository").stdout.strip() == "true":
         raise AssignError(
@@ -197,23 +173,21 @@ def history_highest(refs: Iterable[str]) -> Highest:
         )
     reachable = [ref for ref in refs if git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode == 0]
     if not reachable:
-        return Highest(0, 0, 0)
+        return Highest(0, 0)
     every_commit = ("--full-history", "--diff-merges=separate", "--no-renames", "--no-color")
-    patches = git("log", "-p", *every_commit, "--format=", *reachable, "--", REGISTER, BACKLOG)
+    patches = git("log", "-p", *every_commit, "--format=", *reachable, "--", REGISTER)
     if patches.returncode != 0:
         raise AssignError(f"git log failed: {patches.stderr.strip()}")
     decisions: list[int] = []
-    issues: list[int] = []
     for line in patches.stdout.splitlines():
         content = line[1:]  # past the diff marker
         if (match := DECISION_HEADING.fullmatch(content)) is not None and match.group(1):
             decisions.append(int(match.group(1)))
-        issues.extend(int(number) for number in ISSUE_ID_FIELD.findall(content))
     names = git("log", *every_commit, "--format=", "--name-only", *reachable, "--", ADR_DIRECTORY)
     if names.returncode != 0:
         raise AssignError(f"git log failed: {names.stderr.strip()}")
     adrs = [int(match.group(1)) for path in names.stdout.splitlines() if (match := NUMBERED_ADR.fullmatch(Path(path).name))]
-    return Highest(max(decisions, default=0), max(adrs, default=0), max(issues, default=0))
+    return Highest(max(decisions, default=0), max(adrs, default=0))
 
 
 def tracked_files() -> list[str]:
@@ -240,7 +214,7 @@ def placeholder_texts(tracked: Iterable[str]) -> dict[str, str]:
     return texts
 
 
-def declared(register: str | None, tracked: list[str], issue_ids: list[str]) -> tuple[list[Placeholder], ...]:
+def declared(register: str | None, tracked: list[str]) -> tuple[list[Placeholder], ...]:
     """Each kind's placeholders in order of first appearance."""
     decisions = dict.fromkeys(match.group(2) for match in headings(register) if match.group(2))
     adr_labels = [
@@ -255,11 +229,9 @@ def declared(register: str | None, tracked: list[str], issue_ids: list[str]) -> 
         if label is not None:
             first_mention.setdefault(label, match.start())
     adrs = sorted(adr_labels, key=lambda label: (first_mention.get(label, len(index)), label))
-    issues = dict.fromkeys(match.group(1) for issue_id in issue_ids if (match := ISSUE_PLACEHOLDER.fullmatch(issue_id)))
     return (
         [Placeholder("D", label) for label in decisions],
         [Placeholder("ADR", label) for label in adrs],
-        [Placeholder("SCP", label) for label in issues],
     )
 
 
@@ -275,17 +247,15 @@ def mentioned(match: re.Match[str]) -> Placeholder | None:
 def plan(base: str) -> Plan:
     base_commit, base_numbers = base_highest(base)
     register = read_text(REGISTER)
-    issue_ids = backlog_ids(read_text(BACKLOG), BACKLOG)
     tracked = tracked_files()
-    tree_numbers = highest(register, (path.name for path in (ROOT / ADR_DIRECTORY).glob("*.md")), issue_ids)
+    tree_numbers = highest(register, (path.name for path in (ROOT / ADR_DIRECTORY).glob("*.md")))
     history_numbers = history_highest([base, "HEAD"])
     starts = (
         max(base_numbers.decision, tree_numbers.decision, history_numbers.decision),
         max(base_numbers.adr, tree_numbers.adr, history_numbers.adr),
-        max(base_numbers.issue, tree_numbers.issue, history_numbers.issue),
     )
     mapping: dict[Placeholder, int] = {}
-    for placeholders, start in zip(declared(register, tracked, issue_ids), starts):
+    for placeholders, start in zip(declared(register, tracked), starts):
         for offset, placeholder in enumerate(placeholders, start=1):
             mapping[placeholder] = start + offset
 
@@ -300,7 +270,7 @@ def plan(base: str) -> Plan:
     for name, text in texts.items():
         for match in PLACEHOLDER.finditer(text):
             placeholder = mentioned(match)
-            if placeholder is not None and placeholder not in mapping:
+            if match.group("backlog") is not None or (placeholder is not None and placeholder not in mapping):
                 line = text.count("\n", 0, match.start()) + 1
                 problems.append(f"  {name}:{line}: {match.group(0)}")
     if problems:

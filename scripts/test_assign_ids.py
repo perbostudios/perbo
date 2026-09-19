@@ -2,8 +2,6 @@
 """scripts/assign_ids.py run against scratch git repositories."""
 from __future__ import annotations
 
-import copy
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -11,12 +9,11 @@ import sys
 import tempfile
 import unittest
 
-from test_repository_validators import NEW, valid_backlog, write_docs_tree
+from test_repository_validators import NEW, write_docs_tree
 
 SCRIPTS = (
     "assign_ids.py",
     "repository_rules.py",
-    "validate_backlog.py",
     "validate_diagrams.py",
     "validate_docs.py",
 )
@@ -55,18 +52,6 @@ def read(root: Path, relative: str) -> str:
     return (root / relative).read_text(encoding="utf-8")
 
 
-def backlog(*issues: tuple[str, list[str]]) -> str:
-    """Backlog JSON holding the given (id, depends_on) issues, otherwise the minimal valid one."""
-    data = valid_backlog()
-    template = data["issues"]
-    assert isinstance(template, list) and isinstance(template[0], dict)
-    data["issues"] = [
-        {**copy.deepcopy(template[0]), "id": issue_id, "title": f"Issue {issue_id}", "depends_on": depends_on}
-        for issue_id, depends_on in issues
-    ]
-    return json.dumps(data, indent=2) + "\n"
-
-
 class AssignIdsTests(unittest.TestCase):
     def repository(self) -> Path:
         """A scratch repository on main, committed, that the validators accept and that holds no placeholder."""
@@ -88,7 +73,7 @@ class AssignIdsTests(unittest.TestCase):
             command += ["--base", base]
         return subprocess.run(command, cwd=root, capture_output=True, text=True, env=ENVIRONMENT, check=False)
 
-    def test_numbers_follow_first_appearance_in_the_register_the_adr_index_and_the_backlog(self) -> None:
+    def test_numbers_follow_first_appearance_in_the_register_and_the_adr_index(self) -> None:
         root = self.repository()
         write(
             root,
@@ -106,11 +91,6 @@ class AssignIdsTests(unittest.TestCase):
             "docs/adr/README.md",
             f"# ADRs\n\n- [ADR-{NEW}-beta]({NEW}-beta.md)\n- [ADR-{NEW}-alpha]({NEW}-alpha.md)\n",
         )
-        write(
-            root,
-            "backlog/issues.json",
-            backlog(("SCP-001", []), (f"SCP-{NEW}-zulu", []), (f"SCP-{NEW}-bravo", [f"SCP-{NEW}-zulu"])),
-        )
         self.commit(root, "Placeholders")
 
         result = self.assign(root)
@@ -121,8 +101,6 @@ class AssignIdsTests(unittest.TestCase):
             f"ADR-{NEW}-beta -> ADR-0002",
             f"ADR-{NEW}-alpha -> ADR-0003",
             f"ADR-{NEW}-gamma -> ADR-0004",
-            f"SCP-{NEW}-zulu -> SCP-002",
-            f"SCP-{NEW}-bravo -> SCP-003",
         ):
             self.assertIn(line, result.stdout)
         self.assertEqual(git(root, "status", "--porcelain"), "", "a dry run wrote to the tree")
@@ -133,36 +111,30 @@ class AssignIdsTests(unittest.TestCase):
         write(root, "docs/adr/0007-seventh.md", "# ADR-0007: Seventh\n")
         write(root, "docs/11-open-decisions.md", f"# Decisions\n\n### D-001 — First\n### D-{NEW}-queue — Queue\n")
         write(root, f"docs/adr/{NEW}-local.md", f"# ADR-{NEW}-local: Local\n")
-        write(root, "backlog/issues.json", backlog(("SCP-001", []), (f"SCP-{NEW}-serve", [])))
         self.commit(root, "Placeholders")
         git(root, "checkout", "--quiet", "main")
         write(root, "docs/11-open-decisions.md", "# Decisions\n\n### D-001 — First\n### D-905 — Fifth\n")
-        write(root, "backlog/issues.json", backlog(("SCP-001", []), ("SCP-009", [])))
         self.commit(root, "Main moves on")
         git(root, "checkout", "--quiet", "pull-request")
 
         result = self.assign(root)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        # Decisions and backlog ids run highest on main, ADRs in the tree.
+        # Decisions run highest on main, ADRs in the tree.
         self.assertIn(f"D-{NEW}-queue -> D-906", result.stdout)
         self.assertIn(f"ADR-{NEW}-local -> ADR-0008", result.stdout)
-        self.assertIn(f"SCP-{NEW}-serve -> SCP-010", result.stdout)
 
     def number_then_delete(self, root: Path) -> None:
-        """Commit D-905, ADR-0007 and SCP-009, then a commit that deletes all three."""
+        """Commit D-905 and ADR-0007, then a commit that deletes both."""
         write(root, "docs/11-open-decisions.md", "# Decisions\n\n### D-001 — First\n### D-905 — Fifth\n")
         write(root, "docs/adr/0007-seventh.md", "# ADR-0007: Seventh\n")
-        write(root, "backlog/issues.json", backlog(("SCP-001", []), ("SCP-009", [])))
         self.commit(root, "Numbers")
         write(root, "docs/11-open-decisions.md", "# Decisions\n\n### D-001 — First\n")
         (root / "docs/adr/0007-seventh.md").unlink()
-        write(root, "backlog/issues.json", backlog(("SCP-001", [])))
         self.commit(root, "Delete them")
 
     def write_placeholders(self, root: Path) -> None:
         write(root, "docs/11-open-decisions.md", f"# Decisions\n\n### D-001 — First\n### D-{NEW}-queue — Queue\n")
         write(root, f"docs/adr/{NEW}-local.md", f"# ADR-{NEW}-local: Local\n")
-        write(root, "backlog/issues.json", backlog(("SCP-001", []), (f"SCP-{NEW}-serve", [])))
         self.commit(root, "Placeholders")
 
     def test_a_number_deleted_on_the_branch_is_never_reused(self) -> None:
@@ -173,10 +145,9 @@ class AssignIdsTests(unittest.TestCase):
 
         result = self.assign(root)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        # Neither main nor the tree holds D-905, ADR-0007 or SCP-009; the branch's history does.
+        # Neither main nor the tree holds D-905 or ADR-0007; the branch's history does.
         self.assertIn(f"D-{NEW}-queue -> D-906", result.stdout)
         self.assertIn(f"ADR-{NEW}-local -> ADR-0008", result.stdout)
-        self.assertIn(f"SCP-{NEW}-serve -> SCP-010", result.stdout)
 
     def test_a_number_deleted_on_the_base_is_never_reused(self) -> None:
         root = self.repository()
@@ -190,7 +161,6 @@ class AssignIdsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(f"D-{NEW}-queue -> D-906", result.stdout)
         self.assertIn(f"ADR-{NEW}-local -> ADR-0008", result.stdout)
-        self.assertIn(f"SCP-{NEW}-serve -> SCP-010", result.stdout)
 
     def merge(self, root: Path, branch: str) -> None:
         """Start merging `branch` without committing; the caller resolves any conflict."""
@@ -203,9 +173,9 @@ class AssignIdsTests(unittest.TestCase):
         )
 
     def merge_keeping(self, root: Path, branch: str, side: str) -> None:
-        """Merge `branch`, finishing with `side`'s register and backlog and without ADR-0002."""
+        """Merge `branch`, finishing with `side`'s register and without ADR-0002."""
         self.merge(root, branch)
-        git(root, "checkout", side, "--", "docs/11-open-decisions.md", "backlog/issues.json")
+        git(root, "checkout", side, "--", "docs/11-open-decisions.md")
         if (root / "docs/adr/0002-second.md").exists():
             git(root, "rm", "--quiet", "--force", "docs/adr/0002-second.md")
         self.commit(root, f"Merge {branch}")
@@ -213,13 +183,12 @@ class AssignIdsTests(unittest.TestCase):
     def write_second(self, root: Path) -> None:
         write(root, "docs/11-open-decisions.md", "# Decisions\n\n### D-001 — First\n### D-002 — Second\n")
         write(root, "docs/adr/0002-second.md", "# ADR-0002: Second\n")
-        write(root, "backlog/issues.json", backlog(("SCP-001", []), ("SCP-002", [])))
 
     def test_a_number_a_merge_dropped_is_never_reused(self) -> None:
         root = self.repository()
         git(root, "checkout", "--quiet", "-b", "rename", "main")
         self.write_second(root)
-        self.commit(root, "Number D-002, ADR-0002 and SCP-002")
+        self.commit(root, "Number D-002 and ADR-0002")
         git(root, "checkout", "--quiet", "-b", "pull-request", "main")
         self.write_placeholders(root)
         self.merge_keeping(root, "rename", "HEAD")
@@ -230,7 +199,6 @@ class AssignIdsTests(unittest.TestCase):
         # The merge kept this branch's records, so only the merged side's history holds the numbers.
         self.assertIn(f"D-{NEW}-queue -> D-003", result.stdout)
         self.assertIn(f"ADR-{NEW}-local -> ADR-0003", result.stdout)
-        self.assertIn(f"SCP-{NEW}-serve -> SCP-003", result.stdout)
 
     def test_a_number_only_a_merge_resolution_held_is_never_reused(self) -> None:
         root = self.repository()
@@ -240,7 +208,7 @@ class AssignIdsTests(unittest.TestCase):
         git(root, "checkout", "--quiet", "-b", "pull-request", "main")
         write(root, "pull-request.txt", "pull request\n")
         self.commit(root, "Pull request")
-        # This resolution numbers D-002, ADR-0002 and SCP-002, which neither parent holds.
+        # This resolution numbers D-002 and ADR-0002, which neither parent holds.
         self.merge(root, "side")
         self.write_second(root)
         self.commit(root, "Merge side")
@@ -256,7 +224,6 @@ class AssignIdsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(f"D-{NEW}-queue -> D-003", result.stdout)
         self.assertIn(f"ADR-{NEW}-local -> ADR-0003", result.stdout)
-        self.assertIn(f"SCP-{NEW}-serve -> SCP-003", result.stdout)
 
     def test_a_shallow_clone_is_refused(self) -> None:
         root = self.repository()
@@ -283,7 +250,6 @@ class AssignIdsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(f"D-{NEW}-queue -> D-906", result.stdout)
         self.assertIn(f"ADR-{NEW}-local -> ADR-0008", result.stdout)
-        self.assertIn(f"SCP-{NEW}-serve -> SCP-010", result.stdout)
 
     def test_apply_renames_the_adr_and_numbers_its_heading(self) -> None:
         root = self.repository()
@@ -307,7 +273,7 @@ class AssignIdsTests(unittest.TestCase):
             "docs/11-open-decisions.md",
             "# Decisions\n\n### D-001 — First\n"
             f"### D-{NEW}-queue-design — Serve a queue\n\n"
-            f"Recorded in [ADR-{NEW}-local](adr/{NEW}-local.md) and tracked as SCP-{NEW}-serve.\n",
+            f"Recorded in [ADR-{NEW}-local](adr/{NEW}-local.md) and tracked as SCP-007.\n",
         )
         write(
             root,
@@ -325,7 +291,6 @@ class AssignIdsTests(unittest.TestCase):
             f"# Agents\n\nSee [D-{NEW}-queue-design](docs/11-open-decisions.md{anchor}) "
             f"and docs/adr/{NEW}-local.md. D-001 and ADR-0001 stay as they are.\n",
         )
-        write(root, "backlog/issues.json", backlog(("SCP-001", [f"SCP-{NEW}-serve"]), (f"SCP-{NEW}-serve", [])))
         self.commit(root, "Placeholders")
 
         result = self.assign(root, "--apply")
@@ -333,7 +298,7 @@ class AssignIdsTests(unittest.TestCase):
         self.assertEqual(
             read(root, "docs/11-open-decisions.md"),
             "# Decisions\n\n### D-001 — First\n### D-002 — Serve a queue\n\n"
-            "Recorded in [ADR-0002](adr/0002-local.md) and tracked as SCP-002.\n",
+            "Recorded in [ADR-0002](adr/0002-local.md) and tracked as SCP-007.\n",
         )
         self.assertEqual(
             read(root, "docs/adr/0002-local.md"),
@@ -347,11 +312,6 @@ class AssignIdsTests(unittest.TestCase):
             read(root, "AGENTS.md"),
             "# Agents\n\nSee [D-002](docs/11-open-decisions.md#d-002--serve-a-queue) "
             "and docs/adr/0002-local.md. D-001 and ADR-0001 stay as they are.\n",
-        )
-        issues = json.loads(read(root, "backlog/issues.json"))["issues"]
-        self.assertEqual(
-            [(issue["id"], issue["depends_on"]) for issue in issues],
-            [("SCP-001", ["SCP-002"]), ("SCP-002", [])],
         )
 
     def test_a_tree_without_placeholders_is_left_alone(self) -> None:
@@ -390,6 +350,17 @@ class AssignIdsTests(unittest.TestCase):
         result = self.assign(root, "--apply")
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn(f"docs/00-thesis.md:3: D-{NEW}-queu", result.stderr)
+        self.assertEqual(git(root, "status", "--porcelain"), "")
+
+    def test_a_backlog_placeholder_stops_the_run_because_nothing_here_declares_one(self) -> None:
+        root = self.repository()
+        write(root, "docs/11-open-decisions.md", f"# Decisions\n\n### D-001 — First\n### D-{NEW}-queue — Second\n")
+        write(root, "docs/00-thesis.md", f"# Thesis\n\nD-{NEW}-queue is tracked as SCP-{NEW}-serve.\n")
+        self.commit(root, "A backlog placeholder")
+
+        result = self.assign(root, "--apply")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f"docs/00-thesis.md:3: SCP-{NEW}-serve", result.stderr)
         self.assertEqual(git(root, "status", "--porcelain"), "")
 
     def test_the_base_defaults_to_origin_main_and_must_resolve(self) -> None:
