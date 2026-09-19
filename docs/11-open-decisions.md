@@ -43,7 +43,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-075 — Everything that runs on one machine is open source
 
 - Owner: Founder
-- Decision: the open-source product is everything that runs on one machine: the desktop, the whole CLI, the queue and its endpoint, `perbo agent`, `perbo interview`, and phone pairing over the local network. Anything hosted or shared across people is the control plane (D-016). The code is Apache-2.0, and contributions carry a Developer Certificate of Origin, with no contributor licence agreement. The corpus is public in [`plantedbugs`](https://github.com/lianmatsuo/plantedbugs), all of it from the public release, under Apache-2.0 for the fixture format and CC-BY-4.0 for the fixtures.
+- Decision: the open-source product is everything that runs on one machine: the desktop, the whole CLI, the queue and its endpoint, `perbo agent`, `perbo interview`, and phone pairing over the local network. Anything hosted or shared across people is the control plane (D-016). The code is Apache-2.0, and a contribution is under the same licence, with no contributor licence agreement. The corpus is public in [`plantedbugs`](https://github.com/lianmatsuo/plantedbugs), all of it from the public release, under Apache-2.0 for the fixture format and CC-BY-4.0 for the fixtures.
 - Why: the line follows memory, not features. The reviewer's prompts are open because a reviewer nobody can read is one nobody will trust.
 - Changes if: an open component turns out to need the hosted plane to work.
 - ADR: [ADR-0032](adr/0032-open-source-the-local-cli-and-the-reviewer.md).
@@ -546,11 +546,11 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Why: a green validator says an entry is well formed, never that it is right.
 - Changes if: validator-criteria tickets land entries that turn out wrong on substance.
 
-### D-114 — A person certifies a commit, and an agent's part is named
+### D-114 — An agent's part in a commit is named
 
 - Owner: Founder
-- Decision: a commit merges to `main` carrying the `Signed-off-by` of the person who submits it, their certificate under the Developer Certificate of Origin in `CONTRIBUTING.md`; an agent never certifies. A commit an agent wrote carries the trailer `Assisted-by: LLM`, the Linux kernel's convention, and no `Co-Authored-By` naming a model; `.claude/settings.json` sets that trailer for Claude Code sessions in this repository. The independent review an agent's merge needs (D-073) is maintainer tooling, recorded as a review comment, and is never a required approval on `main`.
-- Why: only a person can certify the certificate, and a history written almost entirely by agents should say so in a form other projects already read.
+- Decision: a commit an agent wrote carries the trailer `Assisted-by: LLM`, the Linux kernel's convention, and no `Co-Authored-By` naming a model; `.claude/settings.json` sets that trailer for Claude Code sessions in this repository. No commit carries a sign-off: a contribution is under Apache-2.0 by the licence's section 5, with no contributor licence agreement. The independent review an agent's merge needs (D-073) is maintainer tooling, recorded as a review comment, and is never a required approval on `main`.
+- Why: a history written almost entirely by agents should say so in a form other projects already read, and in the founder's words, "we should remove this requirement for a sign off".
 - Changes if: a required-approval rule a machine can satisfy is found to catch what the review comment does not.
 
 ### D-113 — The repository carries everything an agent needs

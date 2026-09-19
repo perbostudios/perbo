@@ -53,7 +53,7 @@ Running the corpus spends money: it needs a reviewer credential, and `--run` is 
 
 An agent may merge a pull request only after an independent review run on Claude Fable 5.1, or Claude Opus 5 when Fable is unavailable, has read the whole diff against this file and the `AGENTS.md` of every package the diff touches, and left an unqualified approve as a review comment naming the model ([D-073](docs/11-open-decisions.md)). The reviewing run is never the session that wrote the change. The founder may merge without it. That review is maintainer tooling: it is recorded as a comment and is never a required approval on `main`, and since GitHub cannot enforce it, a merge without the comment is a defect. Whoever merges runs `scripts/assign_ids.py --apply` first.
 
-A commit merges with the `Signed-off-by` of the person who submits it ([`CONTRIBUTING.md`](CONTRIBUTING.md)); a commit an agent wrote carries `Assisted-by: LLM` and no `Co-Authored-By` naming a model ([D-114](docs/11-open-decisions.md)). `.claude/settings.json` sets that trailer for Claude Code.
+A commit an agent wrote carries `Assisted-by: LLM` and no `Co-Authored-By` naming a model ([D-114](docs/11-open-decisions.md)). `.claude/settings.json` sets that trailer for Claude Code.
 
 ## Agent skills
 

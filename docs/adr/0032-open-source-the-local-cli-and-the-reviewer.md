@@ -9,7 +9,7 @@ Perbo runs on one machine, with the person's own subscriptions or keys. What a t
 
 ## Decision
 
-**Open**, under Apache-2.0 with a Developer Certificate of Origin: everything that runs on one machine. That covers:
+**Open**, under Apache-2.0: everything that runs on one machine. That covers:
 - `apps/cli` (every command) and `apps/desktop`;
 - `packages/contracts`, `packages/review` (with the reviewer's prompts), `packages/workspace`, `packages/runner`, `packages/planning` and `packages/ui`;
 - the evaluation harness and scorer;
