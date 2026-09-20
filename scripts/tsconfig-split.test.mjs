@@ -29,7 +29,6 @@ const PENDING = new Set([
   "@perbo/evaluation",
   "@perbo/planning",
   "@perbo/review",
-  "@perbo/runner",
   "@perbo/ui",
   "@perbo/workspace",
 ]);
