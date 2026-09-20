@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TicketIdSchema } from "./ids.js";
 import { TicketKeySchema } from "./ticket.js";
-import { wilsonInterval, type WilsonInterval } from "./stops.js";
+import { wilsonInterval, type WilsonInterval } from "./wilson.js";
 
 /**
  * Post-merge escapes: what merged and was then undone or reworked within

@@ -1,4 +1,4 @@
-import { wilsonInterval, type WilsonInterval } from "./stops.js";
+import { wilsonInterval, type WilsonInterval } from "./wilson.js";
 import type { DeliveryArm, Ticket } from "./ticket.js";
 
 /**

@@ -24,6 +24,7 @@ export * from "./permission.js";
 export * from "./runbundle.js";
 export * from "./secrets.js";
 export * from "./stops.js";
+export * from "./wilson.js";
 export * from "./verdicts.js";
 export * from "./escapes.js";
 export * from "./github.js";

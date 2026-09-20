@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TicketIdSchema } from "./ids.js";
 import { TicketKeySchema } from "./ticket.js";
+import { wilsonInterval, type WilsonInterval } from "./wilson.js";
 
 /**
  * Stop verdicts: precision of stopping measured live from pull requests
@@ -220,35 +221,6 @@ export function reconcileStopVerdicts(args: {
     first_seen_at: args.previous?.first_seen_at ?? args.observed_at,
     observed_at: args.observed_at,
   });
-}
-
-export interface WilsonInterval {
-  point: number;
-  low: number;
-  high: number;
-  n: number;
-  successes: number;
-}
-
-/**
- * Wilson score interval, copied from `packages/evaluation/src/metrics.ts` so
- * the CLI does not depend on the corpus package to report a live number. Same
- * arithmetic, same clamping: the interval always contains the point estimate.
- */
-export function wilsonInterval(successes: number, n: number, z = 1.959963984540054): WilsonInterval {
-  if (n === 0) return { point: NaN, low: NaN, high: NaN, n: 0, successes: 0 };
-  const p = successes / n;
-  const z2 = z * z;
-  const denominator = 1 + z2 / n;
-  const centre = p + z2 / (2 * n);
-  const spread = z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n));
-  return {
-    point: p,
-    low: Math.min(p, Math.max(0, (centre - spread) / denominator)),
-    high: Math.max(p, Math.min(1, (centre + spread) / denominator)),
-    n,
-    successes,
-  };
 }
 
 export interface StopsSummary {
