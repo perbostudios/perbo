@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isLive } from "../shared/jobs.js";
 import { useEffect } from "react";
 import type { DesktopBridge, Request } from "../shared/protocol.js";
-import { sampleBridge } from "../sample-host/bridge.js";
 import { workspaceRefresh } from "./workspace-refresh.js";
 
 const missingHost: DesktopBridge = {
@@ -15,9 +14,13 @@ const missingHost: DesktopBridge = {
     return () => undefined;
   },
 };
-export const bridge: DesktopBridge =
-  window.perbo ??
-  (navigator.userAgent.includes("Electron/") ? missingHost : sampleBridge);
+/**
+ * The one adapter slot. Preload fills it in Electron, the development preview
+ * page fills it with the sample host, and the test setup fills it under jsdom;
+ * with nothing in it there is no host to ask, and saying so is the only honest
+ * answer (D-097).
+ */
+export const bridge: DesktopBridge = window.perbo ?? missingHost;
 function useRefresh() {
   const client = useQueryClient();
   const refresh = workspaceRefresh(client, bridge);

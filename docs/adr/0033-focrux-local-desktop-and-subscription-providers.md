@@ -8,7 +8,7 @@
 `apps/desktop` is an Electron host with a React renderer built by Vite:
 
 - **Structure.** `src/renderer/ui` owns the renderer's primitives and visual tokens, behind one surface every feature module imports. Feature modules own presentation, and one typed, runtime-validated request protocol separates them from native capabilities. TanStack Query manages local projections and refreshes without becoming a second ticket store.
-- **Browser preview.** It uses clearly labelled sample records and cannot reach a repository or start a provider.
+- **Sample host.** `src/sample-host/` answers the same request protocol from clearly labelled sample records and cannot reach a repository or start a provider. It is what the renderer's tests run against, and `preview.html` is a development page that runs the renderer against it in a browser; the packaged renderer contains neither ([D-NEW-desktop-sample-host](../11-open-decisions.md)).
 - **The host and the CLI.** The host bundles the full CLI and its guard hook, runs the CLI on the Node inside Electron (`ELECTRON_RUN_AS_NODE`), and calls fixed CLI entry points with argv, never a shell string.
   - Native folder selection registers a canonical git checkout. Later requests carry repository ids, and a repository-relative path only where a surface reads one file; the host resolves it under the registered repository and refuses an absolute path, one that leaves the repository, one reached through a symlink and one nothing reads at all.
   - Contract edits and approval carry the digest of the bytes the person viewed.

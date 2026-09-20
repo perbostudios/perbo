@@ -282,14 +282,6 @@ export function App() {
                   </Suspense>
                 </main>
               </div>
-              {data.mode === "preview" && (
-                <div
-                  className="preview-indicator"
-                  title="Interactive preview with sample records. No coding agents run and no repositories are accessed."
-                >
-                  Sample workspace
-                </div>
-              )}
             </div>
           </HeaderSlotProvider>
           </CreateProvider>
