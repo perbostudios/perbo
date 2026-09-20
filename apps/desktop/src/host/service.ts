@@ -9,9 +9,8 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { z } from "zod";
-import { branchName, recordedBranch } from "@perbo/workspace";
 import {
   ApproachRecordSchema,
   DEFAULT_LIMITS,
@@ -111,6 +110,8 @@ import {
 import { WorkspaceReads } from "./workspace-reads.js";
 import { ProfileStateSchema } from "./profile/store.js";
 import { explorerPath, safePath } from "./repository/paths.js";
+import { repositoryStatus, topLevel, trackedFiles } from "./repository/git.js";
+import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import {
   attemptsPath,
   bundlesPath,
@@ -480,12 +481,8 @@ export class DesktopService {
     });
     renameSync(temporary, path);
   }
-  /** The repository's tracked files, from Git in the registered repository and never from a path a renderer sent. */
-  private async trackedFiles(repo: RegisteredRepository): Promise<string[]> {
-    const result = await this.execute("git", ["--no-optional-locks", "ls-files", "-z"], {
-      cwd: repo.path,
-    });
-    return requireSuccess(result).split("\0").filter((entry) => entry.length > 0);
+  private trackedFiles(repo: RegisteredRepository): Promise<string[]> {
+    return trackedFiles(this.execute, repo.path);
   }
   private async explorerList(repo: RegisteredRepository): Promise<ExplorerListing> {
     const tracked = await this.trackedFiles(repo);
@@ -567,15 +564,7 @@ export class DesktopService {
   ): Promise<Repository> {
     try {
       this.repository(repo.id);
-      const result = await this.execute(
-        "git",
-        ["--no-optional-locks", "status", "--porcelain=v1", "--branch"],
-        { cwd: repo.path },
-      );
-      const status = requireSuccess(result).trimEnd().split("\n");
-      const head = requireSuccess(
-        await this.execute("git", ["rev-parse", "HEAD"], { cwd: repo.path }),
-      ).trim();
+      const status = await repositoryStatus(this.execute, repo.path);
       const config = existsSync(configPath(repo))
         ? z
             .record(z.string(), z.unknown())
@@ -589,10 +578,7 @@ export class DesktopService {
         .safeParse(config["protected_paths"]);
       return {
         ...repo,
-        head,
-        branch:
-          (status[0] ?? "").replace(/^## /, "").split("...")[0] ?? "detached",
-        dirty: status.length > 1,
+        ...status,
         configured: existsSync(configPath(repo)),
         error: null,
         ...(manifest.success
@@ -618,11 +604,7 @@ export class DesktopService {
   }
   async registerRepository(path: string): Promise<Repository> {
     const canonical = realpathSync(path);
-    const root = requireSuccess(
-      await this.execute("git", ["rev-parse", "--show-toplevel"], {
-        cwd: canonical,
-      }),
-    ).trim();
+    const root = await topLevel(this.execute, canonical);
     if (realpathSync(root) !== canonical)
       throw new Error("Choose the root folder of the Git checkout.");
     const existing = this.state.repositories.find(
@@ -2236,64 +2218,19 @@ export class DesktopService {
       return null;
     }
     if (request.kind === "openWorktree") {
-      const { contract } = this.readContract(repo, request.key);
-      // A branch the ticket's records already name is kept; a name is derived
-      // only where none is (D-098).
-      const ticket = (await this.list(repo)).tickets.find(
-        (entry) => entry.key === request.key,
+      await this.options.io.openPath(
+        await ticketWorktree(
+          { tickets: this.ticketRecords(), execute: this.execute },
+          repo,
+          request.key,
+        ),
       );
-      const attempts = readAttempts(
-        attemptsPath(repo, contract.ticket_id),
-      ).attempts;
-      const branch =
-        "refs/heads/" +
-        (recordedBranch(
-          {
-            delivery: ticket?.delivery.branch,
-            attempt: attempts.at(-1)?.branch,
-          },
-          contract.ticket_id,
-        ) ??
-          branchName({
-            ticket_key: ticket?.key ?? request.key,
-            ticket_id: contract.ticket_id,
-            outcome: contract.outcome,
-          }));
-      const listed = requireSuccess(
-        await this.execute("git", ["worktree", "list", "--porcelain", "-z"], {
-          cwd: repo.path,
-        }),
-      );
-      const entry = listed
-        .split("\0\0")
-        .find((record) => record.split("\0").includes("branch " + branch));
-      const path = entry
-        ?.split("\0")
-        .find((field) => field.startsWith("worktree "))
-        ?.slice(9);
-      if (!path || !isAbsolute(path) || !existsSync(path))
-        throw new Error(
-          "This task has no materialized worktree available. Its retained changes remain in the run record.",
-        );
-      const canonical = realpathSync(path);
-      if (canonical === repo.path)
-        throw new Error(
-          "The task's worktree resolves to the primary checkout.",
-        );
-      await this.options.io.openPath(canonical);
       return null;
     }
     if (request.kind === "openPullRequest") {
-      const detail = await this.detail(repo.id, request.key),
-        url = detail.ticket.delivery.pull_request_url;
-      if (
-        !url ||
-        !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+$/.test(
-          url,
-        )
-      )
-        throw new Error("This task has no supported GitHub pull-request URL.");
-      await this.options.io.openExternal(url);
+      await this.options.io.openExternal(
+        pullRequestUrl(await this.detail(repo.id, request.key)),
+      );
       return null;
     }
     if (request.kind === "export") {
@@ -2637,6 +2574,13 @@ export class DesktopService {
       );
     const unreachable: never = request;
     throw new Error(`Unsupported request ${String(unreachable)}`);
+  }
+  /** What a module reading a ticket's records is given, so it never reads the store twice over. */
+  private ticketRecords(): TicketRecords {
+    return {
+      list: (repo) => this.list(repo),
+      contract: (repo, key) => this.readContract(repo, key),
+    };
   }
   private async taskSummary(repoId: string, key: string): Promise<TaskSummary> {
     return this.reads.read(
