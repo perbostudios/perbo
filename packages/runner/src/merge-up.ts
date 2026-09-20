@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { gitEnv, run, runOrThrow } from "@perbo/workspace";
+import { git } from "@perbo/workspace";
 
 /**
  * Keeping the attempt's branch level with the base (SCP-192).
@@ -72,20 +72,13 @@ export interface MergeUpRequest {
  */
 const REF_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._/@+-]*$/;
 
-async function git(args: string[], cwd: string, timeoutMs: number) {
-  return run(["git", ...args], { cwd, env: gitEnv(), timeoutMs });
-}
-
-/** Whether `ancestor` is reachable from `descendant`. */
-async function isAncestor(
-  ancestor: string,
-  descendant: string,
-  cwd: string,
-  timeoutMs: number,
-): Promise<boolean> {
-  const result = await git(["merge-base", "--is-ancestor", ancestor, descendant], cwd, timeoutMs);
-  return result.code === 0;
-}
+/**
+ * What the list of unmerged paths may say, past which only its tail arrives.
+ *
+ * The paths are what the resolution round is briefed with, so a cut list is a
+ * conflict brief missing the files it opens with.
+ */
+const MAX_LISTING_BYTES = 64 * 1024 * 1024;
 
 /**
  * Merge the base's current tip into the attempt's branch.
@@ -102,50 +95,44 @@ export async function mergeUp(request: MergeUpRequest): Promise<MergeUpResult> {
   const unchanged: MergeUpResult = { status: "current", base_commit: request.base_commit };
 
   if (!REF_SHAPE.test(request.base_ref)) return unchanged;
-  const resolved = await git(
-    ["rev-parse", "--verify", "--quiet", `${request.base_ref}^{commit}`],
-    request.repository_root,
-    timeoutMs,
-  );
-  if (resolved.code !== 0) return unchanged;
-  const tip = resolved.stdout.trim();
-  if (tip.length === 0) return unchanged;
+  const tip = await git.resolveCommit(request.repository_root, request.base_ref, { timeoutMs });
+  if (tip === null) return unchanged;
 
   // The base has to have moved **forward** from the base this change set is
   // measured against. A `base_ref` pointing at an unrelated commit, or at one
   // behind the contract's base, is not a base that moved under the run: merging
   // it would widen the change set with work the plan never named.
   if (tip === request.base_commit) return unchanged;
-  if (!(await isAncestor(request.base_commit, tip, request.worktree, timeoutMs))) return unchanged;
+  if (!(await git.isAncestor(request.worktree, request.base_commit, tip, { timeoutMs }))) return unchanged;
 
   // Already merged up — by an earlier round, or by the executor itself. The
   // branch is level, and the base it is level with is the tip.
-  if (await isAncestor(tip, "HEAD", request.worktree, timeoutMs)) {
+  if (await git.isAncestor(request.worktree, tip, "HEAD", { timeoutMs })) {
     return { status: "current", base_commit: tip };
   }
 
   const message =
     `${request.ticket_key}: merge ${request.base_ref} into the attempt branch\n\n` +
     `Attempt: ${request.attempt_id}\nBase: ${tip}\n`;
-  const merged = await git(["merge", "--no-edit", "-m", message, tip], request.worktree, timeoutMs);
+  const merged = await git.run(request.worktree, ["merge", "--no-edit", "-m", message, tip], { timeoutMs });
   if (merged.code === 0) {
-    const head = await runOrThrow(["git", "rev-parse", "HEAD"], {
-      cwd: request.worktree,
-      env: gitEnv(),
-      timeoutMs,
-    });
-    return { status: "merged", base_commit: tip, merge_commit: head.stdout.trim() };
+    const head = await git.head(request.worktree, { timeoutMs });
+    if (head === null) throw new Error(`${request.worktree} is on no commit after a merge git accepted`);
+    return { status: "merged", base_commit: tip, merge_commit: head };
   }
 
   // Unmerged paths first, then the abort: reading them after the abort would
   // read an empty list. A merge that failed for some other reason reports no
   // path, and the detail is what says why.
-  const unmerged = await git(["diff", "--name-only", "--diff-filter=U"], request.worktree, timeoutMs);
+  const unmerged = await git.run(request.worktree, ["diff", "--name-only", "--diff-filter=U"], {
+    timeoutMs,
+    maxOutputBytes: MAX_LISTING_BYTES,
+  });
   const paths = unmerged.stdout
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
-  await git(["merge", "--abort"], request.worktree, timeoutMs);
+  await git.run(request.worktree, ["merge", "--abort"], { timeoutMs });
   return {
     status: "conflict",
     base_commit: request.base_commit,
