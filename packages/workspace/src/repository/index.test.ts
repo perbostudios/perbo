@@ -97,7 +97,7 @@ describe("an operand that would be read as an option", () => {
     await expect(repository.resolveCommit("/repo", "--output=x")).rejects.toThrowError(RangeError);
     await expect(repository.changedPaths("/repo", "--output=/tmp/x", "HEAD")).rejects.toThrowError(RangeError);
     await expect(repository.mergeBase("/repo", "-f", "HEAD")).rejects.toThrowError(RangeError);
-    expect(repository.headSync).toBeTypeOf("function");
+    expect(() => repository.resolveCommitSync("/repo", "--output=x")).toThrowError(RangeError);
     expect(process_.calls).toEqual([]);
   });
 });
