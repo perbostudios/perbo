@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button, Notice, cx } from "../ui/index.js";
-import { bridge, errorMessage } from "../data.js";
+import { bridge, errorMessage, useGraph } from "../data.js";
 import { draftHistory, graphHistory, latestUndoable } from "./history.js";
 import type { HistoryRow } from "./history.js";
-import type { Change } from "../../shared/protocol.js";
 import type { useContractEditing } from "../tasks/contract-editor.js";
 
 /**
@@ -30,29 +29,10 @@ export function HistoryDrawer({ editor, onClose }: { editor: Editor; onClose: ()
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const graph = useQuery({
-    queryKey: ["graph", repoId, key],
-    queryFn: () => bridge.request({ kind: "graphRead", repoId, key: key ?? "" }),
-    networkMode: "always",
-    enabled: key !== null,
-    staleTime: 1000,
-  });
+  const graph = useGraph(repoId, key);
   const rows: HistoryRow[] =
     key !== null ? graphHistory(graph.data?.history ?? []) : draftHistory(session?.history ?? []);
   const undoable = latestUndoable(rows);
-
-  // The plan moves under this drawer while it is open — the interview edits it
-  // from the chat beside it — and the pane underneath is not always the Graph
-  // pane, which is the only other thing listening.
-  useEffect(
-    () =>
-      bridge.subscribe((change: Change) => {
-        if (change.kind !== "records" || key === null) return;
-        if (change.repoId !== null && change.repoId !== repoId) return;
-        void client.invalidateQueries({ queryKey: ["graph", repoId, key] });
-      }),
-    [client, key, repoId],
-  );
 
   const dismiss = useRef(onClose);
   dismiss.current = onClose;

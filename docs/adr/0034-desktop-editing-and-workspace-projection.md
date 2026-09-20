@@ -20,9 +20,9 @@ Three modules own the desktop's lifecycles, each behind a focused interface.
   - A terminal command's stale records cannot establish success or recovery while fresh records are being read.
 - **Workspace refresh sits behind the query hooks.**
   - Validated progress events patch the job display without native reads.
-  - Record events refresh the changed repository and the active detail and output queries.
+  - Record events refresh the changed repository and the active detail, output, summary and graph queries.
   - Polling and visibility wakeups still read external CLI changes.
-  - A dirty generation forces a fresh pass when a mutation overlaps a read.
+  - A dirty generation forces a fresh pass when a mutation overlaps a read. One module states that rule, `src/shared/read-generations.ts`, and both the host's reads and every one of the renderer's query hooks go through it.
   - The host shares in-flight reads; the selected output attempt still passes ticket, bundle, size, regular-file and hash checks.
 
 The preview uses the same editing protocol against sample records. Neither the preview nor the native host changes the CLI's authority over tickets and contracts, or the runner's review, publication and merge controls.

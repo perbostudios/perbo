@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type PropsWithChildren } from "react";
+import { sizeEstimate } from "@perbo/contracts/size";
 import { WorkspaceRefresh } from "../src/renderer/workspace-refresh.js";
 import { WorkspaceReads } from "../src/host/workspace-reads.js";
 import { previewBridge } from "../src/renderer/preview.js";
+import { bridge, useGraph, useTaskSummary } from "../src/renderer/data.js";
 import { TaskModelsSchema } from "../src/shared/protocol.js";
-import type { Change, DesktopBridge, Detail, Job, ReplyMap, Request, Snapshot } from "../src/shared/protocol.js";
+import type { Change, DesktopBridge, Detail, GraphView, Job, ReplyMap, Request, Snapshot, TaskSummary } from "../src/shared/protocol.js";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => { for (const clean of cleanups.splice(0)) clean(); });
@@ -173,5 +177,68 @@ describe("native read sharing", () => {
     old.resolve("old record");
     expect(await Promise.all([first, second])).toEqual(["new record", "new record"]);
     expect(loader).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * ADR-0034's rule holds for every query hook, not only the ones the refresh
+ * reads itself: a reply that was in flight when the records under it moved is
+ * an account of what was there before, and marking it fresh hides that.
+ */
+describe("hooks read through the guard", () => {
+  const hookRepo = "90000000-0000-4000-8000-000000000001";
+  const hookKey = "PRB-901";
+  function hooks() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, networkMode: "always" } } });
+    const wrapper = ({ children }: PropsWithChildren) => createElement(QueryClientProvider, { client }, children);
+    let listener: ((change: Change) => void) | undefined;
+    vi.spyOn(bridge, "subscribe").mockImplementation((next) => { listener = next; return () => { listener = undefined; }; });
+    const request = vi.spyOn(bridge, "request");
+    cleanups.push(() => { cleanup(); vi.restoreAllMocks(); client.clear(); });
+    return { client, wrapper, request, emit: (change: Change) => listener!(change) };
+  }
+  /** Every reply the refresh asks for while a records change is being followed. */
+  const answered = (kind: Request["kind"]): boolean => kind === "repositorySnapshot" || kind === "snapshot";
+
+  it("takes a task summary again when the records moved while it was in flight", async () => {
+    const f = hooks();
+    const summary = (note: string): TaskSummary =>
+      ({ branch: null, attempts: 1, latestAttemptAt: null, costMicros: null, costBasis: "none", diff: null, note });
+    const held = deferred<TaskSummary>();
+    let reads = 0;
+    f.request.mockImplementation(async (input) => {
+      if (input.kind === "taskSummary") return (++reads === 1 ? await held.promise : summary("new")) as never;
+      if (answered(input.kind)) return { repository: null, tasks: [], errors: [] } as never;
+      throw new Error("Unexpected request " + input.kind);
+    });
+    const view = renderHook(() => useTaskSummary(hookRepo, hookKey), { wrapper: f.wrapper });
+    await waitFor(() => { expect(reads).toBe(1); });
+    f.emit({ kind: "records", sequence: 1, repoId: hookRepo, key: hookKey });
+    held.resolve(summary("old"));
+    await waitFor(() => { expect(view.result.current.data?.note).toBe("new"); });
+    expect(reads).toBe(2);
+  });
+
+  it("takes a graph read again when the records moved while it was in flight", async () => {
+    const f = hooks();
+    const graph = (note: string): GraphView => ({
+      key: hookKey, state: "planning", approved: false, outcome: "A sample plan", nodes: [], criteria: [],
+      edges: [], pathsAllowed: [], size: sizeEstimate({ nodes: 0, criteria: 0, files: 0, packages: 0 }),
+      editCount: 0, history: [], digest: "0".repeat(64),
+      live: { attempt: null, nodes: [], outside: [], note },
+    });
+    const held = deferred<GraphView>();
+    let reads = 0;
+    f.request.mockImplementation(async (input) => {
+      if (input.kind === "graphRead") return (++reads === 1 ? await held.promise : graph("new")) as never;
+      if (answered(input.kind)) return { repository: null, tasks: [], errors: [] } as never;
+      throw new Error("Unexpected request " + input.kind);
+    });
+    const view = renderHook(() => useGraph(hookRepo, hookKey), { wrapper: f.wrapper });
+    await waitFor(() => { expect(reads).toBe(1); });
+    f.emit({ kind: "records", sequence: 1, repoId: hookRepo, key: hookKey });
+    held.resolve(graph("old"));
+    await waitFor(() => { expect(view.result.current.data?.live.note).toBe("new"); });
+    expect(reads).toBe(2);
   });
 });

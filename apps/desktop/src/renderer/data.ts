@@ -69,13 +69,24 @@ export function useOutput(
 }
 /** What a card or row can say about a ticket's work; read on demand, never for the whole listing. */
 export function useTaskSummary(repoId: string, key: string, enabled = true) {
-  useRefresh();
+  const refresh = useRefresh();
   return useQuery({
     queryKey: ["summary", repoId, key],
-    queryFn: () => bridge.request({ kind: "taskSummary", repoId, key }),
+    queryFn: () => refresh.summary(repoId, key),
     networkMode: "always",
     enabled,
     staleTime: 30_000,
+  });
+}
+/** A plan's execution graph and what the run's records say about it (D-100, SCP-317). */
+export function useGraph(repoId: string, key: string | null) {
+  const refresh = useRefresh();
+  return useQuery({
+    queryKey: ["graph", repoId, key],
+    queryFn: () => refresh.graph(repoId, key ?? ""),
+    networkMode: "always",
+    enabled: key !== null,
+    staleTime: 1000,
   });
 }
 /** The month's ledger and each provider's own account of its plan. Read when asked, never on a timer (S6E). */
