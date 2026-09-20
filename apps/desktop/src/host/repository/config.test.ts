@@ -9,9 +9,11 @@ import {
   effectiveLimits,
   readConfig,
   readManifest,
+  readStanding,
   saveManifest,
   specFolder,
   writeConfig,
+  writeStanding,
 } from "./config.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
@@ -85,6 +87,42 @@ describe("reading and replacing the configuration", () => {
     expect(statSync(configPath(repo)).mode & 0o777).toBe(0o600);
     writeConfig(repo, { specs: "specs" });
     expect(readConfig(repo)).toEqual({ specs: "specs" });
+  });
+});
+
+describe("the standing prohibited list", () => {
+  const added = {
+    path: "src/generated/**",
+    draft: "80000000-0000-4000-8000-00000000000d",
+    source: "this draft",
+    added_at: "2026-09-19T09:00:00.000Z",
+  };
+
+  it("is nothing where the repository has recorded none", () => {
+    expect(readStanding(repository())).toEqual([]);
+    expect(readStanding(repository({ test_command: "pnpm test" }))).toEqual([]);
+  });
+
+  it("is written beside the repository's other configuration, and read back whole", () => {
+    const repo = repository({ test_command: "pnpm test" });
+    writeStanding(repo, [added]);
+    expect(readConfig(repo)).toEqual({ test_command: "pnpm test", paths_prohibited: [added] });
+    expect(readStanding(repo)).toEqual([added]);
+  });
+
+  it("is replaced by what it is given, so taking an entry off leaves the rest alone", () => {
+    const repo = repository({ test_command: "pnpm test" });
+    writeStanding(repo, [added]);
+    writeStanding(repo, []);
+    expect(readConfig(repo)).toEqual({ test_command: "pnpm test", paths_prohibited: [] });
+    expect(readStanding(repo)).toEqual([]);
+  });
+
+  it("carries an entry a person wrote by hand as one nothing here added", () => {
+    const repo = repository({ paths_prohibited: ["specs/**"] });
+    expect(readStanding(repo)).toEqual([
+      { path: "specs/**", draft: null, source: "written in .perbo/config.json", added_at: null },
+    ]);
   });
 });
 

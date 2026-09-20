@@ -7,8 +7,11 @@ import {
   LimitsTableSchema,
   MaterializationManifestSchema,
   PER_TOKEN_COST_LIMITS,
+  STANDING_PROHIBITED_KEY,
   isRepositoryRelativeFolder,
+  readStandingProhibited,
 } from "@perbo/contracts";
+import type { StandingProhibitedEntry } from "@perbo/contracts";
 import { ManifestEditorSchema } from "../../shared/protocol.js";
 import type { ManifestEditor, ReplyMap, Settings } from "../../shared/protocol.js";
 import { configPath, configTemporaryPath, perboPath } from "./layout.js";
@@ -44,6 +47,22 @@ export function writeConfig(
     mode: 0o600,
   });
   renameSync(temporary, path);
+}
+
+/**
+ * The paths this repository always prohibits, whoever put them there (D-105),
+ * and the one place the desktop writes them back: the entries replace their
+ * key and every other key of the configuration stays as it was.
+ */
+export function readStanding(repo: RegisteredRepository): StandingProhibitedEntry[] {
+  return readStandingProhibited(readConfig(repo));
+}
+
+export function writeStanding(
+  repo: RegisteredRepository,
+  entries: readonly StandingProhibitedEntry[],
+): void {
+  writeConfig(repo, { ...(readConfig(repo) ?? {}), [STANDING_PROHIBITED_KEY]: entries });
 }
 
 /**

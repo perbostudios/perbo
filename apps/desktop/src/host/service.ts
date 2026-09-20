@@ -1,10 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import {
-  TicketSchema,
-  STANDING_PROHIBITED_KEY,
-  readStandingProhibited,
-} from "@perbo/contracts";
+import { TicketSchema } from "@perbo/contracts";
 import type {
   Detail,
   Change,
@@ -24,7 +20,7 @@ import {
 import { runProcess, startLineProcess } from "./process.js";
 import { probeProviders } from "./providers/status.js";
 import { seedArchived } from "./profile/preferences.js";
-import { readConfig, writeConfig } from "./repository/config.js";
+import { readStanding, writeStanding } from "./repository/config.js";
 import type { TicketRecords } from "./tickets/open.js";
 import type { SpecDeps } from "./plan/spec.js";
 import {
@@ -198,13 +194,10 @@ export class DesktopService {
         await this.dispatch({ kind: "cancel", jobId });
       },
       id: randomUUID,
-      standing: (repoId) => readStandingProhibited(readConfig(this.repository(repoId))),
+      standing: (repoId) => readStanding(this.repository(repoId)),
       setStanding: (repoId, entries) => {
         const repo = this.repository(repoId);
-        writeConfig(repo, {
-          ...(readConfig(repo) ?? {}),
-          [STANDING_PROHIBITED_KEY]: entries,
-        });
+        writeStanding(repo, entries);
         this.changes.changed(true, { kind: "records", repoId: repo.id, key: null });
       },
     });
