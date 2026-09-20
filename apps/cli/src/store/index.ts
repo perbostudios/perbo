@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import {
@@ -8,6 +7,7 @@ import {
   readStandingProhibited,
   type StandingProhibitedEntry,
 } from "@perbo/contracts";
+import { git } from "@perbo/workspace";
 
 /**
  * The store directory itself: where it is, what it declares, and the error a
@@ -84,18 +84,34 @@ export function storedRepositoryRoot(dir: string, repositoryRoot: string): strin
  * `perbo run` mints a contract against this checkout's HEAD with nothing
  * admitted behind it (SCP-180), so a run with no ticket has no store to read
  * them from; `tickets.ts` re-exports both under the names its callers use.
+ *
+ * Both go through `@perbo/workspace`'s repository module, which is where every
+ * git process Perbo starts is decided: argv only, the runner's environment
+ * rather than this one's, a bounded wait, and a listing too large to hold
+ * refused rather than handed back cut.
  */
-const git = (cwd: string, ...args: string[]): string =>
-  execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+/** What a tracked listing of this repository is allowed to be. */
+const MAX_LISTING_BYTES = 64 * 1024 * 1024;
 
 export function headCommit(repositoryRoot: string): string {
+  let head: string | null;
   try {
-    return git(repositoryRoot, "rev-parse", "HEAD");
+    head = git.headSync(repositoryRoot);
   } catch (error) {
     throw new StoreError(
-      `cannot read HEAD in ${repositoryRoot}: ${error instanceof Error ? error.message : String(error)}`,
+      `cannot read HEAD in ${repositoryRoot}: ${
+        error instanceof Error ? (error.message.split("\n")[0] ?? error.message) : String(error)
+      }`,
+      { cause: error },
     );
   }
+  if (head === null) {
+    throw new StoreError(
+      `cannot read HEAD in ${repositoryRoot}: git named no commit there, so it is either not a ` +
+        "repository or has nothing committed yet",
+    );
+  }
+  return head;
 }
 
 /**
@@ -109,13 +125,7 @@ export function headCommit(repositoryRoot: string): string {
  */
 export function trackedFiles(repositoryRoot: string): string[] {
   try {
-    return execFileSync("git", ["-C", repositoryRoot, "ls-files", "-z"], {
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
-    })
-      .split("\0")
-      .filter((path) => path.length > 0);
+    return git.trackedFilesSync(repositoryRoot, { maxOutputBytes: MAX_LISTING_BYTES });
   } catch {
     return [];
   }
