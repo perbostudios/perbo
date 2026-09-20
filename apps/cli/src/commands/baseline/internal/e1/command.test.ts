@@ -18,9 +18,6 @@ import { E1LedgerSchema, type E1Ledger } from "./ledger.js";
  * partner's month actually goes, and assert on what the file holds and what
  * the person is told — a unit test of the rules is in
  * `./ledger.test.ts`.
- *
- * Fail-first, measured 2026-09-05: with `apps/cli/src/commands/baseline/internal/e1.ts` moved out of
- * tree this file does not collect.
  */
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-e1-test-"));
