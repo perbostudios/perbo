@@ -23,9 +23,7 @@ import { REPO_ROOT, workspacePackages } from "./check.mjs";
  * shared presets. A burn-down list: an entry may only leave it, and the set
  * goes away with its last entry.
  */
-const PENDING = new Set([
-  "@perbo/review",
-]);
+const PENDING = new Set([]);
 
 /**
  * The files a package's typecheck program is allowed not to contain. Both are

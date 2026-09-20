@@ -27,46 +27,59 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const repoDir = join(scratch, "packages");
 
-const contract = (level: "P1" | "P2" = "P1"): PlanContract => ({
-  plan_id: "plan_test",
-  version: 1,
-  ticket_id: "ticket_test",
-  level,
-  outcome: "a does the thing",
-  acceptance_criteria: [
-    {
-      id: "ac_1",
-      text: "a returns 1",
-      expected_verification: { kind: "test", assertion: "a === 1" },
+type ContractAtLevel<L extends "P1" | "P2"> = Extract<PlanContract, { level: L }>;
+
+// One overload per level, because the levels are a discriminated union and a
+// P2 contract carries five fields a P1 one does not: a caller that asks for P2
+// gets the type that has them, and a caller that asks for neither gets P1 and
+// may add the fields P1 accepts, such as `nodes`.
+function contract(level?: "P1"): ContractAtLevel<"P1">;
+function contract(level: "P2"): ContractAtLevel<"P2">;
+function contract(
+  level: "P1" | "P2" = "P1",
+): ContractAtLevel<"P1"> | ContractAtLevel<"P2"> {
+  const body: Omit<ContractAtLevel<"P1">, "level"> = {
+    plan_id: "plan_test",
+    version: 1,
+    ticket_id: "ticket_test",
+    outcome: "a does the thing",
+    acceptance_criteria: [
+      {
+        id: "ac_1",
+        text: "a returns 1",
+        expected_verification: { kind: "test", assertion: "a === 1" },
+      },
+      {
+        id: "ac_2",
+        text: "helper returns 2",
+        expected_verification: { kind: "test", assertion: "helper() === 2" },
+      },
+    ],
+    scope: {
+      repository_id: "repo_fixture",
+      paths_allowed: ["a/**"],
+      paths_prohibited: [".github/**"],
+      generated_paths: [],
+      expansion_budget_files: 3,
     },
-    {
-      id: "ac_2",
-      text: "helper returns 2",
-      expected_verification: { kind: "test", assertion: "helper() === 2" },
+    base: {
+      base_commit: "a1b2c3d",
+      context_manifest_hash: `sha256:${"0".repeat(64)}`,
+      captured_at: "2026-08-27T09:00:00Z",
     },
-  ],
-  scope: {
-    repository_id: "repo_fixture",
-    paths_allowed: ["a/**"],
-    paths_prohibited: [".github/**"],
-    generated_paths: [],
-    expansion_budget_files: 3,
-  },
-  base: {
-    base_commit: "a1b2c3d",
-    context_manifest_hash: `sha256:${"0".repeat(64)}`,
-    captured_at: "2026-08-27T09:00:00Z",
-  },
-  ...(level === "P2"
+  };
+  return level === "P2"
     ? {
+        ...body,
+        level: "P2",
         data_impact: "none",
         security_impact: "none",
         rollout: "flag",
         rollback: "revert",
         estimated_recurring_cost_micros: 0,
       }
-    : {}),
-});
+    : { ...body, level: "P1" };
+}
 
 const diff = `diff --git a/a/src/a.ts b/a/src/a.ts
 index 1111111..2222222 100644
@@ -983,8 +996,8 @@ Binary files /dev/null and b/a/src/verdicts.ts differ
     expect(answer).toContain("a/src/verdicts.ts");
     expect(answer).toContain(`byte ${offset}`);
     expect(answer).not.toContain("export const equal");
-    expect(artifact.context_manifest.map((item) => item.attrs?.path)).not.toContain(
-      "a/src/verdicts.ts",
+    expect(artifact.context_manifest.map((item) => item.provenance)).not.toContain(
+      "a/src/verdicts.ts at head",
     );
   });
 

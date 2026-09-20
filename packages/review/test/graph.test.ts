@@ -3,6 +3,7 @@ import {
   ChangeSetSchema,
   PlanContractSchema,
   ReviewArtifactSchema,
+  hasAcceptanceCriteria,
   type ChangeSet,
   type CheckResult,
   type CriterionEvidenceBinding,
@@ -352,8 +353,8 @@ describe("reviewGraph — a two-node contract", () => {
     const modelA = fakeModel("model_a");
     const modelB = fakeModel("model_b");
     const modelOverall = fakeModel("model_overall");
-    const modelFor = vi.fn((c: { acceptance_criteria?: Array<{ id: string }> }) => {
-      const ids = c.acceptance_criteria?.map((entry) => entry.id) ?? [];
+    const modelFor = vi.fn((c: PlanContract, _checks: readonly CheckResult[]) => {
+      const ids = hasAcceptanceCriteria(c) ? c.acceptance_criteria.map((entry) => entry.id) : [];
       if (ids.length === 1 && ids[0] === "ac_1") return modelA;
       if (ids.length === 1 && ids[0] === "ac_2") return modelB;
       return modelOverall;
