@@ -162,6 +162,7 @@ const doctorArgs = (
   criteria: [],
   paths: [],
   pr: null,
+  relevel: false,
 });
 
 const originalPath = process.env.PATH;

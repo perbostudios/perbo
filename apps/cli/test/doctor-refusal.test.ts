@@ -75,6 +75,13 @@ const doctorArgs = (repo: string, extra: Partial<DoctorOptions["args"]> = {}): D
   json: true,
   quiet: true,
   writeConfig: false,
+  probe: false,
+  resumeFrom: null,
+  outcome: null,
+  criteria: [],
+  paths: [],
+  pr: null,
+  relevel: false,
   ...extra,
 });
 
@@ -264,7 +271,7 @@ describe("perbo doctor", () => {
 
 async function run(
   repo: string,
-  collaborators: Pick<DoctorOptions, "preflight" | "diagnose" | "baseRef">,
+  collaborators: Pick<DoctorOptions, "preflight" | "diagnose" | "baseRef" | "pullRequestChecks">,
 ): Promise<{ out: string[]; err: string[]; code: number }> {
   const sink = streams();
   const code = await runDoctorCommand({

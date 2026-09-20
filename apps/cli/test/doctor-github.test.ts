@@ -74,6 +74,13 @@ const doctorArgs = (repo: string, json: boolean): DoctorOptions["args"] => ({
   json,
   quiet: true,
   writeConfig: false,
+  probe: false,
+  resumeFrom: null,
+  outcome: null,
+  criteria: [],
+  paths: [],
+  pr: null,
+  relevel: false,
 });
 
 const originalPath = process.env.PATH;

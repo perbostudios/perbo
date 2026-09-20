@@ -89,7 +89,7 @@ function storeWith(
   const write = (
     kind: "execution" | "review",
     subject_id: string,
-    inputs: Record<string, unknown>,
+    inputs: Record<string, string | number | boolean | null>,
     artifacts: Array<{ name: string; media_type: string; body: string }>,
     at: string,
   ) =>

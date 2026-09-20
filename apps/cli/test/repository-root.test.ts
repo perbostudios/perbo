@@ -234,7 +234,7 @@ describe("a committed ticket read from another clone", () => {
     cloneRepository(repo, clone);
 
     const work = TICKET_RUNS.load({ cwd: clone, repo: ".", store: null, key: "PRB-1" });
-    const config = TicketRunConfigSchema.parse(TICKET_RUNS.runConfig(work, undefined));
+    const config = TicketRunConfigSchema.parse(TICKET_RUNS.runConfig(work, undefined, false));
     expect(config.repository_root).toBe(clone);
   }, 30_000);
 

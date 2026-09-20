@@ -18,8 +18,8 @@
     "dist/index.bundle.js"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node ../../tooling/package/bundle.mjs --package",
-    "typecheck": "tsc -p tsconfig.json --noEmit --declaration false --declarationMap false --sourceMap false",
+    "build": "tsc -p tsconfig.build.json && node ../../tooling/package/bundle.mjs --package",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "lint": "eslint src test"
   },

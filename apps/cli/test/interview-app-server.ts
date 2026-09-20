@@ -352,6 +352,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
         argv: string[];
         env: Record<string, string>;
         home: string[];
+        homeMode: number | null;
       },
   };
 }

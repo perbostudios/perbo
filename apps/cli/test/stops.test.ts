@@ -7,6 +7,7 @@ import {
   STOP_VERDICTS_SCHEMA_VERSION,
   reconcileStopVerdicts,
   type ObservedStop,
+  type StopVerdict,
   type StopVerdicts,
 } from "@perbo/contracts";
 import { parseStopAnswers } from "@perbo/runner";
@@ -29,12 +30,14 @@ function capture(): Streams & { out: string[]; err: string[] } {
 }
 
 const key = (c: string) => c.repeat(64);
-const stop = (c: string, answer: "endorse" | "override" | "conflict" | null, at: string) => ({
+const stop = (c: string, answer: "endorse" | "override" | "conflict" | null, at: string): StopVerdict => ({
   finding_key: key(c),
   rule_id: `rule.${c}`,
-  routing: "blocks" as const,
+  routing: "blocks",
   answer,
   answered_at: answer === null ? null : at,
+  // What the reconciler attributes an answer to when nothing else signs it.
+  answered_by: answer === null ? null : "person",
   first_seen_at: at,
 });
 

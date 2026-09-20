@@ -52,6 +52,7 @@ const doctorArgs = (repo: string, json: boolean): DoctorOptions["args"] => ({
   criteria: [],
   paths: [],
   pr: null,
+  relevel: false,
 });
 
 /** A machine and a checkout that are both fine, so nothing else is in the report. */

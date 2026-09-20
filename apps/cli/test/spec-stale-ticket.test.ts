@@ -221,7 +221,7 @@ const EMPTY_REPORT: InspectReport = {
   size: null,
   attempts_path: "",
   attempts: [],
-  total_cost: { basis: "none", components: 0, usd: null, tokens: null },
+  total_cost: { micros: 0, components: 0, priced: 0, reported: 0, estimated: 0, unavailable: 0, partial: 0 },
   verdicts: [],
 };
 
