@@ -1,4 +1,4 @@
-import { PageHeader } from "../Screen.js";
+import { PageHeader } from "../ui/index.js";
 import { ProviderScreen, RepositoryScreen } from "./ConnectionScreens.js";
 import { ConnectionsPage } from "./ConnectionsPage.js";
 import { GeneralPage } from "./GeneralPage.js";

@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, EmptyState, Notice } from "@perbo/ui";
+import { Button, EmptyState, LineIcon, Notice } from "../ui/index.js";
 import { withNoGo } from "@perbo/planning/impact";
 import type { ImpactReasonKind, ImpactWarning } from "@perbo/planning/impact";
-import { LineIcon } from "../icons.js";
 import { bridge, errorMessage } from "../data.js";
 import type { ImpactView, Snapshot } from "../../shared/protocol.js";
 import type { useContractEditing } from "../tasks/contract-editor.js";

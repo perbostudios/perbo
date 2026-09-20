@@ -1,13 +1,15 @@
 import { useRef, useState } from "react";
-import { Button, EmptyState, Notice, cx } from "@perbo/ui";
-import { InkIcon } from "../InkIcon.js";
 import {
+  Button,
   Dropdown,
+  EmptyState,
+  InkIcon,
+  Notice,
   PageHeader,
   PaginationButton,
-  Rename,
-  StageRing,
-} from "../Screen.js";
+  cx,
+} from "../ui/index.js";
+import { Rename } from "./Rename.js";
 import { archived, timeAgo } from "../presentation.js";
 import { errorMessage, useAction, useTaskSummary } from "../data.js";
 import { useCreate } from "../shell/create.js";
@@ -41,6 +43,33 @@ export function DiffLabel({
       <span className="added">+{summary.diff.additions}</span>{" "}
       <span className="removed">−{summary.diff.deletions}</span>
       {!compact && <span className="muted"> · {files}</span>}
+    </span>
+  );
+}
+
+function StageRing({
+  stage,
+  attention = false,
+  complete = false,
+}: {
+  stage: number;
+  attention?: boolean;
+  complete?: boolean;
+}) {
+  const share = complete ? 100 : (stage / 6) * 100;
+  return (
+    <span
+      className={cx(
+        "stage-ring",
+        attention && "stage-ring--attention",
+        complete && "stage-ring--complete",
+      )}
+      aria-label={complete ? "Completed" : `Stage ${stage} of 6`}
+      style={{
+        background: `conic-gradient(${complete ? "var(--green)" : "var(--ink)"} 0 ${share}%,rgba(var(--ink-rgb),.16) ${share}% 100%)`,
+      }}
+    >
+      <span />
     </span>
   );
 }

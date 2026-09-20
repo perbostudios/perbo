@@ -1,4 +1,4 @@
-import { cx } from "@perbo/ui";
+import { cx } from "./cx.js";
 /** The supplied artwork is the primary icon language. Callers give the control its accessible name. */
 export function InkIcon({
   name,

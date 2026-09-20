@@ -106,7 +106,7 @@ test("--filter expands to exactly three commands", () => {
     ["pnpm", "exec", "turbo", "run", "typecheck", "test", "lint", "--filter=@perbo/contracts"],
   ]);
   assert.deepEqual(
-    filterPlan("@perbo/ui").map((step) => step.stage),
+    filterPlan("@perbo/desktop").map((step) => step.stage),
     FILTERED_STAGES,
   );
 });

@@ -85,7 +85,6 @@ Each package's entry file names what the others may import from it, and the layo
 | `@perbo/workspace` | Git worktree provisioning, the environment diagnostic, materialization, process execution |
 | `@perbo/runner` | The permission profile, the write guard, sealing, checks, the remediation loop, delivery and the merge step |
 | `@perbo/planning` | Contract drafting from a tracker issue, a pasted file or a repository spec: a model proposes, a person approves. Reads and writes the spec folder and its page per node |
-| `@perbo/ui` | Shared components and design tokens the desktop renderer builds on |
 | `@perbo/evaluation` | The corpus, its harness and scorer, and the regression suite that gates a change to the reviewer ([D-010](11-open-decisions.md), [regression suite](evaluation/regression-suite.md)) |
 
 A contract, drafted or typed, carries an outcome, its acceptance criteria and a proposed scope ([D-072](11-open-decisions.md)). Once approved it is immutable. Large work stays one ticket: the plan may group its criteria into nodes, each naming the paths expected to satisfy them, and `perbo inspect` shows the graph with a size derived from it ([D-100](11-open-decisions.md), [D-104](11-open-decisions.md)). The order between nodes and the spec's No-Gos are approach, kept beside the ticket and never given to the reviewer. There is no epic kind.

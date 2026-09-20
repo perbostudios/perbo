@@ -1,4 +1,4 @@
-import { cx } from "@perbo/ui";
+import { cx } from "./cx.js";
 
 /**
  * Line icons for planning's own controls, beside the inked artwork

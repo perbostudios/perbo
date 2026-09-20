@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Dialog, Notice } from "@perbo/ui";
+import { Button, Dialog, Dropdown, IconButton, Notice } from "../ui/index.js";
 import {
   ManifestEditorSchema,
   type ManifestEditor,
 } from "../../shared/protocol.js";
 import { bridge, errorMessage, useAction } from "../data.js";
-import { Dropdown, IconButton } from "../Screen.js";
 
 export function ManifestDialog({
   repoId,

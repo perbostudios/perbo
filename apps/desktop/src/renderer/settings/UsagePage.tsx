@@ -1,6 +1,4 @@
-import { Button, Notice } from "@perbo/ui";
-import { InkIcon } from "../InkIcon.js";
-import { NumberPop, PageHeader, SectionLabel } from "../Screen.js";
+import { Button, InkIcon, Notice, NumberPop, PageHeader, SectionLabel } from "../ui/index.js";
 import { errorMessage, useUsage } from "../data.js";
 import { timeAgo } from "../presentation.js";
 import type { PageProps } from "../shell/App.js";

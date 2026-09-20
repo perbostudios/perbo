@@ -11,7 +11,7 @@ Perbo runs on one machine, with the person's own subscriptions or keys. What a t
 
 **Open**, under Apache-2.0: everything that runs on one machine. That covers:
 - `apps/cli` (every command) and `apps/desktop`;
-- `packages/contracts`, `packages/model`, `packages/review` (with the reviewer's prompts), `packages/workspace`, `packages/runner`, `packages/planning` and `packages/ui`;
+- `packages/contracts`, `packages/model`, `packages/review` (with the reviewer's prompts), `packages/workspace`, `packages/runner` and `packages/planning`;
 - the evaluation harness and scorer;
 - the queue and its endpoint, and `perbo agent`;
 - phone pairing over the local network, which is decided and not built.

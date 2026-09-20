@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Notice, cx } from "@perbo/ui";
-import { InkIcon } from "../InkIcon.js";
-import { PageHeader } from "../Screen.js";
+import { Button, InkIcon, Notice, PageHeader, cx } from "../ui/index.js";
 import { errorMessage, useAction } from "../data.js";
 import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/App.js";

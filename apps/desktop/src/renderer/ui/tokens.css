@@ -289,42 +289,6 @@ textarea::placeholder {
   color: var(--danger);
   border-color: var(--red-line);
 }
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: calc(11px * var(--text-scale));
-  font-weight: 500;
-  border-radius: 20px;
-  padding: 5px 9px;
-  background: var(--canvas);
-  color: var(--muted);
-  white-space: nowrap;
-}
-.badge-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-}
-.badge--success {
-  background: var(--success-soft);
-  color: var(--success);
-}
-.badge--warning {
-  background: var(--accent-soft);
-  color: var(--warning);
-}
-.badge--danger {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
-.panel {
-  border: 1px solid var(--line);
-  background: var(--surface);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-}
 .field {
   display: flex;
   flex-direction: column;

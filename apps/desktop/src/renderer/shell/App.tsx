@@ -1,9 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Button, Notice, cx } from "@perbo/ui";
+import { Brand, Button, HeaderSlotProvider, InkIcon, Notice, TitleBar, cx } from "../ui/index.js";
 import { errorMessage, useWorkspace } from "../data.js";
-import { InkIcon } from "../InkIcon.js";
-import { Brand, HeaderSlotProvider, TitleBar } from "../Screen.js";
 import { HomePage } from "../tasks/HomePage.js";
 import { Onboarding } from "../settings/Onboarding.js";
 import { projectTicket } from "../tasks/ticket-workspace.js";

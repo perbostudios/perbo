@@ -1,4 +1,4 @@
-import type { LineIconName } from "../icons.js";
+import type { LineIconName } from "../ui/index.js";
 
 /** The panes planning mode has, in rail order. Each pane's ticket adds its entry here. */
 export const PLANNING_PANES = [
