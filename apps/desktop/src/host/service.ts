@@ -3,13 +3,10 @@ import {
   existsSync,
   lstatSync,
   readFileSync,
-  realpathSync,
 } from "node:fs";
-import { basename } from "node:path";
 import { z } from "zod";
 import {
   ApproachRecordSchema,
-  MaterializationManifestSchema,
   PlanContractSchema,
   ReviewArtifactSchema,
   RunBundleSchema,
@@ -88,8 +85,9 @@ import {
 import { WorkspaceReads } from "./workspace-reads.js";
 import { Profile } from "./profile/store.js";
 import { Changes } from "./changes.js";
+import { RepositoryRegistry } from "./repository/registry.js";
 import { explorerPath, safePath } from "./repository/paths.js";
-import { repositoryStatus, topLevel, trackedFiles } from "./repository/git.js";
+import { trackedFiles } from "./repository/git.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
@@ -118,10 +116,7 @@ import {
   verdictArgs,
   writePrivate,
 } from "./jobs/commands.js";
-import {
-  forgetRepository,
-  setArchived,
-} from "./profile/preferences.js";
+import { setArchived } from "./profile/preferences.js";
 import {
   effectiveLimits,
   readConfig,
@@ -133,9 +128,7 @@ import {
 import {
   attemptsPath,
   bundlesPath,
-  configPath,
   objectsPath,
-  perboPath,
   principlesPath,
   ticketPath,
 } from "./repository/layout.js";
@@ -305,6 +298,7 @@ export class DesktopService {
   private readonly spawn: typeof startLineProcess;
   private readonly profile: Profile;
   private readonly changes: Changes;
+  private readonly registry: RepositoryRegistry;
   private readonly editing: ContractEditing;
   private readonly reads = new WorkspaceReads();
   /** Every command still running, by job id: planning beside a run (D-101). */
@@ -344,6 +338,13 @@ export class DesktopService {
       reads: this.reads,
       save: () => this.profile.save(),
       emit: (change) => options.changed(change),
+    });
+    this.registry = new RepositoryRegistry({
+      profile: this.profile,
+      changes: this.changes,
+      reads: this.reads,
+      execute: this.execute,
+      liveJobs: () => this.liveJobs(),
     });
     this.editing = new ContractEditing({
       records: () => this.state.editingSessions,
@@ -390,17 +391,7 @@ export class DesktopService {
   }
 
   private repository(id: string): RegisteredRepository {
-    const repo = this.state.repositories.find((entry) => entry.id === id);
-    if (!repo)
-      throw new Error(
-        "This repository is no longer connected. Choose it again in Settings.",
-      );
-    if (realpathSync(repo.path) !== repo.path)
-      throw new Error(
-        "The repository path changed. Reconnect the repository before continuing.",
-      );
-    perboPath(repo);
-    return repo;
+    return this.registry.lookup(id);
   }
   private trackedFiles(repo: RegisteredRepository): Promise<string[]> {
     return trackedFiles(this.execute, repo.path);
@@ -473,74 +464,8 @@ export class DesktopService {
       { ...options, cwd: repo.path, env },
     );
   }
-  private async metadata(
-    repo: RegisteredRepository,
-  ): Promise<Repository> {
-    return this.reads.read("metadata:" + repo.id, repo.id, () =>
-      this.readMetadata(repo),
-    );
-  }
-  private async readMetadata(
-    repo: RegisteredRepository,
-  ): Promise<Repository> {
-    try {
-      this.repository(repo.id);
-      const status = await repositoryStatus(this.execute, repo.path);
-      const config = existsSync(configPath(repo))
-        ? z
-            .record(z.string(), z.unknown())
-            .parse(JSON.parse(readFileSync(configPath(repo), "utf8")))
-        : {};
-      const manifest = MaterializationManifestSchema.safeParse(
-        config["materialization_manifest"],
-      );
-      const protectedPaths = z
-        .array(z.string())
-        .safeParse(config["protected_paths"]);
-      return {
-        ...repo,
-        ...status,
-        configured: existsSync(configPath(repo)),
-        error: null,
-        ...(manifest.success
-          ? {
-              testCommand: manifest.data.verify.command.join(" "),
-              manifestCount: manifest.data.entries.length,
-            }
-          : {}),
-        ...(protectedPaths.success
-          ? { prohibitedPaths: protectedPaths.data }
-          : {}),
-      };
-    } catch (error) {
-      return {
-        ...repo,
-        branch: "Unavailable",
-        head: "",
-        dirty: false,
-        configured: false,
-        error: redact(String(error)),
-      };
-    }
-  }
-  async registerRepository(path: string): Promise<Repository> {
-    const canonical = realpathSync(path);
-    const root = await topLevel(this.execute, canonical);
-    if (realpathSync(root) !== canonical)
-      throw new Error("Choose the root folder of the Git checkout.");
-    const existing = this.state.repositories.find(
-      (repo) => repo.path === canonical,
-    );
-    if (existing) return this.metadata(existing);
-    const repo = {
-      id: randomUUID(),
-      name: basename(canonical),
-      path: canonical,
-    };
-    perboPath(repo);
-    this.state.repositories.push(repo);
-    this.changes.changed(true, { kind: "repositories" });
-    return this.metadata(repo);
+  registerRepository(path: string): Promise<Repository> {
+    return this.registry.register(path);
   }
   async snapshot(): Promise<Snapshot> {
     // The live interviews are counted outside the shared read: they are this
@@ -606,7 +531,7 @@ export class DesktopService {
     const repo = this.repository(repoId);
     return this.reads.read("repository:" + repoId, repoId, async () => {
       const [metadata, listing] = await Promise.allSettled([
-        this.metadata(repo),
+        this.registry.metadata(repo),
         this.list(repo),
       ]);
       if (metadata.status === "rejected") throw metadata.reason;
@@ -1746,16 +1671,7 @@ export class DesktopService {
       return null;
     }
     const repo = this.repository(request.repoId);
-    if (request.kind === "forgetRepository") {
-      if (heldRepository(this.liveJobs(), repo.id))
-        throw new Error(
-          "Wait for the commands running in this repository to finish before disconnecting it.",
-        );
-      forgetRepository(this.state, repo.id);
-      this.changes.changed(true, { kind: "repositories" });
-      this.changes.preferences(this.state, false);
-      return null;
-    }
+    if (request.kind === "forgetRepository") return this.registry.forget(repo.id);
     if (request.kind === "graphRead") return this.graphView(repo, request.key);
     // Every edit the Graph pane makes is this command (D-100): applied to a
     // copy, validated whole and recorded with its author by the CLI, which is
