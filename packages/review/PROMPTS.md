@@ -30,21 +30,21 @@ harness option selects an older one — a run always builds the current prompt. 
 still be read from a stored artifact's `model.prompt_version`, but nothing in this codebase can
 produce a fresh review under one.
 
-`closureVerifySystemPrompt()` (`src/closure-verify.ts:125`) is the same shape: no version argument,
+`closureVerifySystemPrompt()` (`src/closure-verify.ts:124`) is the same shape: no version argument,
 exactly one closure-verification prompt in force at a time, `CLOSURE_VERIFY_PROMPT_VERSION`
-(`src/closure-verify.ts:41`).
+(`src/closure-verify.ts:40`).
 
 ## How a version is pinned in a review bundle
 
 Every `ReviewArtifact` carries the version that produced it in `model.prompt_version`, a required
-string (`packages/contracts/src/review.ts:474`), written by `runReview` at `src/review.ts:928`. The
-same value is copied onto `independence.context_builder` (`src/review.ts:906`, so two artifacts can
+string (`packages/contracts/src/review.ts:475`), written by `runReview` at `src/review.ts:892`. The
+same value is copied onto `independence.context_builder` (`src/review.ts:870`, so two artifacts can
 be compared for prompt identity from that field alone) and onto the run bundle's own
-`prompt_version` (`src/review.ts:944`, interface at `src/review.ts:116`). The runner writes that
+`prompt_version` (`src/review.ts:908`, interface at `src/review.ts:114`). The runner writes that
 artifact to `review.json` in the pull request's run bundle (`writeReviewBundle`,
 `packages/runner/src/loop.ts`).
 Closure verification stamps its own version the same way, on `ClosureVerification.prompt_version`
-(`src/closure-verify.ts:69`, set throughout `verifyClosures`).
+(`src/closure-verify.ts:68`, set throughout `verifyClosures`).
 
 `prompt_version` is one of the keys the credential redactor never touches
 (`REDACTION_SKIPPED_KEYS`, `src/redact.ts:49`) — it is compared and matched downstream, not scanned
@@ -92,25 +92,25 @@ the deterministic checks, and the fixed policy matrix below, never chosen by the
 
 ## The closure-verification prompt — `closure_verify_v2`
 
-`closureVerifySystemPrompt()` (`src/closure-verify.ts:125-142`) asks about specific findings from an
+`closureVerifySystemPrompt()` (`src/closure-verify.ts:124-141`) asks about specific findings from an
 earlier review, never raises a new one, and never reconsiders whether a finding was right. Two
 deterministic gates run before any model call and can only fail verification, never pass it: a
 failed pinned check or a scope escape short-circuits with every finding `cannot_tell`
-(`src/closure-verify.ts:173-218`), and a `check.*` finding routed by the review is closed by that
-same passing evidence without asking the model at all (`src/closure-verify.ts:220-235`).
+(`src/closure-verify.ts:172-217`), and a `check.*` finding routed by the review is closed by that
+same passing evidence without asking the model at all (`src/closure-verify.ts:219-234`).
 
 Where a model call is needed, it answers two questions per finding, in one forced turn with no file
-reader (`src/closure-verify.ts:267-278`):
+reader (`src/closure-verify.ts:266-273`):
 
-- `status` — `closed` / `not_closed` / `cannot_tell` (`ClosureStatus`, `src/closure-verify.ts:43`),
+- `status` — `closed` / `not_closed` / `cannot_tell` (`ClosureStatus`, `src/closure-verify.ts:42`),
   where `cannot_tell` counts as not closed;
 - `idiomatic` — `established_pattern` / `working_but_not_idiomatic` / `cannot_tell`
-  (`ClosureIdiomatic`, `src/closure-verify.ts:55`), which never gates: a `working_but_not_idiomatic`
+  (`ClosureIdiomatic`, `src/closure-verify.ts:54`), which never gates: a `working_but_not_idiomatic`
   answer still closes the finding and carries the named alternative (`practice`) into the
   notification rather than reopening the loop.
 
 A finding the model does not answer is `cannot_tell`, never silently closed
-(`src/closure-verify.ts:315-327`).
+(`src/closure-verify.ts:310-322`).
 
 ## Rule ids
 
@@ -128,10 +128,10 @@ family, and putting an attacker's own words into an executor's brief is the laun
 trust tiers exist to prevent; `security.*` is behavioural by construction, so closing it means
 deciding what the system should do instead (`src/blocking.ts:180-193`). Findings in either family
 are never routed to the executor and always stop, whatever the `closure` or `direction` answer says.
-`scope.*` (`src/scope.ts:105,122,136,152,167`) and `check.*` (`src/review.ts:222`) are the
+`scope.*` (`src/scope.ts:105,122,136,152,167`) and `check.*` (`src/review.ts:220`) are the
 deterministic families raised by the harness itself rather than the model, and always block.
 
-`closureVerifySchema()` (`src/closure-verify.ts:88`) does not mint rule ids at all — it verifies
+`closureVerifySchema()` (`src/closure-verify.ts:87`) does not mint rule ids at all — it verifies
 findings the judging prompt already raised, addressed by `finding_key`, and its own `idiomatic`
 answer never changes a finding's `rule_id` or its family.
 
