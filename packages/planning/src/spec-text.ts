@@ -75,7 +75,17 @@ export interface SpecRequirementDraft {
  * `parseSpec` already drops — it reads list items there and nothing else — so
  * the reader needs no knowledge of it.
  */
-const MARK = /<!--\s*perbo:requirement-ids through R(\d+)\s*-->/;
+/**
+ * The mark, matched as a whole line and never as part of one.
+ *
+ * Unanchored it also matched a line that merely quoted it — a requirement
+ * about the mark, or a heading naming it — and the filters below drop what
+ * they match, so that line was deleted from the file on the next save with
+ * nothing said. `parseSpec` reads list items and kept it, which left the two
+ * readers of one file disagreeing about what it holds. Multiline, because the
+ * high-water read below looks for it in the whole document.
+ */
+const MARK = /^[ \t]*<!--[ \t]*perbo:requirement-ids through R(\d+)[ \t]*-->[ \t]*$/m;
 const markLine = (highWater: number): string =>
   `<!-- perbo:requirement-ids through R${highWater} -->`;
 
@@ -319,10 +329,16 @@ export function renderSpec(
   // headings make, so a heading keeps the requirements under it: the ids are
   // the file's, the arrangement is the person's.
   const requirements: SpecRequirement[] = [];
-  const groups: { heading: string | null; lines: string[] }[] = [{ heading: null, lines: [] }];
+  const groups: { heading: string | null; depth: number; lines: string[] }[] = [
+    { heading: null, depth: 0, lines: [] },
+  ];
   for (const line of lines) {
     if ("heading" in line) {
-      groups.push({ heading: line.heading, lines: [] });
+      groups.push({
+        heading: line.heading,
+        depth: (/^#+/.exec(line.heading)?.[0].length ?? 0),
+        lines: [],
+      });
       continue;
     }
     for (const requirement of numbered(line.draft)) {
@@ -331,36 +347,53 @@ export function renderSpec(
     }
   }
 
-  // A heading already written, with nothing of its own under it, is the second
-  // copy "Keep both" made: that join hands this function the file's text and
-  // the person's one after the other, and the repeat's requirements
+  /** Whether anything at all survived under this heading, at any depth below it. */
+  const holdsSomething = (at: number): boolean => {
+    const { depth } = groups[at]!;
+    for (let i = at; i < groups.length; i += 1) {
+      const group = groups[i]!;
+      if (i > at && group.heading !== null && group.depth <= depth) break;
+      if (group.lines.length > 0) return true;
+    }
+    return false;
+  };
+
+  // A heading already written, with nothing left anywhere under it, is the
+  // second copy "Keep both" made: that join hands this function the file's text
+  // and the person's one after the other, and the repeat's requirements
   // deduplicate away by id, leaving the heading standing over nothing.
   //
-  // Emptiness is what tells the two apart. A person who writes `### Desktop`,
-  // `### CLI` and `### Desktop` again means the third one, and it has
-  // requirements under it — dropping it would move them under `### CLI`, which
-  // is worse than the repetition it was meant to clean up.
+  // Emptiness is what tells the two apart, and it has to be the emptiness of
+  // everything under the heading rather than of its own lines. A person who
+  // writes `### Desktop`, `### CLI` and `### Desktop` again means the third one;
+  // so does one whose repeated `### Desktop` holds a `#### Dock` with a
+  // requirement in it. Dropping either would move that requirement under
+  // `### CLI`, which is worse than the repetition it was meant to clean up.
   const headings = new Set<string>();
-  const written: string[] = [];
-  for (const group of groups) {
+  const chunks: string[] = [];
+  for (const [at, group] of groups.entries()) {
     if (group.heading !== null) {
-      if (headings.has(group.heading) && group.lines.length === 0) continue;
+      if (headings.has(group.heading) && !holdsSomething(at)) continue;
       headings.add(group.heading);
-      if (written.length > 0) written.push("");
-      written.push(group.heading, "");
     }
-    written.push(...group.lines);
+    // One blank line between a heading and its requirements, and one between
+    // one group and the next: built by joining rather than by pushing
+    // separators, so a group with a heading and no lines cannot leave two.
+    const parts = [
+      ...(group.heading === null ? [] : [group.heading]),
+      ...(group.lines.length === 0 ? [] : [group.lines.join("\n")]),
+    ];
+    if (parts.length > 0) chunks.push(parts.join("\n\n"));
   }
-  // A heading with nothing under it leaves a blank line at the end of its own.
-  while (written.at(-1) === "") written.pop();
 
   const body: Record<(typeof SPEC_HEADINGS)[number], string> = {
     Outcome: text.outcome.trim(),
-    Requirements: [
-      ...written,
-      // No mark until an id has been given: a file that numbered nothing carries nothing.
-      ...(highWater === 0 ? [] : ["", markLine(highWater)]),
-    ].join("\n"),
+    // No mark until an id has been given: a file that numbered nothing carries
+    // nothing, and a section emptied of its requirements keeps the mark alone
+    // rather than a blank line in front of it.
+    Requirements: [chunks.join("\n\n"), highWater === 0 ? "" : markLine(highWater)]
+      .filter((part) => part.length > 0)
+      .join("\n\n"),
     "No-Gos": listOf(text.no_gos)
       .map((each) => `- ${each}`)
       .join("\n"),
