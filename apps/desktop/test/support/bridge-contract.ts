@@ -58,6 +58,19 @@ export function describeBridgeContract(name: string, setup: () => Promise<Contra
       expect(repositories).toContain(subject.repoId);
       for (const row of snapshot.tasks) expect(repositories).toContain(row.repoId);
       for (const job of snapshot.jobs) expect(lane(job.kind)).toBeDefined();
+      // Nothing on the wire says which adapter answered, and no row carries a
+      // reading of its own work that the records did not produce.
+      expect("mode" in snapshot).toBe(false);
+      for (const row of snapshot.tasks) expect("summary" in row).toBe(false);
+    });
+
+    it("carries a ticket's detail with nothing on it the records did not make", async () => {
+      const detail = await subject.bridge.request({
+        kind: "detail",
+        repoId: subject.repoId,
+        key: subject.unapprovedKey,
+      });
+      expect("sample" in detail).toBe(false);
     });
 
     it("answers a repository's own snapshot with that repository's rows and no others", async () => {

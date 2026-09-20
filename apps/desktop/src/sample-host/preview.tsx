@@ -11,7 +11,7 @@ import { sampleBridge } from "./bridge.js";
  */
 window.perbo = sampleBridge;
 const { mountApp } = await import("../renderer/mount.js");
-mountApp(document.getElementById("root")!);
+mountApp(document.getElementById("root")!, "sample");
 
 /** Said on every screen, because nothing here is the person's own work. */
 const indicator = document.createElement("div");

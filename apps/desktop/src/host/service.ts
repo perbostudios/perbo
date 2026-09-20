@@ -249,7 +249,6 @@ export class DesktopService {
       )
         this.profile.save();
       return {
-        mode: "desktop" as const,
         version: this.options.version,
         settings: this.state.settings,
         repositories: records.map((entry) => entry.repository),

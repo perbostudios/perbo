@@ -203,3 +203,35 @@ it("writes a standing mark into the repository's configuration, and undo removes
     await disposeFixtures();
   }
 });
+
+/**
+ * D-061: a remediation round is verified, never reviewed again. The review the
+ * reviewer wrote is immutable, so what answers its finding is the closure the
+ * round recorded beside it — which is what the host's records hold and what
+ * the sample host's must hold too, or a screen reading the sample reads
+ * something the product cannot produce.
+ */
+it("settles a sample decision as a closure beside the review, not as a second review", async () => {
+  const repoId = (await sampleBridge.request({ kind: "snapshot" })).repositories[0]!.id;
+  const key = "PRB-412";
+  const opened = await sampleBridge.request({ kind: "detail", repoId, key });
+  const job = await sampleBridge.request({
+    kind: "decide",
+    repoId,
+    key,
+    digest: opened.digest,
+    answer: "A new dead_letters table.",
+  });
+  await settled(sampleBridge, job.id);
+  const detail = await sampleBridge.request({ kind: "detail", repoId, key });
+  expect(detail.attempts[0]!.review?.decision).toBe("escalate");
+  expect(detail.attempts.at(-1)!.verification).toMatchObject({
+    all_closed: true,
+    deterministic_failure: null,
+    open_keys: [],
+  });
+  const live = (await sampleBridge.request({ kind: "graphRead", repoId, key })).live;
+  const node = live.nodes.find((entry) => entry.id === "node_2")!;
+  expect(node.state).not.toBe("finding_open");
+  expect(node.criteria.every((criterion) => criterion.finding === null)).toBe(true);
+});

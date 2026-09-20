@@ -22,7 +22,7 @@ pnpm desktop:build
 pnpm desktop:start
 ```
 
-For a browser-only design preview, run `pnpm desktop:preview`, which opens `preview.html` against the sample host. Add `?empty` to inspect empty onboarding, or `?slow` and start planning from Create to keep simulated drafting, compilation and completion states visible for eight seconds during visual QA. The native completion countdown remains three seconds. The app never falls back to sample records when a host request fails: with no adapter in `window.perbo` it says the connection did not load.
+For a browser-only design preview, run `pnpm desktop:preview`, which opens `preview.html` against the sample host. Add `?empty` to inspect empty onboarding, or `?slow` and start planning from Create to keep simulated drafting and compilation states visible for eight seconds during visual QA. Every screen the preview renders is a reply the sample host answered, the same shape the host answers, so the completion countdown is the app's own three seconds. The app never falls back to sample records when a host request fails: with no adapter in `window.perbo` it says the connection did not load.
 
 ## Local package
 

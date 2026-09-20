@@ -1,18 +1,15 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import { projectTicket } from "../src/renderer/tasks/ticket-workspace.js";
 import { sampleBridge } from "../src/sample-host/bridge.js";
 import type { Job } from "../src/shared/protocol.js";
 
 async function fixture() {
   const workspace = structuredClone(await sampleBridge.request({ kind: "snapshot" }));
-  workspace.mode = "desktop";
   workspace.jobs = [];
   const row = workspace.tasks.find((task) => task.ticket.key === "PRB-412")!;
   const detail = structuredClone(await sampleBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }));
   detail.ticket = row.ticket;
-  delete detail.sample;
-  delete row.summary;
   const job: Job = { id: crypto.randomUUID(), repoId: row.repoId, key: row.ticket.key, resultKey: null, kind: "run", state: "failed", label: "Run", startedAt: "2026-09-09T09:00:00.000Z", endedAt: "2026-09-09T09:01:00.000Z", log: "", error: "CLI exited with code 2", result: null };
   return { workspace, row, detail, job };
 }
@@ -96,6 +93,22 @@ describe("ticket workspace projection", () => {
     expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: false, held: true });
     workspace.jobs = [{ ...planning, repoId: crypto.randomUUID() }];
     expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: false, held: false });
+  });
+
+  /**
+   * ADR-0034 calls this projection a pure function over a repository-qualified
+   * ticket, its jobs and, optionally, its detail. Which adapter answered is
+   * none of those, and a ticket mid-run with nothing running it needs recovery
+   * whoever said so.
+   */
+  it("reads a ticket the same way whichever host answered", async () => {
+    expectTypeOf<Parameters<typeof projectTicket>[0]>().not.toHaveProperty("mode");
+    expectTypeOf<Parameters<typeof projectTicket>[1]>().not.toHaveProperty("summary");
+    const { row, detail } = await fixture();
+    row.ticket.state = "executing";
+    const result = projectTicket({ jobs: [], refreshingRepos: [] }, row, detail);
+    expect(result.recoverable).toBe(true);
+    expect(result.primary.label).toBe("Review and recover");
   });
 
   it("withholds recovery while a completed command's canonical records are being refreshed", async () => {

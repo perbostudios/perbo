@@ -18,8 +18,8 @@ const closureSchema = z.object({
 
 /** A read-only projection of one repository-qualified Ticket. It performs no reads or writes. */
 export function projectTicket(
-  workspace: Pick<Snapshot, "mode" | "jobs" | "refreshingRepos">,
-  row: Pick<TaskRow, "repoId" | "ticket" | "summary">,
+  workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
+  row: Pick<TaskRow, "repoId" | "ticket">,
   detail?: Detail,
   requested: TaskView = "auto",
   refreshing = workspace.refreshingRepos?.includes(row.repoId) ?? false,
@@ -34,7 +34,7 @@ export function projectTicket(
   const held = heldRepository(workspace.jobs, repoId);
   const lastRun = jobs.filter((job) => ["run", "decide"].includes(job.kind)).at(-1);
   const recoverable = !active && !refreshing && (inProgress.includes(ticket.state) || ["failed", "cancelled"].includes(ticket.state)) &&
-    (["interrupted", "failed", "cancelled"].includes(lastRun?.state ?? "") || (workspace.mode === "desktop" && inProgress.includes(ticket.state)));
+    (["interrupted", "failed", "cancelled"].includes(lastRun?.state ?? "") || inProgress.includes(ticket.state));
   const currentDetail = detail?.ticket.ticket_id === ticket.ticket_id && detail.contract.plan_id === ticket.plan_id && detail.contract.version === ticket.plan_version;
   const latest = currentDetail ? detail.attempts.at(-1) : undefined;
   const review = currentDetail ? [...detail.attempts].reverse().find((attempt) => attempt.review)?.review : undefined;
@@ -53,7 +53,7 @@ export function projectTicket(
     ready: !active && !refreshing && ["pr_open", "ready", "merged"].includes(ticket.state) && checksPassed && (approved || closuresVerified),
   };
   const observed = active ? runnerProgress(active.log) : null;
-  const stage = workspace.mode === "preview" ? row.summary?.stage ?? detail?.sample?.stage ?? observed?.stage ?? stageOf(ticket.state) : observed?.stage ?? stageOf(ticket.state);
+  const stage = observed?.stage ?? stageOf(ticket.state);
   const attention = !active && !refreshing && (recoverable || ["changes_requested", "pr_open", "failed", "blocked", "plan_invalid"].includes(ticket.state));
   let screen: Exclude<TaskView, "auto">;
   if (requested === "output") screen = "output";
@@ -83,6 +83,6 @@ export function projectTicket(
   };
   const description = recoverable ? "This task needs recovery. Review the contract and retained changes before another attempt." :
     refreshing ? "Reading the task's recorded outcome…" :
-    (workspace.mode === "preview" ? row.summary?.description : undefined) ?? descriptions[observed?.state ?? ticket.state] ?? "Open the ticket to see its contract, latest state and retained evidence.";
+    descriptions[observed?.state ?? ticket.state] ?? "Open the ticket to see its contract, latest state and retained evidence.";
   return { jobs, active, busy, held, recoverable, resultReady, refreshing, attention, primary, screen, stage, description, observed, latest, review, evidence };
 }

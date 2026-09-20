@@ -39,13 +39,12 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
     latest,
     review,
     jobs,
-    sample,
     busy,
     recoverable,
     projection,
   } = taskRecords(context);
   const action = useAction();
-  const questions: DecisionQuestion[] = sample ? sample.decisions : decisionQuestions(review);
+  const questions: DecisionQuestion[] = decisionQuestions(review);
   const observed = projection.observed;
   const paused = ticket.state === "changes_requested" && !active && questions.length > 0,
     stage = paused
@@ -55,8 +54,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
     ? "Ready to recover this task"
     : paused
     ? "Paused for a decision"
-    : (sample?.current ??
-      observed?.title ??
+    : (observed?.title ??
       (
         {
           provisioning: "Materialising the worktree",
@@ -70,16 +68,14 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
         } as Record<string, string>
       )[ticket.state] ??
       "Ready to start the loop");
-  const steps =
-    sample?.steps ??
-    ticket.history.map((entry, index) => ({
-      text: entry.note || entry.to.replaceAll("_", " "),
-      time: index === ticket.history.length - 1 && active ? "now" : "",
-      state:
-        index === ticket.history.length - 1 && active
-          ? ("current" as const)
-          : ("complete" as const),
-    }));
+  const steps = ticket.history.map((entry, index) => ({
+    text: entry.note || entry.to.replaceAll("_", " "),
+    time: index === ticket.history.length - 1 && active ? "now" : "",
+    state:
+      index === ticket.history.length - 1 && active
+        ? ("current" as const)
+        : ("complete" as const),
+  }));
   const commands = latest?.ceilings.find(
     (ceiling) => ceiling.resource === "attempt_commands",
   );
@@ -114,7 +110,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
           <div className="progress-track">
             <span
               style={{
-                width: (sample?.progress ?? ((stage - 1) / 6) * 100) + "%",
+                width: ((stage - 1) / 6) * 100 + "%",
               }}
             />
           </div>

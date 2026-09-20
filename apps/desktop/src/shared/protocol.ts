@@ -967,21 +967,6 @@ export interface TaskRow {
   repoId: string;
   repository: string;
   ticket: Ticket;
-  summary?: {
-    description?: string;
-    created?: string;
-    stage?: number;
-    criteriaMet?: number;
-    criteriaTotal?: number;
-    cost?: string;
-    delivery?: string;
-    progress?: number;
-    elapsed?: string;
-    files?: number;
-    branch?: string;
-    additions?: number;
-    deletions?: number;
-  };
 }
 /** Whether the machine is being held awake for a live run (S6F, Away from keyboard). */
 export interface PowerState {
@@ -990,7 +975,6 @@ export interface PowerState {
   since: string | null;
 }
 export interface Snapshot {
-  mode: "desktop" | "preview";
   version: string;
   settings: Settings;
   repositories: Repository[];
@@ -1110,20 +1094,6 @@ export interface Detail {
    */
   effective: { stallMinutes: number; ticketDollars: number };
   report: unknown;
-  sample?: {
-    progress: number;
-    stage: number;
-    current: string;
-    elapsed: string;
-    steps: {
-      text: string;
-      time: string;
-      state: "complete" | "current" | "queued";
-    }[];
-    decisions: DecisionQuestion[];
-    transcript: { author: string; label: string; text: string }[];
-    terminal: string;
-  };
 }
 export interface DecisionQuestion {
   id: string;

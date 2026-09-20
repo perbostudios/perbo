@@ -153,8 +153,12 @@ describe("UI v2", () => {
     fireEvent.change(search, { target: { value: "" } });
     fireEvent.click(screen.getByLabelText("Filter tickets"));
     fireEvent.click(screen.getByRole("option", { name: "Show · needs you" }));
-    expect(screen.getAllByRole("button", { name: /Answer|Merge/ })).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: "Rate-limit the invite endpoint" })).toBeNull();
+    // A decision to answer, a pull request to merge, and two tickets mid-run
+    // with nothing running them, which is what recovery looks like.
+    expect(
+      screen.getAllByRole("button", { name: /Answer|Merge|Review and recover/ }),
+    ).toHaveLength(4);
+    expect(screen.queryByRole("button", { name: "Split the settings page into tabs" })).toBeNull();
     fireEvent.click(screen.getByLabelText("Filter tickets"));
     fireEvent.click(screen.getByRole("option", { name: "Show · all" }));
     fireEvent.keyDown(window, { key: "k", metaKey: true });

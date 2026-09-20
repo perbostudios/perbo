@@ -20,7 +20,6 @@ function deferred<T>() {
 }
 async function fixture() {
   const snapshot = structuredClone(await sampleBridge.request({ kind: "snapshot" }));
-  snapshot.mode = "desktop";
   snapshot.jobs = [];
   snapshot.sequence = 0;
   const row = snapshot.tasks[0]!;

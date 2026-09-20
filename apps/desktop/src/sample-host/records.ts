@@ -68,6 +68,10 @@ const repoId = "80000000-0000-4000-8000-000000000001";
 const landingId = "80000000-0000-4000-8000-000000000002";
 export const at = "2026-09-08T09:40:00.000Z";
 const base = "a1b2c3d" + "0".repeat(33);
+/** The finding the sample review raises, and the key a round's closure names (D-061). */
+const FINDING_KEY = "d".repeat(64);
+/** When the remediation round recorded that closure, which is after the review. */
+const closedAt = "2026-09-08T10:10:00.000Z";
 export const plans = new Map<string, PlanContract>();
 /** The order between a plan's nodes and the spec's No-Gos, beside the ticket (D-100). */
 const approaches = new Map<string, ApproachRecord>();
@@ -183,158 +187,38 @@ function sample(number: number, title: string, state: Ticket["state"]): Ticket {
     history: [],
   } as unknown as Ticket;
 }
-function row(
-  number: number,
-  title: string,
-  state: Ticket["state"],
-  summary: TaskRow["summary"],
-): TaskRow {
-  return {
-    repoId,
-    repository: "webstore",
-    ticket: sample(number, title, state),
-    ...(summary ? { summary } : {}),
-  };
+function row(number: number, title: string, state: Ticket["state"]): TaskRow {
+  return { repoId, repository: "webstore", ticket: sample(number, title, state) };
 }
+/** What each sample ticket's attempts cost, which `taskSummary` reports. */
+const sampleCosts = new Map<string, number>([["PRB-398", 610_000]]);
 const home = [
-  row(412, "Activation email never sent on signup", "changes_requested", {
-    created: "22 min ago",
-    stage: 4,
-    description:
-      "Activation mail is queued but never sent for a fresh signup. One decision is waiting: where a permanently failed send should be retained.",
-  }),
-  row(377, "Backfill the audit table", "pr_open", {
-    created: "yesterday",
-    stage: 6,
-    description:
-      "Both loops finished and the reviewer approved. 3 of 3 criteria directly verified — the merge is the only thing left, and it is yours.",
-  }),
-  row(398, "Rate-limit the invite endpoint", "executing", {
-    created: "1h ago",
-    stage: 2,
-    description:
-      "Editing packages/api/invite.ts — step 3 of the agent’s own plan.",
-    progress: 58,
-    elapsed: "4m 12s",
-    cost: "$0.61",
-    files: 6,
-  }),
-  row(404, "Cache the pricing table response", "verifying", {
-    created: "2h ago",
-    stage: 3,
-    description:
-      "Running typecheck, lint and 184 tests on the sealed change set. Nothing needed from you unless one of them fails.",
-  }),
-  row(421, "Split the settings page into tabs", "plan_review", {
-    created: "3h ago",
-    stage: 1,
-    description:
-      "Criteria drafted and the contract is compiled, waiting for your approval before the loop starts.",
-  }),
+  row(412, "Activation email never sent on signup", "changes_requested"),
+  row(377, "Backfill the audit table", "pr_open"),
+  row(398, "Rate-limit the invite endpoint", "executing"),
+  row(404, "Cache the pricing table response", "verifying"),
+  row(421, "Split the settings page into tabs", "plan_review"),
 ];
 home.forEach((row, index) => {
   row.ticket.updated_at = new Date(Date.parse(at) - index * 1000).toISOString();
 });
+/** The archive's sample rows: the key, its title, what it cost, how it was delivered, and where. */
 const archived = [
-  [
-    409,
-    "Retry the webhook dispatcher three times",
-    4,
-    4,
-    "$2.14",
-    "#418 · 2 Sep",
-    "webstore",
-  ],
-  [
-    402,
-    "Reject signups with a plus-addressed duplicate",
-    3,
-    3,
-    "$0.91",
-    "#411 · 31 Aug",
-    "webstore",
-  ],
-  [
-    396,
-    "Show runway on the billing page",
-    2,
-    3,
-    "$3.40",
-    "closed unmerged",
-    "landing",
-  ],
-  [
-    390,
-    "Move session cookies to the shared domain",
-    2,
-    2,
-    "$0.62",
-    "#399 · 28 Aug",
-    "webstore",
-  ],
-  [
-    385,
-    "Dead-letter the invoice sync job",
-    3,
-    3,
-    "$1.77",
-    "#394 · 26 Aug",
-    "webstore",
-  ],
-  [
-    381,
-    "Debounce the search-as-you-type request",
-    2,
-    2,
-    "$0.48",
-    "#388 · 24 Aug",
-    "landing",
-  ],
-  [
-    374,
-    "Expire password reset links after an hour",
-    3,
-    3,
-    "$0.83",
-    "#379 · 21 Aug",
-    "webstore",
-  ],
-  [
-    366,
-    "Paginate the members table",
-    2,
-    2,
-    "$1.12",
-    "#371 · 19 Aug",
-    "webstore",
-  ],
-  [
-    359,
-    "Stop double-charging annual upgrades",
-    4,
-    4,
-    "$2.86",
-    "#364 · 16 Aug",
-    "webstore",
-  ],
-  [
-    352,
-    "Log webhook retries with a request id",
-    2,
-    2,
-    "$0.54",
-    "#357 · 14 Aug",
-    "landing",
-  ],
+  [409, "Retry the webhook dispatcher three times", "$2.14", "#418 · 2 Sep", "webstore"],
+  [402, "Reject signups with a plus-addressed duplicate", "$0.91", "#411 · 31 Aug", "webstore"],
+  [396, "Show runway on the billing page", "$3.40", "closed unmerged", "landing"],
+  [390, "Move session cookies to the shared domain", "$0.62", "#399 · 28 Aug", "webstore"],
+  [385, "Dead-letter the invoice sync job", "$1.77", "#394 · 26 Aug", "webstore"],
+  [381, "Debounce the search-as-you-type request", "$0.48", "#388 · 24 Aug", "landing"],
+  [374, "Expire password reset links after an hour", "$0.83", "#379 · 21 Aug", "webstore"],
+  [366, "Paginate the members table", "$1.12", "#371 · 19 Aug", "webstore"],
+  [359, "Stop double-charging annual upgrades", "$2.86", "#364 · 16 Aug", "webstore"],
+  [352, "Log webhook retries with a request id", "$0.54", "#357 · 14 Aug", "landing"],
 ] as const;
 const archive: TaskRow[] = archived.map(
-  ([number, title, met, total, cost, delivery, repository], index) => {
-    const result = row(
-      number,
-      title,
-      delivery === "closed unmerged" ? "closed" : "merged",
-      { criteriaMet: met, criteriaTotal: total, cost, delivery },
-    );
+  ([number, title, cost, delivery, repository], index) => {
+    const result = row(number, title, delivery === "closed unmerged" ? "closed" : "merged");
+    sampleCosts.set(result.ticket.key, Math.round(Number(cost.replace("$", "")) * 1_000_000));
     result.repoId = repository === "landing" ? landingId : repoId;
     result.repository = repository;
     result.ticket.updated_at = new Date(
@@ -344,19 +228,14 @@ const archive: TaskRow[] = archived.map(
   },
 );
 for (let i = 0; i < 118; i++) {
-  const result = row(300 - i, "Sample archived task " + (i + 11), "merged", {
-    criteriaMet: 2,
-    criteriaTotal: 2,
-    cost: "$1.00",
-    delivery: "sample",
-  });
+  const result = row(300 - i, "Sample archived task " + (i + 11), "merged");
+  sampleCosts.set(result.ticket.key, 1_000_000);
   result.ticket.updated_at = new Date(
     Date.parse(at) - (i + 11) * 86_400_000,
   ).toISOString();
   archive.push(result);
 }
 export const initial: Snapshot = {
-  mode: "preview",
   version: "0.1.0",
   settings: SettingsSchema.parse({
     name: "Lian",
@@ -430,7 +309,7 @@ export function sampleSummary(key: string): TaskSummary {
     branch: known?.[0] ?? `perbo/${number}-sample`,
     attempts: 1,
     latestAttemptAt: row.ticket.updated_at,
-    costMicros: row.summary?.cost ? Math.round(Number(row.summary.cost.replace("$", "")) * 1_000_000) : 610_000,
+    costMicros: sampleCosts.get(key) ?? 610_000,
     costBasis: "priced",
     diff: known
       ? { files: known[1], additions: known[2], deletions: known[3] }
@@ -529,20 +408,23 @@ const sampleChecks: { name: string; status: string; node: string | null }[] = [
   { name: "Tests", status: "passed", node: "node_1" },
   { name: "Tests", status: "failed", node: "node_2" },
 ];
+/**
+ * The review on record. A remediation round does not replace it: a round is
+ * verified rather than reviewed again (D-061), so this stays escalating and
+ * what answers its finding is the closure the round recorded beside it.
+ */
 function reviewFor(key: string): ReviewArtifact {
-  const isApproved = approved.has(key),
-    plan = plans.get(key)!,
+  const plan = plans.get(key)!,
     criteria = "acceptance_criteria" in plan ? plan.acceptance_criteria : [];
   return {
     review_id: "rev_preview",
     created_at: at,
     target: { base_commit: base, head_commit: "c".repeat(40) },
-    decision: isApproved ? "approve" : "escalate",
+    decision: "escalate",
     coverage: criteria.map((criterion, index) => ({
       criterion_id: criterion.id,
-      status: isApproved || index !== 2 ? "met" : "cannot_determine",
-      verification_strength:
-        isApproved || index !== 2 ? "directly_verified" : "asserted_only",
+      status: index !== 2 ? "met" : "cannot_determine",
+      verification_strength: index !== 2 ? "directly_verified" : "asserted_only",
       evidence: {
         assertion: criterion.expected_verification.assertion,
         location: {
@@ -553,208 +435,81 @@ function reviewFor(key: string): ReviewArtifact {
       },
       note: null,
     })),
-    findings: isApproved
-      ? []
-      : [
-          {
-            key: "d".repeat(64),
-            rule_id: "product.dead_letter",
-            criterion_id: "ac_3",
-            severity: "major",
-            routing: "escalates",
-            status: "open",
-            blocking: true,
-            blocking_reason: "Criterion 03 leaves a product choice unresolved.",
-            closure: "human",
-            direction: "positive",
-            file: "packages/queue/retry.ts",
-            line: 67,
-            statement: "Where should a permanently failed email go?",
-          },
-        ],
+    findings: [
+      {
+        key: FINDING_KEY,
+        rule_id: "product.dead_letter",
+        criterion_id: "ac_3",
+        severity: "major",
+        routing: "escalates",
+        status: "open",
+        blocking: true,
+        blocking_reason: "Criterion 03 leaves a product choice unresolved.",
+        closure: "human",
+        direction: "positive",
+        file: "packages/queue/retry.ts",
+        line: 67,
+        statement: "Where should a permanently failed email go?",
+      },
+    ],
   } as unknown as ReviewArtifact;
 }
 export function detail(key: string): Detail {
   const { ticket } = ticketRow(key),
     contract = plans.get(key)!;
-  const isApproved = approved.has(key),
-    waiting = !isApproved && ticket.state === "changes_requested";
-  const sample: NonNullable<Detail["sample"]> = {
-    progress: waiting ? 52 : 38,
-    stage: waiting ? 4 : ticket.state === "verifying" ? 3 : 2,
-    current: "Editing packages/queue/retry.ts",
-    elapsed: "21m",
-    steps: [
-      {
-        text: "Worktree materialised from a1b2c3d with 3 manifest files",
-        time: "39s",
-        state: "complete",
-      },
-      {
-        text: "Read packages/queue — found the webhook failure table",
-        time: "1m 04s",
-        state: "complete",
-      },
-      {
-        text: "Wrote the retry path in auth/signup.ts",
-        time: "2m 11s",
-        state: "complete",
-      },
-      {
-        text: "Editing queue/retry.ts — dead-letter behaviour",
-        time: "now",
-        state: "current",
-      },
-      {
-        text: "Run pnpm test, typecheck, lint and the scope ledger",
-        time: "queued",
-        state: "queued",
-      },
-      {
-        text: "Hand the sealed change set to the reviewer",
-        time: "queued",
-        state: "queued",
-      },
-    ],
-    decisions: waiting
-      ? [
-          {
-            id: "dead-letter",
-            title: "Where should a permanently failed email go?",
-            context:
-              "Criterion 03 says “dead-lettered”. The queue has no dead-letter table, so this changes the shape of the diff rather than a line of it.",
-            options: [
-              {
-                title: "A new dead_letters table",
-                detail:
-                  "Matches how packages/queue already stores webhook failures, so the reviewer can check it against tests that exist.",
-                recommended: true,
-                metadata: ["+1 migration", "reversible", "~2 min more"],
-              },
-              {
-                title: "A status column on the existing table",
-                detail:
-                  "Smaller diff. Failures then compete with live rows for the same index.",
-              },
-              {
-                title: "Log it and drop it",
-                detail:
-                  "Cheapest. Criterion 03 becomes provable only by a log assertion — marked asserted_only.",
-              },
-            ],
-          },
-          {
-            id: "retention",
-            title: "How long should a dead-lettered row be kept?",
-            context:
-              "Choose how long failed deliveries remain available for inspection.",
-            options: [
-              {
-                title: "30 days, then a scheduled purge",
-                detail:
-                  "Keeps recent failures available without growing the table forever.",
-                recommended: true,
-              },
-              {
-                title: "Keep rows until manually removed",
-                detail: "Retains every failure for investigation.",
-              },
-            ],
-          },
-          {
-            id: "retry",
-            title: "Should the retry delay be configurable?",
-            context: "Choose the behaviour to ship with this change.",
-            options: [
-              {
-                title: "Hard-code 30s for now, note it in the PR",
-                detail: "Keep the first version simple.",
-                recommended: true,
-              },
-              {
-                title: "Make the delay configurable",
-                detail: "Expose the retry delay as a setting.",
-              },
-            ],
-          },
-        ]
-      : [],
-    transcript: [
-      {
-        author: "Executor",
-        label: "plan · 2m 04s",
-        text: "The queue stores webhook failures in webhook_failures, keyed by delivery. Activation mail has no equivalent, so criterion 03 has nowhere to record a permanent failure. Two shapes are possible: reuse that table’s shape for a new one, or widen the existing queue row.",
-      },
-      {
-        author: "Executor",
-        label: "decision raised · 4m 12s",
-        text: "This is a choice the contract does not settle, and it changes the shape of the diff rather than a line of it. Pausing to ask instead of picking for you.",
-      },
-      {
-        author: "Executor",
-        label: "resume · 5m 52s",
-        text: "Answer received: a new dead_letters table. Writing the migration first, then the terminal branch.",
-      },
-      {
-        author: "Reviewer",
-        label: "review · 11m 08s",
-        text: "I have the diff, the three criteria and the check output. I do not have the executor’s account of what it did, by design.",
-      },
-      {
-        author: "Reviewer",
-        label: "finding · 11m 40s",
-        text: "Criterion 03 is proven by queue/retry.test.ts:88, which never ran — describe.skip is still in the file. 184 tests passed and not one of them touched retry behaviour. Marking it asserted_only and returning it to the executor.",
-      },
-    ],
-    terminal:
-      "$ pnpm test --filter queue\nRUN v2.1.4 /worktrees/ayo_wt_2\n✓ auth/signup.test.ts (2 tests) 412ms\n✓ queue/retry.test.ts (3 tests) 388ms\nTest Files 12 passed (12)\n     Tests 186 passed (186)",
-  };
+  // The round that answered the review's finding: a second attempt carrying
+  // the verification, never a second review (D-061).
+  const remediated = approved.has(key);
+  const reviewed = {
+    id: "preview-attempt-" + key,
+    run: 1,
+    round: 0,
+    startedAt: at,
+    outcome: "escalate",
+    termination: "Sample attempt complete",
+    model: "sonnet-class",
+    costMicros: 610_000,
+    costBasis: "sample",
+    partial: false,
+    ceilings: [{ resource: "attempt_commands", used: 23, ceiling: 40, hit: false }],
+    review: reviewFor(key),
+    reviewDecision: "escalate",
+    changes: sampleChanges,
+    // What gates the change is the whole-change run; a node's own result is
+    // evidence for that node's review (D-107).
+    checks: sampleChecks
+      .filter((check) => check.node === null)
+      .map((check) => ({ name: check.name, status: check.status, detail: "Sample result" })),
+    verification: null,
+    bundles: [],
+  } satisfies Detail["attempts"][number];
+  const closing = {
+    ...reviewed,
+    id: "preview-round-" + key,
+    round: 1,
+    startedAt: closedAt,
+    outcome: "approve",
+    costMicros: 1_330_000,
+    review: null,
+    reviewDecision: null,
+    verification: {
+      all_closed: true,
+      deterministic_failure: null,
+      open_keys: [],
+      per_finding: [
+        { finding_key: FINDING_KEY, status: "closed", pointer: "packages/queue/dead_letters.ts:1" },
+      ],
+    },
+  } satisfies Detail["attempts"][number];
+  const attempts =
+    ticket.state === "plan_review" ? [] : remediated ? [reviewed, closing] : [reviewed];
   return {
     ticket,
     contract,
     digest: String(ticket.plan_version).repeat(64),
-    attempts:
-      ticket.state === "plan_review"
-        ? []
-        : [
-            {
-              id: "preview-attempt-" + key,
-              run: 1,
-              round: 0,
-              startedAt: at,
-              outcome: isApproved ? "approve" : "escalate",
-              termination: "Sample attempt complete",
-              model: "sonnet-class",
-              costMicros: isApproved ? 1940000 : 610000,
-              costBasis: "sample",
-              partial: false,
-              ceilings: [
-                {
-                  resource: "attempt_commands",
-                  used: 23,
-                  ceiling: 40,
-                  hit: false,
-                },
-              ],
-              review: reviewFor(key),
-              reviewDecision: isApproved ? "approve" : "escalate",
-              changes: sampleChanges,
-              // What gates the change is the whole-change run; a node's own
-              // result is evidence for that node's review (D-107).
-              checks: sampleChecks
-                .filter((check) => check.node === null)
-                .map((check) => ({
-                  name: check.name,
-                  status: check.status,
-                  detail: "Sample result",
-                })),
-              verification: null,
-              bundles: [],
-            },
-          ],
+    attempts,
     cost: {
-      micros:
-        ticket.state === "plan_review" ? 0 : isApproved ? 1940000 : 610000,
+      micros: attempts.reduce((sum, attempt) => sum + (attempt.costMicros ?? 0), 0),
       partial: false,
       unavailable: 0,
     },
@@ -762,8 +517,39 @@ export function detail(key: string): Detail {
     verdicts: [],
     effective: { stallMinutes: 12, ticketDollars: 2.5 },
     report: { sample: true },
-    sample,
   };
+}
+/**
+ * The executor's retained transcript, in the records' own format: what a run
+ * leaves behind is provider output, which the screen interprets for display
+ * and nothing else ([ADR-0023](../../../../docs/adr/0023-untrusted-context-boundary.md)).
+ */
+export function sampleTranscript(): string {
+  const message = (text: string): string =>
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text }] } });
+  return [
+    message(
+      "The queue stores webhook failures in webhook_failures, keyed by delivery. Activation mail " +
+        "has no equivalent, so criterion 03 has nowhere to record a permanent failure. Two shapes " +
+        "are possible: reuse that table’s shape for a new one, or widen the existing queue row.",
+    ),
+    message(
+      "This is a choice the contract does not settle, and it changes the shape of the diff rather " +
+        "than a line of it. Pausing to ask instead of picking for you.",
+    ),
+    JSON.stringify({
+      item: {
+        type: "commandExecution",
+        command: "pnpm test --filter queue",
+        aggregatedOutput:
+          "RUN v2.1.4 /worktrees/ayo_wt_2\n✓ auth/signup.test.ts (2 tests) 412ms\n" +
+          "✓ queue/retry.test.ts (3 tests) 388ms\nTest Files 12 passed (12)\n     Tests 186 passed (186)",
+      },
+    }),
+    message(
+      "Answer received: a new dead_letters table. Writing the migration first, then the terminal branch.",
+    ),
+  ].join("\n");
 }
 /** The labels the native host gives each command, kind for kind, so a refusal names what the person sees there. */
 const LABELS: Record<string, string> = {
@@ -1254,7 +1040,9 @@ function liveFor(key: string, nodes: readonly { id: string; paths: readonly stri
             coverage: review.coverage,
             findings: review.findings,
           },
-          closures: [],
+          // What the round since that review closed (D-061), which is what
+          // takes the finding off the node the criterion belongs to.
+          closures: approved.has(key) ? [{ createdAt: closedAt, closed: [FINDING_KEY] }] : [],
         },
     ticket.plan_version,
   );

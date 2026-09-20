@@ -44,7 +44,6 @@ export function taskRecords({ detail, workspace, repoId }: TaskContext) {
       workspace.taskModels?.[repoId + ":" + ticket.key] ?? workspace.settings,
     repo: workspace.repositories.find((repo) => repo.id === repoId),
     title: workspace.titles?.[repoId + ":" + ticket.key] ?? ticket.title,
-    sample: workspace.mode === "preview" ? detail.sample : undefined,
   };
 }
 export const costLabel = (detail: Detail): string =>

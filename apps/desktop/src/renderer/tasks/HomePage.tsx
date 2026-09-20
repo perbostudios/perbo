@@ -96,17 +96,9 @@ function TaskCard({
   const { stage, attention, primary, description } = projectTicket(workspace, row);
   const completed = archived(row.ticket.state);
   const summary = useTaskSummary(row.repoId, row.ticket.key);
-  const branch = summary.data ? summary.data.branch : (row.ticket.delivery.branch ?? row.summary?.branch ?? null);
+  const branch = summary.data ? summary.data.branch : (row.ticket.delivery.branch ?? null);
   const finished = completed
-    ? [
-        row.summary?.criteriaMet !== undefined
-          ? `${row.summary.criteriaMet} / ${row.summary.criteriaTotal ?? row.ticket.admission.criteria_count} criteria`
-          : `${row.ticket.admission.criteria_count} criteria`,
-        row.summary?.cost,
-        "the record stays here until you archive it",
-      ]
-        .filter(Boolean)
-        .join(" · ")
+    ? `${row.ticket.admission.criteria_count} criteria · the record stays here until you archive it`
     : null;
   const delivery =
     row.ticket.delivery.state === "merged"
@@ -150,7 +142,7 @@ function TaskCard({
           onOpenChange={onRenameChange}
         />
         <span className="task-created">
-          {completed ? delivery : "created " + (row.summary?.created ?? timeAgo(row.ticket.admitted_at))}
+          {completed ? delivery : "created " + timeAgo(row.ticket.admitted_at)}
         </span>
       </div>
       <div className="task-card-meta">
@@ -158,13 +150,7 @@ function TaskCard({
         <span className="muted" aria-hidden="true">·</span>
         <span className="mono">{row.repository}</span>
         <span className="muted" aria-hidden="true">·</span>
-        {row.summary?.additions !== undefined && row.summary.deletions !== undefined && !summary.data ? (
-          <span className="diff-label mono">
-            <span className="added">+{row.summary.additions}</span> <span className="removed">−{row.summary.deletions}</span>
-          </span>
-        ) : (
-          <DiffLabel summary={summary.data} pending={summary.isPending && !summary.isError} />
-        )}
+        <DiffLabel summary={summary.data} pending={summary.isPending && !summary.isError} />
       </div>
       <div className="task-card-description">
         <span>{finished ?? description}</span>
@@ -202,17 +188,6 @@ function TaskCard({
           </Button>
         )}
       </div>
-      {row.summary?.progress !== undefined && !completed && (
-        <div className="card-progress">
-          <div className="progress-track">
-            <span style={{ width: row.summary.progress + "%" }} />
-          </div>
-          <span>
-            {row.summary.elapsed} · {row.summary.cost ?? "cost unavailable"} ·{" "}
-            {row.summary.files ?? "—"} files
-          </span>
-        </div>
-      )}
     </article>
   );
 }
@@ -255,18 +230,18 @@ function ArchiveRow({
       <span role="cell">
         <DiffLabel summary={summary.data} pending={summary.isPending && !summary.isError} compact />
       </span>
+      <span role="cell">{row.ticket.admission.criteria_count}</span>
       <span role="cell">
-        {row.summary?.criteriaMet ?? "—"} /{" "}
-        {row.summary?.criteriaTotal ?? row.ticket.admission.criteria_count}
+        {summary.data?.costMicros === null || summary.data === undefined
+          ? "—"
+          : "$" + (summary.data.costMicros / 1_000_000).toFixed(2)}
       </span>
-      <span role="cell">{row.summary?.cost ?? "—"}</span>
       <span role="cell">
-        {row.summary?.delivery ??
-          (row.ticket.delivery.state === "merged"
-            ? "#" + row.ticket.delivery.pull_request_number
-            : row.ticket.state === "closed"
-              ? "closed unmerged"
-              : row.ticket.state)}
+        {row.ticket.delivery.state === "merged"
+          ? "#" + row.ticket.delivery.pull_request_number
+          : row.ticket.state === "closed"
+            ? "closed unmerged"
+            : row.ticket.state}
       </span>
       <span role="cell">
         <button

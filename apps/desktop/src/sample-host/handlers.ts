@@ -34,6 +34,7 @@ import {
   sampleRead,
   sampleSummary,
   sampleInterviews,
+  sampleTranscript,
   saveSpec,
   snapshot,
   specFiles,
@@ -384,7 +385,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       ] },
       { id: "anthropic", name: "Anthropic API", role: null, plan: null, windows: null, detail: "No API key on this machine, so there is no plan to report." },
     ],
-    notes: [],
+    notes: ["Sample figures. The desktop reads its own records."],
   }),
   rename: (request) => {
     snapshot.titles = {
@@ -534,9 +535,10 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     throw new Error("This is a sample repository. The desktop app opens your real folder.");
   },
   output: (request) => {
+    const { attempts } = detail(request.key);
     if (!snapshot.tasks.some((row) => row.repoId === request.repoId && row.ticket.key === request.key)) throw new Error("Sample task not found in this repository.");
-    if (request.attemptId && !detail(request.key).attempts.some((entry) => entry.id === request.attemptId)) throw new Error("The selected attempt does not belong to this task.");
-    return { transcript: null, diff: null, notes: [] };
+    if (request.attemptId && !attempts.some((entry) => entry.id === request.attemptId)) throw new Error("The selected attempt does not belong to this task.");
+    return { transcript: attempts.length > 0 ? sampleTranscript() : null, diff: null, notes: [] };
   },
   exportArchive: async (request) => {
     const csv = archiveCsv(archiveRows(snapshot, request), snapshot.titles);
@@ -578,7 +580,6 @@ function startWork(kind: "run" | "decide", repoId: string, key: string) {
   );
   row.ticket.approved_at = at;
   row.ticket.state = "executing";
-  delete row.summary;
   if (kind === "decide") decisionsAnswered.add(key);
   return opened;
 }

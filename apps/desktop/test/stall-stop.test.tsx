@@ -58,8 +58,6 @@ async function contractContext(): Promise<TaskContext> {
     await sampleBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }),
   );
   detail.attempts = [];
-  delete detail.sample;
-  workspace.mode = "desktop";
   workspace.jobs = [];
   return { workspace, detail, repoId: row.repoId, navigate: vi.fn(), show: vi.fn() };
 }

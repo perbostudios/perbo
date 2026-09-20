@@ -48,8 +48,6 @@ async function contextFor(criteria: AcceptanceCriterion[]): Promise<TaskContext>
     throw new Error("A criterion contract is required");
   detail.contract.acceptance_criteria = criteria;
   detail.attempts = [];
-  delete detail.sample;
-  workspace.mode = "desktop";
   workspace.jobs = [];
   return {
     workspace,

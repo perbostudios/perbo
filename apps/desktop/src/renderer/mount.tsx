@@ -12,6 +12,7 @@ import "./ui/motion.css";
 import "./ui/tokens.css";
 import "./styles.css";
 import { App } from "./shell/App.js";
+import { SurfaceProvider, type Surface } from "./shell/surface.js";
 import { bridge } from "./data.js";
 import { flushContractEditors } from "./tasks/contract-editor.js";
 
@@ -46,13 +47,15 @@ const client = new QueryClient({
   },
 });
 /** Render the app into `root`, against whatever adapter fills `window.perbo`. */
-export function mountApp(root: HTMLElement): void {
+export function mountApp(root: HTMLElement, surface: Surface = "native"): void {
   bridge.beforeClose?.(flushContractEditors);
   createRoot(root).render(
     <React.StrictMode>
       <ErrorBoundary>
         <QueryClientProvider client={client}>
-          <App />
+          <SurfaceProvider value={surface}>
+            <App />
+          </SurfaceProvider>
         </QueryClientProvider>
       </ErrorBoundary>
     </React.StrictMode>,

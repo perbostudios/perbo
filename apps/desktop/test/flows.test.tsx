@@ -134,44 +134,34 @@ describe("interactive desktop flows", () => {
     expect(location.hash).toContain(admitted.key!);
   });
 
-  it("keeps decisions pending when leaving, allows editing the summary, and resumes after confirmation", async () => {
+  it("keeps a decision pending when leaving, lets it be rewritten, and resumes after confirmation", async () => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Answer" }));
-    let dialog = await screen.findByRole("dialog", {
-      name: "Decisions required",
-    });
+    let dialog = await screen.findByRole("dialog", { name: "Decisions required" });
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Save and continue" }),
     );
     expect(
-      within(dialog).getByText("Choose an approach before continuing."),
+      within(dialog).getByText("Write your approach before continuing."),
     ).toBeTruthy();
-    fireEvent.click(within(dialog).getAllByRole("radio")[0]!);
-    fireEvent.click(screen.getByRole("button", { name: "Home" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Answer" }));
-    dialog = await screen.findByRole("dialog", { name: "Decisions required" });
-    expect(
-      (within(dialog).getAllByRole("radio")[0] as HTMLInputElement).checked,
-    ).toBe(true);
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Save and continue" }),
-    );
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Let it decide" }),
-    );
     fireEvent.change(
       within(dialog).getByRole("textbox", { name: "Your approach" }),
       { target: { value: "Use thirty seconds and document it." } },
     );
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Save and continue" }),
-    );
-    dialog = await screen.findByRole("dialog", {
-      name: "Confirm your decisions",
-    });
-    fireEvent.click(
-      within(dialog).getAllByRole("button", { name: "edit" })[2]!,
-    );
+    // Left and come back: the answer is still here and still unsent.
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Answer" }));
+    dialog = await screen.findByRole("dialog", { name: "Decisions required" });
+    expect(
+      (
+        within(dialog).getByRole("textbox", {
+          name: "Your approach",
+        }) as HTMLTextAreaElement
+      ).value,
+    ).toBe("Use thirty seconds and document it.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Let it decide" }));
+    dialog = await screen.findByRole("dialog", { name: "Confirm your decisions" });
+    fireEvent.click(within(dialog).getAllByRole("button", { name: "edit" })[0]!);
     fireEvent.change(screen.getByRole("textbox", { name: "Your approach" }), {
       target: { value: "Use one minute and document it." },
     });
@@ -212,14 +202,12 @@ describe("interactive desktop flows", () => {
   it("never presents a completed local-only run as a published pull request", async () => {
     const workspace = await sampleBridge.request({ kind: "snapshot" });
     const row = workspace.tasks.find((row) => row.ticket.key === "PRB-377")!;
-    delete row.summary;
     row.ticket.delivery = {
       ...row.ticket.delivery,
       state: "none",
       pull_request_url: null,
       pull_request_number: null,
     };
-    workspace.mode = "desktop";
     workspace.tasks = [row];
     const detail = await sampleBridge.request({
       kind: "detail",
@@ -295,7 +283,6 @@ describe("interactive desktop flows", () => {
         repoId: row.repoId,
         key: row.ticket.key,
       });
-      workspace.mode = "desktop";
       detail.ticket.state = state;
       detail.ticket.approved_at = new Date().toISOString();
       workspace.jobs = outcome === "unrecorded" ? [] : [{
@@ -352,14 +339,11 @@ describe("interactive desktop flows", () => {
       const detail = structuredClone(await sampleBridge.request({
         kind: "detail", repoId: row.repoId, key: row.ticket.key,
       }));
-      workspace.mode = "desktop";
       workspace.titles = {};
       row.ticket.state = "provisioning";
       row.ticket.updated_at = "2026-09-01T00:00:00.000Z";
       newer.ticket.state = "ready";
       newer.ticket.updated_at = "2026-09-09T00:00:00.000Z";
-      delete row.summary;
-      delete newer.summary;
       workspace.tasks = [newer, row];
       workspace.jobs = outcome === "unrecorded" ? [] : [{
         id: "home-run",
@@ -409,10 +393,8 @@ describe("interactive desktop flows", () => {
       if (!attempt.review?.findings.some((finding) => finding.closure === "human"))
         throw new Error("The fixture must carry a recorded human decision");
       const question = attempt.review.findings[0]!.statement;
-      workspace.mode = "desktop";
       workspace.titles = {};
       workspace.tasks = [row];
-      delete row.summary;
       row.ticket.state = state;
       row.ticket.delivery.pull_request_url = null;
       detail.ticket = row.ticket;
@@ -457,29 +439,6 @@ describe("interactive desktop flows", () => {
       expect(workspace.jobs).toHaveLength(1);
       expect(workspace.jobs[0]?.state).toBe("failed");
       expect(detail.ticket.state).toBe(state);
-    },
-  );
-
-  it.each(["PRB-398", "PRB-404"])(
-    "preserves the %s preview activity when no native job exists",
-    async (key) => {
-      const workspace = await sampleBridge.request({ kind: "snapshot" });
-      const row = workspace.tasks.find((task) => task.ticket.key === key)!;
-      const detail = structuredClone(await sampleBridge.request({
-        kind: "detail", repoId: row.repoId, key,
-      }));
-      workspace.mode = "preview";
-      workspace.jobs = [];
-      workspace.tasks = [row];
-      if (!row.summary?.description || !detail.sample?.current)
-        throw new Error("The activity preview must retain its supplied presentation");
-      mountTaskFromHome(workspace, row.repoId, detail);
-      expect(screen.getByText(row.summary.description)).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Review and recover" })).toBeNull();
-      expect(screen.queryByText("1 ticket needs action")).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Watch" }));
-      expect(screen.getByRole("heading", { name: detail.sample.current })).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Review and recover" })).toBeNull();
     },
   );
 
