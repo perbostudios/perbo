@@ -7,7 +7,6 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -30,92 +29,10 @@ import type {
 } from "../shared/protocol.js";
 import { CriterionEvidenceBindingSchema } from "@perbo/contracts";
 import type { GraphEdit } from "@perbo/contracts/graph-edit";
+import { disposeFixtures, fixture, trackDirectory, trackService } from "./test-support/host-fixture.js";
 
-const temporary: string[] = [];
-const services: DesktopService[] = [];
-afterEach(async () => {
-  await Promise.all(services.splice(0).map((service) => service.shutdown()));
-  for (const path of temporary.splice(0))
-    rmSync(path, { recursive: true, force: true });
-});
-/**
- * A whole host over a temporary checkout and the bundled CLI, with what it
- * asked of the machine recorded: the notifications it put, the sleep it held,
- * the theme it applied and every change it told.
- */
-function fixture(process?: typeof runProcess, startProcess?: typeof startLineProcess) {
-  const root = mkdtempSync(join(tmpdir(), "perbo-desktop-"));
-  temporary.push(root);
-  // The folder name holds a space, because a path this host hands to a command
-  // is one argument whatever it holds.
-  const repo = join(root, "repository with spaces");
-  mkdirSync(repo);
-  for (const args of [
-    ["init", "--initial-branch=main"],
-    ["config", "user.name", "Desktop Test"],
-    ["config", "user.email", "desktop@example.invalid"],
-    ["config", "commit.gpgsign", "false"],
-  ])
-    execFileSync("git", args, { cwd: repo, stdio: "ignore" });
-  writeFileSync(join(repo, "README.md"), "# Test repository\n");
-  execFileSync("git", ["add", "README.md"], { cwd: repo });
-  execFileSync("git", ["commit", "-m", "Initial test state"], {
-    cwd: repo,
-    stdio: "ignore",
-  });
-  const notifications: { title: string; body: string; silent: boolean | undefined }[] = [];
-  const holds: { hold: boolean; displaySleep: boolean }[] = [];
-  const themes: string[] = [];
-  const changes: Change[] = [];
-  let onBattery = false;
-  const options: ServiceOptions = {
-    dataDirectory: join(root, "profile"),
-    cliPath: resolve("../cli/dist/perbo.js"),
-    nodeBinary: globalThis.process.execPath,
-    version: "test",
-    changed: (change) => {
-      changes.push(change);
-    },
-    io: {
-      chooseDirectory: async () => repo,
-      openPath: async () => undefined,
-      openExternal: async () => undefined,
-      saveFile: async (_name: string, _content: string): Promise<string | null> => null,
-      notify: (title, body, extra) => {
-        notifications.push({ title, body, silent: extra?.silent });
-      },
-      holdSleep: (hold, displaySleep) => {
-        holds.push({ hold, displaySleep });
-      },
-      onBattery: () => onBattery,
-      applyTheme: (theme) => {
-        themes.push(theme);
-      },
-    },
-    usageProbe: async () => ({
-      plan: "Pro",
-      windows: [{ label: "Session · 5-hour window", usedPercent: 23, resetsAt: null }],
-      detail: "Injected.",
-    }),
-    ...(process ? { process } : {}),
-    ...(startProcess ? { startProcess } : {}),
-  };
-  const service = new DesktopService(options);
-  services.push(service);
-  return {
-    repo,
-    root,
-    service,
-    options,
-    notifications,
-    holds,
-    themes,
-    changes,
-    setBattery: (value: boolean) => {
-      onBattery = value;
-    },
-  };
-}
+afterEach(disposeFixtures);
+
 const draft: Draft = {
   outcome: "Make errors actionable $(touch should-not-exist) `whoami`",
   criteria: [
@@ -1172,8 +1089,7 @@ describe("desktop bridge against the actual bundled CLI", () => {
     const form = { ...initial.form, draft, editing: 0, criterion: { text: "Unfinished", assertion: "", kind: "query" as const }, newPath: "packages/", models: { ...initial.form.models, executorModel: "saved-model" } };
     const saved = await service.request({ kind: "editingSave", id: initial.id, revision: initial.revision, repoId: registered.id, form });
     await service.shutdown();
-    const restarted = new DesktopService(options);
-    services.push(restarted);
+    const restarted = trackService(new DesktopService(options));
     const recovered = await restarted.request({ kind: "editingOpen", target: { kind: "new", repoId: registered.id } });
     expect(recovered).toEqual(saved);
     expect((await restarted.snapshot()).tasks).toHaveLength(0);
@@ -1194,8 +1110,7 @@ describe("desktop bridge against the actual bundled CLI", () => {
     }
     expect((await restarted.snapshot()).jobs.some((job) => job.kind === "admit")).toBe(false);
     await restarted.shutdown();
-    const again = new DesktopService(options);
-    services.push(again);
+    const again = trackService(new DesktopService(options));
     const receipt = await again.request({ kind: "editingSubmit", id: saved.id, revision: compiling.revision, operationId, intent: "compile" });
     expect(receipt).toMatchObject({ key: "PRB-1", phase: "ready", operation: { state: "completed", resultKey: "PRB-1" } });
     expect((await again.snapshot()).tasks).toHaveLength(1);
@@ -1749,8 +1664,7 @@ readline.createInterface({ input: process.stdin })
     changes: Change[];
     options: ServiceOptions;
   }> {
-    const root = mkdtempSync(join(tmpdir(), "perbo-interview-"));
-    temporary.push(root);
+    const root = trackDirectory(mkdtempSync(join(tmpdir(), "perbo-interview-")));
     const fake = fakeInterview(root);
     const spawns: typeof startLineProcess = (binary, args, options) =>
       startLineProcess(
@@ -1935,8 +1849,7 @@ readline.createInterface({ input: process.stdin })
     await service.shutdown();
 
     // A restart: a fresh host over the same profile, with nothing running.
-    const restarted = new DesktopService(options);
-    services.push(restarted);
+    const restarted = trackService(new DesktopService(options));
     const session = await restarted.request({ kind: "editingRead", id });
     expect(kinds(session.conversation)).toEqual(["note", "turn", "said"]);
     expect(session.interviewSession).toBe("sdk-session-1");
@@ -2366,8 +2279,7 @@ describe("UI v2 host behaviour", () => {
     delete stored["archivedSeeded"];
     writeFileSync(profile, JSON.stringify(stored));
     await service.shutdown();
-    const restarted = new DesktopService(options);
-    services.push(restarted);
+    const restarted = trackService(new DesktopService(options));
     const snapshot = await restarted.snapshot();
     expect(snapshot.archived).toEqual([registered.id + ":PRB-1"]);
     expect(snapshot.tasks.map((row) => row.ticket.key).sort()).toEqual([
