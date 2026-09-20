@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ExperimentConfigSchema, renderExperiment, runExperiment } from "../src/experiment.js";
-import { git } from "./support.js";
+import { ExperimentConfigSchema, renderExperiment, runExperiment } from "./experiment.js";
+import { git } from "./test-support/repository.js";
 
 /**
  * The ADR-0025 measurement times a cold and a warm start up to the

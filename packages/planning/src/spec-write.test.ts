@@ -3,19 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DEFAULT_SPEC_FOLDER } from "@perbo/contracts";
+import { PlanningError } from "./errors.js";
 import {
+  EMPTY_SPEC_TEXT,
   MAX_SPEC_SLUG_LENGTH,
-  PlanningError,
-  parseSpec,
-  readSpecText,
+  SpecConflict,
   specSlug,
   specTitleFromMessage,
-  writeSpecFile,
-  EMPTY_SPEC_TEXT,
-  SpecConflict,
   type SpecText,
-  type WrittenSpec,
-} from "../src/index.js";
+} from "./spec-text.js";
+import { readSpecText, writeSpecFile, type WrittenSpec } from "./spec-write.js";
+import { parseSpec } from "./spec.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-spec-write-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));

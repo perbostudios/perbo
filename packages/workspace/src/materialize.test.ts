@@ -16,10 +16,10 @@ import {
   materialize,
   materializationEnv,
   materializeEntry,
-} from "../src/materialize.js";
-import { WorkspaceError, provision } from "../src/worktree.js";
-import { diagnose, validateManifest } from "../src/diagnostic.js";
-import { git, makeRepo } from "./support.js";
+} from "./materialize.js";
+import { WorkspaceError, provision } from "./worktree.js";
+import { diagnose, validateManifest } from "./diagnostic.js";
+import { git, makeRepo } from "./test-support/repository.js";
 
 const scratch = () => mkdtempSync(join(tmpdir(), "perbo-mat-"));
 

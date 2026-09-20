@@ -7,7 +7,7 @@ import {
   enclosingWorkspaceRoot,
   proposedInstallStep,
   workspaceMembership,
-} from "../src/diagnostic.js";
+} from "./diagnostic.js";
 
 /**
  * A run pointed at one package of a monorepo.

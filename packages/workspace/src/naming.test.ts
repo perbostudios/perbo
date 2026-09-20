@@ -5,7 +5,7 @@ import {
   recordedBranch,
   shortSlug,
   ticketKey,
-} from "../src/naming.js";
+} from "./naming.js";
 
 describe("branch naming", () => {
   it("follows prb/<ticket id>/<short-slug> for a new ticket", () => {

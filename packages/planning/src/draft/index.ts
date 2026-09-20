@@ -14,9 +14,15 @@ import {
   type ModelCostBasis,
   type ToolResult,
 } from "@perbo/model";
-import { delimit } from "./delimit.js";
-import { DraftRejectedError, PlanningError } from "./errors.js";
-import { repositoryTree } from "./tree.js";
+import { delimit } from "./internal/delimit.js";
+import { DraftRejectedError, PlanningError } from "../errors.js";
+import { repositoryTree } from "./internal/tree.js";
+
+// Delimiting and the tracked tree are drafting's interior, and `@perbo/planning`
+// exports all three names, so the module's surface is where the entry reaches
+// them.
+export { defang, delimit } from "./internal/delimit.js";
+export { repositoryTree } from "./internal/tree.js";
 
 /**
  * The model drafts the contract — outcome, acceptance criteria and a

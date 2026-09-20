@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { PlanContractP1Schema, type PlanContractWithCriteria } from "@perbo/contracts";
-import { parseSpec, requirementNodes, writeNodePages, type Spec } from "../src/index.js";
+import { writeNodePages } from "./node-pages.js";
+import { parseSpec } from "./spec.js";
+import { requirementNodes, type Spec } from "./spec-text.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-node-pages-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));

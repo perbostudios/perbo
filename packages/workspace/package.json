@@ -20,7 +20,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "lint": "eslint src test"
+    "lint": "eslint src"
   },
   "dependencies": {
     "@perbo/contracts": "workspace:*",

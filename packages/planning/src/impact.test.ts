@@ -10,8 +10,8 @@ import {
   type ImpactReasonKind,
   type ImpactWarning,
   withNoGo,
-} from "../src/impact.js";
-import { specSymbolNames } from "../src/spec-text.js";
+} from "./impact.js";
+import { specSymbolNames } from "./spec-text.js";
 
 /**
  * Impact warnings (SCP-320, D-015): what a draft is likely to touch that its

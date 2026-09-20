@@ -1,14 +1,13 @@
 import { READ_FILE_TOOL } from "@perbo/model";
 import { describe, expect, it } from "vitest";
+import { DraftRejectedError, PlanningError } from "../errors.js";
 import {
   CONTRACT_DRAFT_JSON_SCHEMA,
   ContractDraftSchema,
   DRAFT_PROMPT_VERSION,
-  DraftRejectedError,
-  PlanningError,
   draftContract,
-} from "../src/index.js";
-import { disposingDrafter, scriptedDrafter, submits, validDraft } from "./double.js";
+} from "./index.js";
+import { disposingDrafter, scriptedDrafter, submits, validDraft } from "./test-support/drafter.js";
 
 const tree = ["packages/", "packages/auth/", "packages/queue/", "docs/", "README.md"];
 

@@ -7,7 +7,7 @@ import {
   specSymbolNames,
   symbolBeingTyped,
   symbolOptions,
-} from "../src/spec-text.js";
+} from "./spec-text.js";
 
 /**
  * SCP-321: the one reading of `@Symbol` in a spec (D-103, D-015).

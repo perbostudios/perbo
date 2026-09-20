@@ -1,5 +1,5 @@
 import { git } from "@perbo/workspace";
-import { PlanningError } from "./errors.js";
+import { PlanningError } from "../../errors.js";
 
 const DEFAULT_LIMIT = 400;
 
