@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import {
   INLINE_READ_ONLY,
   INLINE_WRITE_CALLS,
-  INTERPRETERS,
   PLAIN_WRITE_CALLS,
-  WRITERS,
-} from "../src/shell/index.js";
+} from "../src/shell/internal/inline-tables.js";
+import { INTERPRETERS } from "../src/shell/internal/interpreter.js";
+import { WRITERS } from "../src/shell/internal/writers.js";
 import { inspectCommand } from "../src/prohibited.js";
 import { scratch } from "./support.js";
 
