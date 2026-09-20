@@ -1241,12 +1241,12 @@ export class DesktopService {
         return;
       }
       // The id as it was recorded, which is the one a later start continues.
+      // The session's own id is of no use to anybody reading the chat, and
+      // the spec's path is in the pane beside it; what is worth saying once is
+      // the folder it may write that is not on screen anywhere.
       this.converse(id, {
         kind: "note",
-        text: redact(`The session is ${session}, writing ${event.spec} and ${event.adr}.`).slice(
-          0,
-          2000,
-        ),
+        text: redact(`Writing ${event.spec} and ${event.adr}.`).slice(0, 2000),
       });
       return;
     }
@@ -1427,9 +1427,9 @@ export class DesktopService {
     // was called while the spec is still empty enough to start again.
     this.converse(id, {
       kind: "note",
-      text:
-        `Named from your first message: ${written.folder}. The folder keeps this name; ` +
-        "the title itself you can change in the Spec pane.",
+      // That the title can be changed is what an editable field says by being
+      // one, and that a folder keeps its name is how folders work.
+      text: `Named ${written.folder} from your first message.`,
     });
   }
 

@@ -2608,7 +2608,7 @@ readline.createInterface({ input: process.stdin })
     // The naming is said, and the turn it came from is part of the conversation.
     const lines = await spoken(service, fresh.id, (entries) =>
       entries.some(
-        (entry) => entry.line.kind === "note" && entry.line.text.includes("Named from your first message"),
+        (entry) => entry.line.kind === "note" && entry.line.text.includes("from your first message"),
       ),
     );
     expect(kinds(lines)).toContain("turn");
@@ -2856,19 +2856,23 @@ readline.createInterface({ input: process.stdin })
     // A `started` event the protocol caps at nothing, against a record that
     // caps it: dropped, the chat comes back with no session and no lines.
     await service.request({ kind: "interviewTurn", id, text: "start a long session" });
-    const lines = await spoken(service, id, (entries) =>
-      entries.some((entry) => entry.line.kind === "note" && entry.line.text.includes("s".repeat(40))),
-    );
+    // Waited for on the record rather than on a line: the note the start posts
+    // says what the session may write and names no id at all, so the two starts
+    // post the same words and neither tells them apart.
+    let session = await service.request({ kind: "editingRead", id });
+    for (let tries = 0; tries < 200 && session.interviewSession !== "s".repeat(200); tries += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      session = await service.request({ kind: "editingRead", id });
+    }
     // The id the second `started` reported, kept at what the record holds
     // rather than dropped with the line that carried it.
-    const session = await service.request({ kind: "editingRead", id });
     expect(session.interviewSession).toBe("s".repeat(200));
-    // And the note names the id that was recorded, which is the one a later
-    // start continues, rather than the longer one that arrived.
-    const note = lines.find(
-      (entry) => entry.line.kind === "note" && entry.line.text.includes("s".repeat(40)),
-    )!.line;
-    expect(note.kind === "note" && note.text).toContain(`The session is ${"s".repeat(200)},`);
+    // And no session id reaches the conversation, however long it was.
+    const lines = await spoken(service, id, (entries) =>
+      entries.some((entry) => entry.line.kind === "note" && entry.line.text.includes("Writing ")),
+    );
+    expect(lines.some((entry) => entry.line.kind === "note" && entry.line.text.includes("s".repeat(40))))
+      .toBe(false);
     await service.request({ kind: "interviewStop", id });
   });
 
@@ -2891,7 +2895,7 @@ readline.createInterface({ input: process.stdin })
     // what lets a later start continue it: recorded as the other's, the two
     // would never match and every start would open a new conversation.
     await spoken(service, id, (lines) =>
-      lines.some((line) => line.line.kind === "note" && line.line.text.includes("The session is")),
+      lines.some((line) => line.line.kind === "note" && line.line.text.includes("Writing ")),
     );
     const started = await service.request({ kind: "editingRead", id });
     expect(started.interviewProvider).toBe("codex");

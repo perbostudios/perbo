@@ -602,16 +602,36 @@ function Line({
       </div>
     );
   if (line.kind === "note") return <p className="msg msg--note">{line.text}</p>;
+  // An ask that worked is said twice already — the line below and the card
+  // itself — and a card for it would be a third, over a detail written to
+  // steer the session rather than to be read by anyone. One that was refused
+  // is said nowhere else: no `asked` follows a rejected call, so dropping it
+  // too would leave the dock saying "Working…" and then nothing at all.
+  if (line.kind === "tool" && line.tool === "ask_options" && line.ok) return null;
   // The questions are put one group at a time under the conversation, and they
   // are written out here as well. A person who says something of their own
   // takes the rest off the card — the session is about to answer what they
   // said — so what was asked has to stay somewhere they can still read it.
   if (line.kind === "asked") {
     const parts = line.groups.reduce((count, group) => count + group.parts.length, 0);
+    // What the questions are about, which is what a person reading the chat
+    // later wants from this line. The count is what is left when the session
+    // titled none of them.
+    const about = line.groups.flatMap((group) => (group.title === null ? [] : [group.title]));
+    // Titles are the session's own words, four groups of up to two hundred
+    // characters: said in the line they would be the long account the card
+    // exists to keep out of the chat.
+    const subjects = (titles: string[]): string => {
+      const joined =
+        titles.length === 1 ? titles[0]! : `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
+      return joined.length > 120 ? `${joined.slice(0, 117).trimEnd()}…` : joined;
+    };
     return (
       <p className="msg msg--note asked-said">
-        Asked {parts === 1 ? "one question" : `${parts} questions`}
-        {line.groups.length > 1 && `, in ${line.groups.length} groups`}.
+        {`Asked ${parts === 1 ? "one question" : `${parts} questions`}${
+          line.groups.length > 1 ? ` in ${line.groups.length} groups` : ""
+        }`}
+        {about.length > 0 && `, about ${subjects(about)}`}.
         <InfoHint
           label="The questions that were asked"
           text={line.groups

@@ -4,6 +4,7 @@ import { Button, Dialog, Notice } from "@perbo/ui";
 import type { SpecField } from "@perbo/planning/spec-text";
 import { specSymbolNames } from "@perbo/planning/spec-text";
 import { bridge } from "../data.js";
+import { InfoHint } from "../InfoHint.js";
 import { InkIcon } from "../InkIcon.js";
 import { useContractEditing } from "../tasks/contract-editor.js";
 import { SpecSection } from "./SpecSection.js";
@@ -291,9 +292,19 @@ export function SpecPane({
   const written = Boolean(view?.slug);
   const busy =
     editor.submitting || editor.session?.phase === "working" || save.isPending;
+  // A group of questions still in front of the person, or a turn the interview
+  // is still taking. Drafting over either turns the spec into a plan while the
+  // thing that would have changed it is still being asked — the answers land
+  // in a spec the contract was already drafted from.
+  const asked = editor.session?.asking ?? null;
+  const midTurn = (workspace.working ?? []).includes(sessionId);
   // The drafter reads the file, so a draft waits for a title and an outcome to
   // be in it: `parseSpec` refuses a spec without either.
-  const ready = Boolean(view?.slug) && (view?.sections.outcome.trim().length ?? 0) > 0;
+  const ready =
+    Boolean(view?.slug) &&
+    (view?.sections.outcome.trim().length ?? 0) > 0 &&
+    asked === null &&
+    !midTurn;
   // What is shown reaches the file before the drafter reads it: every save
   // the text calls for is awaited, including one a section left meanwhile
   // asks for, and a save that fails or is refused leaves the draft unsent.
@@ -350,35 +361,48 @@ export function SpecPane({
         <>
           <div className="pane-head">
             <h2>Spec</h2>
+            {/* The two ways to a plan, said once and in passing: a heading over
+                the contract steps made a second way look like a second place
+                to be, when it is the same page further down. */}
+            <span className="sub">write it with the interview, or the contract yourself below</span>
             <span className="sub mono">{view?.path ?? "specs/…/spec.md"}</span>
             <span className="spacer" />
             <span role="status" className="small muted">
-              {save.isPending
-                ? "Saving to the repository…"
-                : written
-                  ? "Saved in the repository — the file is the spec"
-                  : "not written yet"}
+              {save.isPending ? "Saving…" : written ? "Saved" : "not written yet"}
             </span>
-            <span className={missing.length > 0 ? "small spec-missing" : "small muted"}>
-              {index.isError
-                ? "the index could not be read"
-                : index.data === undefined
-                  ? "reading the index…"
-                  : indexed === null
-                    ? "no TypeScript or JavaScript here, so no @name is checked"
-                    : missing.length === 0
-                      ? "every @name resolves"
-                      : `${missing.length} ${missing.length === 1 ? "name is not" : "names are not"} in the index`}
-            </span>
-            <span className="small muted">
-              {index.data === undefined
-                ? ""
-                : index.data.supported
-                  ? `index · ${index.data.names.length} exported TS symbols · ${index.data.headCommit.slice(0, 7)}${
-                      index.data.workingTree === "clean" ? "" : " with uncommitted changes"
-                    }`
-                  : `index · not built: ${index.data.reason}`}
-            </span>
+            {/* Only what a person can act on. That every `@name` resolves is
+                the absence of the warning below it, and that a repository with
+                no TypeScript has nothing to check is not news twice — it was
+                said here and again in the line under it. What is left of the
+                index is for somebody who went looking, so it is behind the
+                dot. */}
+            {missing.length > 0 && (
+              <span className="small spec-missing">
+                {missing.length} {missing.length === 1 ? "name is not" : "names are not"} in the
+                index
+              </span>
+            )}
+            {index.isError ? (
+              <span className="small muted">the index could not be read</span>
+            ) : index.data === undefined ? (
+              <span className="small muted">reading the index…</span>
+            ) : (
+              <>
+                {/* Nothing checked is not the same as everything resolved, and
+                    a blank head cannot tell them apart. Said once, here. */}
+                {!index.data.supported && <span className="small muted">no names to check here</span>}
+                <InfoHint
+                  label="About the symbol index"
+                  text={
+                    index.data.supported
+                      ? `${index.data.names.length} exported TypeScript symbols, read at ` +
+                        `${index.data.headCommit.slice(0, 7)}` +
+                        (index.data.workingTree === "clean" ? "." : " with uncommitted changes.")
+                      : `No @name is checked here: ${index.data.reason}`
+                  }
+                />
+              </>
+            )}
           </div>
           {failure !== null && <Notice tone="danger">{failure}</Notice>}
           {conflict !== null && (
@@ -485,7 +509,11 @@ export function SpecPane({
                 <span className="small muted">
                   {ready
                     ? "Press once. The drafter turns the spec into a contract and an execution graph."
-                    : "Available once the spec has a title and an outcome."}
+                    : asked !== null
+                      ? "Answer the interview's questions first — its answers change the spec this drafts from."
+                      : midTurn
+                        ? "The interview is still talking."
+                        : "Available once the spec has a title and an outcome."}
                 </span>
               </>
             ) : (
@@ -509,14 +537,6 @@ export function SpecPane({
         </>
       )}
       <div className={working ? "spec-working" : "spec-typed"}>
-        {!working && (
-          <div className="column-heading">
-            <strong>Or write the contract yourself</strong>
-            <span className="small muted">
-              an outcome and its criteria, with no spec behind them
-            </span>
-          </div>
-        )}
         <Suspense fallback={<div className="launch"><InkIcon name="dots" /><p>Opening…</p></div>}>
           <Composer
             workspace={workspace}

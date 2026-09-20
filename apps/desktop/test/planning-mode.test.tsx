@@ -582,7 +582,8 @@ describe("the Spec pane (SCP-336)", () => {
     const ready = async (): Promise<void> => {
       await startPlanning();
       await write(SPEC);
-      await screen.findByText(/exported TS symbols/);
+      // The index reports behind the dot in the pane head.
+      await screen.findAllByRole("button", { name: "About the symbol index" });
     };
     const notes = (): HTMLTextAreaElement =>
       specField("Spec Notes") as HTMLTextAreaElement;
@@ -682,8 +683,11 @@ describe("the Spec pane (SCP-336)", () => {
 
     it("counts the names not in the index, beside the index's size and its commit", async () => {
       await ready();
-      await screen.findByText("every @name resolves");
-      expect(screen.getByText("index · 7 exported TS symbols · 9f2c1ab")).toBeTruthy();
+      // Nothing is said when every name resolves: the absence of the warning
+      // below is the answer, and the index's own size is behind the dot.
+      expect(screen.queryByText(/name is not|names are not/)).toBeNull();
+      expect(screen.getAllByText(/7 exported TypeScript symbols, read at 9f2c1ab/).length)
+        .toBeGreaterThan(0);
 
       type("@signUp and @retryQueue.");
       fireEvent.blur(notes());
@@ -716,8 +720,10 @@ describe("the Spec pane (SCP-336)", () => {
     it("checks no name in a repository the index cannot describe, and says why", async () => {
       await startPlanning(/example\/landing/);
       await write({ title: "A landing page", "Spec Notes": "@signUp is not checked here." });
-      await screen.findByText("no TypeScript or JavaScript here, so no @name is checked");
-      expect(screen.getByText(/index · not built: no tracked TypeScript or JavaScript/)).toBeTruthy();
+      // A repository with nothing to check says so once, behind the dot, and
+      // not a second time in the line beside it.
+      await screen.findAllByRole("button", { name: "About the symbol index" });
+      expect(screen.queryByText(/so no @name is checked/)).toBeNull();
       // Nothing is marked wrong: there is no list to be missing from.
       expect(document.querySelectorAll(".sym--unknown")).toHaveLength(0);
       expect(screen.queryByRole("button", { name: /^Use @/ })).toBeNull();
@@ -1358,7 +1364,7 @@ describe("the Spec pane (SCP-336)", () => {
 
     await screen.findByText("specs/a-light-colour-mode/spec.md");
     await waitFor(() => expect(specField("Spec Requirements").value).toContain("R2:"));
-    await screen.findByText("Saved in the repository — the file is the spec");
+    await screen.findByText("Saved");
     expect(specField("Spec Requirements").value).toContain("- R1: The person can choose Light, Dark or System.");
     expect(specField("Spec Requirements").value).toContain("- R2: Text meets WCAG AA contrast.");
     expect(specField("Spec Requirements").value).not.toContain("R3:");
@@ -1973,6 +1979,8 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       .map((node) => node.textContent ?? "")
       .join("");
     expect(shown).toContain("Asked 3 questions");
+    // The count says how much is still queued; the titles say what it is about.
+    expect(shown).toContain("about ");
     expect(shown).not.toContain("Where does the split go?");
     const dot = within(said).getByRole("button", { name: "The questions that were asked" });
     const hint = within(said).getByRole("tooltip", { hidden: true });
@@ -2275,7 +2283,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(
-      await within(dock()).findByText(/Named from your first message: specs\/add-a-dark-mode-toggle/),
+      await within(dock()).findByText(/Named specs\/add-a-dark-mode-toggle from your first message/),
     ).toBeTruthy();
     // The turn was heard: the session answers it, and the composer is ready
     // for the next one.

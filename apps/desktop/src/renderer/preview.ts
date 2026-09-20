@@ -1522,8 +1522,7 @@ function nameSpecFromTurn(id: string, text: string): void {
   converse(id, {
     kind: "note",
     text:
-      `Named from your first message: specs/${slug}. The folder keeps this name; ` +
-      "the title itself you can change in the Spec pane.",
+      `Named specs/${slug} from your first message.`,
   });
 }
 function startSampleInterview(id: string): InterviewStatus {
@@ -1537,7 +1536,7 @@ function startSampleInterview(id: string): InterviewStatus {
   editing.recordInterview(id, "sample-session", provider);
   converse(id, {
     kind: "note",
-    text: `The session is sample-session, writing specs/${session.specSlug}/spec.md and docs/adr.`,
+    text: `Writing specs/${session.specSlug}/spec.md and docs/adr.`,
   });
   return interviewStatus(id);
 }
