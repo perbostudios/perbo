@@ -1,9 +1,15 @@
-import { PlanContractSchema, type PlanContract } from "@perbo/contracts";
+import {
+  PlanContractP1Schema,
+  PlanContractSchema,
+  type PlanContractWithCriteria,
+} from "@perbo/contracts";
 import { describe, expect, it } from "vitest";
 import { contractDifferences, contractEditCount } from "../src/index.js";
 
-const base = (): PlanContract =>
-  PlanContractSchema.parse({
+// The P1 schema rather than the union, because every assertion below reads the
+// criteria a P0 contract does not have.
+const base = (): PlanContractWithCriteria =>
+  PlanContractP1Schema.parse({
     plan_id: "plan_diff",
     version: 1,
     ticket_id: "ticket_diff",

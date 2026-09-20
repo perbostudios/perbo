@@ -169,6 +169,8 @@ describe("leases", () => {
       expires_at: "2020-01-01T01:00:00.000Z",
       pid: process.pid,
       host: "somewhere-else",
+      port_range_start: null,
+      port_range_end: null,
     };
     expect(leaseIsStale(lease, new Date("2020-01-02T00:00:00.000Z"))).toBe(true);
     expect(leaseIsStale(lease, new Date("2020-01-01T00:30:00.000Z"))).toBe(false);
