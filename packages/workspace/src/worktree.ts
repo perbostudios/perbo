@@ -14,8 +14,7 @@ import { hostname } from "node:os";
 import { join, resolve, sep, toNamespacedPath } from "node:path";
 import { z } from "zod";
 import { assertWithinLimits, type LimitsTable } from "@perbo/contracts";
-import { run, runOrThrow } from "./exec.js";
-import { gitEnv } from "./repository/index.js";
+import { git } from "./repository/index.js";
 import { branchName, recordedBranch, type RecordedBranches } from "./naming.js";
 
 /**
@@ -273,28 +272,14 @@ export function listLeases(root: string): Lease[] {
   return out;
 }
 
-async function gitLines(args: string[], cwd: string, timeoutMs: number): Promise<string[]> {
-  const result = await runOrThrow(["git", ...args], {
-    cwd,
-    env: gitEnv(),
-    timeoutMs,
-  });
-  return result.stdout.split("\n").filter((line) => line.length > 0);
-}
-
 /** Branches currently checked out in some worktree of this repository. */
 export async function checkedOutBranches(
   repositoryRoot: string,
   timeoutMs = DEFAULT_GIT_TIMEOUT_MS,
 ): Promise<Map<string, string>> {
-  const lines = await gitLines(["worktree", "list", "--porcelain"], repositoryRoot, timeoutMs);
   const out = new Map<string, string>();
-  let path: string | null = null;
-  for (const line of lines) {
-    if (line.startsWith("worktree ")) path = line.slice("worktree ".length);
-    if (line.startsWith("branch ") && path) {
-      out.set(line.slice("branch ".length).replace(/^refs\/heads\//, ""), path);
-    }
+  for (const entry of await git.worktrees(repositoryRoot, { timeoutMs })) {
+    if (entry.branch !== null) out.set(entry.branch, entry.path);
   }
   return out;
 }
@@ -310,21 +295,13 @@ export async function reclaimStaleWorktrees(args: {
   const reclaimed: Lease[] = [];
   for (const lease of listLeases(args.root)) {
     if (!leaseIsStale(lease, now)) continue;
-    await run(["git", "worktree", "remove", "--force", lease.path], {
-      cwd: args.repository_root,
-      env: gitEnv(),
-      timeoutMs,
-    });
+    await git.removeWorktree(args.repository_root, lease.path, { timeoutMs });
     rmSync(leasePath(args.root, lease.root_attempt_id), { force: true });
     reclaimed.push(lease);
   }
   // `git worktree prune` clears administrative files for directories that are
   // already gone; without it a reclaimed path cannot be reused.
-  await run(["git", "worktree", "prune"], {
-    cwd: args.repository_root,
-    env: gitEnv(),
-    timeoutMs,
-  });
+  await git.pruneWorktrees(args.repository_root, { timeoutMs });
   return reclaimed;
 }
 
@@ -409,29 +386,20 @@ export async function provision(request: ProvisionRequest): Promise<Workspace> {
 
   // Verify the base commit resolves before creating anything, so a typo is a
   // typed refusal rather than a half-made worktree.
-  const rev = await run(["git", "rev-parse", "--verify", `${request.base_commit}^{commit}`], {
-    cwd: repositoryRoot,
-    env: gitEnv(),
-    timeoutMs,
-  });
-  if (rev.code !== 0) {
+  const resolvedBase = await git.resolveCommit(repositoryRoot, request.base_commit, { timeoutMs });
+  if (resolvedBase === null) {
     throw new WorkspaceError(
       "base_commit_missing",
       `base commit ${request.base_commit} does not resolve in ${repositoryRoot}`,
     );
   }
-  const resolvedBase = rev.stdout.trim();
 
-  const branchExists = await run(["git", "rev-parse", "--verify", `refs/heads/${branch}`], {
-    cwd: repositoryRoot,
-    env: gitEnv(),
-    timeoutMs,
-  });
-  const argv =
-    branchExists.code === 0
-      ? ["git", "worktree", "add", path, branch]
-      : ["git", "worktree", "add", "-b", branch, path, resolvedBase];
-  const added = await run(argv, { cwd: repositoryRoot, env: gitEnv(), timeoutMs });
+  const branchExists = (await git.resolveCommit(repositoryRoot, `refs/heads/${branch}`, { timeoutMs })) !== null;
+  const added = await git.addWorktree(
+    repositoryRoot,
+    branchExists ? { path, branch } : { path, newBranch: branch, startPoint: resolvedBase },
+    { timeoutMs },
+  );
   if (added.code !== 0) {
     throw new WorkspaceError(
       "worktree_collision",
@@ -486,10 +454,7 @@ export async function cleanup(args: {
 }): Promise<{ removed: boolean; detail: string }> {
   const timeoutMs = args.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
   const registration = worktreeGitDir(args.workspace.path);
-  const removed = await run(
-    ["git", "worktree", "remove", "--force", args.workspace.path],
-    { cwd: args.workspace.repository_root, env: gitEnv(), timeoutMs },
-  );
+  const removed = await git.removeWorktree(args.workspace.repository_root, args.workspace.path, { timeoutMs });
   rmSync(leasePath(args.root, args.workspace.root_attempt_id), { force: true });
   // Git refuses a removal — a locked worktree, a main working tree, a path
   // that is not one of its worktrees — before it touches anything. Once it has
@@ -524,11 +489,7 @@ export async function cleanup(args: {
       direct = error instanceof Error ? error.message : String(error);
     }
   }
-  await run(["git", "worktree", "prune"], {
-    cwd: args.workspace.repository_root,
-    env: gitEnv(),
-    timeoutMs,
-  });
+  await git.pruneWorktrees(args.workspace.repository_root, { timeoutMs });
   if (removed.code !== 0 && existsSync(args.workspace.path)) {
     throw new WorkspaceError(
       "cleanup_failed",
