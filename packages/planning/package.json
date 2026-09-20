@@ -42,6 +42,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@perbo/test-support": "workspace:*",
     "@perbo/tsconfig": "workspace:*",
     "@eslint/js": "catalog:",
     "@types/node": "catalog:",

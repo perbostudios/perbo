@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { PlanningError } from "./errors.js";
 import {
   MAX_ISSUE_FILE_BYTES,
@@ -10,11 +10,11 @@ import {
   readIssueFile,
 } from "./file-issue.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "perbo-planning-file-issue-"));
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+const scratch = scratchDirectories("perbo-planning-file-issue-");
+const root = scratch();
 
 const write = (name: string, text: string): string => {
-  const path = join(scratch, name);
+  const path = join(root, name);
   writeFileSync(path, text);
   return path;
 };
@@ -44,7 +44,7 @@ describe("readIssueFile", () => {
   });
 
   it("names the file, never the path it was found at", () => {
-    const nested = join(scratch, "nested");
+    const nested = join(root, "nested");
     mkdirSync(nested, { recursive: true });
     const path = join(nested, "SCP-151.md");
     writeFileSync(path, "T\n\nb\n");
@@ -94,10 +94,10 @@ describe("readIssueFile", () => {
   });
 
   it("says one sentence when the file is not there, is a directory, or is empty", () => {
-    expect(() => readIssueFile(join(scratch, "missing.md"))).toThrow(PlanningError);
-    expect(() => readIssueFile(join(scratch, "missing.md"))).toThrow(/no file at .*missing\.md/);
+    expect(() => readIssueFile(join(root, "missing.md"))).toThrow(PlanningError);
+    expect(() => readIssueFile(join(root, "missing.md"))).toThrow(/no file at .*missing\.md/);
 
-    const dir = join(scratch, "a-directory.md");
+    const dir = join(root, "a-directory.md");
     mkdirSync(dir, { recursive: true });
     expect(() => readIssueFile(dir)).toThrow(/is a directory; --from-file takes one Markdown file/);
 

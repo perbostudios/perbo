@@ -1,16 +1,16 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { PlanningError } from "./errors.js";
 import { fetchGitHubIssue, parseIssueReference } from "./issue.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "perbo-planning-issue-"));
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+const scratch = scratchDirectories("perbo-planning-issue-");
+const root = scratch();
 
 /** A stand-in `gh` that records its argv and prints a fixed answer. */
 function fakeGh(name: string, script: string): string {
-  const path = join(scratch, name);
+  const path = join(root, name);
   writeFileSync(path, `#!/bin/sh\n${script}\n`);
   chmodSync(path, 0o755);
   return path;
@@ -31,7 +31,7 @@ describe("parseIssueReference", () => {
 
 describe("fetchGitHubIssue", () => {
   it("asks gh for the issue by argv and validates what comes back", async () => {
-    const argvFile = join(scratch, "argv.txt");
+    const argvFile = join(root, "argv.txt");
     const binary = fakeGh(
       "gh-ok",
       `printf '%s\\n' "$@" > ${JSON.stringify(argvFile)}\n` +
@@ -88,7 +88,7 @@ describe("fetchGitHubIssue", () => {
  */
 describe("the gh fetchGitHubIssue starts", () => {
   it.skipIf(process.platform === "win32")("runs with prompts off and no ambient secret", async () => {
-    const dump = join(scratch, "issue-child-env.txt");
+    const dump = join(root, "issue-child-env.txt");
     const binary = fakeGh(
       "gh-env",
       `env > ${JSON.stringify(dump)}\n` +

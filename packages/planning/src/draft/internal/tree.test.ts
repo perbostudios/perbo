@@ -1,23 +1,18 @@
-import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { initRepository, scratchDirectories } from "@perbo/test-support";
 import { PlanningError } from "../../errors.js";
 import { repositoryTree } from "./tree.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "perbo-planning-tree-"));
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+const scratch = scratchDirectories("perbo-planning-tree-");
+const root = scratch();
 
 function repository(files: string[]): string {
-  const dir = join(scratch, `repo-${files.length}-${Math.random().toString(36).slice(2)}`);
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  for (const file of files) {
-    mkdirSync(dirname(join(dir, file)), { recursive: true });
-    writeFileSync(join(dir, file), "x\n");
-  }
-  execFileSync("git", ["-C", dir, "add", "-A"]);
-  return dir;
+  const dir = join(root, `repo-${files.length}-${Math.random().toString(36).slice(2)}`);
+  return initRepository(dir, {
+    files: Object.fromEntries(files.map((file) => [file, "x\n"])),
+  }).dir;
 }
 
 describe("repositoryTree", () => {
@@ -42,7 +37,7 @@ describe("repositoryTree", () => {
   });
 
   it("says so when the directory is not a repository", () => {
-    expect(() => repositoryTree(join(scratch, "not-a-repo"))).toThrow(PlanningError);
+    expect(() => repositoryTree(join(root, "not-a-repo"))).toThrow(PlanningError);
   });
 });
 
@@ -58,9 +53,9 @@ describe("the git repositoryTree starts", () => {
     () => {
       // Only the child is under test here, so the directory it runs in has to
       // exist and nothing more; what git would have said is the fake's.
-      const dir = join(scratch, "any-directory");
-      const bin = join(scratch, "env-dumping-git");
-      const dump = join(scratch, "tree-child-env.txt");
+      const dir = join(root, "any-directory");
+      const bin = join(root, "env-dumping-git");
+      const dump = join(root, "tree-child-env.txt");
       mkdirSync(dir, { recursive: true });
       mkdirSync(bin, { recursive: true });
       writeFileSync(
