@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -10,6 +9,7 @@ import {
   readSpecFile,
   writeNodePages,
 } from "@perbo/planning";
+import { git, type RunResult } from "@perbo/workspace";
 import { UsageError } from "../usage-error.js";
 import { INTERVIEW_SESSION_FILE } from "../commands/interview/index.js";
 import { adrFolder, specFolder } from "../store/index.js";
@@ -173,6 +173,9 @@ function filesUnder(repositoryRoot: string, folder: string): string[] {
   return found;
 }
 
+/** What `git status` may say about these paths before the answer is a fragment. */
+const MAX_STATUS_BYTES = 16 * 1024 * 1024;
+
 /**
  * Which of `paths` the checkout has changed or added since its last commit,
  * repository-relative, and none where git cannot say — which it says on
@@ -183,29 +186,41 @@ function filesUnder(repositoryRoot: string, folder: string): string[] {
  * copies out of the checkout, and a file that is gone has none.
  */
 function changedSince(repositoryRoot: string, paths: readonly string[]): string[] {
-  let reported: string;
-  try {
-    reported = execFileSync(
-      "git",
-      ["-C", repositoryRoot, "status", "--porcelain", "-z", "--untracked-files=all", "--", ...paths],
-      { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] },
-    );
-  } catch (error) {
-    const detail = (error as { stderr?: Buffer | string }).stderr ?? (error as Error).message;
-    const why = String(detail)
-      .split("\n")
-      .map((line) => line.trim())
-      .find((line) => line.length > 0);
+  const unanswered = (why: string | undefined): string[] => {
     process.stderr.write(
       `warning: git could not say which of ${paths.join(", ")} this checkout has changed` +
         `${why === undefined ? "" : `: ${why}`}. The spec is recorded without them, once: ` +
         "nothing asks git again, and the loop commits what this record names.\n",
     );
     return [];
+  };
+  const said = (text: string): string | undefined =>
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.length > 0);
+
+  let reported: RunResult;
+  try {
+    reported = git.runSync(
+      repositoryRoot,
+      ["status", "--porcelain", "-z", "--untracked-files=all", "--", ...paths],
+      { maxOutputBytes: MAX_STATUS_BYTES },
+    );
+  } catch (error) {
+    // git never started: no git on PATH, or no such directory.
+    return unanswered(said(error instanceof Error ? error.message : String(error)));
   }
+  // A status longer than the ceiling arrives as its tail, which is a list of
+  // paths shaped exactly like the whole one and short by the entries that were
+  // cut. The size is the answer here, not the entries that fit.
+  if (reported.truncated) {
+    return unanswered(`it said more than ${MAX_STATUS_BYTES} bytes and only the tail of that arrived`);
+  }
+  if (reported.code !== 0) return unanswered(said(reported.stderr));
   // `XY <path>` per entry, and a rename or copy carries the path it came from
   // as the entry after it — which is a path the checkout no longer has.
-  const fields = reported.split("\0").filter((field) => field.length > 0);
+  const fields = reported.stdout.split("\0").filter((field) => field.length > 0);
   const found: string[] = [];
   for (let at = 0; at < fields.length; at += 1) {
     const entry = fields[at]!;
