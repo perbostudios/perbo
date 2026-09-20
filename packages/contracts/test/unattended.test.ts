@@ -64,7 +64,12 @@ const mergedTicket = (over: {
       opened_by: over.opened_by,
       mergeable: null,
       commits_outside_loop: over.commits_outside_loop,
+      github_credential: null,
       arm: over.arm ?? "loop",
+      merged_by: null,
+      incomplete_review: null,
+      checks: [],
+      checks_state: null,
     },
     history: [
       { at: "2026-08-28T00:00:00.000Z", from: null, to: "plan_review", note: "admitted" },

@@ -10,6 +10,8 @@ import {
   summariseStops,
   widenedByHiding,
   wilsonInterval,
+  type StopAnswer,
+  type StopVerdict,
   type StopVerdicts,
 } from "../src/stops.js";
 
@@ -37,12 +39,14 @@ const file = (over: Partial<StopVerdicts> & { ticket_key: string }): StopVerdict
     ...over,
   });
 
-const stop = (c: string, answer: "endorse" | "override" | "conflict" | null) => ({
+/** A stop as a sync writes it, where the tick carries no signature: a person's. */
+const stop = (c: string, answer: StopAnswer | null): StopVerdict => ({
   finding_key: key(c),
   rule_id: `rule.${c}`,
-  routing: "blocks" as const,
+  routing: "blocks",
   answer,
   answered_at: answer === null ? null : AT,
+  answered_by: answer === null ? null : "person",
   first_seen_at: AT,
 });
 
@@ -293,7 +297,7 @@ describe("a stop the stand-in answered", () => {
     expect(isDogfoodStop({ answer: null, answered_by: "stand_in" })).toBe(false);
     // A record written before the label existed says nothing about who
     // answered, and nothing is what it is read as.
-    expect(isDogfoodStop(stop("a", "endorse"))).toBe(false);
+    expect(isDogfoodStop({ ...stop("a", "endorse"), answered_by: null })).toBe(false);
   });
 
   it("is read off a signed tick and kept while the answer is unchanged", () => {

@@ -46,6 +46,25 @@ const ticket = (overrides: Partial<Ticket> = {}): Ticket =>
     ...overrides,
   });
 
+/** A delivery record, over the defaults a ticket carrying no pull request has. */
+const delivery = (over: Partial<Ticket["delivery"]> = {}): Ticket["delivery"] => ({
+  branch: null,
+  pull_request_url: null,
+  pull_request_number: null,
+  state: "none",
+  observed_at: null,
+  opened_by: null,
+  mergeable: null,
+  commits_outside_loop: null,
+  github_credential: null,
+  arm: "loop",
+  merged_by: null,
+  incomplete_review: null,
+  checks: [],
+  checks_state: null,
+  ...over,
+});
+
 describe("the native ticket", () => {
   it("carries every state the lifecycle diagram draws", () => {
     // The diagram is the source; the enum tracks it. If a state is added to one
@@ -152,6 +171,7 @@ describe("the native ticket", () => {
   it("records a drafted admission, its human time and what the person changed", () => {
     const drafted = ticket({
       admission: {
+        ...ticket().admission,
         elapsed_ms: 9000,
         criteria_source: "drafted",
         criteria_count: 3,
@@ -230,45 +250,46 @@ describe("SCP-157: a failed ticket can be handed off to pr_open", () => {
 });
 
 describe("SCP-173: who opened the pull request on a failed ticket's branch", () => {
-  const delivery = (
+  const opened = (
     pull_request_number: number | null,
     opened_by: Ticket["delivery"]["opened_by"] = pull_request_number === null ? null : "loop",
-  ): Ticket["delivery"] => ({
-    branch: "ayo/fixture/x",
-    pull_request_url: pull_request_number === null ? null : `https://github.com/o/r/pull/${pull_request_number}`,
-    pull_request_number,
-    state: pull_request_number === null ? "none" : "open",
-    observed_at: "2026-08-29T00:00:00.000Z",
-    opened_by,
-  });
+  ): Ticket["delivery"] =>
+    delivery({
+      branch: "ayo/fixture/x",
+      pull_request_url: pull_request_number === null ? null : `https://github.com/o/r/pull/${pull_request_number}`,
+      pull_request_number,
+      state: pull_request_number === null ? "none" : "open",
+      observed_at: "2026-08-29T00:00:00.000Z",
+      opened_by,
+    });
 
   it("attributes a pull request the delivery record already names to the loop", () => {
-    expect(attributePullRequest(ticket({ delivery: delivery(9) }), { pull_request_number: 9 })).toBe("loop");
+    expect(attributePullRequest(ticket({ delivery: opened(9) }), { pull_request_number: 9 })).toBe("loop");
   });
 
   it("attributes a number the record has never seen, and an empty record, to a hand-off", () => {
-    expect(attributePullRequest(ticket({ delivery: delivery(9) }), { pull_request_number: 12 })).toBe("hand_off");
-    expect(attributePullRequest(ticket({ delivery: delivery(null) }), { pull_request_number: 12 })).toBe("hand_off");
+    expect(attributePullRequest(ticket({ delivery: opened(9) }), { pull_request_number: 12 })).toBe("hand_off");
+    expect(attributePullRequest(ticket({ delivery: opened(null) }), { pull_request_number: 12 })).toBe("hand_off");
     // `gh` reporting no number is no evidence that the loop opened it either.
-    expect(attributePullRequest(ticket({ delivery: delivery(9) }), { pull_request_number: null })).toBe("hand_off");
+    expect(attributePullRequest(ticket({ delivery: opened(9) }), { pull_request_number: null })).toBe("hand_off");
   });
 
   it("keeps calling a number recorded as somebody else's a hand-off, however it was recorded", () => {
     // The record names 12 — because a sync saw it on the branch — and says whose
     // it was. A number on the record is not by itself the loop's.
-    expect(attributePullRequest(ticket({ delivery: delivery(12, "hand_off") }), { pull_request_number: 12 })).toBe(
+    expect(attributePullRequest(ticket({ delivery: opened(12, "hand_off") }), { pull_request_number: 12 })).toBe(
       "hand_off",
     );
     // SCP-176: a record from before `opened_by` existed falls to the ticket's
     // own history, not to a bare default. This fixture's history has no
     // `pr_open` row at all, so there is nothing to attribute it from.
-    expect(attributePullRequest(ticket({ delivery: delivery(12, null) }), { pull_request_number: 12 })).toBeNull();
+    expect(attributePullRequest(ticket({ delivery: opened(12, null) }), { pull_request_number: 12 })).toBeNull();
   });
 
   it("writes the loop's own pull request onto the same row, marked as no hand-off", () => {
     const at = new Date("2026-08-29T00:00:00.000Z");
     const resumed = resumeAtPullRequest(
-      ticket({ state: "failed", delivery: delivery(9) }),
+      ticket({ state: "failed", delivery: opened(9) }),
       { pull_request_url: "https://github.com/o/r/pull/9" },
       "the loop opened https://github.com/o/r/pull/9 on an earlier round",
       at,
@@ -323,7 +344,7 @@ describe("SCP-173: who opened the pull request on a failed ticket's branch", () 
     // A ticket handed off once, then re-run: the loop's own pull request is the
     // one on it now, and a hand-off further back was of a different one.
     const handedOffFirst = handOff(
-      ticket({ state: "failed", delivery: delivery(12, "hand_off") }),
+      ticket({ state: "failed", delivery: opened(12, "hand_off") }),
       { pull_request_url: "https://github.com/o/r/pull/12" },
       `pull/12 — ${HAND_OFF_NOTE}`,
       at,
@@ -334,7 +355,7 @@ describe("SCP-173: who opened the pull request on a failed ticket's branch", () 
       TicketSchema.parse({
         ...handedOffFirst,
         state: "failed",
-        delivery: delivery(9),
+        delivery: opened(9),
         history: [
           ...handedOffFirst.history,
           { at: at.toISOString(), from: "pr_open", to: "failed", note: "a later run failed" },
@@ -354,7 +375,7 @@ describe("SCP-173: who opened the pull request on a failed ticket's branch", () 
 
   it("is not inferred from the failed -> pr_open edge", () => {
     const resumed = resumeAtPullRequest(
-      ticket({ state: "failed", delivery: delivery(9) }),
+      ticket({ state: "failed", delivery: opened(9) }),
       { pull_request_url: "https://github.com/o/r/pull/9" },
       "the loop opened it",
       new Date("2026-08-29T00:00:00.000Z"),
@@ -365,14 +386,15 @@ describe("SCP-173: who opened the pull request on a failed ticket's branch", () 
 });
 
 describe("SCP-176: a record with no opened_by is attributed from history, never a bare default", () => {
-  const noOpenedBy = (pull_request_number: number): Ticket["delivery"] => ({
-    branch: "ayo/fixture/x",
-    pull_request_url: `https://github.com/o/r/pull/${pull_request_number}`,
-    pull_request_number,
-    state: "open",
-    observed_at: "2026-09-03T00:00:00.000Z",
-    opened_by: null,
-  });
+  const noOpenedBy = (pull_request_number: number): Ticket["delivery"] =>
+    delivery({
+      branch: "ayo/fixture/x",
+      pull_request_url: `https://github.com/o/r/pull/${pull_request_number}`,
+      pull_request_number,
+      state: "open",
+      observed_at: "2026-09-03T00:00:00.000Z",
+      opened_by: null,
+    });
 
   const admitted: Ticket["history"] = [
     { at: "2026-09-01T00:00:00.000Z", from: null, to: "plan_review", note: "admitted" },
@@ -475,14 +497,14 @@ describe("SCP-176: sync walks a failed ticket to pr_open without choosing an ope
     const at = new Date("2026-09-02T00:00:00.000Z");
     const failed = ticket({
       state: "failed",
-      delivery: {
+      delivery: delivery({
         branch: "ayo/fixture/x",
         pull_request_url: "https://github.com/o/r/pull/9",
         pull_request_number: 9,
         state: "open",
         observed_at: "2026-09-01T00:00:00.000Z",
         opened_by: null,
-      },
+      }),
     });
     const resumed = resumeWithUnrecordedOpener(
       failed,
@@ -519,14 +541,14 @@ describe("SCP-173: what the delivery record is allowed to claim about who opened
   const recorded = (pull_request_number: number | null, opened_by: Ticket["delivery"]["opened_by"]): Ticket =>
     ticket({
       state: "failed",
-      delivery: {
+      delivery: delivery({
         branch: "ayo/fixture/x",
         pull_request_url: pull_request_number === null ? null : `https://github.com/o/r/pull/${pull_request_number}`,
         pull_request_number,
         state: pull_request_number === null ? "none" : "open",
         observed_at: "2026-08-29T00:00:00.000Z",
         opened_by,
-      },
+      }),
     });
 
   it("keeps the attribution already on the record for the number already on it", () => {
@@ -569,18 +591,15 @@ describe("executing to pr_open is the direct arm's row and nobody else's", () =>
   const executing = (arm: "loop" | "direct"): Ticket =>
     ticket({
       state: "executing",
-      delivery: {
+      delivery: delivery({
         branch: arm === "direct" ? "direct/perbo-1/activation" : "ayo/AYO-1/activation",
         pull_request_url: "https://github.com/o/r/pull/1",
         pull_request_number: 1,
         state: "open",
         observed_at: "2026-09-04T09:00:00.000Z",
         opened_by: arm === "direct" ? "direct" : "loop",
-        mergeable: null,
-        commits_outside_loop: null,
-        github_credential: null,
         arm,
-      },
+      }),
     });
 
   it("moves a direct-arm record, whose arm has no review to pass through", () => {
@@ -621,21 +640,17 @@ describe("executing to pr_open is the direct arm's row and nobody else's", () =>
  */
 describe("SCP-252: a pull request closed without merging leaves pr_open", () => {
   const at = new Date("2026-09-06T10:00:00.000Z");
-  const published = (delivery: "open" | "closed"): Ticket =>
+  const published = (pullRequest: "open" | "closed"): Ticket =>
     ticket({
       state: "pr_open",
-      delivery: {
+      delivery: delivery({
         branch: "ayo/AYO-1/activation",
         pull_request_url: "https://github.com/o/r/pull/1",
         pull_request_number: 1,
-        state: delivery,
+        state: pullRequest,
         observed_at: "2026-09-06T09:00:00.000Z",
         opened_by: "loop",
-        mergeable: null,
-        commits_outside_loop: null,
-        github_credential: null,
-        arm: "loop",
-      },
+      }),
     });
 
   it("names closed a state, and one Stage 3 reaches", () => {
