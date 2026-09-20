@@ -10,8 +10,8 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, delimiter, join } from "node:path";
-import { discoverModels } from "../src/host/model-catalog.js";
-import { RequestSchema } from "../src/shared/protocol.js";
+import { discoverModels } from "./model-catalog.js";
+import { RequestSchema } from "../shared/protocol.js";
 
 const temporary: string[] = [];
 afterEach(() => {

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { setTimeout as delay } from "node:timers/promises";
+import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import {
   LINE_CHAR_CAP,
@@ -6,11 +8,13 @@ import {
   forgetRegistryPath,
   installLocations,
   registryPath,
+  redact,
   requireSuccess,
+  runProcess,
   searchPath,
   startLineProcess,
-} from "../src/host/process.js";
-import type { LineProcess } from "../src/host/process.js";
+} from "./process.js";
+import type { LineProcess } from "./process.js";
 
 const windows = process.platform === "win32";
 /** Two spellings of one Windows directory compare equal. */
@@ -273,5 +277,45 @@ describe("startLineProcess", () => {
     expect(out).toEqual(["tail"]);
     expect(stderr.join("")).toContain("longer than");
     expect(close.code).toBe(0);
+  });
+});
+
+describe("desktop process supervision", () => {
+  it("redacts inherited credentials and token forms", () => {
+    expect(
+      redact("secret-value-123 sk-ant-abcdefghijklmnop", {
+        API_KEY: "secret-value-123",
+      }),
+    ).toBe("[redacted] [redacted]");
+  });
+  it("does not stream a partial credential split across stderr chunks", async () => {
+    const observed: string[] = [];
+    const result = await runProcess(
+      process.execPath,
+      [
+        "-e",
+        "process.stderr.write('secret-'); setTimeout(() => process.stderr.write('value-123\\n'), 40)",
+      ],
+      {
+        cwd: tmpdir(),
+        env: { ...process.env, API_KEY: "secret-value-123" },
+        onOutput: (line) => observed.push(line),
+      },
+    );
+    expect(observed.join("")).not.toContain("secret-");
+    expect(result.stderr).toContain("[redacted]");
+  });
+  it("cancels an active subprocess and reports cancellation", async () => {
+    const controller = new AbortController();
+    const pending = runProcess(
+      process.execPath,
+      ["-e", "setInterval(() => {}, 1000)"],
+      { cwd: tmpdir(), signal: controller.signal },
+    );
+    await delay(50);
+    controller.abort();
+    const result = await pending;
+    expect(result.cancelled).toBe(true);
+    expect(result.code).not.toBe(0);
   });
 });
