@@ -24,7 +24,7 @@ import {
   type StopRouting,
   type TicketSource,
 } from "@perbo/contracts";
-import { gitEnv, isAttemptBranch, run } from "@perbo/workspace";
+import { gh, git, isAttemptBranch } from "@perbo/workspace";
 import { requireGithubCredential } from "./github-credential.js";
 
 /**
@@ -56,17 +56,19 @@ export class DeliveryError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
-/** The runner's own environment: it holds the credential, so it is not scrubbed. */
-function runnerEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return {
-    ...gitEnv(base),
-    // `gh` finds its own credential; nothing here reads or forwards it.
-    GH_PROMPT_DISABLED: "1",
-    ...(base.GH_TOKEN ? { GH_TOKEN: base.GH_TOKEN } : {}),
-    ...(base.GITHUB_TOKEN ? { GITHUB_TOKEN: base.GITHUB_TOKEN } : {}),
-    ...(base.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: base.SSH_AUTH_SOCK } : {}),
-  };
-}
+/**
+ * What one answer read here may say, past which only its tail arrives.
+ *
+ * Every `gh` read below is parsed and every git read is counted, and a cut
+ * answer is shaped exactly like a whole one: JSON that will not parse reads as
+ * "GitHub said nothing", and a cut listing reads as a shorter list. The
+ * ceiling is the size of an answer rather than the size of output nobody
+ * reads.
+ */
+const MAX_ANSWER_BYTES = 64 * 1024 * 1024;
+
+/** What is read off a pull request to say whether one stands on the branch. */
+const PULL_REQUEST_FIELDS = ["number", "url", "state"];
 
 export interface PushRequest {
   worktree: string;
@@ -115,16 +117,16 @@ export async function pushAttemptBranch(request: PushRequest): Promise<{ pushed:
     remote,
     timeoutMs,
   });
-  const result = await run(
+  const result = await git.run(
+    request.worktree,
     [
-      "git",
       "push",
       ...(leftover ? [`--force-with-lease=${request.branch}:${leftover}`] : []),
       "--set-upstream",
       remote,
       `${request.branch}:${request.branch}`,
     ],
-    { cwd: request.worktree, env: runnerEnv(), timeoutMs },
+    { timeoutMs },
   );
   if (result.code !== 0) {
     throw new DeliveryError("git push failed", (result.stderr || result.stdout).trim().slice(-800));
@@ -151,16 +153,24 @@ async function leftoverToReplace(request: {
   remote: string;
   timeoutMs: number;
 }): Promise<string | null> {
-  const options = { cwd: request.worktree, env: runnerEnv(), timeoutMs: request.timeoutMs };
-  const listed = await run(["git", "ls-remote", "--heads", request.remote, request.branch], options);
-  if (listed.code !== 0) return null;
+  const options = { timeoutMs: request.timeoutMs, maxOutputBytes: MAX_ANSWER_BYTES };
+  const listed = await git.run(
+    request.worktree,
+    ["ls-remote", "--heads", request.remote, request.branch],
+    options,
+  );
+  if (listed.code !== 0 || listed.truncated) return null;
   const tip = listed.stdout
     .split("\n")
     .map((line) => /^([0-9a-f]{40,64})\s+refs\/heads\/(.+)$/.exec(line.trim()))
     .find((match) => match?.[2] === request.branch)?.[1];
   if (tip === undefined) return null;
 
-  const local = await run(["git", "rev-parse", "--verify", `${request.branch}^{commit}`], options);
+  const local = await git.run(
+    request.worktree,
+    ["rev-parse", "--verify", `${request.branch}^{commit}`],
+    options,
+  );
   if (local.code !== 0 || local.stdout.trim() === tip) return null;
 
   return (await standingPullRequest(request)) === "none" ? tip : null;
@@ -181,14 +191,15 @@ async function standingPullRequest(request: {
 }): Promise<"open" | "none" | "unknown"> {
   let viewed;
   try {
-    viewed = await run(["gh", "pr", "view", request.branch, "--json", "number,url,state"], {
-      cwd: request.worktree,
-      env: runnerEnv(),
+    viewed = await gh.viewPullRequest(request.worktree, request.branch, PULL_REQUEST_FIELDS, {
       timeoutMs: request.timeoutMs,
+      maxOutputBytes: MAX_ANSWER_BYTES,
     });
   } catch {
     return "unknown";
   }
+  // An answer only part of which arrived is one `gh` did not give.
+  if (viewed.truncated) return "unknown";
   if (viewed.code === 0) {
     try {
       return (JSON.parse(viewed.stdout) as { state?: string }).state === "OPEN" ? "open" : "none";
@@ -647,7 +658,6 @@ export async function createPullRequest(
   if (existing !== null) return existing;
 
   const argv = [
-    "gh",
     "pr",
     "create",
     "--head",
@@ -660,10 +670,9 @@ export async function createPullRequest(
     request.body,
     ...(request.draft ? ["--draft"] : []),
   ];
-  const result = await run(argv, {
-    cwd: request.worktree,
-    env: runnerEnv(),
+  const result = await gh.run(request.worktree, argv, {
     timeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    maxOutputBytes: MAX_ANSWER_BYTES,
   });
   if (result.code !== 0) {
     throw new DeliveryError("gh pr create failed", (result.stderr || result.stdout).trim().slice(-800));
@@ -826,10 +835,19 @@ export async function existingPullRequest(request: {
   branch: string;
   timeoutMs?: number;
 }): Promise<{ url: string; number: number | null } | null> {
-  const viewed = await run(
-    ["gh", "pr", "view", request.branch, "--json", "number,url,state"],
-    { cwd: request.worktree, env: runnerEnv(), timeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS },
-  );
+  const viewed = await gh.viewPullRequest(request.worktree, request.branch, PULL_REQUEST_FIELDS, {
+    timeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    maxOutputBytes: MAX_ANSWER_BYTES,
+  });
+  // Null is "there is none to return", and the caller opens one on it. An
+  // answer only part of which arrived says nothing about whether one stands,
+  // so it is refused rather than read as none.
+  if (viewed.truncated) {
+    throw new DeliveryError(
+      "could not read the pull request already on the branch",
+      `\`gh pr view ${request.branch}\` answered more than ${MAX_ANSWER_BYTES} bytes`,
+    );
+  }
   if (viewed.code !== 0) return null;
   try {
     const found = JSON.parse(viewed.stdout) as { number?: number; url?: string; state?: string };
@@ -860,21 +878,27 @@ export async function pollPullRequest(args: {
   // failed at `gh pr view` and arrived here as the same non-zero exit an
   // absent pull request does — so a signed-out machine read as "there is no
   // pull request" and the caller could not tell the two apart.
-  const env = runnerEnv();
   const credential = requireGithubCredential({
-    env,
+    env: process.env,
     what: "there is no credential to read the pull request through",
   });
-  const result = await run(
+  const result = await gh.viewPullRequest(
+    args.worktree,
+    args.branch,
     [
-      "gh",
-      "pr",
-      "view",
-      args.branch,
-      "--json",
-      "number,url,state,body,mergeable,mergeStateStatus,statusCheckRollup,reviews,comments,commits,closedAt",
+      "number",
+      "url",
+      "state",
+      "body",
+      "mergeable",
+      "mergeStateStatus",
+      "statusCheckRollup",
+      "reviews",
+      "comments",
+      "commits",
+      "closedAt",
     ],
-    { cwd: args.worktree, env, timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS },
+    { timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxOutputBytes: MAX_ANSWER_BYTES },
   );
 
   const base: TicketDeliveryState = {
@@ -900,7 +924,11 @@ export async function pollPullRequest(args: {
     observed_at: args.now.toISOString(),
     stop_answers: [],
   };
-  if (result.code !== 0) return TicketDeliveryStateSchema.parse({ ...base, observed: false });
+  // A cut answer is one `gh` did not give: it is read as unobserved rather
+  // than as a pull request with whatever survived the cut.
+  if (result.code !== 0 || result.truncated) {
+    return TicketDeliveryStateSchema.parse({ ...base, observed: false });
+  }
 
   let pr: GhPullRequest;
   try {
@@ -1093,15 +1121,14 @@ async function readRollup(request: {
 }): Promise<Array<{ name: string; conclusion: string | null }> | null> {
   let viewed;
   try {
-    viewed = await run(["gh", "pr", "view", request.branch, "--json", "statusCheckRollup"], {
-      cwd: request.worktree,
-      env: runnerEnv(),
+    viewed = await gh.viewPullRequest(request.worktree, request.branch, ["statusCheckRollup"], {
       timeoutMs: request.timeoutMs,
+      maxOutputBytes: MAX_ANSWER_BYTES,
     });
   } catch {
     return null;
   }
-  if (viewed.code !== 0) return null;
+  if (viewed.code !== 0 || viewed.truncated) return null;
   try {
     const parsed = JSON.parse(viewed.stdout) as { statusCheckRollup?: RollupEntry[] };
     return (parsed.statusCheckRollup ?? []).map(concluded);
@@ -1198,10 +1225,9 @@ export async function editPullRequestBody(request: {
 }): Promise<{ edited: boolean; detail: string }> {
   let result;
   try {
-    result = await run(["gh", "pr", "edit", request.branch, "--body", request.body], {
-      cwd: request.worktree,
-      env: runnerEnv(),
+    result = await gh.run(request.worktree, ["pr", "edit", request.branch, "--body", request.body], {
       timeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxOutputBytes: MAX_ANSWER_BYTES,
     });
   } catch (error) {
     return { edited: false, detail: error instanceof Error ? error.message : String(error) };
