@@ -27,6 +27,33 @@ scripts/          repository validators and local setup
 
 No app imports another app's source; a provider SDK stays inside its own adapter package.
 
+## Package layout
+
+Every package states its interface and keeps an interior ([ADR-NEW-package-interface](adr/NEW-package-interface.md)):
+
+```text
+packages/<name>/
+  package.json          exports "." and, where the desktop renderer imports the package, "./browser"
+  tsconfig.json         typecheck: src, test and config files; emits nothing
+  tsconfig.build.json   build: src, without tests or test-support
+  README.md             what each module owns, and what the interface offers
+  src/
+    index.ts            the interface: named exports only
+    browser.ts          the part of it that loads in a browser
+    <module>.ts         a module with no interior
+    <module>.test.ts    its tests
+    <module>/           a module with an interior
+      index.ts          its surface
+      internal/         what only this module imports
+      test-support/     fakes for its ports; never built, never imported by src
+  test/                 the protected tests and what they import, suites that drive a built binary or cross packages, and fixtures
+```
+
+- Another package is imported by its name or one of its subpaths, never by a file under its `src/` or `dist/`.
+- An entry point that something outside its package names by path stays at `src/<name>.ts`, because its `dist` path is part of a contract: `apps/cli/src/main.ts`, `packages/evaluation/src/main.ts` and `packages/workspace/src/main.ts` (`bin` entries and the harness's spawn), `packages/runner/src/guard-hook.ts` (`tooling/package/bundle.mjs`), and `packages/runner/src/skill-content.ts` (written by `tooling/skills/build.mjs`).
+- `apps/desktop` bundles with Vite and esbuild and typechecks its tests through its own `tsconfig.json`; its renderer keeps PascalCase filenames for React components. `apps/desktop/test/browser-imports.test.ts` bundles the renderer for the browser, which fails on a `node:` import it cannot resolve.
+- `eslint.config.mjs` refuses `export *` in `src/` (outside the entry files still listed there), an import of another module's `internal/`, a deep import of another package, and production code importing test code; `scripts/lint-boundaries.test.mjs` shows each rule firing and staying silent.
+
 ## Build graph and gates
 
 pnpm workspaces (`apps/*`, `packages/*`, `tooling/*`) with one pinned third-party version catalog. Turborepo runs the task graph: `build` depends on its dependencies' own `build` output (`^build`); `typecheck` and `lint` depend only on `^build`; `test` depends on `^build` **and** the package's own `build`, because several suites spawn the built CLI binary rather than calling functions directly — a stale `dist/` is a real hazard, not just a slow one.

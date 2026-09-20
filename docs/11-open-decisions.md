@@ -571,6 +571,14 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: every document states what is true now. A superseded or deprecated decision, ADR or comment is deleted, not marked. A document cites a decision by its id instead of restating it. Git holds the history.
 - Why: in the founder's words, "we only keep a source of truth, not history". Old positions left in place were read as current.
 
+### D-NEW-package-interface — Every package states its interface; a module keeps its interior
+
+- Owner: Founder
+- Decision: each package's entry file lists by name what other packages import from it, and its `package.json` `exports` names one subpath per runtime that consumes it — `.`, and `./browser` where the desktop renderer imports it; nothing else in a package is reachable from outside it. A module with an interior is a directory with one surface and an `internal/` that nothing outside it imports. A module's unit tests sit beside it and are typechecked with it, and the build leaves them out. A module one package uses lives in that package, and `@perbo/contracts` holds what two or more share. The layout is in [docs/07](07-monorepo-and-deployment.md), and the architecture in ADR-NEW-package-interface.
+- Why: when an interface is not stated, every internal symbol is public and no refactor stays inside its package; a test the gate does not typecheck drifts from the interface it tests.
+- Changes if: a package gains a consumer outside this repository, or the lint rules that hold the boundaries need more exceptions than there are modules.
+- ADR: [ADR-NEW-package-interface](adr/NEW-package-interface.md).
+
 ### D-112 — Trademarks, patents and the brand under Apache-2.0
 
 - Owner: Founder

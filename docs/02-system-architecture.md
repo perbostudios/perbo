@@ -75,6 +75,8 @@ Decided, not built: the merge switch trusts only the review run's own verdict co
 
 ## The packages
 
+Each package's entry file names what the others may import from it, and the layout inside a package is in [docs/07](07-monorepo-and-deployment.md) ([ADR-NEW-package-interface](adr/NEW-package-interface.md)).
+
 | Package | Holds |
 |---|---|
 | `@perbo/contracts` | The typed shapes every other package shares: the ticket, the plan contract, the change set, check results, the review artifact, the run bundle, the materialization manifest, the limits table |
