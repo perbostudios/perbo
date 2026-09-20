@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { FULL_COMMAND_SET } from "../src/execute.js";
-import { buildCli, removeStagedBundles, spawnBuilt } from "./open-build.js";
+import { FULL_COMMAND_SET } from "../src/commands/run/index.js";
+import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/open-build.js";
 
 /**
  * The CLI's command table, run as a program and asked rather than read off the

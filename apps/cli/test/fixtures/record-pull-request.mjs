@@ -44,7 +44,7 @@ const NOTES = {
     also_recorded_in:
       "The evaluation corpus pins the same pull request for a different purpose, as fixture " +
       "reg-010-skip-derived-reevaluation-in-inert-blocks. The two records are checked against " +
-      "each other in apps/cli/test/ticketless-review.test.ts.",
+      "each other in apps/cli/src/commands/review/index.ticketless.test.ts.",
     upstream_code_is_checked_in_here:
       "Deliberately, and unlike the corpus's pinned fixtures, which compute their diff from a " +
       "clone into a gitignored cache. A test that reads that cache is a test CI fails, and the " +

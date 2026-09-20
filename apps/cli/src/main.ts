@@ -1,35 +1,36 @@
 #!/usr/bin/env node
-import { parseReviewArgs } from "./args.js";
+import { parseReviewArgs } from "./commands/review/index.js";
 import {
   parseAdmitArgs,
   parseListArgs,
   runAdmitCommand,
   runApproveCommand,
   runListCommand,
-} from "./admit.js";
-import { runBaselineCommand } from "./baseline.js";
-import { startEntryPoint, type EntryPoint } from "./entry.js";
-import { runEditCommand } from "./edit.js";
-import { runEscapesCommand } from "./escapes.js";
+} from "./commands/admit.js";
+import { runBaselineCommand } from "./commands/baseline/index.js";
+import { startEntryPoint, type EntryPoint } from "./command-line/terminal.js";
+import { runEditCommand } from "./commands/edit/index.js";
+import { runEscapesCommand } from "./commands/escapes/index.js";
 import {
   FULL_COMMAND_SET,
   parseExecuteArgs,
   runDoctorCommand,
   runExecuteCommand,
   type FullCommandName,
-} from "./execute.js";
-import { runInspectCommand } from "./inspect.js";
-import { parsePrincipleArgs, runPrincipleCommand } from "./principles.js";
-import { VERSION, runReviewCommand } from "./run.js";
-import { runStopsCommand } from "./stops.js";
-import { runIndexCommand } from "./symbol-index.js";
-import { runAgentCommand } from "./agent.js";
-import { runInterviewCommand } from "./interview.js";
-import { runMcpCommand } from "./mcp.js";
-import { runServeCommand } from "./serve.js";
-import { runSyncCommand } from "./sync.js";
-import { USAGE } from "./usage.js";
-import { runVerdictCommand } from "./verdict.js";
+} from "./commands/run/index.js";
+import { runInspectCommand } from "./commands/inspect.js";
+import { parsePrincipleArgs, runPrincipleCommand } from "./commands/principle.js";
+import { runReviewCommand } from "./commands/review/index.js";
+import { VERSION } from "./version.js";
+import { runStopsCommand } from "./commands/stops.js";
+import { runIndexCommand } from "./commands/symbol-index.js";
+import { runAgentCommand } from "./commands/agent.js";
+import { runInterviewCommand } from "./commands/interview/index.js";
+import { runMcpCommand } from "./commands/mcp.js";
+import { runServeCommand } from "./commands/serve/index.js";
+import { runSyncCommand } from "./commands/sync.js";
+import { USAGE } from "./command-line/usage.js";
+import { runVerdictCommand } from "./commands/verdict/index.js";
 
 /**
  * `perbo` (docs/04, "Review CLI contract", SCP-091).

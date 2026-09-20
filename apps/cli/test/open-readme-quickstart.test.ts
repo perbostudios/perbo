@@ -14,9 +14,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { preflight, type PreflightRequest } from "@perbo/runner";
-import { parseReviewArgs } from "../src/args.js";
-import { FULL_COMMAND_SET, parseExecuteArgs, runDoctorCommand } from "../src/execute.js";
-import { buildCli, REPO_ROOT, removeStagedBundles, spawnBuilt } from "./open-build.js";
+import { parseReviewArgs } from "../src/commands/review/index.js";
+import { FULL_COMMAND_SET, parseExecuteArgs, runDoctorCommand } from "../src/commands/run/index.js";
+import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/open-build.js";
+import { REPO_ROOT } from "../src/test-support/paths.js";
 
 /**
  * The open README's quick start, run rather than read.

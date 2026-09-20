@@ -48,6 +48,28 @@ check it talks to the model provider the user pays for and to nothing of ours.
 `pnpm release:pack` stages the same bundle into the design-partner tarball
 ([`tooling/package/pack.mjs`](../../tooling/package/pack.mjs)).
 
+## Source layout
+
+`src/` follows the repository's module layout ([docs/07](../../docs/07-monorepo-and-deployment.md), "Package layout").
+
+| Directory | What it holds |
+|---|---|
+| [`command-line/`](src/command-line) | The argv edge: the terminal shell around the command table, and the usage text |
+| [`commands/`](src/commands) | One module per command — a file where the command is one piece, a directory with an `index.ts` surface and an `internal/` where it is not |
+| [`store/`](src/store) | `<repo>/.perbo/` and the records every command reads and writes |
+| [`spec/`](src/spec) | The Spec (D-103): its pages, and whether a ticket's spec still matches the repository |
+| [`endpoint/`](src/endpoint) | The loopback tool server the queue hosts for a session |
+
+The root holds the two build entries — [`main.ts`](src/main.ts) for the binary and
+[`index.ts`](src/index.ts) for the library — and the small modules every command shares.
+[`version.ts`](src/version.ts) stays at the root: it reads `../package.json` from
+`import.meta.url`, which names this package only from one level under `src/`.
+
+A test sits beside the module it covers. [`test/`](test) holds the suites whose subject is the built
+package — the compiled tree, the bundle, the packed tarball, the README quick start — and
+`test/fixtures/`, the authored data the suites read — among it the repository `perbo index` is run
+over.
+
 ## Install
 
 A design partner receives one archive, `perbo-<version>.tgz`, and its SHA-256 by a separate route;

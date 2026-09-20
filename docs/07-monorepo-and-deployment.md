@@ -51,6 +51,7 @@ packages/<name>/
 
 - Another package is imported by its name or one of its subpaths, never by a file under its `src/` or `dist/`.
 - An entry point that something outside its package names by path stays at `src/<name>.ts`, because its `dist` path is part of a contract: `apps/cli/src/main.ts`, `packages/evaluation/src/main.ts` and `packages/workspace/src/main.ts` (`bin` entries and the harness's spawn), `packages/runner/src/guard-hook.ts` (`tooling/package/bundle.mjs`), and `packages/runner/src/skill-content.ts` (written by `tooling/skills/build.mjs`).
+- An app's `src/` follows the same rules ([D-NEW-package-interface](11-open-decisions.md)): `apps/cli` groups one module per command under `src/commands/` and keeps only the suites over its built package in `test/`, and `apps/desktop/src` is three layers — `host/`, `renderer/` and `shared/` — where the first two import across only through the third.
 - `apps/desktop` bundles with Vite and esbuild and typechecks its tests through its own `tsconfig.json`; its renderer keeps PascalCase filenames for React components. `apps/desktop/test/browser-imports.test.ts` bundles the renderer for the browser, which fails on a `node:` import it cannot resolve.
 - `eslint.config.mjs` refuses `export *` in `src/` (outside the entry files still listed there), an import of another module's `internal/`, a deep import of another package, and production code importing test code; `scripts/lint-boundaries.test.mjs` shows each rule firing and staying silent.
 

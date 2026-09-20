@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { REPO_ROOT } from "./open-build.js";
+import { REPO_ROOT } from "../src/test-support/paths.js";
 
 /**
  * The documents that state what a plan is, against what a plan now is.
@@ -101,14 +101,14 @@ describe("the documents that say what a plan is", () => {
 
 describe("the command's own help", () => {
   it("names every flag the graph work added", () => {
-    const help = read("apps/cli/src/usage.ts");
+    const help = read("apps/cli/src/command-line/usage.ts");
     for (const flag of ["--from-spec", "--graph-edit", "--undo", "--author"]) {
       expect(help).toContain(flag);
     }
   });
 
   it("says what admitting a spec puts on the ticket's branch", () => {
-    const help = read("apps/cli/src/usage.ts");
+    const help = read("apps/cli/src/command-line/usage.ts");
     expect(help).toContain("the loop commits");
     expect(help).toContain("of its own under the spec folder");
   });
