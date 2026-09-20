@@ -3,10 +3,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { EXIT_CODES, type SizeEstimate } from "@perbo/contracts";
+import { EXIT_CODES } from "@perbo/contracts";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { runEditCommand } from "../src/edit.js";
-import { runInspectCommand } from "../src/inspect.js";
+import { runInspectCommand, type InspectReport } from "../src/inspect.js";
 import { storeDir } from "../src/tickets.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-graph-test-"));
@@ -86,11 +86,7 @@ async function inspectText(repo: string): Promise<string> {
   return streams.out.join("").replace(/\u001b\[[0-9;]*m/g, "");
 }
 
-async function inspectJson(repo: string): Promise<{
-  nodes: Array<{ id: string; title: string; criteria: string[]; paths: string[] }> | null;
-  edges: Array<{ from: string; to: string }> | null;
-  size: SizeEstimate | null;
-}> {
+async function inspectJson(repo: string): Promise<InspectReport> {
   const streams = capture(false);
   expect(await runInspectCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
   return JSON.parse(streams.out.join("")) as never;

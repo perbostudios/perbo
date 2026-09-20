@@ -24,7 +24,6 @@ import { REPO_ROOT, workspacePackages } from "./check.mjs";
  * goes away with its last entry.
  */
 const PENDING = new Set([
-  "@perbo/cli",
   "@perbo/review",
 ]);
 

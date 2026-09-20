@@ -535,7 +535,6 @@ describe("what the session may do (SCP-311 criterion 5)", () => {
         spec: `${SPEC_FOLDER}/spec.md`,
         adr: "docs/adr",
         repositoryRoot: repo,
-        ticket: null,
       }),
     );
   });
@@ -618,11 +617,11 @@ describe("the directory a call is judged against", () => {
   const decisions = async (
     ask: (decide: InterviewSession["decide"]) => Promise<void>,
   ): Promise<string[]> => {
-    const repo = repository(scratch);
+    const repo = repository();
     const behaviours: string[] = [];
     await runInterviewCommand({
       argv: ["--repo", repo, "--spec", SPEC_FOLDER],
-      streams: { out: [], err: [], stdout: () => undefined, stderr: () => undefined, isTTY: false },
+      streams: { stdout: () => undefined, stderr: () => undefined, isTTY: false },
       cwd: repo,
       model: drafter(),
       turns: (async function* () {

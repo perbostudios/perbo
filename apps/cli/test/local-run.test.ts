@@ -973,7 +973,8 @@ describe("the record a run with nothing admitted leaves", () => {
     const [reported] = report.attempts;
     expect(reported!.attempt_id).toBe(result.json.rounds[0]!.attempt.attempt_id);
     expect(reported!.bundles.map((bundle) => bundle.kind)).toContain("execution");
-    expect(reported!.checks.map((check) => check.name)).toEqual(["unit"]);
+    expect(reported!.checks).not.toBeNull();
+    expect(reported!.checks!.map((check) => check.name)).toEqual(["unit"]);
     expect(reported!.review?.decision).toBe("approve");
     expect(report.total_cost.micros).toBe(result.json.total_cost.micros);
 
@@ -1575,7 +1576,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
         mkdirSync(root, { recursive: true });
         expect(existsSync(join(root, ".perbo"))).toBe(false);
 
-        const result = spawnBuilt([join(buildCli(), "main.js"), "sync"], { cwd: root, encoding: "utf8" });
+        const result = spawnBuilt([join(buildCli(), "main.js"), "sync"], { cwd: root });
 
         expect(result.status).toBe(0);
         expect(result.stderr).toBe("");

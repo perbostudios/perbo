@@ -407,6 +407,7 @@ describe("preflight", () => {
           },
         ],
         tools: { claude: { present: false, version: null } },
+        github: null,
       }),
     });
     expect(result.code).toBe(3);
@@ -421,7 +422,7 @@ describe("preflight", () => {
     await invoke([...base, "--provider", "anthropic"], stubModel(bothMet), false, {
       preflight: (request) => {
         requests.push(request);
-        return { ok: true, findings: [], tools: {} };
+        return { ok: true, findings: [], tools: {}, github: null };
       },
     });
     expect(requests).toEqual([
@@ -870,7 +871,7 @@ describe("the flat review's verdict schema", () => {
     ];
     writeFileSync(join(scratch, "flat-checks-with-node-tag.json"), JSON.stringify(flatChecksWithNodeTag));
 
-    let capturedSchema: Record<string, unknown> | null = null;
+    let capturedSchema: unknown = null;
     const result = await invoke(
       [
         "--contract",

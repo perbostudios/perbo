@@ -4,7 +4,7 @@ import type {
   InterviewSdk,
   InterviewSdkTool,
   InterviewQueryOptions,
-} from "../src/interview.js";
+} from "../src/interview-claude.js";
 
 /**
  * The Claude Agent SDK, doubled: `tool` and `createSdkMcpServer` keep the

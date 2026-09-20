@@ -68,7 +68,9 @@ export function buildCli(): string {
   staged.push(out);
   execFileSync(join(PACKAGE_ROOT, "node_modules", ".bin", "tsc"), [
     "-p",
-    "tsconfig.json",
+    // The build config, not `tsconfig.json`: that one typechecks the tests and
+    // emits nothing, and these tests need the compiled entry points.
+    "tsconfig.build.json",
     "--outDir",
     out,
   ], {
@@ -195,7 +197,7 @@ export const SPAWN_DEADLINE_MS = 20_000;
  */
 export function spawnBuilt(
   argv: readonly string[],
-  options: SpawnSyncOptions & { encoding: "utf8" } = { encoding: "utf8" },
+  options: Omit<SpawnSyncOptions, "encoding"> = {},
 ): { status: number | null; stdout: string; stderr: string } {
   const deadline = options.timeout ?? SPAWN_DEADLINE_MS;
   const result = spawnSync(process.execPath, [...argv], {

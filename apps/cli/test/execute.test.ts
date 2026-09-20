@@ -110,9 +110,14 @@ describe("the run rendering", () => {
             cost_micros: 210_000,
             model: { cost_basis: "provider_list_estimate" },
           } as never,
+          kind: "execute",
+          superseded_attempts: [],
+          node_reviews: [],
+          verification: null,
           checks: [],
           remediable_findings: 2,
           directly_verified: 0,
+          declines: [],
         },
         {
           round: 1,
@@ -126,15 +131,26 @@ describe("the run rendering", () => {
             cost_micros: 190_000,
             model: { cost_basis: "provider_list_estimate" },
           } as never,
+          kind: "remediate",
+          superseded_attempts: [],
+          node_reviews: [],
+          verification: null,
           checks: [],
           remediable_findings: 0,
           directly_verified: 2,
+          declines: [],
         },
       ],
       final_review: null,
+      node_reviews: [],
       pull_request: { url: "https://example.invalid/pull/1", number: 1 },
+      merge: null,
+      delivery_checks: null,
+      github_credential: "gh_login",
       outcome: "approved",
       detail: "the gate is open",
+      incomplete_review: null,
+      merged_base: null,
     });
     expect(rendered).toContain("ayo/scp094/x");
     expect(rendered).toContain("remediation 1");
@@ -166,15 +182,26 @@ describe("the run rendering", () => {
             cost_micros: 0,
             model: { cost_basis: "unavailable" },
           } as never,
+          kind: "execute",
+          superseded_attempts: [],
+          node_reviews: [],
+          verification: null,
           checks: [],
           remediable_findings: 0,
           directly_verified: 0,
+          declines: [],
         },
       ],
       final_review: null,
+      node_reviews: [],
       pull_request: null,
+      merge: null,
+      delivery_checks: null,
+      github_credential: null,
       outcome: "approved",
       detail: "the gate is open",
+      incomplete_review: null,
+      merged_base: null,
     });
 
     expect(rendered).toContain("cost unavailable");
@@ -360,7 +387,7 @@ describe("what the run says when no check reported on the head", () => {
       expect(deliveryChecksBoundMs(listsNothing, DEFAULT_DELIVERED_CHECKS_BOUND_MS)).toBe(0);
       expect(
         deliveryChecksReason(
-          { checks: [], state: "unchecked", waited_ms: 0, bounded: true },
+          { checks: [], bounded: true },
           listsNothing,
         ),
       ).toBe("none reported");
@@ -395,11 +422,13 @@ const doctorArgs = (repo: string, extra: Partial<Parameters<typeof runDoctorComm
   json: true,
   quiet: true,
   writeConfig: false,
+  probe: false,
   resumeFrom: null,
   outcome: null,
   criteria: [],
   paths: [],
   pr: null,
+  relevel: false,
   ...extra,
 });
 

@@ -607,8 +607,10 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     expect(ticket.source.url).toBeNull();
 
     const report = buildInspectReport({ storeDirectory: dir, key: "PRB-1", attempt: null });
-    expect(report.source.reference).toBe(path);
-    expect(report.admission.criteria_source).toBe("drafted");
+    expect(report.source).not.toBeNull();
+    expect(report.source!.reference).toBe(path);
+    expect(report.admission).not.toBeNull();
+    expect(report.admission!.criteria_source).toBe("drafted");
     // A path longer than the column is broken across lines, so it is read with
     // the lines joined back up.
     const unwrapped = (text: string) => text.replace(/\n\s*/g, "");
@@ -1676,7 +1678,7 @@ describe("the run configuration an admitted ticket derives", () => {
     // repository inherits it and every install inside fails. `perbo doctor`
     // reports this as nested_package_manager_workspace — and reported it
     // against this very default before it was fixed.
-    expect(config["worktree_root"].startsWith(repo)).toBe(false);
+    expect(config["worktree_root"]!.startsWith(repo)).toBe(false);
     expect(config["worktree_root"]).toContain(".perbo");
 
     // Records stay in the store: small, and nothing runs a package manager there.

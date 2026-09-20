@@ -892,7 +892,7 @@ describe("a path is judged where it lands, not where it is spelled", () => {
     // A record naming a file outside the checkout is a record about another
     // machine's spec, and this checkout's spec is not it.
     const elsewhere = repository();
-    const answer = check(repo, { path: elsewhere.specPath, content_sha256: bytes, files: [], names_that_resolved: [] })!;
+    const answer = check(repo, { path: elsewhere.specPath, content_sha256: bytes, names_that_resolved: [] })!;
     expect(answer.stale).toHaveLength(1);
     expect(answer.stale[0]).toContain("outside the repository");
     expect(answer.stale[0]).toContain("which the contract was drafted from");

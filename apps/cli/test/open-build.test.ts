@@ -23,7 +23,6 @@ it("throws within its deadline, naming the deadline and the process's captured o
   let thrown: unknown;
   try {
     spawnBuilt(["-e", "process.stdout.write('started\\n'); setInterval(() => {}, 1000);"], {
-      encoding: "utf8",
       timeout: DEADLINE_MS,
     });
   } catch (error) {
@@ -40,7 +39,7 @@ it("throws within its deadline, naming the deadline and the process's captured o
 it("does not throw on an ordinary non-zero exit, and returns the status and stderr the child wrote", () => {
   const result = spawnBuilt(
     ["-e", "process.stderr.write('oops\\n'); process.exit(2);"],
-    { encoding: "utf8", timeout: SPAWN_MARGIN_MS },
+    { timeout: SPAWN_MARGIN_MS },
   );
   expect(result.status).toBe(2);
   expect(result.stderr).toBe("oops\n");

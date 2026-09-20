@@ -774,7 +774,6 @@ function doctor(
     [join(compiled, "main.js"), "doctor", "--repo", dir, "--publish", "--json"],
     {
       cwd: REPO_ROOT,
-      encoding: "utf8",
       timeout: 120_000,
       env: {
         ...process.env,
@@ -831,7 +830,6 @@ describe("the quick start, run in order on a scratch repository", () => {
         [join(compiled, script.slice("apps/cli/dist/".length)), ...argv],
         {
           cwd: REPO_ROOT,
-          encoding: "utf8",
           timeout: 600_000,
           env: {
             ...process.env,
