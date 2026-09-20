@@ -166,7 +166,14 @@ for (const [name, dir] of [...PACKAGES].sort()) {
 
   test(`${name}: build emits src to dist and no test`, () => {
     const build = parseConfig(dir, "tsconfig.build.json");
-    const tests = build.fileNames.filter((file) => /\.test\.tsx?$/.test(file) || file.includes("/test-support/"));
+    // Inside the package: a module's fakes live in its own `test-support/`,
+    // which is what the build must leave out. The package whose whole job is
+    // the fixtures the tests share is named that too, and every file it emits
+    // would otherwise match.
+    const inside = (file) => file.slice(`${repoPath(dir)}/`.length);
+    const tests = build.fileNames.filter(
+      (file) => /\.test\.tsx?$/.test(file) || inside(file).includes("/test-support/"),
+    );
     assert.deepEqual(tests, [], `${build.where} would publish test code in dist`);
     assert.equal(repoPath(build.options.rootDir ?? ""), `${repoPath(dir)}/src`);
     assert.equal(repoPath(build.options.outDir ?? ""), `${repoPath(dir)}/dist`);
