@@ -14,7 +14,14 @@ the worktree **runnable**.
   strategy with lifecycle scripts off, allocates ports and a database schema,
   and runs the command that proves the result works.
 - `exec.ts` — every process this package starts, by argv and never a shell
-  string.
+  string, with what a command said and whether saying it was cut short.
+- `repository/` — every git and `gh` process Perbo starts. The questions
+  callers ask are here by name — the head, the merge base, the tracked files,
+  the worktrees, a pull request — beside the environment the runner's git runs
+  in, a refused prompt, a timeout for a local read and a longer one for
+  anything crossing the network, and the rule that a fragment of an answer is
+  refused rather than read as the whole of one. Signing is whatever the
+  person's own configuration says.
 - `naming.ts` — `prb/<ticket id>/<short-slug>`, derived from the id and the
   approved outcome through an allow-list,
   and never from anything a model said during execution.
@@ -55,4 +62,6 @@ that continues an attempt shares its predecessor's worktree and takes over the
 lease. That is why the unit is the attempt *chain*.
 
 Everything here runs processes through `exec.ts`, which takes argv and never a
-shell string.
+shell string, and every git and `gh` process through `repository/`, which
+builds that argv from the runner's own values: an operand that git would read
+as an option is refused before anything is spawned (ADR-0023 §4).
