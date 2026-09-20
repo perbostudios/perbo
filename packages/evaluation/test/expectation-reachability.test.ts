@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { anchorFileIsReal } from "../src/corpus.js";
+import { anchorFileIsReal, type LoadedFixture } from "../src/corpus.js";
+import type { ExpectedDetection } from "../src/fixture.js";
 import { corpus, describeCorpus } from "./corpus-present.js";
 
 /**
@@ -20,24 +21,44 @@ import { corpus, describeCorpus } from "./corpus-present.js";
  * number people quote. This test exists because that one was found by hand.
  */
 
+/** The expectation variants that carry anchors; `clean` and `contested` do not. */
+type Anchored = Extract<ExpectedDetection, { mode: "blocking" | "coverage" }>;
+
 describeCorpus("every defective fixture's expectation can be satisfied and can fail", () => {
   // The corpus the gate loaded, not a second read of its own: this factory runs
   // only where the corpus is, and `corpus` is the same fixtures the rest of the
   // package asserts on (`corpus-read-guard.test.ts`).
   const defective = corpus.filter((entry) => entry.fixture.defective);
 
+  /**
+   * The expectation's anchors. Only `blocking` and `coverage` carry any; a
+   * fixture scored `clean` or `contested` registers nothing for a finding to
+   * be attributed to, which is the unreachability this file exists to catch.
+   */
+  const anchorsOf = (entry: LoadedFixture): Anchored => {
+    const expectation = entry.fixture.expected_detection;
+    if (expectation.mode !== "blocking" && expectation.mode !== "coverage") {
+      throw new Error(
+        `${entry.fixture.id} is defective but scored in ${expectation.mode} mode, which ` +
+          "registers no criterion, file or rule prefix at all",
+      );
+    }
+    return expectation;
+  };
+
   it("there are defective fixtures to check", () => {
     expect(defective.length).toBeGreaterThan(50);
   });
 
   it.each(
-    defective
-      .filter((entry) => entry.fixture.expected_detection.mode === "blocking")
-      .map((entry) => [entry.fixture.id, entry] as const),
-  )("%s anchors a mechanism, not only a locus", (_id, entry) => {
-    const expectation = entry.fixture.expected_detection;
-    const criterionIds = expectation.criterion_ids ?? [];
-    const prefixes = expectation.rule_prefixes ?? [];
+    defective.flatMap((entry) =>
+      entry.fixture.expected_detection.mode === "blocking"
+        ? [[entry.fixture.id, entry, entry.fixture.expected_detection] as const]
+        : [],
+    ),
+  )("%s anchors a mechanism, not only a locus", (_id, entry, expectation) => {
+    const criterionIds = expectation.criterion_ids;
+    const prefixes = expectation.rule_prefixes;
 
     expect(
       criterionIds.length + prefixes.length,
@@ -52,10 +73,10 @@ describeCorpus("every defective fixture's expectation can be satisfied and can f
   it.each(defective.map((entry) => [entry.fixture.id, entry] as const))(
     "%s",
     (_id, entry) => {
-      const expectation = entry.fixture.expected_detection;
-      const criterionIds = expectation.criterion_ids ?? [];
-      const files = expectation.files ?? [];
-      const prefixes = expectation.rule_prefixes ?? [];
+      const expectation = anchorsOf(entry);
+      const criterionIds = expectation.criterion_ids;
+      const files = expectation.files;
+      const prefixes = expectation.rule_prefixes;
 
       // Reachable: at least one channel by which a finding can be attributed.
       expect(
@@ -71,7 +92,9 @@ describeCorpus("every defective fixture's expectation can be satisfied and can f
 
       // Criteria must exist in the fixture's own contract.
       const declared = new Set(
-        (entry.contract.acceptance_criteria ?? []).map((criterion) => criterion.id),
+        (entry.contract.level === "P0" ? [] : entry.contract.acceptance_criteria).map(
+          (criterion) => criterion.id,
+        ),
       );
       for (const id of criterionIds) {
         expect(

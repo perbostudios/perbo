@@ -40,24 +40,35 @@ const fixture = (id: string, overrides: Record<string, unknown> = {}): Fixture =
     ...overrides,
   });
 
-const finding = (overrides: Partial<Finding>): Finding => ({
-  key: "a".repeat(64),
-  rule_id: "criterion.not_met",
-  source: "semantic",
-  criterion_id: "ac_2",
-  severity: "blocker",
-  blocking: true,
-  blocking_reason: "contract",
-  confidence: 0.9,
-  file: "a.ts",
-  line: 1,
-  symbol: null,
-  statement: "x",
-  status: "open",
-  outcome: "unknown",
-  waiver: null,
-  ...overrides,
-});
+const finding = (overrides: Partial<Finding>): Finding => {
+  const blocking = overrides.blocking ?? true;
+  return {
+    key: "a".repeat(64),
+    rule_id: "criterion.not_met",
+    source: "semantic",
+    criterion_id: "ac_2",
+    severity: "blocker",
+    blocking,
+    blocking_reason: "contract",
+    // The routing a blocking matrix produces for this shape, derived the way
+    // the contract schema derives it from `blocking`. A test that wants another
+    // outcome passes `routing` itself.
+    routing: blocking ? "blocks" : "advisory",
+    row: null,
+    closure: null,
+    direction: null,
+    caused_by_change: null,
+    confidence: 0.9,
+    file: "a.ts",
+    line: 1,
+    symbol: null,
+    statement: "x",
+    status: "open",
+    outcome: "unknown",
+    waiver: null,
+    ...overrides,
+  };
+};
 
 const artifact = (overrides: Partial<ReviewArtifact>): ReviewArtifact =>
   ({

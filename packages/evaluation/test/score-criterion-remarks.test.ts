@@ -51,6 +51,7 @@ const finding = (overrides: Partial<Finding>): Finding => ({
   row: "contract",
   closure: "executor",
   direction: "negative",
+  caused_by_change: null,
   routing: "blocks",
   waiver: null,
   ...overrides,
