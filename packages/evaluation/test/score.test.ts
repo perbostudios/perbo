@@ -165,6 +165,23 @@ describe("blocking-mode detection", () => {
     }
   });
 
+  it("scores an artifact written before the routing was recorded (D-051)", () => {
+    // `score.ts` derives a missing routing from `blocking` so a stored round-one
+    // artifact stays scoreable, and the corpus is read back across runs. The
+    // cast builds that artifact deliberately: a finding with no `routing` key at
+    // all, which the current `Finding` type cannot express.
+    const withoutRouting = Object.fromEntries(
+      Object.entries(finding({})).filter(([field]) => field !== "routing"),
+    ) as unknown as Finding;
+    const score = scoreRun(
+      fixture({}),
+      artifact({ decision: "changes_requested", findings: [withoutRouting] }),
+      2,
+    );
+    expect(score.detected).toBe(true);
+    expect(score.surfaced).toBe(true);
+  });
+
   it("surfaced agrees with detected wherever detected holds", () => {
     const score = scoreRun(
       fixture({}),
