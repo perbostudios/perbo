@@ -11,7 +11,7 @@ import {
   type LoopMergeStop,
   type MergeMode,
 } from "@perbo/contracts";
-import { gitEnv, run } from "@perbo/workspace";
+import { createGit, gh, git as repositoryGit } from "@perbo/workspace";
 import { MergeLockedError, acquireMergeLock } from "./lock.js";
 import { requireGithubCredential } from "./github-credential.js";
 
@@ -34,16 +34,25 @@ import { requireGithubCredential } from "./github-credential.js";
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 
-/** The runner's own environment: it holds the credential, so it is not scrubbed. */
-function runnerEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return {
-    ...gitEnv(base),
-    GH_PROMPT_DISABLED: "1",
-    ...(base.GH_TOKEN ? { GH_TOKEN: base.GH_TOKEN } : {}),
-    ...(base.GITHUB_TOKEN ? { GITHUB_TOKEN: base.GITHUB_TOKEN } : {}),
-    ...(base.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: base.SSH_AUTH_SOCK } : {}),
-  };
-}
+/**
+ * What one `gh` answer may say, past which only its tail arrives.
+ *
+ * Every read here is parsed, and a pull request with a long conversation is a
+ * large answer: a cut one is JSON that will not parse, which this would read as
+ * "GitHub said nothing" — so the ceiling is the size of an answer rather than
+ * the size of output nobody reads.
+ */
+const MAX_ANSWER_BYTES = 64 * 1024 * 1024;
+
+/**
+ * What a head's diff against its base may be, past which no approval carries.
+ *
+ * The whole diff is hashed, so a capture that kept only its tail would make two
+ * heads differing before that tail hash the same — an approval carried to
+ * content nobody reviewed. Past this the answer is that nothing is known about
+ * the head, which is the reading that fails closed.
+ */
+const MAX_DIFF_BYTES = 64 * 1024 * 1024;
 
 export interface LoopMergeRequest {
   /** The repository configuration's switch. `person` refuses before anything is read. */
@@ -134,7 +143,7 @@ const FIELDS = [
   "statusCheckRollup",
   "comments",
   "commits",
-].join(",");
+];
 
 /**
  * One read of the pull request, and the commit signatures beside it.
@@ -151,12 +160,9 @@ async function observe(
   env: NodeJS.ProcessEnv,
 ): Promise<{ observed: LoopMergeObservation; number: number | null }> {
   const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const call = { base: env, timeoutMs, maxOutputBytes: MAX_ANSWER_BYTES };
   const reference = request.pull_request_number === null ? request.branch : String(request.pull_request_number);
-  const viewed = await run(["gh", "pr", "view", reference, "--json", FIELDS], {
-    cwd: request.repository_root,
-    env,
-    timeoutMs,
-  });
+  const viewed = await gh.viewPullRequest(request.repository_root, reference, FIELDS, call);
   const absent: LoopMergeObservation = {
     state: "none",
     head_sha: null,
@@ -166,7 +172,9 @@ async function observe(
     comments: [],
     commits: [],
   };
-  if (viewed.code !== 0) return { observed: absent, number: null };
+  // A cut answer is not a smaller answer: it is JSON that will not parse, and
+  // reading it as "there is no pull request" would decide the merge on it.
+  if (viewed.code !== 0 || viewed.truncated) return { observed: absent, number: null };
 
   let pr: GhPullRequest;
   try {
@@ -181,11 +189,12 @@ async function observe(
     // `{owner}` and `{repo}` are `gh`'s own placeholders, resolved from the
     // checkout this runs in — so nothing here has to parse a URL, and no
     // repository other than the one under change can be named.
-    const api = await run(
-      ["gh", "api", `repos/{owner}/{repo}/pulls/${number}/commits?per_page=100`],
-      { cwd: request.repository_root, env, timeoutMs },
+    const api = await gh.api(
+      request.repository_root,
+      `repos/{owner}/{repo}/pulls/${number}/commits?per_page=100`,
+      call,
     );
-    if (api.code === 0) {
+    if (api.code === 0 && !api.truncated) {
       try {
         for (const commit of JSON.parse(api.stdout) as GhApiCommit[]) {
           if (commit.sha) verified.set(commit.sha, commit.commit?.verification?.verified === true);
@@ -264,52 +273,47 @@ export async function carriedApprovals(args: {
   paths_allowed?: readonly string[] | undefined;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  /** What a head's diff may be. Defaults to {@link MAX_DIFF_BYTES}. */
+  max_diff_bytes?: number;
 }): Promise<CarriedApproval[]> {
   const cwd = args.repository_root;
-  const env = args.env ?? gitEnv();
+  const git = args.env === undefined ? repositoryGit : createGit({ environment: () => args.env! });
   const timeoutMs = args.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const git = (argv: string[]) => run(["git", ...argv], { cwd, env, timeoutMs });
+  const call = { timeoutMs };
 
-  const resolveSha = async (ref: string): Promise<string | null> => {
-    const out = await git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
-    return out.code === 0 && out.stdout.trim().length > 0 ? out.stdout.trim() : null;
-  };
-  const mergeBase = async (a: string, b: string): Promise<string | null> => {
-    const out = await git(["merge-base", a, b]);
-    return out.code === 0 ? out.stdout.trim() : null;
-  };
   /** The branch's own diff against its base, as bytes: what a review judged. */
   const contentHash = async (sha: string): Promise<string | null> => {
-    const base = await mergeBase(args.base_ref, sha);
+    const base = await git.mergeBase(cwd, args.base_ref, sha, call);
     if (base === null) return null;
-    const diff = await git(["diff", "--no-color", "--full-index", base, sha]);
-    if (diff.code !== 0) return null;
+    const diff = await git.run(cwd, ["diff", "--no-color", "--full-index", base, sha], {
+      timeoutMs,
+      maxOutputBytes: args.max_diff_bytes ?? MAX_DIFF_BYTES,
+    });
+    // A diff too large to hold is held from its end, and two heads that differ
+    // only before that end hash the same. Nothing is known about this head.
+    if (diff.code !== 0 || diff.truncated) return null;
     return createHash("sha256").update(diff.stdout).digest("hex");
   };
 
-  const head = await resolveSha(args.head);
+  const head = await git.resolveCommit(cwd, args.head, call);
   if (head === null) return [];
   const headHash = await contentHash(head);
-  const headBase = await mergeBase(args.base_ref, head);
+  const headBase = await git.mergeBase(cwd, args.base_ref, head, call);
   if (headHash === null || headBase === null) return [];
 
   const carried: CarriedApproval[] = [];
   for (const named of new Set(args.approved)) {
-    const sha = await resolveSha(named);
+    const sha = await git.resolveCommit(cwd, named, call);
     if (sha === null || sha === head) continue;
-    const onBranch = await git(["merge-base", "--is-ancestor", sha, head]);
-    if (onBranch.code !== 0) continue;
+    if (!(await git.isAncestor(cwd, sha, head, call))) continue;
     const shaHash = await contentHash(sha);
-    const shaBase = await mergeBase(args.base_ref, sha);
+    const shaBase = await git.mergeBase(cwd, args.base_ref, sha, call);
     if (shaHash === null || shaBase === null) continue;
     let scope_touched: string[] = [];
     if (shaBase !== headBase) {
-      const moved = await git(["diff", "--name-only", shaBase, headBase]);
-      if (moved.code !== 0) continue;
-      const paths = moved.stdout
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
+      const moved = await git.changedPaths(cwd, shaBase, headBase, call);
+      if (moved === null) continue;
+      const paths = moved.map((line) => line.trim()).filter((line) => line.length > 0);
       scope_touched =
         args.paths_allowed === undefined ? paths : paths.filter((path) => matchesAny(path, args.paths_allowed!));
     }
@@ -347,7 +351,7 @@ export async function mergeLoopPullRequest(request: LoopMergeRequest): Promise<L
   const switched = mergeSwitchStop(request.mode);
   if (switched !== null) return stopped(switched, null);
 
-  const env = runnerEnv(request.env);
+  const env = request.env ?? process.env;
   requireGithubCredential({ env, what: "there is no credential to merge the pull request through" });
 
   const first = await observe(request, env);
@@ -393,9 +397,9 @@ export async function mergeLoopPullRequest(request: LoopMergeRequest): Promise<L
     // says both so a reader can see the approval was carried and to what.
     const approvedHead = decision.approved_head ?? head;
     const reference = first.number === null ? request.branch : String(first.number);
-    const merged = await run(
+    const merged = await gh.run(
+      request.repository_root,
       [
-        "gh",
         "pr",
         "merge",
         reference,
@@ -406,7 +410,11 @@ export async function mergeLoopPullRequest(request: LoopMergeRequest): Promise<L
         `Attempt: ${request.attempt_id}\nApproved-head: ${approvedHead}\n` +
           (approvedHead === head ? "" : `Carried-to: ${head}\n`),
       ],
-      { cwd: request.repository_root, env, timeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS },
+      {
+        base: env,
+        timeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        maxOutputBytes: MAX_ANSWER_BYTES,
+      },
     );
     if (merged.code !== 0) {
       // `gh` says what it refused on a later line than the one that says it
