@@ -176,7 +176,7 @@ export function readDraftEdits(path: string): GraphEditView[] {
  *
  * What the chat's card for an `edit_plan` or an `undo_edit` is drawn from: the
  * edit the command wrote down, rather than the session's own account of what
- * it did ([ADR-0023](../../../docs/adr/0023-untrusted-context-boundary.md)).
+ * it did ([ADR-0023](../../../../docs/adr/0023-untrusted-context-boundary.md)).
  * An undo is itself an edit, and names the one it reversed.
  *
  * The author is what links the record to the card, because the last edit of

@@ -331,7 +331,7 @@ export class InterviewHost {
    * The edit the command wrote down, not the one the tool said it made: the
    * record is written by `perbo edit`, which is the one path a plan changes
    * through, and the tool's own account of itself is a model's output
-   * ([ADR-0023](../../../../docs/adr/0023-untrusted-context-boundary.md)).
+   * ([ADR-0023](../../../../../docs/adr/0023-untrusted-context-boundary.md)).
    */
   private interviewEdit(id: string): InterviewEdit | null {
     try {
