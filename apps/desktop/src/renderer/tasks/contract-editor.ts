@@ -107,6 +107,30 @@ export class ContractEditor {
       })
       .catch((error) => { if (generation === this.generation) this.publish({ loading: false, error: message(error) }); });
   };
+  /**
+   * Release a session the host parked at `ready`.
+   *
+   * A settled `generate` or `startOver` leaves the record at `ready`, and the
+   * host refuses a submit against anything but `editing`: `editingOpen` is the
+   * only thing that moves it back. That happens today only by accident —
+   * the screen that submitted is still mounted, so its own open releases it —
+   * and a screen that navigated when the job settled would leave the session
+   * latched and the next Start over refused with nothing said.
+   */
+  private reopen = async (): Promise<void> => {
+    if (!this.saved || this.value.saving || this.value.submitting || this.failedSave) return;
+    const generation = this.generation;
+    const id = this.saved.id;
+    try {
+      const session = await this.connection.request({
+        kind: "editingOpen",
+        target: { kind: "session", id },
+      });
+      if (generation === this.generation) this.accept(session);
+    } catch (error) {
+      if (generation === this.generation) this.publish({ error: message(error) });
+    }
+  };
   private release = (): void => {
     if (--this.readers > 0) return;
     this.close();
@@ -150,8 +174,11 @@ export class ContractEditor {
         if (revision !== this.refreshRevision) continue;
         if (session.revision < (this.saved?.revision ?? 0)) return;
         const oldDigest = this.saved?.digest;
+        // A job that has just settled parks the session at `ready`.
+        const settled = this.saved?.phase === "working" && session.phase === "ready";
         this.accept(session);
         if (session.digest !== oldDigest) await this.loadRecord(session, generation);
+        if (settled) await this.reopen();
         if (revision !== this.refreshRevision) continue;
         return;
       }

@@ -1328,6 +1328,7 @@ describe("the Spec pane (SCP-336)", () => {
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
     const drafts = (await previewBridge.request({ kind: "drafts" })) ?? [];
     location.hash = `planning/${drafts[0]!.id}/spec`;
+    await screen.findByLabelText("Spec title");
     fireEvent.click(await screen.findByRole("button", { name: "Start over from the spec…" }));
     const dialog = await screen.findByRole("dialog", { name: "Start over from the spec?" });
     const startOver = (): HTMLButtonElement => within(dialog).getByRole("button", { name: "Start over" }) as HTMLButtonElement;
@@ -1409,7 +1410,9 @@ describe("the Spec pane (SCP-336)", () => {
     await screen.findByText("Drafting the plan from your spec");
     // It lands on the drafted contract, as compiling one does.
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    expect(location.hash).toMatch(/^#task\//);
+    // The drafter divides this spec into two nodes, so the plan has a graph
+    // and the graph is what is shown; a flat plan lands on the contract.
+    expect(location.hash).toMatch(/^#planning\/[^/]+\/graph$/);
 
     // Back in planning, each requirement names the node its criteria sit in.
     const drafts = (await previewBridge.request({ kind: "drafts" })) ?? [];
@@ -1435,6 +1438,7 @@ describe("the Spec pane (SCP-336)", () => {
     const version = (await previewBridge.request({ kind: "detail", repoId: planning.repoId, key }))
       .ticket.plan_version;
     location.hash = `planning/${planning.id}/spec`;
+    await screen.findByLabelText("Spec title");
 
     fireEvent.click(await screen.findByRole("button", { name: "Start over from the spec…" }));
     const dialog = await screen.findByRole("dialog", { name: /Start over from the spec/ });

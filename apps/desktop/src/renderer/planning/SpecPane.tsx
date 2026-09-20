@@ -4,6 +4,7 @@ import { Button, Dialog, Notice } from "@perbo/ui";
 import type { SpecField } from "@perbo/planning/spec-text";
 import { specSymbolNames } from "@perbo/planning/spec-text";
 import { bridge } from "../data.js";
+import { planNodes } from "@perbo/contracts/plan";
 import { InfoHint } from "../InfoHint.js";
 import { InkIcon } from "../InkIcon.js";
 import { useContractEditing } from "../tasks/contract-editor.js";
@@ -542,6 +543,21 @@ export function SpecPane({
             workspace={workspace}
             navigate={navigate}
             target={{ kind: "session", id: sessionId }}
+            // The plan is what was asked for, so it is what is shown: the
+            // graph where the drafter divided the work, and the contract
+            // where it did not, because a flat plan has no graph to look at.
+            onSettled={(key) => {
+              // A record that has not landed yet cannot say whether the plan
+              // was divided, and standing still is the bug this replaces: the
+              // contract is where every plan could always be confirmed.
+              const record = editor.record;
+              const divided = record !== undefined && planNodes(record.contract).length > 0;
+              navigate(
+                divided
+                  ? { page: "planning", sessionId, pane: "graph" }
+                  : { page: "task", repoId: editor.repoId, key, view: "contract" },
+              );
+            }}
           />
         </Suspense>
       </div>
