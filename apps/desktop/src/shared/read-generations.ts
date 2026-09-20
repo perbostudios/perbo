@@ -43,7 +43,7 @@ export class ReadGenerations {
       const token = this.token(scope);
       try {
         const result = await load();
-        return result;
+        if (token === this.token(scope)) return result;
       } catch (error) {
         if (token === this.token(scope)) throw error;
       }
