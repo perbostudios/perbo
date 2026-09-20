@@ -2,13 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   lstatSync,
-  mkdirSync,
   readFileSync,
   realpathSync,
-  renameSync,
-  writeFileSync,
 } from "node:fs";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import { z } from "zod";
 import {
   ApproachRecordSchema,
@@ -47,7 +44,6 @@ import {
   HELP_LINKS,
   PREVIEW_BYTE_CAP,
   RequestSchema,
-  SettingsSchema,
   TaskModelsSchema,
   INTERVIEW_NEEDS_A_TITLE,
 } from "../shared/protocol.js";
@@ -55,7 +51,6 @@ import { InterviewEventSchema, InterviewTurnSchema, encodeInterviewTurn } from "
 import type {
   Detail,
   Change,
-  ChangeInput,
   EditingSession,
   ExplorerFile,
   ExplorerListing,
@@ -91,7 +86,8 @@ import {
   interviewSessionArgs,
 } from "../shared/contract-editing.js";
 import { WorkspaceReads } from "./workspace-reads.js";
-import { ProfileStateSchema } from "./profile/store.js";
+import { Profile } from "./profile/store.js";
+import { Changes } from "./changes.js";
 import { explorerPath, safePath } from "./repository/paths.js";
 import { repositoryStatus, topLevel, trackedFiles } from "./repository/git.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
@@ -307,11 +303,10 @@ export class DesktopService {
   private readonly options: ServiceOptions;
   private readonly execute: typeof runProcess;
   private readonly spawn: typeof startLineProcess;
-  private readonly statePath: string;
-  private state: ProfileState;
+  private readonly profile: Profile;
+  private readonly changes: Changes;
   private readonly editing: ContractEditing;
   private readonly reads = new WorkspaceReads();
-  private sequence = 0;
   /** Every command still running, by job id: planning beside a run (D-101). */
   private readonly active = new Map<
     string,
@@ -334,71 +329,36 @@ export class DesktopService {
    * planning is discarded, or when the app closes.
    */
   private readonly interviews = new Map<string, { repoId: string; child: LineProcess }>();
-  private lastSave = 0;
+
+  /** The profile's own record, which every module mutating a preference is handed. */
+  private get state(): ProfileState {
+    return this.profile.state;
+  }
 
   constructor(options: ServiceOptions) {
     this.options = options;
     this.execute = options.process ?? runProcess;
     this.spawn = options.startProcess ?? startLineProcess;
-    mkdirSync(options.dataDirectory, { recursive: true, mode: 0o700 });
-    this.statePath = join(options.dataDirectory, "workspace.json");
-    const stored = existsSync(this.statePath)
-      ? z
-          .record(z.string(), z.unknown())
-          .parse(JSON.parse(readFileSync(this.statePath, "utf8")))
-      : null;
-    this.state = stored
-      ? ProfileStateSchema.parse(stored)
-      : {
-          version: 1,
-          settings: SettingsSchema.parse({}),
-          repositories: [],
-          jobs: [],
-          titles: {},
-          taskModels: {},
-          archived: [],
-          archivedSeeded: true,
-          editingSessions: [],
-        };
-    // A profile from before the four notification moments keeps what its one switch said.
-    const legacy = z
-      .looseObject({
-        notifications: z.boolean().optional(),
-        notifyOn: z.unknown().optional(),
-      })
-      .safeParse(stored?.["settings"] ?? {});
-    if (
-      legacy.success &&
-      legacy.data.notifyOn === undefined &&
-      legacy.data.notifications === false
-    )
-      this.state.settings.notifyOn = {
-        decision: false,
-        review: false,
-        ceiling: false,
-        stage: false,
-      };
-    for (const job of this.state.jobs)
-      if (job.state === "running" || job.state === "stopping") {
-        job.state = "interrupted";
-        job.error =
-          "Perbo closed before the command reported an outcome. Refresh the ticket from its CLI records before starting again.";
-        job.endedAt = new Date().toISOString();
-      }
+    this.profile = Profile.open(options.dataDirectory);
+    this.changes = new Changes({
+      reads: this.reads,
+      save: () => this.profile.save(),
+      emit: (change) => options.changed(change),
+    });
     this.editing = new ContractEditing({
       records: () => this.state.editingSessions,
       persist: (records) => {
         const previous = this.state.editingSessions;
         this.state.editingSessions = records;
         try {
-          this.save();
+          this.profile.save();
         } catch (error) {
           this.state.editingSessions = previous;
           throw error;
         }
         for (const record of records)
           if (previous.find((entry) => entry.id === record.id) !== record)
-            this.changed(false, { kind: "editing", sessionId: record.id });
+            this.changes.changed(false, { kind: "editing", sessionId: record.id });
       },
       repository: (id) => {
         this.repository(id);
@@ -421,43 +381,14 @@ export class DesktopService {
           ...(readConfig(repo) ?? {}),
           [STANDING_PROHIBITED_KEY]: entries,
         });
-        this.changed(true, { kind: "records", repoId: repo.id, key: null });
+        this.changes.changed(true, { kind: "records", repoId: repo.id, key: null });
       },
     });
     this.editing.recover();
-    this.save();
+    this.profile.save();
     this.options.io.applyTheme?.(this.state.settings.theme);
   }
 
-  private save(): void {
-    const temporary = `${this.statePath}.${randomUUID()}.tmp`;
-    writeFileSync(temporary, JSON.stringify(this.state, null, 2), {
-      mode: 0o600,
-      flag: "wx",
-    });
-    renameSync(temporary, this.statePath);
-    this.lastSave = Date.now();
-  }
-  private changed(
-    persist = true,
-    change: ChangeInput = { kind: "records", repoId: null, key: null },
-  ): void {
-    if (change.kind === "records")
-      this.reads.invalidate(change.repoId ?? "all");
-    if (change.kind === "repositories" || change.kind === "preferences")
-      this.reads.invalidate("all");
-    if (persist) this.save();
-    this.options.changed({ ...change, sequence: ++this.sequence });
-  }
-  private preferencesChanged(persist = true): void {
-    this.changed(persist, {
-      kind: "preferences",
-      settings: this.state.settings,
-      titles: this.state.titles,
-      taskModels: this.state.taskModels,
-      archived: this.state.archived,
-    });
-  }
   private repository(id: string): RegisteredRepository {
     const repo = this.state.repositories.find((entry) => entry.id === id);
     if (!repo)
@@ -608,7 +539,7 @@ export class DesktopService {
     };
     perboPath(repo);
     this.state.repositories.push(repo);
-    this.changed(true, { kind: "repositories" });
+    this.changes.changed(true, { kind: "repositories" });
     return this.metadata(repo);
   }
   async snapshot(): Promise<Snapshot> {
@@ -635,7 +566,7 @@ export class DesktopService {
           ]),
         ];
         this.state.archivedSeeded = true;
-        this.save();
+        this.profile.save();
       }
       return {
         mode: "desktop" as const,
@@ -647,7 +578,7 @@ export class DesktopService {
         errors: records.flatMap((entry) => entry.errors),
         titles: this.state.titles,
         taskModels: this.state.taskModels,
-        sequence: this.sequence,
+        sequence: this.changes.sequence,
         archived: this.state.archived,
         power: this.power,
         repositoryErrors: Object.fromEntries(
@@ -888,7 +819,7 @@ export class DesktopService {
         }
       }
     }
-    this.changed(false, {
+    this.changes.changed(false, {
       kind: "interview",
       sessionId: id,
       running: this.interviews.has(id),
@@ -915,7 +846,7 @@ export class DesktopService {
    * waited for that would come and go with whether the person was saving.
    */
   private askingChanged(id: string): void {
-    this.changed(false, {
+    this.changes.changed(false, {
       kind: "interview",
       sessionId: id,
       running: this.interviews.has(id),
@@ -1124,7 +1055,7 @@ export class DesktopService {
       const session = this.editing.read(id);
       if (session.key === null) return;
       const repoId = this.interviews.get(id)?.repoId ?? session.repoId;
-      this.changed(true, { kind: "records", repoId, key: session.key });
+      this.changes.changed(true, { kind: "records", repoId, key: session.key });
     } catch {
       // A session that has gone has no plan for anything to be drawing.
     }
@@ -1628,7 +1559,7 @@ export class DesktopService {
         this.reads.invalidate(repoId);
         try {
           await this.editing.settled(job);
-          this.changed(true, {
+          this.changes.changed(true, {
             kind: "records",
             repoId,
             key: job.resultKey ?? key,
@@ -1639,7 +1570,7 @@ export class DesktopService {
         } catch (error) {
           job.error = `Could not save the command status: ${redact(String(error))}`;
           job.state = "failed";
-          this.changed(false, {
+          this.changes.changed(false, {
             kind: "records",
             repoId,
             key: job.resultKey ?? key,
@@ -1662,7 +1593,7 @@ export class DesktopService {
     }
     try {
       if (owner) this.editing.started(owner, job);
-      this.changed(true, { kind: "progress", job });
+      this.changes.changed(true, { kind: "progress", job });
       this.updatePower();
     } catch (error) {
       controller.abort();
@@ -1683,7 +1614,7 @@ export class DesktopService {
       onOutput: (output) => {
         if (job.log === output) return;
         job.log = output;
-        this.changed(Date.now() - this.lastSave > 1500, {
+        this.changes.changed(Date.now() - this.profile.lastSave > 1500, {
           kind: "progress",
           job,
         });
@@ -1796,7 +1727,7 @@ export class DesktopService {
     }
     if (request.kind === "saveSettings") {
       this.state.settings = request.settings;
-      this.preferencesChanged();
+      this.changes.preferences(this.state);
       this.options.io.applyTheme?.(request.settings.theme);
       this.updatePower();
       return request.settings;
@@ -1811,7 +1742,7 @@ export class DesktopService {
       if (!entry || !isLive(entry.job)) throw new Error("That command is no longer active.");
       entry.job.state = "stopping";
       entry.controller.abort();
-      this.changed(true, { kind: "progress", job: entry.job });
+      this.changes.changed(true, { kind: "progress", job: entry.job });
       return null;
     }
     const repo = this.repository(request.repoId);
@@ -1821,8 +1752,8 @@ export class DesktopService {
           "Wait for the commands running in this repository to finish before disconnecting it.",
         );
       forgetRepository(this.state, repo.id);
-      this.changed(true, { kind: "repositories" });
-      this.preferencesChanged(false);
+      this.changes.changed(true, { kind: "repositories" });
+      this.changes.preferences(this.state, false);
       return null;
     }
     if (request.kind === "graphRead") return this.graphView(repo, request.key);
@@ -1853,8 +1784,8 @@ export class DesktopService {
         repo,
         request.key,
       );
-      this.changed(true, { kind: "records", repoId: repo.id, key: null });
-      this.preferencesChanged();
+      this.changes.changed(true, { kind: "records", repoId: repo.id, key: null });
+      this.changes.preferences(this.state);
       return null;
     }
     if (request.kind === "archive") {
@@ -1863,7 +1794,7 @@ export class DesktopService {
       if (keys.some((key) => !list.tickets.some((ticket) => ticket.key === key)))
         throw new Error("A ticket to file is not in the repository's ticket store.");
       setArchived(this.state, repo.id, keys, request.archived);
-      this.preferencesChanged();
+      this.changes.preferences(this.state);
       return null;
     }
     if (request.kind === "output")
@@ -1882,13 +1813,13 @@ export class DesktopService {
           "Wait for the commands running in this repository to finish before changing the manifest.",
         );
       saveManifest(repo, request.digest, request.value);
-      this.changed(true, { kind: "records", repoId: repo.id, key: null });
+      this.changes.changed(true, { kind: "records", repoId: repo.id, key: null });
       return null;
     }
     if (request.kind === "rename") {
       this.readContract(repo, request.key);
       this.state.titles[repo.id + ":" + request.key] = request.title;
-      this.preferencesChanged();
+      this.changes.preferences(this.state);
       return null;
     }
     if (request.kind === "openRepository") {
@@ -2007,7 +1938,7 @@ export class DesktopService {
           job.resultKey = request.key;
           if (request.models) {
             this.state.taskModels[repo.id + ":" + request.key] = request.models;
-            this.preferencesChanged();
+            this.changes.preferences(this.state);
           }
         },
         owner,
@@ -2100,7 +2031,7 @@ export class DesktopService {
     job.resultKey = admitted.ticket.key;
     if (models) {
       this.state.taskModels[repo.id + ":" + admitted.ticket.key] = models;
-      this.preferencesChanged();
+      this.changes.preferences(this.state);
     }
   }
   /** What a module reading a ticket's records is given, so it never reads the store twice over. */
@@ -2236,11 +2167,7 @@ export class DesktopService {
         : null,
     };
     this.options.io.holdSleep?.(hold, afk.displaySleep);
-    this.options.changed({
-      kind: "power",
-      power: this.power,
-      sequence: ++this.sequence,
-    });
+    this.changes.power(this.power);
   }
   /** Called by the host when the machine moves between mains and battery. */
   powerChanged(): void {

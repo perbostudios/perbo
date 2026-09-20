@@ -1,6 +1,41 @@
-import { describe, expect, it } from "vitest";
-import { ProfileStateSchema } from "./store.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Profile, ProfileStateSchema } from "./store.js";
 import { SettingsSchema } from "../../shared/protocol.js";
+
+const temporary: string[] = [];
+afterEach(() => {
+  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
+});
+/** A profile directory the app has not opened yet, optionally holding a record. */
+function directory(written?: unknown): string {
+  const root = mkdtempSync(join(tmpdir(), "perbo-profile-"));
+  temporary.push(root);
+  const path = join(root, "profile");
+  if (written !== undefined) {
+    rmSync(path, { recursive: true, force: true });
+    writeFileSync(join(root, "workspace.json"), JSON.stringify(written, null, 2));
+    return root;
+  }
+  return path;
+}
+const job = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  id: "80000000-0000-4000-8000-000000000001",
+  repoId: "80000000-0000-4000-8000-000000000002",
+  key: "PRB-1",
+  kind: "run",
+  label: "Run engineering loop",
+  state: "running",
+  startedAt: "2026-09-19T09:00:00.000Z",
+  endedAt: null,
+  log: "",
+  error: null,
+  resultKey: null,
+  result: null,
+  ...over,
+});
 
 const stored = {
   version: 1,
@@ -50,5 +85,106 @@ describe("the profile's record", () => {
       },
     };
     expect(ProfileStateSchema.parse({ ...stored, jobs: [job] }).jobs[0]).toEqual(job);
+  });
+});
+
+describe("opening the profile", () => {
+  it("starts one where there is none, with the tickets already finished counted as filed", () => {
+    const path = directory();
+    const profile = Profile.open(path);
+    expect(profile.state.repositories).toEqual([]);
+    expect(profile.state.archivedSeeded).toBe(true);
+    expect(existsSync(profile.path)).toBe(false);
+  });
+
+  it("makes the profile directory readable only by its owner", () => {
+    const profile = Profile.open(directory());
+    profile.save();
+    expect(statSync(profile.path).mode & 0o777).toBe(0o600);
+  });
+
+  it("reads back what it saved, and replaces the file whole", () => {
+    const path = directory();
+    const first = Profile.open(path);
+    first.state.titles = { "repo:PRB-1": "Renamed" };
+    first.save();
+    expect(first.lastSave).toBeGreaterThan(0);
+    expect(Profile.open(path).state.titles).toEqual({ "repo:PRB-1": "Renamed" });
+  });
+
+  it("keeps what a profile from before the four moments said with its one switch", () => {
+    // Written before `notifyOn` existed: one switch, and no record of the four.
+    const settings: Record<string, unknown> = {
+      ...SettingsSchema.parse({}),
+      notifications: false,
+    };
+    delete settings["notifyOn"];
+    const root = directory({
+      version: 1,
+      settings,
+      repositories: [],
+      jobs: [],
+    });
+    expect(Profile.open(root).state.settings.notifyOn).toEqual({
+      decision: false,
+      review: false,
+      ceiling: false,
+      stage: false,
+    });
+  });
+
+  it("leaves the four moments alone where the profile already carries them", () => {
+    const notifyOn = { decision: true, review: false, ceiling: true, stage: false };
+    const root = directory({
+      version: 1,
+      settings: { ...SettingsSchema.parse({}), notifications: false, notifyOn },
+      repositories: [],
+      jobs: [],
+    });
+    expect(Profile.open(root).state.settings.notifyOn).toEqual(notifyOn);
+  });
+
+  it("marks a job the app closed on interrupted, and says where its outcome is", () => {
+    const root = directory({
+      version: 1,
+      settings: SettingsSchema.parse({}),
+      repositories: [],
+      jobs: [job(), job({ id: "80000000-0000-4000-8000-000000000003", state: "stopping" })],
+    });
+    const state = Profile.open(root).state;
+    expect(state.jobs.map((entry) => entry.state)).toEqual(["interrupted", "interrupted"]);
+    expect(state.jobs[0]?.error).toBe(
+      "Perbo closed before the command reported an outcome. Refresh the ticket from its CLI records before starting again.",
+    );
+    expect(state.jobs[0]?.endedAt).not.toBeNull();
+  });
+
+  it("leaves a job that had already finished as it was recorded", () => {
+    const root = directory({
+      version: 1,
+      settings: SettingsSchema.parse({}),
+      repositories: [],
+      jobs: [job({ state: "completed", endedAt: "2026-09-19T09:01:00.000Z", error: null })],
+    });
+    expect(Profile.open(root).state.jobs[0]).toMatchObject({
+      state: "completed",
+      endedAt: "2026-09-19T09:01:00.000Z",
+    });
+  });
+
+  it("carries the record's own bytes, so a save writes what was read", () => {
+    const root = directory({
+      version: 1,
+      settings: SettingsSchema.parse({}),
+      repositories: [{ id: "80000000-0000-4000-8000-000000000002", name: "a", path: "/a" }],
+      jobs: [],
+      archived: ["80000000-0000-4000-8000-000000000002:PRB-1"],
+    });
+    const profile = Profile.open(root);
+    profile.save();
+    expect(JSON.parse(readFileSync(profile.path, "utf8"))).toMatchObject({
+      repositories: [{ name: "a" }],
+      archived: ["80000000-0000-4000-8000-000000000002:PRB-1"],
+    });
   });
 });
