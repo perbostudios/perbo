@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { InterviewEventSchema, InterviewTurnSchema } from "@perbo/contracts/interview-protocol";
 import { UsageError } from "../src/args.js";
@@ -35,7 +36,7 @@ import { claudeHarness, codexHarness } from "./interview-harness.js";
 import { scriptedSdk, type ScriptStep } from "./interview-sdk.js";
 
 /** The built command, for the approval an interview cannot make. */
-const CLI = join(dirname(new URL(import.meta.url).pathname), "..", "dist", "main.js");
+const CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "main.js");
 
 /**
  * `perbo interview`: the person's own Claude Code or Codex session (D-102).
@@ -642,7 +643,7 @@ describe("the streamed protocol", () => {
 
 describe("Paseo (SCP-311 criterion 8)", () => {
   it("is followed as a design and named nowhere in the interview's own code", () => {
-    const here = dirname(new URL(import.meta.url).pathname);
+    const here = dirname(fileURLToPath(import.meta.url));
     const sources = [
       join(here, "..", "src", "interview.ts"),
       join(here, "..", "src", "interview-claude.ts"),
@@ -659,7 +660,7 @@ describe("Paseo (SCP-311 criterion 8)", () => {
 
 describe("the Claude Agent SDK", () => {
   it("is pinned in the catalog and in the lockfile", () => {
-    const root = join(dirname(new URL(import.meta.url).pathname), "..", "..", "..");
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
     const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
     const pinned = /"@anthropic-ai\/claude-agent-sdk":\s*(\d+\.\d+\.\d+)\s*$/m.exec(workspace);
     expect(pinned, "the catalog pins no @anthropic-ai/claude-agent-sdk").not.toBeNull();

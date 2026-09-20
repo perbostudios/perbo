@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CheckResultsFileSchema,
   EXIT_CODES,
@@ -69,7 +70,7 @@ function readPackageVersion(): string {
     metadata = JSON.parse(readFileSync(packagePath, "utf8"));
   } catch (error) {
     throw new Error(
-      `could not read CLI package metadata from ${packagePath.pathname}: ${
+      `could not read CLI package metadata from ${fileURLToPath(packagePath)}: ${
         error instanceof Error ? error.message : String(error)
       }`,
       { cause: error },
@@ -82,7 +83,7 @@ function readPackageVersion(): string {
     typeof metadata.version !== "string" ||
     metadata.version.length === 0
   ) {
-    throw new Error(`CLI package metadata at ${packagePath.pathname} has no version`);
+    throw new Error(`CLI package metadata at ${fileURLToPath(packagePath)} has no version`);
   }
   return metadata.version;
 }

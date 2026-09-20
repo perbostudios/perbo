@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { repository, type ContractStep, type InterviewHarness } from "./interview-contract.js";
 import { claudeHarness, codexHarness } from "./interview-harness.js";
@@ -14,7 +15,7 @@ import { claudeHarness, codexHarness } from "./interview-harness.js";
  * own newline survives the file.
  */
 function readShapes(): string[] {
-  const path = join(dirname(new URL(import.meta.url).pathname), "fixtures", "read-only-shapes.txt");
+  const path = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "read-only-shapes.txt");
   return readFileSync(path, "utf8")
     .split("\n")
     .filter((line) => line.trim().length > 0 && !line.startsWith("#"))
