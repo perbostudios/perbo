@@ -412,6 +412,30 @@ importers:
         specifier: 'catalog:'
         version: 0.28.2
 
+  tooling/test-support:
+    devDependencies:
+      '@eslint/js':
+        specifier: 'catalog:'
+        version: 10.0.1(eslint@10.9.1(jiti@2.7.0))
+      '@perbo/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.4.0
+      eslint:
+        specifier: 'catalog:'
+        version: 10.9.1(jiti@2.7.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      typescript-eslint:
+        specifier: 'catalog:'
+        version: 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@26.4.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0))
+
   tooling/tsconfig: {}
 
 packages:
