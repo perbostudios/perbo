@@ -15,7 +15,7 @@ import { makeContract, makeRepo, makeReview, scratch, withoutInstall } from "./s
  * the `merge` switch's to decide. The step is the same one `perbo sync
  * --merge` calls, so what is proven here is where the loop calls it and what
  * it does with the answer; the six conditions themselves are proven against a
- * fake `gh` in `apps/cli/test/sync-merge.test.ts`.
+ * fake `gh` in `apps/cli/src/commands/sync.merge.test.ts`.
  */
 
 const agentDouble = (write: (worktree: string) => void) => {

@@ -45,7 +45,7 @@ import { runVerdictCommand } from "./commands/verdict/index.js";
  * and import index built from it.
  *
  * The shell around the table — help, version, an unknown command, and what a
- * thrown error exits as — is `entry.js`.
+ * thrown error exits as — is `command-line/terminal.js`.
  */
 export const FULL_ENTRY_POINT: EntryPoint<FullCommandName> = {
   usage: USAGE,

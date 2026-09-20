@@ -151,7 +151,7 @@ describe("a ticket written before `file` existed", () => {
     // The one shape the schema deliberately stopped admitting. It is not left
     // to fail at the reader: the ticket store normalises it to the `file`
     // source it always was before it validates
-    // (`apps/cli/test/ticket-store-source.test.ts`).
+    // (`apps/cli/src/store/tickets.source.test.ts`).
     expect(
       TicketSchema.safeParse(
         storedTicket({
