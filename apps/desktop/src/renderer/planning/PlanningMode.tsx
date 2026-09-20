@@ -92,9 +92,9 @@ export function PlanningMode({
     );
   const open =
     pane === "explorer" ? (
-      <ExplorerPane workspace={workspace} editor={editor} />
+      <ExplorerPane workspace={workspace} navigate={navigate} editor={editor} />
     ) : pane === "impact" ? (
-      <ImpactPane workspace={workspace} editor={editor} />
+      <ImpactPane workspace={workspace} navigate={navigate} editor={editor} />
     ) : pane === "graph" ? (
       <Suspense fallback={<Opening what="the graph" />}>
         <GraphPane workspace={workspace} navigate={navigate} editor={editor} />

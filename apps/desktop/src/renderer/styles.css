@@ -4823,6 +4823,19 @@ kbd {
   flex: none;
   margin-left: auto;
 }
+/* The way onward from a pane that shows the plan, sitting where every other
+   pane's primary control sits: the bottom right of its own window. It is flex
+   none against panes that scroll, so it stays put rather than scrolling away
+   from the thing it acts on. */
+.pane-confirm {
+  flex: none;
+  padding: 10px 16px 12px;
+  border-top: 1.5px solid var(--line);
+  background: var(--paper);
+}
+.pane-confirm .small {
+  margin-right: auto;
+}
 .graph-history {
   flex: 1;
   min-width: 0;

@@ -2579,6 +2579,104 @@ describe("the Impact pane (SCP-320)", () => {
   };
   const row = (path: string) => screen.getByLabelText(path);
 
+  // A plan is the thing impact is measured against, so the plan arriving is the
+  // question being asked. Somebody who has just had one drafted and opens this
+  // pane wants what it disturbs, not a button that will tell them.
+  it("asks once on its own when the planning has a plan, and not again", async () => {
+    const asked = vi.spyOn(previewBridge, "request");
+    const runs = (): number =>
+      asked.mock.calls.filter(([request]) => request.kind === "impactRead").length;
+    try {
+      await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
+      const opened = await session();
+      expect(runs()).toBe(0);
+      // A plan needs a spec to be drafted from, through the host as the Spec
+      // pane's own Generate does.
+      await previewBridge.request({
+        kind: "specSave",
+        id: opened.id,
+        repoId: opened.repoId,
+        title: "A light colour mode",
+        sections: {
+          outcome: "The application supports a usable light colour mode.",
+          requirements: "- The person can choose Light, Dark or System without a restart.",
+          no_gos: "",
+          rabbit_holes: "",
+          notes: "",
+        },
+        base: NOTHING_YET,
+      });
+      const withSpec = await session();
+      await previewBridge.request({
+        kind: "editingSubmit",
+        id: withSpec.id,
+        revision: withSpec.revision,
+        operationId: crypto.randomUUID(),
+        intent: "generate",
+      });
+      await waitFor(
+        async () => expect((await session()).key).not.toBeNull(),
+        { timeout: 5000 },
+      );
+      // No button was pressed, and the answer arrives.
+      await waitFor(() => expect(runs()).toBeGreaterThan(0));
+      await waitFor(() => expect(screen.queryByText("not checked yet")).toBeNull());
+      const once = runs();
+      // And it is asked once: the answer is a whole `perbo index` over the
+      // tracked tree, so a re-render is not a reason to run it again.
+      await waitFor(() => expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy());
+      expect(runs()).toBe(once);
+    } finally {
+      asked.mockRestore();
+    }
+  });
+
+  // A person settles a plan from whichever pane answered their last question,
+  // so the way onward is on all three rather than only on the Graph. It
+  // confirms and never approves: the contract is the page that states what
+  // freezes, and it carries the one approval there is.
+  it.each(["Impact", "Explorer"])("offers the way to the contract from %s", async (pane) => {
+    await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
+    // No plan yet, so there is nothing to confirm and the control is absent —
+    // these panes are read while the work is still being described.
+    await openPane(pane);
+    expect(screen.queryByRole("button", { name: "Confirm the plan" })).toBeNull();
+
+    const opened = await session();
+    await previewBridge.request({
+      kind: "specSave",
+      id: opened.id,
+      repoId: opened.repoId,
+      title: "A light colour mode",
+      sections: {
+        outcome: "The application supports a usable light colour mode.",
+        requirements: "- The person can choose Light, Dark or System without a restart.",
+        no_gos: "",
+        rabbit_holes: "",
+        notes: "",
+      },
+      base: NOTHING_YET,
+    });
+    const withSpec = await session();
+    await previewBridge.request({
+      kind: "editingSubmit",
+      id: withSpec.id,
+      revision: withSpec.revision,
+      operationId: crypto.randomUUID(),
+      intent: "generate",
+    });
+    await waitFor(async () => expect((await session()).key).not.toBeNull(), { timeout: 5000 });
+
+    await openPane(pane);
+    // Read before the click: confirming leaves planning, and the session is
+    // read off the route this is standing on.
+    const key = (await session()).key!;
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }));
+    // The contract, and not an approval taken on a pane that never said what
+    // it was freezing.
+    await waitFor(() => expect(location.hash).toContain(`${key}/contract`));
+  });
+
   it("sits last in the rail's planning panes, and asks for nothing until it is asked", async () => {
     await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
     // No plan has been drafted here, so there is no graph to offer and Impact

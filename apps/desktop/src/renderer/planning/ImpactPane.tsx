@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, EmptyState, Notice } from "@perbo/ui";
 import { withNoGo } from "@perbo/planning/impact";
 import type { ImpactReasonKind, ImpactWarning } from "@perbo/planning/impact";
 import { LineIcon } from "../icons.js";
 import { bridge, errorMessage } from "../data.js";
-import type { ImpactView, Snapshot } from "../../shared/protocol.js";
+import type { ImpactView } from "../../shared/protocol.js";
+import type { PageProps } from "../shell/App.js";
 import type { useContractEditing } from "../tasks/contract-editor.js";
+import { ConfirmPlan } from "./ConfirmPlan.js";
 
 type Editor = ReturnType<typeof useContractEditing>;
 
@@ -14,10 +16,13 @@ type Editor = ReturnType<typeof useContractEditing>;
  * The Impact pane (D-015, D-101): what this draft is likely to touch that its
  * scope does not cover.
  *
- * **On demand, and that means a button.** The answer is a fresh `perbo index`
- * over the repository's whole tracked tree, so opening the pane shows what was
- * asked for last and asks for nothing; the person asks, and asks again when the
- * draft has moved.
+ * **Asked once when the plan arrives, and by the button after that.** The
+ * answer is a fresh `perbo index` over the repository's whole tracked tree, so
+ * it is not something to run on a timer or on every focus. A plan is the thing
+ * impact is measured against, though, so the first one is the question being
+ * asked: a person who has just had a plan drafted and opens this pane wants
+ * what it disturbs, not a button that will tell them. Once the draft moves,
+ * asking again is theirs.
  *
  * **A warning is advice.** Nothing on this screen reaches a contract, a scope
  * glob or a spec on its own (ADR-0023 §4). The two actions beside a warning are
@@ -39,7 +44,7 @@ const REASON_LABELS: Record<ImpactReasonKind, string> = {
   ci_infra_policy: "CI, infra or policy",
 };
 
-export function ImpactPane({ workspace, editor }: { workspace: Snapshot; editor: Editor }) {
+export function ImpactPane({ workspace, navigate, editor }: PageProps & { editor: Editor }) {
   const client = useQueryClient();
   const [failure, setFailure] = useState<string | null>(null);
   const [asked, setAsked] = useState(false);
@@ -62,6 +67,14 @@ export function ImpactPane({ workspace, editor }: { workspace: Snapshot; editor:
     retry: false,
   });
   const view: ImpactView | undefined = impact.data;
+
+  // The plan arriving is the ask. Keyed on the plan's own key so it fires once
+  // when the draft first has one, and not again on a re-render or a re-read;
+  // `staleTime: Infinity` then holds that answer until the person asks again.
+  const key = session?.key ?? null;
+  useEffect(() => {
+    if (key !== null) setAsked(true);
+  }, [key]);
 
   /** The draft's own mark, the one the Explorer makes, so the history can reverse it. */
   const toScope = useMutation({
@@ -221,6 +234,12 @@ export function ImpactPane({ workspace, editor }: { workspace: Snapshot; editor:
           </>
         )}
       </div>
+      <ConfirmPlan
+        workspace={workspace}
+        navigate={navigate}
+        editor={editor}
+        busy={impact.isFetching}
+      />
     </section>
   );
 }
