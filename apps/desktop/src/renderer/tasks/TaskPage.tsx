@@ -3,6 +3,7 @@ import { Button, Notice } from "@perbo/ui";
 import { errorMessage, useDetail } from "../data.js";
 import type { PageProps, TaskView } from "../shell/App.js";
 import { Composer } from "./Composer.js";
+import { ExplorerScreen } from "./ExplorerScreen.js";
 import { ContractScreen } from "./ContractScreen.js";
 import { LoopScreen } from "./LoopScreen.js";
 import { projectTicket } from "./ticket-workspace.js";
@@ -72,6 +73,7 @@ export function TaskPage({
   if (screen === "complete")
     return <CompletionScreen {...context} merged />;
   if (screen === "contract") return <ContractScreen {...context} />;
+  if (screen === "explorer") return <ExplorerScreen {...context} />;
   if (screen === "review") return <ReviewScreen {...context} />;
   return <LoopScreen {...context} decisions={screen === "decisions"} />;
 }

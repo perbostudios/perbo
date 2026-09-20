@@ -5,10 +5,10 @@ import { InkIcon } from "../InkIcon.js";
 import { errorMessage, useAction } from "../data.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey } from "./ticket-workspace.js";
-import { costLabel, taskRecords } from "./task-context.js";
+import { costLabel, pendingScope, taskRecords } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
 export function ContractScreen(context: TaskContext) {
-  const { detail, repoId, navigate, show } = context;
+  const { detail, repoId, navigate, show, workspace } = context;
   const { contract, ticket, criteria, models, repo, busy, held, title, latest } =
     taskRecords(context);
   const [publish, setPublish] = useState(false),
@@ -17,6 +17,10 @@ export function ContractScreen(context: TaskContext) {
     [deleting, setDeleting] = useState(false);
   const action = useAction();
   const unrun = detail.attempts.length === 0 && !ticket.delivery.pull_request_url;
+  // Marks made in the Explorer live in the saved session until a compile moves
+  // them into the contract, and approval freezes the contract. Approving over
+  // the difference would freeze a scope the person has already changed.
+  const pending = ticket.approved_at === null ? pendingScope(workspace.drafts, repoId, ticket.key, contract.scope) : null;
   const bundle = latest?.bundles.find((bundle) => bundle.kind === "execution");
   const start = (): void => {
     void action
@@ -32,7 +36,7 @@ export function ContractScreen(context: TaskContext) {
       .then(() => show("loop"))
       .catch(() => undefined);
   };
-  useShortcut("approve", busy || action.isPending ? null : start);
+  useShortcut("approve", busy || action.isPending || pending !== null ? null : start);
   useShortcut("rename", () => setRenaming(true));
   return (
     <section className="screen" data-screen="s11">
@@ -115,6 +119,16 @@ export function ContractScreen(context: TaskContext) {
               ],
             ]}
           />
+          {/* The scope reads as globs; the files it reaches are what a person
+              is actually approving. This opens them read-only, beside the
+              contract, rather than asking anyone to hold a glob in their head. */}
+          <button
+            type="button"
+            className="text-button small"
+            onClick={() => show("explorer")}
+          >
+            Browse the files this scope reaches
+          </button>
           <div className="scope-message">
             <InkIcon name="locked" size={22} />
             <span>
@@ -204,9 +218,19 @@ export function ContractScreen(context: TaskContext) {
                 request. I will merge it myself.
               </span>
             </label>
+            {pending !== null && (
+              <Notice tone="warning">
+                This planning holds a scope the contract does not carry yet —{" "}
+                {pending.allowed.length} allowed{" "}
+                {pending.allowed.length === 1 ? "path" : "paths"} and{" "}
+                {pending.prohibited.length} prohibited. Approving freezes the
+                contract&rsquo;s scope, not this one, so compile it in first:
+                open the contract again with Back and save it.
+              </Notice>
+            )}
             <Button
               variant="primary"
-              disabled={busy || action.isPending}
+              disabled={busy || action.isPending || pending !== null}
               onClick={start}
             >
               {ticket.approved_at

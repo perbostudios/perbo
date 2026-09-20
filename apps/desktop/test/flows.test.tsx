@@ -559,3 +559,64 @@ describe("interactive desktop flows", () => {
     await running.stop();
   });
 });
+
+/**
+ * The repository's files, reached from the contract and read-only there.
+ *
+ * Scope is one of the four fields approval freezes, and it reads as globs; the
+ * files those globs reach are what a person is actually approving. Marking is
+ * deliberately absent: a mark writes the editing session's draft and reaches
+ * the contract only through a compile, while approval sends the contract
+ * file's digest, which a mark never changes.
+ */
+describe("the files a contract's scope reaches", () => {
+  it("opens from the contract read-only, says what is in scope, and goes back", async () => {
+    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const row = workspace.tasks[0]!;
+    const detail = structuredClone(
+      await previewBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }),
+    );
+    detail.ticket = { ...row.ticket, state: "plan_review", approved_at: null };
+    detail.attempts = [];
+    client.setQueryData(["detail", row.repoId, row.ticket.key], detail);
+    function AtTheContract() {
+      const [view, setView] = useState<TaskView>("contract");
+      return (
+        <TaskPage
+          workspace={workspace}
+          navigate={(next) => setView(next.page === "task" ? next.view ?? "contract" : "contract")}
+          repoId={row.repoId}
+          taskKey={row.ticket.key}
+          view={view}
+          edit={false}
+        />
+      );
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <AtTheContract />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Browse the files this scope reaches" }),
+    );
+    const tree = await screen.findByRole("tree", { name: "Tracked files" });
+
+    // Read-only: none of the planning pane's mark controls came with it.
+    expect(screen.queryByRole("group", { name: "Mark for this draft" })).toBeNull();
+    expect(screen.queryByText("For this draft")).toBeNull();
+
+    // What it says instead is whether this contract reaches a row. A collapsed
+    // folder is not reached by a glob that points inside it, so the files the
+    // glob names are what is asked for — the filter flattens the tree to them.
+    const inside = detail.contract.scope.paths_allowed[0]!.replace(/[*?[\]].*$/, "").replace(/\/$/, "");
+    fireEvent.change(screen.getByLabelText("Filter files"), { target: { value: inside } });
+    await waitFor(() =>
+      expect(within(tree).queryAllByText("in scope").length).toBeGreaterThan(0),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to the contract" }));
+    await screen.findByText(/Four fields freeze when you approve/);
+  });
+});

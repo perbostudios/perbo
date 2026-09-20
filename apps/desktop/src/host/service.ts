@@ -2633,7 +2633,17 @@ export class DesktopService {
           await this.invoke(
             job,
             repo,
-            ["edit", request.key, ...this.draftArgs(request.draft)],
+            [
+              "edit",
+              request.key,
+              ...this.draftArgs(request.draft),
+              // An empty list and an absent flag are the same on a command
+              // line, and the edit replaces only what it is given: without
+              // this, unmarking the last prohibited path would be written and
+              // then quietly ignored. Admission needs no such flag — it writes
+              // the whole scope rather than replacing part of one.
+              ...(request.draft.prohibited.length === 0 ? ["--no-prohibit"] : []),
+            ],
             signal,
           );
           job.resultKey = request.key;

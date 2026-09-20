@@ -1522,6 +1522,7 @@ async function applyEdit(
     // A prohibited path is the person's own mark in the explorer (D-105), and
     // a manual reviewer is their own choice: neither is a field this sets.
     prohibited: [],
+    clearProhibited: false,
     manualReviewer: null,
     manualReason: null,
     author: INTERVIEW_AUTHOR,

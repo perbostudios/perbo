@@ -103,7 +103,17 @@ export function withDraft(snapshot: Snapshot, session: EditingSession): Snapshot
   return {
     ...snapshot,
     drafts: [
-      { id: session.id, repoId: session.repoId, key: session.key, outcome: session.form.draft.outcome, phase: session.phase },
+      {
+        id: session.id,
+        repoId: session.repoId,
+        key: session.key,
+        outcome: session.form.draft.outcome,
+        phase: session.phase,
+        scope: {
+          paths: [...session.form.draft.paths],
+          prohibited: [...session.form.draft.prohibited],
+        },
+      },
       ...(snapshot.drafts ?? []).filter((draft) => draft.id !== session.id),
     ],
   };

@@ -88,7 +88,14 @@ const pending = (operation: EditingOperation | null): boolean =>
 export function openDrafts(records: readonly EditingSession[]): OpenDraft[] {
   return records
     .filter((record) => record.phase !== "discarded")
-    .map((record) => ({ id: record.id, repoId: record.repoId, key: record.key, outcome: record.form.draft.outcome, phase: record.phase }))
+    .map((record) => ({
+      id: record.id,
+      repoId: record.repoId,
+      key: record.key,
+      outcome: record.form.draft.outcome,
+      phase: record.phase,
+      scope: { paths: [...record.form.draft.paths], prohibited: [...record.form.draft.prohibited] },
+    }))
     .reverse();
 }
 

@@ -493,6 +493,16 @@ export interface OpenDraft {
   key: string | null;
   outcome: string;
   phase: EditingSession["phase"];
+  /**
+   * The scope this session holds, which is not yet the contract's.
+   *
+   * A mark made in the Explorer writes here and reaches the contract only
+   * through a compile. Approval freezes the contract's scope and never reads
+   * this one, so the contract page compares the two and refuses to approve
+   * over the difference rather than freezing a scope the person has already
+   * moved on from.
+   */
+  scope: { paths: string[]; prohibited: string[] };
 }
 export const EditingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("new"), repoId: identifier }),

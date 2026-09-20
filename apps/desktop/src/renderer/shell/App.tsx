@@ -36,7 +36,8 @@ export type TaskView =
   | "merge"
   | "decisions"
   | "called-off"
-  | "complete";
+  | "complete"
+  | "explorer";
 export type SettingsSection =
   | "general"
   | "usage"
@@ -95,6 +96,7 @@ function readRoute(): Route {
         "decisions",
         "called-off",
         "complete",
+        "explorer",
       ].includes(view ?? "")
         ? view
         : "auto") as TaskView,
