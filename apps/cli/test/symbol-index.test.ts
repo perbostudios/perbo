@@ -132,6 +132,66 @@ describe("the index of an authored monorepo", () => {
     TIMEOUT,
   );
 
+  /**
+   * The rest of the dialect a `packages:` list is written in, and that the
+   * package manager reads: a member may be written from the repository root
+   * as `./apps/*`, and one entry may name several directories at once. A
+   * repository written either way installs, so its names have to resolve.
+   */
+  it(
+    "admits workspace globs written with a leading ./",
+    () => {
+      const root = repositoryFrom("symbol-index", (at) => {
+        writeFileSync(
+          join(at, "pnpm-workspace.yaml"),
+          'packages:\n  - "./apps/*"\n  - "./packages/*"\n',
+        );
+      });
+      expect(comparable(buildSymbolIndex({ repositoryRoot: root }))).toEqual(EXPECTED);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "admits workspace globs written with braces",
+    () => {
+      const root = repositoryFrom("symbol-index", (at) => {
+        writeFileSync(join(at, "pnpm-workspace.yaml"), 'packages:\n  - "{apps,packages}/*"\n');
+      });
+      expect(comparable(buildSymbolIndex({ repositoryRoot: root }))).toEqual(EXPECTED);
+    },
+    TIMEOUT,
+  );
+
+  /**
+   * A negated entry takes a directory out of the workspace, so the name its
+   * manifest declares is not a workspace name any more: an import of it is a
+   * package from the registry, resolved to nothing, rather than an error.
+   */
+  it(
+    "leaves out a package a negated glob names",
+    () => {
+      const root = repositoryFrom("symbol-index", (at) => {
+        writeFileSync(
+          join(at, "pnpm-workspace.yaml"),
+          'packages:\n  - "apps/*"\n  - "packages/*"\n  - "!packages/ui"\n',
+        );
+      });
+      const built = SymbolIndexSchema.parse(buildSymbolIndex({ repositoryRoot: root }));
+      const main = built.files.find((file) => file.path === "apps/web/src/main.ts");
+      expect(main?.imports.filter((edge) => edge.specifier === "@fixture/ui")).toEqual([
+        { specifier: "@fixture/ui", resolved: null, external: true, line: 2 },
+        { specifier: "@fixture/ui", resolved: null, external: true, line: 8 },
+      ]);
+      // The package that is still a member resolves, so the exclusion is the
+      // negated entry rather than the whole list failing to match.
+      expect(main?.imports.find((edge) => edge.specifier === "@fixture/core")?.resolved).toBe(
+        "packages/core/src/index.ts",
+      );
+    },
+    TIMEOUT,
+  );
+
   it(
     "stamps the commit it read and the schema it was written against",
     () => {
