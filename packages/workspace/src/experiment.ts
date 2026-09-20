@@ -11,9 +11,8 @@ import {
   type MaterializationManifest,
 } from "@perbo/contracts";
 import { diagnose, isGreenfieldVerify, validateManifest } from "./diagnostic.js";
-import { run } from "./exec.js";
 import { materialize } from "./materialize.js";
-import { gitEnv } from "./repository/index.js";
+import { git } from "./repository/index.js";
 import { cleanup, provision, type Workspace } from "./worktree.js";
 
 /**
@@ -104,23 +103,19 @@ export interface RepositoryResult {
 }
 
 const TEN_MINUTES = 10 * 60 * 1000;
+/** A read of a checkout that is on this disk and may be large. */
+const MEASUREMENT_READ_TIMEOUT_MS = 60_000;
+const CHECKOUT_TIMEOUT_MS = 120_000;
 
 async function gitHead(dir: string): Promise<string> {
-  const result = await run(["git", "rev-parse", "HEAD"], {
-    cwd: dir,
-    env: gitEnv(),
-    timeoutMs: 60_000,
-  });
-  return result.stdout.trim();
+  return (await git.head(dir, { timeoutMs: MEASUREMENT_READ_TIMEOUT_MS })) ?? "";
 }
 
 async function countWorkspaces(dir: string): Promise<number | null> {
   const file = join(dir, "pnpm-workspace.yaml");
   if (!existsSync(file)) return null;
-  const result = await run(["git", "ls-files", "--", "**/package.json", "package.json"], {
-    cwd: dir,
-    env: gitEnv(),
-    timeoutMs: 60_000,
+  const result = await git.run(dir, ["ls-files", "--", "**/package.json", "package.json"], {
+    timeoutMs: MEASUREMENT_READ_TIMEOUT_MS,
   });
   const manifests = result.stdout.split("\n").filter((line) => line.trim().length > 0);
   return manifests.length;
@@ -131,11 +126,11 @@ async function cloneInto(spec: RepositorySpec, into: string): Promise<number | n
   const started = Date.now();
   // `--no-hardlinks` on a local clone so the number is a copy rather than a
   // link table: a hardlinked local clone measures nothing a user would see.
-  const argv =
-    spec.clone === "local"
-      ? ["git", "clone", "--no-hardlinks", resolve(spec.source), into]
-      : ["git", "clone", spec.source, into];
-  const result = await run(argv, { cwd: resolve(into, ".."), env: gitEnv(), timeoutMs: TEN_MINUTES });
+  const local = spec.clone === "local";
+  const result = await git.clone(resolve(into, ".."), local ? resolve(spec.source) : spec.source, into, {
+    noHardlinks: local,
+    timeoutMs: TEN_MINUTES,
+  });
   if (result.code !== 0) {
     throw new Error(`clone failed for ${spec.name}: ${result.stderr.trim().slice(0, 400)}`);
   }
@@ -273,10 +268,8 @@ export async function runExperiment(
       clone_ms = await cloneInto(spec, checkout);
     }
     if (spec.ref) {
-      const checked = await run(["git", "checkout", "--detach", spec.ref], {
-        cwd: checkout,
-        env: gitEnv(),
-        timeoutMs: 120_000,
+      const checked = await git.run(checkout, ["checkout", "--detach", spec.ref], {
+        timeoutMs: CHECKOUT_TIMEOUT_MS,
       });
       if (checked.code !== 0) manual.push(`could not check out ${spec.ref}`);
     }
