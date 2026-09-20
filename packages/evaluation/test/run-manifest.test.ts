@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -302,4 +302,48 @@ describe("a results directory whose reviewer copy is no longer beside it", () =>
       }),
     ).toEqual([]);
   });
+});
+
+/**
+ * The state of the tree is read by the runner's git, not by whatever the shell
+ * that started the corpus run happened to hold.
+ *
+ * A manifest is written before the first paid call and read long afterwards, so
+ * the two fields it takes from git have to come back or come back as unknown —
+ * never after a wait nobody bounded, on a prompt nobody is there to answer.
+ */
+describe("the git a run manifest's source snapshot starts", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "perbo-manifest-git-"));
+  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+  it.skipIf(process.platform === "win32")(
+    "runs in the runner's environment, with prompts off and no ambient secret",
+    () => {
+      const bin = join(scratch, "bin");
+      const dump = join(scratch, "child-env.txt");
+      const commit = "9".repeat(40);
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(
+        join(bin, "git"),
+        `#!/bin/sh\nenv > ${JSON.stringify(dump)}\ncase "$*" in *rev-parse*) echo ${commit};; esac\n`,
+      );
+      chmodSync(join(bin, "git"), 0o755);
+
+      const path = process.env.PATH;
+      process.env.PATH = `${bin}:${path ?? ""}`;
+      process.env.PERBO_SENTINEL_TOKEN = "a token the child must not see";
+      let source: ReturnType<typeof captureRunSource>;
+      try {
+        source = captureRunSource({ cliPath: join(bin, "git"), cwd: scratch });
+      } finally {
+        process.env.PATH = path;
+        delete process.env.PERBO_SENTINEL_TOKEN;
+      }
+
+      expect(source.source_commit).toBe(commit);
+      const child = readFileSync(dump, "utf8").split("\n");
+      expect(child).toContain("GIT_TERMINAL_PROMPT=0");
+      expect(child.filter((line) => line.startsWith("PERBO_SENTINEL_TOKEN="))).toEqual([]);
+    },
+  );
 });
