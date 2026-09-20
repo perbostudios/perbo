@@ -21,7 +21,8 @@ import {
 } from "./admission.js";
 import { PERBO_AGENT_ROLE_NAMES, isSubagentTool, judgeSubagentStart, SUBAGENT_TOOL_NAMES } from "./agents.js";
 import { writeBriefRecord, type BriefRecords } from "./brief.js";
-import { UNKNOWN_CWD, describeShellCwd, type CommandSegment } from "./prohibited.js";
+import { describeShellCwd } from "./prohibited.js";
+import { UNKNOWN_CWD, type CommandSegment } from "./shell/index.js";
 import { HOST_TEMPORARY_DIRECTORY } from "./scratch.js";
 
 /**

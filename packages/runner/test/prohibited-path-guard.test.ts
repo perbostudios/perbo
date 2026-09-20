@@ -17,7 +17,8 @@ import {
   type PreToolGuardState,
 } from "../src/pretool.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { inspectCommand, inspectToolWrite, inspectWritePath, resolveScope } from "../src/prohibited.js";
+import { inspectCommand, inspectToolWrite } from "../src/prohibited.js";
+import { inspectWritePath, resolveScope } from "../src/shell/index.js";
 import { fakeAgent, scratch } from "./support.js";
 
 /**

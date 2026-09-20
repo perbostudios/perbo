@@ -134,7 +134,7 @@ import {
 } from "./resume.js";
 import { RunRefusedError } from "./refusal.js";
 import { commitSpec } from "./spec-commit.js";
-import { allowedPathsSentence } from "./prohibited.js";
+import { allowedPathsSentence } from "./shell/index.js";
 import { parseDeclines, type Decline } from "./declines.js";
 import { readPrinciples, readPrinciplesFile } from "./principles.js";
 import { quarantine, release, restoreAny } from "./quarantine.js";

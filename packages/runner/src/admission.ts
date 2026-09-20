@@ -1,12 +1,14 @@
 import {
   inspectCommandWithCwd,
-  inspectWritePath,
-  resolveScope,
   writeCause,
   type CommandInspection,
+} from "./prohibited.js";
+import {
+  inspectWritePath,
+  resolveScope,
   type WorktreeScope,
   type WriteFinding,
-} from "./prohibited.js";
+} from "./shell/index.js";
 
 /**
  * Whether a command the executor asked for is admitted, and on what grounds
@@ -218,8 +220,8 @@ function unquote(word: string): string {
  * plain `split(/\s+/)` is good enough for prefix matching, but a `-c
  * key='a b'` value has to survive as one word for the key that precedes its
  * `=` to be read correctly. This does not expand escapes or substitutions
- * the way shell.ts's own tokenizer does; it only has to not split a quoted
- * span apart.
+ * the way the shell reader's own lexer (`shell/internal/lexer.ts`) does; it
+ * only has to not split a quoted span apart.
  */
 function splitWords(text: string): string[] {
   const words: string[] = [];

@@ -11,7 +11,7 @@ import {
   type PreToolDecision,
   type PreToolGuard,
 } from "../src/pretool.js";
-import { UNKNOWN_CWD } from "../src/prohibited.js";
+import { UNKNOWN_CWD } from "../src/shell/index.js";
 import { buildPermissionProfile } from "../src/profile.js";
 import { SPAWN_TEST_TIMEOUT_MS, scratch } from "./support.js";
 

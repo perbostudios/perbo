@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { judgeCommand } from "../src/admission.js";
-import { UNKNOWN_CWD, inspectCommand, inspectCommandWithCwd } from "../src/prohibited.js";
+import { inspectCommand, inspectCommandWithCwd } from "../src/prohibited.js";
+import { UNKNOWN_CWD } from "../src/shell/index.js";
 import { scratchPath } from "../src/scratch.js";
 
 /**

@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { UNKNOWN_CWD, inspectCommandWithCwd } from "../src/prohibited.js";
+import { inspectCommandWithCwd } from "../src/prohibited.js";
+import { UNKNOWN_CWD } from "../src/shell/index.js";
 
 /**
  * An option a wrapper's table does not know is an option, not a missing

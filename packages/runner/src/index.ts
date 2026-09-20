@@ -27,6 +27,12 @@ export * from "./resume.js";
 export * from "./seal.js";
 export * from "./spec-commit.js";
 export {
+  UNKNOWN_CWD,
+  expandableHeredocBodies,
+  type CommandSegment,
+  type WorktreeScope,
+} from "./shell/index.js";
+export {
   TRANSPORT_RETRY_DELAY_MS,
   providerReset,
   resetInText,

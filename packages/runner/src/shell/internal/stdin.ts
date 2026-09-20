@@ -120,8 +120,8 @@ export function shellFromStdin(
         ? unreadable("a here-string cannot be read — it is built at run time")
         : { findings: [], script: [source.word.value], accounted: true };
     // A file: its contents are not read here, which is what `accounted: false`
-    // says — the segment falls through to the patterns kept at the bottom of
-    // this file, as `sh script.sh` does.
+    // says — the segment falls through to `LEGACY_RULES` in `line.ts`, as
+    // `sh script.sh` does.
     case "file":
       return { findings: [], script: [], accounted: false };
     case "pipe": {
