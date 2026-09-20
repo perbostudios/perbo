@@ -67,20 +67,19 @@ const MAX_DIFF_BYTES = 32 * 1024 * 1024;
 const CALL = { timeoutMs: LOCAL_TIMEOUT_MS, maxOutputBytes: MAX_DIFF_BYTES } as const;
 
 /**
- * What git said, whole.
+ * Refuse an answer only part of which arrived.
  *
  * Past the ceiling only the tail is kept, and the flag is the only thing that
  * says so: a diff cut that way is still a valid-looking diff, and a fixture
  * prepared from one pins a `change.diff` that is not the change the reviewer is
  * scored on. So the size is the answer here rather than the bytes that fit.
  */
-function whole(result: RunResult, fixtureId: string, what: string): RunResult {
+function refuseCut(result: RunResult, fixtureId: string, what: string): void {
   if (result.truncated) {
     throw new Error(
       `${fixtureId}: the ${what} is larger than ${MAX_DIFF_BYTES} bytes and only part of it arrived`,
     );
   }
-  return result;
 }
 
 /**
@@ -154,14 +153,11 @@ export async function prepareFixture(args: {
   if (diff.code !== 0) {
     throw new Error(`${args.fixture.fixture.id}: could not diff the pinned commits`);
   }
-  whole(diff, args.fixture.fixture.id, "diff between the pinned commits");
+  refuseCut(diff, args.fixture.fixture.id, "diff between the pinned commits");
   writeFileSync(diffPath, diff.stdout);
 
-  const names = whole(
-    await git.run(repo, ["diff", "--name-only", range], CALL),
-    args.fixture.fixture.id,
-    "list of files changed between the pinned commits",
-  );
+  const names = await git.run(repo, ["diff", "--name-only", range], CALL);
+  refuseCut(names, args.fixture.fixture.id, "list of files changed between the pinned commits");
 
   return {
     fixture_id: args.fixture.fixture.id,
