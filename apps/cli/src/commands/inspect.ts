@@ -6,7 +6,6 @@ import {
   CheckResultsFileSchema,
   EXIT_CODES,
   NodeReviewsSchema,
-  QUEUE_HOLDING_STATES,
   ReviewArtifactSchema,
   RunBundleSchema,
   activeVerdicts,
@@ -16,7 +15,6 @@ import {
   planNodes,
   planSizeCounts,
   pullRequestAttribution,
-  queueOrder,
   sizeEstimate,
   ticketSourceLabel,
   wholeChangeChecks,
@@ -41,6 +39,7 @@ import {
   type TicketSource,
 } from "@perbo/contracts";
 import { BundleStore, parseDeclines, runNumbers, type Decline } from "@perbo/runner";
+import { QUEUE_HOLDING_STATES, queueOrder } from "../scheduling.js";
 import { UsageError } from "../usage-error.js";
 import {
   BASE_SOURCE_LABEL,

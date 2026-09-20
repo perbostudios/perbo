@@ -87,7 +87,6 @@ const PENDING = [
   "packages/contracts/test/plan.test.ts",
   "packages/contracts/test/review.test.ts",
   "packages/contracts/test/risk.test.ts",
-  "packages/contracts/test/scheduling.test.ts",
   "packages/contracts/test/secrets.test.ts",
   "packages/contracts/test/size.test.ts",
   "packages/contracts/test/spec-files.test.ts",

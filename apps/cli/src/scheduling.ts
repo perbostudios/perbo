@@ -1,6 +1,11 @@
-import { matchesAny } from "./paths.js";
-import type { Scope } from "./plan.js";
-import { TICKET_PRIORITIES, type Ticket, type TicketState, type Wait } from "./ticket.js";
+import {
+  TICKET_PRIORITIES,
+  matchesAny,
+  type Scope,
+  type Ticket,
+  type TicketState,
+  type Wait,
+} from "@perbo/contracts";
 
 /**
  * The queue's decisions (SCP-008 criterion 5, SCP-227): which admitted ticket

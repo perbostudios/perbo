@@ -7,7 +7,6 @@ export * from "./approach.js";
 export * from "./graph-edit.js";
 export * from "./size.js";
 export * from "./ticket.js";
-export * from "./scheduling.js";
 export * from "./changeset.js";
 export * from "./check.js";
 export * from "./context.js";
