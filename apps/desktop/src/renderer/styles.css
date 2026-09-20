@@ -40,7 +40,10 @@ h3 {
 p {
   line-height: 1.6;
 }
-code,
+code {
+  font-family: var(--mono);
+  font-size: calc(12px * var(--text-scale));
+}
 /* The surfaces the browser draws for us still belong to the design: a page
    that themes its own elements and leaves the selection, the caret and the
    scrollbars at their defaults is a page assembled rather than built. */
@@ -1337,6 +1340,26 @@ textarea {
   border-style: dashed;
   background: transparent;
   color: var(--muted);
+}
+/* What the scope does not cover, on the page that freezes it. Advice, so it
+   reads as a line of the contract rather than as an alarm across it: one rule
+   above it, the same ink as its neighbours, and no colour doing the arguing. */
+.scope-outside {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.5;
+}
+.scope-outside > span {
+  flex: 1;
+}
+.scope-outside .text-button {
+  flex: none;
+  white-space: nowrap;
 }
 .scope-message {
   display: flex;
@@ -4832,6 +4855,12 @@ kbd {
   padding: 10px 16px 12px;
   border-top: 1.5px solid var(--line);
   background: var(--paper);
+  /* `.approve-actions` pushes itself to the end of the Graph's own footer row
+     with `margin-left: auto`, which here — as the last child of a column —
+     would push this bar off to the right at half the pane's width. It is the
+     footer rather than an item in one, so it spans. */
+  margin-left: 0;
+  width: 100%;
 }
 .pane-confirm .small {
   margin-right: auto;

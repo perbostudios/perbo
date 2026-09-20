@@ -1019,6 +1019,45 @@ export class DesktopService {
   }
 
   /**
+   * What a compiled contract's scope does not cover, for the page that freezes
+   * it.
+   *
+   * The same derivation {@link impactView} makes of a draft, asked of the
+   * contract instead: its own allowed paths, and the spec the ticket records
+   * having been drafted from where there is one. Read from the ticket rather
+   * than from a planning session, because the contract page is reached from a
+   * ticket — one the CLI admitted has no session to ask, and a person
+   * approving it is making exactly the same decision.
+   *
+   * The spec is read from the path the ticket recorded, and a spec that has
+   * since gone leaves the reading to the scope alone rather than failing: a
+   * warning is advice, and advice that cannot be given is not an error on the
+   * page that approves.
+   */
+  private async contractImpact(repoId: string, key: string): Promise<ImpactView> {
+    const repo = this.repository(repoId);
+    const { contract } = this.readContract(repo, key);
+    const ticket = (await this.list(repo)).tickets.find((entry) => entry.key === key);
+    const tracked = (await this.trackedFiles(repo)).filter((path) => !isNeverReadPath(path));
+    let spec: string | null = null;
+    const at = ticket?.admission?.spec?.path ?? null;
+    if (at !== null) {
+      try {
+        spec = readSpecText(this.safePath(repo, ...at.split("/"))).markdown;
+      } catch {
+        spec = null;
+      }
+    }
+    const report = impactReport({
+      scope: contract.scope.paths_allowed,
+      tracked,
+      spec,
+      index: await this.symbolIndex(repo),
+    });
+    return { ...report, readAt: new Date().toISOString() };
+  }
+
+  /**
    * The interview's argv, built from the registered repository and this
    * planning's own records and from nothing a renderer sent (ADR-0023 §4).
    *
@@ -1357,6 +1396,12 @@ export class DesktopService {
       const session = this.editing.read(id);
       if (session.key === null) return;
       const repoId = this.interviews.get(id)?.repoId ?? session.repoId;
+      // An edit can divide a plan that was not divided, or put a divided one
+      // back together, and the rail is drawn where no contract can be read —
+      // it asks this count instead. Settling a job writes it and so does a
+      // contract re-read; an edit reaches neither, so a plan the interview
+      // split would have a graph that the rail never offered a way into.
+      this.editing.countNodes(id, planNodes(this.readContract(this.repository(repoId), session.key).contract).length);
       this.changed(true, { kind: "records", repoId, key: session.key });
     } catch {
       // A session that has gone has no plan for anything to be drawing.
@@ -2127,8 +2172,14 @@ export class DesktopService {
       // exception: it is the repository's, not this ticket's, and D-105 has
       // the guard read it again when a run starts, so it binds an approved
       // ticket and is allowed to be written for one.
+      //
+      // Either way on the list, which is what `always` being set at all means:
+      // true adds the path and false takes back what this draft added, and a
+      // rule that admitted only the adding would let a person put a path on
+      // the repository's list from an approved ticket and never take it off.
+      // Null is the ticket's own scope, and that is what the freeze holds.
       const session = this.editing.read(request.id);
-      if (session.key !== null && request.always !== true) {
+      if (session.key !== null && request.always === null) {
         const repo = this.repository(session.repoId);
         const ticket = (await this.list(repo)).tickets.find((entry) => entry.key === session.key);
         if (ticket?.approved_at)
@@ -2219,6 +2270,8 @@ export class DesktopService {
     }
     if (request.kind === "specRead") return this.specView(request.id);
     if (request.kind === "impactRead") return this.impactView(request.id);
+    if (request.kind === "impactContract")
+      return this.contractImpact(request.repoId, request.key);
     if (request.kind === "usage") return this.usage();
     if (request.kind === "cancel") {
       const entry = this.active.get(request.jobId);

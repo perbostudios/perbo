@@ -23,7 +23,8 @@ import type { Route } from "../shell/App.js";
 
 /**
  * The Graph pane (D-100, D-101, SCP-316): the plan's execution graph, the size
- * derived from it, and the one approval at the end of it.
+ * derived from it, and the confirmation at the end of it, which leads to the
+ * contract where the one approval is given.
  *
  * **The pane writes nothing.** Every change is one `GraphEdit` handed to the
  * host, which runs `perbo edit --graph-edit` — the same command the interview

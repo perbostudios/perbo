@@ -2294,6 +2294,53 @@ describe("the explorer's marks through the host", () => {
     expect(detail.contract.scope.paths_allowed).toEqual(["src/**", "test/**"]);
   });
 
+  // Approval freezes the scope, and the freeze is the CLI's: `perbo edit`
+  // refuses every state but plan_review. Nothing on the mark path asks it, so
+  // without this guard a mark on an approved ticket would be taken, written to
+  // the draft, and never compiled in — a mark the person goes on believing in.
+  // The standing list is the exception, because it is the repository's rather
+  // than this ticket's and the write guard reads it again when a run starts
+  // (D-105); it is the exception in both directions, or a path could be put on
+  // it from an approved ticket and never taken off.
+  it("freezes an approved ticket's own scope, and leaves the repository's list writable", async () => {
+    const { service, repo } = fixture();
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    const opened = await service.request({
+      kind: "editingOpen",
+      target: { kind: "ticket", repoId: registered.id, key: "PRB-1" },
+    });
+    // Approved on disk, which is what the guard reads, rather than by running
+    // the loop for it.
+    const at = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as Record<string, unknown>;
+    writeFileSync(at, JSON.stringify({ ...ticket, approved_at: new Date().toISOString() }));
+
+    const mark = (always: boolean | null) =>
+      service.request({
+        kind: "explorerMark",
+        id: opened.id,
+        revision: opened.revision,
+        path: "src/generated/",
+        mark: "prohibited",
+        always,
+      });
+    // This ticket's own scope: refused, and the reason says what to do.
+    await expect(mark(null)).rejects.toThrow(/approved, so its scope is frozen/);
+    // The repository's list: taken, onto it and back off it.
+    const added = await mark(true);
+    expect(added.form.draft.prohibited).toContain("src/generated/**");
+    const removed = await service.request({
+      kind: "explorerMark",
+      id: opened.id,
+      revision: added.revision,
+      path: "src/generated/",
+      mark: null,
+      always: false,
+    });
+    expect(removed.form.draft.prohibited).not.toContain("src/generated/**");
+  });
+
   it("writes the standing list beside the repository's other configuration, and undo removes it", async () => {
     const { service, repo } = fixture();
     mkdirSync(join(repo, ".perbo"), { recursive: true });

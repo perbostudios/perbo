@@ -1629,6 +1629,29 @@ function answerSampleTurn(id: string, text: string): void {
         "flagged   1 issue-authored attempt — read as data, not followed",
       edit: null,
     });
+    // The turn is over, and saying so is what takes "Working…" off the dock.
+    // A branch that returned without it left the sample saying it was working
+    // for ever, which is the one thing this pane must never do.
+    sampleWorking.delete(id);
+    askingChanged(id);
+    return;
+  }
+  // A tool that was refused. The dock keeps these where it drops the ones that
+  // worked, and shows the reason without asking, because that is the thing to
+  // act on — a rule with no way to reach its refused arm is a rule nothing can
+  // check.
+  if (/\brefuse it\b/i.test(text)) {
+    converse(id, {
+      kind: "tool",
+      tool: "edit_plan",
+      ok: false,
+      detail:
+        "node_404 is not in this plan. read_plan reads the nodes it has, and an edge may only " +
+        "name two of them.",
+      edit: null,
+    });
+    sampleWorking.delete(id);
+    askingChanged(id);
     return;
   }
   if (/\btake it back\b/i.test(text) && key !== null) {
@@ -1652,6 +1675,8 @@ function answerSampleTurn(id: string, text: string): void {
         },
       });
       emit({ kind: "records", repoId: ticketRow(key).repoId, key });
+      sampleWorking.delete(id);
+      askingChanged(id);
       return;
     }
   }
@@ -1758,10 +1783,13 @@ async function previewRequest<T extends Request>(request: T, owner?: EditingOwne
       case "explorerMark": {
         // As on the real host: an approved contract's scope is frozen, and a
         // mark against one could never be compiled in. The standing list is
-        // the repository's rather than this ticket's, so it stays writable.
+        // the repository's rather than this ticket's, so it stays writable —
+        // either way on it, which is what `always` being set at all means:
+        // true adds the path and false takes back what this draft added. Null
+        // is the ticket's own scope, and that is what the freeze holds.
         const marking = editing.read(request.id);
         const held = marking.key === null ? undefined : snapshot.tasks.find((entry) => entry.ticket.key === marking.key);
-        if (held?.ticket.approved_at && request.always !== true)
+        if (held?.ticket.approved_at && request.always === null)
           throw new Error(
             "This contract is approved, so its scope is frozen. Start over from the spec to plan it again.",
           );
@@ -1852,6 +1880,31 @@ async function previewRequest<T extends Request>(request: T, owner?: EditingOwne
         const markdown = session.specSlug === null ? null : (specFiles()[session.specSlug] ?? null);
         result = {
           ...impactReport({ scope: session.form.draft.paths, tracked, spec: markdown, index }),
+          readAt: new Date().toISOString(),
+        };
+        break;
+      }
+      // The same reading, of a compiled contract's own scope. Answered from the
+      // ticket rather than from a planning session, as the host answers it:
+      // the contract page is reached from a ticket, and one the CLI admitted
+      // never had a session.
+      case "impactContract": {
+        const tracked = sampleFiles(request.repoId).filter((path) => !isNeverReadPath(path));
+        const index = SAMPLE_INDEX[request.repoId];
+        if (index === undefined) throw new Error("This sample repository is no longer connected.");
+        const contract = plans.get(request.key);
+        if (contract === undefined) throw new Error("That contract is no longer here.");
+        // The spec the ticket was drafted from, as the host reads it off the
+        // ticket's admission record; here, off the planning that drafted it.
+        const slug =
+          editingRecords().find((record) => record.key === request.key)?.specSlug ?? null;
+        result = {
+          ...impactReport({
+            scope: contract.scope.paths_allowed,
+            tracked,
+            spec: slug === null ? null : (specFiles()[slug] ?? null),
+            index,
+          }),
           readAt: new Date().toISOString(),
         };
         break;

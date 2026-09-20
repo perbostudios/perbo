@@ -783,6 +783,15 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    */
   z.strictObject({ kind: z.literal("impactRead"), id: identifier }),
   /**
+   * The same reading, asked of a compiled contract rather than of a draft.
+   *
+   * Impact is only ever actionable before approval — a scope frozen is a
+   * scope no warning can move — so the count belongs on the page where
+   * approving happens, and that page is reached from a ticket, not from a
+   * planning session. A ticket the CLI admitted never had one at all.
+   */
+  z.strictObject({ kind: z.literal("impactContract"), repoId: identifier, key }),
+  /**
    * Write the spec to `specs/<slug>/spec.md`, creating the folders the first
    * time. The session names itself and its repository; the path is the host's
    * to derive, as every other repository path is.
@@ -1243,6 +1252,7 @@ export interface ReplyMap {
   specSave: SpecSaveReply;
   symbolIndex: SymbolIndexView;
   impactRead: ImpactView;
+  impactContract: ImpactView;
   openHelp: null;
   chooseRepository: Repository | null;
   forgetRepository: null;

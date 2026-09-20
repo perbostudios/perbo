@@ -424,6 +424,105 @@ describe("generate_plan (SCP-311 criterion 2)", () => {
     expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual(["PRB-1"]);
   });
 
+  // The shape the tool's own description recommends — independent groups go
+  // separately, up to MAX_QUESTION_GROUPS — and the one a counter of turns gets
+  // wrong. The person is put one group at a time, so answering the first leaves
+  // the second on screen; a plan drafted then is drafted around a guess at it.
+  it("holds the draft until every group of a multi-group asking is answered", async () => {
+    const twoGroups: ScriptStep = {
+      kind: "call",
+      tool: "ask_options",
+      input: {
+        groups: [
+          {
+            title: "Ordering",
+            parts: [
+              {
+                question: "How are a day's events ordered?",
+                options: [
+                  { label: "Timed first", detail: null, recommended: true },
+                  { label: "As written", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+          {
+            title: "Filler days",
+            parts: [
+              {
+                question: "What fills the days around the month?",
+                options: [
+                  { label: "Left blank", detail: null, recommended: true },
+                  { label: "Greyed in", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const repo = repository();
+    const { sdk } = await interview(
+      repo,
+      // Their answer to the first group, then a draft that must still be
+      // refused, then their answer to the second, then the draft that lands.
+      [writeSpec(), twoGroups, { kind: "await" }, generate, { kind: "await" }, generate],
+      { turns: ["let us write the spec", "Timed first", "Left blank"] },
+    );
+    const drafts = sdk.calls.filter((call) => call.tool.endsWith("generate_plan"));
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0]?.isError, "drafted with a group still on screen").toBe(true);
+    expect(drafts[0]?.result).toContain("unanswered");
+    expect(drafts[1]?.isError).toBe(false);
+    expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual(["PRB-1"]);
+  });
+
+  // The asking ends whole when they say something of their own, exactly as the
+  // planning record ends it (D-117), so the guard cannot deadlock a session
+  // whose questions the person simply talked past.
+  it("lets the draft through once they answer with something of their own", async () => {
+    const twoGroups: ScriptStep = {
+      kind: "call",
+      tool: "ask_options",
+      input: {
+        groups: [
+          {
+            title: null,
+            parts: [
+              {
+                question: "How are a day's events ordered?",
+                options: [
+                  { label: "Timed first", detail: null, recommended: true },
+                  { label: "As written", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+          {
+            title: null,
+            parts: [
+              {
+                question: "What fills the days around the month?",
+                options: [
+                  { label: "Left blank", detail: null, recommended: true },
+                  { label: "Greyed in", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const repo = repository();
+    const { sdk } = await interview(
+      repo,
+      [writeSpec(), twoGroups, { kind: "await" }, generate],
+      { turns: ["let us write the spec", "forget the ordering, just build it"] },
+    );
+    expect(sdk.calls.at(-1)?.isError).toBe(false);
+    expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual(["PRB-1"]);
+  });
+
   it("refuses a second draft from a spec nothing has changed since the first", async () => {
     const repo = repository();
     const { sdk } = await interview(repo, [writeSpec(), generate, generate]);
@@ -561,9 +660,20 @@ describe("edit_plan (SCP-311 criterion 3)", () => {
     for (const step of NEXT_STEPS) expect(applied, step).not.toContain(step);
     expect(applied).not.toContain("perbo approve");
 
+    // The refusal half is not judged by the same loop, because no refusal can
+    // fail it: `perbo edit` refuses by throwing, and a thrown message is the
+    // whole of what the interview relays — whatever the command wrote to its
+    // streams before it is dropped — so no refusal it issues carries a block,
+    // and a loop over NEXT_STEPS here would pass against any relay at all.
+    // What holds of a refused edit is that it reaches the session as an error
+    // in the command's own words and nothing besides, which is also what would
+    // catch a command to type if a refusal ever came to carry one.
     const refused = sdk.calls[3]?.result ?? "";
     expect(sdk.calls[3]?.isError).toBe(true);
-    for (const step of NEXT_STEPS) expect(refused, step).not.toContain(step);
+    expect(refused.trim()).toBe("this plan has no edge node_1 -> node_404");
+    // And a refused edit is not a recorded one: the edge that did come out is
+    // still the only edit this plan has.
+    expect(readDraftSnapshot(storeDir(repo, null), "PRB-1")?.edits ?? []).toHaveLength(1);
   });
 
   it("says a plan is approved rather than that none was drafted", async () => {

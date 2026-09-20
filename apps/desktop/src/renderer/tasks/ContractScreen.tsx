@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button, Dialog, Notice } from "@perbo/ui";
 import { FactList, Rename, SectionLabel, WizardHeader } from "../Screen.js";
 import { InkIcon } from "../InkIcon.js";
-import { errorMessage, useAction } from "../data.js";
+import { bridge, errorMessage, useAction } from "../data.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey } from "./ticket-workspace.js";
 import { planNodes } from "@perbo/contracts/plan";
@@ -37,6 +38,23 @@ export function ContractScreen(context: TaskContext) {
       .then(() => show("loop"))
       .catch(() => undefined);
   };
+  // What this scope does not cover, asked here because here is where it can
+  // still be acted on: a scope frozen is a scope no warning can move. It is
+  // advice and never a gate — somebody who has read it and is content approves
+  // straight through, and a warning that held the button would be a warning
+  // people learn to click past.
+  const impact = useQuery({
+    queryKey: ["impact-contract", repoId, ticket.key, detail.digest],
+    queryFn: () => bridge.request({ kind: "impactContract", repoId, key: ticket.key }),
+    networkMode: "always",
+    enabled: ticket.approved_at === null,
+    // Keyed by the contract's own digest, so a re-compiled contract is a new
+    // question and an unchanged one is never asked twice.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const outside = impact.data?.warnings.length ?? 0;
   useShortcut("approve", busy || action.isPending || pending !== null ? null : start);
   useShortcut("rename", () => setRenaming(true));
   return (
@@ -150,6 +168,23 @@ export function ContractScreen(context: TaskContext) {
           >
             Browse the files this scope reaches
           </button>
+          {/* Only where there is something to say. A scope that covers what the
+              work reaches is the ordinary case, and a line reporting nothing is
+              a line in the way of the one that matters. */}
+          {ticket.approved_at === null && outside > 0 && (
+            <p className="scope-outside">
+              <InkIcon name="growth-chart" size={18} />
+              <span>
+                {outside} {outside === 1 ? "file" : "files"} outside this scope{" "}
+                {outside === 1 ? "imports" : "import"} what it changes, or sit in a class worth
+                reading — a migration, a manifest, configuration, CI. Widening the scope is
+                free now and a new contract later.
+              </span>
+              <button type="button" className="text-button small" onClick={() => show("explorer")}>
+                Read them
+              </button>
+            </p>
+          )}
           <div className="scope-message">
             <InkIcon name="locked" size={22} />
             <span>

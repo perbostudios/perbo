@@ -1,4 +1,12 @@
 import { planNodes } from "@perbo/contracts/plan";
+// The rule for what counts as a group's answer lives in the protocol, because
+// the interview counts on it too: it refuses to draft while a group it asked
+// is unanswered, and a second copy of the rule would let the two disagree.
+import {
+  LEAVE_IT_TO_THE_INTERVIEW,
+  PART_LETTERS,
+  answersGroup,
+} from "@perbo/contracts/interview-protocol";
 import { standingGlob, type StandingProhibitedEntry } from "@perbo/contracts/standing";
 import {
   DraftSchema,
@@ -287,6 +295,21 @@ export class ContractEditing {
       }
       const answered = asking.answered + 1;
       session.asking = answered >= line.groups.length ? null : { entry: asking.entry, answered };
+    });
+  }
+
+  /**
+   * Write down how many nodes this planning's plan has.
+   *
+   * The rail is drawn where a contract cannot be read, so it asks this rather
+   * than the plan itself ({@link ../renderer/planning/panes.ts}). Recorded
+   * wherever the plan moves, which is a job settling, a contract being read
+   * again, and an edit — an edit divides a plan or puts one back together just
+   * as a draft does.
+   */
+  countNodes(id: string, nodes: number): void {
+    this.update(id, (session) => {
+      session.nodes = nodes;
     });
   }
 
@@ -644,43 +667,7 @@ export class ContractEditing {
   }
 }
 
-/**
- * The answer every part of a group carries whatever the session offered, so a
- * person with no view on a question can leave it to the interview rather than
- * picking one of its options to get past it. The dock offers it and the host
- * reads it back, so it is declared once here.
- */
-export const LEAVE_IT_TO_THE_INTERVIEW = "Let the interview decide";
-
-/** The letters a group's parts are read and answered under: 1a, 1b, 1c. */
-export const PART_LETTERS = "abcdefghijklmnopqrstuvwxyz";
-
-/**
- * Whether one turn is this group's answer, in the shape the dock sends: the
- * option's own words for a single part, and the parts lettered as they were
- * read for more than one.
- *
- * Read back rather than flagged on the way in, so a person who types the
- * wording out themselves is answering as much as one who picked it, and so
- * nothing has to be threaded through the turn the host writes down.
- */
-export function answersGroup(
-  group: Extract<InterviewEntry["line"], { kind: "asked" }>["groups"][number],
-  text: string,
-): boolean {
-  const offered = (part: (typeof group.parts)[number]): string[] => [
-    ...part.options.map((option) => option.label),
-    LEAVE_IT_TO_THE_INTERVIEW,
-  ];
-  if (group.parts.length === 1) return offered(group.parts[0]!).includes(text.trim());
-  const lines = text.trim().split("\n");
-  if (lines.length !== group.parts.length) return false;
-  return group.parts.every((part, index) =>
-    offered(part).some(
-      (label) => lines[index]!.trim() === `${PART_LETTERS[index] ?? index + 1}) ${label}`,
-    ),
-  );
-}
+export { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS, answersGroup };
 
 /** Which session a planning's interview runs on, from the models it drafts with. */
 export function interviewProviderFor(models: { draftingProvider: string }): "claude" | "codex" {

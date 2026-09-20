@@ -41,6 +41,12 @@ const introduces = (line: string): boolean =>
  * not before it, and they are the only report of where D-103's pages landed.
  */
 export function withoutNextStep(text: string): string {
+  // Applied to a refusal as well as to a report that worked, though no refusal
+  // the commands can currently produce carries one of these blocks: a refusal
+  // throws, and what the interview relays is the error's own sentence. It is
+  // put on both paths because the two are one seam — a command's text reaching
+  // a session whose client may be the app — and a refusal that later closes
+  // with a next step would otherwise arrive as an instruction to leave it.
   const lines = text.split("\n");
   const kept: string[] = [];
   for (let at = 0; at < lines.length; at += 1) {

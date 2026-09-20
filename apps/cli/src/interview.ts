@@ -14,6 +14,7 @@ import {
 import {
   InterviewQuestionGroupSchema,
   MAX_QUESTION_GROUPS,
+  answersGroup,
   decodeInterviewTurn,
   encodeInterviewEvent,
   type InterviewEvent,
@@ -1869,9 +1870,14 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     say: (line) => input.streams.stderr(line),
   });
 
-  // Groups put to the person and not yet answered. Their answer is their next
-  // turn, so a turn arriving is what clears this.
-  let outstanding = 0;
+  // The groups put to the person and not yet answered, in the order they are
+  // put. Moved on by the same rule the planning record uses (D-117): a turn
+  // that answers the group in front of them drops that one, and a turn that
+  // does not — they said something of their own — ends the asking whole, which
+  // is what the dock does with the card. Counting turns instead would let the
+  // two disagree on every asking that carries more than one group, and a plan
+  // would be drafted around a question still on screen.
+  let pending: InterviewQuestionGroup[] = [];
   const context: InterviewContext = {
     cwd: input.cwd,
     repo: args.repo,
@@ -1881,7 +1887,7 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     spec,
     specWritten: permission.specWritten,
     specTaken: permission.specTaken,
-    asking: () => outstanding,
+    asking: () => pending.length,
     model: input.model,
   };
 
@@ -1904,7 +1910,7 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
       // The questions are their own line: the card says a tool ran, and what
       // the person answers is put to them beside it.
       if (result.asks !== undefined && result.asks.length > 0) {
-        outstanding += result.asks.length;
+        pending = [...pending, ...result.asks];
         emit({ type: "asked", groups: [...result.asks] });
       }
       return result;
@@ -1951,8 +1957,9 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     orientation: interviewOrientation({ repositoryRoot, spec, adr }),
     tools,
     decide: (tool, toolInput, where) => permission.canUseTool(tool, toolInput, where),
-    turns: answering(turnsAsText(input), () => {
-      outstanding = 0;
+    turns: answering(turnsAsText(input), (turn) => {
+      pending =
+        pending.length > 0 && answersGroup(pending[0]!, turn) ? pending.slice(1) : [];
     }),
     sessionId: () => sessionId,
     stderr: (data) => input.streams.stderr(data),
@@ -2146,19 +2153,20 @@ function isSymlink(path: string): boolean {
 
 /** The person's turns, as text, one line of stdin each. */
 /**
- * The person's turns, with each one counted as their answer.
+ * The person's turns, each read against the group it may be answering.
  *
  * A group is put to them and nothing waits for it; what comes back is an
- * ordinary turn, whether they picked an option or said something else entirely
- * (D-117). So a turn arriving is the answer, and it is what lets the session
- * draft again.
+ * ordinary turn, and only its own words say whether it answered the question
+ * or changed the subject (D-117). `answered` is given the turn so it can tell
+ * the two apart, and runs before the turn is handed on, so a tool called in
+ * the turn it releases sees it released.
  */
 async function* answering(
   turns: AsyncGenerator<string>,
-  answered: () => void,
+  answered: (turn: string) => void,
 ): AsyncGenerator<string> {
   for await (const turn of turns) {
-    answered();
+    answered(turn);
     yield turn;
   }
 }

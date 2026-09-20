@@ -292,6 +292,10 @@ describe("perbo edit", () => {
 
   it("takes the last prohibition back when the edit says there are none", async () => {
     const { repo, dir } = admitted("edit-unprohibit");
+    // What the admission allowed. Neither edit below names a path, and emptying
+    // the prohibitions is not licence to move the scope they sit inside.
+    const allowed = readContract(dir, "PRB-1").scope.paths_allowed;
+    expect(allowed).toEqual(["packages/search/**"]);
     const prohibit = await runEditCommand({
       argv: ["PRB-1", "--repo", repo, "--prohibit", "specs/**"],
       streams: capture(),
@@ -314,7 +318,7 @@ describe("perbo edit", () => {
     expect(code).toBe(0);
     const after = readContract(dir, "PRB-1").scope;
     expect(after.paths_prohibited).toEqual([]);
-    expect(after.paths_allowed).toEqual(readContract(dir, "PRB-1").scope.paths_allowed);
+    expect(after.paths_allowed).toEqual(allowed);
   });
 
   it("leaves the prohibited list alone when an edit names neither prohibitions nor none", async () => {

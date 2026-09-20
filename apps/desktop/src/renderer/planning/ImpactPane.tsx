@@ -44,6 +44,15 @@ const REASON_LABELS: Record<ImpactReasonKind, string> = {
   ci_infra_policy: "CI, infra or policy",
 };
 
+/**
+ * The plans whose impact has been asked for on its own, as `planning:ticket`.
+ *
+ * Module-scope on purpose: the fact being remembered is about the plan, not
+ * about one mounting of this pane, and the pane is unmounted every time the
+ * person looks at another one.
+ */
+const IMPACT_ASKED = new Set<string>();
+
 export function ImpactPane({ workspace, navigate, editor }: PageProps & { editor: Editor }) {
   const client = useQueryClient();
   const [failure, setFailure] = useState<string | null>(null);
@@ -68,13 +77,22 @@ export function ImpactPane({ workspace, navigate, editor }: PageProps & { editor
   });
   const view: ImpactView | undefined = impact.data;
 
-  // The plan arriving is the ask. Keyed on the plan's own key so it fires once
-  // when the draft first has one, and not again on a re-render or a re-read;
-  // `staleTime: Infinity` then holds that answer until the person asks again.
+  // The plan arriving is the ask, and it is asked once for that plan.
+  //
+  // Remembered outside the component because `useState` is per mount: leaving
+  // the pane and coming back mounts a new one, and React Query drops a cached
+  // answer after its `gcTime`, so a pane that decided from its own state would
+  // run a whole `perbo index` again every time the person looked — which is
+  // the standing cost the button exists to keep them in charge of. What is
+  // remembered is the plan, so a draft replaced by a different one is a
+  // different question and is asked again.
   const key = session?.key ?? null;
+  const once = session === null || key === null ? null : `${session.id}:${key}`;
   useEffect(() => {
-    if (key !== null) setAsked(true);
-  }, [key]);
+    if (once === null || IMPACT_ASKED.has(once)) return;
+    IMPACT_ASKED.add(once);
+    setAsked(true);
+  }, [once]);
 
   /** The draft's own mark, the one the Explorer makes, so the history can reverse it. */
   const toScope = useMutation({

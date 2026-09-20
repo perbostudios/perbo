@@ -2335,6 +2335,30 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     await waitFor(() => expect(composer().value).toBe("?!?!"));
   });
 
+  // The refused arm of the same rule. A call that worked is dropped for saying
+  // what the graph already says; one that was refused is said nowhere else —
+  // no `asked` follows a rejected call — so dropping it too would leave the
+  // dock on "Working…" and then nothing at all.
+  it("keeps a refused tool card, and shows its reason without asking", async () => {
+    const session = await planning();
+    location.hash = `planning/${session.id}/spec`;
+    mount();
+    await screen.findByLabelText("Message the interview");
+    fireEvent.change(composer(), { target: { value: "refuse it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    // Named for what it tried rather than what it did: it never happened.
+    expect(await within(dock()).findByText("Changing the plan")).toBeTruthy();
+    expect(within(dock()).getByText("refused by the edit path")).toBeTruthy();
+    // The reason is on the page, not behind the i: it is the thing to act on.
+    expect(within(dock()).getByText(/node_404 is not in this plan/)).toBeTruthy();
+    expect(
+      within(dock()).queryByRole("button", { name: /^What happened/ }),
+    ).toBeNull();
+    // And the turn ended, so the dock is not left saying it is working.
+    await waitFor(() => expect(within(dock()).queryByText("Working…")).toBeNull());
+  });
+
   it("takes a card away once a later edit puts its undo out of reach", async () => {
     const session = await planning();
     const current = await previewBridge.request({ kind: "editingRead", id: session.id });

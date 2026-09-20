@@ -673,6 +673,11 @@ describe("discarding a plan", () => {
  * `perbo edit` refuses every state but plan_review. Nothing on the mark path
  * asked, so a mark against an approved ticket was taken and could never be
  * compiled in.
+ *
+ * The standing list is the one exception, and it is the half that has to be
+ * shown as well: it is the repository's list rather than this ticket's, and
+ * D-105 has the guard read it again when a run starts, so it binds an approved
+ * ticket and is written from one.
  */
 describe("marking a path on an approved contract", () => {
   it("is refused, while the repository's own standing list stays writable", async () => {
@@ -693,5 +698,23 @@ describe("marking a path on an approved contract", () => {
         always: null,
       }),
     ).rejects.toThrow(/approved, so its scope is frozen/);
+
+    // The same path, on the repository's list rather than this contract's
+    // scope: taken, recorded in the draft's history with the rest, and on the
+    // list with the draft that wrote it, which is what lets it be taken off
+    // again. A refusal that reached here would leave a person unable to
+    // prohibit a path for the repository from any approved ticket.
+    const marked = await previewBridge.request({
+      kind: "explorerMark",
+      id: session.id,
+      revision: session.revision,
+      path: "packages/",
+      mark: "prohibited",
+      always: true,
+    });
+    expect(marked.history.at(-1)?.summary).toBe("Always prohibit packages/** in this repository");
+    expect(marked.form.draft.prohibited).toContain("packages/**");
+    const listing = await previewBridge.request({ kind: "explorerList", repoId: row.repoId });
+    expect(listing.standing.find((entry) => entry.path === "packages/**")?.draft).toBe(session.id);
   });
 });
