@@ -5,10 +5,7 @@ import {
   STANDING_PROHIBITED_KEY,
   readStandingProhibited,
 } from "@perbo/contracts";
-import type {
-  Ticket,
-} from "@perbo/contracts";
-import { heldRepository, isLive } from "../shared/jobs.js";
+import { heldRepository } from "../shared/jobs.js";
 import {
   DraftSchema,
   HELP_LINKS,
@@ -19,16 +16,14 @@ import type {
   Detail,
   Change,
   Job,
-  PowerState,
   Provider,
   ReplyMap,
   Repository,
   Request,
   Snapshot,
   TaskModels,
-  UsageReport,
 } from "../shared/protocol.js";
-import { redact, runProcess, startLineProcess } from "./process.js";
+import { runProcess, startLineProcess } from "./process.js";
 import { discoverModels } from "./model-catalog.js";
 import {
   ContractEditing,
@@ -47,6 +42,10 @@ import { graphView } from "./plan/graph.js";
 import { impactView } from "./plan/impact.js";
 import { InterviewHost } from "./interview/host.js";
 import { JobRunner } from "./jobs/runner.js";
+import { openLogin, probeProviders } from "./providers/status.js";
+import { usageReport } from "./providers/usage.js";
+import { PowerHold } from "./power.js";
+import { Notices } from "./notifications.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
@@ -83,18 +82,7 @@ import {
   specFolder,
   writeConfig,
 } from "./repository/config.js";
-import {
-  attemptsPath,
-} from "./repository/layout.js";
 import type { ProfileState, RegisteredRepository } from "./profile/store.js";
-import { runnerProgress } from "../shared/runner-progress.js";
-import {
-  currentMonth,
-  isEarlyStop,
-  ledgerFor,
-  readAttempts,
-  type StoredAttempt,
-} from "./records.js";
 import { codexUsage } from "./usage-probe.js";
 
 export interface HostIO {
@@ -110,10 +98,6 @@ export interface HostIO {
   /** Runs a fixed sign-in command in the person's own terminal; absent where the host has no terminal to open. */
   openTerminal?(command: readonly string[]): Promise<void>;
 }
-export const LOGIN_COMMANDS = {
-  claude: ["claude", "auth", "login"],
-  codex: ["codex", "login"],
-} as const;
 export interface ServiceOptions {
   dataDirectory: string;
   cliPath: string;
@@ -149,6 +133,8 @@ export class DesktopService {
   private readonly editing: ContractEditing;
   private readonly reads = new WorkspaceReads();
   private readonly jobs: JobRunner;
+  private readonly power: PowerHold;
+  private readonly notices: Notices;
   private readonly interviews: InterviewHost;
 
   /** The profile's own record, which every module mutating a preference is handed. */
@@ -180,6 +166,18 @@ export class DesktopService {
       execute: this.execute,
       liveJobs: () => this.liveJobs(),
     });
+    this.power = new PowerHold({
+      io: options.io,
+      settings: () => this.state.settings,
+      liveJobs: () => this.liveJobs(),
+      changes: this.changes,
+    });
+    this.notices = new Notices({
+      io: options.io,
+      settings: () => this.state.settings,
+      repositories: () => this.registry.all(),
+      tickets: { list: (repo) => this.tickets.list(repo) },
+    });
     this.jobs = new JobRunner({
       profile: this.profile,
       changes: this.changes,
@@ -189,9 +187,9 @@ export class DesktopService {
         started: (owner, job) => this.editing.started(owner, job),
         settled: (job) => this.editing.settled(job),
       },
-      liveChanged: () => this.updatePower(),
-      progressed: (job) => this.notifyStage(job),
-      settled: (job) => this.notifyOutcome(job),
+      liveChanged: () => this.power.update(),
+      progressed: (job) => this.notices.stage(job),
+      settled: (job) => this.notices.outcome(job),
     });
     this.interviews = new InterviewHost({
       editing: {
@@ -290,7 +288,7 @@ export class DesktopService {
         taskModels: this.state.taskModels,
         sequence: this.changes.sequence,
         archived: this.state.archived,
-        power: this.power,
+        power: this.power.state,
         repositoryErrors: Object.fromEntries(
           records.map((entry) => [entry.repository.id, entry.errors]),
         ),
@@ -302,75 +300,8 @@ export class DesktopService {
   async detail(repoId: string, key: string): Promise<Detail> {
     return this.tickets.detail(repoId, key);
   }
-  async providers(): Promise<Provider[]> {
-    const probe = async (id: "claude" | "codex"): Promise<Provider> => {
-      const base = {
-        id,
-        name: id === "claude" ? "Claude Code" : "Codex",
-        loginCommand: LOGIN_COMMANDS[id].join(" "),
-        roles:
-          id === "claude"
-            ? ["Execution", "Independent review", "Planning"]
-            : ["Execution", "Independent review", "Planning"],
-      };
-      try {
-        const result = await this.execute(
-          id,
-          id === "claude" ? ["auth", "status", "--json"] : ["login", "status"],
-          { cwd: this.options.dataDirectory, timeoutMs: 12_000 },
-        );
-        const logged =
-          id === "claude"
-            ? z
-                .object({
-                  loggedIn: z.boolean(),
-                  authMethod: z.string().optional(),
-                })
-                .safeParse(JSON.parse(result.stdout || "{}"))
-            : null;
-        const authenticated =
-          id === "claude"
-            ? logged?.success === true && logged.data.loggedIn
-            : result.code === 0;
-        const subscription =
-          id === "claude"
-            ? logged?.success === true &&
-              /oauth|subscription/i.test(logged.data.authMethod ?? "")
-            : /chatgpt/i.test(result.stdout + result.stderr);
-        return {
-          ...base,
-          installed: true,
-          authenticated,
-          detail: authenticated
-            ? subscription
-              ? "Signed in with your subscription"
-              : "Signed in · credential managed by the CLI"
-            : "Installed · sign in through your terminal, then refresh",
-        };
-      } catch {
-        return {
-          ...base,
-          installed: false,
-          authenticated: false,
-          detail: "CLI unavailable. Install it, sign in, then refresh.",
-        };
-      }
-    };
-    const providers = await Promise.all([probe("claude"), probe("codex")]);
-    return [
-      ...providers,
-      {
-        id: "anthropic",
-        name: "Anthropic API · optional",
-        installed: true,
-        authenticated: Boolean(process.env.ANTHROPIC_API_KEY),
-        detail: process.env.ANTHROPIC_API_KEY
-          ? "Environment credential available · metered API usage"
-          : "No ANTHROPIC_API_KEY in the app environment",
-        loginCommand: "",
-        roles: ["Independent review"],
-      },
-    ];
+  providers(): Promise<Provider[]> {
+    return probeProviders(this.execute, this.options.dataDirectory);
   }
   /** The jobs still tracked, in either lane. */
   private liveJobs(): Job[] {
@@ -447,15 +378,8 @@ export class DesktopService {
         this.repository(request.repoId),
       );
     if (request.kind === "providers") return this.providers();
-    if (request.kind === "login") {
-      const command = LOGIN_COMMANDS[request.provider];
-      if (!this.options.io.openTerminal)
-        throw new Error(
-          `Run ${command.join(" ")} in your terminal, then refresh the connection.`,
-        );
-      await this.options.io.openTerminal(command);
-      return null;
-    }
+    if (request.kind === "login")
+      return openLogin(this.options.io, request.provider);
     if (request.kind === "models") return discoverModels(request.provider);
     if (request.kind === "exportArchive") {
       if (request.repoId !== null) this.repository(request.repoId);
@@ -474,7 +398,7 @@ export class DesktopService {
       this.state.settings = request.settings;
       this.changes.preferences(this.state);
       this.options.io.applyTheme?.(request.settings.theme);
-      this.updatePower();
+      this.power.update();
       return request.settings;
     }
     if (request.kind === "specRead") return specView(this.planDeps(), request.id);
@@ -488,7 +412,15 @@ export class DesktopService {
         },
         request.id,
       );
-    if (request.kind === "usage") return this.usage();
+    if (request.kind === "usage")
+      return usageReport({
+        repositories: () => this.registry.all(),
+        lookup: (id) => this.repository(id),
+        tickets: this.tickets,
+        settings: () => this.state.settings,
+        providers: () => this.providers(),
+        probe: this.options.usageProbe ?? codexUsage,
+      });
     if (request.kind === "cancel") return this.jobs.cancel(request.jobId);
     const repo = this.repository(request.repoId);
     if (request.kind === "forgetRepository") return this.registry.forget(repo.id);
@@ -790,179 +722,9 @@ export class DesktopService {
       contract: (repo, key) => this.tickets.contract(repo, key),
     };
   }
-  /** The month's ledger from retained attempts, and each provider's own account of its plan (S6E). */
-  private async usage(): Promise<UsageReport> {
-    const records: { ticket: Ticket; attempts: StoredAttempt[] }[] = [];
-    const notes: string[] = [];
-    for (const repo of this.state.repositories) {
-      try {
-        this.repository(repo.id);
-        for (const ticket of (await this.tickets.list(repo)).tickets) {
-          const record = readAttempts(
-            attemptsPath(repo, ticket.ticket_id),
-          );
-          if (record.error)
-            notes.push(`${repo.name} · ${ticket.key}: ${record.error}`);
-          records.push({ ticket, attempts: record.attempts });
-        }
-      } catch (error) {
-        notes.push(`${repo.name}: ${redact(String(error))}`);
-      }
-    }
-    const settings = this.state.settings;
-    const roleOf = (
-      id: "claude-cli" | "codex-cli" | "anthropic",
-    ): string | null =>
-      [
-        settings.executorProvider === id && "default executor",
-        settings.reviewerProvider === id && "default reviewer",
-      ]
-        .filter(Boolean)
-        .join(" · ") || null;
-    const providers = await this.providers();
-    const signedIn = (id: Provider["id"]): boolean =>
-      providers.find((provider) => provider.id === id)?.authenticated ?? false;
-    const codex = signedIn("codex")
-      ? await (this.options.usageProbe ?? codexUsage)()
-      : {
-          plan: null,
-          windows: null,
-          detail: "Codex is not signed in on this machine.",
-        };
-    return {
-      readAt: new Date().toISOString(),
-      ledger: ledgerFor(records, currentMonth()),
-      providers: [
-        {
-          id: "claude",
-          name: "Claude Code",
-          role: roleOf("claude-cli"),
-          plan: null,
-          windows: null,
-          detail: signedIn("claude")
-            ? "Claude Code reports a limit only when a run meets one; there is no window to read without spending a turn."
-            : "Claude Code is not signed in on this machine.",
-        },
-        { id: "codex", name: "Codex", role: roleOf("codex-cli"), ...codex },
-        {
-          id: "anthropic",
-          name: "Anthropic API",
-          role: roleOf("anthropic"),
-          plan: null,
-          windows: null,
-          detail: signedIn("anthropic")
-            ? "Metered API usage; the API reports no plan window."
-            : "No API key in the app environment.",
-        },
-      ],
-      notes,
-    };
-  }
-  private power: PowerState = { holding: false, detail: null, since: null };
-  /** AFK mode (S6F): the machine is held awake only while a run or decision is live, and only as the settings allow. */
-  updatePower(): void {
-    const afk = this.state.settings.afk;
-    const running = this.liveJobs().find(
-      (job) => ["run", "decide"].includes(job.kind) && isLive(job),
-    );
-    const onBattery = this.options.io.onBattery?.() ?? false;
-    const hold = Boolean(
-      afk.holdSleep && running && !(afk.releaseOnBattery && onBattery),
-    );
-    const detail = hold
-      ? `Holding sleep now — ${running?.key ?? "a run"} is running.`
-      : running && afk.holdSleep
-        ? "Released on battery power."
-        : null;
-    if (hold === this.power.holding && detail === this.power.detail) return;
-    this.power = {
-      holding: hold,
-      detail,
-      since: hold
-        ? this.power.holding
-          ? this.power.since
-          : new Date().toISOString()
-        : null,
-    };
-    this.options.io.holdSleep?.(hold, afk.displaySleep);
-    this.changes.power(this.power);
-  }
   /** Called by the host when the machine moves between mains and battery. */
   powerChanged(): void {
-    this.updatePower();
-  }
-  private readonly stages = new Map<string, string>();
-  private notify(title: string, body: string): void {
-    this.options.io.notify(title, body, {
-      silent: !this.state.settings.notifySound,
-    });
-  }
-  private notifyStage(job: Job): void {
-    if (
-      !this.state.settings.notifyOn.stage ||
-      !["run", "decide"].includes(job.kind)
-    )
-      return;
-    const observed = runnerProgress(job.log);
-    if (!observed || this.stages.get(job.id) === observed.title) return;
-    this.stages.set(job.id, observed.title);
-    this.notify(
-      `${job.key ?? "Task"} · ${observed.title}`,
-      "The loop moved to a new stage.",
-    );
-  }
-  /** The four moments a person asked to be interrupted for, read from the recorded outcome rather than the process exit. */
-  private async notifyOutcome(job: Job): Promise<void> {
-    this.stages.delete(job.id);
-    const on = this.state.settings.notifyOn;
-    if (!["run", "decide"].includes(job.kind) || !job.key) return;
-    const repo = this.state.repositories.find(
-      (entry) => entry.id === job.repoId,
-    );
-    if (!repo) return;
-    let ticket: Ticket | undefined;
-    try {
-      ticket = (await this.tickets.list(repo)).tickets.find(
-        (entry) => entry.key === job.key,
-      );
-    } catch {
-      return;
-    }
-    if (!ticket) return;
-    const reason = readAttempts(
-      attemptsPath(repo, ticket.ticket_id),
-    ).attempts.at(-1)?.termination?.reason;
-    if (on.ceiling && isEarlyStop(reason))
-      this.notify(
-        reason === "stalled"
-          ? `${ticket.key} stopped: the agent went quiet`
-          : `${ticket.key} stopped at a ceiling`,
-        reason === "stalled"
-          ? "No tool activity for the stall window, so the loop stopped it. Nothing was lost — " +
-              "open the task to see what it had done and recover."
-          : "The loop stopped and nothing was lost. Open the task to raise the ceiling or recover.",
-      );
-    else if (on.decision && ticket.state === "changes_requested")
-      this.notify(
-        `${ticket.key} needs a decision`,
-        "The loop is paused until you answer.",
-      );
-    else if (
-      on.review &&
-      job.state === "completed" &&
-      ["pr_open", "ready", "merged"].includes(ticket.state)
-    )
-      this.notify(
-        `${ticket.key} · review finished`,
-        ticket.delivery.pull_request_url
-          ? "The pull request is open. The merge is yours."
-          : "The result is ready to review.",
-      );
-    else if (on.review && job.state === "failed")
-      this.notify(
-        `${ticket.key} · the loop stopped`,
-        job.error ?? "Open the task to inspect the cause.",
-      );
+    this.power.update();
   }
   async shutdown(): Promise<void> {
     this.interviews.shutdown();
