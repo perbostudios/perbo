@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   EXIT_CODES,
-  LocalVerdictsSchema,
   ReviewArtifactSchema,
   SecretIndex,
   findingKey,
@@ -17,6 +16,7 @@ import {
 } from "@perbo/contracts";
 import { BundleStore } from "@perbo/runner";
 import { attemptsRecordSubject } from "../inspect.js";
+import { LocalVerdictsSchema } from "./record.js";
 import {
   buildTicketlessBundle,
   routingFor,

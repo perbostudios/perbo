@@ -3,18 +3,10 @@ import { join, resolve } from "node:path";
 import {
   DOGFOOD_ANSWERER,
   EXIT_CODES,
-  LOCAL_VERDICTS_SCHEMA_VERSION,
-  LocalVerdictsSchema,
   StopVerdictsSchema,
   TicketKeySchema,
-  VerdictConflictError,
-  isStopDecision,
-  recordVerdict,
-  verdictFor,
-  type LocalVerdict,
   type StopRouting,
   type Ticket,
-  type VerdictDecision,
 } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
 import {
@@ -31,13 +23,21 @@ import type { Streams } from "../../streams.js";
 import { listTickets } from "../../store/tickets.js";
 import {
   GIT_IDENTITY_COMMANDS,
+  LOCAL_VERDICTS_SCHEMA_VERSION,
+  LocalVerdictsSchema,
+  VerdictConflictError,
   authorIdentity,
   authorLine,
   decidedBy,
+  isStopDecision,
   readGitIdentity,
   readLocalVerdicts,
+  recordVerdict,
+  verdictFor,
   verdictsPath,
   writeLocalVerdicts,
+  type LocalVerdict,
+  type VerdictDecision,
 } from "./record.js";
 
 /**

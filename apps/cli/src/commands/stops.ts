@@ -6,15 +6,12 @@ import {
   EXIT_CODES,
   PARTNER_READING_CAVEAT,
   StopVerdictsSchema,
-  activeVerdicts,
   judgeAgainstD060,
-  mergeLocalVerdicts,
   summariseStops,
   summariseUnattendedMerges,
   widenedByHiding,
   type D060Reading,
   type EscapeRow,
-  type LocalVerdict,
   type StopVerdicts,
   type DeliveryArm,
   type IncompleteReviewPath,
@@ -35,7 +32,13 @@ import {
 } from "./inspect.js";
 import { escapeRows } from "./escapes/index.js";
 import { listChanges, storeDir, type SyncedChange } from "../store/tickets.js";
-import { readLocalVerdictsOrWarn, verdictsPath } from "./verdict/record.js";
+import {
+  activeVerdicts,
+  mergeLocalVerdicts,
+  readLocalVerdictsOrWarn,
+  verdictsPath,
+  type LocalVerdict,
+} from "./verdict/record.js";
 
 /**
  * `perbo stops` — precision of stopping, measured live from pull requests

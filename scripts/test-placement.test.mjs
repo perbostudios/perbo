@@ -97,7 +97,6 @@ const PENDING = [
   "packages/contracts/test/ticket-source.test.ts",
   "packages/contracts/test/ticket.test.ts",
   "packages/contracts/test/unattended.test.ts",
-  "packages/contracts/test/verdicts.test.ts",
   "packages/runner/test/adapter-cancellation.test.ts",
   "packages/runner/test/adapter.test.ts",
   "packages/runner/test/allow-list.test.ts",

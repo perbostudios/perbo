@@ -1,20 +1,22 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  STOP_VERDICTS_SCHEMA_VERSION,
+  summariseStops,
+  type StopVerdict,
+  type StopVerdicts,
+} from "@perbo/contracts";
+import {
   EMPTY_LOCAL_VERDICTS,
   LocalVerdictSchema,
-  STOP_VERDICTS_SCHEMA_VERSION,
   VerdictConflictError,
   activeVerdicts,
   mergeLocalVerdicts,
   recordVerdict,
-  summariseStops,
   verdictFor,
   verdictKey,
   type LocalVerdict,
-  type StopVerdict,
-  type StopVerdicts,
-} from "../src/index.js";
+} from "./record.js";
 
 /**
  * The local verdicts record (SCP-181): one decision per review and key, an
@@ -124,7 +126,7 @@ describe("the local verdicts record", () => {
     // A raw 0x00 in the file makes git call it binary and the review that
     // reads the diff never runs. The key above is the same either way; the
     // source has to stay printable.
-    const source = readFileSync(new URL("../src/verdicts.ts", import.meta.url));
+    const source = readFileSync(new URL("./record.ts", import.meta.url));
     expect(source.indexOf(0)).toBe(-1);
   });
 
