@@ -1,30 +1,15 @@
 import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  readFileSync,
-} from "node:fs";
 import { z } from "zod";
 import {
-  ApproachRecordSchema,
   TicketSchema,
   STANDING_PROHIBITED_KEY,
-  hasAcceptanceCriteria,
-  isNeverReadPath,
-  planNodes,
-  planSizeCounts,
   readStandingProhibited,
-  sizeEstimate,
 } from "@perbo/contracts";
 import type {
-  GraphEdge,
-  PlanContract,
   Ticket,
 } from "@perbo/contracts";
-import type { PlanNode } from "@perbo/contracts/plan";
 import { busyMessage, exclusiveJob, heldRepository, isLive, lane } from "../shared/jobs.js";
 import {
-  impactReport,
-  readSpecText,
   specTitleFromMessage,
 } from "@perbo/planning";
 import {
@@ -39,11 +24,6 @@ import type {
   Detail,
   Change,
   EditingSession,
-  GraphCriterionView,
-  GraphLiveView,
-  GraphNodeView,
-  GraphView,
-  ImpactView,
   InterviewEdit,
   InterviewEntry,
   InterviewStatus,
@@ -74,9 +54,10 @@ import { RepositoryRegistry } from "./repository/registry.js";
 import { createCli, type Cli } from "./cli.js";
 import { TicketReads } from "./tickets/reads.js";
 import { listExplorer, readExplorerFile } from "./explorer.js";
-import { exportedNames, readSymbolIndex } from "./symbols.js";
+import { exportedNames } from "./symbols.js";
+import { graphView } from "./plan/graph.js";
+import { impactView } from "./plan/impact.js";
 import { safePath } from "./repository/paths.js";
-import { trackedFiles } from "./repository/git.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
@@ -116,7 +97,6 @@ import {
 } from "./repository/config.js";
 import {
   attemptsPath,
-  objectsPath,
   ticketPath,
 } from "./repository/layout.js";
 import type { ProfileState, RegisteredRepository } from "./profile/store.js";
@@ -125,9 +105,7 @@ import {
   currentMonth,
   isEarlyStop,
   ledgerFor,
-  liveGraph,
   readAttempts,
-  readDraftEdits,
   readLatestDraftEdit,
   type StoredAttempt,
 } from "./records.js";
@@ -317,9 +295,6 @@ export class DesktopService {
   private repository(id: string): RegisteredRepository {
     return this.registry.lookup(id);
   }
-  private trackedFiles(repo: RegisteredRepository): Promise<string[]> {
-    return trackedFiles(this.execute, repo.path);
-  }
   registerRepository(path: string): Promise<Repository> {
     return this.registry.register(path);
   }
@@ -359,49 +334,6 @@ export class DesktopService {
     });
     return { ...workspace, interviews };
   }
-  /**
-   * The impact warnings for one planning session's draft (D-015, SCP-320).
-   *
-   * Derived when a person asks the pane for them and never on its own: the
-   * index is a parse of the whole tracked tree, which is not work to do because
-   * a pane was opened.
-   *
-   * Every input is the host's own — the tracked tree from Git in the registered
-   * repository, the scope off the session's form, the spec off the file the
-   * session records — so nothing a renderer sent reaches a path or an argument
-   * (ADR-0023 §4). Asking changes neither the draft nor the spec: it rebuilds
-   * the index file `perbo index` keeps at `.perbo/index.json`, and the
-   * pane's two actions are the draft's own mark and the spec's own save.
-   *
-   * The never-read paths are dropped before the warnings are derived, as the
-   * explorer drops them from its listing: a path no surface reads is not one to
-   * offer a person for their scope. They are dropped from the tracked list
-   * alone: `perbo index` reads the whole tree and has no never-read filter of
-   * its own, so what keeps them off the screen is `impactReport` naming nothing
-   * outside that list — inside a warning's sentence as much as in its path.
-   */
-  private async impactView(id: string): Promise<ImpactView> {
-    const session = this.editing.read(id);
-    const repo = this.repository(session.repoId);
-    const tracked = (await this.trackedFiles(repo)).filter((path) => !isNeverReadPath(path));
-    const spec =
-      session.specSlug === null
-        ? null
-        : readSpecText(
-            safePath(
-              repo,
-              ...`${specFolder(repo)}/${session.specSlug}/spec.md`.split("/"),
-            ),
-          ).markdown;
-    const report = impactReport({
-      scope: session.form.draft.paths,
-      tracked,
-      spec,
-      index: await readSymbolIndex(this.cli, repo),
-    });
-    return { ...report, readAt: new Date().toISOString() };
-  }
-
   /**
    * The interview's argv, built from the registered repository and this
    * planning's own records and from nothing a renderer sent (ADR-0023 §4).
@@ -824,167 +756,6 @@ export class DesktopService {
     return this.interviewStatus(id);
   }
 
-  /**
-   * The approach record beside a ticket: the order between its nodes and the
-   * spec's No-Gos (D-100). A plan that has never had a graph has none, which is
-   * an empty order rather than a failure; a record that does not parse, or that
-   * belongs to another plan, is a refusal, because showing a graph with the
-   * wrong order is worse than showing none.
-   */
-  private readApproach(
-    repo: RegisteredRepository,
-    key: string,
-    contract: PlanContract,
-  ): GraphEdge[] {
-    const path = ticketPath(repo, key, ".approach.json");
-    if (!existsSync(path)) return [];
-    let raw: unknown;
-    try {
-      raw = JSON.parse(readFileSync(path, "utf8"));
-    } catch {
-      raw = undefined;
-    }
-    const parsed = ApproachRecordSchema.safeParse(raw);
-    if (!parsed.success)
-      throw new Error(
-        `${key}'s approach record could not be read as an order between its nodes. Restore it from version control.`,
-      );
-    if (parsed.data.plan_id !== contract.plan_id || parsed.data.ticket_id !== contract.ticket_id)
-      throw new Error(
-        `${key}'s approach record belongs to another plan. Restore it from version control.`,
-      );
-    return [...parsed.data.edges];
-  }
-
-  /**
-   * The generated page of each node, read from the spec folder (D-103). Absent
-   * for a ticket drafted from an issue, which has no spec to generate from, and
-   * for a node whose page has not been written yet.
-   */
-  private nodePages(
-    repo: RegisteredRepository,
-    ticket: Ticket,
-    nodes: readonly { id: string }[],
-  ): Map<string, { path: string; text: string }> {
-    const pages = new Map<string, { path: string; text: string }>();
-    const spec = ticket.admission.spec;
-    if (spec === null) return pages;
-    const folder = spec.path.split("/").slice(0, -1).join("/");
-    for (const node of nodes) {
-      const path = `${folder}/nodes/${node.id}.md`;
-      let full: string;
-      try {
-        full = safePath(repo, ...path.split("/"));
-      } catch {
-        // A symlink on the way is a page the pane does not show, not a refusal of the graph.
-        continue;
-      }
-      if (!existsSync(full)) continue;
-      pages.set(node.id, { path, text: readFileSync(full, "utf8") });
-    }
-    return pages;
-  }
-
-  /**
-   * One plan's execution graph as the Graph pane reads it (D-100, D-104): the
-   * contract's nodes and criteria, the approach's order, the size over the
-   * repository's tracked files, and the log of every edit with its author.
-   *
-   * Read from the store the CLI writes, never from anything the pane holds:
-   * the pane's every edit goes back through `perbo edit`, so this is the only
-   * account of what the plan now is. The tracked files stay on this side: the
-   * size is counted here, and a listing crosses only through the explorer,
-   * which withholds what nothing reads.
-   */
-  private async graphView(repo: RegisteredRepository, key: string): Promise<GraphView> {
-    const ticket = (await this.tickets.list(repo)).tickets.find((entry) => entry.key === key);
-    if (!ticket) throw new Error("This task is no longer in the repository's ticket store.");
-    const { contract, digest } = this.tickets.contract(repo, key);
-    const criteria: GraphCriterionView[] = hasAcceptanceCriteria(contract)
-      ? contract.acceptance_criteria.map((criterion) => ({
-          id: criterion.id,
-          text: criterion.text,
-          kind: criterion.expected_verification.kind,
-          assertion: criterion.expected_verification.assertion,
-          requirement: criterion.requirement_id ?? null,
-          manual:
-            criterion.expected_verification.kind === "manual"
-              ? {
-                  reviewer: criterion.expected_verification.manual_reviewer ?? "",
-                  reason: criterion.expected_verification.manual_reason ?? "",
-                }
-              : null,
-        }))
-      : [];
-    const held = new Map(criteria.map((criterion) => [criterion.id, criterion]));
-    const nodes = planNodes(contract);
-    const pages = this.nodePages(repo, ticket, nodes);
-    const files = await this.trackedFiles(repo);
-    return {
-      key,
-      state: ticket.state,
-      approved: ticket.approved_at !== null,
-      outcome: contract.outcome,
-      nodes: nodes.map(
-        (node): GraphNodeView => ({
-          id: node.id,
-          title: node.title,
-          criteria: node.criteria.flatMap((id) => {
-            const criterion = held.get(id);
-            return criterion ? [criterion] : [];
-          }),
-          paths: [...node.paths],
-          page: pages.get(node.id) ?? null,
-        }),
-      ),
-      criteria,
-      edges: this.readApproach(repo, key, contract),
-      pathsAllowed: [...contract.scope.paths_allowed],
-      size: sizeEstimate(
-        planSizeCounts({
-          nodes,
-          criteria: criteria.length,
-          paths_allowed: contract.scope.paths_allowed,
-          paths_prohibited: contract.scope.paths_prohibited,
-          trackedFiles: files,
-        }),
-      ),
-      editCount: ticket.admission.edit_count ?? 0,
-      history: readDraftEdits(ticketPath(repo, key, ".draft.json")),
-      digest,
-      live: await this.liveGraph(repo, ticket, nodes),
-    };
-  }
-
-  /**
-   * What this ticket's own records say about its graph (SCP-317): the sealed
-   * change set, the pinned checks narrowed to each node, and the review of
-   * this plan with whatever the rounds since it closed.
-   *
-   * Read here rather than through `perbo inspect`, as `taskSummary` reads the
-   * same store: the Graph pane is refreshed after every edit and while a run
-   * moves, and this is a read of files the loop already wrote — no job, no
-   * write and no subprocess.
-   */
-  private async liveGraph(
-    repo: RegisteredRepository,
-    ticket: Ticket,
-    nodes: readonly PlanNode[],
-  ): Promise<GraphLiveView> {
-    const record = readAttempts(
-      attemptsPath(repo, ticket.ticket_id),
-    );
-    const bundles = record.attempts.length ? await this.tickets.bundles(repo) : [];
-    return liveGraph({
-      nodes: nodes.map((node) => ({ id: node.id, paths: node.paths, criteria: node.criteria })),
-      attempts: record.attempts,
-      bundles,
-      ticketId: ticket.ticket_id,
-      planVersion: ticket.plan_version,
-      objectsDirectory: objectsPath(repo),
-    });
-  }
-
   async detail(repoId: string, key: string): Promise<Detail> {
     return this.tickets.detail(repoId, key);
   }
@@ -1302,7 +1073,16 @@ export class DesktopService {
       return request.settings;
     }
     if (request.kind === "specRead") return specView(this.planDeps(), request.id);
-    if (request.kind === "impactRead") return this.impactView(request.id);
+    if (request.kind === "impactRead")
+      return impactView(
+        {
+          editing: this.editing,
+          repository: (id) => this.repository(id),
+          cli: this.cli,
+          execute: this.execute,
+        },
+        request.id,
+      );
     if (request.kind === "usage") return this.usage();
     if (request.kind === "cancel") {
       const entry = this.active.get(request.jobId);
@@ -1316,7 +1096,8 @@ export class DesktopService {
     }
     const repo = this.repository(request.repoId);
     if (request.kind === "forgetRepository") return this.registry.forget(repo.id);
-    if (request.kind === "graphRead") return this.graphView(repo, request.key);
+    if (request.kind === "graphRead")
+      return graphView({ tickets: this.tickets, execute: this.execute }, repo, request.key);
     // Every edit the Graph pane makes is this command (D-100): applied to a
     // copy, validated whole and recorded with its author by the CLI, which is
     // also what the interview's edits go through. The pane writes nothing.
