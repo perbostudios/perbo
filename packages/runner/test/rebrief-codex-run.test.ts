@@ -90,7 +90,9 @@ const run = (f: ReturnType<typeof fixture>, options: { limits?: Record<string, n
       options.clock ?? (() => 0),
     ),
     env: f.env,
-    onProgress: options.onProgress,
+    // `onProgress` is optional on the request, so an absent one is left out
+    // rather than passed as undefined.
+    ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress }),
   });
 
 describe("a Codex re-briefing at the end of a turn (D-096)", () => {

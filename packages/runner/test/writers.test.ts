@@ -521,6 +521,10 @@ const hookAnswer = (command: string) =>
       root: ROOT,
       tmpdir: null,
       cwd: ROOT,
+      // Empty admits everything inside the root, which is what a contract with
+      // no globs of its own leaves the guard judging these commands against.
+      paths_allowed: [],
+      paths_prohibited: [],
       allow_list: [...profile.command_allow_list],
       deny_list: [...profile.command_deny_list],
     },

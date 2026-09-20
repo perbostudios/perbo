@@ -86,6 +86,7 @@ function executorDouble(behaviour: {
       prohibited: [],
       usage: {
         input_tokens: 10,
+        cache_read_input_tokens: 0,
         output_tokens: 5,
         cost_micros: 1234,
         cost_basis: "transport_reported",
@@ -93,6 +94,7 @@ function executorDouble(behaviour: {
         iterations: 1,
       },
       termination: behaviour.termination ?? { reason: "completed", detail: "" },
+      final_message: null,
       transcript: ['{"type":"result","subtype":"success"}'],
     };
   };

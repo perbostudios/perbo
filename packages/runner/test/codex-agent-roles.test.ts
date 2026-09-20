@@ -37,7 +37,7 @@ describe("Perbo's roles as files under CODEX_HOME/agents", () => {
 
   it("carries name, description and developer_instructions as TOML strings", () => {
     const dir = home();
-    writeAgentRoleFiles(dir, { "perbo-implementer": { description: "d", prompt: "p", tools: [] } });
+    writeAgentRoleFiles(dir, { "perbo-implementer": { description: "d", prompt: "p" } });
     const text = readFileSync(join(dir, "agents", "perbo-implementer.toml"), "utf8");
     expect(text).toContain('name = "perbo-implementer"');
     expect(text).toContain('description = "d"');
@@ -50,7 +50,6 @@ describe("Perbo's roles as files under CODEX_HOME/agents", () => {
       torture: {
         description: 'a "quoted" word and a back\\slash',
         prompt: "line one\nline two\r\nwith a\ttab, a NUL \u0000, a backspace \b and DEL \u007f",
-        tools: [],
       },
     });
     const text = readFileSync(join(dir, "agents", "torture.toml"), "utf8");

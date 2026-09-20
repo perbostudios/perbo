@@ -73,6 +73,7 @@ const agentDouble = (write: (worktree: string, round: number) => void) => {
       prohibited: [],
       usage: {
         input_tokens: 10,
+        cache_read_input_tokens: 0,
         output_tokens: 5,
         cost_micros: 1234,
         cost_basis: "transport_reported",
@@ -80,6 +81,7 @@ const agentDouble = (write: (worktree: string, round: number) => void) => {
         iterations: 1,
       },
       termination: { reason: "completed", detail: "" },
+      final_message: null,
       transcript: ['{"type":"result","subtype":"success"}'],
     };
   };
@@ -243,6 +245,7 @@ describe("the loop closes", () => {
         commands: [], egress: new EgressLog(request.profile.network_allow_list), prohibited: [],
         usage: {
           input_tokens: 10,
+          cache_read_input_tokens: 0,
           output_tokens: 5,
           cost_micros: 1234,
           cost_basis: "transport_reported",
@@ -250,6 +253,7 @@ describe("the loop closes", () => {
           iterations: 1,
         },
         termination: { reason: "completed", detail: "" },
+        final_message: null,
         // The transcript as the adapter records it: stream-json event lines.
         transcript:
           round === 0
@@ -1113,13 +1117,14 @@ describe("a ceiling termination", () => {
         },
         commands: [], egress: new EgressLog(request.profile.network_allow_list), prohibited: [],
         usage: {
-          input_tokens: 10, output_tokens: 5, cost_micros: 1234,
+          input_tokens: 10, cache_read_input_tokens: 0, output_tokens: 5, cost_micros: 1234,
           cost_basis: "transport_reported", cost_partial: false, iterations: 61,
         },
         termination: {
           reason: "iteration_ceiling_exceeded",
           detail: "attempt_iterations would reach 61, above the limit of 60",
         },
+        final_message: null,
         transcript: [],
       };
     };
@@ -3074,6 +3079,8 @@ describe("a graphed ticket's round", () => {
   /** A two-node plan over the same scope `makeContract` declares. */
   const graphed = (base_commit: string): PlanContract => {
     const contract = makeContract();
+    // A P0 carries no acceptance criteria to extend; `makeContract` builds a P1.
+    if (contract.level === "P0") throw new Error(`the fixture contract is ${contract.level}`);
     return PlanContractSchema.parse({
       ...contract,
       base: { ...contract.base, base_commit },

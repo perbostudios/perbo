@@ -17,7 +17,7 @@ import { finding, makeContract, makeRepo, makeReview, scratch } from "./support.
  * earlier one was.
  */
 
-const INVOCATION = {
+const INVOCATION: AgentResult["invocation"] = {
   adapter: "double",
   binary_path: "/bin/true",
   binary_version: "0.0.0",
@@ -32,7 +32,7 @@ const INVOCATION = {
     asserted_empty: ["mcp_servers"],
     reported: { mcp_servers: [], plugins: [], skills: [], subagents: [], memory_paths: [] },
   },
-} as const;
+};
 
 const USAGE = {
   input_tokens: 10,

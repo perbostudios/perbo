@@ -757,6 +757,7 @@ export function makeAttempt(input: {
     },
     environment: {
       manifest_hash: "sha256:fixture",
+      install_pinned: true,
       materialized_paths: [],
       secret_content_sha256: [],
       port_range_start: 41000,
@@ -771,6 +772,7 @@ export function makeAttempt(input: {
     user_instructions: [],
     usage: {
       input_tokens: 0,
+      cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0,
       output_tokens: 0,
       cost_micros: 0,
@@ -784,6 +786,16 @@ export function makeAttempt(input: {
     head_commit: input.head_commit ?? null,
     prior_commits: [],
     change_set_origin: "attempt",
+    executor_skills: [],
+    executor_account: null,
+    brief_reinjections: [],
+    resumed_from: null,
+    merged_base: null,
+    spec_commit: null,
+    swept_processes: [],
+    base_verification: null,
+    provisioning_verify: null,
+    wait: null,
   } satisfies ExecutionAttempt);
 }
 
@@ -796,6 +808,10 @@ export const finding = (overrides: Partial<Finding> = {}): Finding => ({
   blocking: false,
   blocking_reason: "verification: routed to the executor",
   routing: "remediable",
+  row: null,
+  closure: null,
+  direction: null,
+  caused_by_change: null,
   confidence: 0.9,
   file: "src/feature.ts",
   line: 1,

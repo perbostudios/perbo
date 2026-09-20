@@ -131,8 +131,10 @@ const reviewer =
     artifact: makeReview({
       review_id: "rev_0000000000000001",
       decision,
-      changeset_id: request.changeset?.changeset_id,
-      head_commit: request.head_commit,
+      // Both are optional on the request, so an absent one is left out rather
+      // than passed as undefined; `makeReview` then supplies its own default.
+      ...(request.changeset === undefined ? {} : { changeset_id: request.changeset.changeset_id }),
+      ...(request.head_commit === undefined ? {} : { head_commit: request.head_commit }),
       findings: decision === "remediable" ? [finding()] : [],
     }),
     bundle: {
