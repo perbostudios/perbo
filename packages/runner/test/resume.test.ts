@@ -176,6 +176,7 @@ function watchingExecutor(terminations: ReadonlyArray<AgentResult["termination"]
       prohibited: [],
       usage: {
         input_tokens: 10,
+        cache_read_input_tokens: 0,
         output_tokens: 5,
         cost_micros: 1234,
         cost_basis: "transport_reported",
@@ -183,6 +184,7 @@ function watchingExecutor(terminations: ReadonlyArray<AgentResult["termination"]
         iterations: 1,
       },
       termination: terminations[seen.length - 1] ?? { reason: "completed", detail: "" },
+      final_message: null,
       transcript: ['{"type":"result","subtype":"success"}'],
     };
   };

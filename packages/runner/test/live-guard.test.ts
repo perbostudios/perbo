@@ -122,7 +122,7 @@ const asked = (result: AgentResult): string =>
 
 /** The same file however the path is spelled: `/tmp` is a symlink on macOS. */
 const sameFile = (a: string, b: string): boolean => {
-  const real = (path: string) => {
+  const real = (path: string): string => {
     try {
       return realpathSync(path);
     } catch {

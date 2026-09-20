@@ -43,6 +43,7 @@ function failingUnitCheck(worktree: string): {
         // report "no package found" rather than being cut off mid-resolution.
         timeout_ms: 30_000,
         definition_path: null,
+        origin: "configured",
       },
     ],
   };
@@ -121,6 +122,7 @@ function unresolvableUnitCheck(worktree: string): {
         command: ["node", script],
         timeout_ms: 10_000,
         definition_path: null,
+        origin: "configured",
       },
     ],
   };

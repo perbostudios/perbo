@@ -212,8 +212,9 @@ describe("an attempt's end leaves no process running from its worktree", () => {
     const agent = agentLeaving([{ name: "left", cwd: "worktree", argv: ["sleep", "300"] }]);
     const { result, printed, config, ticket_id } = await runWith({ agentBinary: agent.binary });
     const pid = agent.pids().left;
+    expect(pid).toBeDefined();
     try {
-      expect(alive(pid)).toBe(false);
+      expect(alive(pid!)).toBe(false);
       expect(swept(result)).toEqual([{ pid, command: expect.stringContaining("sleep 300") }]);
       expect(sweptOnRecord(config, ticket_id)).toEqual(swept(result));
       expect(printed.filter((line) => line.includes("still running under the worktree"))).toEqual([
@@ -282,8 +283,9 @@ describe("an attempt's end leaves no process running from its worktree", () => {
     ]);
     const { result } = await runWith({ agentBinary: agent.binary });
     const pid = agent.pids().deaf;
+    expect(pid).toBeDefined();
     try {
-      expect(alive(pid)).toBe(false);
+      expect(alive(pid!)).toBe(false);
       expect(swept(result).map((entry) => entry.pid)).toEqual([pid]);
     } finally {
       end(pid);

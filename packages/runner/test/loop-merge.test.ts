@@ -47,6 +47,7 @@ const agentDouble = (write: (worktree: string) => void) => {
       prohibited: [],
       usage: {
         input_tokens: 10,
+        cache_read_input_tokens: 0,
         output_tokens: 5,
         cost_micros: 1234,
         cost_basis: "transport_reported",
@@ -54,6 +55,7 @@ const agentDouble = (write: (worktree: string) => void) => {
         iterations: 1,
       },
       termination: { reason: "completed", detail: "" },
+      final_message: null,
       transcript: ['{"type":"result","subtype":"success"}'],
     };
   };

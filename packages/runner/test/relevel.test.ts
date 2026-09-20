@@ -56,6 +56,7 @@ const agentDouble = (write: (worktree: string) => void) => {
       prohibited: [],
       usage: {
         input_tokens: 10,
+        cache_read_input_tokens: 0,
         output_tokens: 5,
         cost_micros: 1234,
         cost_basis: "transport_reported",
@@ -63,6 +64,7 @@ const agentDouble = (write: (worktree: string) => void) => {
         iterations: 1,
       },
       termination: { reason: "completed", detail: "" },
+      final_message: null,
       transcript: ['{"type":"result","subtype":"success"}'],
     };
   };
@@ -627,7 +629,7 @@ describe("carried approvals", () => {
     expect(touched).toEqual([{ head: approved, content_equal: true, scope_touched: ["src/other.ts"] }]);
     // Without a scope to read against, every base change counts.
     const unscoped = await carriedApprovals({ repository_root: repo.dir, base_ref: "main", head: moved, approved: [approved] });
-    expect(unscoped[0]?.scope_touched.sort()).toEqual(["docs/notes.md", "src/other.ts"]);
+    expect(unscoped[0]?.scope_touched.toSorted()).toEqual(["docs/notes.md", "src/other.ts"]);
 
     // A commit that changed the branch's own content does not carry.
     writeFileSync(join(repo.dir, "src", "feature.ts"), "export const total = () => 0;\n");

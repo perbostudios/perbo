@@ -61,6 +61,7 @@ function fakeGh(name: string, authExit: number): { path: string; calls: () => st
 /** A request that asks about nothing but `gh`. */
 const request = (env: NodeJS.ProcessEnv, needsGh: boolean, probeGithub?: boolean) => ({
   agentBinary: null,
+  agentProvider: null,
   reviewerProvider: "anthropic" as const,
   needsGh,
   needsGit: false,

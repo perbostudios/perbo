@@ -276,6 +276,7 @@ const unitCheck = (command: string[]) => [
     command,
     timeout_ms: 30_000,
     definition_path: null,
+    origin: "configured" as const,
   },
 ];
 

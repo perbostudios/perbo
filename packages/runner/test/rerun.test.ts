@@ -218,6 +218,7 @@ const pinned = (command: string[], kind: "unit" | "lint" = "unit") => [
     command,
     timeout_ms: 30_000,
     definition_path: null,
+    origin: "configured" as const,
   },
 ];
 
@@ -327,6 +328,7 @@ describe("a failing unit check re-runs once before it closes the gate", () => {
           command: ["node", "-e", "process.exit(0)"],
           timeout_ms: 30_000,
           definition_path: null,
+          origin: "configured" as const,
         },
       ],
       worktree: scratch("perbo-wt-"),
