@@ -60,8 +60,7 @@ import {
   provision,
   signableCommit,
   validateManifest,
-  gitEnv,
-  run,
+  git,
   type MaterializedWorkspace,
   type Workspace,
 } from "@perbo/workspace";
@@ -185,6 +184,15 @@ import { TRANSPORT_RETRY_DELAY_MS, resetInText } from "./transport.js";
  * removes is the step that began every hand finish of day four — a person
  * merging the base in before anything else could be done with the branch.
  */
+
+/**
+ * What the log of a branch's own line past the pushed tip may say.
+ *
+ * The commits it names are what a re-level decides on: every one of them is
+ * either the loop's own or a person's, and a listing held from its end has
+ * lost its oldest — the ones a reset would drop. Past this nothing is read.
+ */
+const MAX_BRANCH_LOG_BYTES = 64 * 1024 * 1024;
 
 /**
  * The three places a run's base branch can come from, in the order they are
@@ -1086,49 +1094,47 @@ async function runLockedTicket(
   // are refused with what the branch carries named, for a person to reconcile.
   if (config.relevel) {
     const remote = `refs/remotes/origin/${workspace.branch}`;
-    const inWorktree = { cwd: workspace.path, env: gitEnv(), timeoutMs: 120_000 };
-    const pushed = await run(["git", "rev-parse", "--verify", "--quiet", `${remote}^{commit}`], {
-      cwd: config.repository_root,
-      env: gitEnv(),
-      timeoutMs: 120_000,
-    });
-    if (pushed.code === 0 && pushed.stdout.trim().length > 0) {
-      const tip = pushed.stdout.trim();
-      const local = (await run(["git", "rev-parse", "HEAD"], inWorktree)).stdout.trim();
+    const call = { timeoutMs: 120_000 };
+    const tip = await git.resolveCommit(config.repository_root, remote, call);
+    if (tip !== null) {
+      const local = (await git.head(workspace.path, call)) ?? "";
       if (local !== tip) {
-        const ahead = (await run(["git", "merge-base", "--is-ancestor", tip, "HEAD"], inWorktree)).code === 0;
+        const ahead = await git.isAncestor(workspace.path, tip, "HEAD", call);
         // The branch's own line past the tip: what a merge brought in from the
         // base is the base's, and is behind the merge's second parent.
-        const carried = ahead
-          ? (
-              await run(
-                [
-                  "git",
-                  "log",
-                  "--first-parent",
-                  "--reverse",
-                  "--format=%H%x1f%s%x1f%(trailers:key=Attempt,valueonly,separator=%x2c)",
-                  `${tip}..HEAD`,
-                ],
-                inWorktree,
-              )
-            ).stdout
-              .split("\n")
-              .filter((line) => line.length > 0)
-              .map((line) => {
-                const [sha = "", subject = "", trailers = ""] = line.split("\x1f");
-                const attempts = trailers
-                  .split(",")
-                  .map((value) => value.trim())
-                  .filter((value) => value.length > 0);
-                return { sha, subject, attempts };
-              })
-          : [];
+        const listed = ahead
+          ? await git.run(
+              workspace.path,
+              [
+                "log",
+                "--first-parent",
+                "--reverse",
+                "--format=%H%x1f%s%x1f%(trailers:key=Attempt,valueonly,separator=%x2c)",
+                `${tip}..HEAD`,
+              ],
+              { ...call, maxOutputBytes: MAX_BRANCH_LOG_BYTES },
+            )
+          : null;
+        const carried = (listed?.stdout ?? "")
+          .split("\n")
+          .filter((line) => line.length > 0)
+          .map((line) => {
+            const [sha = "", subject = "", trailers = ""] = line.split("\x1f");
+            const attempts = trailers
+              .split(",")
+              .map((value) => value.trim())
+              .filter((value) => value.length > 0);
+            return { sha, subject, attempts };
+          });
         const own = (commit: (typeof carried)[number]): boolean =>
           sealedBy.has(commit.sha) || commit.attempts.some((attempt) => onRecord.has(attempt));
         const foreign = carried.filter((commit) => !own(commit));
-        if (ahead && foreign.length === 0) {
-          await run(["git", "reset", "--hard", tip], inWorktree);
+        // A listing held from its end has lost its oldest commits, which are
+        // the ones a reset would drop: what cannot be read whole is refused
+        // rather than reset over.
+        const unread = listed?.truncated === true;
+        if (ahead && !unread && foreign.length === 0) {
+          await git.run(workspace.path, ["reset", "--hard", tip], call);
           progress(
             `${workspace.branch} carried ${local.slice(0, 12)} locally and the pull request has ` +
               `${tip.slice(0, 12)}; re-levelling from what the pull request has`,
@@ -1136,12 +1142,15 @@ async function runLockedTicket(
         } else {
           await sweepWorktree({ worktree: workspace.path, onProgress: progress });
           await cleanup({ workspace, root: config.worktree_root, outcome: "failure" }).catch(() => undefined);
-          const what = ahead
-            ? `${workspace.branch} carries ${foreign.length} commit${foreign.length === 1 ? "" : "s"} the loop did not ` +
-              `make past what the pull request has (${tip.slice(0, 12)}): ` +
-              foreign.map((commit) => `${commit.sha.slice(0, 12)} ${commit.subject}`).join("; ")
-            : `${workspace.branch} has diverged from its pull request: the checkout is at ${local.slice(0, 12)} ` +
-              `and the pull request at ${tip.slice(0, 12)}, and neither contains the other`;
+          const what = unread
+            ? `${workspace.branch} carries more past what the pull request has (${tip.slice(0, 12)}) than ` +
+              `${MAX_BRANCH_LOG_BYTES} bytes of log can name`
+            : ahead
+              ? `${workspace.branch} carries ${foreign.length} commit${foreign.length === 1 ? "" : "s"} the loop did not ` +
+                `make past what the pull request has (${tip.slice(0, 12)}): ` +
+                foreign.map((commit) => `${commit.sha.slice(0, 12)} ${commit.subject}`).join("; ")
+              : `${workspace.branch} has diverged from its pull request: the checkout is at ${local.slice(0, 12)} ` +
+                `and the pull request at ${tip.slice(0, 12)}, and neither contains the other`;
           throw new RunRefusedError({
             message: `${what}. Reconcile the branch by hand, then re-level it; the loop neither drops nor publishes what it did not make`,
             findings: [],
@@ -1534,16 +1543,13 @@ async function runLockedTicket(
     const merged = `merged ${config.base_ref} at ${baseCommit.slice(0, 12)} into ${input.branch}`;
     // What the base brought in, read in the repository where both commits are,
     // against the contract's own globs rather than the wider write guard.
-    const moved = await run(["git", "diff", "--name-only", input.base_before, baseCommit], {
-      cwd: config.repository_root,
-      env: gitEnv(),
+    const moved = await git.changedPaths(config.repository_root, input.base_before, baseCommit, {
       timeoutMs: 120_000,
     });
     const touched =
-      moved.code !== 0
+      moved === null
         ? null
-        : moved.stdout
-            .split("\n")
+        : moved
             .map((line) => line.trim())
             .filter((line) => line.length > 0 && matchesAny(line, contract.scope.paths_allowed));
     const pathsAllowed = admittedWriteGlobs(contract.scope);
