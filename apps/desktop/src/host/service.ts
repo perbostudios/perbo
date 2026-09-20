@@ -6,7 +6,6 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -108,6 +107,11 @@ import { repositoryStatus, topLevel, trackedFiles } from "./repository/git.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
+import { discardTicket } from "./tickets/discard.js";
+import {
+  forgetRepository,
+  setArchived,
+} from "./profile/preferences.js";
 import {
   effectiveLimits,
   readConfig,
@@ -431,8 +435,8 @@ export class DesktopService {
     if (persist) this.save();
     this.options.changed({ ...change, sequence: ++this.sequence });
   }
-  private preferencesChanged(): void {
-    this.changed(true, {
+  private preferencesChanged(persist = true): void {
+    this.changed(persist, {
       kind: "preferences",
       settings: this.state.settings,
       titles: this.state.titles,
@@ -1904,26 +1908,9 @@ export class DesktopService {
         throw new Error(
           "Wait for the commands running in this repository to finish before disconnecting it.",
         );
-      this.state.repositories = this.state.repositories.filter(
-        (entry) => entry.id !== repo.id,
-      );
-      // Its tickets' titles, models and archive marks go with it; a reconnection gets a fresh id anyway.
-      const prefix = repo.id + ":";
-      for (const entry of Object.keys(this.state.titles))
-        if (entry.startsWith(prefix)) delete this.state.titles[entry];
-      for (const entry of Object.keys(this.state.taskModels))
-        if (entry.startsWith(prefix)) delete this.state.taskModels[entry];
-      this.state.archived = this.state.archived.filter(
-        (entry) => !entry.startsWith(prefix),
-      );
+      forgetRepository(this.state, repo.id);
       this.changed(true, { kind: "repositories" });
-      this.changed(false, {
-        kind: "preferences",
-        settings: this.state.settings,
-        titles: this.state.titles,
-        taskModels: this.state.taskModels,
-        archived: this.state.archived,
-      });
+      this.preferencesChanged(false);
       return null;
     }
     if (request.kind === "graphRead") return this.graphView(repo, request.key);
@@ -1959,67 +1946,15 @@ export class DesktopService {
     if (request.kind === "taskSummary")
       return this.taskSummary(repo.id, request.key);
     if (request.kind === "discard") {
-      if (heldRepository(this.liveJobs(), repo.id))
-        throw new Error(
-          "Wait for the commands running in this repository to finish before deleting a contract.",
-        );
-      const ticket = (await this.list(repo)).tickets.find(
-        (entry) => entry.key === request.key,
+      await discardTicket(
+        {
+          tickets: this.ticketRecords(),
+          profile: { state: this.state },
+          liveJobs: () => this.liveJobs(),
+        },
+        repo,
+        request.key,
       );
-      if (!ticket)
-        throw new Error(
-          "This task is no longer in the repository's ticket store.",
-        );
-      if (
-        ![
-          "draft",
-          "specifying",
-          "plan_review",
-          "ready",
-          "plan_invalid",
-        ].includes(ticket.state)
-      )
-        throw new Error(
-          "Only a contract that has never run can be deleted. This one has moved past the contract stage.",
-        );
-      const attempts = readAttempts(
-        attemptsPath(repo, ticket.ticket_id),
-      );
-      const bundles = listBundles(
-        bundlesPath(repo),
-      );
-      if (
-        attempts.attempts.length ||
-        attempts.error ||
-        bundles.some((bundle) => bundle.ticket_id === ticket.ticket_id)
-      )
-        throw new Error(
-          "This contract has recorded attempts or evidence, so it stays. Only a never-run contract can be deleted.",
-        );
-      if (ticket.delivery.pull_request_url)
-        throw new Error(
-          "This contract has a pull request on record, so it stays.",
-        );
-      for (const suffix of [".json", ".contract.json", ".draft.json"] as const) {
-        const path = ticketPath(repo, request.key, suffix);
-        if (existsSync(path) && !lstatSync(path).isSymbolicLink()) rmSync(path);
-      }
-      const entry = repo.id + ":" + request.key;
-      delete this.state.titles[entry];
-      delete this.state.taskModels[entry];
-      this.state.archived = this.state.archived.filter(
-        (item) => item !== entry,
-      );
-      for (const session of this.state.editingSessions)
-        if (
-          session.repoId === repo.id &&
-          session.key === request.key &&
-          session.phase !== "discarded"
-        ) {
-          session.phase = "discarded";
-          session.resumeNew = false;
-          session.revision++;
-        }
       this.changed(true, { kind: "records", repoId: repo.id, key: null });
       this.preferencesChanged();
       return null;
@@ -2027,16 +1962,9 @@ export class DesktopService {
     if (request.kind === "archive") {
       const list = await this.list(repo);
       const keys = [...new Set(request.keys)];
-      if (
-        keys.some((key) => !list.tickets.some((ticket) => ticket.key === key))
-      )
-        throw new Error(
-          "A ticket to file is not in the repository's ticket store.",
-        );
-      const entries = keys.map((key) => repo.id + ":" + key);
-      this.state.archived = request.archived
-        ? [...new Set([...this.state.archived, ...entries])]
-        : this.state.archived.filter((entry) => !entries.includes(entry));
+      if (keys.some((key) => !list.tickets.some((ticket) => ticket.key === key)))
+        throw new Error("A ticket to file is not in the repository's ticket store.");
+      setArchived(this.state, repo.id, keys, request.archived);
       this.preferencesChanged();
       return null;
     }
