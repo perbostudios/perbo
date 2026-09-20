@@ -7,18 +7,17 @@ import { parseWorktrees, type WorktreeEntry } from "./internal/worktrees.js";
 /**
  * Every git and `gh` process Perbo starts.
  *
- * One module because the facts about running them are one set of facts, and
- * they were seven: which environment the runner's git gets, that a prompt is a
- * failure rather than a hang, how long a local read may take and how long one
- * that crosses the network may, and what a timeout or an output too large to
- * hold means for the answer. Each copy of those facts is a place they can
- * disagree, and they did.
+ * One module, because the facts about running them are one set of facts: which
+ * environment the runner's git gets, that a prompt is a failure rather than a
+ * hang, how long a local read may take and how long one that crosses the
+ * network may, and what a timeout or an output too large to hold means for the
+ * answer. A second copy of any of them is a place they can disagree.
  *
  * The questions callers ask are here by name — the head, the merge base, the
  * tracked files, the worktrees, a pull request — so a caller states what it
  * wants to know rather than how git spells it, and the module answers with a
- * value or a refusal. `run`, `runOrThrow` and `runSync` remain for the
- * commands with one caller, where the exit status is the answer.
+ * value or a refusal. `run`, `runOrThrow` and `runSync` are for the commands
+ * with one caller, where the exit status is the answer.
  *
  * ADR-0023 §4 holds structurally here: argv only, never a shell string, and an
  * operand that would be read as an option is refused before anything is
