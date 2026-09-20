@@ -6,6 +6,7 @@ import {
   forgetRegistryPath,
   installLocations,
   registryPath,
+  requireSuccess,
   searchPath,
   startLineProcess,
 } from "../src/host/process.js";
@@ -156,6 +157,28 @@ describe("childEnvironment", () => {
  * and is written a line at a time, stdout comes back a line at a time, and a
  * stop ends stdin and then signals the process group, as the runner does.
  */
+describe("requireSuccess", () => {
+  const result = { code: 0, stdout: "out", stderr: "", cancelled: false };
+  it("hands back what the command wrote", () => {
+    expect(requireSuccess(result)).toBe("out");
+  });
+
+  it("says a stopped command was stopped, rather than reporting its code as a failure", () => {
+    expect(() => requireSuccess({ ...result, code: 130, cancelled: true })).toThrow(
+      "Command stopped. Refresh the ticket to read its recorded outcome.",
+    );
+  });
+
+  it("carries the command's own words, and falls back to its code where it wrote none", () => {
+    expect(() => requireSuccess({ ...result, code: 2, stderr: "  no such ticket\n" })).toThrow(
+      "no such ticket",
+    );
+    expect(() => requireSuccess({ ...result, code: 2, stderr: "  \n" })).toThrow(
+      "CLI exited with code 2.",
+    );
+  });
+});
+
 describe("startLineProcess", () => {
   const script = (body: string): string[] => ["-e", body];
   const lines = async (

@@ -98,7 +98,7 @@ import type {
   TaskSummary,
   UsageReport,
 } from "../shared/protocol.js";
-import { childEnvironment, redact, runProcess, startLineProcess } from "./process.js";
+import { childEnvironment, redact, requireSuccess, runProcess, startLineProcess } from "./process.js";
 import type { LineProcess, ProcessOptions, ProcessResult } from "./process.js";
 import { archiveCsv, archiveRows, isArchived } from "../shared/archive.js";
 import { discoverModels } from "./model-catalog.js";
@@ -558,7 +558,7 @@ export class DesktopService {
     const result = await this.execute("git", ["--no-optional-locks", "ls-files", "-z"], {
       cwd: repo.path,
     });
-    return this.requireSuccess(result).split("\0").filter((entry) => entry.length > 0);
+    return requireSuccess(result).split("\0").filter((entry) => entry.length > 0);
   }
   private async explorerList(repo: z.infer<typeof RepoSchema>): Promise<ExplorerListing> {
     const tracked = await this.trackedFiles(repo);
@@ -628,15 +628,6 @@ export class DesktopService {
       { ...options, cwd: repo.path, env },
     );
   }
-  private requireSuccess(result: ProcessResult): string {
-    if (result.code !== 0)
-      throw new Error(
-        result.cancelled
-          ? "Command stopped. Refresh the ticket to read its recorded outcome."
-          : result.stderr.trim() || `CLI exited with code ${result.code}.`,
-      );
-    return result.stdout;
-  }
   private async metadata(
     repo: z.infer<typeof RepoSchema>,
   ): Promise<Repository> {
@@ -654,8 +645,8 @@ export class DesktopService {
         ["--no-optional-locks", "status", "--porcelain=v1", "--branch"],
         { cwd: repo.path },
       );
-      const status = this.requireSuccess(result).trimEnd().split("\n");
-      const head = this.requireSuccess(
+      const status = requireSuccess(result).trimEnd().split("\n");
+      const head = requireSuccess(
         await this.execute("git", ["rev-parse", "HEAD"], { cwd: repo.path }),
       ).trim();
       const configPath = this.safePath(repo, ".perbo", "config.json");
@@ -701,7 +692,7 @@ export class DesktopService {
   }
   async registerRepository(path: string): Promise<Repository> {
     const canonical = realpathSync(path);
-    const root = this.requireSuccess(
+    const root = requireSuccess(
       await this.execute("git", ["rev-parse", "--show-toplevel"], {
         cwd: canonical,
       }),
@@ -773,7 +764,7 @@ export class DesktopService {
     return this.reads.read("list:" + repo.id, repo.id, async () =>
       ListSchema.parse(
         JSON.parse(
-          this.requireSuccess(
+          requireSuccess(
             await this.cli(["list", "--all", "--json"], repo),
           ),
         ),
@@ -876,7 +867,7 @@ export class DesktopService {
     repo: z.infer<typeof RepoSchema>,
   ): Promise<SymbolIndex | UnsupportedRepository> {
     const record: unknown = JSON.parse(
-      this.requireSuccess(await this.cli(["index", "--json"], repo)),
+      requireSuccess(await this.cli(["index", "--json"], repo)),
     );
     return record !== null && typeof record === "object" && "supported" in record
       ? UnsupportedRepositorySchema.parse(record)
@@ -1681,7 +1672,7 @@ export class DesktopService {
       );
     const report = ReportSchema.parse(
       JSON.parse(
-        this.requireSuccess(await this.cli(["inspect", key, "--json"], repo)),
+        requireSuccess(await this.cli(["inspect", key, "--json"], repo)),
       ),
     );
     const principlesPath = this.safePath(repo, ".perbo", "principles.md");
@@ -1978,7 +1969,7 @@ export class DesktopService {
     job.log = redact(
       [result.stderr, result.stdout].filter(Boolean).join("\n"),
     ).slice(-80_000);
-    if (!allowFailure) this.requireSuccess(result);
+    if (!allowFailure) requireSuccess(result);
     if (result.stdout.trim()) {
       try {
         job.result = JSON.parse(result.stdout);
@@ -2361,7 +2352,7 @@ export class DesktopService {
             ticket_id: contract.ticket_id,
             outcome: contract.outcome,
           }));
-      const listed = this.requireSuccess(
+      const listed = requireSuccess(
         await this.execute("git", ["worktree", "list", "--porcelain", "-z"], {
           cwd: repo.path,
         }),

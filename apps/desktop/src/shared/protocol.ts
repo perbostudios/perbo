@@ -1235,6 +1235,19 @@ export interface ReplyMap {
   openPullRequest: null;
   export: string | null;
 }
+/** One Request, narrowed to the kind it carries. */
+export type RequestOf<K extends Request["kind"]> = Extract<Request, { kind: K }>;
+/**
+ * A handler for every Request kind and for nothing else: a host that answers
+ * the protocol is this table. A missing kind or a key the protocol does not
+ * declare is a compile error, which is what makes the table exhaustive.
+ */
+export type RequestHandlers<Context = void> = {
+  [K in Request["kind"]]: (
+    request: RequestOf<K>,
+    context: Context,
+  ) => Promise<ReplyMap[K]> | ReplyMap[K];
+};
 export interface DesktopBridge {
   request<T extends Request>(request: T): Promise<ReplyMap[T["kind"]]>;
   subscribe(listener: (change: Change) => void): () => void;
