@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./base.json",
+  "compilerOptions": { "rootDir": "${configDir}/src", "outDir": "${configDir}/dist" },
+  "include": ["${configDir}/src"],
+  "exclude": ["${configDir}/src/**/*.test.ts", "${configDir}/src/**/*.test.tsx", "${configDir}/src/**/test-support"]
+}

@@ -135,7 +135,13 @@ export const STAGES = [
       ctx.run([python, "scripts/validate_diagrams.py"]);
       ctx.run([python, "scripts/validate_fixture_diffs.py"]);
       ctx.run([python, "-c", YAML_PARSE]);
-      ctx.run(["node", "--test", "scripts/check.test.mjs", "scripts/sync-protected-paths.test.mjs"]);
+      ctx.run([
+        "node",
+        "--test",
+        "scripts/check.test.mjs",
+        "scripts/sync-protected-paths.test.mjs",
+        "scripts/tsconfig-split.test.mjs",
+      ]);
       ctx.run(["node", "scripts/sync-protected-paths.mjs", "--check"]);
     },
   },

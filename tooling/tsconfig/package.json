@@ -3,5 +3,5 @@
   "private": true,
   "version": "0.0.0",
   "license": "Apache-2.0",
-  "files": ["base.json"]
+  "files": ["base.json", "library.json", "library.build.json"]
 }
