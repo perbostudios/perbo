@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { ReviewModel } from "@perbo/review";
+import type { Model } from "@perbo/model";
 import { parseReviewArgs } from "../src/args.js";
 import { runReviewCommand, type Streams } from "../src/run.js";
 
@@ -140,7 +140,7 @@ const pullRequest = (head: Record<string, unknown>): Record<string, unknown> => 
  * and a count of how many times it was asked anything, which is what the two
  * refusals are measured by.
  */
-function countingModel(): ReviewModel & { built: number; turns: number } {
+function countingModel(): Model & { built: number; turns: number } {
   const model = {
     provider: "double",
     model_id: "scripted",
@@ -184,7 +184,7 @@ function countingModel(): ReviewModel & { built: number; turns: number } {
       };
     },
   };
-  return model as unknown as ReviewModel & { built: number; turns: number };
+  return model as unknown as Model & { built: number; turns: number };
 }
 
 interface Ran {
@@ -195,7 +195,7 @@ interface Ran {
 
 async function review(
   argv: string[],
-  options: { cwd: string; gh: string; model: ReviewModel & { built: number; turns: number } },
+  options: { cwd: string; gh: string; model: Model & { built: number; turns: number } },
 ): Promise<Ran> {
   let out = "";
   let err = "";

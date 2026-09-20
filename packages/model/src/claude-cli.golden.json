@@ -1,0 +1,58 @@
+[
+  {
+    "argv": [
+      "-p",
+      "--model",
+      "claude-opus-5",
+      "--tools",
+      "",
+      "--setting-sources",
+      "user",
+      "--safe-mode",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--settings",
+      "{\"disableAllHooks\":true}",
+      "--disable-slash-commands",
+      "--output-format",
+      "json",
+      "--json-schema",
+      "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"next\",\"read_paths\",\"review\"],\"properties\":{\"next\":{\"type\":\"string\",\"enum\":[\"read_files\",\"submit_review\"],\"description\":\"read_files to open more of the repository before deciding; submit_review when done.\"},\"read_paths\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Repository-relative paths to open, exactly as they appear in the listing. Empty when submitting.\"},\"review\":{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"],\"additionalProperties\":false},{\"type\":\"null\"}],\"description\":\"The completed review when next is submit_review, otherwise null.\"}}}",
+      "--session-id",
+      "<session>",
+      "--system-prompt-file",
+      "<system-file>"
+    ],
+    "stdin": "the context",
+    "system": "system prompt"
+  },
+  {
+    "argv": [
+      "-p",
+      "--model",
+      "claude-opus-5",
+      "--tools",
+      "",
+      "--setting-sources",
+      "user",
+      "--safe-mode",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--settings",
+      "{\"disableAllHooks\":true}",
+      "--disable-slash-commands",
+      "--output-format",
+      "json",
+      "--json-schema",
+      "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"next\",\"read_paths\",\"review\"],\"properties\":{\"next\":{\"type\":\"string\",\"enum\":[\"read_files\",\"submit_review\"],\"description\":\"read_files to open more of the repository before deciding; submit_review when done.\"},\"read_paths\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Repository-relative paths to open, exactly as they appear in the listing. Empty when submitting.\"},\"review\":{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"],\"additionalProperties\":false},{\"type\":\"null\"}],\"description\":\"The completed review when next is submit_review, otherwise null.\"}}}",
+      "--resume",
+      "<session>",
+      "--system-prompt-file",
+      "<system-file>"
+    ],
+    "stdin": "the file\n\nSubmit now: set next to submit_review and fill review with one coverage entry per criterion. No further reads.",
+    "system": "system prompt"
+  }
+]

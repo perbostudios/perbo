@@ -7,10 +7,10 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { admittedSpecFiles } from "@perbo/contracts";
 import {
   SUBMIT_REVIEW_TOOL,
+  type Model,
   type ModelRequest,
   type ModelTurn,
-  type ReviewModel,
-} from "@perbo/review";
+} from "@perbo/model";
 import { commitSpec } from "@perbo/runner";
 import { UsageError } from "../src/args.js";
 import { parseAdmitArgs, runAdmitCommand, runApproveCommand, type Streams } from "../src/admit.js";
@@ -103,7 +103,7 @@ function capture(): Streams & { out: string[]; err: string[] } {
 }
 
 /** The drafter, scripted: one turn, one `submit_review` call, no provider. */
-function scripted(draft: unknown): ReviewModel {
+function scripted(draft: unknown): Model {
   let turn = 0;
   return {
     provider: "double",

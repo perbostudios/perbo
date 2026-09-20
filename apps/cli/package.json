@@ -26,6 +26,7 @@
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "catalog:",
     "@perbo/contracts": "workspace:*",
+    "@perbo/model": "workspace:*",
     "@perbo/planning": "workspace:*",
     "@perbo/review": "workspace:*",
     "@perbo/runner": "workspace:*",

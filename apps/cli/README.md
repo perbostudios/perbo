@@ -216,7 +216,7 @@ through local `gh`, hands its title and body to a model as delimited `trust="ext
 alongside the repository's tree, and takes back a constrained draft: one outcome, the criteria
 the work has, each with an assertion and a kind, a proposed scope of one to eight globs, a
 rationale and, where the work divides, the nodes and edges of an execution graph
-(`@perbo/planning`, prompt `draft_v3`). The draft is written beside the ticket as
+(`@perbo/planning`, prompt `draft_v4`). The draft is written beside the ticket as
 `<KEY>.draft.json` with the model, provider, tokens and cost that produced it, and the contract is
 created in `plan_review`. **A draft is never executed; only an approved contract is.** The person's
 `approve` is the authority boundary under ADR-0023 §4 — a scope glob a model proposed becomes an

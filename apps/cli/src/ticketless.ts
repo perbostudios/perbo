@@ -13,6 +13,7 @@ import {
   SourceContractSchema,
   issueAuthoredAttempts,
   planContractFromSource,
+  redactCredentials,
   parsePullRequestReference,
   routeForReview,
   sourceContractFromArguments,
@@ -23,7 +24,7 @@ import {
   type ReviewRouting,
   type SourceContract,
 } from "@perbo/contracts";
-import { isRemediableFamily, redactCredentials, remediableFindings } from "@perbo/review";
+import { isRemediableFamily, remediableFindings } from "@perbo/review";
 import { UsageError, type ReviewArgs } from "./args.js";
 import { readPullRequest, readRefRange, type GitRunner, type PullRequestRead } from "./pull-request.js";
 

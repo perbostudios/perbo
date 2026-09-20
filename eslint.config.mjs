@@ -5,7 +5,8 @@ import tseslint from "typescript-eslint";
 
 /**
  * ADR-0023 §4: nothing the model returns may become a path, a command or a
- * shell argument. Two rules, because two packages have different jobs.
+ * shell argument. Three rules, because a package that never starts a process,
+ * one whose two transports do, and everything else have different jobs.
  */
 const NO_SHELL_STRING = {
   // `exec` and `execSync` take a command *line*. Everything else in
@@ -16,11 +17,20 @@ const NO_SHELL_STRING = {
     "No shell-string execution anywhere. Use argv (execFile/spawn) so a value cannot become a command (ADR-0023 §4).",
 };
 
+const PROCESS_EXECUTION =
+  "CallExpression[callee.name=/^(exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)$/]";
+
 const NO_PROCESS_EXECUTION = {
-  selector:
-    "CallExpression[callee.name=/^(exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)$/]",
+  selector: PROCESS_EXECUTION,
   message:
     "No process execution in the reviewer. Model output must never reach a command (ADR-0023).",
+};
+
+const NO_TRANSPORT_PROCESS_EXECUTION = {
+  selector: PROCESS_EXECUTION,
+  message:
+    "No process execution in the model package, outside its two named CLI transports. " +
+    "Model output must never reach a command (ADR-0023).",
 };
 
 /**
@@ -132,13 +142,26 @@ export default tseslint.config(
     },
   },
   {
-    // The two named CLI transports are the reviewer's only exception. They
-    // start a fixed provider binary while model/repository content travels as
-    // data and never selects a command. Both retain the shell-string ban.
-    files: [
-      "packages/review/src/provider-cli.ts",
-      "packages/review/src/provider-codex-cli.ts",
-    ],
+    // The model call has no process-execution surface by default either.
+    files: ["packages/model/**"],
+    rules: {
+      "no-restricted-syntax": ["error", NO_TRANSPORT_PROCESS_EXECUTION],
+    },
+  },
+  {
+    // Its source, which the object above no longer reaches.
+    files: ["packages/model/src/**"],
+    ignores: EXPORT_ALL_BURN_DOWN,
+    rules: {
+      "no-restricted-syntax": ["error", NO_TRANSPORT_PROCESS_EXECUTION, NO_EXPORT_ALL],
+    },
+  },
+  {
+    // The two named CLI transports are the only exception in the repository.
+    // They start a fixed provider binary while model and repository content
+    // travels as data and never selects a command. Both retain the
+    // shell-string ban.
+    files: ["packages/model/src/claude-cli.ts", "packages/model/src/codex-cli.ts"],
     rules: {
       "no-restricted-syntax": ["error", NO_SHELL_STRING, NO_EXPORT_ALL],
     },

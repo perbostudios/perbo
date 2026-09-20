@@ -24,6 +24,7 @@ import {
   type TicketState,
   type Wait,
 } from "@perbo/contracts";
+import { MODEL_PROVIDERS } from "@perbo/model";
 import { RunRefusedError, ServeLockedError, acquireServeLock, liveRunLocks } from "@perbo/runner";
 import { startEndpoint, type RunningEndpoint } from "./endpoint.js";
 import { gitEnv, run } from "@perbo/workspace";
@@ -387,7 +388,7 @@ export function keyFromAdmitJson(stdout: string): string | null {
 export const TrackerConfigSchema = z.strictObject({
   repository: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/, "owner/repo"),
   draft_label: z.string().min(1),
-  provider: z.enum(["anthropic", "claude-cli", "codex-cli"]).optional(),
+  provider: z.enum(MODEL_PROVIDERS).optional(),
   model: z.string().min(1).optional(),
 });
 export type TrackerConfig = z.infer<typeof TrackerConfigSchema>;

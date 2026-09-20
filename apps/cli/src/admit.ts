@@ -54,14 +54,8 @@ import {
   readIssueFile,
   readSpecFile,
 } from "@perbo/planning";
-import {
-  ProviderError,
-  RepoReader,
-  anthropicModel,
-  claudeCliModel,
-  codexCliModel,
-  type ReviewModel,
-} from "@perbo/review";
+import { ProviderError, createModel, type Model, type ModelProvider } from "@perbo/model";
+import { RepoReader } from "@perbo/review";
 import { UsageError } from "./args.js";
 import { prohibitedSpecPaths, regenerateNodePages, specCommitFiles } from "./specs.js";
 import { specBaseline } from "./spec-staleness.js";
@@ -136,7 +130,7 @@ const DEFAULT_GENERATED = ["pnpm-lock.yaml", "package-lock.json", "**/*.generate
 const DEFAULT_EXPANSION_BUDGET = 3;
 const DEFAULT_PREFIX = "PRB";
 
-export type DraftProvider = "anthropic" | "claude-cli" | "codex-cli";
+export type DraftProvider = ModelProvider;
 
 export interface AdmitArgs {
   repo: string;
@@ -895,14 +889,8 @@ function describeContractDifference(
 }
 
 /** The drafting transport, the reviewer's own, constrained to the draft schema. */
-function draftingModel(provider: DraftProvider, modelId: string | null): ReviewModel {
-  const options = {
-    submitSchema: CONTRACT_DRAFT_JSON_SCHEMA,
-    ...(modelId ? { modelId } : {}),
-  };
-  if (provider === "claude-cli") return claudeCliModel(options);
-  if (provider === "codex-cli") return codexCliModel(options);
-  return anthropicModel(options);
+function draftingModel(provider: DraftProvider, modelId: string | null): Model {
+  return createModel(provider, { submitSchema: CONTRACT_DRAFT_JSON_SCHEMA, modelId });
 }
 
 interface Resolved {
@@ -934,7 +922,7 @@ export interface AdmitInput {
   cwd: string;
   now?: Date;
   /** The drafting model, for tests. Otherwise built from `--provider`. */
-  model?: ReviewModel;
+  model?: Model;
   /** The issue reader, for tests. Otherwise `gh issue view`. */
   fetchIssue?: (reference: string) => Promise<GitHubIssue>;
 }

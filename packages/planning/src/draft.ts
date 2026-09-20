@@ -9,15 +9,11 @@ import {
 import {
   READ_FILE_TOOL,
   SUBMIT_REVIEW_TOOL,
-  ZERO_USAGE,
-  addUsage,
-  renderReadFileResult,
-  resolveModelCost,
+  openSession,
+  type Model,
   type ModelCostBasis,
-  type ModelUsage,
-  type ReadOutcome,
-  type ReviewModel,
-} from "@perbo/review";
+  type ToolResult,
+} from "@perbo/model";
 import { delimit } from "./delimit.js";
 import { DraftRejectedError, PlanningError } from "./errors.js";
 import { repositoryTree } from "./tree.js";
@@ -39,11 +35,12 @@ import { repositoryTree } from "./tree.js";
 /**
  * Covers the system prompt, the block layout and the output schema together.
  *
- * v3: a spec as a second source, an execution graph of nodes and suggested
- * edges, the requirement id a criterion was drafted from, and no cap on the
- * number of criteria (D-100, D-103).
+ * v4: a spec as a second source, an execution graph of nodes and suggested
+ * edges, the requirement id a criterion was drafted from, no cap on the number
+ * of criteria (D-100, D-103), and every file the drafter opens delimited by
+ * this package.
  */
-export const DRAFT_PROMPT_VERSION = "draft_v3";
+export const DRAFT_PROMPT_VERSION = "draft_v4";
 
 /**
  * `manual` is absent: it carries a named reviewer and a reason nobody can
@@ -364,9 +361,32 @@ export interface BoardEntry {
   approved: boolean;
 }
 
+/** One file the drafter asked for, as the reader answered. */
+export type DraftReadOutcome =
+  | { ok: true; path: string; content: string; truncated: boolean; bytes: number }
+  | { ok: false; path: string; refusal: string };
+
 /** What the drafter may open, bounded by whoever supplies it. */
 export interface DraftReader {
-  read(path: string): ReadOutcome;
+  read(path: string): DraftReadOutcome;
+}
+
+/**
+ * A file the drafter opened, as the next turn receives it.
+ *
+ * The reader is bounded, but what it serves is still bytes somebody wrote, so
+ * it arrives inside a block that names its trust tier and is defanged like
+ * every other piece of content that is not the system prompt.
+ */
+function renderRead(outcome: DraftReadOutcome): string {
+  return delimit({
+    kind: "repo_file",
+    trust: "repo",
+    attrs: outcome.ok
+      ? { path: outcome.path, ...(outcome.truncated ? { truncated: "true" } : {}) }
+      : { path: outcome.path, read: "refused" },
+    body: outcome.ok ? outcome.content : outcome.refusal,
+  });
 }
 
 /** One file the drafter opened, or asked to and was refused. */
@@ -401,7 +421,7 @@ export interface DraftInput {
   repositoryId: string;
   defaultProhibited: readonly string[];
   defaultGenerated: readonly string[];
-  model: ReviewModel;
+  model: Model;
   /** The tree to show instead of listing `repositoryRoot`. Tests supply one. */
   tree?: readonly string[];
   /**
@@ -625,43 +645,31 @@ function unknownRoots(globs: readonly string[], tree: readonly string[]): string
 
 export async function draftContract(input: DraftInput): Promise<DraftResult> {
   const tree = input.tree ?? repositoryTree(input.repositoryRoot);
-  const system = draftSystemPrompt();
-  const messages: Array<{ role: "user" | "assistant"; content: unknown }> = [
-    {
-      role: "user",
-      content: draftUserMessage({
-        title: input.title,
-        body: input.body,
-        url: input.url,
-        reference: input.reference,
-        repositoryId: input.repositoryId,
-        tree,
-        defaultProhibited: input.defaultProhibited,
-        defaultGenerated: input.defaultGenerated,
-        board: input.board,
-        sourceKind: input.sourceKind,
-        requirementIds: input.requirementIds,
-      }),
-    },
-  ];
+  const session = openSession(
+    input.model,
+    draftSystemPrompt(),
+    draftUserMessage({
+      title: input.title,
+      body: input.body,
+      url: input.url,
+      reference: input.reference,
+      repositoryId: input.repositoryId,
+      tree,
+      defaultProhibited: input.defaultProhibited,
+      defaultGenerated: input.defaultGenerated,
+      board: input.board,
+      sourceKind: input.sourceKind,
+      requirementIds: input.requirementIds,
+    }),
+  );
 
-  let usage: ModelUsage = ZERO_USAGE;
-  let turns = 0;
-  let reportedTurns = 0;
-  let reportedCostMicros = 0;
   let draft: ContractDraft | null = null;
   const filesRead: DraftFileRead[] = [];
   const maxTurns = input.reader === undefined ? MAX_DRAFT_TURNS : MAX_DRAFT_TURNS_WITH_READS;
 
   try {
     for (let turn = 0; turn < maxTurns && draft === null; turn += 1) {
-      const result = await input.model.turn({ system, messages, forceSubmit: true });
-      turns += 1;
-      usage = addUsage(usage, result.usage);
-      if (result.reported_cost_micros !== undefined) {
-        reportedTurns += 1;
-        reportedCostMicros += result.reported_cost_micros;
-      }
+      const result = await session.next(true);
 
       const submit = result.toolCalls.find((call) => call.name === SUBMIT_REVIEW_TOOL);
       if (submit) {
@@ -702,59 +710,38 @@ export async function draftContract(input: DraftInput): Promise<DraftResult> {
         // Bounded reads, honoured: each is served by the caller's reader,
         // which refuses what it will not open, and recorded either way.
         const reader = input.reader;
-        messages.push({
-          role: "assistant",
-          content: reads.map((call) => ({ type: "tool_use", id: call.id, name: call.name, input: call.input })),
-        });
-        messages.push({
-          role: "user",
-          content: reads.map((call) => {
+        session.answer(
+          reads.map((call): ToolResult => {
             const path = String((call.input as { path?: unknown })?.path ?? "");
             const outcome = reader.read(path);
             filesRead.push({ path, bytes: outcome.ok ? outcome.bytes : 0, refused: outcome.ok ? null : outcome.refusal });
-            return {
-              type: "tool_result",
-              tool_use_id: call.id,
-              content: renderReadFileResult(outcome),
-              ...(outcome.ok ? {} : { is_error: true }),
-            };
+            return { call, content: renderRead(outcome), isError: !outcome.ok };
           }),
-        });
+        );
         continue;
       }
 
       // The model asked for files where none may be opened, or stopped. One
       // more turn, saying plainly that the tree is all there is.
       if (reads.length > 0) {
-        messages.push({
-          role: "assistant",
-          content: reads.map((call) => ({
-            type: "tool_use",
-            id: call.id,
-            name: call.name,
-            input: call.input,
-          })),
-        });
-        messages.push({
-          role: "user",
-          content: reads.map((call) => ({
-            type: "tool_result",
-            tool_use_id: call.id,
+        session.answer(
+          reads.map((call) => ({
+            call,
             content:
               "Files cannot be opened while drafting; the repository tree above is all there is. " +
               "Submit the draft now.",
+            isError: false,
           })),
-        });
+        );
       } else {
-        messages.push({ role: "assistant", content: [{ type: "text", text: "(no draft)" }] });
-        messages.push({ role: "user", content: "Submit the draft now, as structured output." });
+        session.nudge("(no draft)", "Submit the draft now, as structured output.");
       }
     }
   } finally {
     // The drafting is over for the transport however it ended. The CLI one
     // writes a session to the user's store and removes it here, so an
     // admission that skipped this would leave one behind.
-    await input.model.dispose?.();
+    await session.close();
   }
 
   if (draft === null) {
@@ -764,15 +751,7 @@ export async function draftContract(input: DraftInput): Promise<DraftResult> {
     );
   }
 
-  const cost = resolveModelCost({
-    usage,
-    turns,
-    reportedTurns,
-    reportedCostMicros,
-    ...(input.model.unreported_cost_basis !== undefined
-      ? { unreportedCostBasis: input.model.unreported_cost_basis }
-      : {}),
-  });
+  const { usage, turns, ...cost } = session.accounting();
   const basis: ModelCostBasis = cost.cost_basis;
 
   // Read from the body, not from the draft: what the issue tried is a fact

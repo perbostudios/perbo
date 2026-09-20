@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EXIT_CODES } from "@perbo/contracts";
+import { MODEL_PROVIDERS } from "@perbo/model";
 import { isAbsolute } from "node:path";
 import { parseAdmitArgs, parseListArgs, runAdmitCommand, runListCommand, type AdmitArgs } from "./admit.js";
 import { runEdit, type EditArgs } from "./edit.js";
@@ -237,7 +238,7 @@ const admitTicket = tool({
     generated: z.array(z.string()).optional().describe("Globs exempt from scope accounting: lockfiles, codegen."),
     from: IssueReferenceSchema.optional().describe("owner/repo#N: draft the contract from that issue."),
     from_file: AbsoluteFileSchema.optional().describe("An absolute path: draft the contract from that file."),
-    provider: z.enum(["anthropic", "claude-cli", "codex-cli"]).optional().describe("The drafting provider."),
+    provider: z.enum(MODEL_PROVIDERS).optional().describe("The drafting provider."),
     model: ModelIdSchema.optional().describe("The drafting model id."),
     priority: z.enum(["urgent", "high", "normal", "low"]).optional(),
     labels: z.array(z.string()).optional(),

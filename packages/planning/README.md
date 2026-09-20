@@ -15,7 +15,7 @@ Three properties are why a draft here is safe to show a person:
 
 | | |
 |---|---|
-| `draft.ts` | `draftContract`: the system prompt, the delimited blocks, the call, the schema, the provenance record. `DRAFT_PROMPT_VERSION` is `draft_v3` and covers all of them together |
+| `draft.ts` | `draftContract`: the system prompt, the delimited blocks, the call, the schema, the provenance record. `DRAFT_PROMPT_VERSION` is `draft_v4` and covers all of them together |
 | `delimit.ts` | The `<perbo:kind trust="…">` block, mirrored from the reviewer, plus the tag defang |
 | `tree.ts` | `git ls-files` two levels deep, by argv, so proposed globs name directories that exist |
 | `issue.ts` | `SourceIssue`, the one shape drafting reads, and `fetchGitHubIssue`: `gh issue view … --json` by argv, Zod-validated, one sentence on failure |
@@ -32,7 +32,7 @@ Three properties are why a draft here is safe to show a person:
 
 ## What is recorded
 
-`draftContract` returns the validated draft together with the model's `provider`, `model_id`, `prompt_version`, token `usage`, `cost_micros` and `cost_basis` — the same accounting `@perbo/review` reports, resolved by the same `resolveModelCost`, so a draft over `claude-cli` carries the dollars the transport reported and one over `codex-cli` says `unavailable` rather than inventing a Claude price. It also names any proposed glob whose leading directory is not in the tree: shown to the person, not refused, because a new package is a real case.
+`draftContract` returns the validated draft together with the model's `provider`, `model_id`, `prompt_version`, token `usage`, `cost_micros` and `cost_basis`, resolved by `resolveModelCost` from `@perbo/model` — the same accounting every model call in this repository carries — so a draft over `claude-cli` carries the dollars the transport reported and one over `codex-cli` says `unavailable` rather than inventing a Claude price. It also names any proposed glob whose leading directory is not in the tree: shown to the person, not refused, because a new package is a real case.
 
 `contractEditCount` is the admission-friction instrument's second number (D-072, ADR-0027). It counts the outcome, each criterion added, removed or reworded, and each scope glob added or removed, matching criteria by id. Identity, base and level are not counted; a person does not type those.
 

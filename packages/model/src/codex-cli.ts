@@ -10,23 +10,17 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import readline from "node:readline";
 import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
-import {
-  ProviderError,
-  providerFailureText,
-  type ModelRequest,
-  type ModelTurn,
-  type ModelUsage,
-  type ReviewModel,
-} from "./provider.js";
+import { DEFAULT_CODEX_MODEL } from "./defaults.js";
+import { ProviderError, providerFailureText } from "./failure.js";
 import {
   lastUserText,
   structuredTurnSchema,
   structuredTurnToolCalls,
   type StructuredTurn,
-} from "./provider-structured.js";
-import { SUBMIT_REVIEW_TOOL } from "./verdict.js";
+} from "./structured.js";
+import { SUBMIT_REVIEW_TOOL, type Model, type ModelRequest, type ModelTurn } from "./turn.js";
+import type { ModelUsage } from "./usage.js";
 
-const DEFAULT_MODEL = "gpt-5.6-terra";
 const TRANSPORT_INSTRUCTIONS =
   "You are a stateless semantic reviewer. Do not call tools: none are available. " +
   "Return only JSON matching the supplied schema. Choose read_files to ask the " +
@@ -467,8 +461,8 @@ class CodexAppServer {
   }
 }
 
-export function codexCliModel(options: CodexCliOptions): ReviewModel {
-  const modelId = options.modelId ?? DEFAULT_MODEL;
+export function codexCliModel(options: CodexCliOptions): Model {
+  const modelId = options.modelId ?? DEFAULT_CODEX_MODEL;
   const schema = structuredTurnSchema(options.submitSchema);
   let server: CodexAppServer | null = null;
   let threadId: string | null = null;

@@ -48,7 +48,7 @@ import {
   readDraftSnapshot,
   readTicket,
 } from "./tickets.js";
-import type { ReviewModel } from "@perbo/review";
+import type { Model } from "@perbo/model";
 
 /**
  * `perbo interview` — the person's own session, which writes the spec
@@ -1298,7 +1298,7 @@ export interface InterviewContext {
   specWritten: () => boolean;
   specTaken: () => void;
   /** The drafting model, injected by a test. Otherwise `admit`'s own. */
-  model?: ReviewModel | undefined;
+  model?: Model | undefined;
 }
 
 export interface InterviewTool<Input extends z.ZodType = z.ZodType> {
@@ -1782,7 +1782,7 @@ export interface InterviewInput {
   /** Injected by tests: the transport. Otherwise the one `--provider` names. */
   transport?: InterviewTransport;
   /** Injected by tests: the drafting model `generate_plan` runs the drafter with. */
-  model?: ReviewModel;
+  model?: Model;
   /** The person's turns, one JSON line each. Defaults to stdin. */
   turns?: AsyncIterable<string>;
   now?: Date;

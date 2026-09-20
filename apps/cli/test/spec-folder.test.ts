@@ -6,10 +6,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import {
   SUBMIT_REVIEW_TOOL,
+  type Model,
   type ModelRequest,
   type ModelTurn,
-  type ReviewModel,
-} from "@perbo/review";
+} from "@perbo/model";
 import { UsageError } from "../src/args.js";
 import { parseAdmitArgs, runAdmitCommand, runApproveCommand, type Streams } from "../src/admit.js";
 import { runEditCommand } from "../src/edit.js";
@@ -87,7 +87,7 @@ function capture(): Streams & { out: string[]; err: string[] } {
   return { out, err, stdout: (c) => out.push(c), stderr: (c) => err.push(c), isTTY: false };
 }
 
-function scripted(script: Array<Array<{ tool: string; input: unknown }>>): ReviewModel {
+function scripted(script: Array<Array<{ tool: string; input: unknown }>>): Model {
   let turn = 0;
   return {
     provider: "double",
@@ -117,7 +117,7 @@ function scriptedWithCount(script: Array<Array<{ tool: string; input: unknown }>
         turns += 1;
         return inner.turn(request);
       },
-    } as ReviewModel,
+    } as Model,
   };
 }
 

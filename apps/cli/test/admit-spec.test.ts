@@ -7,10 +7,10 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { ApproachRecordSchema, EXIT_CODES } from "@perbo/contracts";
 import {
   SUBMIT_REVIEW_TOOL,
+  type Model,
   type ModelRequest,
   type ModelTurn,
-  type ReviewModel,
-} from "@perbo/review";
+} from "@perbo/model";
 import { UsageError } from "../src/args.js";
 import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
 import { runEditCommand } from "../src/edit.js";
@@ -88,7 +88,7 @@ function capture(): Streams & { out: string[]; err: string[] } {
   };
 }
 
-function scripted(script: Array<Array<{ tool: string; input: unknown }>>): ReviewModel & {
+function scripted(script: Array<Array<{ tool: string; input: unknown }>>): Model & {
   requests: ModelRequest[];
 } {
   const requests: ModelRequest[] = [];
@@ -158,7 +158,7 @@ const drafted = {
 async function admitFromSpec(
   repo: string,
   specPath: string,
-  model: ReviewModel,
+  model: Model,
   extra: string[] = [],
 ) {
   const streams = capture();
@@ -527,12 +527,12 @@ describe("a spec is one piece of work's, in a folder of its own", () => {
     const loose = join(repo, "spec.md");
     writeFileSync(loose, SPEC);
     const asked: string[] = [];
-    const model: ReviewModel = {
+    const model: Model = {
       complete: async () => {
         asked.push("drafted");
         throw new Error("no model is asked for a spec that is not one piece of work");
       },
-    } as unknown as ReviewModel;
+    } as unknown as Model;
 
     const refused = await admitFromSpec(repo, loose, model).catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(UsageError);

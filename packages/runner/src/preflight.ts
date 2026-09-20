@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { GH_NOT_LOGGED_IN } from "@perbo/contracts";
+import type { ModelProvider } from "@perbo/model";
 import {
   readGithubCredential,
   type GithubCredentialReading,
@@ -66,7 +67,7 @@ export interface PreflightRequest {
    */
   agentProvider: "claude-cli" | "codex-cli" | null;
   /** Which reviewer transport the run will use. */
-  reviewerProvider: "anthropic" | "claude-cli" | "codex-cli";
+  reviewerProvider: ModelProvider;
   /** Whether the run will push and open a pull request through `gh`. */
   needsGh: boolean;
   /**

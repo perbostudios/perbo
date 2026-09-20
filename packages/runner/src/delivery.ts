@@ -9,6 +9,7 @@ import {
   deliveryChecksState,
   failedChecks,
   readD073Verdicts,
+  redactCredentials,
   ticketSourceLabel,
   type DeliveredCheck,
   type DeliveryArm,
@@ -24,7 +25,6 @@ import {
   type TicketSource,
 } from "@perbo/contracts";
 import { gitEnv, isAttemptBranch, run } from "@perbo/workspace";
-import { redactCredentials } from "@perbo/review";
 import { requireGithubCredential } from "./github-credential.js";
 
 /**

@@ -79,8 +79,9 @@ Each package's entry file names what the others may import from it, and the layo
 
 | Package | Holds |
 |---|---|
-| `@perbo/contracts` | The typed shapes every other package shares: the ticket, the plan contract, the change set, check results, the review artifact, the run bundle, the materialization manifest, the limits table |
-| `@perbo/review` | The reviewer: context assembly, the blocking and routing matrix, the model call, credential redaction, the structured verdict |
+| `@perbo/contracts` | The typed shapes every other package shares: the ticket, the plan contract, the change set, check results, the review artifact, the run bundle, the materialization manifest, the limits table, and what counts as credential-shaped |
+| `@perbo/model` | The model call: one port over one turn of the read-or-submit protocol, three transports onto it, and what a turn cost |
+| `@perbo/review` | The reviewer: context assembly, the blocking and routing matrix, the structured verdict, closure verification, artifact redaction |
 | `@perbo/workspace` | Git worktree provisioning, the environment diagnostic, materialization, process execution |
 | `@perbo/runner` | The permission profile, the write guard, sealing, checks, the remediation loop, delivery and the merge step |
 | `@perbo/planning` | Contract drafting from a tracker issue, a pasted file or a repository spec: a model proposes, a person approves. Reads and writes the spec folder and its page per node |

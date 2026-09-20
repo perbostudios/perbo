@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
-import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL, type ModelRequest, type ModelTurn, type ReviewModel } from "@perbo/review";
+import {
+  READ_FILE_TOOL,
+  SUBMIT_REVIEW_TOOL,
+  type Model,
+  type ModelRequest,
+  type ModelTurn,
+} from "@perbo/model";
 import { UsageError } from "../src/args.js";
 import { parseAdmitArgs, readTicket, runAdmitCommand, storeDir, type Streams } from "../src/admit.js";
 import { nextKey, readDraftSnapshot } from "../src/tickets.js";
@@ -52,7 +58,7 @@ const issue = {
 const fetchIssue = () => Promise.resolve(issue);
 
 /** A drafter that answers each turn from a script, recording what it was asked. */
-function scripted(script: Array<Array<{ tool: string; input: unknown }>>): ReviewModel & { requests: ModelRequest[] } {
+function scripted(script: Array<Array<{ tool: string; input: unknown }>>): Model & { requests: ModelRequest[] } {
   const requests: ModelRequest[] = [];
   let turn = 0;
   return {
@@ -122,7 +128,7 @@ const one = {
   rationale: "Queue owns delivery.",
 };
 
-async function admitFrom(repo: string, model: ReviewModel, extra: string[] = []) {
+async function admitFrom(repo: string, model: Model, extra: string[] = []) {
   const streams = capture();
   const code = await runAdmitCommand({
     args: parseAdmitArgs(["--repo", repo, "--from", "o/r#412", ...extra]),

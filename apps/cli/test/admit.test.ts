@@ -15,10 +15,10 @@ import {
 import { PlanningError, draftSystemPrompt, readIssueFile } from "@perbo/planning";
 import {
   SUBMIT_REVIEW_TOOL,
+  type Model,
   type ModelRequest,
   type ModelTurn,
-  type ReviewModel,
-} from "@perbo/review";
+} from "@perbo/model";
 import { UsageError } from "../src/args.js";
 import { runEditCommand } from "../src/edit.js";
 import { buildInspectReport, renderInspect, runInspectCommand } from "../src/inspect.js";
@@ -151,7 +151,7 @@ const draft = {
 };
 
 /** A model that returns one fixed draft through the structured-output path. */
-function drafter(input: unknown = draft): ReviewModel {
+function drafter(input: unknown = draft): Model {
   return {
     provider: "double",
     model_id: "scripted",
@@ -224,7 +224,7 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
 
     // The snapshot is what the person was shown, with the model that drafted it.
     const snapshot = readDraftSnapshot(dir, "PRB-1");
-    expect(snapshot?.draft?.model.prompt_version).toBe("draft_v3");
+    expect(snapshot?.draft?.model.prompt_version).toBe("draft_v4");
     expect(snapshot?.draft?.model.provider).toBe("double");
     // As returned, plus the fields the schema fills when a draft names no
     // dependency and proposes no graph.
@@ -311,7 +311,7 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
  * model was actually asked — which is the only way to show that two commands
  * make the same call rather than two that happen to agree.
  */
-function recordingDrafter(input: unknown = draft): ReviewModel & { requests: ModelRequest[] } {
+function recordingDrafter(input: unknown = draft): Model & { requests: ModelRequest[] } {
   const requests: ModelRequest[] = [];
   return {
     provider: "double",

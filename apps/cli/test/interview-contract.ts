@@ -3,7 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { InterviewEventSchema, type InterviewEvent } from "@perbo/contracts/interview-protocol";
-import { SUBMIT_REVIEW_TOOL, type ModelRequest, type ModelTurn, type ReviewModel } from "@perbo/review";
+import {
+  SUBMIT_REVIEW_TOOL,
+  type Model,
+  type ModelRequest,
+  type ModelTurn,
+} from "@perbo/model";
 import { INTERVIEW_SESSION_FILE, INTERVIEW_TOOL_NAMES } from "../src/interview.js";
 import { listTickets, readDraftSnapshot, readTicket, storeDir } from "../src/tickets.js";
 
@@ -117,7 +122,7 @@ export function repository(scratch: string): string {
 }
 
 /** The drafter `admit --from-spec` runs, scripted to one draft. */
-export function drafter(): ReviewModel {
+export function drafter(): Model {
   let turn = 0;
   return {
     provider: "double",

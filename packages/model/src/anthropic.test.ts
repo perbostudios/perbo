@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { anthropicModel } from "../src/provider.js";
+import { anthropicModel } from "./anthropic.js";
 
 /**
  * The SDK transport's error accounting. A fake `fetch` stands in for the

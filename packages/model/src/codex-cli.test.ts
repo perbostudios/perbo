@@ -2,10 +2,10 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { codexCliModel } from "../src/provider-codex-cli.js";
-import { ProviderError } from "../src/provider.js";
-import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL } from "../src/verdict.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
+import { codexCliModel } from "./codex-cli.js";
+import { ProviderError } from "./failure.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "./test-support/spawn-timeout.js";
+import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL } from "./turn.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-codex-provider-test-"));
 const authHome = join(scratch, "auth-home");

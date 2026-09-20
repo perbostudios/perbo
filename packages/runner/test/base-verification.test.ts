@@ -6,7 +6,8 @@ import {
   type MaterializationManifest,
   type ReviewArtifact,
 } from "@perbo/contracts";
-import { runReview, type ReviewModel } from "@perbo/review";
+import type { Model } from "@perbo/model";
+import { runReview } from "@perbo/review";
 import { branchName } from "@perbo/workspace";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
@@ -140,7 +141,7 @@ const covers = {
 };
 
 /** A reviewer transport that submits one clean verdict every time it is asked. */
-function cleanModel(): ReviewModel {
+function cleanModel(): Model {
   return {
     provider: "double",
     model_id: "scripted",

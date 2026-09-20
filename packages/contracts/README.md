@@ -29,6 +29,15 @@ derivation, would drift. It is also the single home for what a path glob *means*
 is the interface, and `test/glob-conformance.json` states the semantics as cases, so a matcher
 written elsewhere to them answers that table rather than a reading of its own.
 
+`credential.ts` is the single home for "what counts as credential-shaped" ([D-063](../../docs/11-open-decisions.md)):
+`findCredentials` and `redactCredentials`, deliberately narrow, each rule requiring a positive
+signal of secrecy rather than entropy alone. It sits here beside the two neighbouring facts —
+`isCredentialEnvName` in `permission.ts`, which says which environment variables are credentials,
+and `SecretIndex`, which says which materialized content is one — and every package that has to
+redact what it writes already depends on this one. Its false-positive behaviour is measured over the
+whole corpus by `packages/evaluation/test/credential-sweep.test.ts`, so a rule change is a
+measurement, not an edit.
+
 `review.ts` carries one deliberate asymmetry worth knowing about. A finding's `routing` is derived
 from `blocking` when it is absent, rather than defaulted, so an artifact written before D-051 stays
 scoreable — a plain default would silently relabel every blocking finding in an older artifact as

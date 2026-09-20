@@ -1,0 +1,196 @@
+[
+  {
+    "argv": [
+      "--disable",
+      "shell_tool",
+      "--disable",
+      "unified_exec",
+      "-c",
+      "agents.enabled=false",
+      "app-server"
+    ]
+  },
+  {
+    "method": "initialize",
+    "id": 1,
+    "params": {
+      "clientInfo": {
+        "name": "perbo_reviewer",
+        "title": "Perbo semantic reviewer",
+        "version": "0.1.0"
+      },
+      "capabilities": {
+        "experimentalApi": true,
+        "requestAttestation": false
+      }
+    }
+  },
+  {
+    "method": "initialized",
+    "params": {}
+  },
+  {
+    "method": "thread/start",
+    "id": 2,
+    "params": {
+      "model": "gpt-5.6-terra",
+      "allowProviderModelFallback": false,
+      "cwd": "<scratch>",
+      "runtimeWorkspaceRoots": [
+        "<scratch>"
+      ],
+      "approvalPolicy": "never",
+      "sandbox": "read-only",
+      "baseInstructions": "system prompt",
+      "developerInstructions": "You are a stateless semantic reviewer. Do not call tools: none are available. Return only JSON matching the supplied schema. Choose read_files to ask the orchestrator for repository files, or submit_review to return the verdict.",
+      "environments": [],
+      "dynamicTools": [],
+      "selectedCapabilityRoots": [],
+      "ephemeral": true
+    }
+  },
+  {
+    "method": "turn/start",
+    "id": 3,
+    "params": {
+      "threadId": "thr_1",
+      "input": [
+        {
+          "type": "text",
+          "text": "the context",
+          "text_elements": []
+        }
+      ],
+      "cwd": "<scratch>",
+      "runtimeWorkspaceRoots": [
+        "<scratch>"
+      ],
+      "approvalPolicy": "never",
+      "sandboxPolicy": {
+        "type": "readOnly",
+        "networkAccess": false
+      },
+      "environments": [],
+      "model": "gpt-5.6-terra",
+      "effort": "medium",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "next",
+          "read_paths",
+          "review"
+        ],
+        "properties": {
+          "next": {
+            "type": "string",
+            "enum": [
+              "read_files",
+              "submit_review"
+            ],
+            "description": "read_files to open more of the repository before deciding; submit_review when done."
+          },
+          "read_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Repository-relative paths to open, exactly as they appear in the listing. Empty when submitting."
+          },
+          "review": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "ok"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The completed review when next is submit_review, otherwise null."
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "turn/start",
+    "id": 4,
+    "params": {
+      "threadId": "thr_1",
+      "input": [
+        {
+          "type": "text",
+          "text": "the file\n\nSubmit now: set next to submit_review and fill review with one coverage entry per criterion. No further reads.",
+          "text_elements": []
+        }
+      ],
+      "cwd": "<scratch>",
+      "runtimeWorkspaceRoots": [
+        "<scratch>"
+      ],
+      "approvalPolicy": "never",
+      "sandboxPolicy": {
+        "type": "readOnly",
+        "networkAccess": false
+      },
+      "environments": [],
+      "model": "gpt-5.6-terra",
+      "effort": "medium",
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "next",
+          "read_paths",
+          "review"
+        ],
+        "properties": {
+          "next": {
+            "type": "string",
+            "enum": [
+              "read_files",
+              "submit_review"
+            ],
+            "description": "read_files to open more of the repository before deciding; submit_review when done."
+          },
+          "read_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Repository-relative paths to open, exactly as they appear in the listing. Empty when submitting."
+          },
+          "review": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "ok"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The completed review when next is submit_review, otherwise null."
+          }
+        }
+      }
+    }
+  }
+]

@@ -11,6 +11,7 @@ import {
   SourceContractSchema,
   issueAuthoredAttempts,
   planContractFromSource,
+  redactCredentials,
   sourceContractFromArguments,
   sourceContractFromPullRequest,
   sourceIdentity,
@@ -19,7 +20,6 @@ import {
   type PlanContractWithCriteria,
   type SourceContract,
 } from "@perbo/contracts";
-import { redactCredentials } from "@perbo/review";
 import { BaseSourceSchema } from "@perbo/runner";
 import { UsageError } from "./args.js";
 import { readPullRequest } from "./pull-request.js";

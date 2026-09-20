@@ -1,8 +1,14 @@
 import type { ChangeSet, CheckResult, Finding, Scope } from "@perbo/contracts";
 import { assessLegibility } from "./legibility.js";
 import { assessScope } from "./scope.js";
-import type { ModelCostBasis, ModelTurn, ModelUsage, ReviewModel } from "./provider.js";
-import { ZERO_USAGE, addUsage, resolveModelCost } from "./provider.js";
+import {
+  ZERO_USAGE,
+  openSession,
+  type Model,
+  type ModelCostBasis,
+  type ModelTurn,
+  type ModelUsage,
+} from "@perbo/model";
 
 /**
  * Closure verification (D-061, SCP-101): the question asked after a remediation
@@ -147,7 +153,7 @@ export async function verifyClosures(args: {
   checks: CheckResult[];
   scope: Scope;
   changeset: ChangeSet;
-  model: ReviewModel;
+  model: Model;
   onProgress?: (message: string) => void;
 }): Promise<ClosureVerification> {
   const progress = args.onProgress ?? (() => undefined);
@@ -257,24 +263,20 @@ export async function verifyClosures(args: {
         `- finding_key: ${finding.key}\n  rule: ${finding.rule_id}\n  file: ${finding.file ?? "(none)"}\n  statement: ${finding.statement}`,
     )
     .join("\n");
+  const session = openSession(
+    args.model,
+    closureVerifySystemPrompt(),
+    `Findings to verify:\n${findingsList}\n\nThe follow-up change set:\n\n${clip(args.diff, 180_000)}`,
+  );
   let turn: ModelTurn;
   try {
-    turn = await args.model.turn({
-      system: closureVerifySystemPrompt(),
-      messages: [
-        {
-          role: "user",
-          content: `Findings to verify:\n${findingsList}\n\nThe follow-up change set:\n\n${clip(args.diff, 180_000)}`,
-        },
-      ],
-      forceSubmit: true,
-    });
+    turn = await session.next(true);
   } finally {
     // One turn is the whole verification, so it is over here on both paths.
-    await args.model.dispose?.();
+    await session.close();
   }
 
-  const usage = addUsage(ZERO_USAGE, turn.usage);
+  const { usage, ...resolvedCost } = session.accounting();
   const submitCall = turn.toolCalls.find((call) => call.name === "submit_review");
   const submitted =
     submitCall && typeof submitCall.input === "object" && submitCall.input !== null
@@ -320,14 +322,6 @@ export async function verifyClosures(args: {
     ),
   ];
   const open_keys = per_finding.filter((row) => row.status !== "closed").map((row) => row.finding_key);
-  const resolvedCost = resolveModelCost({
-    usage,
-    turns: 1,
-    reportedTurns: turn.reported_cost_micros === undefined ? 0 : 1,
-    reportedCostMicros: turn.reported_cost_micros ?? 0,
-    unreportedCostBasis: args.model.unreported_cost_basis,
-  });
-
   return {
     prompt_version: CLOSURE_VERIFY_PROMPT_VERSION,
     per_finding,

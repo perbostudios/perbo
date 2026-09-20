@@ -5,6 +5,7 @@ import {
   EXIT_CODES,
   LimitExceededError,
   PlanContractSchema,
+  redactCredentials,
   exitCodeForDecision,
   hasAcceptanceCriteria,
   wholeChangeChecks,
@@ -14,21 +15,17 @@ import {
   type PlanContractWithCriteria,
   type ReviewArtifact,
 } from "@perbo/contracts";
+import { createModel, type Model } from "@perbo/model";
 import {
   PlanNotReviewableError,
   RuleAuthorityFileSchema,
   SuppressionFileSchema,
-  anthropicModel,
   buildRuleAuthority,
-  claudeCliModel,
-  codexCliModel,
   buildSuppressions,
-  redactCredentials,
   redactReviewArtifact,
   reviewGraph,
   runReview,
   verdictSchemas,
-  type ReviewModel,
 } from "@perbo/review";
 import {
   AgentConfigurationPresentError,
@@ -101,7 +98,7 @@ export interface RunOptions {
   cwd: string;
   now: Date;
   /** Injected by the tests. Production builds the selected transport. */
-  makeModel?: (submitSchema: Record<string, unknown>, modelId: string | null) => ReviewModel;
+  makeModel?: (submitSchema: Record<string, unknown>, modelId: string | null) => Model;
   /**
    * Injected by the tests. Production checks the real machine — but only when
    * the model is the real one too: an injected model has no binary or key to
@@ -512,12 +509,7 @@ export async function runReviewCommand(options: RunOptions): Promise<number> {
 
   const makeModel =
     options.makeModel ??
-    ((submitSchema, modelId) =>
-      args.provider === "claude-cli"
-        ? claudeCliModel({ submitSchema, ...(modelId ? { modelId } : {}) })
-        : args.provider === "codex-cli"
-          ? codexCliModel({ submitSchema, ...(modelId ? { modelId } : {}) })
-        : anthropicModel({ submitSchema, ...(modelId ? { modelId } : {}) }));
+    ((submitSchema, modelId) => createModel(args.provider, { submitSchema, modelId }));
 
   // The submit schema is built from the criteria this review is judging and
   // wholeChangeChecks(checks) — the same narrowing reviewGraph applies to a

@@ -40,8 +40,8 @@ describe("the drafter proposes an execution graph", () => {
   it("returns one contract with nodes and suggested edges, under a new prompt version", async () => {
     const model = scriptedDrafter([submits(graphedDraft)]);
     const result = await draftContract(fromSpec(model));
-    expect(DRAFT_PROMPT_VERSION).toBe("draft_v3");
-    expect(result.model.prompt_version).toBe("draft_v3");
+    expect(DRAFT_PROMPT_VERSION).toBe("draft_v4");
+    expect(result.model.prompt_version).toBe("draft_v4");
     expect(result.draft.nodes).toEqual(graphedDraft.nodes);
     expect(result.draft.edges).toEqual([{ from: 0, to: 1 }]);
     // One draft is one contract is one ticket, whatever the graph's size.

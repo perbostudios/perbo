@@ -3,6 +3,8 @@
  * silently ignored typo that produces a review of something else.
  */
 
+import type { ModelProvider } from "@perbo/model";
+
 export class UsageError extends Error {}
 
 /**
@@ -68,7 +70,7 @@ export interface ReviewArgs {
   json: boolean;
   color: boolean | null;
   model: string | null;
-  provider: "anthropic" | "claude-cli" | "codex-cli";
+  provider: ModelProvider;
   maxTurns: number | null;
   quiet: boolean;
   /** Where to write the artifact BEFORE redaction, for the corpus harness only. */

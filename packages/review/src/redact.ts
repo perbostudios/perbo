@@ -1,5 +1,4 @@
-import type { ReviewArtifact } from "@perbo/contracts";
-import { redactCredentials } from "./credential.js";
+import { redactCredentials, type ReviewArtifact } from "@perbo/contracts";
 
 /**
  * Redaction at the artifact boundary (D-063, SCP-109).

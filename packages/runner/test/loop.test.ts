@@ -10,7 +10,8 @@ import {
   type MaterializationManifest,
   type PlanContract,
 } from "@perbo/contracts";
-import { runReview, type ReviewModel } from "@perbo/review";
+import type { Model } from "@perbo/model";
+import { runReview } from "@perbo/review";
 import { branchName } from "@perbo/workspace";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
@@ -805,11 +806,11 @@ const verdict = (coverage: unknown[]) => ({
  * a test can say how many turns the reviewer took and what the retry told it.
  */
 function verdictModel(verdicts: unknown[]): {
-  model: ReviewModel;
+  model: Model;
   requests: Array<{ messages: unknown }>;
 } {
   const requests: Array<{ messages: unknown }> = [];
-  const model: ReviewModel = {
+  const model: Model = {
     provider: "double",
     model_id: "scripted",
     async turn(request) {

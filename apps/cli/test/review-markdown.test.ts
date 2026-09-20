@@ -4,7 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ReviewArtifactSchema, type ReviewArtifact } from "@perbo/contracts";
-import { assessLegibility, type ReviewModel } from "@perbo/review";
+import type { Model } from "@perbo/model";
+import { assessLegibility } from "@perbo/review";
 import { UsageError, parseReviewArgs } from "../src/args.js";
 import { renderReviewMarkdown } from "../src/markdown.js";
 import { runReviewCommand, type Streams } from "../src/run.js";
@@ -165,7 +166,7 @@ const verdict = {
   overall_confidence: 0.62,
 };
 
-function stubModel(input: unknown): ReviewModel {
+function stubModel(input: unknown): Model {
   return {
     provider: "double",
     model_id: "scripted",
