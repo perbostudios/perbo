@@ -2,9 +2,16 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseUnifiedDiff, type CheckResult } from "@perbo/contracts";
-import { gitEnv, run } from "@perbo/workspace";
+import { git as defaultGit, run, type Git } from "@perbo/workspace";
 import { RUNTIME_FILES, type LoadedFixture } from "./corpus.js";
 import { cachePathFor, clonePathFor } from "./prepare.js";
+
+/** How long a git call inside a clone this size may take. */
+const LOCAL_TIMEOUT_MS = 600_000;
+/** What a test-only patch may be, past which only part of it arrives. */
+const MAX_PATCH_BYTES = 32 * 1024 * 1024;
+
+const CALL = { timeoutMs: LOCAL_TIMEOUT_MS, maxOutputBytes: MAX_PATCH_BYTES } as const;
 
 /**
  * Fail-first evidence for a pinned fixture (`perbo-corpus baseline`).
@@ -117,7 +124,10 @@ export async function measureBaseline(args: {
   fixture: LoadedFixture;
   cacheRoot: string;
   onProgress?: (message: string) => void;
+  /** The repository module every git call here goes through. */
+  git?: Git;
 }): Promise<BaselineResult> {
+  const git = args.git ?? defaultGit;
   const pinned = args.fixture.fixture.pinned_repository;
   const id = args.fixture.fixture.id;
   const progress = args.onProgress ?? (() => undefined);
@@ -140,32 +150,40 @@ export async function measureBaseline(args: {
   const work = join(cachePathFor(args.cacheRoot, id), "baseline");
   mkdirSync(resolve(work, ".."), { recursive: true });
 
-  const git = (argv: string[], cwd: string) =>
-    run(["git", ...argv], { cwd, env: gitEnv(), timeoutMs: 600_000, maxOutputBytes: 32 * 1024 * 1024 });
-
   try {
     if (!existsSync(join(work, ".git"))) {
       progress(`worktree at ${pinned.base_commit.slice(0, 12)}`);
-      const added = await git(["worktree", "add", "--detach", "--force", work, pinned.base_commit], clone);
+      const added = await git.addWorktree(
+        clone,
+        { path: work, detach: pinned.base_commit, force: true },
+        CALL,
+      );
       if (added.code !== 0) return skip(`could not check out the base commit: ${added.stderr.trim().slice(-200)}`);
     } else {
-      await git(["checkout", "--detach", "--force", pinned.base_commit], work);
-      await git(["clean", "-fdx", "--exclude=node_modules", "--exclude=.venv"], work);
+      await git.run(work, ["checkout", "--detach", "--force", pinned.base_commit], CALL);
+      await git.run(work, ["clean", "-fdx", "--exclude=node_modules", "--exclude=.venv"], CALL);
     }
 
     progress(`apply ${split.tests.length} test file(s)`);
-    const patch = await git(
-      ["diff", "--no-color", `${pinned.base_commit}..${pinned.head_commit}`, "--", ...split.tests],
+    const patch = await git.run(
       work,
+      ["diff", "--no-color", `${pinned.base_commit}..${pinned.head_commit}`, "--", ...split.tests],
+      CALL,
     );
     if (patch.code !== 0 || patch.stdout.trim().length === 0) {
       return skip("could not produce a test-only patch");
+    }
+    // Past the ceiling only the tail is held, and a patch cut there applies
+    // cleanly or not at all for reasons that have nothing to do with the base
+    // commit. Either outcome would be recorded as evidence about the fixture.
+    if (patch.truncated) {
+      return skip(`the test-only patch is larger than ${MAX_PATCH_BYTES} bytes and only part of it arrived`);
     }
     // Through a file rather than stdin: `run` is argv-only by design and does
     // not write to a child's input.
     const patchFile = join(cachePathFor(args.cacheRoot, id), "tests-only.patch");
     writeFileSync(patchFile, patch.stdout);
-    const applied = await git(["apply", "--whitespace=nowarn", patchFile], work);
+    const applied = await git.run(work, ["apply", "--whitespace=nowarn", patchFile], CALL);
     if (applied.code !== 0) {
       return skip(`the test-only patch does not apply to the base commit: ${applied.stderr.trim().slice(-200)}`);
     }
@@ -205,7 +223,7 @@ export async function measureBaseline(args: {
       duration_ms: Date.now() - started,
     };
   } finally {
-    await git(["worktree", "remove", "--force", work], clone).catch(() => undefined);
+    await git.removeWorktree(clone, work, CALL).catch(() => undefined);
   }
 }
 

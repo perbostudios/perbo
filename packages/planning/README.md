@@ -17,8 +17,8 @@ Three properties are why a draft here is safe to show a person:
 |---|---|
 | `draft.ts` | `draftContract`: the system prompt, the delimited blocks, the call, the schema, the provenance record. `DRAFT_PROMPT_VERSION` is `draft_v4` and covers all of them together |
 | `delimit.ts` | The `<perbo:kind trust="…">` block, mirrored from the reviewer, plus the tag defang |
-| `tree.ts` | `git ls-files` two levels deep, by argv, so proposed globs name directories that exist |
-| `issue.ts` | `SourceIssue`, the one shape drafting reads, and `fetchGitHubIssue`: `gh issue view … --json` by argv, Zod-validated, one sentence on failure |
+| `tree.ts` | The tracked tree two levels deep, through `@perbo/workspace`'s repository module, so proposed globs name directories that exist |
+| `issue.ts` | `SourceIssue`, the one shape drafting reads, and `fetchGitHubIssue`: `gh issue view … --json` through `@perbo/workspace`'s repository module, Zod-validated, one sentence on failure |
 | `spec.ts` | `parseSpec` and `readSpecFile`: one spec under its five headings, strictly, because a spec about to be drafted from has to be complete |
 | `spec-text.ts` | The other half, and no filesystem at all: `specSlug`, the folder name a title takes; `renderSpec`, the Markdown a spec is written as, with an id on every requirement; `readSpecSections`, the forgiving read of a spec half written; and `requirementNodes` — which node each requirement landed in, derived from the criteria that cite it. The desktop's renderer imports it, so a browser assigns the ids the command line would |
 | `spec-write.ts` | `writeSpecFile`: the bytes at `specs/<slug>/spec.md`, with the folders created and a second spec on one slug refused |

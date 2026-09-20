@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { git } from "@perbo/workspace";
 import { PlanningError } from "./errors.js";
 
 const DEFAULT_LIMIT = 400;
@@ -11,19 +11,20 @@ const DEFAULT_LIMIT = 400;
  * small enough to sit in one prompt; the executor and the reviewer see the
  * full tree, the drafter does not need to.
  *
- * `git ls-files` by argv: the root is an argument, never part of a command line.
+ * The listing comes from `@perbo/workspace`'s repository module, which is where
+ * every git process Perbo starts is decided: argv only, the runner's
+ * environment rather than this one's, a bounded wait, and a listing too large
+ * to hold refused rather than returned cut — a truncated tree is shaped exactly
+ * like a complete one, and the directories missing from it are the ones a
+ * proposed glob would be told do not exist.
  */
 export function repositoryTree(
   repositoryRoot: string,
   options: { limit?: number } = {},
 ): string[] {
-  let listing: string;
+  let tracked: string[];
   try {
-    listing = execFileSync("git", ["-C", repositoryRoot, "ls-files", "-z"], {
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    tracked = git.trackedFilesSync(repositoryRoot);
   } catch (error) {
     throw new PlanningError(
       `cannot list the tracked files in ${repositoryRoot}: ${
@@ -34,8 +35,7 @@ export function repositoryTree(
   }
 
   const entries = new Set<string>();
-  for (const path of listing.split("\0")) {
-    if (path.length === 0) continue;
+  for (const path of tracked) {
     const segments = path.split("/");
     if (segments.length === 1) {
       entries.add(path);
