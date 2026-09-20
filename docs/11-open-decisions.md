@@ -631,3 +631,10 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: the interview writes `specs/<slug>/spec.md`, so a planning with no slug has nowhere to write. Where the person has not titled it in the Spec pane, the host cuts a title from their first turn — the first sentence, its opening dropped, clipped to a whole word within the slug's cap — writes the spec with it and records the slug, then starts the interview on that spec and sends the turn. The chat says which folder was named. A turn no folder name can come from is refused as before, naming the title it could not take. The folder is minted once and is not moved afterwards; the title in it stays editable.
 - Why: a person opening planning and typing what they want should be talking to the interview, not stopped by a field they have not found. Their own words name the folder, so nothing a model returned becomes a path ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). The naming is said rather than silent because a slug outlives the message it came from.
 - Built: `specTitleFromMessage` in `@perbo/planning`, the host naming the spec on the first turn and saying so as a note, and the browser preview doing the same.
+
+### D-NEW-contracts-shared-vocabulary — `@perbo/contracts` holds what two packages share
+
+- Owner: Founder
+- Decision: a schema or rule lives in `@perbo/contracts` when two or more packages, the desktop included, read or write it; a record only one package reads and writes lives in that package beside its code. The CLI's baseline stopwatch and E1 ledger, its local verdicts record, its escapes record and the queue's ordering are its own.
+- Why: the dependency floor rebuilds every package on each change, and a module with one consumer is read more easily beside its caller.
+- Changes if: a second package reads one of those records.

@@ -106,3 +106,7 @@ _Avoid_: Broken spec.
 **Size estimate**:
 A description of how big a Ticket's execution graph is, from S to XL, derived from its nodes, criteria and scope. It predicts neither cost nor time.
 _Avoid_: Cost estimate, forecast, appetite (nothing is budgeted).
+
+**E1**:
+The comparison a partner's use of Perbo is judged by ([D-038](docs/11-open-decisions.md)): the median time Perbo takes over ten pieces of work, divided by the median time the partner took over the same ten working agent-direct. The ten are timed from start of work to pull request opened, and sealed before the partner first uses Perbo; the pass bars are agreed in writing before the first is timed. `perbo baseline` keeps it in `.perbo/e1.json`; an AI stand-in's baseline is reported on its own and never pooled with a partner's.
+_Avoid_: Pilot, trial (neither says what is measured).
