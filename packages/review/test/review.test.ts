@@ -884,6 +884,78 @@ describe("the reviewer's inputs do not grow when an executor exists", () => {
 });
 
 /**
+ * The transport is released once, however the review ended.
+ *
+ * A transport can hold a session in the user's own store and a directory of
+ * its own, so a path out of the loop that skipped the release would leave one
+ * of each behind per review — and the paths out are not one.
+ */
+describe("the review releases its transport", () => {
+  const counting = (
+    behaviour: (turn: number) => { tool: string; input: unknown }[] | Error,
+  ): ReviewModel & { disposed: () => number } => {
+    let disposed = 0;
+    let turn = 0;
+    return {
+      provider: "double",
+      model_id: "scripted",
+      disposed: () => disposed,
+      async turn() {
+        turn += 1;
+        const next = behaviour(turn);
+        if (next instanceof Error) throw next;
+        return {
+          toolCalls: next.map((call, index) => ({
+            id: `tool_${turn}_${index}`,
+            name: call.tool,
+            input: call.input,
+          })),
+          usage: {
+            input_tokens: 1000,
+            output_tokens: 200,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          stop_reason: "tool_use",
+        };
+      },
+      async dispose() {
+        disposed += 1;
+      },
+    };
+  };
+
+  it("releases it once when a verdict is submitted", async () => {
+    const model = counting(() => submits(bothMet));
+    const { artifact } = await run({ model });
+    expect(artifact.decision).toBe("approve");
+    expect(model.disposed()).toBe(1);
+  });
+
+  it("releases it once when a turn fails", async () => {
+    const model = counting((turn) =>
+      turn === 1
+        ? reads("a/src/helper.ts")
+        : new ProviderError("the transport went away", 2, "provider_unavailable"),
+    );
+    const { artifact } = await run({ model });
+    expect(artifact.error?.kind).toBe("provider_unavailable");
+    expect(model.disposed()).toBe(1);
+  });
+
+  it("releases it once when the corrected verdict is rejected too", async () => {
+    const unknownCriterion = {
+      ...bothMet,
+      coverage: [coverageEntry({ criterion_id: "ac_nonexistent" })],
+    };
+    const model = counting(() => submits(unknownCriterion));
+    const { artifact } = await run({ model });
+    expect(artifact.error?.kind).toBe("verdict_rejected");
+    expect(model.disposed()).toBe(1);
+  });
+});
+
+/**
  * The reviewer's session, end to end over the claude-cli transport: the review
  * opens one session of its own, resumes it, and leaves none of it behind in the
  * user's session store however the review ended.

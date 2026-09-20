@@ -1,0 +1,276 @@
+{
+  "default": {
+    "url": "https://api.anthropic.com/v1/messages",
+    "method": "POST",
+    "body": {
+      "model": "claude-opus-5",
+      "max_tokens": 16000,
+      "thinking": {
+        "type": "adaptive"
+      },
+      "output_config": {
+        "effort": "high"
+      },
+      "system": [
+        {
+          "type": "text",
+          "text": "S",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "Read one file from the repository at head. Use it to follow the change out of the diff.",
+          "input_schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Repository-relative path, exactly as it appears in the file listing. One file per call."
+              }
+            }
+          }
+        },
+        {
+          "name": "submit_review",
+          "description": "Submit the review. Call exactly once, with one coverage entry per criterion in the plan.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "ok"
+            ],
+            "additionalProperties": false
+          },
+          "strict": true
+        }
+      ],
+      "messages": [
+        {
+          "role": "user",
+          "content": "the context"
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t1",
+              "name": "read_file",
+              "input": {
+                "path": "a/b.ts"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t1",
+              "content": "refused",
+              "is_error": true
+            }
+          ]
+        }
+      ],
+      "stream": true
+    }
+  },
+  "forced": {
+    "url": "https://api.anthropic.com/v1/messages",
+    "method": "POST",
+    "body": {
+      "model": "claude-opus-5",
+      "max_tokens": 16000,
+      "thinking": {
+        "type": "adaptive"
+      },
+      "output_config": {
+        "effort": "high"
+      },
+      "system": [
+        {
+          "type": "text",
+          "text": "S",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "Read one file from the repository at head. Use it to follow the change out of the diff.",
+          "input_schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Repository-relative path, exactly as it appears in the file listing. One file per call."
+              }
+            }
+          }
+        },
+        {
+          "name": "submit_review",
+          "description": "Submit the review. Call exactly once, with one coverage entry per criterion in the plan.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "ok"
+            ],
+            "additionalProperties": false
+          },
+          "strict": true
+        }
+      ],
+      "tool_choice": {
+        "type": "tool",
+        "name": "submit_review"
+      },
+      "messages": [
+        {
+          "role": "user",
+          "content": "the context"
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t1",
+              "name": "read_file",
+              "input": {
+                "path": "a/b.ts"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t1",
+              "content": "refused",
+              "is_error": true
+            }
+          ]
+        }
+      ],
+      "stream": true
+    }
+  },
+  "overridden": {
+    "url": "https://api.anthropic.com/v1/messages",
+    "method": "POST",
+    "body": {
+      "model": "claude-sonnet-5",
+      "max_tokens": 8000,
+      "thinking": {
+        "type": "adaptive"
+      },
+      "output_config": {
+        "effort": "max"
+      },
+      "system": [
+        {
+          "type": "text",
+          "text": "S",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ],
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "Read one file from the repository at head. Use it to follow the change out of the diff.",
+          "input_schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Repository-relative path, exactly as it appears in the file listing. One file per call."
+              }
+            }
+          }
+        },
+        {
+          "name": "submit_review",
+          "description": "Submit the review. Call exactly once, with one coverage entry per criterion in the plan.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "ok"
+            ],
+            "additionalProperties": false
+          },
+          "strict": true
+        }
+      ],
+      "messages": [
+        {
+          "role": "user",
+          "content": "the context"
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "t1",
+              "name": "read_file",
+              "input": {
+                "path": "a/b.ts"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t1",
+              "content": "refused",
+              "is_error": true
+            }
+          ]
+        }
+      ],
+      "stream": true
+    }
+  }
+}

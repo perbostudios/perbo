@@ -1,0 +1,106 @@
+{
+  "with_reader": [
+    {
+      "forceSubmit": true,
+      "added": [
+        "<the issue, the tree and the board>"
+      ]
+    },
+    {
+      "forceSubmit": true,
+      "added": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "tool_1_0",
+              "name": "read_file",
+              "input": {
+                "path": "packages/auth/signup.ts"
+              }
+            },
+            {
+              "type": "tool_use",
+              "id": "tool_1_1",
+              "name": "read_file",
+              "input": {
+                "path": "packages/auth/.env"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "tool_1_0",
+              "content": "<perbo:repo_file trust=\"repo\" path=\"packages/auth/signup.ts\">\nexport const signup = () => {};\n\n</perbo:repo_file>"
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "tool_1_1",
+              "content": "<perbo:repo_file trust=\"repo\" path=\"packages/auth/.env\" read=\"refused\">\nrefused: this path may hold a materialized local secret\n</perbo:repo_file>",
+              "is_error": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "forceSubmit": true,
+      "added": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "(no draft)"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": "Submit the draft now, as structured output."
+        }
+      ]
+    }
+  ],
+  "without_reader": [
+    {
+      "forceSubmit": true,
+      "added": [
+        "<the issue, the tree and the board>"
+      ]
+    },
+    {
+      "forceSubmit": true,
+      "added": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "tool_1_0",
+              "name": "read_file",
+              "input": {
+                "path": "packages/auth/signup.ts"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "tool_1_0",
+              "content": "Files cannot be opened while drafting; the repository tree above is all there is. Submit the draft now."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

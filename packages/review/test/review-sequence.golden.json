@@ -1,0 +1,121 @@
+{
+  "context_bytes": 1773,
+  "turns": [
+    {
+      "forceSubmit": false,
+      "added": [
+        "<context>"
+      ]
+    },
+    {
+      "forceSubmit": false,
+      "added": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "tool_1_0",
+              "name": "read_file",
+              "input": {
+                "path": "a/src/helper.ts"
+              }
+            },
+            {
+              "type": "tool_use",
+              "id": "tool_1_1",
+              "name": "read_file",
+              "input": {
+                "path": "a/.env"
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "tool_1_0",
+              "content": "<perbo:repo_file trust=\"repo\" path=\"a/src/helper.ts\">\nexport const helper = () => 2;\n\n</perbo:repo_file>"
+            },
+            {
+              "type": "tool_result",
+              "tool_use_id": "tool_1_1",
+              "content": "<perbo:repo_file trust=\"repo\" path=\"a/.env\" read=\"refused\">\nrefused: this path may hold a materialized local secret, which never enters a model context. Its existence is reportable; its contents are not readable.\n</perbo:repo_file>",
+              "is_error": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "forceSubmit": false,
+      "added": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "(no tool call)"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": "Call submit_review now with one coverage entry per criterion."
+        }
+      ]
+    },
+    {
+      "forceSubmit": false,
+      "added": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "tool_3_0",
+              "name": "submit_review",
+              "input": {
+                "coverage": [
+                  {
+                    "criterion_id": "ac_nonexistent",
+                    "status": "met",
+                    "verification_strength": "directly_verified",
+                    "evidence_type": "test_result",
+                    "evidence_ref": "check_ut",
+                    "evidence_assertion": "expect(result.ok).toBe(true)",
+                    "evidence_file": "packages/a/test/a.test.ts",
+                    "evidence_line": 5,
+                    "evidence_symbol": null,
+                    "note": null
+                  }
+                ],
+                "findings": [],
+                "check_assertions": [
+                  {
+                    "check_id": "check_ut",
+                    "asserted_status": "passed"
+                  }
+                ],
+                "overall_confidence": 0.9
+              }
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "tool_3_0",
+              "content": "The verdict you submitted was rejected before it was used, for this reason: \"verdict references criterion_id 'ac_nonexistent', which the approved plan does not contain (plan criteria: ac_1)\"\n\nCall submit_review again with a corrected verdict: exactly one coverage entry per criterion in the plan, no criterion covered twice, no criterion the plan does not contain, and a check_id only where the change set has one. This is the only correction that will be asked for; a second rejected verdict ends the review with no verdict.",
+              "is_error": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
