@@ -29,7 +29,7 @@ import { planNodes } from "@perbo/contracts/plan";
 import { planSizeCounts, sizeEstimate } from "@perbo/contracts/size";
 import { ContractEditing, interviewProviderFor, openDrafts, type EditingOwner } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows } from "../shared/archive.js";
-import { nodeState } from "../shared/graph-state.js";
+import { assembleLiveGraph } from "../shared/graph-live.js";
 import { busyMessage, exclusiveJob, isLive, lane } from "../shared/jobs.js";
 import type {
   PlanContract,
@@ -41,7 +41,7 @@ import type {
 import type { ApproachRecord } from "@perbo/contracts/approach";
 import type { GraphEdit } from "@perbo/contracts/graph-edit";
 import type { StandingProhibitedEntry } from "@perbo/contracts/standing";
-import { isNeverReadPath, matchesAny } from "@perbo/contracts/paths";
+import { isNeverReadPath } from "@perbo/contracts/paths";
 import { SettingsSchema } from "../shared/protocol.js";
 import type {
   DesktopBridge,
@@ -1220,67 +1220,40 @@ function undoGraphEditAt(key: string, number: number): void {
 }
 
 /**
- * What the sample records say about a sample graph (SCP-317), through the same
- * derivation the host uses: the sealed change set, the pinned checks per node
- * and the review artifact's coverage, and nothing the executor said. The
- * sample has one review of one plan, so the host's staleness and closure reads
- * have nothing to answer here.
+ * What the sample records say about a sample graph (SCP-317). The records are
+ * assembled from the samples and read by {@link assembleLiveGraph}, the same
+ * derivation the host runs over a repository's own, so a closure, a stale
+ * review and a check's scope read here exactly as they read there.
  */
 function liveFor(key: string, nodes: readonly { id: string; paths: readonly string[]; criteria: readonly string[] }[]): GraphLiveView {
   const { ticket } = ticketRow(key);
-  if (ticket.state === "plan_review" || ticket.state === "ready")
-    return {
-      attempt: null,
-      nodes: nodes.map((node) => ({
-        id: node.id,
-        state: "untouched",
-        changed: [],
-        checks: [],
-        criteria: node.criteria.map((id) => ({ id, state: "unbound", strength: null, evidence: null, finding: null })),
-      })),
-      outside: [],
-      note: null,
-    };
+  const before = ticket.state === "plan_review" || ticket.state === "ready";
   const review = reviewFor(key);
-  const bound = new Map(review.coverage.map((entry) => [entry.criterion_id, entry]));
-  const open = new Map(
-    review.findings
-      .filter((finding) => finding.criterion_id !== null && finding.status === "open")
-      .map((finding) => [finding.criterion_id!, finding.statement]),
+  return assembleLiveGraph(
+    nodes,
+    before
+      ? { attempt: null, changed: [], sealed: false, checks: [], review: null, closures: [] }
+      : {
+          attempt: "preview-attempt-" + key,
+          changed: sampleChanges.map((change) => change.path),
+          sealed: true,
+          // The loop narrows a pinned check to a node's own changed files
+          // (D-107); a sample check with no node is the whole command.
+          checks: sampleChecks.map((check) => ({
+            name: check.name,
+            status: check.status,
+            node: check.node ? { id: check.node, scope: "files" } : null,
+          })),
+          review: {
+            planVersion: ticket.plan_version,
+            createdAt: at,
+            coverage: review.coverage,
+            findings: review.findings,
+          },
+          closures: [],
+        },
+    ticket.plan_version,
   );
-  const changed = sampleChanges.map((change) => change.path);
-  return {
-    attempt: "preview-attempt-" + key,
-    nodes: nodes.map((node) => {
-      const touched = changed.filter((path) => matchesAny(path, node.paths)).sort();
-      const ran = sampleChecks
-        .filter((check) => check.node === node.id)
-        .map((check) => ({ name: check.name, status: check.status }));
-      const criteria = node.criteria.map((id) => {
-        const binding = bound.get(id);
-        const place = binding?.evidence?.location ?? null;
-        return {
-          id,
-          state: binding?.status ?? ("unbound" as const),
-          strength: binding?.verification_strength ?? null,
-          evidence: place ? (place.line ? `${place.file}:${place.line}` : place.file) : (binding?.evidence?.ref ?? null),
-          finding: open.get(id) ?? null,
-        };
-      });
-      return {
-        id: node.id,
-        state: nodeState({ touched, ran, criteria }),
-        changed: touched,
-        checks: ran,
-        criteria,
-      };
-    }),
-    outside:
-      nodes.length === 0
-        ? []
-        : changed.filter((path) => !nodes.some((node) => matchesAny(path, node.paths))).sort(),
-    note: null,
-  };
 }
 
 /** One plan's graph, its size and its history, as the native host reads them. */
