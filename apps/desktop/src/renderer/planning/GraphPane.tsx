@@ -154,22 +154,15 @@ export function GraphPane({
     [selected, view],
   );
   const one = held.length === 1 ? view?.nodes.find((node) => node.id === held[0]) : undefined;
-  const approve = (): void => {
+  // Confirming the plan is saying the division is right, and it leads to the
+  // page where what freezes is shown — the outcome, the criteria, the scope
+  // and the base. Approval happens there and nowhere else: one contract has
+  // one approval, on the screen that states what is being approved.
+  const confirm = (): void => {
     if (view === undefined || busy || action.isPending) return;
-    void action
-      .mutateAsync({
-        kind: "run",
-        repoId,
-        key: view.key,
-        digest: view.digest,
-        approve: !view.approved,
-        publish: false,
-        resumeFrom: null,
-      })
-      .then(() => navigate({ page: "task", repoId, key: view.key, view: "loop" }))
-      .catch(() => undefined);
+    navigate({ page: "task", repoId, key: view.key, view: "contract" });
   };
-  useShortcut("approve", view === undefined || busy || action.isPending ? null : approve);
+  useShortcut("approve", view === undefined || busy || action.isPending ? null : confirm);
 
   if (!session)
     return (
@@ -338,7 +331,7 @@ export function GraphPane({
             workspace={workspace}
             history={view.history}
             busy={busy || action.isPending}
-            onApprove={approve}
+            onApprove={confirm}
             onUndo={(n) => void apply({ kind: "graphUndo", edit: n })}
             onStartOver={() => setStartingOver(true)}
           />
@@ -920,9 +913,10 @@ function ApproveBar({
         )}
       </section>
       <p>
-        <b>Approving freezes</b> the outcome and each node&rsquo;s criteria and paths ({files}{" "}
-        {files === 1 ? "file" : "files"} in scope) and the base. The order between nodes and the
-        spec&rsquo;s No-Gos stay approach, and may still change while the work runs.
+        Confirming takes you to the contract, where <b>approving freezes</b> the outcome, each
+        node&rsquo;s criteria and paths ({files} {files === 1 ? "file" : "files"} in scope) and the
+        base. The order between nodes and the spec&rsquo;s No-Gos stay approach, and may still
+        change while the work runs.
         {running ? ` Runs go one at a time; this one starts after ${running.ticket.key}.` : ""}
       </p>
       <div className="approve-actions">
@@ -930,7 +924,7 @@ function ApproveBar({
           Start over from the spec…
         </button>
         <Button variant="primary" disabled={busy} onClick={onApprove}>
-          {view.approved ? "Start the loop" : "Approve · start the loop"}
+          {view.approved ? "Open the contract" : "Confirm the plan"}
         </Button>
       </div>
     </div>

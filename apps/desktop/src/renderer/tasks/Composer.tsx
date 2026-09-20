@@ -19,22 +19,8 @@ import type { PageProps } from "../shell/App.js";
 import { isLive } from "../../shared/jobs.js";
 export { contractDraft } from "../../shared/contract-editing.js";
 export function Composer({
-  workspace, navigate, existing, existingRepoId, onCancel, target: chosen, onSettled,
-}: PageProps & {
-  existing?: Detail;
-  existingRepoId?: string;
-  onCancel?: () => void;
-  target?: EditingTarget;
-  /**
-   * Where the caller goes when a job that drafted a plan settles.
-   *
-   * Only `generate` and `startOver`: the contract steps run through this same
-   * composer, in planning as everywhere else, and a contract somebody compiled
-   * is still the thing to show them. Without one, every settled job lands on
-   * the contract as it always has.
-   */
-  onSettled?: (key: string) => void;
-}) {
+  workspace, navigate, existing, existingRepoId, onCancel, target: chosen,
+}: PageProps & { existing?: Detail; existingRepoId?: string; onCancel?: () => void; target?: EditingTarget }) {
   // Planning mode hands over the session it holds; a ticket's own editor names the ticket.
   const target: EditingTarget = chosen ?? (existing && existingRepoId
     ? { kind: "ticket" as const, repoId: existingRepoId, key: existing.ticket.key }
@@ -53,10 +39,6 @@ export function Composer({
   const setNewPath = (newPath: string | null): void => editor.update({ newPath });
   const providers = useProviders(), handled = useRef<string | null>(session?.phase === "ready" ? session.operation?.id ?? null : null);
   const submitted = useRef<"draft" | "compile" | "generate" | "startOver">("draft");
-  // Held in a ref so a caller that rebuilds the callback every render cannot
-  // re-run the effect below and land twice on one settled job.
-  const landing = useRef(onSettled);
-  landing.current = onSettled;
   const currentJob = workspace.jobs.find((job) => job.id === session?.operation?.jobId && job.repoId === repoId);
   // Only this session's own drafting holds its Start: planning runs beside a run and beside another session (D-101).
   const pending = Boolean(currentJob && isLive(currentJob));
@@ -64,18 +46,14 @@ export function Composer({
   const readError = editor.error;
   useEffect(() => {
     if (session?.phase !== "ready" || !session.key || handled.current === session.operation?.id) return;
-    const intent = session.operation?.intent ?? submitted.current;
-    const plan = intent === "generate" || intent === "startOver";
-    // Which pane a drafted plan belongs on is read from its contract, and the
-    // record lands a beat after the phase does. Waiting for it is why `record`
-    // is a dependency: guessing would put a divided plan on the page that
-    // cannot show it, every time.
-    if (plan && landing.current && record?.ticket.key !== session.key) return;
     handled.current = session.operation?.id ?? null;
-    if (plan && landing.current) landing.current(session.key);
-    else navigate({ page: "task", repoId: session.repoId, key: session.key, view: "contract" });
+    // Always the ticket. Where a drafted ticket belongs — the graph it was
+    // divided into, or the contract — is a question about the ticket, and
+    // `TaskPage` answers it once for everybody: landing here and clicking the
+    // same ticket on Home have to agree, and a rule written twice does not.
+    navigate({ page: "task", repoId: session.repoId, key: session.key, view: "auto" });
     onCancel?.();
-  }, [session, record, navigate, onCancel]);
+  }, [session, navigate, onCancel]);
   const start = (model: boolean): void => {
     submitted.current = model ? "draft" : "compile";
     editor.submit(submitted.current);

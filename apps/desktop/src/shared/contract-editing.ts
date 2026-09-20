@@ -1,3 +1,4 @@
+import { planNodes } from "@perbo/contracts/plan";
 import { standingGlob, type StandingProhibitedEntry } from "@perbo/contracts/standing";
 import {
   DraftSchema,
@@ -94,6 +95,7 @@ export function openDrafts(records: readonly EditingSession[]): OpenDraft[] {
       key: record.key,
       outcome: record.form.draft.outcome,
       phase: record.phase,
+      nodes: record.nodes,
       scope: { paths: [...record.form.draft.paths], prohibited: [...record.form.draft.prohibited] },
     }))
     .reverse();
@@ -180,6 +182,7 @@ export class ContractEditing {
           digest: legacy?.digest ?? detail?.digest ?? null,
           revision: 0, resumeNew: target.kind === "new", history: [],
           form: legacy?.form ?? editingForm(this.io.defaults(repoId, key), detail),
+          nodes: detail ? planNodes(detail.contract).length : 0,
           phase: legacy?.pending ? "outcome-unknown" : "editing",
           error: legacy?.pending ? "An older draft has an unconfirmed job. Your text is preserved; check Home before submitting again." : null,
           operation: null,
@@ -209,13 +212,23 @@ export class ContractEditing {
         const manual = "acceptance_criteria" in detail.contract && detail.contract.acceptance_criteria.some(
           (entry) => entry.expected_verification.kind === "manual",
         );
+        // Whether this planning has a graph, for the rail, which is drawn
+        // where no contract can be read. Written wherever the contract is,
+        // rather than only where a session is made: a planning resumed for a
+        // ticket already in plan_review never saw the job that drafted it.
+        next.nodes = planNodes(detail.contract).length;
         if (detail.digest !== next.digest || detail.ticket.approved_at || manual) {
           next.phase = "conflict";
           next.error = manual
             ? "This contract has named manual reviewers. Edit it with the CLI to preserve those assignments."
             : "The saved contract changed or was approved. Your local edits are preserved; open the current contract to review it.";
         } else if (next.phase === "ready") next.phase = "editing";
-        if (next.phase !== current.phase || next.error !== current.error) next.revision++;
+        if (
+          next.phase !== current.phase ||
+          next.error !== current.error ||
+          next.nodes !== current.nodes
+        )
+          next.revision++;
       });
     }
     return current;
@@ -577,6 +590,9 @@ export class ContractEditing {
             } else {
               next.key = detail.ticket.key;
               next.digest = detail.digest;
+              // Whether this plan has a graph, for the rail that cannot read a
+              // contract from where it is drawn.
+              next.nodes = planNodes(detail.contract).length;
               next.form = { ...next.form, draft: contractDraft(detail), step: 2, editing: null, newPath: null };
               next.phase = operation.intent === "draft" ? "editing" : "ready";
               // Generating a plan and starting over both land on a contract, as

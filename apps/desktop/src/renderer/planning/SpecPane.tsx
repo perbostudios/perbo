@@ -4,7 +4,6 @@ import { Button, Dialog, Notice } from "@perbo/ui";
 import type { SpecField } from "@perbo/planning/spec-text";
 import { specSymbolNames } from "@perbo/planning/spec-text";
 import { bridge } from "../data.js";
-import { planNodes } from "@perbo/contracts/plan";
 import { InfoHint } from "../InfoHint.js";
 import { InkIcon } from "../InkIcon.js";
 import { useContractEditing } from "../tasks/contract-editor.js";
@@ -365,7 +364,6 @@ export function SpecPane({
             {/* The two ways to a plan, said once and in passing: a heading over
                 the contract steps made a second way look like a second place
                 to be, when it is the same page further down. */}
-            <span className="sub">write it with the interview, or the contract yourself below</span>
             <span className="sub mono">{view?.path ?? "specs/…/spec.md"}</span>
             <span className="spacer" />
             <span role="status" className="small muted">
@@ -537,27 +535,17 @@ export function SpecPane({
           </div>
         </>
       )}
-      <div className={working ? "spec-working" : "spec-typed"}>
+      {/* The composer stays mounted whatever is on screen — it is what lands
+          on the drafted contract when the job settles — but its own steps are
+          not a second way to plan offered beside the first. A spec written
+          with the interview is how a plan is made here; the steps are what a
+          command running takes the pane with. */}
+      <div className={working ? "spec-working" : "spec-typed spec-typed--away"}>
         <Suspense fallback={<div className="launch"><InkIcon name="dots" /><p>Opening…</p></div>}>
           <Composer
             workspace={workspace}
             navigate={navigate}
             target={{ kind: "session", id: sessionId }}
-            // The plan is what was asked for, so it is what is shown: the
-            // graph where the drafter divided the work, and the contract
-            // where it did not, because a flat plan has no graph to look at.
-            onSettled={(key) => {
-              // A record that has not landed yet cannot say whether the plan
-              // was divided, and standing still is the bug this replaces: the
-              // contract is where every plan could always be confirmed.
-              const record = editor.record;
-              const divided = record !== undefined && planNodes(record.contract).length > 0;
-              navigate(
-                divided
-                  ? { page: "planning", sessionId, pane: "graph" }
-                  : { page: "task", repoId: editor.repoId, key, view: "contract" },
-              );
-            }}
           />
         </Suspense>
       </div>

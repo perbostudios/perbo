@@ -5,6 +5,7 @@ import { InkIcon } from "../InkIcon.js";
 import { errorMessage, useAction } from "../data.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey } from "./ticket-workspace.js";
+import { planNodes } from "@perbo/contracts/plan";
 import { costLabel, pendingScope, taskRecords } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
 export function ContractScreen(context: TaskContext) {
@@ -97,6 +98,26 @@ export function ContractScreen(context: TaskContext) {
               ))}
             </div>
           </div>
+          {/* What a graph freezes, on the page that freezes it. A divided plan
+              is approved here and curated on the Graph pane, so the division
+              has to be readable here too — approving what you cannot see is
+              the one thing this screen exists to prevent. */}
+          {planNodes(contract).length > 0 && (
+            <section className="contract-nodes" aria-label="How the work divides">
+              <SectionLabel>How the work divides</SectionLabel>
+              <ol>
+                {planNodes(contract).map((node) => (
+                  <li key={node.id}>
+                    <b>{node.title}</b>
+                    <span className="small muted">
+                      {node.criteria.length} {node.criteria.length === 1 ? "criterion" : "criteria"}
+                      {node.paths.length > 0 ? ` · ${node.paths.join(" · ")}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
           <FactList
             className="boundary-facts"
             rows={[

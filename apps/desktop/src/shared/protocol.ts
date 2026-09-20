@@ -459,6 +459,16 @@ export const EditingSessionSchema = z.strictObject({
    * outlives the line it came from, which the conversation's own cap can drop.
    */
   asking: AskingSchema.nullable().default(null),
+  /**
+   * How many nodes the plan this session drafted has, zero for a flat plan or
+   * for no plan at all.
+   *
+   * Kept here because the rail is outside planning mode and cannot read a
+   * contract: what it needs to know is whether there is a graph worth offering,
+   * and that is a number the reconcile already has in its hand. Zero on a
+   * session from before it existed, which reads as "no graph" and is right.
+   */
+  nodes: z.number().int().nonnegative().default(0),
   form: EditingFormSchema,
   phase: z.enum(["editing", "working", "ready", "conflict", "outcome-unknown", "discarded"]),
   error: z.string().nullable(),
@@ -493,6 +503,8 @@ export interface OpenDraft {
   key: string | null;
   outcome: string;
   phase: EditingSession["phase"];
+  /** How many nodes its plan has: zero for a flat plan, or for no plan yet. */
+  nodes: number;
   /**
    * The scope this session holds, which is not yet the contract's.
    *

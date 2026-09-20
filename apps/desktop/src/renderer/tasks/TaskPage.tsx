@@ -6,6 +6,7 @@ import { Composer } from "./Composer.js";
 import { ExplorerScreen } from "./ExplorerScreen.js";
 import { ContractScreen } from "./ContractScreen.js";
 import { LoopScreen } from "./LoopScreen.js";
+import { planNodes } from "@perbo/contracts/plan";
 import { projectTicket } from "./ticket-workspace.js";
 import {
   CompletionScreen,
@@ -34,6 +35,31 @@ export function TaskPage({
   useEffect(() => {
     if (view === "loop" && resultReady) show("review");
   }, [resultReady, view]);
+  // A plan the drafter divided is read on its graph, not on the page that
+  // cannot show the division. Asked here, of the ticket, so that landing on a
+  // freshly drafted plan and clicking the same ticket on Home agree — a rule
+  // about where a ticket belongs, written once.
+  //
+  // Only for `auto`: asking for the contract is how a person gets to it from
+  // the graph, and that has to keep working.
+  const planning = (workspace.drafts ?? []).find(
+    (draft) => draft.repoId === repoId && draft.key === taskKey && draft.phase !== "discarded",
+  );
+  const divided =
+    view === "auto" &&
+    // `edit` is as explicit an ask as a named view: the contract editor is
+    // reached by it and nothing else, so answering over it would leave an
+    // epic with no way into its own editor.
+    !edit &&
+    query.data?.ticket.state === "plan_review" &&
+    query.data.ticket.approved_at === null &&
+    // Asked of the contract, which is where the division actually is. The
+    // session carries a copy for the rail, and a copy can be behind.
+    planNodes(query.data.contract).length > 0 &&
+    planning !== undefined;
+  useEffect(() => {
+    if (divided && planning) navigate({ page: "planning", sessionId: planning.id, pane: "graph" });
+  }, [divided, planning?.id, navigate]);
   if (query.isPending)
     return (
       <div className="launch">

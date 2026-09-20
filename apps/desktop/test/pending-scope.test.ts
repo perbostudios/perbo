@@ -17,6 +17,7 @@ const draft = (scope: { paths: string[]; prohibited: string[] }, over: Partial<O
   key: "PRB-1",
   outcome: "Something is true.",
   phase: "editing",
+  nodes: 0,
   scope,
   ...over,
 });

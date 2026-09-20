@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { cx } from "@perbo/ui";
 import { InkIcon } from "../InkIcon.js";
-import { PLANNING_PANES } from "../planning/panes.js";
+import { panesFor } from "../planning/panes.js";
+import type { Snapshot } from "../../shared/protocol.js";
 import { useCreate } from "./create.js";
 import { useShortcut } from "./shortcuts.js";
 import { RAIL_WIDTH, setRailSize, useRailSize } from "./rail-size.js";
@@ -83,10 +84,13 @@ export function Rail({
   route,
   navigate,
   attention,
+  drafts,
 }: {
   route: Route;
   navigate: (route: Route) => void;
   attention: number;
+  /** The open plannings, which say which of them has a graph to offer. */
+  drafts: Snapshot["drafts"];
 }) {
   const inSettings = (SETTINGS_PAGES as readonly string[]).includes(route.page);
   const [hover, setHover] = useState(false);
@@ -158,7 +162,7 @@ export function Rail({
         </button>
         {planning && (
           <div className="rail-children" role="group" aria-label="Planning panes">
-            {PLANNING_PANES.map((pane) => (
+            {panesFor(drafts, route.sessionId).map((pane) => (
               <button
                 key={pane.id}
                 className={cx("rail-item", "rail-child", route.pane === pane.id && "selected")}

@@ -10,7 +10,7 @@ Large work sliced into sibling tickets costs several approvals and several pull 
 
 ## Decision
 
-Large work is one ticket. Its plan may group acceptance criteria into nodes, each with the paths expected to satisfy them. The nodes' criteria and paths are contract; the suggested order between nodes is approach. A person curates the drafter's suggested graph and approves it once. The spec that states the work's intent lives in the repository ([D-103](../11-open-decisions.md)).
+Large work is one ticket. Its plan may group acceptance criteria into nodes, each with the paths expected to satisfy them. The nodes' criteria and paths are contract; the suggested order between nodes is approach. A person curates the drafter's suggested graph and confirms it; the contract it belongs to is approved once, on the screen that states what freezes. The spec that states the work's intent lives in the repository ([D-103](../11-open-decisions.md)).
 
 ## Consequences
 

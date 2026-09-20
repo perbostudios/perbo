@@ -109,6 +109,7 @@ export function withDraft(snapshot: Snapshot, session: EditingSession): Snapshot
         key: session.key,
         outcome: session.form.draft.outcome,
         phase: session.phase,
+        nodes: session.nodes,
         scope: {
           paths: [...session.form.draft.paths],
           prohibited: [...session.form.draft.prohibited],

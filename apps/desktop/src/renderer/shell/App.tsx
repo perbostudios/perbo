@@ -260,6 +260,7 @@ export function App() {
                     route={route}
                     navigate={navigate}
                     attention={attention}
+                    drafts={data?.drafts}
                   />
                 )}
                 <main id="content" className="workspace-shell">
