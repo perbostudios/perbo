@@ -89,8 +89,8 @@ describe("the suite that called scratchDirectories, once it has finished", () =>
   it("has had its directories taken back", () => {
     // The removal is registered on whatever vitest is collecting when
     // scratchDirectories() is called — the suite above — so by the time this
-    // one runs it has already happened. In a test file the same call at the
-    // top level gives the directories the lifetime of the file, which is what
+    // one runs it has already happened. At the top level of a test file the
+    // same call gives the directories the lifetime of the file, which is what
     // a beforeAll fixture needs.
     expect(hooked).not.toBe("");
     expect(existsSync(hooked)).toBe(false);

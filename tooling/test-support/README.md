@@ -5,9 +5,8 @@ directory and how long it lives, how a fixture repository is initialised and
 what git runs under, how long a test that starts processes is given, and what
 the process asked to connect to while it ran.
 
-It is a devDependency, never a dependency. Production code does not import it,
-`tsc -p tsconfig.build.json` never emits it into anyone's bundle, and ESLint
-refuses the import from a non-test `src` file (docs/07 "Package layout").
+It is a devDependency, never a dependency: production code does not import it,
+so nothing it holds reaches a shipped bundle (docs/07 "Package layout").
 
 A package's own port fakes do not belong here — they live beside the module
 that owns the port, in its `test-support/`. What belongs here is what would
@@ -35,9 +34,8 @@ otherwise be copied into five packages.
   top-level call gives every directory the lifetime of the file — which is what
   a `beforeAll` fixture needs.
 - **Nothing here registers a hook on import.** An `afterAll` at module scope
-  would attach itself to every file that imports the package, including the
-  protected `packages/runner/test/security.test.ts`, which reaches this package
-  through the runner's own support module.
+  would attach itself to every file that imports the package, whatever that
+  file wanted from it — and a file that may not be edited could not opt out.
 - **A fixture repository carries its identity and `commit.gpgsign false` in its
   own config**, not only in the environment its test passes to git. The product
   is what commits there next, and it runs git with the person's environment: on
