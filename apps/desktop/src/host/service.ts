@@ -8,7 +8,7 @@ import {
 import type {
   Ticket,
 } from "@perbo/contracts";
-import { busyMessage, exclusiveJob, heldRepository, isLive, lane } from "../shared/jobs.js";
+import { heldRepository, isLive } from "../shared/jobs.js";
 import {
   DraftSchema,
   HELP_LINKS,
@@ -28,8 +28,7 @@ import type {
   TaskModels,
   UsageReport,
 } from "../shared/protocol.js";
-import { redact, requireSuccess, runProcess, startLineProcess } from "./process.js";
-import type { ProcessResult } from "./process.js";
+import { redact, runProcess, startLineProcess } from "./process.js";
 import { discoverModels } from "./model-catalog.js";
 import {
   ContractEditing,
@@ -47,6 +46,7 @@ import { exportedNames } from "./symbols.js";
 import { graphView } from "./plan/graph.js";
 import { impactView } from "./plan/impact.js";
 import { InterviewHost } from "./interview/host.js";
+import { JobRunner } from "./jobs/runner.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
@@ -148,19 +148,7 @@ export class DesktopService {
   private readonly tickets: TicketReads;
   private readonly editing: ContractEditing;
   private readonly reads = new WorkspaceReads();
-  /** Every command still running, by job id: planning beside a run (D-101). */
-  private readonly active = new Map<
-    string,
-    { job: Job; controller: AbortController; done: Promise<void> }
-  >();
-  /**
-   * The tail of each repository's admissions. The ticket store hands out a key
-   * by scanning what it holds, so two `admit` processes over one store return
-   * the same key and the second overwrites the first; within a repository they
-   * take turns. Planning still runs beside a run, beside an edit, and beside
-   * planning in another repository.
-   */
-  private readonly admissions = new Map<string, Promise<void>>();
+  private readonly jobs: JobRunner;
   private readonly interviews: InterviewHost;
 
   /** The profile's own record, which every module mutating a preference is handed. */
@@ -191,6 +179,19 @@ export class DesktopService {
       reads: this.reads,
       execute: this.execute,
       liveJobs: () => this.liveJobs(),
+    });
+    this.jobs = new JobRunner({
+      profile: this.profile,
+      changes: this.changes,
+      reads: this.reads,
+      cli: this.cli,
+      editing: {
+        started: (owner, job) => this.editing.started(owner, job),
+        settled: (job) => this.editing.settled(job),
+      },
+      liveChanged: () => this.updatePower(),
+      progressed: (job) => this.notifyStage(job),
+      settled: (job) => this.notifyOutcome(job),
     });
     this.interviews = new InterviewHost({
       editing: {
@@ -373,141 +374,7 @@ export class DesktopService {
   }
   /** The jobs still tracked, in either lane. */
   private liveJobs(): Job[] {
-    return [...this.active.values()].map((entry) => entry.job);
-  }
-  private start(
-    repoId: string,
-    key: string | null,
-    kind: string,
-    label: string,
-    operation: (job: Job, signal: AbortSignal) => Promise<void>,
-    owner?: EditingOwner,
-  ): Job {
-    const blocking =
-      lane(kind) === "exclusive"
-        ? exclusiveJob(this.liveJobs())
-        : undefined;
-    if (blocking) throw new Error(busyMessage(blocking.label));
-    const controller = new AbortController();
-    const job: Job = {
-      id: randomUUID(),
-      repoId,
-      key,
-      kind,
-      label,
-      state: "running",
-      startedAt: new Date().toISOString(),
-      endedAt: null,
-      log: "",
-      error: null,
-      resultKey: null,
-      result: null,
-      ...(owner ? { editing: owner } : {}),
-    };
-    // The journal keeps the last forty records, and never drops a live command:
-    // cancelling one and saving its editing receipt both need its record.
-    this.state.jobs = [
-      ...this.state.jobs.slice(0, -39).filter((entry) => this.active.has(entry.id)),
-      ...this.state.jobs.slice(-39),
-      job,
-    ];
-    const admits = kind === "draft" || kind === "admit";
-    const ahead = admits ? this.admissions.get(repoId) : undefined;
-    // Reserve the job's place synchronously, before operation can yield or another IPC request can enter.
-    const done = (ahead ?? Promise.resolve())
-      .then(() => {
-        if (controller.signal.aborted)
-          throw new Error("Command cancelled before starting");
-        return operation(job, controller.signal);
-      })
-      .then(() => {
-        job.state = controller.signal.aborted ? "cancelled" : "completed";
-      })
-      .catch((error: unknown) => {
-        job.error = redact(
-          error instanceof Error ? error.message : String(error),
-        );
-        job.state = controller.signal.aborted ? "cancelled" : "failed";
-      })
-      .finally(async () => {
-        job.endedAt = new Date().toISOString();
-        this.reads.invalidate(repoId);
-        try {
-          await this.editing.settled(job);
-          this.changes.changed(true, {
-            kind: "records",
-            repoId,
-            key: job.resultKey ?? key,
-            job,
-          });
-          this.updatePower();
-          await this.notifyOutcome(job);
-        } catch (error) {
-          job.error = `Could not save the command status: ${redact(String(error))}`;
-          job.state = "failed";
-          this.changes.changed(false, {
-            kind: "records",
-            repoId,
-            key: job.resultKey ?? key,
-            job,
-          });
-          this.updatePower();
-        } finally {
-          // Held until the receipt is saved and the outcome told, so a
-          // shutdown awaits it; the job is no longer live by then, so it is
-          // in nobody's way, and a stop no longer reaches it.
-          this.active.delete(job.id);
-        }
-      });
-    this.active.set(job.id, { job, controller, done });
-    if (admits) {
-      this.admissions.set(repoId, done);
-      void done.then(() => {
-        if (this.admissions.get(repoId) === done) this.admissions.delete(repoId);
-      });
-    }
-    try {
-      if (owner) this.editing.started(owner, job);
-      this.changes.changed(true, { kind: "progress", job });
-      this.updatePower();
-    } catch (error) {
-      controller.abort();
-      throw error;
-    }
-    return job;
-  }
-  private async invoke(
-    job: Job,
-    repo: RegisteredRepository,
-    args: string[],
-    signal: AbortSignal,
-    allowFailure = false,
-  ): Promise<ProcessResult> {
-    const result = await this.cli.run(args, repo, {
-      signal,
-      timeoutMs: 12 * 60 * 60 * 1000,
-      onOutput: (output) => {
-        if (job.log === output) return;
-        job.log = output;
-        this.changes.changed(Date.now() - this.profile.lastSave > 1500, {
-          kind: "progress",
-          job,
-        });
-        this.notifyStage(job);
-      },
-    });
-    job.log = redact(
-      [result.stderr, result.stdout].filter(Boolean).join("\n"),
-    ).slice(-80_000);
-    if (!allowFailure) requireSuccess(result);
-    if (result.stdout.trim()) {
-      try {
-        job.result = JSON.parse(result.stdout);
-      } catch {
-        job.result = null;
-      }
-    }
-    return result;
+    return this.jobs.live();
   }
   async request<T extends Request>(input: T): Promise<ReplyMap[T["kind"]]> {
     const request = RequestSchema.parse(input);
@@ -622,16 +489,7 @@ export class DesktopService {
         request.id,
       );
     if (request.kind === "usage") return this.usage();
-    if (request.kind === "cancel") {
-      const entry = this.active.get(request.jobId);
-      // A finished job stays tracked while its receipt is saved; it is not one
-      // a stop can reach, and marking it stopping would leave it there for good.
-      if (!entry || !isLive(entry.job)) throw new Error("That command is no longer active.");
-      entry.job.state = "stopping";
-      entry.controller.abort();
-      this.changes.changed(true, { kind: "progress", job: entry.job });
-      return null;
-    }
+    if (request.kind === "cancel") return this.jobs.cancel(request.jobId);
     const repo = this.repository(request.repoId);
     if (request.kind === "forgetRepository") return this.registry.forget(repo.id);
     if (request.kind === "graphRead")
@@ -640,13 +498,15 @@ export class DesktopService {
     // copy, validated whole and recorded with its author by the CLI, which is
     // also what the interview's edits go through. The pane writes nothing.
     if (request.kind === "graphEdit" || request.kind === "graphUndo")
-      return this.start(
-        repo.id,
-        request.key,
-        request.kind,
-        request.kind === "graphUndo" ? "Undo a plan edit" : "Change the plan's graph",
-        async (job, signal) => {
-          await this.invoke(job, repo, graphEditArgs(request.key, request), signal);
+      return this.jobs.start(
+        {
+          repo,
+          key: request.key,
+          kind: request.kind,
+          label: request.kind === "graphUndo" ? "Undo a plan edit" : "Change the plan's graph",
+        },
+        async (job, context) => {
+          await context.invoke(graphEditArgs(request.key, request));
           job.resultKey = request.key;
         },
       );
@@ -731,62 +591,66 @@ export class DesktopService {
       return this.options.io.saveFile(name, content);
     }
     if (request.kind === "doctor")
-      return this.start(
-        repo.id,
-        null,
-        request.kind,
-        request.writeConfig
+      return this.jobs.start(
+        {
+          repo,
+          key: null,
+          kind: request.kind,
+          label: request.writeConfig
           ? "Save repository configuration"
           : "Check repository readiness",
-        async (job, signal) => {
+        },
+        async (job, context) => {
           const path = writePrivate(
             this.options.dataDirectory,
             `doctor-${job.id}.json`,
             JSON.stringify(doctorConfig(this.state.settings)),
           );
-          await this.invoke(job, repo, doctorArgs(path, request.writeConfig), signal);
+          await context.invoke(doctorArgs(path, request.writeConfig));
         },
       );
     if (request.kind === "specSave")
       return saveSpec(this.planDeps(), repo, request);
     if (request.kind === "generatePlan" || request.kind === "startOver")
-      return this.start(
-        repo.id,
-        request.kind === "startOver" ? request.key : null,
-        "draft",
-        request.kind === "startOver"
+      return this.jobs.start(
+        {
+          repo,
+          key: request.kind === "startOver" ? request.key : null,
+          kind: "draft",
+          owner,
+          label: request.kind === "startOver"
           ? "Draft this plan again from the spec"
           : "Draft a plan from the spec",
-        async (job, signal) => {
+        },
+        async (job, context) => {
           const session = this.editing.read(request.id);
           if (session.repoId !== repo.id)
             throw new Error("This planning belongs to another repository.");
           if (session.specSlug === null)
             throw new Error("Write the spec before generating a plan from it.");
-          await this.invoke(
-            job,
-            repo,
+          await context.invoke(
             admitFromSpecArgs(
               `${specFolder(repo)}/${session.specSlug}/spec.md`,
               request.kind === "startOver" ? request.key : null,
               request.models?.draftingProvider ?? this.state.settings.draftingProvider,
               request.models?.executorModel ?? this.state.settings.executorModel,
             ),
-            signal,
           );
           this.recordAdmitted(job, repo, request.models);
         },
-        owner,
       );
     if (request.kind === "draft" || request.kind === "admit")
-      return this.start(
-        repo.id,
-        null,
-        request.kind,
-        request.kind === "draft"
+      return this.jobs.start(
+        {
+          repo,
+          key: null,
+          kind: request.kind,
+          owner,
+          label: request.kind === "draft"
           ? "Draft a task contract"
           : "Save task contract",
-        async (job, signal) => {
+        },
+        async (job, context) => {
           const args =
             request.kind === "draft"
               ? admitFromFileArgs(
@@ -799,78 +663,84 @@ export class DesktopService {
                   request.models?.executorModel ?? this.state.settings.executorModel,
                 )
               : admitDraftArgs(DraftSchema.parse(request.draft));
-          await this.invoke(job, repo, args, signal);
+          await context.invoke(args);
           this.recordAdmitted(job, repo, request.models);
         },
-        owner,
       );
     if (request.kind === "edit")
-      return this.start(
-        repo.id,
-        request.key,
-        request.kind,
-        "Update task contract",
-        async (job, signal) => {
+      return this.jobs.start(
+        {
+          repo,
+          key: request.key,
+          kind: request.kind,
+          owner,
+          label: "Update task contract",
+        },
+        async (job, context) => {
           this.tickets.assertDigest(repo, request.key, request.digest);
           assertEditable(this.tickets.contract(repo, request.key).contract);
-          await this.invoke(job, repo, editArgs(request.key, request.draft), signal);
+          await context.invoke(editArgs(request.key, request.draft));
           job.resultKey = request.key;
           if (request.models) {
             this.state.taskModels[repo.id + ":" + request.key] = request.models;
             this.changes.preferences(this.state);
           }
         },
-        owner,
       );
     if (request.kind === "sync")
-      return this.start(
-        repo.id,
-        request.key,
-        request.kind,
-        "Refresh delivery from GitHub",
-        async (job, signal) => {
-          await this.invoke(job, repo, syncArgs(request.key), signal);
+      return this.jobs.start(
+        {
+          repo,
+          key: request.key,
+          kind: request.kind,
+          label: "Refresh delivery from GitHub",
+        },
+        async (_job, context) => {
+          await context.invoke(syncArgs(request.key));
         },
       );
     if (request.kind === "principle")
-      return this.start(
-        repo.id,
-        request.key,
-        request.kind,
-        "Record a product decision",
-        async (job, signal) => {
-          await this.invoke(job, repo, principleArgs(request.answer), signal);
+      return this.jobs.start(
+        {
+          repo,
+          key: request.key,
+          kind: request.kind,
+          label: "Record a product decision",
+        },
+        async (_job, context) => {
+          await context.invoke(principleArgs(request.answer));
         },
       );
     if (request.kind === "verdict")
-      return this.start(
-        repo.id,
-        request.key,
-        request.kind,
-        "Record finding feedback",
-        async (job, signal) => {
-          await this.invoke(
-            job,
-            repo,
+      return this.jobs.start(
+        {
+          repo,
+          key: request.key,
+          kind: request.kind,
+          label: "Record finding feedback",
+        },
+        async (_job, context) => {
+          await context.invoke(
             verdictArgs(request, this.state.settings.name || "Local user"),
-            signal,
           );
         },
       );
     if (request.kind === "run" || request.kind === "decide")
-      return this.start(
-        repo.id,
-        request.key,
-        request.kind,
-        "Run engineering loop",
-        async (job, signal) => {
+      return this.jobs.start(
+        {
+          repo,
+          key: request.key,
+          kind: request.kind,
+          label: "Run engineering loop",
+        },
+        async (job, context) => {
           this.tickets.assertDigest(repo, request.key, request.digest);
           const resumeFrom = request.kind === "run" ? request.resumeFrom : null;
           if (resumeFrom)
             assertResumable(await this.detail(repo.id, request.key), resumeFrom);
           if (request.kind === "decide") {
-            await this.invoke(job, repo, principleArgs(request.answer), signal);
-            if (signal.aborted) return;
+            await context.invoke(principleArgs(request.answer));
+            if (context.signal.aborted) return;
           }
           const path = writePrivate(
             this.options.dataDirectory,
@@ -884,9 +754,9 @@ export class DesktopService {
             ),
           );
           if (request.kind === "run" && request.approve)
-            await this.invoke(job, repo, approveArgs(request.key), signal);
-          if (signal.aborted) return;
-          await this.invoke(job, repo, runArgs(request.key, path, resumeFrom), signal);
+            await context.invoke(approveArgs(request.key));
+          if (context.signal.aborted) return;
+          await context.invoke(runArgs(request.key, path, resumeFrom));
         },
       );
     const unreachable: never = request;
@@ -1096,8 +966,6 @@ export class DesktopService {
   }
   async shutdown(): Promise<void> {
     this.interviews.shutdown();
-    const running = [...this.active.values()];
-    for (const entry of running) entry.controller.abort();
-    await Promise.all(running.map((entry) => entry.done));
+    await this.jobs.shutdown();
   }
 }
