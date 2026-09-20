@@ -1801,12 +1801,16 @@ async function previewRequest<T extends Request>(request: T, owner?: EditingOwne
         // The ticket this planning drafted goes with it, as it does on the
         // real host: a plan thrown away must not leave its ticket on the board
         // with no way back to the plan. One that has run is not a draft and
-        // stays.
+        // stays, and one this planning was merely opened over was never its
+        // to throw away.
         const held = editing.read(request.id);
         result = editing.discard(request.id, request.revision);
         sampleInterviews.delete(request.id);
         emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id), working: false });
-        const drafted = held.key === null ? undefined : snapshot.tasks.find((entry) => entry.ticket.key === held.key);
+        const drafted =
+          held.key === null || !held.admitted
+            ? undefined
+            : snapshot.tasks.find((entry) => entry.ticket.key === held.key);
         if (
           drafted &&
           ["draft", "specifying", "plan_review", "ready", "plan_invalid"].includes(drafted.ticket.state)

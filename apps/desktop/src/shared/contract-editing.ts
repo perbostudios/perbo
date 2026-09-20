@@ -611,6 +611,10 @@ export class ContractEditing {
               next.phase = "conflict";
               next.error = "Another editor already holds this task. Your submitted fields remain here; open the current contract to continue from that editor.";
             } else {
+              // Admitted by this planning only where it held no ticket before:
+              // a session that started over on one it was opened with did not
+              // make that ticket, however much of it the re-draft replaced.
+              if (next.key === null) next.admitted = true;
               next.key = detail.ticket.key;
               next.digest = detail.digest;
               // Whether this plan has a graph, for the rail that cannot read a

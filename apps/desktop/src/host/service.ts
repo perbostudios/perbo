@@ -2204,10 +2204,15 @@ export class DesktopService {
       // plan it came from — a delete that deleted the way in and not the thing.
       // A ticket that has run is not a draft, so it stays, and the reason is
       // the same one deleting a contract outright would have given.
+      //
+      // The one it drafted, and never one it was merely opened over: planning
+      // started from a ticket the CLI admitted, or from one another session
+      // made, holds that key from birth. Discarding on the key alone would
+      // throw away work this planning did not do and cannot give back.
       const session = this.editing.read(request.id);
       const discarded = this.editing.discard(request.id, request.revision);
       this.stopInterview(request.id);
-      if (session.key !== null)
+      if (session.key !== null && session.admitted)
         await this.deleteContract(this.repository(session.repoId), session.key);
       return discarded;
     }

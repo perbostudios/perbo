@@ -429,6 +429,20 @@ export const EditingSessionSchema = z.strictObject({
   id: identifier,
   repoId: identifier,
   key: key.nullable(),
+  /**
+   * Whether this planning admitted the ticket it holds, rather than being
+   * opened over one that already existed.
+   *
+   * Discarding a planning throws away the ticket it drafted, because a plan
+   * thrown away must not leave its ticket on the board with no way back to it.
+   * A session opened over a ticket the CLI admitted, or one another session
+   * drafted, holds that key from birth and did not make it — deleting on the
+   * key alone would take somebody else's work away with this one's.
+   *
+   * Defaulted so a session recorded before this was written reads back as
+   * having admitted nothing, which is the reading that deletes nothing.
+   */
+  admitted: z.boolean().default(false),
   digest: z.string().length(64).nullable(),
   revision: z.number().int().nonnegative(),
   resumeNew: z.boolean(),

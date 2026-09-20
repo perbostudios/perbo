@@ -637,7 +637,61 @@ describe("the files a contract's scope reaches", () => {
  * the plan it came from — a delete that deleted the way in and not the thing.
  */
 describe("discarding a plan", () => {
-  it("deletes the ticket it drafted, and leaves one that has run", async () => {
+  it("deletes the ticket it drafted itself", async () => {
+    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const repoId = workspace.repositories[0]!.id;
+    const opened = await previewBridge.request({
+      kind: "editingOpen",
+      target: { kind: "fresh", repoId },
+    });
+    // It has to draft one: a planning that never admitted a ticket has none of
+    // its own to throw away.
+    expect(opened.key).toBeNull();
+    await previewBridge.request({
+      kind: "specSave",
+      id: opened.id,
+      repoId,
+      title: "A light colour mode",
+      sections: {
+        outcome: "The application supports a usable light colour mode.",
+        requirements: "- The person can choose Light, Dark or System without a restart.",
+        no_gos: "",
+        rabbit_holes: "",
+        notes: "",
+      },
+      base: {
+        title: "",
+        sections: { outcome: "", requirements: "", no_gos: "", rabbit_holes: "", notes: "" },
+      },
+    });
+    const withSpec = await previewBridge.request({ kind: "editingRead", id: opened.id });
+    await previewBridge.request({
+      kind: "editingSubmit",
+      id: opened.id,
+      revision: withSpec.revision,
+      operationId: crypto.randomUUID(),
+      intent: "generate",
+    });
+    let key: string | null = null;
+    await waitFor(
+      async () => {
+        key = (await previewBridge.request({ kind: "editingRead", id: opened.id })).key;
+        expect(key).not.toBeNull();
+      },
+      { timeout: 5000 },
+    );
+
+    await previewBridge.request({ kind: "editingDiscard", id: opened.id });
+    const after = await previewBridge.request({ kind: "snapshot" });
+    expect(after.tasks.some((each) => each.ticket.key === key)).toBe(false);
+    expect(after.drafts?.some((draft) => draft.id === opened.id) ?? false).toBe(false);
+  });
+
+  // The other side of the same rule, and the one that costs somebody their
+  // work if it is wrong. A planning opened over a ticket the CLI admitted, or
+  // over one another session drafted, holds that key from birth and did not
+  // make it: throwing the planning away must leave the ticket where it was.
+  it("leaves a ticket it was only opened over", async () => {
     const before = await previewBridge.request({ kind: "snapshot" });
     const row = before.tasks.find((each) => each.ticket.state === "plan_review") ?? before.tasks[0]!;
     const session = await previewBridge.request({
@@ -648,11 +702,16 @@ describe("discarding a plan", () => {
 
     await previewBridge.request({ kind: "editingDiscard", id: session.id });
     const after = await previewBridge.request({ kind: "snapshot" });
-    expect(after.tasks.some((each) => each.ticket.key === row.ticket.key)).toBe(false);
+    expect(after.tasks.some((each) => each.ticket.key === row.ticket.key)).toBe(true);
+    // The planning is gone; only the ticket it never made stays.
     expect(after.drafts?.some((draft) => draft.id === session.id) ?? false).toBe(false);
   });
 
-  it("keeps a ticket whose loop has run, because that is work and not a draft", async () => {
+  // A ticket that has run is kept twice over: this planning did not admit it,
+  // and `deleteContract` refuses a state past planning anyway. The first
+  // answer comes first, so what this proves is that the ticket survives —
+  // not which of the two rules saved it.
+  it("keeps a ticket whose loop has run", async () => {
     const before = await previewBridge.request({ kind: "snapshot" });
     const run = before.tasks.find(
       (each) => !["draft", "specifying", "plan_review", "ready", "plan_invalid"].includes(each.ticket.state),
