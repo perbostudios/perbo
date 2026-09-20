@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BundleIdSchema, CommitShaSchema, type ResumedFrom, type RunBundle } from "@perbo/contracts";
-import { gitEnv, run } from "@perbo/workspace";
+import { git } from "@perbo/workspace";
 import { BundleStore } from "./bundle.js";
 
 /**
@@ -239,11 +239,11 @@ export async function applyRetainedDiff(args: {
   const path = join(scratch, RETAINED_DIFF_ARTIFACT);
   try {
     writeFileSync(path, args.source.diff);
-    const applied = await run(["git", "apply", "--3way", "--whitespace=nowarn", "--", path], {
-      cwd: args.worktree,
-      env: gitEnv(),
-      timeoutMs: args.timeoutMs ?? 120_000,
-    });
+    const applied = await git.run(
+      args.worktree,
+      ["apply", "--3way", "--whitespace=nowarn", "--", path],
+      { timeoutMs: args.timeoutMs ?? 120_000 },
+    );
     if (applied.code !== 0) {
       throw new ResumeRefusedError(
         args.source.bundle_id,
