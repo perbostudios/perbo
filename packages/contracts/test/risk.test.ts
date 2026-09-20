@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { changeSetFromDiff } from "../src/changeset.js";
-import { globToRegExp, packageOf } from "../src/paths.js";
+import { packageOf } from "../src/paths.js";
 import { deriveActualRisk, derivePlannedRisk, raisePlanLevel } from "../src/risk.js";
 
 const scope = (paths: string[]) => ({
@@ -213,13 +213,5 @@ describe("path helpers", () => {
     expect(packageOf("packages/auth/signup.ts")).toBe("packages/auth");
     expect(packageOf("apps/cli/src/main.ts")).toBe("apps/cli");
     expect(packageOf("infra/terraform/main.tf")).toBe("infra");
-  });
-
-  it("matches globs segment-aware", () => {
-    expect(globToRegExp("packages/auth/**").test("packages/auth/a/b.ts")).toBe(true);
-    expect(globToRegExp("packages/auth/**").test("packages/email/a.ts")).toBe(false);
-    expect(globToRegExp("**/*.pem").test("infra/tls/server.pem")).toBe(true);
-    expect(globToRegExp("*.ts").test("a/b.ts")).toBe(false);
-    expect(globToRegExp("**/.env*").test("packages/auth/.env.local")).toBe(true);
   });
 });

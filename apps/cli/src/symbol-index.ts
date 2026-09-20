@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, extname, join, posix, resolve } from "node:path";
+import { dirname, extname, join, matchesGlob, posix, resolve } from "node:path";
 // The one import that puts a compiler in what ships: `typescript` is inlined
 // into the single-file bundle, as `zod` is, and it is declared beside `zod` in
 // `devDependencies` for the same reason. `apps/cli`'s manifest names no
@@ -206,26 +206,20 @@ function workspaceGlobs(repositoryRoot: string): string[] {
 }
 
 /**
- * `*` matches within one path segment and `**` across them. Nothing else in a
- * glob is a pattern — enough for a `packages:` list, which is directory globs.
- *
- * One pass, so a character escaped for the regular expression can never be
- * read back as a pattern: every token is either a star to translate or a
- * character to escape.
- */
-function globToRegExp(glob: string): RegExp {
-  const pattern = glob.replace(/\*\*|\*|[.+?^${}()|[\]\\]/g, (token) =>
-    token === "**" ? ".*" : token === "*" ? "[^/]*" : `\\${token}`,
-  );
-  return new RegExp(`^${pattern}$`);
-}
-
-/**
  * Every workspace package by the name its own manifest declares.
  *
- * A `package.json` counts when its directory matches one of the globs above,
- * which is the same rule pnpm itself installs by, so the names that resolve
- * here are the names that resolve at runtime.
+ * A `package.json` counts when its directory matches one of the globs the
+ * `packages:` list declares, which is the rule the package manager installs
+ * by, so the names that resolve here are the names that resolve at runtime.
+ * That question is the package manager's, not the product's, so the globs are
+ * read in the package manager's dialect — `node:path`'s `matchesGlob`, which
+ * `@perbo/workspace` reads a member list with as well — and not by
+ * `@perbo/contracts`' scope matcher, which answers what a contract admits.
+ * The dialect has braces, and `*` does not match a dot-directory.
+ *
+ * A member may be written from the repository root as `./packages/*`; the
+ * prefix names the same directory and is dropped before matching. A negated
+ * entry takes the directories it names out wherever it sits in the list.
  */
 function workspacePackages(
   repositoryRoot: string,
@@ -233,16 +227,17 @@ function workspacePackages(
 ): Map<string, WorkspacePackage> {
   const globs = workspaceGlobs(repositoryRoot);
   if (globs.length === 0) return new Map();
-  const include = globs.filter((glob) => !glob.startsWith("!")).map(globToRegExp);
-  const exclude = globs.filter((glob) => glob.startsWith("!")).map((glob) => globToRegExp(glob.slice(1)));
+  const member = (glob: string) => glob.replace(/^\.\//, "");
+  const include = globs.filter((glob) => !glob.startsWith("!")).map(member);
+  const exclude = globs.filter((glob) => glob.startsWith("!")).map((glob) => member(glob.slice(1)));
 
   const packages = new Map<string, WorkspacePackage>();
   for (const path of tracked) {
     if (!path.endsWith("package.json") || underExcludedDirectory(path)) continue;
     const directory = posix.dirname(path);
     if (directory === ".") continue;
-    if (!include.some((pattern) => pattern.test(directory))) continue;
-    if (exclude.some((pattern) => pattern.test(directory))) continue;
+    if (!include.some((glob) => matchesGlob(directory, glob))) continue;
+    if (exclude.some((glob) => matchesGlob(directory, glob))) continue;
     let manifest: Record<string, unknown>;
     try {
       manifest = JSON.parse(readFileSync(join(repositoryRoot, path), "utf8")) as Record<string, unknown>;

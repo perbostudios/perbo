@@ -4,8 +4,21 @@
  * Two copies of "what counts as a migration" would drift.
  */
 
-/** Minimal glob: `*` within a segment, `**` across segments, `?` one character. */
-export function globToRegExp(pattern: string): RegExp {
+/**
+ * A path glob, as every scope, prohibition and never-read list is written:
+ * `*` matches within one path segment and `**` across segments, where a `**`
+ * followed by a slash also matches no segment at all, so that prefix covers a
+ * root-level file as well as a nested one. `?` is one character other than
+ * `/`. Every other character is literal — no classes, braces, negation or
+ * escapes — and `.` is ordinary, so `*` matches a dotfile. The whole
+ * repository-relative path is matched, as Git names it, with `/` and
+ * case-sensitively; a leading `./` is not stripped.
+ *
+ * `test/glob-conformance.json` is that paragraph written as cases, and it is
+ * the one statement of what a path glob means: a matcher written elsewhere to
+ * these semantics answers the same table rather than a reading of its own.
+ */
+function globToRegExp(pattern: string): RegExp {
   let out = "";
   for (let i = 0; i < pattern.length; i += 1) {
     const char = pattern[i] ?? "";
