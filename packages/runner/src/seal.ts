@@ -9,7 +9,7 @@ import {
   parseNameStatus,
 } from "@perbo/contracts";
 import type { ChangeSet, SecretIndex } from "@perbo/contracts";
-import { gitEnv, run, runOrThrow } from "@perbo/workspace";
+import { git } from "@perbo/workspace";
 import { inspectPaths, type JudgingArtifacts, type ProhibitedHit } from "./prohibited.js";
 import { SCRATCH_EXCLUDE_PATHSPEC } from "./scratch.js";
 
@@ -122,9 +122,16 @@ export interface SealResult {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-async function git(args: string[], cwd: string, timeoutMs: number) {
-  return run(["git", ...args], { cwd, env: gitEnv(), timeoutMs });
-}
+/**
+ * What a listing of the range may say, past which only its tail arrives.
+ *
+ * The file list is parsed into the change set, so a cut one is a change set
+ * with its first files missing — shaped exactly like a complete one, and the
+ * files it lost are the ones nothing would inspect. The module's own named
+ * questions refuse a cut answer; this is the same ceiling for the two listings
+ * that have no named form.
+ */
+const MAX_LISTING_BYTES = 64 * 1024 * 1024;
 
 export async function sealChangeSet(request: SealRequest): Promise<SealResult> {
   const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -135,14 +142,9 @@ export async function sealChangeSet(request: SealRequest): Promise<SealResult> {
   // change set that does not list it.
   const pathspec = [...SCRATCH_EXCLUDE_PATHSPEC, ...excludeSpec(request.spec_paths)];
 
-  await runOrThrow(["git", "add", "-A", "--", ...pathspec], {
-    cwd,
-    env: gitEnv(),
-    timeoutMs,
-  });
+  await git.stage(cwd, pathspec, { timeoutMs });
 
-  const staged = await git(["diff", "--cached", "--name-only", "--", ...pathspec], cwd, timeoutMs);
-  const stagedPaths = staged.stdout.split("\n").filter((line) => line.trim().length > 0);
+  const stagedPaths = await git.stagedPaths(cwd, pathspec, { timeoutMs });
 
   // Content-hash exclusion (D-012). The filename check stays as a second line;
   // it is not the mechanism, because the same bytes under another name are the
@@ -152,7 +154,7 @@ export async function sealChangeSet(request: SealRequest): Promise<SealResult> {
   const producedByChecks = new Set(request.exclude_paths ?? []);
   for (const path of stagedPaths) {
     if (producedByChecks.has(path)) {
-      await git(["restore", "--staged", "--", path], cwd, timeoutMs);
+      await git.run(cwd, ["restore", "--staged", "--", path], { timeoutMs });
       excluded_check_artifacts.push(path);
       continue;
     }
@@ -165,13 +167,12 @@ export async function sealChangeSet(request: SealRequest): Promise<SealResult> {
     const matchesContent = request.secrets.matchesFile(bytes);
     const matchesValue = request.secrets.size > 0 && request.secrets.contains(bytes.toString("utf8"));
     if (matchesContent || matchesValue || (isSecretPath(path) && request.secrets.size > 0)) {
-      await git(["restore", "--staged", "--", path], cwd, timeoutMs);
+      await git.run(cwd, ["restore", "--staged", "--", path], { timeoutMs });
       excluded_paths.push(path);
     }
   }
 
-  const remaining = await git(["diff", "--cached", "--name-only", "--", ...pathspec], cwd, timeoutMs);
-  const toCommit = remaining.stdout.split("\n").filter((line) => line.trim().length > 0);
+  const toCommit = await git.stagedPaths(cwd, pathspec, { timeoutMs });
 
   // An attempt that staged nothing is not sealed into an empty commit; the
   // branch head stays where it was, and the range below still describes
@@ -180,7 +181,7 @@ export async function sealChangeSet(request: SealRequest): Promise<SealResult> {
     const message =
       `${request.ticket_key}: ${request.outcome}\n\n` +
       `Attempt: ${request.attempt_id}\nBase: ${request.base_commit}\n`;
-    await runOrThrow(["git", "commit", "-q", "-m", message], { cwd, env: gitEnv(), timeoutMs });
+    await git.commit(cwd, message, { timeoutMs });
   }
 
   const described = await describeRange({
@@ -248,15 +249,17 @@ export async function describeRange(args: {
   const cwd = args.worktree;
   const timeoutMs = args.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  const head = await runOrThrow(["git", "rev-parse", "HEAD"], { cwd, env: gitEnv(), timeoutMs });
-  const head_commit = head.stdout.trim();
+  const head_commit = await git.head(cwd, { timeoutMs });
+  if (head_commit === null) throw new Error(`${cwd} is on no commit, so there is no range to describe`);
   const range = `${args.base_commit}..${head_commit}`;
   const pathspec = [...SCRATCH_EXCLUDE_PATHSPEC, ...excludeSpec(args.spec_paths)];
 
-  const listed = await runOrThrow(
-    ["git", "diff", "--name-status", "-z", range, "--", ...pathspec],
-    { cwd, env: gitEnv(), timeoutMs },
+  const listed = await git.runOrThrow(
+    cwd,
+    ["diff", "--name-status", "-z", range, "--", ...pathspec],
+    { timeoutMs, maxOutputBytes: MAX_LISTING_BYTES },
   );
+  if (listed.truncated) throw new Error(`${range} lists more than ${MAX_LISTING_BYTES} bytes of files`);
   const files = parseNameStatus(listed.stdout);
 
   // The prohibited-path inspection reads the range, not this attempt's staged
@@ -308,9 +311,10 @@ export async function describeRange(args: {
   let diff: string | null;
   let diff_bytes: number;
   try {
-    await runOrThrow(
-      ["git", "diff", "--no-color", `--output=${diffPath}`, range, "--", ...pathspec],
-      { cwd, env: gitEnv(), timeoutMs },
+    await git.runOrThrow(
+      cwd,
+      ["diff", "--no-color", `--output=${diffPath}`, range, "--", ...pathspec],
+      { timeoutMs },
     );
     diff_bytes = statSync(diffPath).size;
     diff = diff_bytes <= cap ? readFileSync(diffPath, "utf8") : null;
@@ -357,11 +361,14 @@ export async function commitsSince(args: {
   base_commit: string;
   timeoutMs?: number;
 }): Promise<string[]> {
-  const result = await runOrThrow(["git", "rev-list", "--reverse", `${args.base_commit}..HEAD`], {
-    cwd: args.worktree,
-    env: gitEnv(),
-    timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-  });
+  const result = await git.runOrThrow(
+    args.worktree,
+    ["rev-list", "--reverse", `${args.base_commit}..HEAD`],
+    { timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxOutputBytes: MAX_LISTING_BYTES },
+  );
+  if (result.truncated) {
+    throw new Error(`${args.base_commit}..HEAD lists more than ${MAX_LISTING_BYTES} bytes of commits`);
+  }
   return result.stdout
     .split("\n")
     .map((line) => line.trim())
@@ -380,13 +387,13 @@ export async function headCommit(args: {
   worktree: string;
   timeoutMs?: number;
 }): Promise<string | null> {
-  const result = await run(["git", "rev-parse", "HEAD"], {
-    cwd: args.worktree,
-    env: gitEnv(),
-    timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-  });
-  const sha = result.stdout.trim();
-  return result.code === 0 && sha.length > 0 ? sha : null;
+  try {
+    return await git.head(args.worktree, { timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+  } catch {
+    // A worktree git cannot read at all is one with no head to name, which is
+    // what every caller of this does next anyway.
+    return null;
+  }
 }
 
 /**
@@ -401,13 +408,10 @@ export async function untrackedAfterChecks(args: {
   worktree: string;
   timeoutMs?: number;
 }): Promise<string[]> {
-  const result = await run(
-    ["git", "status", "--porcelain", "--untracked-files=all", "--", ...SCRATCH_EXCLUDE_PATHSPEC],
-    {
-      cwd: args.worktree,
-      env: gitEnv(),
-      timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    },
+  const result = await git.run(
+    args.worktree,
+    ["status", "--porcelain", "--untracked-files=all", "--", ...SCRATCH_EXCLUDE_PATHSPEC],
+    { timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxOutputBytes: MAX_LISTING_BYTES },
   );
   return result.stdout
     .split("\n")
