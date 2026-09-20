@@ -82,12 +82,26 @@ describe("initRepository", () => {
     expect(elsewhere.git("ls-files").trim()).toBe(untouched.index);
   });
 
-  it("lets product code commit on a machine whose global configuration signs", () => {
-    const root = scratch("perbo-signing-");
+  // Both signing formats, because the local `commit.gpgsign false` is what
+  // decides before the format is ever consulted — and because on a machine
+  // that signs over SSH the real symptom is the commit hanging on a key this
+  // process cannot unlock, which a test cannot wait for.
+  it.each([
+    ["openpgp", (signer: string) => `[gpg]\n\tprogram = ${signer}\n`],
+    [
+      "ssh",
+      (signer: string) =>
+        `[gpg]\n\tformat = ssh\n[gpg "ssh"]\n\tprogram = ${signer}\n[user]\n\tsigningkey = key\n`,
+    ],
+  ])("lets product code commit on a machine whose global configuration signs over %s", (
+    format,
+    signing,
+  ) => {
+    const root = scratch(`perbo-signing-${format}-`);
     const refuse = join(root, "refuse-to-sign");
     writeFileSync(refuse, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
     const globalConfig = join(root, "gitconfig");
-    writeFileSync(globalConfig, `[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = ${refuse}\n`);
+    writeFileSync(globalConfig, `[commit]\n\tgpgsign = true\n${signing(refuse)}`);
 
     const repository = initRepository(join(root, "repository"));
     // How the product runs git: the person's environment, saying nothing about
