@@ -18,7 +18,6 @@ import {
   standingProhibitedPaths,
   wholeChangeChecks,
   type AttemptWait,
-  type CheckResult,
   type CredentialClass,
   type ExecutionAttempt,
   type GithubCredential,
@@ -48,12 +47,8 @@ import {
   isRemediableFamily,
   remediableFindings,
   reviewGraph,
-  runReview,
-  verifyClosures,
-  type ClosureVerification,
 } from "@perbo/review";
 import {
-  appendAttempts,
   lastAttemptBranch,
   lastAttemptId,
   lastExecutorAccount,
@@ -62,30 +57,26 @@ import {
   recordedBaseVerification,
   rootAttemptId as mintRootAttemptId,
   runsOnRecord,
-  sealedByAttempt,
   specCommitOnRecord,
 } from "./attempts.js";
+import { Ledger } from "./loop/ledger.js";
 import { acquireRunLock, type HeldRunLock } from "./lock.js";
 import { executorAccount } from "./account.js";
 import { AttemptCeilings } from "./ceilings.js";
-import { AgentConfigurationPresentError, runAgent } from "./adapter.js";
-import { runCodexAgent } from "./adapter-codex.js";
+import { AgentConfigurationPresentError } from "./adapter.js";
 import { BundleStore } from "./bundle.js";
-import { runPinnedChecks, type PinnedCheck } from "./checks.js";
+import type { PinnedCheck } from "./checks.js";
 import {
-  createPullRequest,
   deliveredChecksSection,
   editPullRequestBody,
-  existingPullRequest,
   pullRequestBody,
-  pushAttemptBranch,
   readDeliveredChecks,
   type DeliveredChecksReading,
 } from "./delivery.js";
 import { githubCredential } from "./github-credential.js";
 import { mergeUp, pathsWithConflictMarkers, type MergeUpResult } from "./merge-up.js";
 import { sweepWorktree } from "./orphans.js";
-import { mergeLoopPullRequest, type LoopMergeOutcome } from "./merge.js";
+import type { LoopMergeOutcome } from "./merge.js";
 import type { BriefRecords } from "./brief.js";
 import { buildAgentEnvironment, buildPermissionProfile } from "./profile.js";
 import {
@@ -109,7 +100,7 @@ import {
 import { RunRefusedError } from "./refusal.js";
 import { commitSpec } from "./spec-commit.js";
 import { allowedPathsSentence } from "./shell/index.js";
-import { parseDeclines, type Decline } from "./declines.js";
+import { parseDeclines } from "./declines.js";
 import { readPrinciples, readPrinciplesFile } from "./principles.js";
 import { quarantine, release, restoreAny } from "./quarantine.js";
 import {
@@ -132,7 +123,8 @@ import {
   reviewerModel,
   writeReviewBundle,
 } from "./loop/review.js";
-import { attemptIdFor } from "./loop/state.js";
+import { resolvePorts, type LoopPorts } from "./loop/context.js";
+import { attemptIdFor, type RoundKind, type RoundRecord } from "./loop/state.js";
 import { verifierModel } from "./loop/verify.js";
 
 /**
@@ -174,7 +166,9 @@ import { verifierModel } from "./loop/verify.js";
  * merging the base in before anything else could be done with the branch.
  */
 
+export { resolvePorts, type LoopPorts } from "./loop/context.js";
 export { incompleteReviewCauses } from "./loop/review.js";
+export { type RoundKind, type RoundRecord } from "./loop/state.js";
 
 export {
   BaseSourceSchema,
@@ -193,61 +187,6 @@ export {
  * lost its oldest — the ones a reset would drop. Past this nothing is read.
  */
 const MAX_BRANCH_LOG_BYTES = 64 * 1024 * 1024;
-
-/**
- * What a round was for (SCP-192).
- *
- * `execute` is the ticket, `remediate` answers routed findings, and
- * `resolve_conflict` does one thing only: make a branch that has stopped
- * merging into its base mergeable again. The third is a round like the others —
- * a new attempt, sealed, checked and judged — and it is here rather than
- * inferred from the round number because a reader counting remediation rounds
- * must not count it as one.
- */
-export type RoundKind = "execute" | "remediate" | "resolve_conflict";
-
-export interface RoundRecord {
-  round: number;
-  kind: RoundKind;
-  attempt: ExecutionAttempt;
-  /**
-   * Attempts of this same round that ended before `attempt` was started,
-   * oldest first, and empty where the round took one attempt.
-   *
-   * Two things put an attempt here: a transport failure the loop sat out
-   * (SCP-172), and a ceiling the run continued past (SCP-193). Neither answered
-   * the round, and both were paid for.
-   *
-   * They live here rather than as records of their own because `rounds` holds
-   * exactly one entry per round: a reader counting rounds counts entries, and
-   * neither an outage nor a ceiling must turn one round into two. Every attempt
-   * in here is also on the ticket's attempts record and priced into the run's
-   * cost, so nothing is hidden by being nested.
-   */
-  superseded_attempts: ExecutionAttempt[];
-  /**
-   * The review that judged this round, where one did.
-   *
-   * Round 0's is the one independent review. A later round carries one only
-   * where it was answering a review that could not resolve every criterion:
-   * nothing about that is a closure to verify, so the round is reviewed again
-   * and the verdict is the new review's.
-   */
-  review: ReviewArtifact | null;
-  /**
-   * Each reviewed node's own artifact beside the round's combined review
-   * (D-107): `null` for a node with no file inside its paths this round,
-   * empty for a flat plan.
-   */
-  node_reviews: NodeReview[];
-  /** A round that answered routed findings: the closure verification (D-061). */
-  verification: ClosureVerification | null;
-  checks: CheckResult[];
-  remediable_findings: number;
-  directly_verified: number;
-  /** D-065: findings the executor declared no-determinable-practice for, with reasons. */
-  declines: Decline[];
-}
 
 export interface TicketRunResult {
   ticket_id: string;
@@ -360,27 +299,59 @@ export interface TicketRunRequest {
    */
   onPullRequest?: (pull_request: NonNullable<TicketRunResult["pull_request"]>) => void;
   /** Injected by tests: a stand-in for the agent, the checks and the reviewer. */
-  hooks?: {
-    agent?: typeof runAgent;
-    review?: typeof runReview;
-    verify?: typeof verifyClosures;
-    checks?: typeof runPinnedChecks;
-    /**
-     * The two calls that reach GitHub. A test drives the merge-up before the
-     * pull request without a remote to push to or a `gh` to answer; the loop's
-     * own behaviour either side of them is the same call it makes in anger.
-     */
-    push?: typeof pushAttemptBranch;
-    open?: typeof createPullRequest;
-    /**
-     * SCP-202's post-approval merge step. A test drives the loop's own call to
-     * it — where it happens, and what the run records of the answer — without
-     * a `gh` to answer the six conditions; the conditions themselves are
-     * proven against a fake `gh` in the CLI's own suite.
-     */
-    merge?: typeof mergeLoopPullRequest;
-    /** SCP-227: the open pull request a re-level pushes to, read rather than opened. */
-    existing?: typeof existingPullRequest;
+  hooks?: Partial<LoopPorts>;
+}
+
+/**
+ * What a run is bounded by, from its configuration and the limits table.
+ *
+ * Read once, at the start, so that every ceiling a round is judged against and
+ * every sentence that names where to raise one read the same values — a run
+ * whose limits changed under it would stop for a reason its own record could
+ * not explain.
+ */
+export interface RunLimits {
+  /** The remediation cap: the configured rounds, or the table's, whichever is lower. */
+  maxRounds: number;
+  /**
+   * The loop's own backstop, above every rule inside it.
+   *
+   * Nothing should reach it: every path through the body breaks or advances,
+   * and the rules below — the progress rule, the ticket budget, the round cap —
+   * end a run long before this. It is here because a conflict round no longer
+   * counts against the remediation cap (SCP-194), so `round` is no longer
+   * bounded by `maxRounds` and a `while` that said so would be stating
+   * something untrue. A conflict can interrupt each remediation round at most
+   * once, plus once before the executor, which is what the arithmetic is.
+   */
+  roundCeiling: number;
+  /** The longest the loop will sit out one provider wait (SCP-193). */
+  waitBoundMs: number;
+  /** Where a ceiling, a budget or a wait bound is raised. */
+  configPath: string;
+  /**
+   * What one ticket may spend before the loop stops restarting itself, which is
+   * nothing unless the executor is billed per token (D-096).
+   *
+   * The credential is the attempt's own, read from the invocation it recorded:
+   * on a subscription the dollar figure is a measure of work and not a bill, so
+   * no number of them adds up to a budget.
+   */
+  ticketBudgetMicros: (credential: CredentialClass) => number | null;
+}
+
+export function runLimits(config: TicketRunConfig): RunLimits {
+  const maxRounds = Math.min(
+    config.max_remediation_rounds,
+    limitFor(config.limits, "remediation_rounds"),
+  );
+  return {
+    maxRounds,
+    roundCeiling: 2 * maxRounds + 2,
+    waitBoundMs: limitFor(config.limits, "wait_for_provider_ms"),
+    configPath: join(config.repository_root, ".perbo", "config.json"),
+    ticketBudgetMicros: (credential) =>
+      limitFor(limitsForCredential(config.limits, credential), "ticket_cost_micros"),
   };
 }
 
@@ -415,14 +386,15 @@ async function runLockedTicket(
   const clock = args.now ?? (() => new Date());
   const wait = args.sleep ?? ((ms: number) => setTimeout(ms));
   const progress = args.onProgress ?? (() => undefined);
-  const agentRunner = args.hooks?.agent ?? (config.agent_provider === "codex-cli" ? runCodexAgent : runAgent);
-  const reviewRunner = args.hooks?.review ?? runReview;
-  const verifyRunner = args.hooks?.verify ?? verifyClosures;
-  const checkRunner = args.hooks?.checks ?? runPinnedChecks;
-  const pushBranch = args.hooks?.push ?? pushAttemptBranch;
-  const openPullRequest = args.hooks?.open ?? createPullRequest;
-  const mergePullRequest = args.hooks?.merge ?? mergeLoopPullRequest;
-  const findPullRequest = args.hooks?.existing ?? existingPullRequest;
+  const ports = resolvePorts(config, args.hooks);
+  const agentRunner = ports.agent;
+  const reviewRunner = ports.review;
+  const verifyRunner = ports.verify;
+  const checkRunner = ports.checks;
+  const pushBranch = ports.push;
+  const openPullRequest = ports.open;
+  const mergePullRequest = ports.merge;
+  const findPullRequest = ports.existing;
 
   if (!hasAcceptanceCriteria(args.contract)) {
     throw new Error(
@@ -489,7 +461,7 @@ async function runLockedTicket(
    * its predecessor is on the record rather than in `attempts`.
    */
   const previousRunAccount = lastExecutorAccount(priorAttempts);
-  const sealedBy = sealedByAttempt(priorAttempts);
+  const ledger = new Ledger({ path: attemptsPath, prior: priorAttempts, ticketId: contract.ticket_id });
   if (priorAttempts !== null) {
     progress(
       `run ${runNumber} of ${config.ticket_key}; ${priorAttempts.attempts.length} attempt(s) ` +
@@ -497,20 +469,7 @@ async function runLockedTicket(
     );
   }
 
-  /** Where a ceiling, a budget or a wait bound is raised. */
-  const configPath = join(config.repository_root, ".perbo", "config.json");
-  /** The longest the loop will sit out one provider wait (SCP-193). */
-  const waitBoundMs = limitFor(config.limits, "wait_for_provider_ms");
-  /**
-   * What one ticket may spend before the loop stops restarting itself, which is
-   * nothing unless the executor is billed per token (D-096).
-   *
-   * The credential is the attempt's own, read from the invocation it recorded:
-   * on a subscription the dollar figure is a measure of work and not a bill, so
-   * no number of them adds up to a budget.
-   */
-  const ticketBudgetMicros = (credential: CredentialClass): number | null =>
-    limitFor(limitsForCredential(config.limits, credential), "ticket_cost_micros");
+  const { configPath, waitBoundMs, ticketBudgetMicros, maxRounds, roundCeiling } = runLimits(config);
 
   /**
    * SCP-193: a wait a previous process was killed in the middle of.
@@ -691,7 +650,7 @@ async function runLockedTicket(
             return { sha, subject, attempts };
           });
         const own = (commit: (typeof carried)[number]): boolean =>
-          sealedBy.has(commit.sha) || commit.attempts.some((attempt) => onRecord.has(attempt));
+          ledger.sealedBy(commit.sha) !== null || commit.attempts.some((attempt) => onRecord.has(attempt));
         const foreign = carried.filter((commit) => !own(commit));
         // A listing held from its end has lost its oldest commits, which are
         // the ones a reset would drop: what cannot be read whole is refused
@@ -855,9 +814,6 @@ async function runLockedTicket(
     lifecycle_scripts: manifest.install.lifecycle_scripts.policy,
   });
 
-  const rounds: RoundRecord[] = [];
-  /** D-065: every decline across rounds, for the notification and the record. */
-  const allDeclines: Decline[] = [];
   // The product principles the person has recorded (D-065 option 3). Read from
   // the repository root — the agent cannot write there (.perbo/** is
   // prohibited) — and handed to every brief as data.
@@ -887,72 +843,8 @@ async function runLockedTicket(
   let incompleteReview: IncompleteReviewPath | null = null;
   /** Filled after each round's checks; excluded from the next round's seal. */
   let checkArtifacts: string[] = [];
-  const attempts: ExecutionAttempt[] = [];
-
-  /**
-   * What this ticket has spent, in micro-dollars, as far as anything priced it:
-   * every attempt already on its record plus every attempt this run has made.
-   *
-   * Only priced components are added. A model with no applicable rate card and
-   * no transport-reported figure contributes nothing and is counted
-   * separately, because a budget that read "unmeasured" as `$0` would never be
-   * reached — which is the one way a ticket budget can fail open.
-   *
-   * An attempt on a subscription is left out (D-096): the dollar figure it
-   * reports is a measure of work and not a bill, and the budget is a bill.
-   */
-  const ticketSpend = (): { micros: number; priced: number; unpriced: number } => {
-    const usage = z.looseObject({
-      agent: z.looseObject({ credential_class: z.string() }).optional(),
-      usage: z.looseObject({
-        cost_micros: z.number().int().min(0),
-        cost_basis: z.string(),
-      }),
-    });
-    let micros = 0;
-    let priced = 0;
-    let unpriced = 0;
-    for (const record of [...(priorAttempts?.attempts ?? []), ...attempts]) {
-      const parsed = usage.safeParse(record);
-      if (!parsed.success) {
-        unpriced += 1;
-        continue;
-      }
-      if (parsed.data.agent?.credential_class === "subscription") continue;
-      const basis = parsed.data.usage.cost_basis;
-      if (basis === "unavailable") unpriced += 1;
-      else if (basis === "not_incurred") continue;
-      else {
-        micros += parsed.data.usage.cost_micros;
-        priced += 1;
-      }
-    }
-    return { micros, priced, unpriced };
-  };
-
-  /**
-   * How many of this run's attempts the ticket's record already holds.
-   *
-   * The record is written once, when the run ends — except when the run parks
-   * on a provider's reset, which is exactly the moment it may not survive to
-   * write anything. So a park flushes what the run has made so far and moves
-   * this mark, and the write at the end appends only what came after it.
-   */
-  let recordedThrough = 0;
-  const recordAttemptsSoFar = (): void => {
-    const pending = attempts.slice(recordedThrough);
-    if (pending.length === 0) return;
-    appendAttempts({ path: attemptsPath, ticket_id: contract.ticket_id, attempts: pending });
-    recordedThrough = attempts.length;
-  };
-
   let outcome: TicketRunResult["outcome"] = "terminated";
   let detail = "";
-
-  const maxRounds = Math.min(
-    config.max_remediation_rounds,
-    limitFor(config.limits, "remediation_rounds"),
-  );
 
   /**
    * The round, and the attempt within it.
@@ -1069,19 +961,6 @@ async function runLockedTicket(
    * round a `--resume-from` diff belongs to.
    */
   let executeRound = 0;
-
-  /**
-   * The loop's own backstop, above every rule inside it.
-   *
-   * Nothing should reach it: every path through the body breaks or advances,
-   * and the rules below — the progress rule, the ticket budget, the round cap —
-   * end a run long before this. It is here because a conflict round no longer
-   * counts against the remediation cap (SCP-194), so `round` is no longer
-   * bounded by `maxRounds` and a `while` that said so would be stating
-   * something untrue. A conflict can interrupt each remediation round at most
-   * once, plus once before the executor, which is what the arithmetic is.
-   */
-  const roundCeiling = 2 * maxRounds + 2;
 
   /**
    * SCP-227: the judgement of a clean re-level, where no executor ran.
@@ -1296,7 +1175,7 @@ async function runLockedTicket(
       // whether that is the previous round's or the transport failure this one
       // answers. Read from the attempts themselves rather than from `rounds`,
       // which holds one entry per round and so cannot name a retried attempt.
-      const previous = attempts[attempts.length - 1];
+      const previous = ledger.last();
       /** The base tip this attempt's own branch was merged with, if any. */
       let mergedBase: string | null = null;
       /**
@@ -1313,10 +1192,10 @@ async function runLockedTicket(
         mergedBase = up.base_commit;
       };
 
-      // A worktree per round after the first this run runs. `attempts.length`
+      // A worktree per round after the first this run runs. `ledger.attempts.length`
       // rather than `round > 0`, because a run that continues a remediation
       // starts at round 1 in the worktree already provisioned for it.
-      if (attempts.length > 0 && transport_retry === 0 && ceiling_continuation === 0) {
+      if (ledger.attempts.length > 0 && transport_retry === 0 && ceiling_continuation === 0) {
         workspaceForRound = await provision({
           repository_root: config.repository_root,
           repository_id: contract.scope.repository_id,
@@ -1340,7 +1219,7 @@ async function runLockedTicket(
       // merge-up, and a conflict round starts from a branch that is
       // deliberately not merged.
       if (
-        attempts.length === 0 &&
+        ledger.attempts.length === 0 &&
         transport_retry === 0 &&
         ceiling_continuation === 0 &&
         kind !== "resolve_conflict"
@@ -1428,7 +1307,7 @@ async function runLockedTicket(
       ).filter((sha) => sha !== specCommit);
       const prior_commits: SealedCommit[] = inherited.map((sha) => ({
         sha,
-        attempt_id: sealedBy.get(sha) ?? null,
+        attempt_id: ledger.sealedBy(sha),
       }));
       if (inherited.length > 0) {
         progress(`branch carries ${inherited.length} commit(s) sealed before this attempt`);
@@ -1534,7 +1413,7 @@ async function runLockedTicket(
         // where the plan has a graph (D-107). Empty on a run's first round,
         // which nothing has measured yet, and on a round whose predecessor was
         // cut before its checks ran.
-        checks: rounds[rounds.length - 1]?.checks ?? [],
+        checks: ledger.rounds[ledger.rounds.length - 1]?.checks ?? [],
         open_findings: [...toClose],
       };
 
@@ -1929,12 +1808,9 @@ async function runLockedTicket(
         // is parked has to leave the instant behind for the next run to honour.
         wait: park,
       } satisfies ExecutionAttempt);
-      attempts.push(attempt);
-      // The next round inherits this one's commit and can name the attempt
+            // The next round inherits this one's commit and can name the attempt
       // that sealed it.
-      if (!carriedForward && sealed.head_commit !== null) {
-        sealedBy.set(sealed.head_commit, attempt_id);
-      }
+      ledger.addAttempt(attempt, !carriedForward ? sealed.head_commit : null);
 
       bundles.write({
         kind: "execution",
@@ -2028,7 +1904,7 @@ async function runLockedTicket(
           : [];
       if (declines.length > 0) {
         progress(`${declines.length} finding(s) declared no-determinable-practice`);
-        allDeclines.push(...declines);
+        ledger.addDeclines(declines);
       }
 
       /** This round's record where no review and no verification judged it. */
@@ -2065,7 +1941,7 @@ async function runLockedTicket(
           // Stopping says which instant and which key, so raising the bound is
           // a decision a person makes with the number in front of them.
           if (reset !== null && park === null) {
-            rounds.push(record());
+            ledger.addRound(record());
             outcome = "terminated";
             detail =
               `${termination.reason}: ${termination.detail} The provider resets at ` +
@@ -2079,7 +1955,7 @@ async function runLockedTicket(
           if (park !== null) {
             // On the record before the sleep: the wait has to outlive this
             // process, because the whole point of it is that it is long.
-            recordAttemptsSoFar();
+            ledger.flush();
             lock.parked(park);
             progress(
               `the provider resets at ${park.until} (${park.zone}); parking ` +
@@ -2136,7 +2012,7 @@ async function runLockedTicket(
             // ceiling ends an attempt, this path included.
             termination.reason === "round_iteration_ceiling_exceeded")
         ) {
-          const spend = ticketSpend();
+          const spend = ledger.spend();
           const budget = ticketBudgetMicros(agentResult.invocation.credential_class);
           const room = (budget ?? 0) - spend.micros;
           if (budget !== null && spend.priced > 0 && room > 0) {
@@ -2148,13 +2024,13 @@ async function runLockedTicket(
             transport_retry = 0;
             progress(
               `${termination.reason} on ${attempt.attempt_id}; its work is sealed on ` +
-                `${workspaceForRound.branch}, and run ${runNumber} attempt ${attempts.length + 1} ` +
+                `${workspaceForRound.branch}, and run ${runNumber} attempt ${ledger.attempts.length + 1} ` +
                 `continues over it — $${(spend.micros / 1_000_000).toFixed(2)} of the ` +
                 `$${((budget ?? 0) / 1_000_000).toFixed(2)} ticket budget is spent`,
             );
             continue;
           }
-          rounds.push(record());
+          ledger.addRound(record());
           outcome = "terminated";
           detail =
             `${termination.reason}: ${termination.detail} ` +
@@ -2179,7 +2055,7 @@ async function runLockedTicket(
                   ".");
           break;
         }
-        rounds.push(record());
+        ledger.addRound(record());
         if (termination.reason === "transport_unavailable") {
           outcome = "terminated";
           detail =
@@ -2210,7 +2086,7 @@ async function runLockedTicket(
       // a review of a change nobody can take — and the executor gets one round
       // whose only task is the resolution.
       if (conflictNow !== null) {
-        rounds.push(record());
+        ledger.addRound(record());
         // A merge that stopped without naming an unmerged path did not stop on
         // a conflict, and there is nothing for a round to resolve. One
         // resolution attempt per real conflict, too: a round that *was* the
@@ -2261,7 +2137,7 @@ async function runLockedTicket(
         // tell: as far as it is concerned the conflict is resolved.
         const markers = pathsWithConflictMarkers(workspaceForRound.path, sealed.changed_paths);
         if (markers.length > 0) {
-          rounds.push(record());
+          ledger.addRound(record());
           outcome = "base_conflict";
           detail =
             `the round given the base conflict left a conflict marker in ${markers.join(", ")}, ` +
@@ -2275,7 +2151,7 @@ async function runLockedTicket(
         if (conflict!.before_executor && !config.relevel) {
           // The round's own brief has not run yet: it is the next round's, and
           // it is whichever brief the conflict interrupted (SCP-194).
-          rounds.push(record());
+          ledger.addRound(record());
           const resume = conflict!.resume_kind;
           round += 1;
           if (resume === "execute") executeRound = round;
@@ -2316,7 +2192,7 @@ async function runLockedTicket(
         // branch and the finding stays open — and the stop says which paths
         // arrived and what the contract admits.
         if (widened.length > 0) {
-          rounds.push(record());
+          ledger.addRound(record());
           outcome = "changes_requested";
           detail =
             `remediation round ${remediationRound} was given ${scopeGiven.length} scope ` +
@@ -2404,7 +2280,7 @@ async function runLockedTicket(
           now: clock(),
         });
 
-        rounds.push({
+        ledger.addRound({
           round,
           kind,
           attempt,
@@ -2440,7 +2316,7 @@ async function runLockedTicket(
           verification.open_keys.includes(finding.key),
         );
         if (openFindings.length === 0) {
-          if (allDeclines.length === 0) {
+          if (ledger.declines.length === 0) {
             outcome = "approved";
             detail =
               `round 0's routed findings verified closed after ${remediationRound} ` +
@@ -2448,7 +2324,7 @@ async function runLockedTicket(
           } else {
             outcome = "escalated";
             detail =
-              `${allDeclines.length} finding(s) declared no-determinable-practice by the ` +
+              `${ledger.declines.length} finding(s) declared no-determinable-practice by the ` +
               "executor; a person decides — the reasons are on the round record, and in the " +
               "pull request when one is opened";
           }
@@ -2479,12 +2355,12 @@ async function runLockedTicket(
             `remediation round ${remediationRound} closed none of the ${toVerify.length} ` +
             `finding(s) it was given, so the next round would be the same brief against the ` +
             `same evidence. Still open: ${openKeys.join(", ")}` +
-            (allDeclines.length > 0
-              ? ` (and ${allDeclines.length} declined for a person)`
+            (ledger.declines.length > 0
+              ? ` (and ${ledger.declines.length} declined for a person)`
               : "");
           break;
         }
-        const spentSoFar = ticketSpend();
+        const spentSoFar = ledger.spend();
         const remediationBudget = ticketBudgetMicros(
           agentResult.invocation.credential_class,
         );
@@ -2495,7 +2371,7 @@ async function runLockedTicket(
             `${openFindings.length} remain, but ${maxRounds} is the cap — raise ` +
             `max_remediation_rounds or limits.limits.remediation_rounds in ${configPath}. ` +
             `Still open: ${openKeys.join(", ")}` +
-            (allDeclines.length > 0 ? ` (and ${allDeclines.length} declined for a person)` : "");
+            (ledger.declines.length > 0 ? ` (and ${ledger.declines.length} declined for a person)` : "");
           break;
         }
         if (
@@ -2511,7 +2387,7 @@ async function runLockedTicket(
             `$${(remediationBudget / 1_000_000).toFixed(2)} in ` +
             `limits.limits.ticket_cost_micros (${configPath}). Still open: ` +
             `${openKeys.join(", ")}` +
-            (allDeclines.length > 0 ? ` (and ${allDeclines.length} declined for a person)` : "");
+            (ledger.declines.length > 0 ? ` (and ${ledger.declines.length} declined for a person)` : "");
           break;
         }
         round += 1;
@@ -2611,7 +2487,7 @@ async function runLockedTicket(
 
       finalReview = review;
       nodeReviews = nodeReviewsThisRound;
-      rounds.push({
+      ledger.addRound({
         round,
         kind,
         attempt,
@@ -2778,7 +2654,7 @@ async function runLockedTicket(
     // SCP-227: a re-level judged without an executor has no attempt to
     // publish under; its own block below pushes a `relevelled` branch, and a
     // verdict short of that leaves the merge commit local and unpushed.
-    if ((outcome === "approved" || outcome === "escalated") && config.publish && finalReview && attempts.length > 0) {
+    if ((outcome === "approved" || outcome === "escalated") && config.publish && finalReview && ledger.attempts.length > 0) {
       // SCP-192, the second merge-up: the base can move between the review and
       // the publish, and a pull request that is behind at the moment it opens
       // is the pull request a person spent day four merging by hand. Nothing
@@ -2790,7 +2666,7 @@ async function runLockedTicket(
         base_ref: config.base_ref,
         base_commit: baseCommit,
         ticket_key: config.ticket_key,
-        attempt_id: attempts[attempts.length - 1]?.attempt_id ?? rootAttemptId,
+        attempt_id: ledger.last()?.attempt_id ?? rootAttemptId,
       });
       if (up.status === "conflict") {
         // There is no round left to hand this to — the loop is past its rounds
@@ -2814,7 +2690,7 @@ async function runLockedTicket(
 
     // A second test rather than an `else`: the block above can turn an approved
     // run into `base_conflict`, and the pull request must not open on it.
-    if ((outcome === "approved" || outcome === "escalated") && config.publish && finalReview && attempts.length > 0) {
+    if ((outcome === "approved" || outcome === "escalated") && config.publish && finalReview && ledger.attempts.length > 0) {
       merged_base = baseCommit === workspace.base_commit ? null : baseCommit;
       // SCP-200: the runner holds the credential and performs both steps, so
       // the path is read from the runner's own environment. The preflight in
@@ -2823,13 +2699,13 @@ async function runLockedTicket(
       await pushBranch({ worktree: workspace.path, branch: workspace.branch, onProgress: progress });
       const body = pullRequestBody({
         contract,
-        attempt: attempts[attempts.length - 1]!,
+        attempt: ledger.last()!,
         review: finalReview,
-        attempts,
+        attempts: [...ledger.attempts],
         // Where the work came from, so the person merging reads it here
         // rather than going back to the ticket for it.
         source: config.ticket_source,
-        verification_costs: rounds.flatMap((entry) =>
+        verification_costs: ledger.rounds.flatMap((entry) =>
           entry.verification
             ? [
                 {
@@ -2839,7 +2715,7 @@ async function runLockedTicket(
               ]
             : [],
         ),
-        declines: allDeclines,
+        declines: ledger.declines,
         // SCP-202: the closing line says which of the two merges this pull
         // request is waiting for, from the switch that decides it.
         merge: config.merge,
@@ -2873,7 +2749,7 @@ async function runLockedTicket(
         state_root: config.state_root,
         ticket_key: config.ticket_key,
         paths_allowed: contract.scope.paths_allowed,
-        attempt_id: attempts[attempts.length - 1]?.attempt_id ?? rootAttemptId,
+        attempt_id: ledger.last()?.attempt_id ?? rootAttemptId,
         now: clock(),
       });
       progress(merge.merged ? `merged: ${merge.detail}` : `not merged — ${merge.detail}`);
@@ -2952,7 +2828,7 @@ async function runLockedTicket(
           state_root: config.state_root,
           ticket_key: config.ticket_key,
           paths_allowed: contract.scope.paths_allowed,
-          attempt_id: attempts[attempts.length - 1]?.attempt_id ?? continuesPreviousRun ?? rootAttemptId,
+          attempt_id: ledger.last()?.attempt_id ?? continuesPreviousRun ?? rootAttemptId,
           now: clock(),
         });
         progress(merge.merged ? `merged: ${merge.detail}` : `not merged — ${merge.detail}`);
@@ -2979,20 +2855,16 @@ async function runLockedTicket(
     // Only what a park has not already flushed: an attempt appended twice
     // collides with itself, and the refusal that catches it would fail a run
     // that had otherwise finished.
-    const recorded = appendAttempts({
-      path: attemptsPath,
-      ticket_id: contract.ticket_id,
-      attempts: attempts.slice(recordedThrough),
-    });
+    const recorded = ledger.finish();
     progress(
-      `recorded ${attempts.length} attempt(s) as run ${recorded.runs} of ${config.ticket_key}; ` +
+      `recorded ${ledger.attempts.length} attempt(s) as run ${recorded.runs} of ${config.ticket_key}; ` +
         `${recorded.attempts.length} on record`,
     );
 
     return {
       ticket_id: contract.ticket_id,
       workspace,
-      rounds,
+      rounds: [...ledger.rounds],
       final_review: finalReview,
       node_reviews: nodeReviews,
       pull_request,
