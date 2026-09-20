@@ -61,11 +61,13 @@ test("`export *` is refused in a source file, and naming the exports is not", as
   await allows("packages/workspace/src/m.ts", EXPORT_NAMED);
 });
 
-test("`export *` is refused in the reviewer's source and in its two transports", async () => {
-  // Both are reached by a later config object, which replaces the array whole.
+test("`export *` is refused in the reviewer's and the model's source", async () => {
+  // Every one is reached by a later config object, which replaces the array
+  // whole — the model's two transports by an override of their own.
   await refuses("packages/review/src/m.ts", EXPORT_ALL, NAME_WHAT);
-  await refuses("packages/review/src/provider-cli.ts", EXPORT_ALL, NAME_WHAT);
-  await refuses("packages/review/src/provider-codex-cli.ts", EXPORT_ALL, NAME_WHAT);
+  await refuses("packages/model/src/m.ts", EXPORT_ALL, NAME_WHAT);
+  await refuses("packages/model/src/claude-cli.ts", EXPORT_ALL, NAME_WHAT);
+  await refuses("packages/model/src/codex-cli.ts", EXPORT_ALL, NAME_WHAT);
 });
 
 test("`export *` outside a package's source is not this rule's business", async () => {
@@ -145,16 +147,35 @@ const ARGV = 'import { spawn } from "node:child_process";\nexport const p = spaw
 
 test("no shell-string execution, wherever a source file is", async () => {
   await refuses("packages/workspace/src/m.ts", SHELL_STRING, "No shell-string execution");
-  await refuses("packages/review/src/provider-cli.ts", SHELL_STRING, "No shell-string execution");
+  await refuses("packages/model/src/claude-cli.ts", SHELL_STRING, "No shell-string execution");
   await refuses("packages/contracts/src/index.ts", SHELL_STRING, "No shell-string execution");
 });
 
-test("no process execution in the reviewer, except in its two named transports", async () => {
+test("no process execution in the reviewer, with no exception", async () => {
   await refuses("packages/review/src/m.ts", ARGV, "No process execution in the reviewer");
   await refuses("packages/review/src/index.ts", ARGV, "No process execution in the reviewer");
   await refuses("packages/review/test/m.test.ts", ARGV, "No process execution in the reviewer");
-  await allows("packages/review/src/provider-cli.ts", ARGV);
-  await allows("packages/review/src/provider-codex-cli.ts", ARGV);
+  // The rule covers a path, not a file: the two names the transports had are
+  // refused like any other, so a transport cannot come back to the reviewer.
+  await refuses("packages/review/src/provider-cli.ts", ARGV, "No process execution in the reviewer");
+  await refuses(
+    "packages/review/src/provider-codex-cli.ts",
+    ARGV,
+    "No process execution in the reviewer",
+  );
+});
+
+test("no process execution in the model package, except in its two named transports", async () => {
+  await refuses("packages/model/src/m.ts", ARGV, "No process execution in the model package");
+  await refuses("packages/model/src/index.ts", ARGV, "No process execution in the model package");
+  await refuses("packages/model/src/anthropic.ts", ARGV, "No process execution in the model package");
+  await refuses(
+    "packages/model/src/nested/claude-cli.ts",
+    ARGV,
+    "No process execution in the model package",
+  );
+  await allows("packages/model/src/claude-cli.ts", ARGV);
+  await allows("packages/model/src/codex-cli.ts", ARGV);
 });
 
 // --------------------------------------------------------------------------
@@ -166,4 +187,9 @@ test("a package running `eslint src test` from its own directory gets the same r
   await refuses("packages/review/src/m.ts", EXPORT_ALL, NAME_WHAT, inside);
   await refuses("packages/review/src/m.ts", ARGV, "No process execution in the reviewer", inside);
   await allows("packages/review/src/index.ts", EXPORT_ALL, inside);
+
+  const model = new ESLint({ cwd: join(REPO_ROOT, "packages/model") });
+  await refuses("packages/model/src/m.ts", EXPORT_ALL, NAME_WHAT, model);
+  await refuses("packages/model/src/m.ts", ARGV, "No process execution in the model package", model);
+  await allows("packages/model/src/claude-cli.ts", ARGV, model);
 });
