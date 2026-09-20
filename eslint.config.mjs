@@ -124,6 +124,7 @@ export default tseslint.config(
     },
   },
   {
+    // The reviewer's source, which the object above no longer reaches.
     files: ["packages/review/src/**"],
     ignores: EXPORT_ALL_BURN_DOWN,
     rules: {

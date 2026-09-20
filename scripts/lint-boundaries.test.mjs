@@ -128,7 +128,7 @@ const NO_TEST_CODE = "imports no test code";
 test("production code reaches no `test-support/`, and a test does", async () => {
   await refuses("packages/workspace/src/m/index.ts", USES("./test-support/fake-clock.js"), NO_TEST_CODE);
   await allows("packages/workspace/src/m/index.test.ts", USES("./test-support/fake-clock.js"));
-  await allows("packages/workspace/src/m/test-support/fake-clock.ts", USES("./builder.js"));
+  await allows("packages/workspace/src/m/test-support/fake-clock.ts", USES("../../test-support/build-run.js"));
 });
 
 test("production code reaches no test module, and a test does", async () => {
