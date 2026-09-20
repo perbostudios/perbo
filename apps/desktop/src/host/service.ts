@@ -9,7 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { branchName, recordedBranch } from "@perbo/workspace";
 import {
@@ -110,6 +110,18 @@ import {
 } from "../shared/contract-editing.js";
 import { WorkspaceReads } from "./workspace-reads.js";
 import { ProfileStateSchema } from "./profile/store.js";
+import { explorerPath, safePath } from "./repository/paths.js";
+import {
+  attemptsPath,
+  bundlesPath,
+  configPath,
+  configTemporaryPath,
+  objectPath,
+  objectsPath,
+  perboPath,
+  principlesPath,
+  ticketPath,
+} from "./repository/layout.js";
 import type { ProfileState, RegisteredRepository } from "./profile/store.js";
 import { runnerProgress } from "../shared/runner-progress.js";
 import {
@@ -436,34 +448,12 @@ export class DesktopService {
       throw new Error(
         "The repository path changed. Reconnect the repository before continuing.",
       );
-    this.safePath(repo, ".perbo");
+    perboPath(repo);
     return repo;
-  }
-  private safePath(
-    repo: RegisteredRepository,
-    ...parts: string[]
-  ): string {
-    const path = resolve(repo.path, ...parts),
-      fragment = relative(repo.path, path);
-    if (
-      isAbsolute(fragment) ||
-      fragment === ".." ||
-      fragment.startsWith(`..${sep}`)
-    )
-      throw new Error("Path is outside the selected repository.");
-    let cursor = repo.path;
-    for (const part of fragment.split(sep)) {
-      cursor = join(cursor, part);
-      if (existsSync(cursor) && lstatSync(cursor).isSymbolicLink())
-        throw new Error(
-          "Perbo refuses a symlink in the ticket store. Use a repository-owned .perbo directory.",
-        );
-    }
-    return path;
   }
   /** The repository's `.perbo/config.json`, or null where it has none. */
   private readConfig(repo: RegisteredRepository): Record<string, unknown> | null {
-    const path = this.safePath(repo, ".perbo", "config.json");
+    const path = configPath(repo);
     if (!existsSync(path)) return null;
     try {
       return z.record(z.string(), z.unknown()).parse(JSON.parse(readFileSync(path, "utf8")));
@@ -481,35 +471,14 @@ export class DesktopService {
     repo: RegisteredRepository,
     config: Record<string, unknown>,
   ): void {
-    const path = this.safePath(repo, ".perbo", "config.json");
-    mkdirSync(this.safePath(repo, ".perbo"), { recursive: true });
-    const temporary = this.safePath(repo, ".perbo", `config-${randomUUID()}.tmp`);
+    const path = configPath(repo);
+    mkdirSync(perboPath(repo), { recursive: true });
+    const temporary = configTemporaryPath(repo, randomUUID());
     writeFileSync(temporary, JSON.stringify(config, null, 2) + "\n", {
       flag: "wx",
       mode: 0o600,
     });
     renameSync(temporary, path);
-  }
-  /**
-   * A path a renderer named, as this repository's own. Absolute spellings and
-   * `..` are refused here because `safePath` would resolve them to something
-   * inside the repository and accept it; everything else — outside the
-   * repository, a symlink on the way — `safePath` refuses.
-   */
-  private explorerPath(repo: RegisteredRepository, path: string): string {
-    if (isAbsolute(path) || /^[A-Za-z]:[\\/]/.test(path))
-      throw new Error(
-        "Name the file the way the repository does, relative to its root. Perbo does not take an absolute path from a screen.",
-      );
-    const relative = path.split(sep).join("/").replace(/^\.\//, "");
-    if (relative === "" || relative.split("/").includes(".."))
-      throw new Error("That path would leave the repository. Name a file inside it.");
-    if (isNeverReadPath(relative))
-      throw new Error(
-        "Perbo never lists nor reads this path: it may hold a secret, Git metadata or agent configuration. That it exists is reportable; its contents are not.",
-      );
-    this.safePath(repo, relative);
-    return relative;
   }
   /** The repository's tracked files, from Git in the registered repository and never from a path a renderer sent. */
   private async trackedFiles(repo: RegisteredRepository): Promise<string[]> {
@@ -536,8 +505,8 @@ export class DesktopService {
     repo: RegisteredRepository,
     requested: string,
   ): Promise<ExplorerFile> {
-    const path = this.explorerPath(repo, requested);
-    const full = this.safePath(repo, path);
+    const path = explorerPath(repo, requested);
+    const full = safePath(repo, path);
     if (!existsSync(full)) throw new Error(`${path} is not a tracked file in this repository.`);
     if (lstatSync(full).isDirectory())
       throw new Error(`${path} is a folder. The tree already lists what is in it.`);
@@ -607,11 +576,10 @@ export class DesktopService {
       const head = requireSuccess(
         await this.execute("git", ["rev-parse", "HEAD"], { cwd: repo.path }),
       ).trim();
-      const configPath = this.safePath(repo, ".perbo", "config.json");
-      const config = existsSync(configPath)
+      const config = existsSync(configPath(repo))
         ? z
             .record(z.string(), z.unknown())
-            .parse(JSON.parse(readFileSync(configPath, "utf8")))
+            .parse(JSON.parse(readFileSync(configPath(repo), "utf8")))
         : {};
       const manifest = MaterializationManifestSchema.safeParse(
         config["materialization_manifest"],
@@ -625,7 +593,7 @@ export class DesktopService {
         branch:
           (status[0] ?? "").replace(/^## /, "").split("...")[0] ?? "detached",
         dirty: status.length > 1,
-        configured: existsSync(this.safePath(repo, ".perbo", "config.json")),
+        configured: existsSync(configPath(repo)),
         error: null,
         ...(manifest.success
           ? {
@@ -666,7 +634,7 @@ export class DesktopService {
       name: basename(canonical),
       path: canonical,
     };
-    this.safePath(repo, ".perbo");
+    perboPath(repo);
     this.state.repositories.push(repo);
     this.changed(true, { kind: "repositories" });
     return this.metadata(repo);
@@ -791,7 +759,7 @@ export class DesktopService {
 
   /** Where this repository keeps its specs: `specs`, or the `specs` key (D-103). */
   private specFolder(repo: RegisteredRepository): string {
-    const path = this.safePath(repo, ".perbo", "config.json");
+    const path = configPath(repo);
     if (!existsSync(path)) return DEFAULT_SPEC_FOLDER;
     const named = z
       .record(z.string(), z.unknown())
@@ -803,7 +771,7 @@ export class DesktopService {
           "repository-relative folder, for example \"specs\" or \"docs/specs\".",
       );
     // Through safePath as well, so a link on the way is refused with its own sentence.
-    this.safePath(repo, named);
+    safePath(repo, named);
     return named;
   }
 
@@ -894,7 +862,7 @@ export class DesktopService {
     const repo = this.repository(session.repoId);
     const folder = `${this.specFolder(repo)}/${session.specSlug}`;
     const path = `${folder}/spec.md`;
-    const read = readSpecText(this.safePath(repo, ...path.split("/")));
+    const read = readSpecText(safePath(repo, ...path.split("/")));
     // The nodes a requirement landed in come from the contract this session
     // holds, where it holds one; before the first draft every answer is none.
     const held = session.key ? this.readContract(repo, session.key).contract : null;
@@ -952,7 +920,7 @@ export class DesktopService {
       session.specSlug === null
         ? null
         : readSpecText(
-            this.safePath(
+            safePath(
               repo,
               ...`${this.specFolder(repo)}/${session.specSlug}/spec.md`.split("/"),
             ),
@@ -986,7 +954,7 @@ export class DesktopService {
     if (session.specSlug === null)
       throw new Error(INTERVIEW_NEEDS_A_TITLE);
     const spec = `${this.specFolder(repo)}/${session.specSlug}`;
-    this.safePath(repo, ...spec.split("/"));
+    safePath(repo, ...spec.split("/"));
     const provider = interviewProviderFor(models);
     return [
       "interview",
@@ -1302,7 +1270,7 @@ export class DesktopService {
       // `perbo edit` wrote, and the one {@link planChanged} names.
       const repo = this.repository(this.interviews.get(id)?.repoId ?? session.repoId);
       return readLatestDraftEdit(
-        this.safePath(repo, ".perbo", "tickets", `${session.key}.draft.json`),
+        ticketPath(repo, session.key, ".draft.json"),
         "interview",
       );
     } catch {
@@ -1406,7 +1374,7 @@ export class DesktopService {
     key: string,
     contract: PlanContract,
   ): GraphEdge[] {
-    const path = this.safePath(repo, ".perbo", "tickets", `${key}.approach.json`);
+    const path = ticketPath(repo, key, ".approach.json");
     if (!existsSync(path)) return [];
     let raw: unknown;
     try {
@@ -1444,7 +1412,7 @@ export class DesktopService {
       const path = `${folder}/nodes/${node.id}.md`;
       let full: string;
       try {
-        full = this.safePath(repo, ...path.split("/"));
+        full = safePath(repo, ...path.split("/"));
       } catch {
         // A symlink on the way is a page the pane does not show, not a refusal of the graph.
         continue;
@@ -1520,7 +1488,7 @@ export class DesktopService {
         }),
       ),
       editCount: ticket.admission.edit_count ?? 0,
-      history: readDraftEdits(this.safePath(repo, ".perbo", "tickets", `${key}.draft.json`)),
+      history: readDraftEdits(ticketPath(repo, key, ".draft.json")),
       digest,
       live: await this.liveGraph(repo, ticket, nodes),
     };
@@ -1542,11 +1510,11 @@ export class DesktopService {
     nodes: readonly PlanNode[],
   ): Promise<GraphLiveView> {
     const record = readAttempts(
-      this.safePath(repo, ".perbo", "state", `${ticket.ticket_id}.attempts.json`),
+      attemptsPath(repo, ticket.ticket_id),
     );
     const bundles = record.attempts.length
       ? await this.reads.read("bundles:" + repo.id, repo.id, async () =>
-          listBundles(this.safePath(repo, ".perbo", "bundles", "bundles")),
+          listBundles(bundlesPath(repo)),
         )
       : [];
     return liveGraph({
@@ -1555,7 +1523,7 @@ export class DesktopService {
       bundles,
       ticketId: ticket.ticket_id,
       planVersion: ticket.plan_version,
-      objectsDirectory: this.safePath(repo, ".perbo", "bundles", "objects"),
+      objectsDirectory: objectsPath(repo),
     });
   }
 
@@ -1564,7 +1532,7 @@ export class DesktopService {
     key: string,
   ): { contract: Detail["contract"]; digest: string } {
     const raw = readFileSync(
-      this.safePath(repo, ".perbo", "tickets", `${key}.contract.json`),
+      ticketPath(repo, key, ".contract.json"),
       "utf8",
     );
     return {
@@ -1585,7 +1553,7 @@ export class DesktopService {
   private limits(
     repo: RegisteredRepository,
   ): z.infer<typeof LimitsTableSchema> {
-    const path = this.safePath(repo, ".perbo", "config.json");
+    const path = configPath(repo);
     const record = existsSync(path)
       ? z
           .record(z.string(), z.unknown())
@@ -1633,7 +1601,7 @@ export class DesktopService {
         requireSuccess(await this.cli(["inspect", key, "--json"], repo)),
       ),
     );
-    const principlesPath = this.safePath(repo, ".perbo", "principles.md");
+    const principles = principlesPath(repo);
     const limits = this.limits(repo).limits;
     return {
       ticket,
@@ -1678,8 +1646,8 @@ export class DesktopService {
           report.total_cost.partial > 0 || report.total_cost.unavailable > 0,
         unavailable: report.total_cost.unavailable,
       },
-      principles: existsSync(principlesPath)
-        ? readFileSync(principlesPath, "utf8").slice(0, 100_000)
+      principles: existsSync(principles)
+        ? readFileSync(principles, "utf8").slice(0, 100_000)
         : "",
       verdicts: report.verdicts,
       effective: {
@@ -1714,7 +1682,7 @@ export class DesktopService {
       );
       if (!artifact?.retained) return null;
       const result = readObject(
-        this.safePath(repo, ".perbo", "bundles", "objects", artifact.sha256),
+        objectPath(repo, artifact.sha256),
         artifact,
       );
       if (result.text === null) {
@@ -2155,15 +2123,10 @@ export class DesktopService {
           "Only a contract that has never run can be deleted. This one has moved past the contract stage.",
         );
       const attempts = readAttempts(
-        this.safePath(
-          repo,
-          ".perbo",
-          "state",
-          `${ticket.ticket_id}.attempts.json`,
-        ),
+        attemptsPath(repo, ticket.ticket_id),
       );
       const bundles = listBundles(
-        this.safePath(repo, ".perbo", "bundles", "bundles"),
+        bundlesPath(repo),
       );
       if (
         attempts.attempts.length ||
@@ -2177,13 +2140,8 @@ export class DesktopService {
         throw new Error(
           "This contract has a pull request on record, so it stays.",
         );
-      for (const suffix of [".json", ".contract.json", ".draft.json"]) {
-        const path = this.safePath(
-          repo,
-          ".perbo",
-          "tickets",
-          `${request.key}${suffix}`,
-        );
+      for (const suffix of [".json", ".contract.json", ".draft.json"] as const) {
+        const path = ticketPath(repo, request.key, suffix);
         if (existsSync(path) && !lstatSync(path).isSymbolicLink()) rmSync(path);
       }
       const entry = repo.id + ":" + request.key;
@@ -2225,7 +2183,7 @@ export class DesktopService {
     if (request.kind === "output")
       return this.output(repo.id, request.key, request.attemptId);
     if (request.kind === "manifest" || request.kind === "saveManifest") {
-      const path = this.safePath(repo, ".perbo", "config.json");
+      const path = configPath(repo);
       if (!existsSync(path))
         throw new Error(
           "Run the environment check and save its proposed configuration first.",
@@ -2258,11 +2216,7 @@ export class DesktopService {
         entries: request.value.entries,
       });
       config["protected_paths"] = request.value.offLimits;
-      const temporary = this.safePath(
-        repo,
-        ".perbo",
-        `config-${randomUUID()}.tmp`,
-      );
+      const temporary = configTemporaryPath(repo, randomUUID());
       writeFileSync(temporary, JSON.stringify(config, null, 2) + "\n", {
         flag: "wx",
         mode: 0o600,
@@ -2289,12 +2243,7 @@ export class DesktopService {
         (entry) => entry.key === request.key,
       );
       const attempts = readAttempts(
-        this.safePath(
-          repo,
-          ".perbo",
-          "state",
-          `${contract.ticket_id}.attempts.json`,
-        ),
+        attemptsPath(repo, contract.ticket_id),
       ).attempts;
       const branch =
         "refs/heads/" +
@@ -2703,16 +2652,11 @@ export class DesktopService {
             "This task is no longer in the repository's ticket store.",
           );
         const record = readAttempts(
-          this.safePath(
-            repo,
-            ".perbo",
-            "state",
-            `${ticket.ticket_id}.attempts.json`,
-          ),
+          attemptsPath(repo, ticket.ticket_id),
         );
         const bundles = record.attempts.length
           ? await this.reads.read("bundles:" + repoId, repoId, async () =>
-              listBundles(this.safePath(repo, ".perbo", "bundles", "bundles")),
+              listBundles(bundlesPath(repo)),
             )
           : [];
         return summariseTicket({
@@ -2720,12 +2664,7 @@ export class DesktopService {
           attempts: record.attempts,
           attemptsError: record.error,
           bundles,
-          objectsDirectory: this.safePath(
-            repo,
-            ".perbo",
-            "bundles",
-            "objects",
-          ),
+          objectsDirectory: objectsPath(repo),
         });
       },
     );
@@ -2739,12 +2678,7 @@ export class DesktopService {
         this.repository(repo.id);
         for (const ticket of (await this.list(repo)).tickets) {
           const record = readAttempts(
-            this.safePath(
-              repo,
-              ".perbo",
-              "state",
-              `${ticket.ticket_id}.attempts.json`,
-            ),
+            attemptsPath(repo, ticket.ticket_id),
           );
           if (record.error)
             notes.push(`${repo.name} · ${ticket.key}: ${record.error}`);
@@ -2879,12 +2813,7 @@ export class DesktopService {
     }
     if (!ticket) return;
     const reason = readAttempts(
-      this.safePath(
-        repo,
-        ".perbo",
-        "state",
-        `${ticket.ticket_id}.attempts.json`,
-      ),
+      attemptsPath(repo, ticket.ticket_id),
     ).attempts.at(-1)?.termination?.reason;
     if (on.ceiling && isEarlyStop(reason))
       this.notify(
