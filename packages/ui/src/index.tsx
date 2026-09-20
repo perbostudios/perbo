@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 export const cx = (...names: (string | false | null | undefined)[]): string =>
   names.filter(Boolean).join(" ");
@@ -18,28 +18,6 @@ export const Button = forwardRef<
     />
   );
 });
-
-export function Badge({
-  tone = "neutral",
-  children,
-}: {
-  tone?: "neutral" | "success" | "warning" | "danger";
-  children: ReactNode;
-}): ReactNode {
-  return (
-    <span className={`badge badge--${tone}`}>
-      <span className="badge-dot" />
-      {children}
-    </span>
-  );
-}
-
-export function Panel({
-  className,
-  ...props
-}: HTMLAttributes<HTMLElement>): ReactNode {
-  return <section className={cx("panel", className)} {...props} />;
-}
 
 export function Field({
   label,

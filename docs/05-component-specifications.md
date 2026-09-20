@@ -90,7 +90,7 @@ The contract draft, and the measurement of what a person did to it.
 
 ## `packages/ui` — `@perbo/ui`
 
-Shared React primitives and design tokens: buttons, badges, panels, fields, notices, empty states, focus-contained native dialogs, and the desktop's design tokens and motion primitives ([D-097](11-open-decisions.md)).
+Shared React primitives and design tokens: buttons, fields, notices, empty states, focus-contained native dialogs, and the desktop's design tokens and motion primitives ([D-097](11-open-decisions.md)).
 
 **Owns:** the component and token set; no filesystem, IPC, provider, database or application-state dependency of its own.
 
