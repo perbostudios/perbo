@@ -14,7 +14,7 @@ vi.mock("node:path", async (importOriginal) => {
   return { ...actual, dirname: actual.win32.dirname, default: { ...actual, dirname: actual.win32.dirname } };
 });
 
-const { inspectWritePath, resolveScope } = await import("../src/shell/index.js");
+const { inspectWritePath, resolveScope } = await import("./index.js");
 
 const ROOT = String.raw`C:\Users\a\wt`;
 

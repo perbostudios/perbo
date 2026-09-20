@@ -1,37 +1,13 @@
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  INLINE_READ_ONLY,
-  INLINE_WRITE_CALLS,
-  PLAIN_WRITE_CALLS,
-} from "../src/shell/internal/inline-tables.js";
-import { INTERPRETERS } from "../src/shell/internal/interpreter.js";
-import { WRITERS } from "../src/shell/internal/writers.js";
-import { inspectCommand } from "../src/prohibited.js";
-import { scratch } from "./support.js";
+import { decision, sentence, withoutListEntry } from "../test-support/pins.js";
+import { INLINE_READ_ONLY, INLINE_WRITE_CALLS, PLAIN_WRITE_CALLS } from "./inline-tables.js";
 
 /**
- * SCP-190: every entry of every table the guard reads a command against, pinned
- * by removing it.
+ * The inline-program tables, each entry pinned by removing it (SCP-190).
  *
- * A table entry with no test is an entry nobody can delete safely and nobody
- * can trust: `INLINE_WRITE_CALLS`'s "opens a file for writing" rule could be
- * deleted from #325 without a single one of 119 tests noticing. Asserting a
- * decision beside the entry is not enough either — the same assertion passes on
- * a guard that reached it some other way. So each entry is **taken out of the
- * table at run time**, the same line re-read, and the answer required to change.
- *
- * The tables are read here rather than listed, so an entry added later with no
- * line of its own fails this file instead of shipping unpinned.
- *
- * What "change" means differs by table, and the difference is the ticket:
- *
- * - `WRITERS` and `INTERPRETERS` pin a **decision**. Without the entry the verb
- *   is a word the guard has no reading for, and the line it refused is allowed.
- * - `INLINE_READ_ONLY` pins a decision the other way: without the entry the
- *   shape is no longer one the guard can show writes nothing, and an allowed
- *   line is refused.
+ * - `INLINE_READ_ONLY` pins a decision: without the entry the shape is no
+ *   longer one the guard can show writes nothing, and an allowed line is
+ *   refused.
  * - `INLINE_WRITE_CALLS` pins a **sentence**. Since SCP-190 those entries no
  *   longer decide anything — the allow-list refuses the code with or without
  *   them — so what is lost when one goes is the refusal an agent can act on,
@@ -40,97 +16,6 @@ import { scratch } from "./support.js";
  *   (SCP-234): without the entry the call is a name the read-only table cannot
  *   vouch for, and a write to a literal path inside the worktree is refused.
  */
-
-const ROOT = realpathSync(scratch("perbo-scp190-pins-"));
-mkdirSync(join(ROOT, "src"), { recursive: true });
-writeFileSync(join(ROOT, "package.json"), '{"name": "fixture"}\n');
-writeFileSync(join(ROOT, "notes.md"), "notes\n");
-
-const writes = (command: string) =>
-  inspectCommand(command, { root: ROOT, home: "/Users/nobody" }).filter(
-    (hit) => hit.action === "write_outside_worktree",
-  );
-
-const decision = (command: string): "refused" | "allowed" =>
-  writes(command).length > 0 ? "refused" : "allowed";
-
-const sentence = (command: string) => writes(command).map((hit) => hit.detail).join("\n");
-
-/** Run `body` with one entry of a map taken out, and put it back afterwards. */
-const withoutMapEntry = <T>(table: Map<string, T>, key: string, body: () => void) => {
-  const held = table.get(key)!;
-  table.delete(key);
-  try {
-    body();
-  } finally {
-    table.set(key, held);
-  }
-};
-
-/** Run `body` with one entry of a list taken out, and put it back afterwards. */
-const withoutListEntry = <T>(table: T[], index: number, body: () => void) => {
-  const held = table[index]!;
-  table.splice(index, 1);
-  try {
-    body();
-  } finally {
-    table.splice(index, 0, held);
-  }
-};
-
-/**
- * One line per writer, refused today because the table says where that verb's
- * destination is. Every one lands outside the root; without the entry the verb
- * names nothing the guard resolves.
- */
-const WRITER_LINES: Record<string, string> = {
-  cp: "cp notes.md ~/backup.md",
-  mv: "mv notes.md ~/backup.md",
-  rm: "rm -rf ~/scratch",
-  chmod: "chmod 777 /etc/hosts",
-  chown: "chown me /etc/hosts",
-  chgrp: "chgrp staff /etc/hosts",
-  tee: "pnpm test | tee ~/log.txt",
-  dd: "dd if=notes.md of=~/copy.md",
-  install: "install -m 755 run.sh /usr/local/bin/run",
-  rsync: "rsync -a src/ ~/backup/",
-  scp: "scp notes.md user@host.example.com:/srv/notes.md",
-  touch: "touch /etc/marker",
-  mkdir: "mkdir -p ~/scratch/deep",
-  mkfifo: "mkfifo /tmp/pipe",
-  rmdir: "rmdir /tmp/generated",
-  unlink: "unlink /tmp/x",
-  truncate: "truncate -s 0 /tmp/log",
-  sed: "sed -i 's/a/b/' /etc/hosts",
-  curl: "curl -o /tmp/payload https://example.com/x",
-  wget: "wget -O ~/payload https://example.com/x",
-  tar: "tar -czf /tmp/archive.tgz src",
-  unzip: "unzip -d /tmp/out archive.zip",
-};
-
-/**
- * One line per interpreter, refused today because the table says that verb
- * carries a program on its command line. None of the paths in them resolves
- * anywhere, so what refuses is the reading of the code and nothing else.
- */
-const INTERPRETER_LINES: Record<string, string> = {
-  node: `node -e "require('fs').unlinkSync('x')"`,
-  nodejs: `nodejs -e "require('fs').unlinkSync('x')"`,
-  deno: `deno eval "Deno.remove('x')"`,
-  python: `python -c "__import__('os').remove('x')"`,
-  python2: `python2 -c "__import__('os').remove('x')"`,
-  python3: `python3 -c "__import__('os').remove('x')"`,
-  pypy: `pypy -c "__import__('os').remove('x')"`,
-  pypy3: `pypy3 -c "__import__('os').remove('x')"`,
-  ruby: `ruby -e "File.delete('x')"`,
-  perl: `perl -e "unlink('x')"`,
-  php: `php -r "unlink('x');"`,
-  osascript: `osascript -e 'do shell script "ls"'`,
-  awk: `awk '{system("rm x")}' src/index.ts`,
-  gawk: `gawk '{system("rm x")}' src/index.ts`,
-  mawk: `mawk '{system("rm x")}' src/index.ts`,
-  nawk: `nawk '{system("rm x")}' src/index.ts`,
-};
 
 /**
  * One line per read-only shape, allowed today because the table names the shape
@@ -201,41 +86,6 @@ const WRITE_CALL_LINES: Record<string, { line: string; detail: string }> = {
     detail: "redirects its output to a file",
   },
 };
-
-describe("every writer in the table, pinned by removing it", () => {
-  it("has a line for every entry, and no line for an entry that is gone", () => {
-    expect(Object.keys(WRITER_LINES).sort()).toEqual([...WRITERS.keys()].sort());
-  });
-
-  for (const [verb, command] of Object.entries(WRITER_LINES)) {
-    it(`\`${verb}\`: ${command}`, () => {
-      expect(decision(command), command).toBe("refused");
-      withoutMapEntry(WRITERS, verb, () => {
-        expect(decision(command), `without \`${verb}\`: ${command}`).toBe("allowed");
-      });
-      expect(decision(command), command).toBe("refused");
-    });
-  }
-});
-
-describe("every interpreter in the table, pinned by removing it", () => {
-  it("has a line for every entry, and no line for an entry that is gone", () => {
-    expect(Object.keys(INTERPRETER_LINES).sort()).toEqual([...INTERPRETERS.keys()].sort());
-  });
-
-  for (const [verb, command] of Object.entries(INTERPRETER_LINES)) {
-    it(`\`${verb}\`: ${command}`, () => {
-      expect(decision(command), command).toBe("refused");
-      // And the record says which interpreter it was, which is what makes the
-      // refusal one a person can act on.
-      expect(sentence(command), command).toContain(verb);
-      withoutMapEntry(INTERPRETERS, verb, () => {
-        expect(decision(command), `without \`${verb}\`: ${command}`).toBe("allowed");
-      });
-      expect(decision(command), command).toBe("refused");
-    });
-  }
-});
 
 describe("every read-only shape, pinned by removing it", () => {
   it("has a line for every entry, and no line for an entry that is gone", () => {

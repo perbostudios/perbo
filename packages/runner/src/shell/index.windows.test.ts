@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inspectWritePath, readCommandLine, resolveScope, type ResolvedScope } from "../src/shell/index.js";
+import { inspectWritePath, readCommandLine, resolveScope, type ResolvedScope } from "./index.js";
 
 /**
  * Scope enforcement against a Windows worktree root.
