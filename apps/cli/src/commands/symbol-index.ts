@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, matchesGlob, posix, resolve } from "node:path";
 // The one import that puts a compiler in what ships: `typescript` is inlined
@@ -25,6 +24,7 @@ import {
   type SymbolIndex,
   type UnsupportedRepository,
 } from "@perbo/contracts";
+import { CommandFailedError, git } from "@perbo/workspace";
 import { UsageError } from "../usage-error.js";
 import { StoreError, headCommit, storeDir } from "../store/index.js";
 import type { Streams } from "../streams.js";
@@ -86,57 +86,55 @@ const BARE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".d.ts", ".js", ".jsx", 
 // ---------------------------------------------------------------------------
 // The tracked tree
 
-/** `git ls-files` by argv: the root is an argument, never part of a command line. */
-function trackedFiles(repositoryRoot: string): string[] {
-  let listing: string;
-  try {
-    listing = execFileSync("git", ["-C", repositoryRoot, "ls-files", "-z"], {
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (error) {
-    throw new StoreError(
-      `cannot list the tracked files in ${repositoryRoot}: ${
-        error instanceof Error ? error.message.split("\n")[0] : String(error)
-      }`,
-    );
-  }
-  return listing.split("\0").filter((path) => path.length > 0);
+/**
+ * What a tracked listing of this repository is allowed to be. The module
+ * refuses one larger rather than returning its tail: an index built from a cut
+ * listing is missing files nothing later says are missing.
+ */
+const MAX_LISTING_BYTES = 64 * 1024 * 1024;
+
+/** What git said it could not do, in the one line a person acts on. */
+function why(error: unknown): string {
+  const said =
+    error instanceof CommandFailedError
+      ? error.result.stderr
+          .split("\n")
+          .map((line) => line.trim())
+          .find((line) => line.length > 0)
+      : undefined;
+  if (said !== undefined) return said;
+  return error instanceof Error ? (error.message.split("\n")[0] ?? error.message) : String(error);
 }
 
-/** Whether any tracked file differs from the commit, by argv. Untracked files are not indexed, so they do not count. */
-export function workingTree(repositoryRoot: string): "clean" | "modified" {
-  let status: string;
+/** Every tracked file, through the repository module: the root is where git is run. */
+function trackedFiles(repositoryRoot: string): string[] {
   try {
-    status = execFileSync(
-      "git",
-      ["-C", repositoryRoot, "status", "--porcelain", "--untracked-files=no"],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    );
+    return git.trackedFilesSync(repositoryRoot, { maxOutputBytes: MAX_LISTING_BYTES });
+  } catch (error) {
+    throw new StoreError(`cannot list the tracked files in ${repositoryRoot}: ${why(error)}`, {
+      cause: error,
+    });
+  }
+}
+
+/** Whether any tracked file differs from the commit. Untracked files are not indexed, so they do not count. */
+export function workingTree(repositoryRoot: string): "clean" | "modified" {
+  try {
+    return git.hasTrackedChangesSync(repositoryRoot) ? "modified" : "clean";
   } catch (error) {
     throw new StoreError(
-      `cannot read the working tree's state in ${repositoryRoot}: ${
-        error instanceof Error ? error.message.split("\n")[0] : String(error)
-      }`,
+      `cannot read the working tree's state in ${repositoryRoot}: ${why(error)}`,
+      { cause: error },
     );
   }
-  return status.trim().length === 0 ? "clean" : "modified";
 }
 
 /** The repository `path` is inside, so `--repo` may name any directory within it. */
 export function repositoryRootAt(path: string): string {
   try {
-    return execFileSync("git", ["-C", path, "rev-parse", "--show-toplevel"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    }).trim();
+    return git.topLevelSync(path);
   } catch (error) {
-    throw new StoreError(
-      `${path} is not inside a git repository: ${
-        error instanceof Error ? error.message.split("\n")[0] : String(error)
-      }`,
-    );
+    throw new StoreError(`${path} is not inside a git repository: ${why(error)}`, { cause: error });
   }
 }
 
