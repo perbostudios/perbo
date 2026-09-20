@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { PlanContractSchema, type PlanContract } from "@perbo/contracts";
+import { PlanContractP1Schema, type PlanContractWithCriteria } from "@perbo/contracts";
 import { parseSpec, requirementNodes, writeNodePages, type Spec } from "../src/index.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-node-pages-"));
@@ -37,8 +37,10 @@ The queue package already has a sender.
 
 const spec: Spec = parseSpec(SPEC);
 
-const contract = (over: Partial<Record<string, unknown>> = {}): PlanContract =>
-  PlanContractSchema.parse({
+// The P1 schema rather than the union, because `requirementNodes` reads the
+// criteria and the nodes a P0 contract does not have.
+const contract = (over: Partial<Record<string, unknown>> = {}): PlanContractWithCriteria =>
+  PlanContractP1Schema.parse({
     plan_id: "plan_0102030405060708",
     version: 1,
     ticket_id: "ticket_0102030405060708",
