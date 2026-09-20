@@ -91,7 +91,7 @@ const generate: ScriptStep = { kind: "call", tool: "generate_plan", input: {} };
 async function interview(
   repo: string,
   steps: readonly ScriptStep[],
-  extra: { argv?: string[]; sessionId?: string; spec?: string } = {},
+  extra: { argv?: string[]; sessionId?: string; spec?: string; turns?: readonly string[] } = {},
 ) {
   const streams = capture();
   const sdk = scriptedSdk({ steps, cwd: repo, ...(extra.sessionId ? { sessionId: extra.sessionId } : {}) });
@@ -102,7 +102,8 @@ async function interview(
     transport: claudeInterviewTransport(sdk, CLAUDE),
     model: drafter(),
     turns: (async function* () {
-      yield JSON.stringify({ type: "turn", text: "let us write the spec" });
+      for (const text of extra.turns ?? ["let us write the spec"])
+        yield JSON.stringify({ type: "turn", text });
     })(),
   });
   return { code, streams, sdk };
@@ -355,6 +356,72 @@ describe("generate_plan (SCP-311 criterion 2)", () => {
     expect(sdk.calls[0]?.behavior).toBe("allow");
     expect(sdk.calls[1]?.isError).toBe(false);
     expect(sdk.calls[1]?.result).toContain("PRB-1");
+  });
+
+  // A group is put to the person and nothing waits for it, so without a rule a
+  // session can ask and draft in the one breath — which is drafting around its
+  // own guess at the answer, and then telling them afterwards which way it
+  // went. Their answer may change the spec this drafts from.
+  it("refuses to draft while a group of questions stands unanswered", async () => {
+    const ask: ScriptStep = {
+      kind: "call",
+      tool: "ask_options",
+      input: {
+        groups: [
+          {
+            title: "Ordering within a day",
+            parts: [
+              {
+                question: "How are a day's events ordered?",
+                options: [
+                  { label: "Timed first, then untimed", detail: null, recommended: true },
+                  { label: "In the order they were written", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const repo = repository();
+    const { sdk } = await interview(repo, [writeSpec(), ask, generate]);
+    expect(sdk.calls[1]?.isError).toBe(false);
+    expect(sdk.calls[2]?.isError).toBe(true);
+    expect(sdk.calls[2]?.result).toContain("unanswered");
+    expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual([]);
+  });
+
+  // The other half: their turn is their answer, so it lets the draft through.
+  // A check nobody can pass is as useless as one nobody can fail.
+  it("drafts once their turn has answered the group", async () => {
+    const ask: ScriptStep = {
+      kind: "call",
+      tool: "ask_options",
+      input: {
+        groups: [
+          {
+            title: null,
+            parts: [
+              {
+                question: "How are a day's events ordered?",
+                options: [
+                  { label: "Timed first", detail: null, recommended: true },
+                  { label: "As written", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const repo = repository();
+    // Two turns: the session asks on the first, and drafts on the second,
+    // which is the turn their answer arrived in.
+    const { sdk } = await interview(repo, [writeSpec(), ask, { kind: "await" }, generate], {
+      turns: ["let us write the spec", "Timed first"],
+    });
+    expect(sdk.calls.at(-1)?.isError).toBe(false);
+    expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual(["PRB-1"]);
   });
 
   it("refuses a second draft from a spec nothing has changed since the first", async () => {

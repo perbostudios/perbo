@@ -28,7 +28,16 @@ export type ScriptStep =
    */
   | { kind: "tool"; tool: string; input: Record<string, unknown>; writes?: { path: string; content: string } }
   /** One of the interview's own tools, called after `canUseTool` admits it. */
-  | { kind: "call"; tool: string; input: Record<string, unknown> };
+  | { kind: "call"; tool: string; input: Record<string, unknown> }
+  /**
+   * The session waiting for the person, and their turn arriving.
+   *
+   * A real session stops after putting questions and says nothing until they
+   * answer; the steps after this one are what it does with that answer. A
+   * script without this runs end to end inside the first turn, which cannot
+   * tell "asked, then drafted" from "asked and drafted in one breath".
+   */
+  | { kind: "await" };
 
 /** What the script's tool calls were answered with. */
 export interface ScriptedCall {
@@ -85,15 +94,26 @@ export function scriptedSdk(args: {
       | undefined;
     const byName = new Map((server?.tools ?? []).map((each) => [each.name, each]));
     yield { type: "system", subtype: "init", session_id: sessionId };
+    // Held as the iterator rather than walked with `for await`, because
+    // breaking out of one calls `return()` on it and closes it for good: a
+    // script that waited for a second turn would be handed nothing, however
+    // many the caller meant to send.
+    const turns = params.prompt[Symbol.asyncIterator]();
+    /** The next turn the person sends, or nothing if they send no more. */
+    const waitForTurn = async (): Promise<void> => {
+      const next = await turns.next();
+      if (next.done !== true) sdk.prompts.push(next.value.message.content);
+    };
     // The person's first turn is read before the script runs, as a session
     // reads its first prompt.
-    for await (const turn of params.prompt) {
-      sdk.prompts.push(turn.message.content);
-      break;
-    }
+    await waitForTurn();
     for (const step of args.steps) {
       if (step.kind === "message") {
         yield { ...step.message, session_id: sessionId };
+        continue;
+      }
+      if (step.kind === "await") {
+        await waitForTurn();
         continue;
       }
       const name = step.kind === "call" ? qualified(step.tool, params.options) : step.tool;
