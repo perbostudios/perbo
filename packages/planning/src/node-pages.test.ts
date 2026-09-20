@@ -1,14 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { PlanContractP1Schema, type PlanContractWithCriteria } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import { writeNodePages } from "./node-pages.js";
 import { parseSpec } from "./spec.js";
 import { requirementNodes, type Spec } from "./spec-text.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "perbo-node-pages-"));
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+const scratch = scratchDirectories("perbo-node-pages-");
+const root = scratch();
 
 const SPEC = `# Activation email
 
@@ -100,7 +100,7 @@ const contract = (over: Partial<Record<string, unknown>> = {}): PlanContractWith
 
 let folders = 0;
 const folder = (): string => {
-  const path = join(scratch, `spec-${folders++}`);
+  const path = join(root, `spec-${folders++}`);
   mkdirSync(path, { recursive: true });
   writeFileSync(join(path, "spec.md"), SPEC);
   return path;
@@ -132,18 +132,18 @@ describe("the node a requirement lands in", () => {
 
 describe("where a node's page is written", () => {
   /** A place outside every repository this file makes, for a link to point at. */
-  const outside = (): string => mkdtempSync(join(tmpdir(), "perbo-node-pages-outside-"));
+  const outside = (): string => scratch("perbo-node-pages-outside-");
 
   it("refuses a nodes folder that is a symlink, so nothing is written outside the spec folder", () => {
     const specFolder = folder();
     const elsewhere = outside();
     symlinkSync(elsewhere, join(specFolder, "nodes"));
-    expect(() => writeNodePages({ repositoryRoot: scratch, specFolder, spec, contract: contract() })).toThrow(/symlink/);
+    expect(() => writeNodePages({ repositoryRoot: root, specFolder, spec, contract: contract() })).toThrow(/symlink/);
     expect(existsSync(join(elsewhere, "node_1.md"))).toBe(false);
   });
 
   it("refuses a spec folder that is a symlink, wherever on the way the link sits", () => {
-    const repository = mkdtempSync(join(scratch, "repo-"));
+    const repository = mkdtempSync(join(root, "repo-"));
     const elsewhere = outside();
     writeFileSync(join(elsewhere, "spec.md"), SPEC);
     mkdirSync(join(repository, "specs"), { recursive: true });
@@ -161,13 +161,13 @@ describe("where a node's page is written", () => {
     writeFileSync(join(elsewhere, "target.md"), "# elsewhere\n");
     mkdirSync(join(specFolder, "nodes"), { recursive: true });
     symlinkSync(join(elsewhere, "target.md"), join(specFolder, "nodes", "node_1.md"));
-    expect(() => writeNodePages({ repositoryRoot: scratch, specFolder, spec, contract: contract() })).toThrow(/symlink/);
+    expect(() => writeNodePages({ repositoryRoot: root, specFolder, spec, contract: contract() })).toThrow(/symlink/);
     expect(readFileSync(join(elsewhere, "target.md"), "utf8")).toBe("# elsewhere\n");
   });
 
   it("refuses a spec folder outside the repository it is told about", () => {
     const specFolder = folder();
-    const other = mkdtempSync(join(scratch, "other-"));
+    const other = mkdtempSync(join(root, "other-"));
     expect(() =>
       writeNodePages({ repositoryRoot: other, specFolder, spec, contract: contract() }),
     ).toThrow(/outside/);
@@ -177,7 +177,7 @@ describe("where a node's page is written", () => {
 describe("a node's page beside the spec", () => {
   it("carries the title, its requirements, its criteria and verification, its paths and the No-Gos", () => {
     const at = folder();
-    const written = writeNodePages({ repositoryRoot: scratch, specFolder: at, spec, contract: contract() });
+    const written = writeNodePages({ repositoryRoot: root, specFolder: at, spec, contract: contract() });
     expect(written.written).toEqual([join(at, "nodes", "node_1.md"), join(at, "nodes", "node_2.md")]);
 
     const page = readFileSync(join(at, "nodes", "node_2.md"), "utf8");
@@ -195,7 +195,7 @@ describe("a node's page beside the spec", () => {
 
   it("keeps a Notes section written by hand when it is regenerated", () => {
     const at = folder();
-    writeNodePages({ repositoryRoot: scratch, specFolder: at, spec, contract: contract() });
+    writeNodePages({ repositoryRoot: root, specFolder: at, spec, contract: contract() });
     const path = join(at, "nodes", "node_1.md");
     writeFileSync(
       path,
@@ -213,7 +213,7 @@ describe("a node's page beside the spec", () => {
         },
       ],
     });
-    writeNodePages({ repositoryRoot: scratch, specFolder: at, spec, contract: renamed });
+    writeNodePages({ repositoryRoot: root, specFolder: at, spec, contract: renamed });
     const after = readFileSync(path, "utf8");
     expect(after).toContain("# Queue it once");
     expect(after).toContain("The sender in @queueSend already batches.");
@@ -225,7 +225,7 @@ describe("a node's page beside the spec", () => {
 
   it("removes the page of a node the plan no longer has", () => {
     const at = folder();
-    writeNodePages({ repositoryRoot: scratch, specFolder: at, spec, contract: contract() });
+    writeNodePages({ repositoryRoot: root, specFolder: at, spec, contract: contract() });
     expect(existsSync(join(at, "nodes", "node_2.md"))).toBe(true);
 
     const merged = contract({
@@ -238,7 +238,7 @@ describe("a node's page beside the spec", () => {
         },
       ],
     });
-    const result = writeNodePages({ repositoryRoot: scratch, specFolder: at, spec, contract: merged });
+    const result = writeNodePages({ repositoryRoot: root, specFolder: at, spec, contract: merged });
     expect(result.removed).toEqual([join(at, "nodes", "node_2.md")]);
     expect(existsSync(join(at, "nodes", "node_2.md"))).toBe(false);
     expect(existsSync(join(at, "nodes", "node_1.md"))).toBe(true);
@@ -246,8 +246,8 @@ describe("a node's page beside the spec", () => {
 
   it("leaves no pages for a flat plan, and removes any the graph left behind", () => {
     const at = folder();
-    writeNodePages({ repositoryRoot: scratch, specFolder: at, spec, contract: contract() });
-    const result = writeNodePages({ repositoryRoot: scratch, specFolder: at, spec, contract: contract({ nodes: undefined }) });
+    writeNodePages({ repositoryRoot: root, specFolder: at, spec, contract: contract() });
+    const result = writeNodePages({ repositoryRoot: root, specFolder: at, spec, contract: contract({ nodes: undefined }) });
     expect(result.written).toEqual([]);
     expect(result.removed).toHaveLength(2);
     expect(existsSync(join(at, "nodes", "node_1.md"))).toBe(false);
@@ -255,9 +255,9 @@ describe("a node's page beside the spec", () => {
 
   it("regenerates from the spec as it now stands, so an edited requirement reaches the page", () => {
     const at = folder();
-    writeNodePages({ repositoryRoot: scratch, specFolder: at, spec, contract: contract() });
+    writeNodePages({ repositoryRoot: root, specFolder: at, spec, contract: contract() });
     const edited = parseSpec(SPEC.replace("- R4: A failed send is retried three times.", "- R4: A failed send is retried five times."));
-    writeNodePages({ repositoryRoot: scratch, specFolder: at, spec: edited, contract: contract() });
+    writeNodePages({ repositoryRoot: root, specFolder: at, spec: edited, contract: contract() });
     expect(readFileSync(join(at, "nodes", "node_2.md"), "utf8")).toContain(
       "- R4: A failed send is retried five times.",
     );
@@ -268,7 +268,7 @@ describe("a node's page beside the spec", () => {
     mkdirSync(join(at, "nodes"), { recursive: true });
     writeFileSync(join(at, "nodes", "reading.txt"), "kept");
     writeFileSync(join(at, "measurements.md"), "kept too");
-    writeNodePages({ repositoryRoot: scratch, specFolder: at, spec, contract: contract({ nodes: undefined }) });
+    writeNodePages({ repositoryRoot: root, specFolder: at, spec, contract: contract({ nodes: undefined }) });
     expect(readFileSync(join(at, "nodes", "reading.txt"), "utf8")).toBe("kept");
     expect(readFileSync(join(at, "measurements.md"), "utf8")).toBe("kept too");
   });

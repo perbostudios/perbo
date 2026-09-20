@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { scratchDirectories } from "@perbo/test-support";
 import { createGit, type GitProcess, type RunResult } from "@perbo/workspace";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { LoadedFixture } from "../src/corpus.js";
 import { clonePathFor, prepareFixture } from "../src/prepare.js";
 import { sample } from "./sample-fixtures.js";
@@ -63,9 +63,10 @@ function scripted(answer: (argv: readonly string[]) => Partial<RunResult>): GitP
 
 const DIFF = ["diff --git a/x b/x", "--- a/x", "+++ b/x", "@@ -1 +1 @@", "-a", "+b", ""].join("\n");
 
+const scratchDirectory = scratchDirectories("perbo-prepare-");
+
 describe("prepareFixture", () => {
-  const scratch = mkdtempSync(join(tmpdir(), "perbo-prepare-"));
-  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  const scratch = scratchDirectory();
 
   const pinnedFixture = (): LoadedFixture => {
     const found = sample.find((entry) => entry.fixture.pinned_repository !== null);

@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { runCorpus, type HarnessOptions, type HarnessResult } from "../src/harness.js";
 import { renderReport } from "../src/report.js";
 import { ruleAuthorityFrom, summariseCorpus } from "../src/summarise.js";
@@ -16,8 +16,8 @@ import { sampleDir } from "./sample-fixtures.js";
  * cannot run here and is tested by the reviewer's own suite.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "perbo-harness-test-"));
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+const scratchDirectory = scratchDirectories("perbo-harness-test-");
+const scratch = scratchDirectory();
 
 /**
  * `runCorpus` with this run's raw artifacts in a directory of its own.

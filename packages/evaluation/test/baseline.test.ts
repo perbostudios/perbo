@@ -1,7 +1,7 @@
-import { afterAll, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, it } from "vitest";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { scratchDirectories } from "@perbo/test-support";
 import { createGit, type GitProcess, type RunResult } from "@perbo/workspace";
 import { isTestPath, splitTestPaths, baselineStatus, measureBaseline } from "../src/baseline.js";
 import type { LoadedFixture } from "../src/corpus.js";
@@ -17,6 +17,8 @@ import { sample } from "./sample-fixtures.js";
  * fixture. The evidence is obtainable: check out the base commit, apply only
  * the test files from the diff, and run.
  */
+
+const scratchDirectory = scratchDirectories("perbo-baseline-");
 
 describe("isTestPath", () => {
   it("recognises the test conventions of the repositories the corpus pins", () => {
@@ -117,7 +119,10 @@ describe("measureBaseline on an authored fixture", () => {
   it("measures the before tree with the after tests, without a pinned repository", async () => {
     const fixture = sample.find((entry) => entry.fixture.id === "cln-025-archived-rows-hidden-from-listing");
     expect(fixture).toBeDefined();
-    const result = await measureBaseline({ fixture: fixture!, cacheRoot: mkdtempSync(join(tmpdir(), "perbo-base-test-")) });
+    const result = await measureBaseline({
+      fixture: fixture!,
+      cacheRoot: scratchDirectory("perbo-base-test-"),
+    });
     expect(result.skipped).toBeNull();
     expect(result.check?.status).toBe("passed");
     expect(result.check?.summary).toMatch(/before tree/);
@@ -148,8 +153,7 @@ function scripted(answer: (argv: readonly string[]) => Partial<RunResult>): GitP
 }
 
 describe("the test-only patch measureBaseline applies", () => {
-  const scratch = mkdtempSync(join(tmpdir(), "perbo-baseline-patch-"));
-  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  const scratch = scratchDirectory("perbo-baseline-patch-");
 
   const testDiff = [
     "diff --git a/src/__tests__/a.spec.ts b/src/__tests__/a.spec.ts",

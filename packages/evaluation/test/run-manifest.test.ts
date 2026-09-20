@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { sample } from "./sample-fixtures.js";
 import type { HarnessResult, RunRecord } from "../src/harness.js";
 import {
@@ -14,6 +14,8 @@ import {
   runManifestFingerprint,
   validateCorpusRunManifest,
 } from "../src/run-manifest.js";
+
+const scratchDirectory = scratchDirectories("perbo-manifest-");
 
 const fixtures = sample.slice(0, 2);
 const runs: RunRecord[] = fixtures.flatMap((fixture) =>
@@ -142,8 +144,7 @@ describe("corpus run manifests", () => {
  * scoreable.
  */
 describe("run manifests written before the reviewer bundle was recorded", () => {
-  const scratch = mkdtempSync(join(tmpdir(), "perbo-manifest-compat-"));
-  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  const scratch = scratchDirectory("perbo-manifest-compat-");
 
   /** Exactly what a run wrote before `<out>/bin/` existed: v1, and no bundle fields. */
   const priorManifest = (): Record<string, unknown> => {
@@ -231,8 +232,7 @@ describe("run manifests written before the harness enforced a review deadline", 
 });
 
 describe("a results directory whose reviewer copy is no longer beside it", () => {
-  const scratch = mkdtempSync(join(tmpdir(), "perbo-manifest-bundle-"));
-  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  const scratch = scratchDirectory("perbo-manifest-bundle-");
 
   const withBundle = (dir: string, contents: string | null): string => {
     mkdirSync(join(dir, "bin"), { recursive: true });
@@ -313,8 +313,7 @@ describe("a results directory whose reviewer copy is no longer beside it", () =>
  * never after a wait nobody bounded, on a prompt nobody is there to answer.
  */
 describe("the git a run manifest's source snapshot starts", () => {
-  const scratch = mkdtempSync(join(tmpdir(), "perbo-manifest-git-"));
-  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  const scratch = scratchDirectory("perbo-manifest-git-");
 
   it.skipIf(process.platform === "win32")(
     "runs in the runner's environment, with prompts off and no ambient secret",

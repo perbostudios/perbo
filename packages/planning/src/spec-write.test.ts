@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DEFAULT_SPEC_FOLDER } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import { PlanningError } from "./errors.js";
 import {
   EMPTY_SPEC_TEXT,
@@ -15,12 +15,12 @@ import {
 import { readSpecText, writeSpecFile, type WrittenSpec } from "./spec-write.js";
 import { parseSpec } from "./spec.js";
 
-const scratch = mkdtempSync(join(tmpdir(), "perbo-spec-write-"));
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+const scratch = scratchDirectories("perbo-spec-write-");
+const repositories = scratch();
 
 let repos = 0;
 const repository = (): string => {
-  const root = join(scratch, `repo-${repos++}`);
+  const root = join(repositories, `repo-${repos++}`);
   mkdirSync(root, { recursive: true });
   return root;
 };
@@ -145,7 +145,7 @@ describe("writing a spec", () => {
 describe("where the spec is written", () => {
   it("refuses a spec folder that is a symlink, so nothing is written outside the repository", () => {
     const root = repository();
-    const elsewhere = join(scratch, `elsewhere-${repos++}`);
+    const elsewhere = join(repositories, `elsewhere-${repos++}`);
     mkdirSync(elsewhere, { recursive: true });
     symlinkSync(elsewhere, join(root, "specs"));
     expect(() => write({ repositoryRoot: root, text: text() })).toThrow(/symlink/);
@@ -154,7 +154,7 @@ describe("where the spec is written", () => {
 
   it("refuses a link however the folder is spelled, a `..` on the way included", () => {
     const root = repository();
-    const elsewhere = join(scratch, `elsewhere-${repos++}`);
+    const elsewhere = join(repositories, `elsewhere-${repos++}`);
     mkdirSync(elsewhere, { recursive: true });
     mkdirSync(join(root, "specs"), { recursive: true });
     symlinkSync(elsewhere, join(root, "specs", "activation-email"));
@@ -166,13 +166,13 @@ describe("where the spec is written", () => {
 
   it("names a repository that does not exist, rather than failing on the way to it", () => {
     expect(() =>
-      write({ repositoryRoot: join(scratch, "no-such-repository"), text: text() }),
+      write({ repositoryRoot: join(repositories, "no-such-repository"), text: text() }),
     ).toThrow(PlanningError);
   });
 
   it("refuses a spec.md that is a symlink, dangling or not", () => {
     const root = repository();
-    const elsewhere = join(scratch, `elsewhere-${repos++}`);
+    const elsewhere = join(repositories, `elsewhere-${repos++}`);
     mkdirSync(join(root, "specs", "activation-email"), { recursive: true });
     symlinkSync(join(elsewhere, "spec.md"), join(root, "specs", "activation-email", "spec.md"));
     expect(() =>
@@ -183,7 +183,7 @@ describe("where the spec is written", () => {
 
   it("refuses a link before reading what it points at", () => {
     const root = repository();
-    const elsewhere = join(scratch, `elsewhere-${repos++}`);
+    const elsewhere = join(repositories, `elsewhere-${repos++}`);
     mkdirSync(elsewhere, { recursive: true });
     writeFileSync(
       join(elsewhere, "spec.md"),
@@ -217,7 +217,7 @@ describe("where the spec is written", () => {
 
   it("refuses a spec's own folder that is a symlink", () => {
     const root = repository();
-    const elsewhere = join(scratch, `elsewhere-${repos++}`);
+    const elsewhere = join(repositories, `elsewhere-${repos++}`);
     mkdirSync(elsewhere, { recursive: true });
     mkdirSync(join(root, "specs"), { recursive: true });
     symlinkSync(elsewhere, join(root, "specs", "activation-email"));
