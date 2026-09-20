@@ -10,23 +10,14 @@ import type {
 } from "@perbo/contracts";
 import { busyMessage, exclusiveJob, heldRepository, isLive, lane } from "../shared/jobs.js";
 import {
-  specTitleFromMessage,
-} from "@perbo/planning";
-import {
   DraftSchema,
   HELP_LINKS,
   RequestSchema,
   TaskModelsSchema,
-  INTERVIEW_NEEDS_A_TITLE,
 } from "../shared/protocol.js";
-import { InterviewEventSchema, InterviewTurnSchema, encodeInterviewTurn } from "@perbo/contracts/interview-protocol";
 import type {
   Detail,
   Change,
-  EditingSession,
-  InterviewEdit,
-  InterviewEntry,
-  InterviewStatus,
   Job,
   PowerState,
   Provider,
@@ -38,14 +29,12 @@ import type {
   UsageReport,
 } from "../shared/protocol.js";
 import { redact, requireSuccess, runProcess, startLineProcess } from "./process.js";
-import type { LineProcess, ProcessResult } from "./process.js";
+import type { ProcessResult } from "./process.js";
 import { discoverModels } from "./model-catalog.js";
 import {
   ContractEditing,
   openDrafts,
   type EditingOwner,
-  interviewProviderFor,
-  interviewSessionArgs,
 } from "../shared/contract-editing.js";
 import { WorkspaceReads } from "./workspace-reads.js";
 import { Profile } from "./profile/store.js";
@@ -57,13 +46,12 @@ import { listExplorer, readExplorerFile } from "./explorer.js";
 import { exportedNames } from "./symbols.js";
 import { graphView } from "./plan/graph.js";
 import { impactView } from "./plan/impact.js";
-import { safePath } from "./repository/paths.js";
+import { InterviewHost } from "./interview/host.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
 import {
-  mintSpecFromTitle,
   saveSpec,
   specView,
   type SpecDeps,
@@ -97,7 +85,6 @@ import {
 } from "./repository/config.js";
 import {
   attemptsPath,
-  ticketPath,
 } from "./repository/layout.js";
 import type { ProfileState, RegisteredRepository } from "./profile/store.js";
 import { runnerProgress } from "../shared/runner-progress.js";
@@ -106,7 +93,6 @@ import {
   isEarlyStop,
   ledgerFor,
   readAttempts,
-  readLatestDraftEdit,
   type StoredAttempt,
 } from "./records.js";
 import { codexUsage } from "./usage-probe.js";
@@ -128,34 +114,6 @@ export const LOGIN_COMMANDS = {
   claude: ["claude", "auth", "login"],
   codex: ["codex", "login"],
 } as const;
-/**
- * The text of one message the interview streamed, or null where it carries
- * none to show.
- *
- * A reading rather than a declaration: the messages travel as the Claude Agent
- * SDK shaped them, and the shapes are the provider's. Its `SDKAssistantMessage`
- * is `{ type: 'assistant', message: BetaMessage, … }`, whose `message` is
- * "Shaped like an Anthropic Messages API Message object (role 'assistant'):
- * id, model, content blocks (text, thinking, tool_use, ...)" — so what is read
- * is the text blocks, and a message that does not look like that shows nothing
- * rather than something guessed.
- */
-const SdkAssistantSchema = z.looseObject({
-  type: z.literal("assistant"),
-  message: z.looseObject({
-    content: z.array(z.looseObject({ type: z.string(), text: z.string().optional() })),
-  }),
-});
-export function interviewSaid(message: Record<string, unknown>): string | null {
-  const parsed = SdkAssistantSchema.safeParse(message);
-  if (!parsed.success) return null;
-  const text = parsed.data.message.content
-    .flatMap((block) => (block.type === "text" && block.text ? [block.text] : []))
-    .join("\n")
-    .trim();
-  return text.length > 0 ? text : null;
-}
-
 export interface ServiceOptions {
   dataDirectory: string;
   cliPath: string;
@@ -203,15 +161,7 @@ export class DesktopService {
    * planning in another repository.
    */
   private readonly admissions = new Map<string, Promise<void>>();
-  /**
-   * The interview beside each planning session, by that session's id (D-102).
-   * One at a time per session, and any number across sessions: the interview
-   * is planning-lane work, so it is never in a run's way and a run is never in
-   * its. It outlives the pane it was started from, as drafting outlives the
-   * screen that asked for it (D-095), and goes when it is stopped, when its
-   * planning is discarded, or when the app closes.
-   */
-  private readonly interviews = new Map<string, { repoId: string; child: LineProcess }>();
+  private readonly interviews: InterviewHost;
 
   /** The profile's own record, which every module mutating a preference is handed. */
   private get state(): ProfileState {
@@ -241,6 +191,20 @@ export class DesktopService {
       reads: this.reads,
       execute: this.execute,
       liveJobs: () => this.liveJobs(),
+    });
+    this.interviews = new InterviewHost({
+      editing: {
+        read: (id) => this.editing.read(id),
+        converse: (id, line, at) => this.editing.converse(id, line, at),
+        recordInterview: (id, session, provider) =>
+          this.editing.recordInterview(id, session, provider),
+        recordSpec: (id, slug) => this.editing.recordSpec(id, slug),
+        beginAsking: (id, entry) => this.editing.beginAsking(id, entry),
+        answerAsking: (id, text) => this.editing.answerAsking(id, text),
+      },
+      repository: (id) => this.repository(id),
+      cli: this.cli,
+      changes: this.changes,
     });
     this.tickets = new TicketReads({
       reads: this.reads,
@@ -302,7 +266,7 @@ export class DesktopService {
     // The live interviews are counted outside the shared read: they are this
     // host's own state rather than anything read off a repository, and a
     // cached listing would say one was still there after it had gone.
-    const interviews = [...this.interviews.keys()];
+    const interviews = this.interviews.running();
     const workspace = await this.reads.read("snapshot", "snapshot", async () => {
       const records = await Promise.all(
         this.state.repositories.map((repo) => this.tickets.repositorySnapshot(repo.id)),
@@ -334,428 +298,6 @@ export class DesktopService {
     });
     return { ...workspace, interviews };
   }
-  /**
-   * The interview's argv, built from the registered repository and this
-   * planning's own records and from nothing a renderer sent (ADR-0023 §4).
-   *
-   * `--spec` is derived from the repository's spec folder and the slug the
-   * session recorded, and judged where it lands rather than as it is spelled:
-   * `safePath` refuses a symlink on the way and anything outside the checkout,
-   * and it is the same string the command is then given, so what was checked is
-   * what it acts on. `--session` appears only once an interview has reported
-   * one, `--model` is the model this planning drafts with, and `--provider` is
-   * the session it runs on, which is this planning's drafting choice.
-   */
-  private interviewArgv(
-    repo: RegisteredRepository,
-    session: EditingSession,
-  ): string[] {
-    const models = TaskModelsSchema.strip().parse(session.form.models);
-    if (session.specSlug === null)
-      throw new Error(INTERVIEW_NEEDS_A_TITLE);
-    const spec = `${specFolder(repo)}/${session.specSlug}`;
-    safePath(repo, ...spec.split("/"));
-    const provider = interviewProviderFor(models);
-    return [
-      "interview",
-      "--spec",
-      spec,
-      ...interviewSessionArgs(session, provider),
-      "--model",
-      models.executorModel,
-      "--provider",
-      provider,
-    ];
-  }
-
-  /** Whether this planning has a live interview, and the conversation it holds. */
-  private interviewStatus(id: string): InterviewStatus {
-    const session = this.editing.read(id);
-    return {
-      id,
-      running: this.interviews.has(id),
-      interview: session.interviewSession,
-      conversation: session.conversation,
-    };
-  }
-
-  /**
-   * Append one line of the conversation and push it to the renderer as it
-   * arrives, or say only what is running where there is no line to add.
-   *
-   * The record is saved by the append itself, so the change is pushed without
-   * a second write.
-   *
-   * Two things can stop a line landing, and they are answered differently. A
-   * session that has gone while its interview was speaking takes the line with
-   * it: there is nowhere left for it to land. A line the record will not hold
-   * is said as a note instead of being dropped, because the person is watching
-   * the chat for it — what the line carries is clipped where it is read
-   * ({@link ../host/records.ts}), so this is the belt rather than the route.
-   */
-  private converse(id: string, line: InterviewEntry["line"] | null): InterviewEntry | null {
-    const at = new Date().toISOString();
-    let entry: InterviewEntry | null = null;
-    if (line !== null) {
-      try {
-        entry = this.editing.converse(id, line, at);
-      } catch (error) {
-        try {
-          entry = this.editing.converse(
-            id,
-            { kind: "note", text: `A line of the interview could not be recorded: ${redact(error instanceof Error ? error.message : String(error))}`.slice(0, 12_000) },
-            at,
-          );
-        } catch {
-          return null;
-        }
-      }
-    }
-    this.changes.changed(false, {
-      kind: "interview",
-      sessionId: id,
-      running: this.interviews.has(id),
-      entry,
-      asking: this.askingOf(id),
-    });
-    return entry;
-  }
-
-  /** The asking this planning is putting, or null where it holds none or has gone. */
-  private askingOf(id: string): { entry: number; answered: number } | null {
-    try {
-      return this.editing.read(id).asking;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Say what the asking is now, with no line to add.
-   *
-   * The dock reads it off this stream rather than off the session, which the
-   * editor refuses to re-read while a save of its own is in flight: a card that
-   * waited for that would come and go with whether the person was saving.
-   */
-  private askingChanged(id: string): void {
-    this.changes.changed(false, {
-      kind: "interview",
-      sessionId: id,
-      running: this.interviews.has(id),
-      entry: null,
-      asking: this.askingOf(id),
-    });
-  }
-
-  /**
-   * Start the interview beside this planning, or answer with the one already
-   * running: one session, one interview.
-   */
-  private startInterview(id: string): InterviewStatus {
-    if (this.interviews.has(id)) return this.interviewStatus(id);
-    const session = this.editing.read(id);
-    const repo = this.repository(session.repoId);
-    const args = this.interviewArgv(repo, session);
-    let stderr = "";
-    const child = this.cli.spawn(args, repo, {
-      onLine: (line) => this.relay(id, line),
-      // What the chat shows comes off the events; stderr is the same refusals
-      // in prose, and is kept only to say why a session that never started did
-      // not start.
-      onStderr: (text) => {
-        stderr = (stderr + text).slice(-4000);
-      },
-      onClose: ({ code, stopped }) => {
-        this.interviews.delete(id);
-        this.converse(
-          id,
-          code === 0 || stopped
-            ? null
-            : {
-                kind: "note",
-                text: `The interview stopped with code ${String(code)}.${
-                  stderr.trim() ? ` ${stderr.trim()}` : ""
-                }`,
-              },
-        );
-      },
-      onError: (error) => {
-        this.interviews.delete(id);
-        this.converse(id, { kind: "note", text: redact(error.message).slice(0, 12_000) });
-      },
-    });
-    this.interviews.set(id, { repoId: repo.id, child });
-    // Nothing is said yet: the interview's own `started` event is what says it
-    // is there, and until then the only honest word is that it is starting,
-    // which is what `running` on this change carries.
-    this.converse(id, null);
-    return this.interviewStatus(id);
-  }
-
-  /**
-   * One line of the interview's stdout, as the chat shows it.
-   *
-   * A line that does not parse is reported as one that did not parse: the line
-   * itself is never relayed, because a host that passed unparsed output through
-   * would be relaying whatever wrote it rather than the protocol it declared.
-   */
-  private relay(id: string, line: string): void {
-    let raw: unknown;
-    try {
-      raw = JSON.parse(line);
-    } catch {
-      this.converse(id, {
-        kind: "note",
-        text: "The interview wrote a line this build could not read: it is not JSON.",
-      });
-      return;
-    }
-    const parsed = InterviewEventSchema.safeParse(raw);
-    if (!parsed.success) {
-      // The reason is the child's text like any other: redacted, and clipped,
-      // because a line refused for four hundred fields names all four hundred
-      // and a note the record will not hold is the line lost again.
-      const why = redact(parsed.error.issues[0]?.message ?? "no reason given").slice(0, 2000);
-      this.converse(id, {
-        kind: "note",
-        text:
-          "The interview wrote a line this build could not read: it is not one of the interview's " +
-          `events (${why}).`,
-      });
-      return;
-    }
-    const event = parsed.data;
-    if (event.type === "started") {
-      // The protocol caps the id at nothing and the record at 200, so it is
-      // clipped here: unclipped, the append throws and the line that carries
-      // the session is lost with it.
-      const session = event.session_id.slice(0, 200);
-      try {
-        this.editing.recordInterview(id, session, this.interviewProvider(id));
-      } catch {
-        // The session's record is where `--session` is read from when the
-        // interview is started again, so a planning that has gone takes the
-        // conversation with it and there is nothing to say it to.
-        return;
-      }
-      // The id as it was recorded, which is the one a later start continues.
-      this.converse(id, {
-        kind: "note",
-        text: redact(`The session is ${session}, writing ${event.spec} and ${event.adr}.`).slice(
-          0,
-          2000,
-        ),
-      });
-      return;
-    }
-    if (event.type === "message") {
-      const said = interviewSaid(event.message);
-      if (said !== null) this.converse(id, { kind: "said", text: redact(said).slice(0, 12_000) });
-      return;
-    }
-    if (event.type === "refused") {
-      this.converse(id, {
-        kind: "refused",
-        tool: event.tool.slice(0, 200),
-        rule: event.rule.slice(0, 200),
-        target: event.target === null ? null : redact(event.target).slice(0, 1000),
-        reason: redact(event.reason).slice(0, 2000),
-      });
-      return;
-    }
-    if (event.type === "tool") {
-      const changed = event.ok && (event.tool === "edit_plan" || event.tool === "undo_edit");
-      this.converse(id, {
-        kind: "tool",
-        tool: event.tool.slice(0, 200),
-        ok: event.ok,
-        detail: redact(event.detail).slice(0, 12_000),
-        edit: changed ? this.interviewEdit(id) : null,
-      });
-      // The plan really moved, so the surfaces reading those records are told,
-      // as they are for an edit the Graph pane makes. Nothing else says it: the
-      // interview runs `perbo edit` inside its own process rather than as a
-      // job of this host's. Said whether or not the card could be drawn,
-      // because what moved is the records rather than the card.
-      if (changed) this.planChanged(id);
-      return;
-    }
-    if (event.type === "asked") {
-      // Clipped the way every other field the session wrote is, and redacted:
-      // this is the session's text and the person reads it.
-      //
-      // Whitespace is flattened on the way through for two reasons a reader
-      // would not guess. A label goes back down as the person's turn and, in a
-      // group of more than one part, one line of it — so a label with a newline
-      // in it would compose an answer the dock could never read back, and the
-      // group would be put again for ever. And redaction can empty a field
-      // outright (a label that was only escape codes), which the record then
-      // refuses for being empty, taking every question in the asking with it;
-      // a named placeholder loses one label instead of all of them.
-      const said = (text: string, cap: number, empty: string): string => {
-        const kept = redact(text).replace(/\s+/g, " ").trim().slice(0, cap).trim();
-        return kept.length > 0 ? kept : empty;
-      };
-      const asked = this.converse(id, {
-        kind: "asked",
-        groups: event.groups.map((group) => ({
-          title: group.title === null ? null : said(group.title, 200, "The interview asks"),
-          parts: group.parts.map((part) => ({
-            question: said(part.question, 600, "(the question did not survive redaction)"),
-            options: part.options.map((option) => ({
-              label: said(option.label, 200, "(unreadable answer)"),
-              detail: option.detail === null ? null : said(option.detail, 600, "") || null,
-              recommended: option.recommended,
-            })),
-          })),
-        })),
-      });
-      // What the person is being put, from the line it arrived on: recorded
-      // rather than counted back out of the turns (D-117).
-      if (asked !== null) {
-        this.editing.beginAsking(id, asked.n);
-        this.askingChanged(id);
-      }
-      return;
-    }
-    this.converse(id, { kind: "note", text: `The interview ended: ${redact(event.reason).slice(0, 2000)}.` });
-  }
-
-  /**
-   * Which provider this planning's interview runs on, which is its drafting
-   * choice: the same derivation {@link interviewArgv} sends, read here so the
-   * id reported back is recorded as that provider's.
-   */
-  private interviewProvider(id: string): "claude" | "codex" {
-    try {
-      return interviewProviderFor(TaskModelsSchema.strip().parse(this.editing.read(id).form.models));
-    } catch {
-      return "claude";
-    }
-  }
-
-  /**
-   * Say the ticket's records moved, for every surface drawing this plan.
-   *
-   * The repository is the one this interview was started against rather than
-   * the one the session names now: `perbo edit` wrote where the argv pointed,
-   * and a session whose repository was changed under a running interview would
-   * otherwise have the wrong one told.
-   */
-  private planChanged(id: string): void {
-    try {
-      const session = this.editing.read(id);
-      if (session.key === null) return;
-      const repoId = this.interviews.get(id)?.repoId ?? session.repoId;
-      this.changes.changed(true, { kind: "records", repoId, key: session.key });
-    } catch {
-      // A session that has gone has no plan for anything to be drawing.
-    }
-  }
-
-  /**
-   * The plan edit an `edit_plan` or an `undo_edit` made, read off the ticket's
-   * own draft record (D-100) so the chat's card carries an Undo on its number.
-   *
-   * The edit the command wrote down, not the one the tool said it made: the
-   * record is written by `perbo edit`, which is the one path a plan changes
-   * through, and the tool's own account of itself is a model's output
-   * ([ADR-0023](../../../docs/adr/0023-untrusted-context-boundary.md)).
-   */
-  private interviewEdit(id: string): InterviewEdit | null {
-    try {
-      const session = this.editing.read(id);
-      if (session.key === null) return null;
-      // The repository this interview was started against, which is where
-      // `perbo edit` wrote, and the one {@link planChanged} names.
-      const repo = this.repository(this.interviews.get(id)?.repoId ?? session.repoId);
-      return readLatestDraftEdit(
-        ticketPath(repo, session.key, ".draft.json"),
-        "interview",
-      );
-    } catch {
-      // No record to read is a card without an undo, not a failed relay.
-      return null;
-    }
-  }
-
-  /**
-   * The spec this planning writes, named from the person's first turn where
-   * they have not named it in the Spec pane (D-118).
-   *
-   * The interview is started with `--spec`, so a planning with no slug has
-   * nowhere to write. The person's own words name it: a title is cut from the
-   * turn, the spec is written, and the slug it mints is recorded exactly as a
-   * save from the Spec pane records one. Nothing a model returned reaches the
-   * folder, so it stays the person's own parameter (ADR-0023 §4), and the slug
-   * still goes through `safePath` where the argv is built.
-   *
-   * A turn no folder name can come from falls through to the refusal, which
-   * asks for the title the message could not give.
-   */
-  private nameSpecFromTurn(id: string, text: string): void {
-    const session = this.editing.read(id);
-    if (session.specSlug !== null) return;
-    const repo = this.repository(session.repoId);
-    let title;
-    try {
-      title = specTitleFromMessage(text);
-    } catch (error) {
-      // Only a message that names nothing asks for a title. A spec already at
-      // that folder is a different problem and says so in its own words.
-      throw new Error(INTERVIEW_NEEDS_A_TITLE, { cause: error });
-    }
-    const written = mintSpecFromTitle(repo, title);
-    this.editing.recordSpec(id, written.slug);
-    // The folder is minted once and never moves, so the person is told what it
-    // was called while the spec is still empty enough to start again.
-    this.converse(id, {
-      kind: "note",
-      text:
-        `Named from your first message: ${written.folder}. The folder keeps this name; ` +
-        "the title itself you can change in the Spec pane.",
-    });
-  }
-
-  /**
-   * The person's turn, down the interview's stdin as a `turn` line, after the
-   * interview has been started where it is not running: leaving planning mode
-   * leaves it running, and a restart starts it again with `--session`, which
-   * continues the same conversation (D-102).
-   *
-   * Validated before it is written, and recorded only once it has been: a turn
-   * nothing heard is not part of the conversation.
-   */
-  private interviewTurn(id: string, text: string): InterviewStatus {
-    const turn = InterviewTurnSchema.parse({ type: "turn", text });
-    if (!this.interviews.has(id)) {
-      this.nameSpecFromTurn(id, turn.text);
-      this.startInterview(id);
-    }
-    const live = this.interviews.get(id);
-    if (!live || !live.child.write(encodeInterviewTurn(turn)))
-      throw new Error(
-        "The interview is not listening. Start it again, then send this once it is running.",
-      );
-    this.converse(id, { kind: "turn", text: turn.text });
-    // Recorded before it is answered, so the asking is judged against a
-    // conversation that already holds this turn.
-    this.editing.answerAsking(id, turn.text);
-    this.askingChanged(id);
-    return this.interviewStatus(id);
-  }
-
-  /**
-   * End the interview's stdin, which is how a session of its own ends; the
-   * process group is signalled only for a child still there after that
-   * ({@link ../host/process.ts}). It stays listed as running until it has
-   * actually gone, so nothing starts a second one over the top of it.
-   */
-  private stopInterview(id: string): InterviewStatus {
-    this.interviews.get(id)?.child.stop();
-    return this.interviewStatus(id);
-  }
-
   async detail(repoId: string, key: string): Promise<Detail> {
     return this.tickets.detail(repoId, key);
   }
@@ -1008,21 +550,17 @@ export class DesktopService {
       // The chat goes with the planning it belonged to: there is no longer a
       // spec for the interview to write or a plan for it to change.
       const discarded = this.editing.discard(request.id, request.revision);
-      this.stopInterview(request.id);
+      this.interviews.stop(request.id);
       return discarded;
     }
     // The interview docked beside the panes (D-102). Planning-lane work, like
     // the explorer's reads: answered here rather than as a job, so a run is
     // never in its way and it is never in a run's.
-    if (request.kind === "interviewStart") {
-      const session = this.editing.read(request.id);
-      if (session.repoId !== request.repoId)
-        throw new Error("This planning belongs to another repository.");
-      return this.startInterview(request.id);
-    }
+    if (request.kind === "interviewStart")
+      return this.interviews.start(request.id, request.repoId);
     if (request.kind === "interviewTurn")
-      return this.interviewTurn(request.id, request.text);
-    if (request.kind === "interviewStop") return this.stopInterview(request.id);
+      return this.interviews.turn(request.id, request.text);
+    if (request.kind === "interviewStop") return this.interviews.stop(request.id);
     if (request.kind === "snapshot") return this.snapshot();
     if (request.kind === "repositorySnapshot")
       return this.tickets.repositorySnapshot(request.repoId);
@@ -1557,8 +1095,7 @@ export class DesktopService {
       );
   }
   async shutdown(): Promise<void> {
-    for (const live of this.interviews.values()) live.child.stop();
-    this.interviews.clear();
+    this.interviews.shutdown();
     const running = [...this.active.values()];
     for (const entry of running) entry.controller.abort();
     await Promise.all(running.map((entry) => entry.done));
