@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { gitEnv, run } from "@perbo/workspace";
+import { git as defaultGit, type Git, type RunResult } from "@perbo/workspace";
 import type { LoadedFixture } from "./corpus.js";
 import type { PinnedRepository } from "./fixture.js";
 
@@ -57,8 +57,31 @@ export function clonePathFor(cacheRoot: string, url: string): string {
   return resolve(cacheRoot, "clones", slug);
 }
 
-const git = (args: string[], cwd: string, timeoutMs = 600_000) =>
-  run(["git", ...args], { cwd, env: gitEnv(), timeoutMs, maxOutputBytes: 32 * 1024 * 1024 });
+/** How long a git call inside a clone this size may take. */
+const LOCAL_TIMEOUT_MS = 600_000;
+/** How long the clone itself may take. These repositories are hundreds of MB. */
+const CLONE_TIMEOUT_MS = 900_000;
+/** What a diff between two pinned commits may be, past which only part arrives. */
+const MAX_DIFF_BYTES = 32 * 1024 * 1024;
+
+const CALL = { timeoutMs: LOCAL_TIMEOUT_MS, maxOutputBytes: MAX_DIFF_BYTES } as const;
+
+/**
+ * What git said, whole.
+ *
+ * Past the ceiling only the tail is kept, and the flag is the only thing that
+ * says so: a diff cut that way is still a valid-looking diff, and a fixture
+ * prepared from one pins a `change.diff` that is not the change the reviewer is
+ * scored on. So the size is the answer here rather than the bytes that fit.
+ */
+function whole(result: RunResult, fixtureId: string, what: string): RunResult {
+  if (result.truncated) {
+    throw new Error(
+      `${fixtureId}: the ${what} is larger than ${MAX_DIFF_BYTES} bytes and only part of it arrived`,
+    );
+  }
+  return result;
+}
 
 /**
  * Clone at the pinned commits, check out the head, and write the diff.
@@ -70,7 +93,10 @@ export async function prepareFixture(args: {
   fixture: LoadedFixture;
   cacheRoot: string;
   onProgress?: (message: string) => void;
+  /** The repository module every git call here goes through. */
+  git?: Git;
 }): Promise<PreparedFixture> {
+  const git = args.git ?? defaultGit;
   const pinned: PinnedRepository | null = args.fixture.fixture.pinned_repository;
   if (!pinned) throw new Error(`${args.fixture.fixture.id} pins no repository`);
   if (!(PERMISSIVE_LICENCES as readonly string[]).includes(pinned.licence)) {
@@ -87,10 +113,9 @@ export async function prepareFixture(args: {
   if (!existsSync(join(clone, ".git"))) {
     progress(`clone ${pinned.url}`);
     mkdirSync(clone, { recursive: true });
-    const cloned = await run(["git", "clone", "--no-tags", pinned.url, clone], {
-      cwd: resolve(clone, ".."),
-      env: gitEnv(),
-      timeoutMs: 900_000,
+    const cloned = await git.clone(resolve(clone, ".."), pinned.url, clone, {
+      noTags: true,
+      timeoutMs: CLONE_TIMEOUT_MS,
     });
     if (cloned.code !== 0) {
       throw new Error(`clone failed for ${args.fixture.fixture.id}: ${cloned.stderr.trim().slice(-400)}`);
@@ -102,9 +127,10 @@ export async function prepareFixture(args: {
   // it saves.
   if (!existsSync(join(repo, ".git"))) {
     progress(`worktree at ${pinned.head_commit.slice(0, 12)}`);
-    const added = await git(
-      ["worktree", "add", "--detach", "--force", repo, pinned.head_commit],
+    const added = await git.addWorktree(
       clone,
+      { path: repo, detach: pinned.head_commit, force: true },
+      CALL,
     );
     if (added.code !== 0) {
       throw new Error(
@@ -114,27 +140,27 @@ export async function prepareFixture(args: {
     }
   }
 
-  const head = await git(["rev-parse", "HEAD"], repo);
-  if (head.stdout.trim() !== pinned.head_commit) {
+  const head = await git.head(repo, CALL);
+  if (head !== pinned.head_commit) {
     progress(`checkout ${pinned.head_commit.slice(0, 12)}`);
-    const checkout = await git(["checkout", "--detach", "--force", pinned.head_commit], repo);
+    const checkout = await git.run(repo, ["checkout", "--detach", "--force", pinned.head_commit], CALL);
     if (checkout.code !== 0) {
       throw new Error(`${args.fixture.fixture.id}: could not check out ${pinned.head_commit}`);
     }
   }
 
-  const diff = await git(
-    ["diff", "--no-color", `${pinned.base_commit}..${pinned.head_commit}`],
-    repo,
-  );
+  const range = `${pinned.base_commit}..${pinned.head_commit}`;
+  const diff = await git.run(repo, ["diff", "--no-color", range], CALL);
   if (diff.code !== 0) {
     throw new Error(`${args.fixture.fixture.id}: could not diff the pinned commits`);
   }
+  whole(diff, args.fixture.fixture.id, "diff between the pinned commits");
   writeFileSync(diffPath, diff.stdout);
 
-  const names = await git(
-    ["diff", "--name-only", `${pinned.base_commit}..${pinned.head_commit}`],
-    repo,
+  const names = whole(
+    await git.run(repo, ["diff", "--name-only", range], CALL),
+    args.fixture.fixture.id,
+    "list of files changed between the pinned commits",
   );
 
   return {
