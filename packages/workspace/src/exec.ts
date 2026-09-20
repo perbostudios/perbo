@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 
 /**
  * Every process this package starts goes through here, and it takes **argv**.
@@ -28,7 +28,17 @@ export interface RunResult {
   stderr: string;
   duration_ms: number;
   timed_out: boolean;
+  /**
+   * The command wrote more than `maxOutputBytes` and part of what it wrote is
+   * gone. Whoever reads `stdout` as an answer has a fragment, and the flag is
+   * the only thing that says so: a cut list, diff or listing is otherwise
+   * shaped exactly like a complete one.
+   */
+  truncated: boolean;
 }
+
+/** Everything `run` takes but the line callback, which needs a live stream. */
+export type SyncRunOptions = Omit<RunOptions, "onLine">;
 
 const DEFAULT_MAX_OUTPUT = 512 * 1024;
 
@@ -69,6 +79,7 @@ export class CommandFailedError extends Error {
         result.code ?? result.signal ?? "unknown"
       }` +
         (result.timed_out ? " (timed out)" : "") +
+        (result.truncated ? " (output truncated)" : "") +
         said(result.stderr),
     );
     this.name = "CommandFailedError";
@@ -76,9 +87,16 @@ export class CommandFailedError extends Error {
   }
 }
 
-function tail(chunks: string[], max: number): string {
+/** What is kept of a stream, and whether keeping it lost anything. */
+interface Captured {
+  text: string;
+  truncated: boolean;
+}
+
+function tail(chunks: string[], max: number): Captured {
   const joined = chunks.join("");
-  return joined.length <= max ? joined : `…${joined.slice(joined.length - max)}`;
+  if (joined.length <= max) return { text: joined, truncated: false };
+  return { text: `…${joined.slice(joined.length - max)}`, truncated: true };
 }
 
 export function run(argv: string[], options: RunOptions): Promise<RunResult> {
@@ -133,14 +151,17 @@ export function run(argv: string[], options: RunOptions): Promise<RunResult> {
       settled = true;
       clearTimeout(timer);
       clearTimeout(drain);
+      const stdout = tail(out, max);
+      const stderr = tail(err, max);
       resolve({
         argv,
         code,
         signal,
-        stdout: tail(out, max),
-        stderr: tail(err, max),
+        stdout: stdout.text,
+        stderr: stderr.text,
         duration_ms: Date.now() - startedAt,
         timed_out: timedOut,
+        truncated: stdout.truncated || stderr.truncated,
       });
     };
 
@@ -212,4 +233,57 @@ export async function runOrThrow(argv: string[], options: RunOptions): Promise<R
   const result = await run(argv, options);
   if (result.code !== 0) throw new CommandFailedError(result);
   return result;
+}
+
+/**
+ * The same, without the event loop.
+ *
+ * A synchronous call is for a short local read — `rev-parse`, `ls-files`,
+ * `config --get` — asked from somewhere that cannot await. `spawnSync` cannot
+ * detach the child, so there is no process group to signal and nothing here
+ * can reach a grandchild the command leaves behind; a command that might leave
+ * one belongs on `run`.
+ *
+ * A process that never started throws the Node error unchanged, because
+ * "this machine has no git" is a different answer from "git said no" and only
+ * the caller knows which of the two it can act on.
+ */
+export function runSync(argv: string[], options: SyncRunOptions): RunResult {
+  const [command, ...args] = argv;
+  if (command === undefined) throw new Error("runSync() requires a command");
+  const max = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT;
+  const startedAt = Date.now();
+
+  const child = spawnSync(command, args, {
+    cwd: options.cwd,
+    env: options.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: false,
+    windowsHide: true,
+    timeout: options.timeoutMs,
+    // Node reads a chunk before it compares against this, so the buffer is a
+    // ceiling on what is delivered rather than on what is captured: `tail`
+    // below is what actually bounds the result, and this is what makes the
+    // overflow reportable.
+    maxBuffer: max,
+    encoding: "utf8",
+  });
+
+  const failure = child.error as NodeJS.ErrnoException | undefined;
+  const timedOut = failure?.code === "ETIMEDOUT";
+  const overflowed = failure?.code === "ENOBUFS";
+  if (failure !== undefined && !timedOut && !overflowed) throw failure;
+
+  const stdout = tail([child.stdout ?? ""], max);
+  const stderr = tail([child.stderr ?? ""], max);
+  return {
+    argv,
+    code: child.status,
+    signal: child.signal,
+    stdout: stdout.text,
+    stderr: stderr.text,
+    duration_ms: Date.now() - startedAt,
+    timed_out: timedOut,
+    truncated: overflowed || stdout.truncated || stderr.truncated,
+  };
 }
