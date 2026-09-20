@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { bundleBuild, buildCli, removeStagedBundles, type Bundle } from "./open-build.js";
+import { bundleBuild, buildCli, removeStagedBundles, type Bundle } from "../src/test-support/open-build.js";
 
 /**
  * What the shipped binary links against.
@@ -62,11 +62,16 @@ describe("the shipped bundle's module graph", () => {
   it("carries every command, and the ticket store behind them", () => {
     // Read from the module graph rather than from the help: the graph is what
     // the artefact carries, and the help is what it says it carries.
-    const modules = firstParty(shipped)
-      .filter((path) => path.startsWith("apps/cli/"))
-      .map((path) => path.split("/").pop());
-    for (const module of ["admit.js", "tickets.js", "sync.js", "serve.js", "main.js"]) {
-      expect(modules, module).toContain(module);
+    const modules = firstParty(shipped).filter((path) => path.startsWith("apps/cli/"));
+    const carried = [
+      "commands/admit.js",
+      "store/tickets.js",
+      "commands/sync.js",
+      "commands/serve/index.js",
+      "main.js",
+    ];
+    for (const module of carried) {
+      expect(modules, module).toContain(`apps/cli/dist/${module}`);
     }
   });
 

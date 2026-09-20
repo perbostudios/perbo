@@ -8,11 +8,24 @@ export { describeFailure } from "./failure.js";
 export type { Streams } from "./streams.js";
 export type { Paint, Style } from "./text.js";
 export { WIDTH, clip, pad, painter, spread, wrap } from "./text.js";
-export type { ReviewArgs, ReviewFormat } from "./args.js";
-export { DEFAULT_STATE_DIR, REVIEW_FORMATS, STDIN, isTicketlessArgs, parseReviewArgs } from "./args.js";
-export type { RenderOptions } from "./render.js";
-export { renderArtifact } from "./render.js";
-export type { ResumeRecord } from "./resume.js";
-export { ResumeRecordSchema, contractForUnresolved, loadResumeRecord, mergeResumed, saveResumeRecord } from "./resume.js";
-export type { RunOptions } from "./run.js";
-export { runReviewCommand } from "./run.js";
+export type {
+  RenderOptions,
+  ResumeRecord,
+  ReviewArgs,
+  ReviewFormat,
+  RunOptions,
+} from "./commands/review/index.js";
+export {
+  DEFAULT_STATE_DIR,
+  REVIEW_FORMATS,
+  ResumeRecordSchema,
+  STDIN,
+  contractForUnresolved,
+  isTicketlessArgs,
+  loadResumeRecord,
+  mergeResumed,
+  parseReviewArgs,
+  renderArtifact,
+  runReviewCommand,
+  saveResumeRecord,
+} from "./commands/review/index.js";

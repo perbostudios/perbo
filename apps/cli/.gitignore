@@ -3,5 +3,5 @@
 # package so the entry points still resolve `@perbo/*` and read
 # `../package.json`, and removed when the run ends. Never `dist/`, which is
 # shared, can be stale, and is being read by the suites running alongside
-# (apps/cli/test/open-build.ts, apps/cli/test/packaging.test.ts).
+# (apps/cli/src/test-support/open-build.ts, apps/cli/test/packaging.test.ts).
 .test-dist-*/

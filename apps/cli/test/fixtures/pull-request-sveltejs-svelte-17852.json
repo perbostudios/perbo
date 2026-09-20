@@ -39,7 +39,7 @@
   },
   "notes": {
     "why_this_pull_request": "Its body states what the change does and states no acceptance criteria — and the checklist under 'Before submitting the PR' is GitHub's template, whose items ('include a test that fails without this PR but passes with it') read exactly like criteria and are not any. A real pull request judged against criteria lifted off a template is the failure SCP-179 exists to avoid, so ac_2 is tested against a real body rather than an invented one. It is also small — four files — and merged, so the pin cannot move.",
-    "also_recorded_in": "The evaluation corpus pins the same pull request for a different purpose, as fixture reg-010-skip-derived-reevaluation-in-inert-blocks. The two records are checked against each other in apps/cli/test/ticketless-review.test.ts.",
+    "also_recorded_in": "The evaluation corpus pins the same pull request for a different purpose, as fixture reg-010-skip-derived-reevaluation-in-inert-blocks. The two records are checked against each other in apps/cli/src/commands/review/index.ticketless.test.ts.",
     "upstream_code_is_checked_in_here": "Deliberately, and unlike the corpus's pinned fixtures, which compute their diff from a clone into a gitignored cache. A test that reads that cache is a test CI fails, and the patch is what the reviewer reads — so an offline test that did not carry it would be asserting about a change this repository wrote. sveltejs/svelte is MIT; its copyright notice, the licence and the commit the patch was taken from are recorded above it."
   },
   "gh_pr_view": {

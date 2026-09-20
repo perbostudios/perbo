@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { spawnBuilt } from "./open-build.js";
+import { spawnBuilt } from "../src/test-support/open-build.js";
 
 /**
  * `spawnBuilt` itself (SCP-191, ac_3): a spawned process that never exits
