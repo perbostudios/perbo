@@ -1,11 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import {
-  BaselineFileSchema,
-  EXIT_CODES,
-  PARTNER_READING_CAVEAT,
-  summariseStops,
-} from "@perbo/contracts";
+import { EXIT_CODES, PARTNER_READING_CAVEAT, summariseStops } from "@perbo/contracts";
 import {
   ESCAPE_WINDOW_DAYS,
   TicketEscapesSchema,
@@ -21,7 +16,7 @@ import {
 import { CommandFailedError, gh, git, type RunResult } from "@perbo/workspace";
 import { UsageError } from "../../usage-error.js";
 import type { Streams } from "../../streams.js";
-import { baselinePath } from "../baseline/index.js";
+import { BaselineFileSchema, baselinePath } from "../baseline/index.js";
 import { countDueness, dueAt, duenessOf, escapeReading, type DueCounts } from "./internal/due.js";
 import {
   METRIC_TABLE_HEADER,

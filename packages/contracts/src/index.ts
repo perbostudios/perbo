@@ -15,8 +15,6 @@ export * from "./review.js";
 export * from "./source.js";
 export * from "./risk.js";
 export * from "./attempt.js";
-export * from "./baseline.js";
-export * from "./e1.js";
 export * from "./limits.js";
 export * from "./materialisation.js";
 export * from "./permission.js";

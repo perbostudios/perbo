@@ -1,10 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
+import { UsageError } from "../../usage-error.js";
+import { baselinePath, readBaselineFile, writeBaselineFile } from "./internal/file.js";
 import {
   BASELINE_COMPARISON_MINIMUM,
-  BaselineFileSchema,
   BaselineStateError,
-  EMPTY_BASELINE_FILE,
   abandonBaseline,
   baselineElapsedMs,
   openBaseline,
@@ -14,9 +13,8 @@ import {
   stopBaseline,
   summarizeBaseline,
   type BaselineFile,
-} from "@perbo/contracts";
-import { UsageError } from "../../usage-error.js";
-import { E1_COMMANDS, isE1Command, runE1Command } from "./internal/e1.js";
+} from "./internal/stopwatch.js";
+import { E1_COMMANDS, isE1Command, runE1Command } from "./internal/e1/command.js";
 import { formatDuration } from "../run/index.js";
 import { storeDir } from "../../store/index.js";
 import type { Streams } from "../../streams.js";
@@ -33,8 +31,6 @@ import { listTickets } from "../../store/tickets.js";
  * not the one D-038 asked for.
  */
 
-export const BASELINE_FILENAME = "baseline.json";
-
 export interface BaselineArgs {
   command: "start" | "pause" | "resume" | "stop" | "abandon" | "list";
   title: string | null;
@@ -48,11 +44,6 @@ export interface BaselineArgs {
 }
 
 const COMMANDS = new Set(["start", "pause", "resume", "stop", "abandon", "list"]);
-/**
- * Called rather than computed: `e1.ts` imports this module back for the
- * stopwatch file it reads, and a module-level constant that reaches into it
- * would depend on which of the two a program happened to import first.
- */
 const harness = () =>
   `The E1 harness — a partner's ten, sealed, and the ratio against them — is baseline ${E1_COMMANDS.join(" | ")}.`;
 const TAKES_VALUE = new Set(["--ref", "--pr", "--note", "--reason", "--repo", "--store"]);
@@ -130,37 +121,6 @@ export function parseBaselineArgs(argv: readonly string[]): BaselineArgs {
     }
   }
   return args;
-}
-
-export function baselinePath(storeDirectory: string): string {
-  return join(storeDirectory, BASELINE_FILENAME);
-}
-
-export function readBaselineFile(path: string): BaselineFile {
-  if (!existsSync(path)) return EMPTY_BASELINE_FILE;
-  let raw: unknown;
-  try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
-  } catch (error) {
-    throw new UsageError(
-      `could not read ${path}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  const parsed = BaselineFileSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new UsageError(
-      `${path} is not a baseline record:\n  ` +
-        parsed.error.issues
-          .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-          .join("\n  "),
-    );
-  }
-  return parsed.data;
-}
-
-function writeBaselineFile(path: string, file: BaselineFile): void {
-  mkdirSync(join(path, ".."), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(BaselineFileSchema.parse(file), null, 2)}\n`);
 }
 
 export function renderBaselineList(file: BaselineFile, path: string, now: Date): string {
@@ -302,3 +262,10 @@ export async function runBaselineCommand(input: BaselineOptions): Promise<number
   }
   return 0;
 }
+
+/**
+ * What `perbo escapes` reads of the same file: where it is, and the schema it
+ * parses a store's baseline with.
+ */
+export { baselinePath } from "./internal/file.js";
+export { BaselineFileSchema, type BaselineFile } from "./internal/stopwatch.js";

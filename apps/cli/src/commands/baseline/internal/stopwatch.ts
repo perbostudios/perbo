@@ -214,7 +214,8 @@ export interface BaselineSummary {
  * The median of a set of durations, to the millisecond, or null over nothing.
  *
  * One definition, used by the stopwatch's own summary and by the E1 ratio in
- * `e1.ts`, so a partner's median cannot mean one thing in the list and another
+ * `e1/ledger.ts`, so a partner's median cannot mean one thing in the list and
+ * another
  * in the comparison it is quoted in.
  */
 export function medianMs(values: readonly number[]): number | null {

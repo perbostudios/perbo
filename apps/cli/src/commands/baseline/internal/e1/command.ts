@@ -23,23 +23,23 @@ import {
   type E1ProductRun,
   type E1Result,
   type E1Thresholds,
-} from "@perbo/contracts";
-import { UsageError } from "../../../usage-error.js";
-import { baselinePath, readBaselineFile } from "../index.js";
-import { formatDuration } from "../../run/index.js";
-import { storeDir } from "../../../store/index.js";
-import type { Streams } from "../../../streams.js";
+} from "./ledger.js";
+import { UsageError } from "../../../../usage-error.js";
+import { baselinePath, readBaselineFile } from "../file.js";
+import { formatDuration } from "../../../run/index.js";
+import { storeDir } from "../../../../store/index.js";
+import type { Streams } from "../../../../streams.js";
 
 /**
  * `perbo baseline` beyond the stopwatch: the E1 harness (D-038, SCP-080).
  *
- * `baseline/index.ts` times one piece of work. These six subcommands are what
+ * `../../index.ts` times one piece of work. These six subcommands are what
  * turns a pile of readings into a claim: a partner's ten, the thresholds they
  * agreed to before any of it was measured, the seal that fixes the ten before
  * the product is ever used, the product runs of those same ten, and the
  * confounders recorded beside the ratio rather than inside it.
  *
- * The rules live in `@perbo/contracts`, which refuses what must be refused.
+ * The rules live in `./ledger.ts`, which refuses what must be refused.
  * What is here is the file, the flags and the words a person reads back —
  * `<repo>/.perbo/e1.json`, on one machine like everything else `perbo`
  * touches.

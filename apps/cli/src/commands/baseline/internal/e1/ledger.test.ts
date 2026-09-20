@@ -22,7 +22,7 @@ import {
   type E1Ledger,
   type E1ProductRun,
   type E1Thresholds,
-} from "../src/e1.js";
+} from "./ledger.js";
 
 /**
  * The E1 ledger (D-038, SCP-080).

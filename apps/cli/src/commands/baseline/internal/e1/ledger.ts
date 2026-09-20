@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { BASELINE_COMPARISON_MINIMUM, medianMs } from "./baseline.js";
+import { BASELINE_COMPARISON_MINIMUM, medianMs } from "../stopwatch.js";
 
 /**
  * The E1 ledger: one partner's ten timed direct-agent tickets, sealed, and the
  * ratio the product is later held to on the same ten (D-038, SCP-080).
  *
- * `baseline.ts` is the stopwatch — one person, one reading, one machine. This
+ * `../stopwatch.ts` is the stopwatch — one person, one reading, one machine. This
  * is what the readings are *for*: E1 asks whether real work moves faster than
  * the workflow it replaces, and that question is only answerable if the number
  * it is compared against was written down before the product touched the
