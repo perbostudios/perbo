@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cx } from "@perbo/ui";
 import { InkIcon } from "../InkIcon.js";
-import { LineIcon } from "../icons.js";
 import { PLANNING_PANES } from "../planning/panes.js";
 import { useCreate } from "./create.js";
 import { useShortcut } from "./shortcuts.js";
@@ -154,7 +153,7 @@ export function Rail({
           onMouseLeave={create.leave}
         >
           <span className="rail-icon">
-            <LineIcon name="create" size={22} />
+            <InkIcon name="add-circle" size={22} />
           </span>
         </button>
         {planning && (
@@ -169,7 +168,7 @@ export function Rail({
                 onClick={() => navigate({ ...route, pane: pane.id })}
               >
                 <span className="rail-icon">
-                  <LineIcon name={pane.icon} size={18} />
+                  <InkIcon name={pane.icon} size={19} />
                 </span>
               </button>
             ))}
@@ -179,7 +178,7 @@ export function Rail({
       {(
         [
           { page: "home", icon: "home", label: "Home" },
-          { page: "archive", icon: "folder", label: "Archive" },
+          { page: "archive", icon: "inbox", label: "Archive" },
         ] as const
       ).map(({ page, icon, label: text }) => (
         <button
@@ -190,7 +189,7 @@ export function Rail({
           onClick={() => navigate({ page })}
         >
           <span className="rail-icon">
-            <InkIcon name={icon} size={icon === "folder" ? 23 : 22} />
+            <InkIcon name={icon} size={22} />
             {page === "home" && (
               <span
                 className="t-badge rail-badge"

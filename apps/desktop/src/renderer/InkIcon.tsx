@@ -14,37 +14,40 @@ const PNG = new Set([
 ]);
 
 /** The supplied artwork is the primary icon language. Callers give the control its accessible name. */
+/** Every piece of supplied artwork, by what it is for. */
+export type InkIconName =
+  | "home"
+  | "folder"
+  | "settings"
+  | "alert"
+  | "approve"
+  | "locked"
+  | "prev"
+  | "next"
+  | "reject"
+  | "dots"
+  | "general"
+  | "usage"
+  | "connections"
+  | "help"
+  | "info"
+  | "chat"
+  | "play"
+  | "skip-forward"
+  | "document"
+  | "add-circle"
+  | "growth-chart"
+  | "share"
+  | "coffee-beans"
+  | "clipboard"
+  | "inbox";
+
 export function InkIcon({
   name,
   size = 24,
   className,
 }: {
-  name:
-    | "home"
-    | "folder"
-    | "settings"
-    | "alert"
-    | "approve"
-    | "locked"
-    | "prev"
-    | "next"
-    | "reject"
-    | "dots"
-    | "general"
-    | "usage"
-    | "connections"
-    | "help"
-    | "info"
-    | "chat"
-    | "play"
-    | "skip-forward"
-    | "document"
-    | "add-circle"
-    | "growth-chart"
-    | "share"
-    | "coffee-beans"
-    | "clipboard"
-    | "inbox";
+  name: InkIconName;
   size?: number;
   className?: string;
 }) {
