@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { exclusiveJob, heldRepository } from "../../shared/jobs.js";
 import { ManifestDialog } from "./ManifestDialog.js";
-import { Button, Dialog, Field, Notice } from "@perbo/ui";
+import { Button, Dialog, Field, Notice } from "../ui/index.js";
 import { FactList, PageHeader, SectionLabel, useElapsed } from "../Screen.js";
 import { errorMessage, useAction } from "../data.js";
 import { useToast } from "../shell/Toast.js";

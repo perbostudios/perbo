@@ -9,7 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ChangeEvent, ReactNode, SelectHTMLAttributes } from "react";
-import { Button, cx } from "@perbo/ui";
+import { Button, cx } from "./ui/index.js";
 import { InkIcon } from "./InkIcon.js";
 
 /** These primitives reproduce the repeated geometry in Perbo Screens, S1–S18. */

@@ -1,4 +1,4 @@
-import { Button, Notice } from "@perbo/ui";
+import { Button, Notice } from "../ui/index.js";
 import { Brand, FactList, PageHeader, SectionLabel } from "../Screen.js";
 import { errorMessage, useAction, useUsage } from "../data.js";
 import type { PageProps } from "../shell/App.js";

@@ -1,6 +1,6 @@
 import { InkIcon } from "../InkIcon.js";
 import { useEffect, useRef } from "react";
-import { Button, Field, Notice } from "@perbo/ui";
+import { Button, Field, Notice } from "../ui/index.js";
 import {
   CriterionSchema,
   DraftSchema,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Checkbox, Notice, Segmented, Switch } from "@perbo/ui";
+import { Button, Checkbox, Notice, Segmented, Switch } from "../ui/index.js";
 import { InkIcon } from "../InkIcon.js";
 import { Brand, IconButton, PageHeader, useElapsed } from "../Screen.js";
 import { errorMessage, useAction } from "../data.js";

@@ -14,7 +14,6 @@ packages/
   workspace/      worktree provisioning and materialization
   runner/         execution: permission profile, ceilings, agent adapter, sealing, delivery
   planning/       contract drafting from an issue — the model proposes, a person approves
-  ui/             shared React primitives and design tokens
   evaluation/     the seeded-defect corpus, its harness and the regression suite
 tooling/
   package/        the CLI tarball and the corpus assembly

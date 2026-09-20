@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Button, EmptyState, Notice, cx } from "@perbo/ui";
+import { Button, EmptyState, Notice, cx } from "../ui/index.js";
 import { InkIcon } from "../InkIcon.js";
 import {
   Dropdown,

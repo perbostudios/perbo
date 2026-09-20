@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Dialog, Notice } from "@perbo/ui";
+import { Button, Dialog, Notice } from "../ui/index.js";
 import { FactList, Rename, SectionLabel, WizardHeader } from "../Screen.js";
 import { InkIcon } from "../InkIcon.js";
 import { errorMessage, useAction } from "../data.js";

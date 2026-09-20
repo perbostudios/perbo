@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Dialog, Notice, cx } from "@perbo/ui";
+import { Button, Dialog, Notice, cx } from "../ui/index.js";
 import { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS } from "@perbo/contracts/size";
 import type { GraphEdit } from "@perbo/contracts/graph-edit";
 import { bridge, errorMessage, useAction } from "../data.js";

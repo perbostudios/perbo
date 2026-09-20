@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Dialog, Notice } from "@perbo/ui";
+import { Button, Dialog, Notice } from "../ui/index.js";
 import type { SpecField } from "@perbo/planning/spec-text";
 import { specSymbolNames } from "@perbo/planning/spec-text";
 import { bridge } from "../data.js";

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Button, Notice, cx } from "@perbo/ui";
+import { Button, Notice, cx } from "../ui/index.js";
 import { errorMessage, useWorkspace } from "../data.js";
 import { InkIcon } from "../InkIcon.js";
 import { Brand, HeaderSlotProvider, TitleBar } from "../Screen.js";

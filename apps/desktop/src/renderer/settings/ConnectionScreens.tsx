@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { exclusiveJob } from "../../shared/jobs.js";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Field, Notice, cx } from "@perbo/ui";
+import { Button, Field, Notice, cx } from "../ui/index.js";
 import { bridge, errorMessage, useAction } from "../data.js";
 import { Dropdown, FactList, ProgressDots, SectionLabel, useElapsed } from "../Screen.js";
 import { InkIcon } from "../InkIcon.js";

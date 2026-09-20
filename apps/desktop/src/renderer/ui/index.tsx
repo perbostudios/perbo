@@ -1,3 +1,7 @@
+/**
+ * The renderer's primitives: controls, page chrome, icons and motion. Every
+ * screen imports them from here; nothing here reads data, IPC or tickets.
+ */
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 

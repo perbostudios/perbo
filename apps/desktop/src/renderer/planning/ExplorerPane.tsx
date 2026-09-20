@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Checkbox, Notice, Segmented, cx } from "@perbo/ui";
+import { Checkbox, Notice, Segmented, cx } from "../ui/index.js";
 import { standingGlob } from "@perbo/contracts/standing";
 import { planNodes } from "@perbo/contracts/plan";
 import { LineIcon } from "../icons.js";

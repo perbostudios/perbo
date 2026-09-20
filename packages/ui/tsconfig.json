@@ -1,4 +1,0 @@
-{
-  "extends": "@perbo/tsconfig/library.json",
-  "compilerOptions": { "jsx": "react-jsx", "lib": ["ES2024", "DOM"] }
-}

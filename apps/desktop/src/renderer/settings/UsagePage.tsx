@@ -1,4 +1,4 @@
-import { Button, Notice } from "@perbo/ui";
+import { Button, Notice } from "../ui/index.js";
 import { InkIcon } from "../InkIcon.js";
 import { NumberPop, PageHeader, SectionLabel } from "../Screen.js";
 import { errorMessage, useUsage } from "../data.js";

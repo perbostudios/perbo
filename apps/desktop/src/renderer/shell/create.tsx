@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Notice, cx } from "@perbo/ui";
+import { Notice, cx } from "../ui/index.js";
 import { bridge, errorMessage } from "../data.js";
 import { InkIcon } from "../InkIcon.js";
 import { LineIcon } from "../icons.js";

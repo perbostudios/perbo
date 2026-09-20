@@ -20,9 +20,9 @@ Built: Create, its picker, the Spec pane, which writes the spec folder, the Expl
 
 A local Electron host and a shared React renderer over the bundled CLI ([ADR-0033](adr/0033-focrux-local-desktop-and-subscription-providers.md)) — process composition, not one app importing another's source.
 
-**Owns:** the native shell — validated IPC between host and renderer, native dialogs, fixed CLI subprocess argv, provider sign-in through a fixed terminal command per provider; the contract editor, the one durable edit surface the desktop offers, against one workspace projection ([D-095](11-open-decisions.md), [ADR-0034](adr/0034-desktop-editing-and-workspace-projection.md)); the Spec pane's `@Symbol` completion over `perbo index`, which the host runs over the registered repository so that no name, path or file a renderer sent reaches it ([D-015](11-open-decisions.md), [ADR-0023](adr/0023-untrusted-context-boundary.md) §4); the local profile/job journal in Electron's own user-data directory; the two lanes a command runs in — drafting, admission, contract edits and impact checks any number at a time; runs, decisions, findings, delivery refreshes, product decisions and readiness checks one at a time; disconnecting a repository, deleting a contract or changing a manifest waits for every command running in that repository ([D-101](11-open-decisions.md)).
+**Owns:** the native shell — validated IPC between host and renderer, native dialogs, fixed CLI subprocess argv, provider sign-in through a fixed terminal command per provider; the contract editor, the one durable edit surface the desktop offers, against one workspace projection ([D-095](11-open-decisions.md), [ADR-0034](adr/0034-desktop-editing-and-workspace-projection.md)); the Spec pane's `@Symbol` completion over `perbo index`, which the host runs over the registered repository so that no name, path or file a renderer sent reaches it ([D-015](11-open-decisions.md), [ADR-0023](adr/0023-untrusted-context-boundary.md) §4); the local profile/job journal in Electron's own user-data directory; the two lanes a command runs in — drafting, admission, contract edits and impact checks any number at a time; runs, decisions, findings, delivery refreshes, product decisions and readiness checks one at a time; disconnecting a repository, deleting a contract or changing a manifest waits for every command running in that repository ([D-101](11-open-decisions.md)), and the renderer's primitives and design tokens in `src/renderer/ui`: one surface every screen imports, with no filesystem, IPC, provider or application-state dependency, and the dark palette and transitions.dev motion ([D-097](11-open-decisions.md)).
 
-**Consumes:** the bundled `@perbo/cli` and its write-guard hook, run on the Node inside Electron, `@perbo/ui` tokens and components, each repository's own `.perbo/` store — read, never a second source of truth. Claude Code and Codex authenticate on the person's own subscription login; an API key is optional ([D-093](11-open-decisions.md)).
+**Consumes:** the bundled `@perbo/cli` and its write-guard hook, run on the Node inside Electron, each repository's own `.perbo/` store — read, never a second source of truth. Claude Code and Codex authenticate on the person's own subscription login; an API key is optional ([D-093](11-open-decisions.md)).
 
 **Emits:** nothing canonical — tickets and evidence stay in the repository's own store; the desktop writes only its local profile/job journal, and a native package under `apps/desktop/release`.
 
@@ -87,16 +87,6 @@ The contract draft, and the measurement of what a person did to it.
 **Consumes:** an issue or a Markdown file, read as external, trust-tagged data — never as instruction — and the repository's own file tree, two levels deep, for proposed globs to be checked against; for impact warnings, its caller's tracked-path list and symbol index, and the spec's own text, matched against that list and never opened; nothing else of the repository ([ADR-0023](adr/0023-untrusted-context-boundary.md)).
 
 **Emits:** the validated draft and its provenance (model, cost, prompt version); the approved contract is written by `apps/cli`, not this package.
-
-## `packages/ui` — `@perbo/ui`
-
-Shared React primitives and design tokens: buttons, fields, notices, empty states, focus-contained native dialogs, and the desktop's design tokens and motion primitives ([D-097](11-open-decisions.md)).
-
-**Owns:** the component and token set; no filesystem, IPC, provider, database or application-state dependency of its own.
-
-**Consumes:** nothing beyond React.
-
-**Emits:** components imported from `@perbo/ui` and tokens from `@perbo/ui/tokens.css`, consumed by `apps/desktop`.
 
 ## `packages/evaluation` — the corpus and the regression suite
 

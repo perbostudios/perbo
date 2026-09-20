@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { Button, Notice, cx } from "@perbo/ui";
+import { Button, Notice, cx } from "../ui/index.js";
 import { bridge, errorMessage, useAction } from "../data.js";
 import { exclusiveJob } from "../../shared/jobs.js";
 import { decisionQuestions } from "../../shared/decisions.js";

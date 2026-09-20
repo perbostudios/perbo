@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Dialog, Notice } from "@perbo/ui";
+import { Button, Dialog, Notice } from "../ui/index.js";
 import {
   ManifestEditorSchema,
   type ManifestEditor,

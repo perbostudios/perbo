@@ -1,4 +1,4 @@
-/* Screen geometry from the supplied Perbo artboards. Shared colour, type and motion tokens live in @perbo/ui. */
+/* Screen geometry from the supplied Perbo artboards. Shared colour, type and motion tokens live in ui/ (tokens.css, motion.css). */
 html,
 body,
 #root {

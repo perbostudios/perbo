@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Notice } from "@perbo/ui";
+import { Button, Notice } from "../ui/index.js";
 import { Brand, ProgressDots } from "../Screen.js";
 import { errorMessage, useAction } from "../data.js";
 import type { PageProps } from "../shell/App.js";

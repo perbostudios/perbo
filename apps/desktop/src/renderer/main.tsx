@@ -8,8 +8,8 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/caveat/500.css";
 // motion.css first: tokens.css maps its colour tokens onto the theme, and the later sheet wins at :root.
-import "@perbo/ui/motion.css";
-import "@perbo/ui/tokens.css";
+import "./ui/motion.css";
+import "./ui/tokens.css";
 import "./styles.css";
 import { App } from "./shell/App.js";
 import { bridge } from "./data.js";

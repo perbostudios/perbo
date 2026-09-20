@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Notice, cx } from "@perbo/ui";
+import { Button, Notice, cx } from "../ui/index.js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { bridge, errorMessage } from "../data.js";
 import { graphHistory, latestUndoable } from "./history.js";

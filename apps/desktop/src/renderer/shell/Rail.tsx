@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { cx } from "@perbo/ui";
+import { cx } from "../ui/index.js";
 import { InkIcon } from "../InkIcon.js";
 import { LineIcon } from "../icons.js";
 import { PLANNING_PANES } from "../planning/panes.js";

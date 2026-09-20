@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Notice, cx } from "@perbo/ui";
+import { Button, Notice, cx } from "../ui/index.js";
 import { bridge, errorMessage } from "../data.js";
 import { draftHistory, graphHistory, latestUndoable } from "./history.js";
 import type { HistoryRow } from "./history.js";
