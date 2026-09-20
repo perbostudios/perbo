@@ -22,6 +22,8 @@ import { listTickets, readContract } from "../../../store/tickets.js";
  */
 
 const TIMEOUT_MS = 120_000;
+/** What a base's history between two commits may say, past which the read is refused rather than trusted. */
+const MAX_LOG_BYTES = 64 * 1024 * 1024;
 const KEY = "[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}";
 const RUNNER_MERGE = new RegExp(`^(${KEY}): merge `, "m");
 const ATTEMPT_BRANCH = new RegExp(`\\b(?:${BRANCH_PREFIX}|${AYO_BRANCH_PREFIX})/(${KEY})/`, "g");
@@ -36,7 +38,7 @@ export async function ticketKeysMergedBetween(args: {
   const log = await git.run(
     args.repository_root,
     ["log", "--reverse", "--format=%s%n%b%n--", `${args.from}..${args.to}`],
-    { timeoutMs: TIMEOUT_MS },
+    { timeoutMs: TIMEOUT_MS, maxOutputBytes: MAX_LOG_BYTES },
   );
   if (log.code !== 0) return [];
   // A log longer than the read holds arrives as its tail, which is shaped

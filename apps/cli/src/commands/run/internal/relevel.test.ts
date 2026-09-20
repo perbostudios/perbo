@@ -107,7 +107,7 @@ describe("what merged under a branch", () => {
     git(repo, "add", "-A");
     execFileSync("git", ["-C", repo, "commit", "-q", "-F", "-"], {
       env,
-      input: `a long commit\n\n${"x".repeat(600 * 1024)}\n`,
+      input: `a long commit\n\n${"x".repeat(65 * 1024 * 1024)}\n`,
     });
     // The merge the tail does hold, which is the trap: a cut log is shaped
     // exactly like a whole one, and the keys before the cut are the tickets a
