@@ -700,6 +700,35 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     ).toThrow(EscapeCollectionError);
   }, GIT_FIXTURE_TIMEOUT_MS);
 
+  it("refuses a merge reading that arrived cut rather than reading a record out of its tail", () => {
+    // A body past the ceiling arrives as its own tail, which is shaped like a
+    // pull request that merged into a branch nobody named — and the record the
+    // window is measured from would be written from it.
+    const bin = join(scratch, "bin-facts-cut");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(
+      join(bin, "gh"),
+      [
+        "#!/bin/sh",
+        `printf '{"number":7,"state":"MERGED","baseRefName":"'`,
+        "dd if=/dev/zero bs=1048576 count=65 2>/dev/null | tr '\\0' 't'",
+        `printf '"}'`,
+        "",
+      ].join("\n"),
+    );
+    chmodSync(join(bin, "gh"), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}${path === undefined ? "" : `:${path}`}`;
+    try {
+      expect(() =>
+        readMergeFacts({ repositoryRoot: scratch, branch: "ayo/AYO-1", pull_request_number: 7 }),
+      ).toThrow(/only\s+part of it arrived/);
+    } finally {
+      if (path === undefined) delete process.env.PATH;
+      else process.env.PATH = path;
+    }
+  }, GIT_FIXTURE_TIMEOUT_MS);
+
   it("leaves the previous record alone when `gh` cannot be asked", async () => {
     const f = fixture("gh-silent", [{ key: "AYO-1", file: "one.txt", mergedAt: MERGED_AT }]);
     const ticket = ticketAt(f, "AYO-1", "ayo/AYO-1", 1);
