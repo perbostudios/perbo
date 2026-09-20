@@ -1,4 +1,4 @@
-import { ESCAPE_WINDOW_DAYS, type EscapeRow } from "@perbo/contracts";
+import { ESCAPE_WINDOW_DAYS, type EscapeRow } from "./record.js";
 
 /**
  * When each merged change's fourteen days are up (`SCP-217`).

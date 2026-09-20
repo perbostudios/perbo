@@ -2,20 +2,22 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   BaselineFileSchema,
-  ESCAPE_WINDOW_DAYS,
   EXIT_CODES,
   PARTNER_READING_CAVEAT,
+  summariseStops,
+} from "@perbo/contracts";
+import {
+  ESCAPE_WINDOW_DAYS,
   TicketEscapesSchema,
   buildTicketEscapes,
   escapeRow,
   summariseEscapes,
-  summariseStops,
   type EscapeRow,
   type ObservedCommit,
   type ObservedHead,
   type TicketCommit,
   type TicketEscapes,
-} from "@perbo/contracts";
+} from "./internal/record.js";
 import { CommandFailedError, gh, git, type RunResult } from "@perbo/workspace";
 import { UsageError } from "../../usage-error.js";
 import type { Streams } from "../../streams.js";
@@ -731,3 +733,19 @@ export async function runEscapesCommand(input: {
   }
   return EXIT_CODES.approve;
 }
+
+/**
+ * The record's vocabulary, for the commands that read an escapes file without
+ * collecting one: `perbo stops` counts the rows, and `perbo sync` writes the
+ * file and prints what it observed.
+ */
+export {
+  ESCAPE_WINDOW_DAYS,
+  TICKET_ESCAPES_SCHEMA_VERSION,
+  TicketEscapesSchema,
+  escapeStatus,
+  observedThrough,
+  type EscapeCommit,
+  type EscapeRow,
+  type TicketEscapes,
+} from "./internal/record.js";

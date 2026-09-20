@@ -24,7 +24,6 @@ export * from "./runbundle.js";
 export * from "./secrets.js";
 export * from "./stops.js";
 export * from "./wilson.js";
-export * from "./escapes.js";
 export * from "./github.js";
 export * from "./authored.js";
 export * from "./unattended.js";

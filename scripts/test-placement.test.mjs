@@ -71,7 +71,6 @@ const PENDING = [
   "packages/contracts/test/check.test.ts",
   "packages/contracts/test/contract-source.test.ts",
   "packages/contracts/test/e1.test.ts",
-  "packages/contracts/test/escapes.test.ts",
   "packages/contracts/test/glob-conformance.json",
   "packages/contracts/test/glob-conformance.test.ts",
   "packages/contracts/test/graph-edit.test.ts",
