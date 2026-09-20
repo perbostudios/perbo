@@ -13,7 +13,7 @@ import {
   type DiagnosticResult,
   isRefusal,
 } from "@perbo/contracts";
-import { gitEnv } from "./worktree.js";
+import { gitEnv } from "./repository/index.js";
 import { run, type RunResult } from "./exec.js";
 import { DEFAULT_PORT_BASE, DEFAULT_PORT_SPAN } from "./ports.js";
 

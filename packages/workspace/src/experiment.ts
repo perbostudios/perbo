@@ -13,7 +13,8 @@ import {
 import { diagnose, isGreenfieldVerify, validateManifest } from "./diagnostic.js";
 import { run } from "./exec.js";
 import { materialize } from "./materialize.js";
-import { cleanup, gitEnv, provision, type Workspace } from "./worktree.js";
+import { gitEnv } from "./repository/index.js";
+import { cleanup, provision, type Workspace } from "./worktree.js";
 
 /**
  * The ADR-0025 measurement (SCP-079 criterion 5, roadmap item 6).

@@ -15,6 +15,7 @@ import { join, resolve, sep, toNamespacedPath } from "node:path";
 import { z } from "zod";
 import { assertWithinLimits, type LimitsTable } from "@perbo/contracts";
 import { run, runOrThrow } from "./exec.js";
+import { gitEnv } from "./repository/index.js";
 import { branchName, recordedBranch, type RecordedBranches } from "./naming.js";
 
 /**
@@ -135,59 +136,6 @@ export interface ProvisionRequest {
 
 const DEFAULT_LEASE_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_GIT_TIMEOUT_MS = 120_000;
-
-/**
- * The environment **the runner's** Git runs in, which is not the agent's.
- *
- * That distinction is the whole security posture: the agent's environment is
- * scrubbed of every credential and the agent never sees a token, while the
- * runner holds them and performs the commit, the push and the pull request
- * itself. So this forwards what Git legitimately needs from the user's setup —
- * the agent socket a signing key is unlocked through, and the config files that
- * say whether to sign at all — and nothing beyond it.
- *
- * Dropping `SSH_AUTH_SOCK` here looks safer and is not: on a machine with SSH
- * commit signing enabled it makes every seal fail with a passphrase prompt,
- * which is an outage rather than a control.
- *
- * `GIT_TERMINAL_PROMPT=0` turns a credential prompt into a failure rather than
- * a hang.
- */
-export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  // The last three are where Windows keeps a user's own state: `gh` reads its
-  // host credential from `%AppData%\GitHub CLI\hosts.yml` and keeps its state
-  // under `%LocalAppData%\GitHub CLI`, and `USERPROFILE` is the home Go's
-  // `os.UserHomeDir` reads there. Without them the runner's `gh` is logged into
-  // no host on a machine whose own `gh auth status` answers, and the attempt
-  // fails at `gh pr create` with the work already sealed and reviewed.
-  //
-  // They name directories rather than carry secrets, and this is the runner's
-  // own environment — the one that legitimately performs the commit, the push
-  // and the pull request. The agent's environment is built separately and is
-  // not widened by this. On POSIX the loop below skips a name the host does not
-  // set.
-  const forward = [
-    "SSH_AUTH_SOCK",
-    "GIT_CONFIG_GLOBAL",
-    "GIT_CONFIG_SYSTEM",
-    "XDG_CONFIG_HOME",
-    "GNUPGHOME",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "USERPROFILE",
-  ];
-  const env: NodeJS.ProcessEnv = {
-    PATH: base.PATH ?? "/usr/bin:/bin",
-    HOME: base.HOME ?? "",
-    GIT_TERMINAL_PROMPT: "0",
-    LANG: base.LANG ?? "C",
-  };
-  for (const name of forward) {
-    const value = base[name];
-    if (value !== undefined) env[name] = value;
-  }
-  return env;
-}
 
 /**
  * `root` must already be a real path: on macOS `/var` is a symlink to
