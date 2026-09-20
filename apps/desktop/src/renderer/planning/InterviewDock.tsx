@@ -107,6 +107,20 @@ export function InterviewDock({
   const [busy, setBusy] = useState(false);
   const [text, setText] = useState("");
   const chat = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  // Picking "Something else" is a request for the box, so the box is where the
+  // next keystroke goes. Someone who has just said their answer is not on the
+  // card is already composing it, and making them find a box that appeared this
+  // moment asks twice for the one thing.
+  useEffect(() => {
+    if (!typing) return;
+    const held = box.current;
+    if (held === null) return;
+    held.focus();
+    // At the end of what is there: the box keeps whatever was typed before the
+    // card came up, and that is where the writing carries on from.
+    held.setSelectionRange(held.value.length, held.value.length);
+  }, [typing]);
 
   useEffect(() => {
     setLive([]);
@@ -348,6 +362,7 @@ export function InterviewDock({
       >
         <div className="composer-box">
           <textarea
+            ref={box}
             aria-label="Message the interview"
             value={text}
             placeholder="Answer, or tell the interview something…"
@@ -408,12 +423,26 @@ type Shown = Choice & { icon?: LineIconName };
  * following is the work. A name not here is shown as it is, so a tool added
  * later reads as itself rather than as nothing.
  */
-const TOOL_NAMES: Record<string, string> = {
-  ask_options: "Questions",
-  generate_plan: "Draft the plan",
-  edit_plan: "Change the plan",
-  undo_edit: "Undo a change",
-  read_plan: "Read the plan",
+const TOOL_NAMES: Record<string, { did: string; tried: string }> = {
+  ask_options: { did: "Questions", tried: "Questions" },
+  generate_plan: { did: "Drafted the plan", tried: "Drafting the plan" },
+  edit_plan: { did: "Changed the plan", tried: "Changing the plan" },
+  undo_edit: { did: "Took a change back", tried: "Taking a change back" },
+  read_plan: { did: "Read the plan", tried: "Reading the plan" },
+};
+
+/**
+ * What a card calls what happened, in the tense it happened in.
+ *
+ * A card is written when the tool returns, so one that worked is past: "Draft
+ * the plan" reads as a button for something not yet done, over work already
+ * finished. One that was refused never happened at all, and saying it did would
+ * be the card contradicting the word beside it.
+ */
+const toolName = (tool: string, ok: boolean): string => {
+  const named = TOOL_NAMES[tool];
+  if (named === undefined) return tool;
+  return ok ? named.did : named.tried;
 };
 
 const LEAVE_IT: Shown = {
@@ -602,12 +631,29 @@ function Line({
       </div>
     );
   if (line.kind === "note") return <p className="msg msg--note">{line.text}</p>;
-  // An ask that worked is said twice already — the line below and the card
-  // itself — and a card for it would be a third, over a detail written to
-  // steer the session rather than to be read by anyone. One that was refused
-  // is said nowhere else: no `asked` follows a rejected call, so dropping it
-  // too would leave the dock saying "Working…" and then nothing at all.
-  if (line.kind === "tool" && line.tool === "ask_options" && line.ok) return null;
+  // A tool that worked and only repeated itself has nothing in it to act on:
+  // what it changed is on the graph, what it asked is on the card, and a panel
+  // saying it happened is a third telling of something already told. One run of
+  // edits made eight of them in a row and pushed the conversation off the top.
+  //
+  // What survives is what is said nowhere else:
+  //
+  //  - a refusal, because no `asked` follows a rejected call, so dropping it
+  //    would leave the dock saying "Working…" and then nothing at all;
+  //  - the drafting, which happens once and whose report carries the count of
+  //    instructions the spec aimed at the drafter — read as data and not
+  //    followed (ADR-0023), and told to the person nowhere else in the app;
+  //  - an undo, which is rare, person-asked, and the only word that a change
+  //    was taken back;
+  //  - the edit at the head of the plan's history, which carries the undo
+  //    D-100 allows: a control rather than a report.
+  //
+  // What is left to drop is a repeated `edit_plan` and a `read_plan`, which is
+  // exactly the run that buried the conversation.
+  if (line.kind === "tool" && line.ok && line.tool !== "generate_plan" && line.tool !== "undo_edit") {
+    const keepsUndo = line.edit !== null && onUndo !== null && undoable === line.edit.n;
+    if (!keepsUndo) return null;
+  }
   // The questions are put one group at a time under the conversation, and they
   // are written out here as well. A person who says something of their own
   // takes the rest off the card — the session is about to answer what they
@@ -698,19 +744,20 @@ function ToolCard({
         {/* What the tool is for, rather than what it is called: a person
             reading the chat is following the work, and `ask_options` is the
             name of a thing they never call. */}
-        <b>{TOOL_NAMES[line.tool] ?? line.tool}</b>
-        <span className="small muted">
-          {line.ok
-            ? "done"
-            : line.tool === "edit_plan" || line.tool === "undo_edit"
+        <b>{toolName(line.tool, line.ok)}</b>
+        {/* No word for one that worked: the name is already past, and "done"
+            beside it says a second time what it just said. */}
+        {!line.ok && (
+          <span className="small muted">
+            {line.tool === "edit_plan" || line.tool === "undo_edit"
               ? "refused by the edit path"
               : "refused"}
-        </span>
-        {/* What the tool said is read when it is asked for: the name and the
-            word beside it are what the card is for, and the account underneath
-            them was most of the dock. */}
+          </span>
+        )}
+        {/* What the tool said is read when it is asked for: the name is what
+            the card is for, and the account underneath it was most of the dock. */}
         {line.ok && (
-          <InfoHint text={line.detail} label={`What ${TOOL_NAMES[line.tool] ?? line.tool} did`} />
+          <InfoHint text={line.detail} label={`What happened: ${toolName(line.tool, true)}`} />
         )}
       </div>
       {/* What a tool did is read when it is asked for; why one was refused is

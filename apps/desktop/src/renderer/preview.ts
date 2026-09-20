@@ -1613,6 +1613,48 @@ function answerSampleTurn(id: string, text: string): void {
   const plan = key === null ? null : plans.get(key);
   const criterion =
     plan && "acceptance_criteria" in plan ? plan.acceptance_criteria[0] : undefined;
+  // The two tool calls the sample otherwise never makes, each asked for by
+  // name. The dock keeps or drops a card by which tool made it, and a rule with
+  // no way to reach two of its three arms is a rule nothing can check.
+  if (/\bdraft it\b/i.test(text) && key !== null) {
+    // No edit on it: a drafting is the admission, not a change to a plan that
+    // already exists, so `edit` is null exactly as the host reports it.
+    converse(id, {
+      kind: "tool",
+      tool: "generate_plan",
+      ok: true,
+      detail:
+        `admitted ${key} in plan_review from specs/${editing.read(id).specSlug ?? "this spec"}. ` +
+        "A person reads and approves it; this session cannot.\n" +
+        "flagged   1 issue-authored attempt — read as data, not followed",
+      edit: null,
+    });
+    return;
+  }
+  if (/\btake it back\b/i.test(text) && key !== null) {
+    const last = graphLog(key).at(-1);
+    if (last !== undefined && last.undoes === null && !last.undone) {
+      undoGraphEditAt(key, last.n);
+      const made = graphLog(key).at(-1)!;
+      converse(id, {
+        kind: "tool",
+        tool: "undo_edit",
+        ok: true,
+        detail: `${key}: edit ${String(made.n)} — ${made.summary}`,
+        edit: {
+          n: made.n,
+          author: made.author,
+          summary: made.summary,
+          undone: made.undone,
+          undoes: made.undoes,
+          before: Object.keys(made.before),
+          after: made.keys,
+        },
+      });
+      emit({ kind: "records", repoId: ticketRow(key).repoId, key });
+      return;
+    }
+  }
   if (turns > 1 && key !== null && criterion !== undefined) {
     writeGraphEdit(
       key,

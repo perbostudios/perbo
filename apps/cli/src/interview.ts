@@ -39,6 +39,7 @@ import {
 import { parseAdmitArgs, runAdmitCommand, type AdmitArgs } from "./admit.js";
 import { UsageError } from "./args.js";
 import { runEdit, type EditArgs } from "./edit.js";
+import { withoutNextStep } from "./next-step.js";
 import { adrFolder, specFolder, storeDir, trackedFiles } from "./store.js";
 import type { Streams } from "./streams.js";
 import {
@@ -1285,6 +1286,7 @@ const said = (text: string, isError = false): InterviewToolResult => ({
   ...(isError ? { isError: true } : {}),
 });
 
+
 /** What the interview's tools are given: the checkout, the store and the spec. */
 export interface InterviewContext {
   cwd: string;
@@ -1426,12 +1428,12 @@ const generatePlan = tool({
         ...(context.model === undefined ? {} : { model: context.model }),
       }),
     );
-    if (ran.code !== EXIT_CODES.approve) return said(ran.text, true);
+    if (ran.code !== EXIT_CODES.approve) return said(withoutNextStep(ran.text), true);
     context.specTaken();
     const key = startOver ?? ticketFromSpec(context) ?? "the ticket";
     return said(
       `${startOver === null ? "admitted" : "re-drafted"} ${key} in plan_review from ${context.spec}. ` +
-        `A person reads and approves it; this session cannot.\n${ran.text}`,
+        `A person reads and approves it; this session cannot.\n${withoutNextStep(ran.text)}`,
     );
   },
 });
@@ -1533,13 +1535,13 @@ async function applyEdit(
   const ran = await captured((streams) =>
     runEdit({ key, args, streams, cwd: context.cwd, env: {} }),
   );
-  if (ran.code !== EXIT_CODES.approve) return said(ran.text, true);
+  if (ran.code !== EXIT_CODES.approve) return said(withoutNextStep(ran.text), true);
   const snapshot = readDraftSnapshot(context.storeDirectory, key);
   const entry = snapshot?.edits.at(-1);
   return said(
     `${key}: edit ${snapshot?.edits.length ?? 0}${entry?.summary ? ` — ${entry.summary}` : ""}\n` +
       JSON.stringify({ before: entry?.before ?? {}, after: entry?.after ?? {} }, null, 2) +
-      `\n${ran.text}`,
+      `\n${withoutNextStep(ran.text)}`,
   );
 }
 
@@ -1664,7 +1666,9 @@ When the spec states the work, write it and then call generate_plan, which draft
 plan_review. After that the plan changes only through edit_plan and undo_edit, each change recorded as
 yours and undoable, and the spec is brought back into step with it in the same turn. read_plan reads it
 back. You cannot approve, publish or merge, and there is no tool for any of the three: prepare the plan
-and say what is ready for the person's keystroke. State names, keys and numbers come from the tools,
+and say what is ready for the person to approve. Never tell them to run a command to do it, and do
+not repeat one a tool's report names: you cannot see whether they are at a terminal or in the app,
+where approving, editing and running are buttons and nothing is typed. State names, keys and numbers come from the tools,
 never from memory.
 
 Write the spec to be read at a glance, because it is read far more often than it is written. One

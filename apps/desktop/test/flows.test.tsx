@@ -146,6 +146,14 @@ describe("interactive desktop flows", () => {
     expect(
       within(dialog).getByText("Choose an approach before continuing."),
     ).toBeTruthy();
+    // Picking "Something else" hands the box under it the caret: saying the
+    // answer is not on the list is already the start of writing one.
+    fireEvent.click(
+      within(dialog).getByRole("radio", { name: /Something else/ }),
+    );
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("textbox", { name: "Your approach" }),
+    );
     fireEvent.click(within(dialog).getAllByRole("radio")[0]!);
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     fireEvent.click(await screen.findByRole("button", { name: "Answer" }));

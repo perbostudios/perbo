@@ -51,6 +51,7 @@ import {
   type EditAuthor,
 } from "./tickets.js";
 import { applyGraphEdit, emptyApproach, undoGraphEdit } from "./graph-edit.js";
+import { NEXT_STEPS } from "./next-step.js";
 
 /**
  * `perbo edit KEY` — the person's half of a drafted contract.
@@ -624,7 +625,7 @@ export async function runEdit(input: {
       (diff.count > 0 ? ` (${diff.changes.join(", ")})` : "") +
       "\n" +
       levelNote +
-      `\nRead it once more, then approve it:\n  perbo approve ${key}\n`,
+      `\n${NEXT_STEPS[0]}\n  perbo approve ${key}\n`,
   );
   return EXIT_CODES.approve;
 }
@@ -775,7 +776,7 @@ async function runGraphEdit(input: {
       (entry.keys.length > 0 ? `, touching ${entry.keys.join(", ")}` : "") +
       "\n" +
       (ticket.approved_at === null
-        ? `\nRead it once more, then approve it:\n  perbo approve ${key}\n`
+        ? `\n${NEXT_STEPS[0]}\n  perbo approve ${key}\n`
         : `\nThe approach may change while the work runs; the contract may not.\n`),
   );
   return EXIT_CODES.approve;

@@ -2140,6 +2140,10 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     await waitFor(() =>
       expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false),
     );
+    // And the box has the caret: saying the answer is not on the card is
+    // already the start of typing it, so the next keystroke lands in the box
+    // without a hand leaving the keyboard for the mouse.
+    await waitFor(() => expect(document.activeElement).toBe(composer()));
 
     await waitFor(() => expect(within(dock()).getAllByText(/Noted:/)).toHaveLength(1));
   });
@@ -2331,7 +2335,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     await waitFor(() => expect(composer().value).toBe("?!?!"));
   });
 
-  it("takes the Undo off a card once a later edit is in the way", async () => {
+  it("takes a card away once a later edit puts its undo out of reach", async () => {
     const session = await planning();
     const current = await previewBridge.request({ kind: "editingRead", id: session.id });
     await previewBridge.request({
@@ -2363,6 +2367,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       await waitFor(() => expect(composer().value).toBe(""));
     }
     expect(await within(dock()).findByRole("button", { name: /^Undo/ })).toBeTruthy();
+    expect(within(dock()).getByText("Changed the plan")).toBeTruthy();
 
     // A hand edit lands after it, which D-100 says an undo may not reach past.
     const plan = { repoId: session.repoId, key: key! };
@@ -2378,11 +2383,70 @@ describe("the interview docked in planning mode (SCP-313)", () => {
         expected_verification: { kind: second.kind, assertion: second.assertion },
       },
     });
-    // The card asks the plan rather than the snapshot it was drawn from, so it
-    // stops offering an undo the host would refuse.
+    // The card asks the plan rather than the snapshot it was drawn from. With
+    // the undo out of reach it carries nothing the graph does not already show,
+    // so the whole card goes rather than the button alone — asserted on the
+    // card's own name, since a missing button cannot tell the two apart.
     await waitFor(() =>
       expect(within(dock()).queryByRole("button", { name: /^Undo/ })).toBeNull(),
     );
+    expect(within(dock()).queryByText("Changed the plan")).toBeNull();
+    // The conversation it was standing in is untouched: what goes is the panel,
+    // not the turns around it.
+    expect(within(dock()).getAllByText(/tighten the first criterion/).length).toBeGreaterThan(0);
+  });
+
+  // The other two arms of the same rule. A card is kept or dropped by which
+  // tool made it, so each tool needs its own run: a drafting happens once and
+  // is the only word on what the spec aimed at the drafter, and an undo is the
+  // only word that a change was taken back. Neither is said anywhere else, and
+  // neither may be dropped for being a tool call that worked.
+  it("keeps the drafting and the undo, which are said nowhere else", async () => {
+    const session = await planning();
+    const current = await previewBridge.request({ kind: "editingRead", id: session.id });
+    await previewBridge.request({
+      kind: "editingSubmit",
+      id: session.id,
+      revision: current.revision,
+      operationId: crypto.randomUUID(),
+      intent: "generate",
+    });
+    await waitFor(
+      async () =>
+        expect((await previewBridge.request({ kind: "editingRead", id: session.id })).key).not.toBeNull(),
+      { timeout: 5000 },
+    );
+    location.hash = `planning/${session.id}/spec`;
+    mount();
+    await screen.findByLabelText("Message the interview");
+
+    const say = async (text: string): Promise<void> => {
+      fireEvent.change(composer(), { target: { value: text } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      await waitFor(() => expect(composer().value).toBe(""));
+    };
+    // A turn to get past the refusal the sample opens with, then an edit, so
+    // there is something for the undo to take back.
+    await say("what is this for?");
+    await say("tighten the first criterion");
+    expect(await within(dock()).findByText("Changed the plan")).toBeTruthy();
+
+    // The drafting: kept, and its report reachable rather than shown.
+    await say("draft it");
+    expect(await within(dock()).findByText("Drafted the plan")).toBeTruthy();
+    expect(
+      within(dock()).getByRole("button", { name: "What happened: Drafted the plan" }),
+    ).toBeTruthy();
+
+    // The undo: kept, though no undo is ever offered on an undo's own card —
+    // the plan's history refuses to undo one, so it can never be the edit the
+    // card's button points at, and a rule that kept only those would lose it.
+    await say("take it back");
+    expect(await within(dock()).findByText("Took a change back")).toBeTruthy();
+    // And the edit it took back is gone from the chat with its undo, while the
+    // drafting is still there.
+    await waitFor(() => expect(within(dock()).queryByText("Changed the plan")).toBeNull());
+    expect(within(dock()).getByText("Drafted the plan")).toBeTruthy();
   });
 
   it("opens the plan's history over the pane, with the chat still beside it", async () => {

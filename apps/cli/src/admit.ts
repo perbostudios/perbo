@@ -90,6 +90,7 @@ import {
   type DraftSnapshotFile,
   type JudgingRule,
 } from "./tickets.js";
+import { NEXT_STEPS } from "./next-step.js";
 import { specFolder } from "./store.js";
 import { describeScheduling } from "./waits.js";
 
@@ -1857,7 +1858,7 @@ function redraft(input: AdmitInput, started: number, resolved: Resolved, key: st
             .map((page) => `  ${relative(repositoryRoot, page).split(sep).join("/")}\n`)
             .join("")
         : "") +
-      `\nRead it once more, then approve it:\n  perbo approve ${key}\n`,
+      `\n${NEXT_STEPS[0]}\n  perbo approve ${key}\n`,
   );
   return EXIT_CODES.approve;
 }
@@ -1925,11 +1926,10 @@ function renderAdmitted(args: {
       `${drafted.model.model_id}, ${money(drafted.model.cost_micros, drafted.model.cost_basis)}\n`
     : `\nadmitted ${key} (${ticket.state}) in ${ticket.admission.elapsed_ms}ms\n`;
   const next = ticket.approved_at
-    ? `\nApproved. The contract is immutable from here.\n  perbo run --ticket ${key}\n`
+    ? `\n${NEXT_STEPS[3]}\n  perbo run --ticket ${key}\n`
     : drafted
-      ? `\nThe model drafted this; nothing runs until you approve it. Edit anything, then approve:\n` +
-        `  perbo edit ${key}\n  perbo approve ${key}\n`
-      : `\nRead the contract, then approve it:\n  perbo edit ${key}\n  perbo approve ${key}\n`;
+      ? `\n${NEXT_STEPS[2]}\n  perbo edit ${key}\n  perbo approve ${key}\n`
+      : `\n${NEXT_STEPS[1]}\n  perbo edit ${key}\n  perbo approve ${key}\n`;
   // The graph as recorded: each node with the criteria it covers and the paths
   // it lands in, then the order and the No-Gos, which are approach and live in
   // their own file. `perbo inspect` says the same with the size beside it.
