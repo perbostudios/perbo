@@ -17,9 +17,9 @@ The verdict is structured output over criteria supplied by the plan, never parse
 
 ## The shape
 
-Seventeen modules, three transports onto one model call surface, no abstraction that does not yet
-have two users. `index.ts` re-exports all but `provider-structured.ts`, which only the two CLI
-transports import, and `redact.test.ts` sits in `src/` beside its subject.
+Twelve modules, no abstraction that does not yet have two users. The model call itself is
+[`@perbo/model`](../model/README.md) — this package holds what judges. `redact.test.ts` sits in
+`src/` beside its subject.
 
 | | |
 |---|---|
@@ -28,14 +28,9 @@ transports import, and `redact.test.ts` sits in `src/` beside its subject.
 | `verdict.ts` | The `submit_review` schema, built from **this plan's** criteria list |
 | `prompt.ts` | Context assembly and the one instruction position |
 | `repo.ts` | The bounded, read-only file surface the reviewer selects from |
-| `provider.ts` | The Anthropic call, plus token accounting |
-| `provider-cli.ts` | The same review over a locally installed `claude` binary |
-| `provider-codex-cli.ts` | The same review over a locally installed `codex` binary |
-| `provider-structured.ts` | The one turn schema both structured-output CLI transports read |
 | `suppression.ts` | Waivers and measured rule authority |
 | `closure-verify.ts` | The single question a remediation round asks of each routed finding |
-| `credential.ts` | What counts as credential-shaped (D-063) |
-| `redact.ts` | Redaction of everything the reviewer writes, at the artifact boundary |
+| `redact.ts` | Redaction of everything the reviewer writes, at the artifact boundary, over the detector in `@perbo/contracts` (D-063) |
 | `legibility.ts` | Whether the change set is one a person can read (SCP-114) |
 | `agent-config.ts` | Repository-supplied agent configuration, failed closed (ADR-0030) |
 | `review.ts` | The orchestrator |

@@ -579,6 +579,14 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Changes if: a package gains a consumer outside this repository, or the lint rules that hold the boundaries need more exceptions than there are modules.
 - ADR: [ADR-NEW-package-interface](adr/NEW-package-interface.md).
 
+### D-NEW-model-client — One model client, three transports, in a package of its own
+
+- Owner: Founder
+- Decision: every model call this repository makes goes through `@perbo/model`: one port, `Model`, carrying one turn of the read-or-submit protocol against a schema the calling process supplied; three transports onto it (the Anthropic SDK, a local `claude` binary, a local `codex` binary); token accounting and the list-price estimate that says what a turn cost. No other package imports a provider SDK, and no other package starts a provider binary for a model call. `@perbo/review` holds what judges — context assembly, the blocking matrix, the structured verdict, closure verification and artifact redaction — and nothing else. What counts as credential-shaped is `@perbo/contracts` ([D-063](11-open-decisions.md)).
+- Why: drafting, review, closure verification and the doctor's probe all make the same call, and three of them reached it by depending on the reviewer, which put a provider SDK in the drafter's dependency graph and the reviewer's package in the drafter's. A change to the request bytes is then indistinguishable from a change to the judgement. Separated, each has one home and one set of tests, and the reviewer's package holds only what a reviewer-change review has to read.
+- Changes if: a caller needs a protocol this port cannot carry — a conversation that is not read-or-submit — in which case the port grows a second shape rather than a second client.
+- Note: a change to a default model, to the request a transport builds or to the price card is a change to the reviewer under [D-010](11-open-decisions.md), and `.github/workflows/build.yml` has to watch `packages/model/` for that to hold.
+
 ### D-112 — Trademarks, patents and the brand under Apache-2.0
 
 - Owner: Founder

@@ -10,6 +10,7 @@ apps/
   desktop/        the Perbo desktop — Electron host + React renderer over the bundled CLI
 packages/
   contracts/      versioned schemas every other package builds on
+  model/          the model call: one turn protocol, three transports, token accounting
   review/         independent review: blocking matrix, structured verdict, trust boundary
   workspace/      worktree provisioning and materialization
   runner/         execution: permission profile, ceilings, agent adapter, sealing, delivery

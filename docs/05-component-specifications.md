@@ -4,11 +4,11 @@ One entry per real component in this repository. **Owns** is what only this comp
 
 ## `apps/cli` — the `perbo` command
 
-One binary carries every command: `doctor`, `baseline`, `review`, `inspect`, `verdict`, `run`, `admit`, `edit`, `approve`, `list`, `sync`, `serve`, `mcp`, `agent`, `interview`, `stops`, `escapes`, `principle` and `index`. `tooling/package` bundles it into the design-partner tarball, linking `@perbo/contracts`, `@perbo/planning`, `@perbo/review`, `@perbo/runner` and `@perbo/workspace` ([D-075](11-open-decisions.md), [ADR-0032](adr/0032-open-source-the-local-cli-and-the-reviewer.md)).
+One binary carries every command: `doctor`, `baseline`, `review`, `inspect`, `verdict`, `run`, `admit`, `edit`, `approve`, `list`, `sync`, `serve`, `mcp`, `agent`, `interview`, `stops`, `escapes`, `principle` and `index`. `tooling/package` bundles it into the design-partner tarball, linking `@perbo/contracts`, `@perbo/model`, `@perbo/planning`, `@perbo/review`, `@perbo/runner` and `@perbo/workspace` ([D-075](11-open-decisions.md), [ADR-0032](adr/0032-open-source-the-local-cli-and-the-reviewer.md)).
 
 **Owns:** the ticket store under `.perbo/` — admission, contracts, drafts, approval and edit history; `perbo serve`, the queue over that store: it fetches the base ref, reads open pull requests through `sync`, decides who waits by set arithmetic over approved scope, re-levels open branches behind the base, starts runs up to the configured concurrency, drafts labelled tracker issues into `plan_review`, and, under `merge: loop`, merges the head pull request once [D-041](11-open-decisions.md)'s conditions hold ([D-108](11-open-decisions.md)); the loopback tool endpoint `perbo serve` hosts and `perbo mcp` / `perbo agent` reach, one capability token per role, scoped to reads plus `admit`, `edit`, `sync` and pause/resume — never approve, publish or merge ([D-109](11-open-decisions.md)); `perbo interview`, the person's own Claude Code session through the Claude Agent SDK or Codex session through `codex app-server`, which writes the spec folder, `CONTEXT.md` and the ADR folder under the runner's write guard, drafts the plan from the spec and edits it afterwards through the validated edit path alone ([D-102](11-open-decisions.md)); the stops/escapes ledger and the baseline stopwatch ([D-038](11-open-decisions.md)); `perbo index`, the symbol and import index over a TypeScript and JavaScript repository, read off the tracked tree with TypeScript's own parser and written to `<repo>/.perbo/index.json`, and the stale-spec check that reads it beside the spec's own bytes — stopping a run on a stale spec at `plan_invalid` and flagging one already in flight ([D-015](11-open-decisions.md), [D-103](11-open-decisions.md)).
 
-**Consumes:** `@perbo/contracts`, `@perbo/review`, `@perbo/workspace`, `@perbo/runner` and `@perbo/planning`; local `git` and `gh`; the person's own coding-agent and reviewer credentials — Perbo never reads, stores or forwards one.
+**Consumes:** `@perbo/contracts`, `@perbo/model`, `@perbo/review`, `@perbo/workspace`, `@perbo/runner` and `@perbo/planning`; local `git` and `gh`; the person's own coding-agent and reviewer credentials — Perbo never reads, stores or forwards one.
 
 **Emits:** `ReviewArtifact` and `ExecutionAttempt` records, ticket state transitions, the stop and verdict ledgers, and, with `--publish`, a branch and a pull request for a person to merge.
 
@@ -42,13 +42,25 @@ Versioned Zod schemas and inferred types — files, not tables — for every art
 
 Decided, not built: grouping a large ticket's plan into an execution graph, and a size derived from it ([D-100](11-open-decisions.md), [D-104](11-open-decisions.md)).
 
+## `packages/model` — `@perbo/model`
+
+The model call: one port over one turn of the read-or-submit protocol, and three transports onto it — the Anthropic SDK, a local `claude` binary and a local `codex` binary ([D-NEW-model-client](11-open-decisions.md)).
+
+**Owns:** the request each transport builds, byte for byte, pinned by a record beside it; the two wire tool names the protocol uses; the default model per transport; token accounting, the Claude list-price card and which of the two ways of knowing a cost a figure came by. The two CLI transports are the only code in the repository that starts a provider binary: argv never a command line, each in a scratch directory of its own under the executor's environment allow-list, with every customisation, tool, hook and slash command suppressed ([ADR-0023](adr/0023-untrusted-context-boundary.md), [ADR-0030](adr/0030-neutralise-repository-supplied-agent-configuration.md)).
+
+**Consumes:** `@perbo/contracts`, and a provider credential the person already has — read by the SDK or the binary from the environment, never by Perbo.
+
+**Emits:** one turn: the tool calls the model made, the tokens it used, and what the transport says the turn cost where it knows.
+
+**Trust boundary:** the prompt and the system prompt are never command-line arguments — one travels on stdin, the other in a file of that conversation's own — because a file a caller read can hold a NUL byte or more bytes than `ARG_MAX`, and argv can hold neither.
+
 ## `packages/review` — `@perbo/review`
 
-Independent review: checks, findings, coverage and structured verdicts, over three model transports (the Anthropic SDK, a local `claude` binary, a local `codex` binary).
+Independent review: checks, findings, coverage and structured verdicts, over one model client (`@perbo/model`).
 
 **Owns:** the blocking matrix and routing, which sends a finding the executor can close back to it as `remediable` within a round limit ([docs/04](04-ticket-workspace-and-review.md#the-blocking-matrix), [D-051](11-open-decisions.md)); stable finding keys (`hash(rule_id | criterion_id | file | symbol)`); waivers and measured rule authority; review independence, with the executor's narrative hidden at every level ([D-037](11-open-decisions.md)).
 
-**Consumes:** the approved plan, the sealed change set, deterministic check results, and files it selects itself from a bounded read-only surface that excludes materialized secrets and repository-supplied agent configuration. Never the executor's narrative or transcript, at any level — repository and issue content arrives only inside trust-tagged blocks, data rather than instruction ([ADR-0023](adr/0023-untrusted-context-boundary.md), [D-035](11-open-decisions.md)).
+**Consumes:** `@perbo/model`; the approved plan, the sealed change set, deterministic check results, and files it selects itself from a bounded read-only surface that excludes materialized secrets and repository-supplied agent configuration. Never the executor's narrative or transcript, at any level — repository and issue content arrives only inside trust-tagged blocks, data rather than instruction ([ADR-0023](adr/0023-untrusted-context-boundary.md), [D-035](11-open-decisions.md)).
 
 **Emits:** the `ReviewArtifact` — structured per-criterion verdicts and findings, never parsed prose; deterministic check results outrank a model's claim about them.
 
