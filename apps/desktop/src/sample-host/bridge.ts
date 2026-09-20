@@ -67,9 +67,10 @@ import type {
   InterviewStatus,
 } from "../shared/protocol.js";
 
-/** The supplied mockup's records, isolated behind the browser-only bridge.
- * No native process, credential, repository or network operation is available here.
- * The same screens and transitions render native records in Electron.
+/**
+ * The sample records, and the one bridge that answers requests over them. No
+ * native process, credential, repository or network operation is reachable
+ * here. The same screens and transitions render native records in Electron.
  */
 const repoId = "80000000-0000-4000-8000-000000000001";
 const landingId = "80000000-0000-4000-8000-000000000002";
@@ -1396,8 +1397,8 @@ const editing = new ContractEditing({
     if (!snapshot.tasks.some((row) => row.repoId === repoId && row.ticket.key === key)) throw new Error("Sample task not found in this repository.");
     return structuredClone(detail(key));
   },
-  start: (request, owner) => previewRequest(request, owner),
-  stop: async (jobId) => { await previewRequest({ kind: "cancel", jobId }); },
+  start: (request, owner) => sampleRequest(request, owner),
+  stop: async (jobId) => { await sampleRequest({ kind: "cancel", jobId }); },
   id: () => crypto.randomUUID(),
   standing: (id) => standingFor(id),
   setStanding: (id, entries) => {
@@ -1601,7 +1602,7 @@ function answerSampleTurn(id: string, text: string): void {
   });
 }
 
-async function previewRequest<T extends Request>(request: T, owner?: EditingOwner): Promise<ReplyMap[T["kind"]]> {
+async function sampleRequest<T extends Request>(request: T, owner?: EditingOwner): Promise<ReplyMap[T["kind"]]> {
     let result: unknown = null;
     switch (request.kind) {
       case "editingOpen": result = await editing.open(request.target, request.legacy); break;
@@ -2110,8 +2111,8 @@ async function previewRequest<T extends Request>(request: T, owner?: EditingOwne
     }
     return result as ReplyMap[T["kind"]];
 }
-export const previewBridge: DesktopBridge = {
-  request: (request) => previewRequest(RequestSchema.parse(request) as typeof request),
+export const sampleBridge: DesktopBridge = {
+  request: (request) => sampleRequest(RequestSchema.parse(request) as typeof request),
   subscribe(listener) {
     listeners.add(listener);
     return () => {

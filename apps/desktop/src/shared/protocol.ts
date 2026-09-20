@@ -296,9 +296,9 @@ export const INTERVIEW_CONVERSATION_CAP = 400;
 /**
  * What the host says when this planning cannot have an interview yet (D-102).
  *
- * Here rather than in the host, because the browser preview stands in for the
- * host and a second spelling of a sentence the person reads would drift from
- * this one at the next edit.
+ * Here rather than in the host, because the sample host stands in for the host
+ * and a second spelling of a sentence the person reads would drift from this
+ * one at the next edit.
  */
 export const INTERVIEW_NEEDS_A_TITLE =
   "Give this planning a spec title first. The interview writes specs/<slug>/spec.md, and the slug " +

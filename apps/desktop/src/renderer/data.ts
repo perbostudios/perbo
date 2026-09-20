@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isLive } from "../shared/jobs.js";
 import { useEffect } from "react";
 import type { DesktopBridge, Request } from "../shared/protocol.js";
-import { previewBridge } from "./preview.js";
+import { sampleBridge } from "../sample-host/bridge.js";
 import { workspaceRefresh } from "./workspace-refresh.js";
 
 const missingHost: DesktopBridge = {
@@ -17,7 +17,7 @@ const missingHost: DesktopBridge = {
 };
 export const bridge: DesktopBridge =
   window.perbo ??
-  (navigator.userAgent.includes("Electron/") ? missingHost : previewBridge);
+  (navigator.userAgent.includes("Electron/") ? missingHost : sampleBridge);
 function useRefresh() {
   const client = useQueryClient();
   const refresh = workspaceRefresh(client, bridge);

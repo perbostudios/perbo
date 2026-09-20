@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { projectTicket } from "../src/renderer/tasks/ticket-workspace.js";
-import { previewBridge } from "../src/renderer/preview.js";
+import { sampleBridge } from "../src/sample-host/bridge.js";
 import type { Job } from "../src/shared/protocol.js";
 
 async function fixture() {
-  const workspace = structuredClone(await previewBridge.request({ kind: "snapshot" }));
+  const workspace = structuredClone(await sampleBridge.request({ kind: "snapshot" }));
   workspace.mode = "desktop";
   workspace.jobs = [];
   const row = workspace.tasks.find((task) => task.ticket.key === "PRB-412")!;
-  const detail = structuredClone(await previewBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }));
+  const detail = structuredClone(await sampleBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }));
   detail.ticket = row.ticket;
   delete detail.sample;
   delete row.summary;

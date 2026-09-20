@@ -6,7 +6,7 @@ import { createElement, type PropsWithChildren } from "react";
 import { sizeEstimate } from "@perbo/contracts/size";
 import { WorkspaceRefresh } from "../src/renderer/workspace-refresh.js";
 import { WorkspaceReads } from "../src/host/workspace-reads.js";
-import { previewBridge } from "../src/renderer/preview.js";
+import { sampleBridge } from "../src/sample-host/bridge.js";
 import { bridge, useGraph, useTaskSummary } from "../src/renderer/data.js";
 import { TaskModelsSchema } from "../src/shared/protocol.js";
 import type { Change, DesktopBridge, Detail, GraphView, Job, ReplyMap, Request, Snapshot, TaskSummary } from "../src/shared/protocol.js";
@@ -19,12 +19,12 @@ function deferred<T>() {
   return { promise, resolve };
 }
 async function fixture() {
-  const snapshot = structuredClone(await previewBridge.request({ kind: "snapshot" }));
+  const snapshot = structuredClone(await sampleBridge.request({ kind: "snapshot" }));
   snapshot.mode = "desktop";
   snapshot.jobs = [];
   snapshot.sequence = 0;
   const row = snapshot.tasks[0]!;
-  const detail = structuredClone(await previewBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }));
+  const detail = structuredClone(await sampleBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }));
   const requests: Request[] = [];
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, networkMode: "always", staleTime: Infinity } } });
   client.setQueryData(["workspace"], snapshot);

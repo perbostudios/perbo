@@ -16,7 +16,7 @@ import type { Detail, Snapshot } from "../src/shared/protocol.js";
 import { runnerProgress } from "../src/renderer/presentation.js";
 import { HomePage } from "../src/renderer/tasks/HomePage.js";
 import { TaskPage } from "../src/renderer/tasks/TaskPage.js";
-import { previewBridge } from "../src/renderer/preview.js";
+import { sampleBridge } from "../src/sample-host/bridge.js";
 import { isLive } from "../src/shared/jobs.js";
 
 // A CI runner renders this app several times slower than a laptop, and the
@@ -28,9 +28,9 @@ let client: QueryClient;
 let decisionDetail: Detail;
 beforeAll(async () => {
   // Keep the recorded review independent of earlier flows that finish this sample run.
-  const workspace = await previewBridge.request({ kind: "snapshot" });
+  const workspace = await sampleBridge.request({ kind: "snapshot" });
   const row = workspace.tasks.find((task) => task.ticket.key === "PRB-412")!;
-  decisionDetail = structuredClone(await previewBridge.request({
+  decisionDetail = structuredClone(await sampleBridge.request({
     kind: "detail", repoId: row.repoId, key: row.ticket.key,
   }));
 });
@@ -97,7 +97,7 @@ describe("interactive desktop flows", () => {
       target: { value: "Every new signup queues exactly one email." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    const admitted = (await previewBridge.request({ kind: "snapshot" })).drafts!.find((draft) => draft.key)!;
+    const admitted = (await sampleBridge.request({ kind: "snapshot" })).drafts!.find((draft) => draft.key)!;
     expect(admitted.key).toMatch(/^PRB-/);
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     fireEvent.click(await screen.findByRole("button", { name: "Create" }));
@@ -180,7 +180,7 @@ describe("interactive desktop flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm and resume" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(async () => {
-      const workspace = await previewBridge.request({ kind: "snapshot" });
+      const workspace = await sampleBridge.request({ kind: "snapshot" });
       expect(workspace.tasks.find((task) => task.ticket.key === "PRB-412")?.ticket.state)
         .toBe("pr_open");
     }, { timeout: 5000 });
@@ -210,7 +210,7 @@ describe("interactive desktop flows", () => {
   });
 
   it("never presents a completed local-only run as a published pull request", async () => {
-    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
     const row = workspace.tasks.find((row) => row.ticket.key === "PRB-377")!;
     delete row.summary;
     row.ticket.delivery = {
@@ -221,7 +221,7 @@ describe("interactive desktop flows", () => {
     };
     workspace.mode = "desktop";
     workspace.tasks = [row];
-    const detail = await previewBridge.request({
+    const detail = await sampleBridge.request({
       kind: "detail",
       repoId: row.repoId,
       key: row.ticket.key,
@@ -288,9 +288,9 @@ describe("interactive desktop flows", () => {
   )(
     "offers recovery for an idle $state task and preserves an active $outcome run",
     async ({ state, outcome }) => {
-      const workspace = await previewBridge.request({ kind: "snapshot" });
+      const workspace = await sampleBridge.request({ kind: "snapshot" });
       const row = workspace.tasks[0]!;
-      const detail = await previewBridge.request({
+      const detail = await sampleBridge.request({
         kind: "detail",
         repoId: row.repoId,
         key: row.ticket.key,
@@ -346,10 +346,10 @@ describe("interactive desktop flows", () => {
   it.each(["failed", "unrecorded", "running", "stopping"] as const)(
     "uses the same recovery state on Home and the loop after a %s run",
     async (outcome) => {
-      const workspace = await previewBridge.request({ kind: "snapshot" });
+      const workspace = await sampleBridge.request({ kind: "snapshot" });
       const row = workspace.tasks.find((task) => task.ticket.key === "PRB-398")!;
       const newer = workspace.tasks.find((task) => task.ticket.key === "PRB-421")!;
-      const detail = structuredClone(await previewBridge.request({
+      const detail = structuredClone(await sampleBridge.request({
         kind: "detail", repoId: row.repoId, key: row.ticket.key,
       }));
       workspace.mode = "desktop";
@@ -402,7 +402,7 @@ describe("interactive desktop flows", () => {
   it.each(["changes_requested", "pr_open", "provisioning"] as const)(
     "keeps canonical %s routing when an earlier run job failed",
     async (state) => {
-      const workspace = await previewBridge.request({ kind: "snapshot" });
+      const workspace = await sampleBridge.request({ kind: "snapshot" });
       const row = workspace.tasks.find((task) => task.ticket.key === "PRB-412")!;
       const detail = structuredClone(decisionDetail);
       const attempt = detail.attempts.at(-1)!;
@@ -463,9 +463,9 @@ describe("interactive desktop flows", () => {
   it.each(["PRB-398", "PRB-404"])(
     "preserves the %s preview activity when no native job exists",
     async (key) => {
-      const workspace = await previewBridge.request({ kind: "snapshot" });
+      const workspace = await sampleBridge.request({ kind: "snapshot" });
       const row = workspace.tasks.find((task) => task.ticket.key === key)!;
-      const detail = structuredClone(await previewBridge.request({
+      const detail = structuredClone(await sampleBridge.request({
         kind: "detail", repoId: row.repoId, key,
       }));
       workspace.mode = "preview";
@@ -485,10 +485,10 @@ describe("interactive desktop flows", () => {
 
   /** Starts the sample loop on a ticket, and stops it when the test is done with it. */
   async function runInProgress(key: string) {
-    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
     const row = workspace.tasks.find((task) => task.ticket.key === key)!;
-    const detail = await previewBridge.request({ kind: "detail", repoId: row.repoId, key });
-    const job = await previewBridge.request({
+    const detail = await sampleBridge.request({ kind: "detail", repoId: row.repoId, key });
+    const job = await sampleBridge.request({
       kind: "run", repoId: row.repoId, key, digest: detail.digest,
       approve: true, publish: false, resumeFrom: null,
     });
@@ -496,8 +496,8 @@ describe("interactive desktop flows", () => {
       row, job,
       // The sample loop settles itself; a stop after that is refused as it is by the host, so only a live one is stopped.
       stop: async () => {
-        const live = (await previewBridge.request({ kind: "snapshot" })).jobs.find((entry) => entry.id === job.id && isLive(entry));
-        if (live) await previewBridge.request({ kind: "cancel", jobId: job.id });
+        const live = (await sampleBridge.request({ kind: "snapshot" })).jobs.find((entry) => entry.id === job.id && isLive(entry));
+        if (live) await sampleBridge.request({ kind: "cancel", jobId: job.id });
       },
     };
   }
@@ -515,7 +515,7 @@ describe("interactive desktop flows", () => {
     fireEvent.click(start);
     await screen.findByText("Drafting your acceptance criteria");
     // Both are in flight: the run was never in the way of the drafting.
-    const live = (await previewBridge.request({ kind: "snapshot" })).jobs
+    const live = (await sampleBridge.request({ kind: "snapshot" })).jobs
       .filter((entry) => ["running", "stopping"].includes(entry.state));
     expect(live.map((entry) => entry.kind).sort()).toEqual(["draft", "run"]);
     expect(live.some((entry) => entry.id === running.job.id)).toBe(true);
@@ -525,9 +525,9 @@ describe("interactive desktop flows", () => {
 
   it("refuses a second run while one is going, and says which one is in the way (SCP-335)", async () => {
     const running = await runInProgress("PRB-404");
-    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
     const row = workspace.tasks.find((task) => task.ticket.key === "PRB-421")!;
-    const detail = structuredClone(await previewBridge.request({
+    const detail = structuredClone(await sampleBridge.request({
       kind: "detail", repoId: row.repoId, key: row.ticket.key,
     }));
     const state = row.ticket.state;
@@ -553,7 +553,7 @@ describe("interactive desktop flows", () => {
       "Run engineering loop is already running. Wait for it to finish or stop it before starting this one.",
     )).toBeTruthy();
     // The refused run left the ticket where it was.
-    const after = (await previewBridge.request({ kind: "snapshot" })).tasks
+    const after = (await sampleBridge.request({ kind: "snapshot" })).tasks
       .find((task) => task.ticket.key === "PRB-421")!;
     expect(after.ticket.state).toBe(state);
     await running.stop();
