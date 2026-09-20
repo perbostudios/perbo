@@ -7,7 +7,7 @@ import {
   INTERPRETERS,
   PLAIN_WRITE_CALLS,
   WRITERS,
-} from "../src/shell.js";
+} from "../src/shell/index.js";
 import { inspectCommand } from "../src/prohibited.js";
 import { scratch } from "./support.js";
 

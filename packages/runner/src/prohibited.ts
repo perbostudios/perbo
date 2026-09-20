@@ -24,7 +24,7 @@ import {
   type WriteFinding,
   type WriteRule,
   type WriterSpec,
-} from "./shell.js";
+} from "./shell/index.js";
 import { describePushDestination, readPush, resolvePushDestination } from "./push-remote.js";
 
 export {
