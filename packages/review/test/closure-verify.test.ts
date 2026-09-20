@@ -14,6 +14,8 @@ const finding = (over: Partial<Finding> = {}): Finding => ({
   source: "semantic",
   row: "semantic_ordinary",
   closure: "executor",
+  direction: null,
+  caused_by_change: null,
   criterion_id: null,
   severity: "advisory",
   blocking: false,

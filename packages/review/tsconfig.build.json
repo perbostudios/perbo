@@ -1,0 +1,3 @@
+{
+  "extends": "@perbo/tsconfig/library.build.json"
+}
