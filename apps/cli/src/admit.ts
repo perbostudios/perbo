@@ -1345,6 +1345,24 @@ function assertNotAlreadyDrafted(input: AdmitInput): void {
   );
 }
 
+/**
+ * What a ticket is called.
+ *
+ * A ticket drafted from a spec is that spec, so it carries the title the
+ * person gave it: the board, the spec's folder and the planning pane all say
+ * the same thing, and work somebody named is findable under the name they
+ * used. Everything else is called by its outcome, which is the only sentence a
+ * ticket drafted from an issue or a pasted file has to be called by.
+ *
+ * The branch is not affected either way — `branchName` derives from the
+ * outcome, not from this.
+ */
+function ticketTitle(resolved: Resolved, outcome: string): string {
+  if (resolved.spec === null) return outcome;
+  const named = resolved.issue?.title.trim() ?? "";
+  return named.length > 0 ? named : outcome;
+}
+
 function admit(input: AdmitInput, started: number, resolved: Resolved): number {
   const now = input.now ?? new Date();
   const { args, streams } = input;
@@ -1396,7 +1414,7 @@ function admit(input: AdmitInput, started: number, resolved: Resolved): number {
     schema_version: TICKET_SCHEMA_VERSION,
     ticket_id,
     key,
-    title: resolved.outcome,
+    title: ticketTitle(resolved, resolved.outcome),
     state: "plan_review",
     priority: args.priority,
     labels: args.labels,
@@ -1791,7 +1809,7 @@ function redraft(input: AdmitInput, started: number, resolved: Resolved, key: st
 
   const updated: Ticket = TicketSchema.parse({
     ...ticket,
-    title: contract.outcome,
+    title: ticketTitle(resolved, contract.outcome),
     plan_version: contract.version,
     updated_at: now.toISOString(),
     admission: {

@@ -346,6 +346,20 @@ describe("perbo admit --from-spec", () => {
     expect(nodes?.[1]?.paths).toEqual(["packages/queue/**"]);
   });
 
+  it("calls the ticket what the person called the spec, not what the draft called the outcome", async () => {
+    const { repo, specPath } = repository();
+    const { code } = await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
+    expect(code).toBe(EXIT_CODES.approve);
+
+    // The spec's own title, so the board, the folder and the planning pane all
+    // say the same thing. The outcome is a sentence the drafter wrote, and it
+    // is still the contract's outcome — it is just not the ticket's name.
+    const ticket = readTicket(storeDir(repo, null), "PRB-1");
+    expect(ticket.title).toBe("Activation email");
+    expect(readContract(storeDir(repo, null), "PRB-1").outcome).toBe(drafted.outcome);
+    expect(ticket.title).not.toBe(drafted.outcome);
+  });
+
   it("shows the person the graph and the No-Gos it just recorded", async () => {
     const { repo, specPath } = repository();
     const { streams } = await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
