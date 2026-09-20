@@ -1,3 +1,5 @@
+import type { Workspace } from "@perbo/workspace";
+import { initialRoundState, type RoundState } from "../state.js";
 import {
   EXECUTION_ATTEMPT_SCHEMA_VERSION,
   ExecutionAttemptSchema,
@@ -208,3 +210,39 @@ export function attempt(input: {
     wait: null,
   } satisfies ExecutionAttempt);
 }
+
+const WORKSPACE: Workspace = {
+  attempt_id: "att_0000000000000001",
+  root_attempt_id: "att_0000000000000001",
+  repository_id: "repo_fixture",
+  repository_root: "/nowhere/repo",
+  branch: "ayo/fixture/the-feature-module",
+  path: "/nowhere/worktree",
+  base_commit: "a1b2c3d",
+  lease: {
+    attempt_id: "att_0000000000000001",
+    root_attempt_id: "att_0000000000000001",
+    repository_id: "repo_fixture",
+    branch: "ayo/fixture/the-feature-module",
+    path: "/nowhere/worktree",
+    base_commit: "a1b2c3d",
+    created_at: "2026-08-27T00:00:00.000Z",
+    expires_at: "2026-08-27T01:00:00.000Z",
+    pid: 1,
+    host: "fixture",
+    port_range_start: null,
+    port_range_end: null,
+  },
+  continued: false,
+};
+
+export const workspace = (overrides: Partial<Workspace> = {}): Workspace => ({
+  ...WORKSPACE,
+  ...overrides,
+});
+
+/** A round state as the loop enters a round, with the field under test set. */
+export const roundState = (overrides: Partial<RoundState> = {}): RoundState => ({
+  ...initialRoundState(WORKSPACE, null),
+  ...overrides,
+});

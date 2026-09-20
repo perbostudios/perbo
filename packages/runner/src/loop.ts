@@ -124,7 +124,7 @@ import {
   writeReviewBundle,
 } from "./loop/review.js";
 import { resolvePorts, type LoopPorts } from "./loop/context.js";
-import { attemptIdFor, type RoundKind, type RoundRecord } from "./loop/state.js";
+import { applyStep, attemptIdFor, initialRoundState, type RoundRecord } from "./loop/state.js";
 import { verifierModel } from "./loop/verify.js";
 
 /**
@@ -820,49 +820,9 @@ async function runLockedTicket(
   const principles = config.principles_path
     ? readPrinciplesFile(config.principles_path)
     : readPrinciples(config.repository_root);
-  /**
-   * The routed findings still open, set by round 0's review and narrowed by
-   * each verification. Only remediable families ever enter it.
-   */
-  let openFindings: ReturnType<typeof remediableFindings> = [];
-  let finalReview: ReviewArtifact | null = null;
-  /** The graph's per-node reviews beside `finalReview` (D-107); empty for a flat plan. */
-  let nodeReviews: NodeReview[] = [];
-  /**
-   * Whether the round now running answers a review that could not resolve every
-   * criterion.
-   *
-   * What such a round produces is judged by a new review rather than by a
-   * closure verification: the criteria are what has to be judged, and verifying
-   * that one finding is closed says nothing about them. Cleared the moment that
-   * review is in, so a round the re-review then routes is verified like any
-   * other.
-   */
-  let reviewingAgain = false;
-  /** Which way an incomplete review reached its end; see `TicketRunResult`. */
-  let incompleteReview: IncompleteReviewPath | null = null;
-  /** Filled after each round's checks; excluded from the next round's seal. */
-  let checkArtifacts: string[] = [];
   let outcome: TicketRunResult["outcome"] = "terminated";
   let detail = "";
 
-  /**
-   * The round, and the attempt within it.
-   *
-   * Both advance explicitly rather than through a `for` header, because a round
-   * can end in more than one way: it moves on when the round is answered, and it
-   * stays where it is for the one further attempt a transport failure buys
-   * (SCP-172), for an attempt a ceiling cut (SCP-193), or for the resolution of
-   * a base conflict found before the executor (SCP-192). Every path through the
-   * body ends in a `break` or in a `continue` that has advanced one of the two
-   * or changed the round's `kind`, and the conflict path can only take a round
-   * from `execute` to `resolve_conflict` and never back, so the loop cannot
-   * spin.
-   *
-   * `transport_retry` is 0 for a round's own attempt and 1 for that further
-   * attempt. It is the whole retry budget: a second consecutive transport
-   * failure is the run's answer rather than a third attempt.
-   */
   /**
    * SCP-194: the remediation this run continues, where the record holds one.
    *
@@ -872,16 +832,13 @@ async function runLockedTicket(
    * that run is continuing a cut attempt's diff, not a review's findings.
    *
    * Whether the branch is still at the commit that review judged is checked in
-   * the loop, against the branch itself. Set to null once that check has run.
+   * the loop, against the branch itself.
    */
-  let continuing =
+  const continuing =
     resumeSource !== null || config.relevel
       ? null
       : remediationToContinue({ bundles, ticket_id: contract.ticket_id });
   if (continuing !== null) {
-    finalReview = continuing.review;
-    nodeReviews = continuing.node_reviews;
-    openFindings = continuing.findings;
     progress(
       `${config.ticket_key}'s last review left ${continuing.findings.length} finding(s) open on ` +
         `${continuing.head_commit}; this run continues remediation from them rather than ` +
@@ -889,78 +846,14 @@ async function runLockedTicket(
     );
   }
 
-  let round = continuing === null ? 0 : 1;
   /**
-   * How many **remediation** rounds have run (SCP-194).
-   *
-   * Separate from `round`, which counts every round the loop takes. A
-   * `resolve_conflict` round is not remediation — its whole task is making the
-   * branch mergeable again, and counting it would spend a ticket's rounds on
-   * the base having moved. So the cap and the progress rule are read against
-   * this, and the executor's brief says which remediation round it is in terms
-   * of this.
+   * Everything one round of this run hands the next, replaced rather than
+   * mutated (`RoundState`). Every path through the round body ends in a
+   * `break`, or in a `continue` that has taken a `Step`: the round advances,
+   * one more attempt of it is bought, or the round is re-entered as the
+   * resolution of a base conflict — so the loop cannot spin.
    */
-  let remediationRound = continuing === null ? 0 : 1;
-  let transport_retry = 0;
-  /**
-   * SCP-193: how many attempts of this round a ceiling already cut.
-   *
-   * A cost or iteration ceiling ends an attempt with its work sealed onto the
-   * branch, and the next attempt of the same round starts over those commits —
-   * SCP-164's re-run, inside one run. It is a separate counter from
-   * `transport_retry` because the two are different budgets: the transport one
-   * is a single retry per round, and this one runs until the ticket budget is
-   * reached. Reset whenever the round advances.
-   */
-  let ceiling_continuation = 0;
-  /**
-   * The attempts of the current round that a transport failure ended, held
-   * until the round has an attempt to record them against. Cleared whenever the
-   * round advances, because they belong to the round they ran in.
-   */
-  let superseded: ExecutionAttempt[] = [];
-  /** Provisioned once per round; the retry runs in the round's own worktree. */
-  let workspaceForRound: Workspace = workspace;
-  /**
-   * SCP-192: the base the change set is measured against.
-   *
-   * `workspace.base_commit` is where the worktree was cut, and it does not
-   * move. This does: every time the loop merges the base branch's tip into the
-   * attempt's branch, the change set the checks, the review and the pull
-   * request read becomes the branch against that tip. A verdict is bound to a
-   * base, so the base has to be the one a person would merge into.
-   */
-  let baseCommit = workspace.base_commit;
-  /** What this round is for; see `RoundKind`. */
-  let kind: RoundKind = continuing === null ? "execute" : "remediate";
-  /**
-   * The change set the round before this one sealed, by path (SCP-194).
-   *
-   * What a widening is measured against: a remediation round given a scope
-   * escape is asked to bring the change set back inside the contract's globs,
-   * and one that added files instead went the other way.
-   */
-  let previousChangedPaths: string[] = [];
-  /**
-   * The conflict a `resolve_conflict` round was started for, and where in the
-   * round it was found.
-   *
-   * `before_executor` is what the loop returns to once the resolution lands. A
-   * conflict found before the executor — a re-run whose sealed commits no
-   * longer merge — spends its round on the resolution and the ticket's own
-   * brief follows it. One found after the seal interrupted a round that had
-   * already done its work, and what follows the resolution is the judgement
-   * that round was heading for.
-   */
-  let conflict:
-    | { tip: string; paths: string[]; before_executor: boolean; resume_kind: RoundKind }
-    | null = null;
-  /**
-   * The round the ticket's own brief runs in. Zero, unless a conflict found
-   * before the executor spent round 0 on the resolution — which is also the
-   * round a `--resume-from` diff belongs to.
-   */
-  let executeRound = 0;
+  let state = initialRoundState(workspace, continuing);
 
   /**
    * SCP-227: the judgement of a clean re-level, where no executor ran.
@@ -983,12 +876,16 @@ async function runLockedTicket(
     review: ReviewArtifact | null;
     node_reviews: NodeReview[];
   }> => {
-    const merged = `merged ${config.base_ref} at ${baseCommit.slice(0, 12)} into ${input.branch}`;
+    const merged =
+      `merged ${config.base_ref} at ${state.baseCommit.slice(0, 12)} into ${input.branch}`;
     // What the base brought in, read in the repository where both commits are,
     // against the contract's own globs rather than the wider write guard.
-    const moved = await git.changedPaths(config.repository_root, input.base_before, baseCommit, {
-      timeoutMs: 120_000,
-    });
+    const moved = await git.changedPaths(
+      config.repository_root,
+      input.base_before,
+      state.baseCommit,
+      { timeoutMs: 120_000 },
+    );
     const touched =
       moved === null
         ? null
@@ -1003,7 +900,7 @@ async function runLockedTicket(
     };
     const sealed = await describeRange({
       worktree: input.worktree,
-      base_commit: baseCommit,
+      base_commit: state.baseCommit,
       judging,
       paths_allowed: pathsAllowed,
       ...sealExclusions,
@@ -1125,7 +1022,7 @@ async function runLockedTicket(
   };
 
   try {
-    while (round <= roundCeiling) {
+    while (state.round <= roundCeiling) {
       /**
        * SCP-194: is the branch still the one the last review judged?
        *
@@ -1138,38 +1035,41 @@ async function runLockedTicket(
        * Before the attempt id is minted, because the answer decides the round
        * this attempt is in.
        */
-      if (continuing !== null) {
+      if (state.continuing !== null) {
         const onBranch = await commitsSince({
-          worktree: workspaceForRound.path,
-          base_commit: baseCommit,
+          worktree: state.workspace.path,
+          base_commit: state.baseCommit,
         });
         const head = onBranch[onBranch.length - 1] ?? null;
-        if (head === null || !sameCommit(head, continuing.head_commit)) {
+        if (head === null || !sameCommit(head, state.continuing.head_commit)) {
           progress(
             `the branch is at ${head ?? "its base"} and the last review judged ` +
-              `${continuing.head_commit}: it has moved, so this run reviews it afresh rather ` +
+              `${state.continuing.head_commit}: it has moved, so this run reviews it afresh rather ` +
               "than verifying closures against a change set nobody judged",
           );
-          kind = "execute";
-          round = 0;
-          remediationRound = 0;
-          openFindings = [];
-          finalReview = null;
-          nodeReviews = [];
+          state = {
+            ...state,
+            kind: "execute",
+            round: 0,
+            remediationRound: 0,
+            openFindings: [],
+            finalReview: null,
+            nodeReviews: [],
+          };
         }
-        continuing = null;
+        state = { ...state, continuing: null };
       }
 
       // Every attempt the run starts passes the run's ceilings — the retry
       // included, so a kill switch flipped or a budget spent between the
       // failure and the retry stops it as it would stop a round.
-      assertWithinLimits(config.limits, "remediation_rounds", remediationRound);
+      assertWithinLimits(config.limits, "remediation_rounds", state.remediationRound);
       const at = clock();
       const attempt_id = attemptIdFor({
         root: rootAttemptId,
-        round,
-        transport_retry,
-        ceiling_continuation,
+        round: state.round,
+        transport_retry: state.transportRetry,
+        ceiling_continuation: state.ceilingContinuation,
       });
       // The attempt this one continues: the last one this run recorded,
       // whether that is the previous round's or the transport failure this one
@@ -1183,20 +1083,24 @@ async function runLockedTicket(
        * it, and the round records the tip it merged.
        */
       const takeMergeUp = (up: MergeUpResult): void => {
-        if (up.status === "conflict" || up.base_commit === baseCommit) return;
+        if (up.status === "conflict" || up.base_commit === state.baseCommit) return;
         progress(
           `merged ${config.base_ref} at ${up.base_commit.slice(0, 12)} into ` +
-            `${workspaceForRound.branch}; the change set is the branch against it`,
+            `${state.workspace.branch}; the change set is the branch against it`,
         );
-        baseCommit = up.base_commit;
+        state = { ...state, baseCommit: up.base_commit };
         mergedBase = up.base_commit;
       };
 
       // A worktree per round after the first this run runs. `ledger.attempts.length`
       // rather than `round > 0`, because a run that continues a remediation
       // starts at round 1 in the worktree already provisioned for it.
-      if (ledger.attempts.length > 0 && transport_retry === 0 && ceiling_continuation === 0) {
-        workspaceForRound = await provision({
+      if (
+        ledger.attempts.length > 0 &&
+        state.transportRetry === 0 &&
+        state.ceilingContinuation === 0
+      ) {
+        const provisioned = await provision({
           repository_root: config.repository_root,
           repository_id: contract.scope.repository_id,
           ticket_key: config.ticket_key,
@@ -1210,6 +1114,7 @@ async function runLockedTicket(
           continues: { root_attempt_id: rootAttemptId },
           now: at,
         });
+        state = { ...state, workspace: provisioned };
       }
 
       // SCP-192: before the executor, on this run's first round and only
@@ -1220,16 +1125,16 @@ async function runLockedTicket(
       // deliberately not merged.
       if (
         ledger.attempts.length === 0 &&
-        transport_retry === 0 &&
-        ceiling_continuation === 0 &&
-        kind !== "resolve_conflict"
+        state.transportRetry === 0 &&
+        state.ceilingContinuation === 0 &&
+        state.kind !== "resolve_conflict"
       ) {
-        const baseBefore = baseCommit;
+        const baseBefore = state.baseCommit;
         const up = await mergeUp({
-          worktree: workspaceForRound.path,
+          worktree: state.workspace.path,
           repository_root: config.repository_root,
           base_ref: config.base_ref,
-          base_commit: baseCommit,
+          base_commit: state.baseCommit,
           ticket_key: config.ticket_key,
           // A re-level's merge commit belongs to the attempt chain already on
           // the branch: this run may record no attempt of its own.
@@ -1241,7 +1146,7 @@ async function runLockedTicket(
           // process cannot reach — and there is nothing for a round to resolve.
           if (up.paths.length === 0) {
             outcome = "base_conflict";
-            detail = mergeFailedDetail(config.base_ref, up.tip, workspaceForRound.branch, up.detail);
+            detail = mergeFailedDetail(config.base_ref, up.tip, state.workspace.branch, up.detail);
             break;
           }
           // Nothing this run produced is at stake yet, and the round is spent
@@ -1250,16 +1155,15 @@ async function runLockedTicket(
             `${config.base_ref} conflicts with the branch on ${up.paths.length} file(s); ` +
               "the round resolves that first",
           );
-          conflict = {
-            tip: up.tip,
-            paths: up.paths,
-            before_executor: true,
-            // What the round was for before the conflict took it over. A run
-            // continuing a remediation goes back to that remediation, not to
-            // the ticket's own brief (SCP-194).
-            resume_kind: kind,
-          };
-          kind = "resolve_conflict";
+          state = applyStep(state, {
+            next: "reenter",
+            conflict: {
+              tip: up.tip,
+              paths: up.paths,
+              before_executor: true,
+              resume_kind: state.kind,
+            },
+          });
           continue;
         }
         takeMergeUp(up);
@@ -1279,20 +1183,23 @@ async function runLockedTicket(
           if (up.status === "current") {
             outcome = "level";
             detail =
-              `${workspaceForRound.branch} is level with ${config.base_ref} at ` +
-              `${baseCommit.slice(0, 12)}; nothing to re-level`;
+              `${state.workspace.branch} is level with ${config.base_ref} at ` +
+              `${state.baseCommit.slice(0, 12)}; nothing to re-level`;
             break;
           }
           const levelled = await judgeRelevel({
-            branch: workspaceForRound.branch,
-            worktree: workspaceForRound.path,
+            branch: state.workspace.branch,
+            worktree: state.workspace.path,
             base_before: baseBefore,
           });
           outcome = levelled.outcome;
           detail = levelled.detail;
           if (levelled.review !== null) {
-            finalReview = levelled.review;
-            nodeReviews = levelled.node_reviews;
+            state = {
+              ...state,
+              finalReview: levelled.review,
+              nodeReviews: levelled.node_reviews,
+            };
           }
           break;
         }
@@ -1303,7 +1210,7 @@ async function runLockedTicket(
       // out: the loop made it before any executor ran, and the change set the
       // review reads does not contain it (D-103).
       const inherited = (
-        await commitsSince({ worktree: workspaceForRound.path, base_commit: baseCommit })
+        await commitsSince({ worktree: state.workspace.path, base_commit: state.baseCommit })
       ).filter((sha) => sha !== specCommit);
       const prior_commits: SealedCommit[] = inherited.map((sha) => ({
         sha,
@@ -1316,8 +1223,8 @@ async function runLockedTicket(
       // A conflict round carries the open findings without being asked to close
       // any of them: it may hand the loop back to the verification that was
       // interrupted, and that verification is about exactly this set.
-      const toClose = kind === "execute" ? [] : openFindings;
-      if (kind === "remediate" && toClose.length === 0) {
+      const toClose = state.kind === "execute" ? [] : state.openFindings;
+      if (state.kind === "remediate" && toClose.length === 0) {
         // Unreachable by construction — round 0 only continues with a
         // non-empty family-filtered set — kept as a guard because reaching it
         // would mean the loop was about to run an agent with nothing to close.
@@ -1335,9 +1242,10 @@ async function runLockedTicket(
       // in fact, by the failed attempt's own seal — so it is applied once per
       // round rather than once per attempt. The retry is still a resumed attempt
       // and still records itself as one; only the application is skipped.
-      const resumedHere = kind === "execute" && round === executeRound ? resumeSource : null;
-      if (resumedHere !== null && transport_retry === 0 && ceiling_continuation === 0) {
-        await applyRetainedDiff({ worktree: workspaceForRound.path, source: resumedHere });
+      const resumedHere =
+        state.kind === "execute" && state.round === state.executeRound ? resumeSource : null;
+      if (resumedHere !== null && state.transportRetry === 0 && state.ceilingContinuation === 0) {
+        await applyRetainedDiff({ worktree: state.workspace.path, source: resumedHere });
         progress(resumeNote(resumedHere));
       }
 
@@ -1352,14 +1260,14 @@ async function runLockedTicket(
       const pathsProhibited = guardProhibitedPaths(contract.scope.paths_prohibited, config);
 
       const basePrompt =
-        kind === "resolve_conflict"
+        state.kind === "resolve_conflict"
           ? conflictPrompt({
               base_ref: config.base_ref,
-              base_commit: conflict!.tip,
-              paths: conflict!.paths,
+              base_commit: state.conflict!.tip,
+              paths: state.conflict!.paths,
               merged: config.relevel_context,
             })
-          : kind === "execute"
+          : state.kind === "execute"
             ? executorPrompt(contract, {
                 principles,
                 resumed: resumedHere
@@ -1369,7 +1277,7 @@ async function runLockedTicket(
             : remediationPrompt({
                 contract,
                 findings: toClose,
-                round: remediationRound,
+                round: state.remediationRound,
                 max_rounds: maxRounds,
                 principles,
                 // D-092: the predecessor's own account of its change. Inside
@@ -1418,16 +1326,16 @@ async function runLockedTicket(
       };
 
       progress(
-        kind === "resolve_conflict"
-          ? `resolving the base conflict on ${conflict!.paths.length} file(s)`
-          : kind === "execute"
+        state.kind === "resolve_conflict"
+          ? `resolving the base conflict on ${state.conflict!.paths.length} file(s)`
+          : state.kind === "execute"
             ? "executing"
-            : `remediation round ${remediationRound} of at most ${maxRounds}`,
+            : `remediation round ${state.remediationRound} of at most ${maxRounds}`,
       );
 
       // ADR-0030 requirement 2, around every handover including remediation.
       const journal = quarantine({
-        worktree: workspaceForRound.path,
+        worktree: state.workspace.path,
         store: config.quarantine_root,
         attempt_id,
         now: at,
@@ -1435,7 +1343,7 @@ async function runLockedTicket(
       const environment = buildAgentEnvironment({
         base: process.env,
         profile,
-        worktree: workspaceForRound.path,
+        worktree: state.workspace.path,
         ports: materialized.ports,
         database_schema: materialized.database_schema,
       });
@@ -1447,7 +1355,7 @@ async function runLockedTicket(
         // conflict round is neither: it is not remediation, and it keeps the
         // attempt's counter. Neither counter is set unless the repository sets
         // it (D-096), and then this is which of the two it reads.
-        ...(kind === "remediate" ? { iterations: "round_iterations" as const } : {}),
+        ...(state.kind === "remediate" ? { iterations: "round_iterations" as const } : {}),
       });
 
 
@@ -1455,7 +1363,7 @@ async function runLockedTicket(
       try {
         agentResult = await agentRunner({
           binary: config.agent_binary,
-          worktree: workspaceForRound.path,
+          worktree: state.workspace.path,
           prompt,
           brief_records: briefRecords,
           model: config.model,
@@ -1488,14 +1396,14 @@ async function runLockedTicket(
         protected_paths: config.protected_paths,
       };
       const rawSeal = await sealChangeSet({
-        worktree: workspaceForRound.path,
-        base_commit: baseCommit,
+        worktree: state.workspace.path,
+        base_commit: state.baseCommit,
         ticket_key: config.ticket_key,
         attempt_id,
         outcome: contract.outcome,
         secrets,
         judging,
-        exclude_paths: checkArtifacts,
+        exclude_paths: state.checkArtifacts,
         paths_allowed: pathsAllowed,
         ...sealExclusions,
       });
@@ -1520,12 +1428,12 @@ async function runLockedTicket(
       let sealed = rawSeal;
       let conflictNow: { tip: string; paths: string[]; detail: string } | null = null;
       if (agentResult.termination.reason === "completed" && rawSeal.changeset !== null) {
-        const before = baseCommit;
+        const before = state.baseCommit;
         const up = await mergeUp({
-          worktree: workspaceForRound.path,
+          worktree: state.workspace.path,
           repository_root: config.repository_root,
           base_ref: config.base_ref,
-          base_commit: baseCommit,
+          base_commit: state.baseCommit,
           ticket_key: config.ticket_key,
           attempt_id,
         });
@@ -1533,7 +1441,7 @@ async function runLockedTicket(
           conflictNow = { tip: up.tip, paths: up.paths, detail: up.detail };
         } else {
           takeMergeUp(up);
-          if (baseCommit !== before) {
+          if (state.baseCommit !== before) {
             // Both ends of the range moved, so the change set is re-read rather
             // than re-sealed: re-running the seal here would stage and commit
             // whatever the round has since left in the worktree.
@@ -1544,8 +1452,8 @@ async function runLockedTicket(
             sealed = {
               ...rawSeal,
               ...(await describeRange({
-                worktree: workspaceForRound.path,
-                base_commit: baseCommit,
+                worktree: state.workspace.path,
+                base_commit: state.baseCommit,
                 judging,
                 paths_allowed: pathsAllowed,
                 fallback_paths: rawSeal.changed_paths,
@@ -1564,7 +1472,7 @@ async function runLockedTicket(
           ? []
           : await checkRunner({
               checks: config.checks as PinnedCheck[],
-              worktree: workspaceForRound.path,
+              worktree: state.workspace.path,
               env: environment.env,
               secrets,
               onProgress: progress,
@@ -1584,7 +1492,12 @@ async function runLockedTicket(
        */
       const gating = wholeChangeChecks(checks);
 
-      checkArtifacts = sealed.changeset === null ? checkArtifacts : await untrackedAfterChecks({ worktree: workspaceForRound.path });
+      if (sealed.changeset !== null) {
+        state = {
+          ...state,
+          checkArtifacts: await untrackedAfterChecks({ worktree: state.workspace.path }),
+        };
+      }
 
       /**
        * SCP-263: the attempt is over, so nothing may still be running from its
@@ -1597,7 +1510,7 @@ async function runLockedTicket(
        * worktree with nothing of the last one's left in it.
        */
       const swept = await sweepWorktree({
-        worktree: workspaceForRound.path,
+        worktree: state.workspace.path,
         onProgress: progress,
       });
 
@@ -1675,10 +1588,12 @@ async function runLockedTicket(
        */
       const scopeGiven = toClose.filter((finding) => finding.rule_id.startsWith("scope."));
       const widened =
-        kind === "remediate" && scopeGiven.length > 0 && termination.reason === "completed"
-          ? sealed.changed_paths.filter((path) => !previousChangedPaths.includes(path))
+        state.kind === "remediate" && scopeGiven.length > 0 && termination.reason === "completed"
+          ? sealed.changed_paths.filter((path) => !state.previousChangedPaths.includes(path))
           : [];
-      if (termination.reason === "completed") previousChangedPaths = [...sealed.changed_paths];
+      if (termination.reason === "completed") {
+        state = { ...state, previousChangedPaths: [...sealed.changed_paths] };
+      }
 
       /**
        * SCP-193: the reset a provider named on its way out, and the wait it
@@ -1699,7 +1614,7 @@ async function runLockedTicket(
        * the wait exists to avoid.
        */
       const reset =
-        termination.reason === "transport_unavailable" && transport_retry === 0
+        termination.reason === "transport_unavailable" && state.transportRetry === 0
           ? resetInText(termination.detail, clock())
           : null;
       const parkMs = reset === null ? 0 : reset.until.getTime() - clock().getTime();
@@ -1725,7 +1640,7 @@ async function runLockedTicket(
         // which is the more specific answer to the same question.
         continues_attempt_id:
           previous?.attempt_id ?? resumedHere?.attempt_id ?? continuesPreviousRun,
-        remediation_round: round,
+        remediation_round: state.round,
         created_at: at.toISOString(),
         ticket_id: contract.ticket_id,
         plan_id: contract.plan_id,
@@ -1733,10 +1648,10 @@ async function runLockedTicket(
         planned_risk: contract.level,
         repository_id: contract.scope.repository_id,
         base_ref: config.base_ref,
-        base_commit: baseCommit,
+        base_commit: state.baseCommit,
         provider: "local_worktree",
-        branch: workspaceForRound.branch,
-        worktree_path: workspaceForRound.path,
+        branch: state.workspace.branch,
+        worktree_path: state.workspace.path,
         autonomy_class: profile.autonomy_class,
         permission_profile: profile,
         agent: agentResult.invocation,
@@ -1819,11 +1734,11 @@ async function runLockedTicket(
         inputs: {
           plan_id: contract.plan_id,
           plan_version: contract.version,
-          base_commit: baseCommit,
+          base_commit: state.baseCommit,
           merged_base: mergedBase,
-          round_kind: kind,
-          branch: workspaceForRound.branch,
-          remediation_round: round,
+          round_kind: state.kind,
+          branch: state.workspace.branch,
+          remediation_round: state.round,
           // SCP-194: what this round was handed, so the ladder a reader builds
           // from the bundles is the executor's own brief rather than an
           // inference from what changed. Empty for a round that was given no
@@ -1843,9 +1758,9 @@ async function runLockedTicket(
         versions: {
           code: "stage-2",
           prompt:
-            kind === "resolve_conflict"
+            state.kind === "resolve_conflict"
               ? conflictPromptVersion(config.relevel_context)
-              : kind === "execute"
+              : state.kind === "execute"
                 ? resumedHere === null
                   ? EXECUTOR_PROMPT_VERSION
                   : RESUMED_EXECUTOR_PROMPT_VERSION
@@ -1899,7 +1814,7 @@ async function runLockedTicket(
       // correctly, changes nothing must end as an escalation with its reasons,
       // not as `no_changes`.
       const declines =
-        kind === "remediate"
+        state.kind === "remediate"
           ? parseDeclines(agentResult.transcript, toClose.map((finding) => finding.key))
           : [];
       if (declines.length > 0) {
@@ -1909,10 +1824,10 @@ async function runLockedTicket(
 
       /** This round's record where no review and no verification judged it. */
       const record = (): RoundRecord => ({
-        round,
-        kind,
+        round: state.round,
+        kind: state.kind,
         attempt,
-        superseded_attempts: superseded,
+        superseded_attempts: state.superseded,
         review: null,
         node_reviews: [],
         verification: null,
@@ -1936,7 +1851,7 @@ async function runLockedTicket(
          * yet, and the attempt is carried on `superseded` so the record the
          * round does get names it.
          */
-        if (termination.reason === "transport_unavailable" && transport_retry === 0) {
+        if (termination.reason === "transport_unavailable" && state.transportRetry === 0) {
           // SCP-193: the provider named a reset this run may not wait for.
           // Stopping says which instant and which key, so raising the bound is
           // a decision a person makes with the number in front of them.
@@ -1951,7 +1866,7 @@ async function runLockedTicket(
               "still in force, so the run stops rather than waking early.";
             break;
           }
-          superseded = [...superseded, attempt];
+          state = applyStep(state, { next: "retry", counter: "transport", superseded: attempt });
           if (park !== null) {
             // On the record before the sleep: the wait has to outlive this
             // process, because the whole point of it is that it is long.
@@ -1971,7 +1886,6 @@ async function runLockedTicket(
             );
             await wait(TRANSPORT_RETRY_DELAY_MS);
           }
-          transport_retry += 1;
           continue;
         }
 
@@ -2016,15 +1930,10 @@ async function runLockedTicket(
           const budget = ticketBudgetMicros(agentResult.invocation.credential_class);
           const room = (budget ?? 0) - spend.micros;
           if (budget !== null && spend.priced > 0 && room > 0) {
-            superseded = [...superseded, attempt];
-            ceiling_continuation += 1;
-            // The transport's one retry is about consecutive transport
-            // failures, and a ceiling is not one: the next attempt starts with
-            // that budget whole.
-            transport_retry = 0;
+            state = applyStep(state, { next: "retry", counter: "ceiling", superseded: attempt });
             progress(
               `${termination.reason} on ${attempt.attempt_id}; its work is sealed on ` +
-                `${workspaceForRound.branch}, and run ${runNumber} attempt ${ledger.attempts.length + 1} ` +
+                `${state.workspace.branch}, and run ${runNumber} attempt ${ledger.attempts.length + 1} ` +
                 `continues over it — $${(spend.micros / 1_000_000).toFixed(2)} of the ` +
                 `$${((budget ?? 0) / 1_000_000).toFixed(2)} ticket budget is spent`,
             );
@@ -2098,7 +2007,7 @@ async function runLockedTicket(
           detail = mergeFailedDetail(
             config.base_ref,
             conflictNow.tip,
-            workspaceForRound.branch,
+            state.workspace.branch,
             conflictNow.detail,
           );
           break;
@@ -2107,35 +2016,37 @@ async function runLockedTicket(
         // here. The remediation cap is not consulted, because a conflict round
         // is not remediation and refusing one on the strength of the rounds
         // spent answering findings would leave a branch nobody can merge.
-        if (kind === "resolve_conflict") {
+        if (state.kind === "resolve_conflict") {
           outcome = "base_conflict";
           detail =
             `${config.base_ref} at ${conflictNow.tip} will not merge into ` +
-            `${workspaceForRound.branch}: ${conflictNow.paths.join(", ")}. ` +
+            `${state.workspace.branch}: ${conflictNow.paths.join(", ")}. ` +
             "The round given the conflict did not resolve it, so a person reconciles those files.";
           break;
         }
-        round += 1;
-        transport_retry = 0;
-        ceiling_continuation = 0;
-        superseded = [];
-        conflict = {
-          tip: conflictNow.tip,
-          paths: conflictNow.paths,
-          before_executor: false,
-          resume_kind: kind,
-        };
-        kind = "resolve_conflict";
+        state = applyStep(state, {
+          next: "advance",
+          kind: "resolve_conflict",
+          remediation: false,
+          carry: {
+            conflict: {
+              tip: conflictNow.tip,
+              paths: conflictNow.paths,
+              before_executor: false,
+              resume_kind: state.kind,
+            },
+          },
+        });
         continue;
       }
 
       // SCP-192: the resolution landed and the branch is level with the base
       // again. What follows is whatever the conflict interrupted.
-      if (kind === "resolve_conflict") {
+      if (state.kind === "resolve_conflict") {
         // A round that committed the markers rather than resolving them leaves
         // a branch that merges cleanly and builds nothing, and `git` cannot
         // tell: as far as it is concerned the conflict is resolved.
-        const markers = pathsWithConflictMarkers(workspaceForRound.path, sealed.changed_paths);
+        const markers = pathsWithConflictMarkers(state.workspace.path, sealed.changed_paths);
         if (markers.length > 0) {
           ledger.addRound(record());
           outcome = "base_conflict";
@@ -2148,24 +2059,26 @@ async function runLockedTicket(
         // SCP-227: a re-level has no brief of its own to return to. The
         // resolution changed the change set, so what follows is the fresh
         // review below, and its verdict is the run's.
-        if (conflict!.before_executor && !config.relevel) {
+        if (state.conflict!.before_executor && !config.relevel) {
           // The round's own brief has not run yet: it is the next round's, and
           // it is whichever brief the conflict interrupted (SCP-194).
           ledger.addRound(record());
-          const resume = conflict!.resume_kind;
-          round += 1;
-          if (resume === "execute") executeRound = round;
-          transport_retry = 0;
-          ceiling_continuation = 0;
-          superseded = [];
-          kind = resume;
-          conflict = null;
+          const resume = state.conflict!.resume_kind;
+          state = applyStep(state, {
+            next: "advance",
+            kind: resume,
+            remediation: false,
+            carry: {
+              conflict: null,
+              ...(resume === "execute" ? { executeRound: state.round + 1 } : {}),
+            },
+          });
           continue;
         }
         // The round it interrupted had already done its work, so the judgement
         // that round was heading for is what happens next — over this round's
         // change set, which is that work merged with the base.
-        conflict = null;
+        state = { ...state, conflict: null };
       }
 
       // A round that answered routed findings is verified, never re-reviewed
@@ -2181,7 +2094,7 @@ async function runLockedTicket(
       // could not resolve every criterion: there is no closure to verify there,
       // only criteria to judge, so that round falls through to the review
       // below.
-      if (finalReview !== null && !reviewingAgain) {
+      if (state.finalReview !== null && !state.reviewingAgain) {
         // D-065: declined findings are the person's now — they skip the model
         // half of verification and leave the executor's open set. The
         // deterministic half still applies to the round's tree: verifyClosures
@@ -2195,7 +2108,7 @@ async function runLockedTicket(
           ledger.addRound(record());
           outcome = "changes_requested";
           detail =
-            `remediation round ${remediationRound} was given ${scopeGiven.length} scope ` +
+            `remediation round ${state.remediationRound} was given ${scopeGiven.length} scope ` +
             `finding(s) and widened the change set instead: ` +
             `${widened.slice(0, 5).join(", ")}${widened.length > 5 ? ", …" : ""} were not in ` +
             `the change set it was asked to narrow. ${allowedPathsSentence(pathsAllowed)}`;
@@ -2203,7 +2116,7 @@ async function runLockedTicket(
         }
         const declinedKeys = new Set(declines.map((decline) => decline.finding_key));
         const toVerify = toClose.filter((finding) => !declinedKeys.has(finding.key));
-        progress(`verifying closures, round ${round}`);
+        progress(`verifying closures, round ${state.round}`);
         const verification = await verifyRunner({
           findings: toVerify,
           diff: sealed.diff ?? "",
@@ -2223,10 +2136,10 @@ async function runLockedTicket(
           ticket_id: contract.ticket_id,
           inputs: {
             changeset_id: sealed.changeset?.changeset_id ?? null,
-            base_commit: baseCommit,
+            base_commit: state.baseCommit,
             head_commit: sealed.head_commit,
-            remediation_round: round,
-            round_kind: kind,
+            remediation_round: state.round,
+            round_kind: state.kind,
             verification: true,
             all_closed: verification.all_closed,
             deterministic_failure: verification.deterministic_failure,
@@ -2281,10 +2194,10 @@ async function runLockedTicket(
         });
 
         ledger.addRound({
-          round,
-          kind,
+          round: state.round,
+          kind: state.kind,
           attempt,
-          superseded_attempts: superseded,
+          superseded_attempts: state.superseded,
           review: null,
           node_reviews: [],
           verification,
@@ -2306,20 +2219,20 @@ async function runLockedTicket(
             toVerify.some(
               (finding) => finding.source === "deterministic" && finding.rule_id.startsWith("check."),
             )
-              ? `the pinned checks still fail after remediation round ${remediationRound}: ${verification.deterministic_failure}`
+              ? `the pinned checks still fail after remediation round ${state.remediationRound}: ${verification.deterministic_failure}`
               : `the fix regressed: ${verification.deterministic_failure}`;
           break;
         }
         // Declined findings leave the executor's open set — the person decides
         // them — so the loop continues only for findings verification left open.
-        openFindings = openFindings.filter((finding) =>
+        const stillOpen = state.openFindings.filter((finding) =>
           verification.open_keys.includes(finding.key),
         );
-        if (openFindings.length === 0) {
+        if (stillOpen.length === 0) {
           if (ledger.declines.length === 0) {
             outcome = "approved";
             detail =
-              `round 0's routed findings verified closed after ${remediationRound} ` +
+              `round 0's routed findings verified closed after ${state.remediationRound} ` +
               "remediation round(s)";
           } else {
             outcome = "escalated";
@@ -2348,11 +2261,11 @@ async function runLockedTicket(
         const closedHere = verification.per_finding.filter(
           (row) => row.status === "closed",
         ).length;
-        const openKeys = openFindings.map((finding) => finding.key);
+        const openKeys = stillOpen.map((finding) => finding.key);
         if (closedHere === 0) {
           outcome = "remediation_stalled";
           detail =
-            `remediation round ${remediationRound} closed none of the ${toVerify.length} ` +
+            `remediation round ${state.remediationRound} closed none of the ${toVerify.length} ` +
             `finding(s) it was given, so the next round would be the same brief against the ` +
             `same evidence. Still open: ${openKeys.join(", ")}` +
             (ledger.declines.length > 0
@@ -2364,11 +2277,11 @@ async function runLockedTicket(
         const remediationBudget = ticketBudgetMicros(
           agentResult.invocation.credential_class,
         );
-        if (remediationRound >= maxRounds) {
+        if (state.remediationRound >= maxRounds) {
           outcome = "remediation_exhausted";
           detail =
-            `remediation round ${remediationRound} closed ${closedHere} finding(s) and ` +
-            `${openFindings.length} remain, but ${maxRounds} is the cap — raise ` +
+            `remediation round ${state.remediationRound} closed ${closedHere} finding(s) and ` +
+            `${stillOpen.length} remain, but ${maxRounds} is the cap — raise ` +
             `max_remediation_rounds or limits.limits.remediation_rounds in ${configPath}. ` +
             `Still open: ${openKeys.join(", ")}` +
             (ledger.declines.length > 0 ? ` (and ${ledger.declines.length} declined for a person)` : "");
@@ -2381,8 +2294,8 @@ async function runLockedTicket(
         ) {
           outcome = "remediation_exhausted";
           detail =
-            `remediation round ${remediationRound} closed ${closedHere} finding(s) and ` +
-            `${openFindings.length} remain, but the ticket has spent ` +
+            `remediation round ${state.remediationRound} closed ${closedHere} finding(s) and ` +
+            `${stillOpen.length} remain, but the ticket has spent ` +
             `$${(spentSoFar.micros / 1_000_000).toFixed(2)} of the ` +
             `$${(remediationBudget / 1_000_000).toFixed(2)} in ` +
             `limits.limits.ticket_cost_micros (${configPath}). Still open: ` +
@@ -2390,14 +2303,12 @@ async function runLockedTicket(
             (ledger.declines.length > 0 ? ` (and ${ledger.declines.length} declined for a person)` : "");
           break;
         }
-        round += 1;
-        remediationRound += 1;
-        transport_retry = 0;
-        ceiling_continuation = 0;
-        kind = "remediate";
-        // The next round's retry budget and its superseded attempts are its
-        // own: a transport failure sat out in this round buys nothing there.
-        superseded = [];
+        state = applyStep(state, {
+          next: "advance",
+          kind: "remediate",
+          remediation: true,
+          carry: { openFindings: stillOpen },
+        });
         continue;
       }
 
@@ -2405,7 +2316,7 @@ async function runLockedTicket(
       // answered an incomplete verdict. Its inputs are the plan, the change
       // set, the checks and the files it selects — and nothing about the
       // attempt that produced them.
-      progress(`review round ${round}`);
+      progress(`review round ${state.round}`);
       // A verdict the plan cannot accept is the reviewer's error, not the
       // executor's: the review asks once for a correction and, failing that,
       // records `review_failed` with the reasons (SCP-165). The change set is
@@ -2422,10 +2333,10 @@ async function runLockedTicket(
           // each node's own results and to wholeChangeChecks for the overall
           // call, which is what `gating` already is for a flat plan.
           checks,
-          repoDir: workspaceForRound.path,
+          repoDir: state.workspace.path,
           model: reviewerModel(config, contract, gating),
           head_commit: sealed.head_commit ?? undefined,
-          remediationAvailable: remediationRound < maxRounds,
+          remediationAvailable: state.remediationRound < maxRounds,
           // Whether the contract's base commit passed the workspace's verify
           // command (d069 reads a pinned check failing now as the change's own
           // breakage). It is the ticket's answer, measured on the attempt that
@@ -2481,17 +2392,16 @@ async function runLockedTicket(
         outcome: reviewOutcome,
         node_reviews: nodeReviewsThisRound,
         sealed,
-        round,
-        remediation_available: remediationRound < maxRounds,
+        round: state.round,
+        remediation_available: state.remediationRound < maxRounds,
       });
 
-      finalReview = review;
-      nodeReviews = nodeReviewsThisRound;
+      state = { ...state, finalReview: review, nodeReviews: nodeReviewsThisRound };
       ledger.addRound({
-        round,
-        kind,
+        round: state.round,
+        kind: state.kind,
         attempt,
-        superseded_attempts: superseded,
+        superseded_attempts: state.superseded,
         review,
         node_reviews: nodeReviewsThisRound,
         verification: null,
@@ -2503,8 +2413,8 @@ async function runLockedTicket(
 
       // The round that answered an incomplete verdict has now been judged, so
       // whatever this review routes next is a closure for the verifier.
-      const answeringIncomplete = reviewingAgain;
-      reviewingAgain = false;
+      const answeringIncomplete = state.reviewingAgain;
+      state = { ...state, reviewingAgain: false };
 
       if (review.decision === "approve") {
         outcome = "approved";
@@ -2558,7 +2468,7 @@ async function runLockedTicket(
         if (tooLarge) {
           // A review handed no diff read nothing, so there is no cause on it to
           // route: the size is the cause, and it is a person's.
-          incompleteReview = "incomplete_escalated";
+          state = { ...state, incompleteReview: "incomplete_escalated" };
           detail =
             `incomplete_escalated: the change set was withheld from review: ${tooLarge.statement} — ` +
             "split the change or raise the cap; a person decides";
@@ -2566,20 +2476,20 @@ async function runLockedTicket(
         }
         if (answeringIncomplete) {
           detail =
-            `incomplete_remediated: the re-review after ${remediationRound} remediation round(s) was ` +
+            `incomplete_remediated: the re-review after ${state.remediationRound} remediation round(s) was ` +
             `still incomplete (${criteria}), so the change is still unjudged and a person decides`;
           break;
         }
         if (unexplained.length > 0) {
-          incompleteReview = "incomplete_escalated";
+          state = { ...state, incompleteReview: "incomplete_escalated" };
           detail =
             `incomplete_escalated: the review was incomplete (${criteria}) and ` +
             `${unexplained.join(", ")} rests on nothing the executor may be handed, so no ` +
             "remediation round can make it judgeable; a person decides";
           break;
         }
-        if (remediationRound >= maxRounds) {
-          incompleteReview = "incomplete_escalated";
+        if (state.remediationRound >= maxRounds) {
+          state = { ...state, incompleteReview: "incomplete_escalated" };
           detail =
             `incomplete_escalated: the review was incomplete (${criteria}) on ${causes.length} ` +
             `finding(s) the executor could have closed, but ${maxRounds} remediation round(s) ` +
@@ -2587,28 +2497,27 @@ async function runLockedTicket(
             `limits.limits.remediation_rounds in ${configPath}; a person decides`;
           break;
         }
-        incompleteReview = "incomplete_remediated";
-        openFindings = causes;
-        reviewingAgain = true;
         progress(
           `the review could not resolve ${criteria} and ${causes.length} finding(s) it routed to ` +
             "the executor are why; remediating those and reviewing again",
         );
-        round += 1;
-        remediationRound += 1;
-        transport_retry = 0;
-        ceiling_continuation = 0;
-        kind = "remediate";
-        // The next round's retry budget and its superseded attempts are its
-        // own: a transport failure sat out in this round buys nothing there.
-        superseded = [];
+        state = applyStep(state, {
+          next: "advance",
+          kind: "remediate",
+          remediation: true,
+          carry: {
+            incompleteReview: "incomplete_remediated",
+            openFindings: causes,
+            reviewingAgain: true,
+          },
+        });
         continue;
       }
       if (review.decision === "remediable") {
-        openFindings = remediableFindings(review.findings).filter((finding) =>
+        const routed = remediableFindings(review.findings).filter((finding) =>
           isRemediableFamily(finding.rule_id),
         );
-        if (openFindings.length === 0) {
+        if (routed.length === 0) {
           // Quoting attacker-authored text into an executor brief is the
           // laundering path the trust tiers exist to prevent; a routed set
           // made entirely of never-remediated families goes to a person.
@@ -2616,15 +2525,13 @@ async function runLockedTicket(
           detail = "the findings that closed the gate are not ones the executor may be handed";
           break;
         }
-        if (remediationRound < maxRounds) {
-          round += 1;
-          remediationRound += 1;
-          transport_retry = 0;
-          ceiling_continuation = 0;
-          kind = "remediate";
-          // The next round's retry budget and its superseded attempts are its
-          // own: a transport failure sat out in this round buys nothing there.
-          superseded = [];
+        if (state.remediationRound < maxRounds) {
+          state = applyStep(state, {
+            next: "advance",
+            kind: "remediate",
+            remediation: true,
+            carry: { openFindings: routed },
+          });
           continue;
         }
       }
@@ -2634,7 +2541,7 @@ async function runLockedTicket(
           : review.decision === "escalate"
             ? "escalated"
             : "changes_requested";
-      detail = `review ${review.decision} after ${round + 1} attempt(s)`;
+      detail = `review ${review.decision} after ${state.round + 1} attempt(s)`;
       break;
     }
 
@@ -2646,7 +2553,7 @@ async function runLockedTicket(
     /** SCP-200: the credential path this run published through, where it did. */
     let github_credential: GithubCredential | null = null;
     /** SCP-192: the base tip the branch is level with when the run ends. */
-    let merged_base: string | null = baseCommit === workspace.base_commit ? null : baseCommit;
+    let merged_base: string | null = state.baseCommit === workspace.base_commit ? null : state.baseCommit;
     // An escalated outcome publishes too (D-065): the pull request is the
     // surface where the person meets the executor's verified fixes and the
     // "no determinable practice — for you to decide" reasons side by side.
@@ -2654,7 +2561,7 @@ async function runLockedTicket(
     // SCP-227: a re-level judged without an executor has no attempt to
     // publish under; its own block below pushes a `relevelled` branch, and a
     // verdict short of that leaves the merge commit local and unpushed.
-    if ((outcome === "approved" || outcome === "escalated") && config.publish && finalReview && ledger.attempts.length > 0) {
+    if ((outcome === "approved" || outcome === "escalated") && config.publish && state.finalReview && ledger.attempts.length > 0) {
       // SCP-192, the second merge-up: the base can move between the review and
       // the publish, and a pull request that is behind at the moment it opens
       // is the pull request a person spent day four merging by hand. Nothing
@@ -2664,7 +2571,7 @@ async function runLockedTicket(
         worktree: workspace.path,
         repository_root: config.repository_root,
         base_ref: config.base_ref,
-        base_commit: baseCommit,
+        base_commit: state.baseCommit,
         ticket_key: config.ticket_key,
         attempt_id: ledger.last()?.attempt_id ?? rootAttemptId,
       });
@@ -2675,23 +2582,23 @@ async function runLockedTicket(
         // attempts are still recorded below.
         outcome = "base_conflict";
         detail =
-          `the change was ${finalReview.decision === "approve" ? "approved" : "escalated"} and then ` +
+          `the change was ${state.finalReview.decision === "approve" ? "approved" : "escalated"} and then ` +
           (up.paths.length > 0
             ? `${config.base_ref} moved to ${up.tip}, which will not merge into ` +
               `${workspace.branch}: ${up.paths.join(", ")}`
             : mergeFailedDetail(config.base_ref, up.tip, workspace.branch, up.detail)) +
           ". No pull request was opened; a re-run merges the base up again.";
         progress(detail);
-      } else if (up.base_commit !== baseCommit) {
-        baseCommit = up.base_commit;
-        progress(`merged ${config.base_ref} at ${baseCommit.slice(0, 12)} before publishing`);
+      } else if (up.base_commit !== state.baseCommit) {
+        state = { ...state, baseCommit: up.base_commit };
+        progress(`merged ${config.base_ref} at ${state.baseCommit.slice(0, 12)} before publishing`);
       }
     }
 
     // A second test rather than an `else`: the block above can turn an approved
     // run into `base_conflict`, and the pull request must not open on it.
-    if ((outcome === "approved" || outcome === "escalated") && config.publish && finalReview && ledger.attempts.length > 0) {
-      merged_base = baseCommit === workspace.base_commit ? null : baseCommit;
+    if ((outcome === "approved" || outcome === "escalated") && config.publish && state.finalReview && ledger.attempts.length > 0) {
+      merged_base = state.baseCommit === workspace.base_commit ? null : state.baseCommit;
       // SCP-200: the runner holds the credential and performs both steps, so
       // the path is read from the runner's own environment. The preflight in
       // front of this run already refused a machine that has neither.
@@ -2700,7 +2607,7 @@ async function runLockedTicket(
       const body = pullRequestBody({
         contract,
         attempt: ledger.last()!,
-        review: finalReview,
+        review: state.finalReview,
         attempts: [...ledger.attempts],
         // Where the work came from, so the person merging reads it here
         // rather than going back to the ticket for it.
@@ -2811,7 +2718,7 @@ async function runLockedTicket(
     // request already exists — the branch is at `pr_open` — so it is found
     // rather than opened, and its body is left as it is.
     if (outcome === "relevelled" && config.publish) {
-      merged_base = baseCommit === workspace.base_commit ? null : baseCommit;
+      merged_base = state.baseCommit === workspace.base_commit ? null : state.baseCommit;
       github_credential = githubCredential();
       await pushBranch({ worktree: workspace.path, branch: workspace.branch, onProgress: progress });
       pull_request = await findPullRequest({ worktree: workspace.path, branch: workspace.branch });
@@ -2865,15 +2772,15 @@ async function runLockedTicket(
       ticket_id: contract.ticket_id,
       workspace,
       rounds: [...ledger.rounds],
-      final_review: finalReview,
-      node_reviews: nodeReviews,
+      final_review: state.finalReview,
+      node_reviews: state.nodeReviews,
       pull_request,
       merge,
       delivery_checks,
       github_credential,
       outcome,
       detail,
-      incomplete_review: incompleteReview,
+      incomplete_review: state.incompleteReview,
       merged_base,
     };
   } finally {
