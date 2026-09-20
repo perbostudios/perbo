@@ -1,19 +1,12 @@
-import { InkIcon } from "../InkIcon.js";
+import { Button, Dropdown, Field, IconButton, InkIcon, Notice, PageFooter } from "../ui/index.js";
+import { WaitScreen, WizardHeader } from "./wizard.js";
 import { useEffect, useRef } from "react";
-import { Button, Field, Notice } from "../ui/index.js";
 import {
   CriterionSchema,
   DraftSchema,
 } from "../../shared/protocol.js";
 import type { Detail, Draft, EditingTarget, TaskModels } from "../../shared/protocol.js";
 import { useContractEditing } from "./contract-editor.js";
-import {
-  Dropdown,
-  IconButton,
-  PageFooter,
-  WaitScreen,
-  WizardHeader,
-} from "../Screen.js";
 import { ModelPicker, useProviders } from "../settings/ConnectionScreens.js";
 import type { PageProps } from "../shell/App.js";
 import { isLive } from "../../shared/jobs.js";

@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { cx } from "../ui/index.js";
-import { InkIcon } from "../InkIcon.js";
-import { LineIcon } from "../icons.js";
+import { InkIcon, LineIcon, cx } from "../ui/index.js";
 import { PLANNING_PANES } from "../planning/panes.js";
 import { useCreate } from "./create.js";
 import { useShortcut } from "./shortcuts.js";

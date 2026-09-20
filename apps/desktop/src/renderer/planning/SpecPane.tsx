@@ -1,10 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Dialog, Notice } from "../ui/index.js";
+import { Button, Dialog, InkIcon, Notice } from "../ui/index.js";
 import type { SpecField } from "@perbo/planning/spec-text";
 import { specSymbolNames } from "@perbo/planning/spec-text";
 import { bridge } from "../data.js";
-import { InkIcon } from "../InkIcon.js";
 import { useContractEditing } from "../tasks/contract-editor.js";
 import { SpecSection } from "./SpecSection.js";
 import type { ExportedName, SpecSections, SpecView } from "../../shared/protocol.js";

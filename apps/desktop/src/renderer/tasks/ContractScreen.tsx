@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Button, Dialog, Notice } from "../ui/index.js";
-import { FactList, Rename, SectionLabel, WizardHeader } from "../Screen.js";
-import { InkIcon } from "../InkIcon.js";
+import { Button, Dialog, FactList, InkIcon, Notice, SectionLabel } from "../ui/index.js";
+import { WizardHeader } from "./wizard.js";
+import { Rename } from "./Rename.js";
 import { errorMessage, useAction } from "../data.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey } from "./ticket-workspace.js";

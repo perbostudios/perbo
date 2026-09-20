@@ -1,7 +1,19 @@
 import { useEffect, useState } from "react";
-import { Button, Dialog, Field, Notice, Segmented, Switch, cx } from "../ui/index.js";
-import { FactList, PageFooter, PageHeader, SectionLabel, SuccessMark } from "../Screen.js";
-import { InkIcon } from "../InkIcon.js";
+import {
+  Button,
+  Dialog,
+  FactList,
+  Field,
+  InkIcon,
+  Notice,
+  PageFooter,
+  PageHeader,
+  SectionLabel,
+  Segmented,
+  SuccessMark,
+  Switch,
+  cx,
+} from "../ui/index.js";
 import { errorMessage, useAction, useOutput } from "../data.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { TaskHeader } from "./LoopScreen.js";

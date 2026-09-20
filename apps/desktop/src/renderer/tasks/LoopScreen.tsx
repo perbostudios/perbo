@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { Button, Notice, cx } from "../ui/index.js";
+import { Button, InkIcon, Notice, NumberPop, PageHeader, SectionLabel, cx } from "../ui/index.js";
 import { bridge, errorMessage, useAction } from "../data.js";
 import { exclusiveJob } from "../../shared/jobs.js";
 import { decisionQuestions } from "../../shared/decisions.js";
-import { InkIcon } from "../InkIcon.js";
-import { NumberPop, PageHeader, SectionLabel } from "../Screen.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey, stageName } from "./ticket-workspace.js";
 import { costLabel, taskRecords } from "./task-context.js";

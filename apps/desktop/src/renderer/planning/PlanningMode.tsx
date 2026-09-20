@@ -1,6 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { Button, EmptyState } from "../ui/index.js";
-import { InkIcon } from "../InkIcon.js";
+import { Button, EmptyState, InkIcon } from "../ui/index.js";
 import { useCreate } from "../shell/create.js";
 import { useContractEditing } from "../tasks/contract-editor.js";
 import { ExplorerPane } from "./ExplorerPane.js";

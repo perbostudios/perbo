@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Notice, cx } from "../ui/index.js";
+import { Button, Notice, ThinkingStatus, cx } from "../ui/index.js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { bridge, errorMessage } from "../data.js";
 import { graphHistory, latestUndoable } from "./history.js";
 import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS } from "../../shared/contract-editing.js";
-import { ThinkingStatus } from "../Screen.js";
 import { INTERVIEW_CONVERSATION_CAP } from "../../shared/protocol.js";
 import type {
   Asking,

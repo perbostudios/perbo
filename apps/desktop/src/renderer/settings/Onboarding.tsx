@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { Button, Notice } from "../ui/index.js";
-import { Brand, ProgressDots } from "../Screen.js";
+import { Brand, Button, Notice, ProgressDots } from "../ui/index.js";
 import { errorMessage, useAction } from "../data.js";
 import type { PageProps } from "../shell/App.js";
 import { ProviderScreen, RepositoryScreen } from "./ConnectionScreens.js";
