@@ -7,6 +7,7 @@ import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS } from "../../shared/contract-e
 import { AskedHandle } from "./AskedHandle.js";
 import { askedHeightLimit, useAskedHeight } from "../shell/asked-size.js";
 import { InfoHint } from "../InfoHint.js";
+import { LineIcon, type LineIconName } from "../icons.js";
 import { ThinkingStatus } from "../Screen.js";
 import { INTERVIEW_CONVERSATION_CAP } from "../../shared/protocol.js";
 import type {
@@ -341,7 +342,10 @@ export function InterviewDock({
       {failure !== null && <Notice tone="danger">{failure}</Notice>}
       {/* The card is the only way to answer while one is up, unless the person
           has said their answer is not on it. */}
-      <div className="composer" hidden={asking !== null && !typing}>
+      <div
+        className={cx("composer", asking !== null && typing && "composer--joined")}
+        hidden={asking !== null && !typing}
+      >
         <div className="composer-box">
           <textarea
             aria-label="Message the interview"
@@ -381,6 +385,17 @@ type Choice = Extract<
 >["groups"][number]["parts"][number]["options"][number];
 
 /**
+ * A choice as the card shows it.
+ *
+ * `icon` is the app's and not the protocol's: the two answers below are the
+ * ones this card adds to every question, and marking them is how a person sees
+ * at a glance that they are not answers to the question above. A session's own
+ * options cannot carry one, because there is nowhere in the protocol to say so
+ * — which is the point. What a model returns does not choose what is drawn.
+ */
+type Shown = Choice & { icon?: LineIconName };
+
+/**
  * The answer every part carries whatever the session offered, as the decision
  * screen carries it: a person asked something they have no view on leaves it to
  * the session rather than picking one of its options to get past the question.
@@ -401,10 +416,11 @@ const TOOL_NAMES: Record<string, string> = {
   read_plan: "Read the plan",
 };
 
-const LEAVE_IT: Choice = {
+const LEAVE_IT: Shown = {
   label: LEAVE_IT_TO_THE_INTERVIEW,
   detail: "Its own recommendation, or its judgement where it made none.",
   recommended: false,
+  icon: "handOver",
 };
 
 /**
@@ -414,10 +430,11 @@ const LEAVE_IT: Choice = {
  * answer is not on the card should not have to pick the nearest wrong one, and
  * a card that offers no way out is a form rather than a question.
  */
-const SOMETHING_ELSE: Choice = {
+const SOMETHING_ELSE: Shown = {
   label: "Something else",
   detail: "Answer in your own words instead.",
   recommended: false,
+  icon: "ownWords",
 };
 
 /**
@@ -456,7 +473,7 @@ function QuestionCard({
   // The session's recommendation first, because a person reading a list of
   // answers reads the top of it, and the one it would pick is the one most of
   // them want. Its own order is kept under that.
-  const choicesOf = (part: (typeof group.parts)[number]): readonly Choice[] => [
+  const choicesOf = (part: (typeof group.parts)[number]): readonly Shown[] => [
     ...[...part.options].sort(
       (left, right) => Number(right.recommended) - Number(left.recommended),
     ),
@@ -482,7 +499,11 @@ function QuestionCard({
   };
   return (
     <div
-      className="asked-card"
+      // While the box for a person's own words is open under it, the card and
+      // the box are one panel with a line between them rather than two curved
+      // boxes stacked: the answer is being written in the same breath as the
+      // question is being read.
+      className={cx("asked-card", ownWords && "asked-card--joined")}
       role="group"
       aria-label={group.title ?? `Question ${number}`}
       style={{ height }}
@@ -517,6 +538,13 @@ function QuestionCard({
                   disabled={busy}
                   onChange={() => setPicked((held) => ({ ...held, [index]: choice }))}
                 />
+                {/* The two answers that are on every question, whoever asked
+                    it, are marked as such: one hands the choice back and the
+                    other asks for the box, and neither is an answer to this
+                    question the way the ones above them are. */}
+                {option.icon !== undefined && (
+                  <LineIcon name={option.icon} size={14} className="choice-icon" />
+                )}
                 <strong>{option.label}</strong>
                 {option.recommended && <span className="choice-recommended">recommended</span>}
               </span>

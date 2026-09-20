@@ -4015,17 +4015,12 @@ kbd {
   color: var(--ink);
   overflow-wrap: anywhere;
 }
-/* The highlighter: a wash rather than a fill, so it reads as one in both
-   palettes — the paper colours are a hair off the surface in the dark one and
-   the mark would not be there at all. The shadow is what makes it a stroke of
-   highlighter instead of a box: it spreads the same colour past the glyphs
-   without moving them. */
+/* Weight and ink, and no wash behind it. A highlighter drawn across a line of
+   a spec fights the text it is meant to lift: the page is already short, and
+   on a short page the heavier word is the loud one without any help. */
 .spec-strong {
   font-weight: 600;
   color: var(--ink);
-  background: rgba(var(--green-rgb), 0.22);
-  box-shadow: 0 0 0 2.5px rgba(var(--green-rgb), 0.22);
-  border-radius: 2px;
 }
 .spec-em {
   font-style: italic;
@@ -4987,6 +4982,33 @@ kbd {
   display: flex;
   align-items: baseline;
   gap: 8px;
+}
+/* With the box for a person's own words open under it, the two are one panel:
+   the card's bottom edge is straightened and its border dropped, and the box
+   below gives up its own, so what divides them is the one line the composer
+   already draws across the dock rather than two curved edges facing each
+   other. */
+.asked-card--joined {
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-bottom: 10px;
+}
+.composer--joined .composer-box {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+/* The mark on the two answers every question carries. */
+.choice-icon {
+  flex: none;
+  color: var(--muted);
+  margin-right: 1px;
+}
+.choice.selected .choice-icon {
+  color: var(--accent);
 }
 .asked-head b {
   font-size: calc(12.5px * var(--text-scale));

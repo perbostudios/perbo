@@ -1,4 +1,18 @@
 import { cx } from "@perbo/ui";
+/** The names still held as traced PNGs; everything drawn since is SVG. */
+const PNG = new Set([
+  "home",
+  "folder",
+  "settings",
+  "alert",
+  "approve",
+  "locked",
+  "prev",
+  "next",
+  "reject",
+  "dots",
+]);
+
 /** The supplied artwork is the primary icon language. Callers give the control its accessible name. */
 export function InkIcon({
   name,
@@ -18,11 +32,17 @@ export function InkIcon({
     | "dots"
     | "general"
     | "usage"
-    | "connections";
+    | "connections"
+    | "help"
+    | "info"
+    | "chat"
+    | "play"
+    | "skip-forward";
   size?: number;
   className?: string;
 }) {
-  const extension = ["general", "usage", "connections"].includes(name) ? "svg" : "png";
+  // The drawn set is SVG; what is left of the traced set is still PNG.
+  const extension = name.endsWith(".png") ? "png" : PNG.has(name) ? "png" : "svg";
   return (
     <img
       className={cx("ink-icon", className)}
