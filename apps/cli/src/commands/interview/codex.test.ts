@@ -19,10 +19,10 @@ import {
 /**
  * The interview on Codex: what only this transport has (SCP-312, D-102).
  *
- * The behaviour both transports share is in `interview-contract.ts`, run once
- * per transport from `interview.test.ts`. Here is the app server itself — the
+ * The behaviour both transports share is in `test-support/contract.ts`, run
+ * once per transport from `index.test.ts`. Here is the app server itself — the
  * invocation, the approval requests its protocol sends, and the thread resume
- * it offers — driven against the fake server in `interview-app-server.ts`.
+ * it offers — driven against the fake server in `test-support/fake-app-server.ts`.
  * Nothing starts a real `codex` and nothing reaches a model.
  */
 

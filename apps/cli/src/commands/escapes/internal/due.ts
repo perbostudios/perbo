@@ -10,7 +10,7 @@ import { ESCAPE_WINDOW_DAYS, type EscapeRow } from "@perbo/contracts";
  * `merged_at` plus {@link ESCAPE_WINDOW_DAYS}, against the clock the report is
  * being read at.
  *
- * It is separate from `escapes.ts` because it is the only part of the reading
+ * It is separate from `escapes/index.ts` because it is the only part of the reading
  * that needs neither a repository nor a record on disk — a row and a clock are
  * the whole input, which is what makes the boundary testable at a fixed instant
  * rather than at whatever day the suite happens to run on.

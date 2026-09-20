@@ -16,7 +16,7 @@ const DEADLINE_MS = 3_000;
 /** A cold `node -e` under the full gate's load has taken over 500 ms; this is the margin an ordinary exit gets. */
 const SPAWN_MARGIN_MS = 5_000;
 
-/** `spawnBuilt`'s own margin (`SPAWN_DEADLINE_MS` in `./open-build.js`) for a cold spawn under load. */
+/** `spawnBuilt`'s own margin (`SPAWN_DEADLINE_MS` in `../src/test-support/open-build.js`) for a cold spawn under load. */
 const SPAWN_BUILT_TIMEOUT_MS = 20_000;
 
 it("throws within its deadline, naming the deadline and the process's captured output, when the child never exits", () => {

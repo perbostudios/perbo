@@ -1350,7 +1350,7 @@ describe("perbo list --json", () => {
     return { code, out: streams.out.join(""), err: streams.err.join("") };
   };
 
-  /** What every colour code in `render.ts` starts with. */
+  /** What every colour code in `text.ts` starts with. */
   const ESCAPE = String.fromCharCode(27);
 
   /** The keys the human table printed, off its first column. */

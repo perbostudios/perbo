@@ -279,7 +279,7 @@ describe("a run starting a ticket that has not started", () => {
 
   /**
    * The ordinary path one step further: the loop's own spec commit judges
-   * each file against the record `execute.ts` hands it — `admittedSpecFiles`
+   * each file against the record `run/index.ts` hands it — `admittedSpecFiles`
    * over `admission.spec` — the same list `runConfig` and `loop.ts` reach. A
    * ticket edited in `plan_review` must clear that check too, and the file it
    * commits for `spec.md` must be the bytes approval read, not admission's.

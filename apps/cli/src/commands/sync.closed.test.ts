@@ -65,7 +65,7 @@ const verdictComment = (verdict: string): { body: string } => ({
 });
 
 /**
- * Reuses `sync-mergeable.test.ts`'s shape, with a `state`/`closedAt` a closed
+ * Reuses `sync.mergeable.test.ts`'s shape, with a `state`/`closedAt` a closed
  * pull request carries and an open one does not, and the comments the verdict
  * is read from.
  */

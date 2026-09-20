@@ -37,7 +37,7 @@ import { storeDir } from "../../store/index.js";
  * the run refuses before it provisions anything, naming `base_ref` as the fix.
  *
  * Everything here is driven through the shipped command. `gh` is faked as a
- * binary on PATH, the way `inspect-pull-request.test.ts` does it, so the argv
+ * binary on PATH, the way `inspect.pull-request.test.ts` does it, so the argv
  * `gh pr create` is really given is what these read; the push is hooked — there
  * is no remote to push to — and the reviewer is a double, but the configuration
  * merge, the worktree, the merge-up, the seal and the delivery call are the

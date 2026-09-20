@@ -28,7 +28,7 @@ import { FIXTURES, PACKAGE_ROOT, REPO_ROOT } from "../../test-support/paths.js";
  * Fail-first, measured rather than argued (2026-09-04): `apps/cli/src` and
  * `packages/contracts/src` were put back to the base commit 846e501 with these
  * test files left in place, `@perbo/contracts` rebuilt, and both new files
- * run. Neither collected a single test — `../src/pull-request.js` does not
+ * run. Neither collected a single test — `../../pull-request.js` does not
  * exist there, `parseReviewArgs` has no `--pr`, `--head`/`--base` or
  * `--outcome`, `runReviewCommand` has no ticketless path, and
  * `@perbo/contracts` exports no contract source or routing. Every test below
@@ -42,7 +42,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** As sync-loop-pull-request.test.ts does it: a committer nobody has to be. */
+/** As sync.loop-pull-request.test.ts does it: a committer nobody has to be. */
 const gitIdentity = {
   ...process.env,
   GIT_AUTHOR_NAME: "t",
@@ -521,7 +521,7 @@ describe("ac_3: the routing decision is computed, printed and persisted, and not
 /**
  * ac_3, the other half: which runs leave a record and which leave none.
  *
- * The comment above the store write in `run.ts` makes a claim about every
+ * The comment above the store write in `review/index.ts` makes a claim about every
  * outcome, and a claim about the code that nothing exercises is a comment that
  * goes stale on the next edit. These two runs are the edges of it — a verdict
  * the command refused, which is still a verdict and is still recorded, and a

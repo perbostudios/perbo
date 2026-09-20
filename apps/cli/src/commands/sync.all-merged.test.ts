@@ -17,7 +17,7 @@ import { readTicket, storeDir, writeTicket } from "../store/tickets.js";
  * "16 not yet decided" today.
  *
  * Every fixture ticket is written straight to the store the way the `stops`
- * half of unattended.test.ts does it, not through `perbo admit`: nothing
+ * half of sync.unattended.test.ts does it, not through `perbo admit`: nothing
  * here needs a real `git` repository, only a ticket store shaped like the
  * live one, so no test spawns a process and none declares a spawn deadline.
  */

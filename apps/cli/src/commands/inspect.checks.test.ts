@@ -19,7 +19,7 @@ import { attemptsRecordSubject, runInspectCommand } from "./inspect.js";
  * a check that fails only on CI's own checkout is a line in the record rather
  * than something to find on GitHub.
  *
- * `gh` is faked as a binary on PATH the way inspect-pull-request.test.ts does
+ * `gh` is faked as a binary on PATH the way inspect.pull-request.test.ts does
  * it, so `gh pr create` really answers the URL and `gh pr view` really answers
  * the rollup. The push is hooked — there is no remote — and the reviewer is a
  * double; the read, the record and `inspect`'s own reading are the shipped

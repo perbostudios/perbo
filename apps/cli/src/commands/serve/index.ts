@@ -957,7 +957,7 @@ export async function runServeCommand(input: {
   try {
     // The tool endpoint, hosted for as long as the queue is: a session of the
     // person's reads the store and the queue through it, and can admit, edit
-    // and sync — never approve, publish or merge (`endpoint-tools.ts`).
+    // and sync — never approve, publish or merge (`endpoint/internal/tools.ts`).
     if (!args.noEndpoint) {
       endpoint = await startEndpoint({
         dir,

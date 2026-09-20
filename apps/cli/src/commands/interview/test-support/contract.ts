@@ -25,7 +25,7 @@ import { listTickets, readDraftSnapshot, readTicket, storeDir } from "../../../s
  *
  * A case that is only meaningful for one transport is not here. Claude offers
  * every read to the permission callback and Codex answers a read inside its
- * own read-only sandbox, so a read is judged in `interview.test.ts` alone, and
+ * own read-only sandbox, so a read is judged in `index.test.ts` alone, and
  * each transport's own invocation is judged in its own file.
  */
 

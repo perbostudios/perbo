@@ -41,7 +41,7 @@ const CLI = BUILT_ENTRY;
  * `perbo interview`: the person's own Claude Code or Codex session (D-102).
  *
  * The behaviour that is the interview's, whichever transport is behind it, is
- * stated once in `interview-contract.ts` and run here once per transport. A
+ * stated once in `test-support/contract.ts` and run here once per transport. A
  * factory rather than a table of transports, because what differs between them
  * is not a parameter but the traffic a step becomes: a write is a permission
  * callback on the Claude Agent SDK and a file-change approval on Codex's app
@@ -53,8 +53,8 @@ const CLI = BUILT_ENTRY;
  * answers inside its own read-only sandbox.
  *
  * Nothing here starts a session or calls a model. The SDK is the double in
- * `interview-sdk.ts`, Codex's app server is the fake in
- * `interview-app-server.ts`, and the drafter is the scripted model
+ * `test-support/fake-sdk.ts`, Codex's app server is the fake in
+ * `test-support/fake-app-server.ts`, and the drafter is the scripted model
  * `admit --from-spec` takes.
  */
 

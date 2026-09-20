@@ -377,7 +377,7 @@ export interface QueueStanding {
  * Whether a ticket's spec is still the one its contract was drafted from
  * (D-103), as `perbo inspect` prints it.
  *
- * `specStaleness` (`spec-staleness.ts`) builds it. `stale` empty and `unjudged`
+ * `specStaleness` (`spec/staleness.ts`) builds it. `stale` empty and `unjudged`
  * empty is a spec that is still the statement the plan was approved against.
  */
 export interface SpecStaleness {

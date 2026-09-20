@@ -17,7 +17,7 @@ import { readContract, readTicket, storeDir, writeTicket } from "../store/ticket
  * still has to walk it to `merged` once a pull request exists, and leave it
  * alone once one does not.
  *
- * `gh` is faked as a binary on PATH, the same way sync-reconcile.test.ts does
+ * `gh` is faked as a binary on PATH, the same way sync.reconcile.test.ts does
  * it: the criterion is about the process `sync` starts and the branch name it
  * puts on the command line.
  *

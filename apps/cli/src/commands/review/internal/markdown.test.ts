@@ -366,7 +366,8 @@ describe("--format json", () => {
   it("is the default, and its bytes are the stored artifact's", async () => {
     const defaulted = await invoke([]);
     // The stored artifact moves when the finding schema does:
-    // `UPDATE_REVIEW_ARTIFACT=1 pnpm exec vitest run test/review-markdown.test.ts`
+    // `UPDATE_REVIEW_ARTIFACT=1 pnpm exec vitest run
+    // src/commands/review/internal/markdown.test.ts`
     // rewrites it from this very invocation, and the diff is what to read.
     if (process.env["UPDATE_REVIEW_ARTIFACT"] === "1") writeFileSync(artifactPath, defaulted.out);
     expect(defaulted.out).toBe(readFileSync(artifactPath, "utf8"));

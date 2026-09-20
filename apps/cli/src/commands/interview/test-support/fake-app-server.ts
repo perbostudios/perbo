@@ -12,7 +12,7 @@ import { join } from "node:path";
  * before the next, as the real server's turn does, and every answer is written
  * to a log the test reads, so what is asserted is what went back over the wire.
  *
- * The counterpart of `interview-sdk.ts` for the other transport: no session is
+ * The counterpart of `fake-sdk.ts` for the other transport: no session is
  * started, nothing is sent anywhere, and an accepted file change is performed
  * here because the real server performs it.
  */

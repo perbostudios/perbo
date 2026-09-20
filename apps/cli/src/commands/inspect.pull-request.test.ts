@@ -16,7 +16,7 @@ import { attemptsRecordSubject, runInspectCommand } from "./inspect.js";
  * the moment the terminal scrolls — and `inspect` is the command that answers
  * "what happened to that run" a day later.
  *
- * `gh` is faked as a binary on PATH the way base-without-config.test.ts does
+ * `gh` is faked as a binary on PATH the way run/index.base-without-config.test.ts does
  * it, so `gh pr create` really is what answers the URL. The push is hooked —
  * there is no remote — and the reviewer is a double, but the run record, the
  * delivery call and `inspect`'s own reading are the shipped ones.

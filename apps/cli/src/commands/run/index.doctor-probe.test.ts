@@ -26,7 +26,7 @@ import { runDoctorCommand, type DoctorOptions } from "./index.js";
  *
  * Measured, not assumed: with `apps/cli/src` checked out at bb8040a — the
  * commit before this change — and this file left in place,
- * `pnpm exec vitest run test/doctor-probe.test.ts` reported
+ * `pnpm exec vitest run src/commands/run/index.doctor-probe.test.ts` reported
  * "Test Files 1 failed (1) · Tests 16 failed (16)", every one of them where the
  * PROVIDER block or the `provider` key of the JSON should have been. Every
  * assertion here discriminates: none of them passes without the change.

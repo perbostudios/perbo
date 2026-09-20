@@ -17,7 +17,7 @@ import { readContract, readTicket, storeDir, writeTicket } from "../store/ticket
  * SCP-196: the loop's own success as a live number.
  *
  * Two halves. The first drives `perbo sync` against a fake `gh` that answers
- * `--json ...,commits`, the same way sync-mergeable.test.ts drives the
+ * `--json ...,commits`, the same way sync.mergeable.test.ts drives the
  * `mergeable` field it sits beside — proving `commits_outside_loop` is read
  * from each commit's own message rather than its author. The second drives
  * `perbo stops` over ticket and attempts fixtures written directly, proving

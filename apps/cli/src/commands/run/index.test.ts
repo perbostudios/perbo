@@ -89,7 +89,7 @@ describe("exit codes", () => {
 });
 
 // `perbo doctor` refusing a repository it cannot materialize lives in
-// doctor-refusal.test.ts, where the preflight and the diagnostic are injected
+// index.doctor-refusal.test.ts, where the preflight and the diagnostic are injected
 // and the test observes that no process is started to reach the refusal.
 
 describe("the run rendering", () => {

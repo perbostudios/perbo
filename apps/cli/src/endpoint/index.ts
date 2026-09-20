@@ -14,7 +14,7 @@ import { toolsFor, type QueueSurface, type ToolContext, type ToolRole } from "./
  * one capability token per role, injected into a session at launch and
  * discovered by nothing on disk a repository could supply. What differs is
  * the authority — every tool is one of this build's own commands, and the
- * three person-only acts are absent by construction (`endpoint-tools.ts`).
+ * three person-only acts are absent by construction (`internal/tools.ts`).
  *
  * Hand-written rather than a dependency: the server is stateless, answers
  * one JSON-RPC request per POST with a JSON body, and needs nothing of the

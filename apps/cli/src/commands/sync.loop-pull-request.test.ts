@@ -22,7 +22,7 @@ import { readContract, readTicket, storeDir, writeTicket } from "../store/ticket
  * the loop's own pull request exactly where it was. The ticket's delivery
  * record names it, and that record is the whole of the difference.
  *
- * `gh` is faked as a binary on PATH, the same way sync-handoff.test.ts does it.
+ * `gh` is faked as a binary on PATH, the same way sync.handoff.test.ts does it.
  *
  * Every case spawns real `git` and `gh` processes, so each carries an explicit
  * timeout (SCP-246, in SCP-191's style) rather than vitest's five-second
