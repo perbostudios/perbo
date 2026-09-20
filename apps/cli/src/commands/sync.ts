@@ -226,8 +226,6 @@ export async function runSyncCommand(input: {
   poll?: typeof pollPullRequest;
   /** The merge as `gh` reports it, for the escape record (SCP-145). */
   mergeFacts?: typeof readMergeFacts | undefined;
-  /** How `git` is run while reading the history after the merge. */
-  run?: Parameters<typeof writeTicketEscapes>[0]["run"];
 }): Promise<number> {
   const now = input.now ?? new Date();
   // SCP-202: taken out before the key is read, so it may be written either
@@ -529,7 +527,6 @@ export async function runSyncCommand(input: {
     observed_at: observed.observed_at,
     streams: input.streams,
     mergeFacts: input.mergeFacts,
-    run: input.run,
   });
   reportObservation({
     streams: input.streams,
@@ -1242,7 +1239,6 @@ function syncEscapes(args: {
   observed_at: string;
   streams: Streams;
   mergeFacts?: typeof readMergeFacts | undefined;
-  run?: Parameters<typeof writeTicketEscapes>[0]["run"];
 }): TicketEscapes | null {
   const change = args.change;
   if (change.state !== "merged" || change.branch === null) return null;
@@ -1251,7 +1247,6 @@ function syncEscapes(args: {
       repositoryRoot: change.repository_root,
       branch: change.branch,
       pull_request_number: change.delivery.pull_request_number,
-      run: args.run,
     });
     if (facts === null) {
       args.streams.stderr(
@@ -1267,7 +1262,6 @@ function syncEscapes(args: {
       facts,
       observed_at: args.observed_at,
       streams: args.streams,
-      run: args.run,
     });
   } catch (error) {
     if (!(error instanceof EscapeCollectionError)) throw error;

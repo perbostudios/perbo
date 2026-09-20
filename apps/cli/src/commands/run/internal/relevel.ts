@@ -1,4 +1,4 @@
-import { AYO_BRANCH_PREFIX, BRANCH_PREFIX, gitEnv, run } from "@perbo/workspace";
+import { AYO_BRANCH_PREFIX, BRANCH_PREFIX, CommandFailedError, git } from "@perbo/workspace";
 import type { MergedTicketContext } from "@perbo/runner";
 import { listTickets, readContract } from "../../../store/tickets.js";
 
@@ -14,6 +14,11 @@ import { listTickets, readContract } from "../../../store/tickets.js";
  * namespaces (`prb/<KEY>/<slug>` and `ayo/<KEY>/<slug>`), which a person's
  * merge of the loop's pull request names in its subject. Nothing a model wrote
  * is read.
+ *
+ * Both reads go through `@perbo/workspace`'s repository module, which is where
+ * every git process Perbo starts is decided: argv only, the runner's
+ * environment, a bounded wait, and a log that arrived cut refused rather than
+ * read as the history.
  */
 
 const TIMEOUT_MS = 120_000;
@@ -28,12 +33,16 @@ export async function ticketKeysMergedBetween(args: {
   to: string;
 }): Promise<string[]> {
   // Oldest first: the brief reads what landed in the order it landed.
-  const log = await run(["git", "log", "--reverse", "--format=%s%n%b%n--", `${args.from}..${args.to}`], {
-    cwd: args.repository_root,
-    env: gitEnv(),
-    timeoutMs: TIMEOUT_MS,
-  });
+  const log = await git.run(
+    args.repository_root,
+    ["log", "--reverse", "--format=%s%n%b%n--", `${args.from}..${args.to}`],
+    { timeoutMs: TIMEOUT_MS },
+  );
   if (log.code !== 0) return [];
+  // A log longer than the read holds arrives as its tail, which is shaped
+  // exactly like the whole of one and is short by the merges before the cut.
+  // Those are tickets the round would be briefed on, so a cut log names none.
+  if (log.truncated) return [];
   const keys: string[] = [];
   const note = (key: string) => {
     if (!keys.includes(key)) keys.push(key);
@@ -60,12 +69,20 @@ export async function mergedTicketContext(args: {
   /** The ticket whose branch this is, never its own context. */
   except: string;
 }): Promise<MergedTicketContext[]> {
-  const options = { cwd: args.repository_root, env: gitEnv(), timeoutMs: TIMEOUT_MS };
-  const base = await run(["git", "merge-base", args.base_ref, args.branch], options);
-  if (base.code !== 0) return [];
+  let base: string | null;
+  try {
+    base = await git.mergeBase(args.repository_root, args.base_ref, args.branch, {
+      timeoutMs: TIMEOUT_MS,
+    });
+  } catch (error) {
+    // A read that did not finish says nothing about where the branch diverged.
+    if (!(error instanceof CommandFailedError)) throw error;
+    base = null;
+  }
+  if (base === null) return [];
   const keys = await ticketKeysMergedBetween({
     repository_root: args.repository_root,
-    from: base.stdout.trim(),
+    from: base,
     to: args.base_ref,
   });
   const byKey = new Map(listTickets(args.dir).map((ticket) => [ticket.key, ticket]));

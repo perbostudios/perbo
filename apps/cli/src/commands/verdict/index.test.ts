@@ -48,15 +48,18 @@ vi.mock("node:child_process", async (importActual) => {
   const refuse = (file: string): never => {
     throw new Error(`refused: recording a verdict spawned ${file}`);
   };
+  // git reads this checkout's identity for the author field, and the fixtures
+  // here build their checkouts with it; that is local either way, and it is
+  // the only child anything in this file may start.
   return {
     ...actual,
     execFileSync: ((file: string, args: readonly string[], options: unknown) =>
-      // git reads this checkout's identity for the author field; that is local.
       file === "git" ? actual.execFileSync(file, args as string[], options as never) : refuse(file)) as unknown,
     execFile: (file: string) => refuse(file),
     exec: (command: string) => refuse(command),
     spawn: (file: string) => refuse(file),
-    spawnSync: (file: string) => refuse(file),
+    spawnSync: ((file: string, args: readonly string[], options: unknown) =>
+      file === "git" ? actual.spawnSync(file, args as string[], options as never) : refuse(file)) as unknown,
   };
 });
 

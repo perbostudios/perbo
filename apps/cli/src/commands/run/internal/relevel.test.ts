@@ -95,6 +95,32 @@ describe("what merged under a branch", () => {
     });
   }, SPAWN_TEST_TIMEOUT_MS);
 
+  it("names no key at all where the log it read arrived cut", async () => {
+    const repo = join(scratch, "history-cut");
+    mkdirSync(repo, { recursive: true });
+    git(repo, "init", "-q", "-b", "main");
+    commit(repo, "README.md", "base");
+    const from = git(repo, "rev-parse", "HEAD");
+    // One commit whose message alone is longer than a `git log` may say, so
+    // what the read holds is the tail of the log and not the log.
+    writeFileSync(join(repo, "long.md"), "long\n");
+    git(repo, "add", "-A");
+    execFileSync("git", ["-C", repo, "commit", "-q", "-F", "-"], {
+      env,
+      input: `a long commit\n\n${"x".repeat(600 * 1024)}\n`,
+    });
+    // The merge the tail does hold, which is the trap: a cut log is shaped
+    // exactly like a whole one, and the keys before the cut are the tickets a
+    // reconciliation round would otherwise be briefed with.
+    git(repo, "checkout", "-q", "-b", "ayo/AYO-3/three");
+    commit(repo, "three.md", "three");
+    git(repo, "checkout", "-q", "main");
+    git(repo, "merge", "-q", "--no-ff", "-m", "AYO-3: merge ayo/AYO-3/three into main", "ayo/AYO-3/three");
+    const to = git(repo, "rev-parse", "HEAD");
+
+    expect(await ticketKeysMergedBetween({ repository_root: repo, from, to })).toEqual([]);
+  }, SPAWN_TEST_TIMEOUT_MS);
+
   it("reads a merge of an prb/ branch the way it reads an ayo/ one, and no other namespace's", () => {
     const repo = join(scratch, "history-prb");
     mkdirSync(repo, { recursive: true });

@@ -27,7 +27,7 @@ import {
 import { MODEL_PROVIDERS } from "@perbo/model";
 import { RunRefusedError, ServeLockedError, acquireServeLock, liveRunLocks } from "@perbo/runner";
 import { startEndpoint, type RunningEndpoint } from "../../endpoint/index.js";
-import { gitEnv, run } from "@perbo/workspace";
+import { CommandFailedError, gh, git } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type DraftProvider } from "../admit.js";
 import { UsageError } from "../../usage-error.js";
 import { effectiveLimits, readRepoConfig, requireBase, resolveBase } from "../run/index.js";
@@ -234,9 +234,7 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
   },
 
   async fetchBase({ repository_root, base_ref }) {
-    const result = await run(["git", "fetch", "--quiet", "origin", base_ref], {
-      cwd: repository_root,
-      env: gitEnv(),
+    const result = await git.run(repository_root, ["fetch", "--quiet", "origin", base_ref], {
       timeoutMs: GIT_TIMEOUT_MS,
     });
     return result.code === 0
@@ -253,15 +251,19 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
   },
 
   async sealedPaths({ repository_root, base_ref, branch }) {
-    const options = { cwd: repository_root, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS };
-    const base = await run(["git", "merge-base", base_ref, branch], options);
-    if (base.code !== 0) return null;
-    const diff = await run(["git", "diff", "--name-only", base.stdout.trim(), branch], options);
-    if (diff.code !== 0) return null;
-    return diff.stdout
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
+    const call = { timeoutMs: GIT_TIMEOUT_MS };
+    try {
+      const base = await git.mergeBase(repository_root, base_ref, branch, call);
+      if (base === null) return null;
+      return await git.changedPaths(repository_root, base, branch, call);
+    } catch (error) {
+      // A read that did not finish, and one whose answer was too large to hold
+      // whole: a list short by the paths that were cut is shaped exactly like
+      // the whole of one, and the queue would read it as two tickets sharing
+      // nothing while they share a file.
+      if (!(error instanceof CommandFailedError)) throw error;
+      return null;
+    }
   },
 
   liveRuns(state_root) {
@@ -269,27 +271,37 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
   },
 
   async baseState({ repository_root, base_ref, branch }) {
-    const options = { cwd: repository_root, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS };
-    const tip = await run(["git", "rev-parse", "--verify", "--quiet", `${base_ref}^{commit}`], options);
-    if (tip.code !== 0 || tip.stdout.trim().length === 0) return null;
-    // The branch as the pull request has it — the remote-tracking ref the
-    // push moved — rather than the local branch, which a re-level judged
-    // short of pushing leaves carrying a merge commit nobody can see.
-    const pushed = await run(["git", "rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}^{commit}`], options);
-    const ref = pushed.code === 0 && pushed.stdout.trim().length > 0 ? `refs/remotes/origin/${branch}` : branch;
-    const branchRef = await run(["git", "rev-parse", "--verify", "--quiet", `${ref}^{commit}`], options);
-    if (branchRef.code !== 0) return null;
-    const level = await run(["git", "merge-base", "--is-ancestor", tip.stdout.trim(), ref], options);
-    return { tip: tip.stdout.trim(), behind: level.code !== 0 };
+    const call = { timeoutMs: GIT_TIMEOUT_MS };
+    try {
+      const tip = await git.resolveCommit(repository_root, base_ref, call);
+      if (tip === null) return null;
+      // The branch as the pull request has it — the remote-tracking ref the
+      // push moved — rather than the local branch, which a re-level judged
+      // short of pushing leaves carrying a merge commit nobody can see.
+      const remote = `refs/remotes/origin/${branch}`;
+      const ref = (await git.resolveCommit(repository_root, remote, call)) === null ? branch : remote;
+      if ((await git.resolveCommit(repository_root, ref, call)) === null) return null;
+      return { tip, behind: !(await git.isAncestor(repository_root, tip, ref, call)) };
+    } catch (error) {
+      // A read that did not finish says nothing about where the branch stands.
+      if (!(error instanceof CommandFailedError)) throw error;
+      return null;
+    }
   },
 
   async listIssues({ repository, label }) {
-    const result = await run(
-      ["gh", "issue", "list", "--repo", repository, "--label", label, "--state", "open", "--limit", "100", "--json", "number,title"],
-      { cwd: target.cwd, env: process.env, timeoutMs: GIT_TIMEOUT_MS },
+    const result = await gh.run(
+      target.cwd,
+      ["issue", "list", "--repo", repository, "--label", label, "--state", "open", "--limit", "100", "--json", "number,title"],
+      { timeoutMs: GIT_TIMEOUT_MS },
     );
     if (result.code !== 0) {
       return { ok: false, detail: (result.stderr || result.stdout).trim().split("\n")[0]?.slice(0, 300) || "gh failed" };
+    }
+    // An answer larger than the read holds arrives as a list of issues shaped
+    // exactly like the whole of one, short by the issues that were cut.
+    if (result.truncated) {
+      return { ok: false, detail: "gh said more than this read holds, and only the tail of it arrived" };
     }
     let raw: unknown;
     try {
