@@ -65,12 +65,7 @@ import {
   type MaterializedWorkspace,
   type Workspace,
 } from "@perbo/workspace";
-import {
-  anthropicModel,
-  claudeCliModel,
-  codexCliModel,
-  type Model,
-} from "@perbo/model";
+import { MODEL_PROVIDERS, createModel, type Model } from "@perbo/model";
 import {
   PROMPT_VERSION,
   closureVerifySchema,
@@ -303,7 +298,7 @@ export const TicketRunConfigSchema = z.strictObject({
   executor_skills: ExecutorSkillsSchema.default([]),
   model: z.string().min(1).optional(),
   reviewer_model: z.string().min(1).nullable().default(null),
-  reviewer_provider: z.enum(["anthropic", "claude-cli", "codex-cli"]).default("claude-cli"),
+  reviewer_provider: z.enum(MODEL_PROVIDERS).default("claude-cli"),
   /**
    * The hard cap on remediation rounds (SCP-194), above the progress rule
    * rather than instead of it: a round that closed a finding earns the next
@@ -3656,12 +3651,10 @@ function reviewerModel(
     contract.acceptance_criteria.map((criterion) => criterion.id),
     [...checks.map((check) => check.check_id), "check_scope", "check_agent_config"],
   ).toolInputSchema;
-  const modelId = config.reviewer_model ?? undefined;
-  return config.reviewer_provider === "claude-cli"
-    ? claudeCliModel({ submitSchema: schema, ...(modelId ? { modelId } : {}) })
-    : config.reviewer_provider === "codex-cli"
-      ? codexCliModel({ submitSchema: schema, ...(modelId ? { modelId } : {}) })
-    : anthropicModel({ submitSchema: schema, ...(modelId ? { modelId } : {}) });
+  return createModel(config.reviewer_provider, {
+    submitSchema: schema,
+    modelId: config.reviewer_model,
+  });
 }
 
 /**
@@ -3686,13 +3679,10 @@ function contractWithCriteria(
  * tool cannot invent a finding or omit one silently.
  */
 function verifierModel(config: TicketRunConfig, keys: string[]): Model {
-  const schema = closureVerifySchema(keys);
-  const modelId = config.reviewer_model ?? undefined;
-  return config.reviewer_provider === "claude-cli"
-    ? claudeCliModel({ submitSchema: schema, ...(modelId ? { modelId } : {}) })
-    : config.reviewer_provider === "codex-cli"
-      ? codexCliModel({ submitSchema: schema, ...(modelId ? { modelId } : {}) })
-    : anthropicModel({ submitSchema: schema, ...(modelId ? { modelId } : {}) });
+  return createModel(config.reviewer_provider, {
+    submitSchema: closureVerifySchema(keys),
+    modelId: config.reviewer_model,
+  });
 }
 
 export { PROMPT_VERSION as REVIEWER_PROMPT_VERSION };

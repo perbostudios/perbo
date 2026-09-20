@@ -54,13 +54,7 @@ import {
   readIssueFile,
   readSpecFile,
 } from "@perbo/planning";
-import {
-  ProviderError,
-  anthropicModel,
-  claudeCliModel,
-  codexCliModel,
-  type Model,
-} from "@perbo/model";
+import { ProviderError, createModel, type Model, type ModelProvider } from "@perbo/model";
 import { RepoReader } from "@perbo/review";
 import { UsageError } from "./args.js";
 import { prohibitedSpecPaths, regenerateNodePages, specCommitFiles } from "./specs.js";
@@ -136,7 +130,7 @@ const DEFAULT_GENERATED = ["pnpm-lock.yaml", "package-lock.json", "**/*.generate
 const DEFAULT_EXPANSION_BUDGET = 3;
 const DEFAULT_PREFIX = "PRB";
 
-export type DraftProvider = "anthropic" | "claude-cli" | "codex-cli";
+export type DraftProvider = ModelProvider;
 
 export interface AdmitArgs {
   repo: string;
@@ -896,13 +890,7 @@ function describeContractDifference(
 
 /** The drafting transport, the reviewer's own, constrained to the draft schema. */
 function draftingModel(provider: DraftProvider, modelId: string | null): Model {
-  const options = {
-    submitSchema: CONTRACT_DRAFT_JSON_SCHEMA,
-    ...(modelId ? { modelId } : {}),
-  };
-  if (provider === "claude-cli") return claudeCliModel(options);
-  if (provider === "codex-cli") return codexCliModel(options);
-  return anthropicModel(options);
+  return createModel(provider, { submitSchema: CONTRACT_DRAFT_JSON_SCHEMA, modelId });
 }
 
 interface Resolved {

@@ -10,3 +10,5 @@ export type { ClaudeCliOptions } from "./claude-cli.js";
 export { CLAUDE_CLI_ENV_ALLOW_LIST, claudeCliModel } from "./claude-cli.js";
 export type { CodexCliOptions } from "./codex-cli.js";
 export { codexCliModel } from "./codex-cli.js";
+export type { CreateModelOptions, ModelProvider } from "./provider.js";
+export { MODEL_PROVIDERS, createModel } from "./provider.js";

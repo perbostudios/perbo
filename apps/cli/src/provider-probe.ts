@@ -5,6 +5,7 @@ import {
   CLAUDE_CLI_ENV_ALLOW_LIST,
   codexCliModel,
   providerFailureText,
+  type ModelProvider,
 } from "@perbo/model";
 
 /**
@@ -36,7 +37,7 @@ import {
  *    left for the shapes this machine does not hold.
  */
 
-export type ProbeProvider = "anthropic" | "claude-cli" | "codex-cli";
+export type ProbeProvider = ModelProvider;
 
 /**
  * What went wrong, as a person has to act on it. The four named in the outcome

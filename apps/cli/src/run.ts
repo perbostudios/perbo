@@ -15,12 +15,7 @@ import {
   type PlanContractWithCriteria,
   type ReviewArtifact,
 } from "@perbo/contracts";
-import {
-  anthropicModel,
-  claudeCliModel,
-  codexCliModel,
-  type Model,
-} from "@perbo/model";
+import { createModel, type Model } from "@perbo/model";
 import {
   PlanNotReviewableError,
   RuleAuthorityFileSchema,
@@ -514,12 +509,7 @@ export async function runReviewCommand(options: RunOptions): Promise<number> {
 
   const makeModel =
     options.makeModel ??
-    ((submitSchema, modelId) =>
-      args.provider === "claude-cli"
-        ? claudeCliModel({ submitSchema, ...(modelId ? { modelId } : {}) })
-        : args.provider === "codex-cli"
-          ? codexCliModel({ submitSchema, ...(modelId ? { modelId } : {}) })
-        : anthropicModel({ submitSchema, ...(modelId ? { modelId } : {}) }));
+    ((submitSchema, modelId) => createModel(args.provider, { submitSchema, modelId }));
 
   // The submit schema is built from the criteria this review is judging and
   // wholeChangeChecks(checks) — the same narrowing reviewGraph applies to a
