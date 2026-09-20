@@ -12,7 +12,8 @@ import {
   runPreToolHook,
   type PreToolGuardState,
 } from "../src/pretool.js";
-import { UNKNOWN_CWD, inspectToolWrite } from "../src/prohibited.js";
+import { inspectToolWrite } from "../src/prohibited.js";
+import { UNKNOWN_CWD } from "../src/shell/index.js";
 import { buildPermissionProfile } from "../src/profile.js";
 import { scratch } from "./support.js";
 
@@ -263,11 +264,11 @@ describe("the contract's allowed paths, before the write", () => {
  *
  * The runner reads a tool call twice: the hook reads it before it runs, and the
  * transcript reads it as the agent announces it. They are one reading in two
- * places — the hook calls `judgeCommand`, which calls the same `shell.ts` the
- * adapter's reading does — and that is a property worth a test, because the
- * two arrived from different tickets and only their agreement makes the
- * sentence docs/08 prints true. A shape the transcript refuses and the hook
- * defers on is a write that happens and is then reported.
+ * places — the hook calls `judgeCommand`, which calls the same shell reader
+ * (`src/shell/`) the adapter's reading does — and that is a property worth a
+ * test, because the two arrived from different tickets and only their
+ * agreement makes the sentence docs/08 prints true. A shape the transcript
+ * refuses and the hook defers on is a write that happens and is then reported.
  */
 describe("the hook and the transcript reading agree on the same call", () => {
   const transcriptBash = (command: string) =>

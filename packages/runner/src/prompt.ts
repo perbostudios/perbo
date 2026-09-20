@@ -6,7 +6,7 @@ import {
 } from "@perbo/contracts";
 import { EXECUTOR_ACCOUNT_HEADING } from "./account.js";
 import { PERBO_AGENT_ROLES } from "./agents.js";
-import { allowedPathsSentence, prohibitedPathsSentence } from "./prohibited.js";
+import { allowedPathsSentence, prohibitedPathsSentence } from "./shell/index.js";
 
 /**
  * The executor's brief, built from the approved plan (ADR-0023 §4).

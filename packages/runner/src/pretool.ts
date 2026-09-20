@@ -21,7 +21,8 @@ import {
 } from "./admission.js";
 import { PERBO_AGENT_ROLE_NAMES, isSubagentTool, judgeSubagentStart, SUBAGENT_TOOL_NAMES } from "./agents.js";
 import { writeBriefRecord, type BriefRecords } from "./brief.js";
-import { UNKNOWN_CWD, describeShellCwd, type CommandSegment } from "./prohibited.js";
+import { describeShellCwd } from "./prohibited.js";
+import { UNKNOWN_CWD, type CommandSegment } from "./shell/index.js";
 import { HOST_TEMPORARY_DIRECTORY } from "./scratch.js";
 
 /**
@@ -642,7 +643,7 @@ function callerOf(call: PreToolCall): string | null {
  * redirect. A program that acts on its own does not — `curl -o` writes without
  * one, and is on the deny-list.
  */
-const EFFECT_FREE_VERBS = new Set(["cd", "pushd", "popd", "echo", "printf", "true", "false", ":"]);
+export const EFFECT_FREE_VERBS = new Set(["cd", "pushd", "popd", "echo", "printf", "true", "false", ":"]);
 
 /** Every command a line runs, the ones inside a nested shell included. */
 function everySegment(segments: readonly CommandSegment[]): CommandSegment[] {
@@ -989,4 +990,3 @@ export function runPreToolHook(
 
 /** The rules a decision can name, re-exported so a reader of a record has one import. */
 export { ADMISSION_RULES };
-export { EFFECT_FREE_VERBS };

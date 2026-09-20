@@ -37,12 +37,8 @@ import {
   prepareUnguardedSettings,
   readPreToolDecisions,
 } from "./pretool.js";
-import {
-  UNKNOWN_CWD,
-  inspectToolWrite,
-  type ProhibitedHit,
-  type ShellCwd,
-} from "./prohibited.js";
+import { inspectToolWrite, type ProhibitedHit, type ShellCwd } from "./prohibited.js";
+import { UNKNOWN_CWD } from "./shell/index.js";
 import { DEFAULT_AGENT_TOOLS } from "./profile.js";
 import { prepareScratchDirectory, scratchEnvironment } from "./scratch.js";
 import { describeTransportFailure, transportExhaustion } from "./transport.js";

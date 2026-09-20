@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { matchesListEntry } from "../src/admission.js";
 import { judgePreToolCall } from "../src/pretool.js";
-import { WRITERS, inspectCommand, inspectCommandWithCwd } from "../src/prohibited.js";
+import { inspectCommand, inspectCommandWithCwd } from "../src/prohibited.js";
+import { WRITERS } from "../src/shell/index.js";
 import { buildPermissionProfile } from "../src/profile.js";
 import { scratch } from "./support.js";
 

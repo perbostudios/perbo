@@ -20,7 +20,7 @@ import { reinjectedBrief } from "./brief.js";
 import { CodexExecutorSession, CODEX_EXECUTOR_ARGV, type Usage } from "./codex-rpc.js";
 import { EgressLog } from "./egress.js";
 import { judgeCommand, matchesListEntry } from "./admission.js";
-import { judgePreToolCall, type PreToolGuardState } from "./pretool.js";
+import { EFFECT_FREE_VERBS, judgePreToolCall, type PreToolGuardState } from "./pretool.js";
 import type { ProhibitedHit } from "./prohibited.js";
 import { prepareScratchDirectory } from "./scratch.js";
 
@@ -118,18 +118,7 @@ export function codexCommandDecision(
       return segment.accounted && segment.nested.every(eligible);
     return (
       segment.programs.length === 0 ||
-      segment.programs.every((program) =>
-        [
-          "cd",
-          "pushd",
-          "popd",
-          "echo",
-          "printf",
-          "true",
-          "false",
-          ":",
-        ].includes(program),
-      ) ||
+      segment.programs.every((program) => EFFECT_FREE_VERBS.has(program)) ||
       state.allow_list.some((entry) =>
         matchesListEntry(entry, "Bash", segment.text),
       )
