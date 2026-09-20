@@ -66,7 +66,8 @@ const clean: Fixture = FixtureSchema.parse({
 const finding = (routing: Finding["routing"], blocking: boolean): Finding => ({
   key: "a".repeat(64), rule_id: "test.missing_case", source: "semantic", criterion_id: "ac_1", severity: "minor",
   blocking, blocking_reason: "", confidence: 0.8, file: "src/a.ts", line: 1, symbol: null, statement: "x",
-  status: "open", outcome: "unknown", row: "semantic_ordinary", closure: "executor", direction: "negative", routing, waiver: null,
+  status: "open", outcome: "unknown", row: "semantic_ordinary", closure: "executor", direction: "negative",
+  caused_by_change: null, routing, waiver: null,
 });
 
 const artifact = (decision: string, findings: Finding[]): ReviewArtifact =>

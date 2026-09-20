@@ -72,6 +72,13 @@ function rowFor(leakedBy: Record<string, boolean>) {
   );
   const summary = summariseCorpus(
     {
+      // The reviewer copy the run executed, as `runCorpus` reports it.
+      bundle: {
+        path: "/tmp/out/bin/perbo.mjs",
+        sha256: "c".repeat(64),
+        bytes: 4096,
+        source: "apps/cli/dist/main.js",
+      },
       excluded_unprepared: [],
       fixtures: chosen,
       runs,
