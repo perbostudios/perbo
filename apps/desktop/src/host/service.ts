@@ -2042,6 +2042,56 @@ export class DesktopService {
       "--json",
     ];
   }
+  /**
+   * Delete a contract that has never run, with everything it carries.
+   *
+   * Answers with the reason it stays rather than throwing, because there are
+   * two callers with two different needs: deleting a contract outright says
+   * the reason to the person, and throwing away the planning that drafted it
+   * takes the ticket along only where it can, and keeps going where it
+   * cannot — a ticket whose loop has run is work, not a draft.
+   */
+  private async deleteContract(
+    repo: z.infer<typeof RepoSchema>,
+    key: string,
+  ): Promise<string | null> {
+    if (heldRepository(this.liveJobs(), repo.id))
+      return "Wait for the commands running in this repository to finish before deleting a contract.";
+    const ticket = (await this.list(repo)).tickets.find((entry) => entry.key === key);
+    if (!ticket) return "This task is no longer in the repository's ticket store.";
+    if (!["draft", "specifying", "plan_review", "ready", "plan_invalid"].includes(ticket.state))
+      return "Only a contract that has never run can be deleted. This one has moved past the contract stage.";
+    const attempts = readAttempts(
+      this.safePath(repo, ".perbo", "state", `${ticket.ticket_id}.attempts.json`),
+    );
+    const bundles = listBundles(this.safePath(repo, ".perbo", "bundles", "bundles"));
+    if (
+      attempts.attempts.length ||
+      attempts.error ||
+      bundles.some((bundle) => bundle.ticket_id === ticket.ticket_id)
+    )
+      return "This contract has recorded attempts or evidence, so it stays. Only a never-run contract can be deleted.";
+    if (ticket.delivery.pull_request_url)
+      return "This contract has a pull request on record, so it stays.";
+    for (const suffix of [".json", ".contract.json", ".draft.json"]) {
+      const path = this.safePath(repo, ".perbo", "tickets", `${key}${suffix}`);
+      if (existsSync(path) && !lstatSync(path).isSymbolicLink()) rmSync(path);
+    }
+    const entry = repo.id + ":" + key;
+    delete this.state.titles[entry];
+    delete this.state.taskModels[entry];
+    this.state.archived = this.state.archived.filter((item) => item !== entry);
+    for (const session of this.state.editingSessions)
+      if (session.repoId === repo.id && session.key === key && session.phase !== "discarded") {
+        session.phase = "discarded";
+        session.resumeNew = false;
+        session.revision++;
+      }
+    this.changed(true, { kind: "records", repoId: repo.id, key: null });
+    this.preferencesChanged();
+    return null;
+  }
+
   async request<T extends Request>(input: T): Promise<ReplyMap[T["kind"]]> {
     const request = RequestSchema.parse(input);
     return (await this.dispatch(request)) as ReplyMap[T["kind"]];
@@ -2068,7 +2118,24 @@ export class DesktopService {
         request.operationId,
         request.intent,
       );
-    if (request.kind === "explorerMark")
+    if (request.kind === "explorerMark") {
+      // Scope is one of the four fields approval freezes, and the freeze is
+      // enforced by the CLI: `perbo edit` refuses every state but plan_review.
+      // Nothing on this path asked, so a mark on an approved ticket was taken,
+      // written to the draft, and could never be compiled in — a mark the
+      // person would have gone on believing in. The standing list is the one
+      // exception: it is the repository's, not this ticket's, and D-105 has
+      // the guard read it again when a run starts, so it binds an approved
+      // ticket and is allowed to be written for one.
+      const session = this.editing.read(request.id);
+      if (session.key !== null && request.always !== true) {
+        const repo = this.repository(session.repoId);
+        const ticket = (await this.list(repo)).tickets.find((entry) => entry.key === session.key);
+        if (ticket?.approved_at)
+          throw new Error(
+            "This contract is approved, so its scope is frozen. Start over from the spec to plan it again.",
+          );
+      }
       return this.editing.mark(
         request.id,
         request.revision,
@@ -2076,14 +2143,21 @@ export class DesktopService {
         request.mark,
         request.always,
       );
+    }
     if (request.kind === "explorerUndo")
       return this.editing.undo(request.id, request.revision, request.edit);
     if (request.kind === "editingStop") return this.editing.stop(request.id);
     if (request.kind === "editingDiscard") {
-      // The chat goes with the planning it belonged to: there is no longer a
-      // spec for the interview to write or a plan for it to change.
+      // The ticket this planning drafted goes with it. Without that, throwing
+      // the plan away left the ticket on the board with no way back to the
+      // plan it came from — a delete that deleted the way in and not the thing.
+      // A ticket that has run is not a draft, so it stays, and the reason is
+      // the same one deleting a contract outright would have given.
+      const session = this.editing.read(request.id);
       const discarded = this.editing.discard(request.id, request.revision);
       this.stopInterview(request.id);
+      if (session.key !== null)
+        await this.deleteContract(this.repository(session.repoId), session.key);
       return discarded;
     }
     // The interview docked beside the panes (D-102). Planning-lane work, like
@@ -2217,79 +2291,8 @@ export class DesktopService {
     if (request.kind === "taskSummary")
       return this.taskSummary(repo.id, request.key);
     if (request.kind === "discard") {
-      if (heldRepository(this.liveJobs(), repo.id))
-        throw new Error(
-          "Wait for the commands running in this repository to finish before deleting a contract.",
-        );
-      const ticket = (await this.list(repo)).tickets.find(
-        (entry) => entry.key === request.key,
-      );
-      if (!ticket)
-        throw new Error(
-          "This task is no longer in the repository's ticket store.",
-        );
-      if (
-        ![
-          "draft",
-          "specifying",
-          "plan_review",
-          "ready",
-          "plan_invalid",
-        ].includes(ticket.state)
-      )
-        throw new Error(
-          "Only a contract that has never run can be deleted. This one has moved past the contract stage.",
-        );
-      const attempts = readAttempts(
-        this.safePath(
-          repo,
-          ".perbo",
-          "state",
-          `${ticket.ticket_id}.attempts.json`,
-        ),
-      );
-      const bundles = listBundles(
-        this.safePath(repo, ".perbo", "bundles", "bundles"),
-      );
-      if (
-        attempts.attempts.length ||
-        attempts.error ||
-        bundles.some((bundle) => bundle.ticket_id === ticket.ticket_id)
-      )
-        throw new Error(
-          "This contract has recorded attempts or evidence, so it stays. Only a never-run contract can be deleted.",
-        );
-      if (ticket.delivery.pull_request_url)
-        throw new Error(
-          "This contract has a pull request on record, so it stays.",
-        );
-      for (const suffix of [".json", ".contract.json", ".draft.json"]) {
-        const path = this.safePath(
-          repo,
-          ".perbo",
-          "tickets",
-          `${request.key}${suffix}`,
-        );
-        if (existsSync(path) && !lstatSync(path).isSymbolicLink()) rmSync(path);
-      }
-      const entry = repo.id + ":" + request.key;
-      delete this.state.titles[entry];
-      delete this.state.taskModels[entry];
-      this.state.archived = this.state.archived.filter(
-        (item) => item !== entry,
-      );
-      for (const session of this.state.editingSessions)
-        if (
-          session.repoId === repo.id &&
-          session.key === request.key &&
-          session.phase !== "discarded"
-        ) {
-          session.phase = "discarded";
-          session.resumeNew = false;
-          session.revision++;
-        }
-      this.changed(true, { kind: "records", repoId: repo.id, key: null });
-      this.preferencesChanged();
+      const refusal = await this.deleteContract(repo, request.key);
+      if (refusal !== null) throw new Error(refusal);
       return null;
     }
     if (request.kind === "archive") {

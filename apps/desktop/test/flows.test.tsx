@@ -620,3 +620,70 @@ describe("the files a contract's scope reaches", () => {
     await screen.findByText(/Four fields freeze when you approve/);
   });
 });
+
+/**
+ * Throwing the planning away takes the ticket it drafted with it.
+ *
+ * Discarding used to mark the session discarded and nothing else, so a ticket
+ * that planning had already drafted stayed on the board with no way back to
+ * the plan it came from — a delete that deleted the way in and not the thing.
+ */
+describe("discarding a plan", () => {
+  it("deletes the ticket it drafted, and leaves one that has run", async () => {
+    const before = await previewBridge.request({ kind: "snapshot" });
+    const row = before.tasks.find((each) => each.ticket.state === "plan_review") ?? before.tasks[0]!;
+    const session = await previewBridge.request({
+      kind: "editingOpen",
+      target: { kind: "ticket", repoId: row.repoId, key: row.ticket.key },
+    });
+    expect(session.key).toBe(row.ticket.key);
+
+    await previewBridge.request({ kind: "editingDiscard", id: session.id });
+    const after = await previewBridge.request({ kind: "snapshot" });
+    expect(after.tasks.some((each) => each.ticket.key === row.ticket.key)).toBe(false);
+    expect(after.drafts?.some((draft) => draft.id === session.id) ?? false).toBe(false);
+  });
+
+  it("keeps a ticket whose loop has run, because that is work and not a draft", async () => {
+    const before = await previewBridge.request({ kind: "snapshot" });
+    const run = before.tasks.find(
+      (each) => !["draft", "specifying", "plan_review", "ready", "plan_invalid"].includes(each.ticket.state),
+    );
+    if (!run) return;
+    const session = await previewBridge.request({
+      kind: "editingOpen",
+      target: { kind: "ticket", repoId: run.repoId, key: run.ticket.key },
+    });
+    await previewBridge.request({ kind: "editingDiscard", id: session.id });
+    const after = await previewBridge.request({ kind: "snapshot" });
+    expect(after.tasks.some((each) => each.ticket.key === run.ticket.key)).toBe(true);
+  });
+});
+
+/**
+ * An approved contract's scope is frozen, and the freeze is the CLI's:
+ * `perbo edit` refuses every state but plan_review. Nothing on the mark path
+ * asked, so a mark against an approved ticket was taken and could never be
+ * compiled in.
+ */
+describe("marking a path on an approved contract", () => {
+  it("is refused, while the repository's own standing list stays writable", async () => {
+    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const row = workspace.tasks.find((each) => each.ticket.approved_at) ?? workspace.tasks[0]!;
+    row.ticket = { ...row.ticket, approved_at: "2026-09-01T00:00:00.000Z" };
+    const session = await previewBridge.request({
+      kind: "editingOpen",
+      target: { kind: "ticket", repoId: row.repoId, key: row.ticket.key },
+    });
+    await expect(
+      previewBridge.request({
+        kind: "explorerMark",
+        id: session.id,
+        revision: session.revision,
+        path: "packages/",
+        mark: "allowed",
+        always: null,
+      }),
+    ).rejects.toThrow(/approved, so its scope is frozen/);
+  });
+});

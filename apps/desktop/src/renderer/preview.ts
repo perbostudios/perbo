@@ -1714,15 +1714,40 @@ async function previewRequest<T extends Request>(request: T, owner?: EditingOwne
           120,
         );
         break;
-      case "explorerMark":
+      case "explorerMark": {
+        // As on the real host: an approved contract's scope is frozen, and a
+        // mark against one could never be compiled in. The standing list is
+        // the repository's rather than this ticket's, so it stays writable.
+        const marking = editing.read(request.id);
+        const held = marking.key === null ? undefined : snapshot.tasks.find((entry) => entry.ticket.key === marking.key);
+        if (held?.ticket.approved_at && request.always !== true)
+          throw new Error(
+            "This contract is approved, so its scope is frozen. Start over from the spec to plan it again.",
+          );
         result = editing.mark(request.id, request.revision, request.path, request.mark, request.always);
         break;
+      }
       case "explorerUndo": result = editing.undo(request.id, request.revision, request.edit); break;
-      case "editingDiscard":
+      case "editingDiscard": {
+        // The ticket this planning drafted goes with it, as it does on the
+        // real host: a plan thrown away must not leave its ticket on the board
+        // with no way back to the plan. One that has run is not a draft and
+        // stays.
+        const held = editing.read(request.id);
         result = editing.discard(request.id, request.revision);
         sampleInterviews.delete(request.id);
         emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id), working: false });
+        const drafted = held.key === null ? undefined : snapshot.tasks.find((entry) => entry.ticket.key === held.key);
+        if (
+          drafted &&
+          ["draft", "specifying", "plan_review", "ready", "plan_invalid"].includes(drafted.ticket.state)
+        ) {
+          snapshot.tasks = snapshot.tasks.filter((entry) => entry !== drafted);
+          plans.delete(held.key!);
+          emit({ kind: "records", repoId: held.repoId, key: null });
+        }
         break;
+      }
       case "interviewStart": {
         const session = editing.read(request.id);
         if (session.repoId !== request.repoId)
