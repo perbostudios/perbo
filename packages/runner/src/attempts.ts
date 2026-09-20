@@ -371,3 +371,38 @@ function writeAtomically(path: string, contents: string): void {
     throw error;
   }
 }
+
+/**
+ * Which attempt sealed which commit, from the attempts record already on disk.
+ *
+ * The record is appended to rather than replaced, so this names every commit
+ * any run of the ticket sealed — a commit from two runs ago is attributed to
+ * the attempt that made it rather than recorded by its sha alone.
+ */
+export function sealedByAttempt(record: AttemptsRecord | null): Map<string, string> {
+  const known = new Map<string, string>();
+  const head = z.object({ attempt_id: z.string(), head_commit: z.string().nullable() });
+  for (const attempt of record?.attempts ?? []) {
+    const parsed = head.safeParse(attempt);
+    if (!parsed.success || parsed.data.head_commit === null) continue;
+    known.set(parsed.data.head_commit, parsed.data.attempt_id);
+  }
+  return known;
+}
+
+/**
+ * The commit this ticket's spec is in, as its attempts record names it, or
+ * null where no run has made one (D-103).
+ *
+ * Read from the record rather than derived from the branch, because the
+ * question a resumed run asks is whether the branch still starts where the
+ * record says it does — and a branch is not evidence about itself.
+ */
+export function specCommitOnRecord(record: AttemptsRecord | null): string | null {
+  const shape = z.object({ spec_commit: z.string().nullable().optional() });
+  for (const attempt of [...(record?.attempts ?? [])].reverse()) {
+    const parsed = shape.safeParse(attempt);
+    if (parsed.success && parsed.data.spec_commit) return parsed.data.spec_commit;
+  }
+  return null;
+}

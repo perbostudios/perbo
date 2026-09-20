@@ -5,16 +5,11 @@ import { withExecutorSkills } from "./skills.js";
 import {
   EXECUTION_ATTEMPT_SCHEMA_VERSION,
   ExecutionAttemptSchema,
-  NodeReviewsSchema,
-  redactCredentials,
-  ReviewArtifactSchema,
   admittedWriteGlobs,
   matchesAny,
   assertProviderEnabled,
   assertWithinLimits,
-  attemptId as makeAttemptId,
   failedChecks,
-  findingKey,
   hasAcceptanceCriteria,
   isRefusal,
   limitFor,
@@ -26,18 +21,14 @@ import {
   type CheckResult,
   type CredentialClass,
   type ExecutionAttempt,
-  type Finding,
   type GithubCredential,
   type IncompleteReviewPath,
-  type LimitedResource,
   type NodeReview,
   type PlanContract,
   type PlanContractWithCriteria,
   type ReviewArtifact,
-  type RunBundle,
   type SealedCommit,
   type SecretIndex,
-  type TerminationReason,
   type VerifiedCommit,
 } from "@perbo/contracts";
 import {
@@ -52,18 +43,14 @@ import {
   type MaterializedWorkspace,
   type Workspace,
 } from "@perbo/workspace";
-import { createModel, type Model } from "@perbo/model";
 import {
   PROMPT_VERSION,
-  closureVerifySchema,
   isRemediableFamily,
   remediableFindings,
   reviewGraph,
   runReview,
-  verdictSchemas,
   verifyClosures,
   type ClosureVerification,
-  redactReviewArtifact,
 } from "@perbo/review";
 import {
   appendAttempts,
@@ -75,7 +62,8 @@ import {
   recordedBaseVerification,
   rootAttemptId as mintRootAttemptId,
   runsOnRecord,
-  type AttemptsRecord,
+  sealedByAttempt,
+  specCommitOnRecord,
 } from "./attempts.js";
 import { acquireRunLock, type HeldRunLock } from "./lock.js";
 import { executorAccount } from "./account.js";
@@ -133,6 +121,19 @@ import {
 } from "./seal.js";
 import { TRANSPORT_RETRY_DELAY_MS, resetInText } from "./transport.js";
 import { guardProhibitedPaths, type TicketRunConfig } from "./loop/config.js";
+import { withCeilingGuidance } from "./loop/attempt.js";
+import { remediationToContinue } from "./loop/continuation.js";
+import { mergeFailedDetail } from "./loop/level.js";
+import {
+  contractWithCriteria,
+  countDirectlyVerified,
+  flakyCheckFindings,
+  incompleteReviewCauses,
+  reviewerModel,
+  writeReviewBundle,
+} from "./loop/review.js";
+import { attemptIdFor } from "./loop/state.js";
+import { verifierModel } from "./loop/verify.js";
 
 /**
  * Contract → worktree → one agent → sealed change set → deterministic checks →
@@ -172,6 +173,8 @@ import { guardProhibitedPaths, type TicketRunConfig } from "./loop/config.js";
  * removes is the step that began every hand finish of day four — a person
  * merging the base in before anything else could be done with the branch.
  */
+
+export { incompleteReviewCauses } from "./loop/review.js";
 
 export {
   BaseSourceSchema,
@@ -335,217 +338,6 @@ export interface TicketRunResult {
    * Null where the base never moved under the run, or where nothing merged it.
    */
   merged_base: string | null;
-}
-
-const countDirectlyVerified = (review: ReviewArtifact | null): number =>
-  review?.coverage.filter((entry) => entry.verification_strength === "directly_verified").length ?? 0;
-
-/**
- * What made an incomplete review incomplete, and whether the executor can be
- * asked about it.
- *
- * The artifact carries no field joining a `cannot_determine` criterion to the
- * finding that caused it, so the join is the two things it does carry: the
- * finding's `criterion_id` and its routing. A finding routed `remediable`, in a
- * family the executor may be handed, **cites** a criterion when it names that
- * criterion; a finding that names no criterion at all is a fact about the whole
- * change — a check that failed, a file nothing could read — and so cites every
- * criterion the review could not resolve.
- *
- * A criterion no such finding cites is `unexplained`: either nothing was filed
- * against it, or what was filed stops for a person. One of those is enough for
- * the whole verdict to be a person's, because a round that closes the others
- * still leaves that criterion unjudged.
- */
-export function incompleteReviewCauses(review: ReviewArtifact): {
-  /** The criteria the review could not resolve, in the order it listed them. */
-  unresolved: string[];
-  /** The findings that cite them, deduplicated, in the order the review filed them. */
-  causes: Finding[];
-  /** The criteria no remediable finding cites. */
-  unexplained: string[];
-} {
-  const unresolved = review.coverage
-    .filter((entry) => entry.status === "cannot_determine")
-    .map((entry) => entry.criterion_id);
-  const routable = remediableFindings(review.findings).filter((finding) =>
-    isRemediableFamily(finding.rule_id),
-  );
-  const causes = new Map<string, Finding>();
-  const unexplained: string[] = [];
-  for (const criterion_id of unresolved) {
-    const cites = routable.filter(
-      (finding) => finding.criterion_id === criterion_id || finding.criterion_id === null,
-    );
-    if (cites.length === 0) {
-      unexplained.push(criterion_id);
-      continue;
-    }
-    for (const finding of cites) causes.set(finding.key, finding);
-  }
-  return { unresolved, causes: [...causes.values()], unexplained };
-}
-
-/** The limits-table key behind each ceiling termination, so the stop names its setting. */
-const CEILING_RESOURCE: Partial<Record<TerminationReason, LimitedResource>> = {
-  stalled: "attempt_stall_ms",
-  wall_clock_exceeded: "attempt_wall_clock_ms",
-  command_ceiling_exceeded: "attempt_commands",
-  iteration_ceiling_exceeded: "attempt_iterations",
-  round_iteration_ceiling_exceeded: "round_iterations",
-  token_ceiling_exceeded: "attempt_tokens",
-  cost_ceiling_exceeded: "attempt_cost_micros",
-};
-
-/**
- * A ceiling is configuration, and a partner meeting one should see the key
- * and the file that raise it rather than a bare number.
- */
-function withCeilingGuidance(
-  termination: { reason: TerminationReason; detail: string },
-  config: TicketRunConfig,
-): { reason: TerminationReason; detail: string } {
-  const resource = CEILING_RESOURCE[termination.reason];
-  if (!resource) return termination;
-  const current = limitFor(config.limits, resource);
-  return {
-    reason: termination.reason,
-    detail:
-      `${termination.detail} — raise limits.limits.${resource} in ` +
-      `${join(config.repository_root, ".perbo", "config.json")}` +
-      (current === null ? "" : ` (currently ${current})`),
-  };
-}
-
-/**
- * Which attempt sealed which commit, from the attempts record already on disk.
- *
- * The record is appended to rather than replaced, so this names every commit
- * any run of the ticket sealed — a commit from two runs ago is attributed to
- * the attempt that made it rather than recorded by its sha alone.
- */
-function sealedByAttempt(record: AttemptsRecord | null): Map<string, string> {
-  const known = new Map<string, string>();
-  const head = z.object({ attempt_id: z.string(), head_commit: z.string().nullable() });
-  for (const attempt of record?.attempts ?? []) {
-    const parsed = head.safeParse(attempt);
-    if (!parsed.success || parsed.data.head_commit === null) continue;
-    known.set(parsed.data.head_commit, parsed.data.attempt_id);
-  }
-  return known;
-}
-
-/**
- * The commit this ticket's spec is in, as its attempts record names it, or
- * null where no run has made one (D-103).
- *
- * Read from the record rather than derived from the branch, because the
- * question a resumed run asks is whether the branch still starts where the
- * record says it does — and a branch is not evidence about itself.
- */
-function specCommitOnRecord(record: AttemptsRecord | null): string | null {
-  const shape = z.object({ spec_commit: z.string().nullable().optional() });
-  for (const attempt of [...(record?.attempts ?? [])].reverse()) {
-    const parsed = shape.safeParse(attempt);
-    if (parsed.success && parsed.data.spec_commit) return parsed.data.spec_commit;
-  }
-  return null;
-}
-
-/**
- * The remediation a re-run continues, or null where there is nothing to
- * continue (SCP-194).
- *
- * A ticket in `changes_requested` has a review on record and findings that
- * review left open. Re-running it used to start at round 0: a fresh independent
- * review of the same sealed commit, which returned the same verdict for the
- * same money — twice on AYO-31. What the branch is actually asking for is the
- * next remediation round, from the findings that are still open.
- *
- * Two things have to be true for that to be safe. The review has to exist, and
- * the change set it judged has to be the one on the branch — a branch that has
- * moved carries work no review has seen, and verifying closures against it
- * would grade a change nobody judged. The second is checked against the live
- * branch by the caller; this answers the first, and says which commit was last
- * judged so the caller can.
- */
-function remediationToContinue(input: {
-  bundles: BundleStore;
-  ticket_id: string;
-}): { review: ReviewArtifact; node_reviews: NodeReview[]; findings: Finding[]; head_commit: string } | null {
-  const forTicket = input.bundles.forTicket(input.ticket_id);
-  const reviews = forTicket.filter(
-    (bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("rev_"),
-  );
-  const last = reviews[reviews.length - 1];
-  if (last === undefined) return null;
-  const artifact = last.artifacts.find((entry) => entry.name === "review.json");
-  if (!artifact || !artifact.retained) return null;
-  const body = input.bundles.readObject(artifact.sha256);
-  if (body === null) return null;
-  let parsed: ReturnType<typeof ReviewArtifactSchema.safeParse>;
-  try {
-    parsed = ReviewArtifactSchema.safeParse(JSON.parse(body));
-  } catch {
-    return null;
-  }
-  if (!parsed.success) return null;
-  const review = parsed.data;
-  // The per-node reviews recorded beside it (D-107). Absent on a bundle
-  // written before per-node review existed, or unreadable: [] either way,
-  // the same default the schema gives a record that never held them.
-  const node_reviews = readNodeReviews(input.bundles, last);
-
-  /**
-   * The closures the rounds after that review already verified. The last
-   * verification's open set is the authoritative one — each round narrows it —
-   * and the commit it judged is the one the branch should still be at.
-   */
-  const verifications = forTicket.filter(
-    (bundle) =>
-      bundle.kind === "review" &&
-      bundle.subject_id.startsWith("cv_") &&
-      bundle.created_at >= last.created_at,
-  );
-  const lastVerification = verifications[verifications.length - 1];
-  const openKeys =
-    lastVerification === undefined
-      ? null
-      : new Set(
-          String(lastVerification.inputs["findings_open"] ?? "")
-            .split(",")
-            .filter((key) => key.length > 0),
-        );
-  // A verification bundle written before this ticket recorded its open set
-  // cannot say what is still open, and guessing would hand the executor
-  // findings it already closed.
-  if (openKeys !== null && lastVerification!.inputs["findings_open"] === undefined) return null;
-
-  const head =
-    lastVerification === undefined
-      ? review.target.head_commit
-      : (lastVerification.inputs["head_commit"] ?? null);
-  if (typeof head !== "string" || head.length === 0) return null;
-
-  const findings = remediableFindings(review.findings)
-    .filter((finding) => isRemediableFamily(finding.rule_id))
-    .filter((finding) => openKeys === null || openKeys.has(finding.key));
-  if (findings.length === 0) return null;
-  return { review, node_reviews, findings, head_commit: head };
-}
-
-/** A review bundle's per-node reviews (D-107), `[]` where the bundle holds none. */
-function readNodeReviews(bundles: BundleStore, bundle: RunBundle): NodeReview[] {
-  const artifact = bundle.artifacts.find((entry) => entry.name === "node-reviews.json");
-  if (!artifact || !artifact.retained) return [];
-  const body = bundles.readObject(artifact.sha256);
-  if (body === null) return [];
-  try {
-    const parsed = NodeReviewsSchema.safeParse(JSON.parse(body));
-    return parsed.success ? parsed.data : [];
-  } catch {
-    return [];
-  }
 }
 
 export interface TicketRunRequest {
@@ -3225,242 +3017,6 @@ async function runLockedTicket(
       outcome: outcome === "approved" ? "success" : "failure",
     }).catch(() => undefined);
   }
-}
-
-/**
- * A merge-up that stopped without naming an unmerged path (SCP-192).
- *
- * `git merge` reports a conflict and a refusal the same way — a non-zero exit —
- * and only the first has files a round could reconcile. The second is an
- * untracked file in the way, a signing key the process cannot reach, a
- * repository state the runner put it in: nobody's round to spend, so the stop
- * quotes what git said rather than handing an executor an empty list.
- */
-function mergeFailedDetail(base_ref: string, tip: string, branch: string, said: string): string {
-  return (
-    `merging ${base_ref} at ${tip} into ${branch} failed and git named no conflicting file, ` +
-    `so it is not a conflict a round can resolve: ${said || "no output"}`
-  );
-}
-
-/**
- * The id of one attempt of one round.
- *
- * Round 0's first attempt is the run's root, which is what the worktree, the
- * branch and the attempts record are all keyed by, so it keeps that id
- * exactly. Everything after it is minted from the root and the position — the
- * round, the ceiling continuation within it and the transport retry within
- * that — so the same run never mints one id twice and a reader can see from the
- * seed which attempt it is looking at.
- */
-function attemptIdFor(position: {
-  root: string;
-  round: number;
-  transport_retry: number;
-  ceiling_continuation: number;
-}): string {
-  if (position.round === 0 && position.transport_retry === 0 && position.ceiling_continuation === 0) {
-    return position.root;
-  }
-  const seeded = position.ceiling_continuation === 0 ? "" : `|continue|${position.ceiling_continuation}`;
-  const retry = position.transport_retry === 0 ? "" : `|transport|${position.transport_retry}`;
-  return makeAttemptId(`${position.root}|round|${position.round}${seeded}${retry}`);
-}
-
-/**
- * A check that failed once and passed on its own, as a finding.
- *
- * Advisory and non-blocking: the re-run is the measurement, and it passed. The
- * finding exists so the round says a suite was unstable rather than saying
- * nothing, and so the tests that were unstable are named where a person reads
- * them.
- */
-/**
- * One review's bundle, written the same way wherever a review is taken: at
- * round 0, at the re-review of an incomplete verdict, and at a re-level's
- * fresh review of the merged change set (SCP-227).
- */
-function writeReviewBundle(args: {
-  bundles: BundleStore;
-  contract: PlanContractWithCriteria;
-  secrets: SecretIndex;
-  clock: () => Date;
-  review: ReviewArtifact;
-  outcome: Awaited<ReturnType<typeof runReview>>;
-  /** The graph's per-node reviews, recorded beside `review` (D-107); empty for a flat plan. */
-  node_reviews: NodeReview[];
-  sealed: { excluded_paths: string[] };
-  round: number;
-  remediation_available: boolean;
-}): void {
-  const { bundles, contract, secrets, clock, review, outcome: reviewOutcome, node_reviews, sealed, round } = args;
-  bundles.write({
-    kind: "review",
-    subject_id: review.review_id,
-    ticket_id: contract.ticket_id,
-    inputs: {
-      // The target the verdict states, which is the key every reader joins
-      // a review to its attempt by — `perbo inspect` among them. Copied,
-      // never restated from the seal: what a bundle records as reviewed is
-      // what the review says it reviewed.
-      changeset_id: review.target.id,
-      base_commit: review.target.base_commit,
-      head_commit: review.target.head_commit,
-      decision: review.decision,
-      remediation_round: round,
-      remediation_available: args.remediation_available,
-    },
-    context_manifest: review.context_manifest,
-    versions: {
-      code: "stage-2",
-      prompt: review.model.prompt_version,
-      policy: "blocking-matrix-v2",
-      model: review.model.model_id,
-      tool: review.model.provider,
-    },
-    usage: {
-      input_tokens: review.model.input_tokens,
-      output_tokens: review.model.output_tokens,
-      cost_micros: review.cost_micros,
-      cost_basis: review.model.cost_basis,
-      wall_clock_ms: review.latency_ms,
-    },
-    artifacts: [
-      // D-063: the artifact is redacted on the way out, not in memory. The
-      // reviewer's own output stays intact for scoring; what is persisted,
-      // replayed and read by a person has the credential removed.
-      {
-        name: "review.json",
-        media_type: "application/json",
-        body: JSON.stringify(redactReviewArtifact(review).artifact, null, 2),
-      },
-      // D-107: each reviewed node's own artifact, redacted the same way.
-      {
-        name: "node-reviews.json",
-        media_type: "application/json",
-        body: JSON.stringify(
-          node_reviews.map((entry) => ({
-            node_id: entry.node_id,
-            review: entry.review ? redactReviewArtifact(entry.review).artifact : null,
-          })),
-          null,
-          2,
-        ),
-      },
-      { name: "reviewer-system-prompt.txt", media_type: "text/plain", body: reviewOutcome.bundle.system_prompt },
-      // A rejected verdict is the reviewer's own output and is kept beside
-      // the accepted one, so a person can read what was returned rather
-      // than only why it was refused. Redacted the same way review.json is.
-      ...reviewOutcome.bundle.rejected_verdicts.map((rejected) => ({
-        name: `rejected-verdict-${rejected.attempt}.json`,
-        media_type: "application/json",
-        body: redactCredentials(
-          JSON.stringify(
-            { attempt: rejected.attempt, kind: rejected.kind, reason: rejected.reason, verdict: rejected.input },
-            null,
-            2,
-          ),
-        ).text,
-      })),
-    ],
-    errors: review.error ? [{ kind: review.error.kind, message: review.error.message }] : [],
-    transitions: [
-      { at: clock().toISOString(), from: "VERIFYING", to: "INDEPENDENT_REVIEW", reason: review.decision },
-    ],
-    retention: { class: "replay_retained", expires_at: null },
-    secrets,
-    excluded_paths: sealed.excluded_paths,
-    deterministic: false,
-    model_version_pinned: true,
-    now: clock(),
-  });
-}
-
-function flakyCheckFindings(checks: readonly CheckResult[]): Finding[] {
-  return checks
-    .filter((check) => check.flaky === true)
-    .map((check) => {
-      const rule_id = `check.${check.kind}_flaky`;
-      const named = check.failing_tests ?? [];
-      return {
-        key: findingKey({ rule_id, criterion_id: null, file: null, symbol: check.name }),
-        rule_id,
-        source: "deterministic" as const,
-        criterion_id: null,
-        severity: "advisory" as const,
-        blocking: false,
-        blocking_reason:
-          "a check that failed once and passed when its own tests were run alone is not " +
-          "evidence against the change",
-        confidence: null,
-        file: null,
-        line: null,
-        symbol: check.name,
-        statement:
-          `The ${check.name} check failed and then passed when it was run again on its own` +
-          `${named.length === 0 ? "" : `: ${named.join("; ")}`}. ` +
-          "The gate is not closed on it; the suite is unstable and a person may want to look.",
-        status: "open" as const,
-        outcome: "unknown" as const,
-        row: null,
-        closure: null,
-        direction: null,
-        caused_by_change: null,
-        routing: "advisory" as const,
-        waiver: null,
-      };
-    });
-}
-
-/**
- * The reviewer transport.
- *
- * The submit schema is built from **this** plan's criteria and this change
- * set's checks, so the tool schema itself cannot express a criterion the plan
- * does not have. The model id is pinned by configuration, never sniffed from
- * the repository.
- */
-function reviewerModel(
-  config: TicketRunConfig,
-  contract: PlanContractWithCriteria,
-  checks: readonly CheckResult[],
-): Model {
-  const schema = verdictSchemas(
-    contract.acceptance_criteria.map((criterion) => criterion.id),
-    [...checks.map((check) => check.check_id), "check_scope", "check_agent_config"],
-  ).toolInputSchema;
-  return createModel(config.reviewer_provider, {
-    submitSchema: schema,
-    modelId: config.reviewer_model,
-  });
-}
-
-/**
- * `reviewGraph`'s `modelFor` hands back whatever contract a node or the
- * overall call is reviewing under, typed as broadly as `ReviewInput.contract`
- * is. Every one `reviewerModel` is ever actually asked to build a schema for
- * carries criteria — a node's own, narrowed, or the ticket's own contract,
- * already `PlanContractWithCriteria` — so this narrows without discarding a
- * P0 contract it should never see, falling back to the ticket's own only to
- * keep the type total.
- */
-function contractWithCriteria(
-  contract: PlanContract,
-  ticketContract: PlanContractWithCriteria,
-): PlanContractWithCriteria {
-  return hasAcceptanceCriteria(contract) ? contract : ticketContract;
-}
-
-/**
- * The verifier transport (D-061). Same providers as the reviewer, but the
- * submit schema enumerates exactly the finding keys under verification, so the
- * tool cannot invent a finding or omit one silently.
- */
-function verifierModel(config: TicketRunConfig, keys: string[]): Model {
-  return createModel(config.reviewer_provider, {
-    submitSchema: closureVerifySchema(keys),
-    modelId: config.reviewer_model,
-  });
 }
 
 export { PROMPT_VERSION as REVIEWER_PROMPT_VERSION };
