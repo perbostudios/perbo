@@ -983,8 +983,8 @@ Binary files /dev/null and b/a/src/verdicts.ts differ
     expect(answer).toContain("a/src/verdicts.ts");
     expect(answer).toContain(`byte ${offset}`);
     expect(answer).not.toContain("export const equal");
-    expect(artifact.context_manifest.map((item) => item.attrs?.path)).not.toContain(
-      "a/src/verdicts.ts",
+    expect(artifact.context_manifest.map((item) => item.provenance)).not.toContain(
+      "a/src/verdicts.ts at head",
     );
   });
 
