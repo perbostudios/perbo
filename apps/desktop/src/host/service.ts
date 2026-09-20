@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
-  lstatSync,
   readFileSync,
 } from "node:fs";
 import { z } from "zod";
@@ -9,8 +8,6 @@ import {
   ApproachRecordSchema,
   TicketSchema,
   STANDING_PROHIBITED_KEY,
-  SymbolIndexSchema,
-  UnsupportedRepositorySchema,
   hasAcceptanceCriteria,
   isNeverReadPath,
   planNodes,
@@ -21,9 +18,7 @@ import {
 import type {
   GraphEdge,
   PlanContract,
-  SymbolIndex,
   Ticket,
-  UnsupportedRepository,
 } from "@perbo/contracts";
 import type { PlanNode } from "@perbo/contracts/plan";
 import { busyMessage, exclusiveJob, heldRepository, isLive, lane } from "../shared/jobs.js";
@@ -35,7 +30,6 @@ import {
 import {
   DraftSchema,
   HELP_LINKS,
-  PREVIEW_BYTE_CAP,
   RequestSchema,
   TaskModelsSchema,
   INTERVIEW_NEEDS_A_TITLE,
@@ -45,8 +39,6 @@ import type {
   Detail,
   Change,
   EditingSession,
-  ExplorerFile,
-  ExplorerListing,
   GraphCriterionView,
   GraphLiveView,
   GraphNodeView,
@@ -62,7 +54,6 @@ import type {
   Repository,
   Request,
   Snapshot,
-  SymbolIndexView,
   TaskModels,
   UsageReport,
 } from "../shared/protocol.js";
@@ -82,7 +73,9 @@ import { Changes } from "./changes.js";
 import { RepositoryRegistry } from "./repository/registry.js";
 import { createCli, type Cli } from "./cli.js";
 import { TicketReads } from "./tickets/reads.js";
-import { explorerPath, safePath } from "./repository/paths.js";
+import { listExplorer, readExplorerFile } from "./explorer.js";
+import { exportedNames, readSymbolIndex } from "./symbols.js";
+import { safePath } from "./repository/paths.js";
 import { trackedFiles } from "./repository/git.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
@@ -327,42 +320,6 @@ export class DesktopService {
   private trackedFiles(repo: RegisteredRepository): Promise<string[]> {
     return trackedFiles(this.execute, repo.path);
   }
-  private async explorerList(repo: RegisteredRepository): Promise<ExplorerListing> {
-    const tracked = await this.trackedFiles(repo);
-    const files = tracked.filter((path) => !isNeverReadPath(path)).sort();
-    return {
-      files,
-      hidden: tracked.length - files.length,
-      standing: readStandingProhibited(readConfig(repo)),
-    };
-  }
-  /**
-   * One file, read-only (D-015). A file larger than the cap or holding a NUL
-   * byte comes back with the reason and no text: a truncated preview reads as
-   * the whole file, and a decoded binary is not text.
-   */
-  private async explorerRead(
-    repo: RegisteredRepository,
-    requested: string,
-  ): Promise<ExplorerFile> {
-    const path = explorerPath(repo, requested);
-    const full = safePath(repo, path);
-    if (!existsSync(full)) throw new Error(`${path} is not a tracked file in this repository.`);
-    if (lstatSync(full).isDirectory())
-      throw new Error(`${path} is a folder. The tree already lists what is in it.`);
-    if (!(await this.trackedFiles(repo)).includes(path))
-      throw new Error(`${path} is not a tracked file in this repository.`);
-    const bytes = lstatSync(full).size;
-    const refuse = (refusal: string): ExplorerFile => ({ path, bytes, text: null, refusal });
-    if (bytes > PREVIEW_BYTE_CAP)
-      return refuse(
-        `${path} is larger than the 256 KiB the preview reads, so nothing is shown rather than part of it. Open it in your editor.`,
-      );
-    const raw = readFileSync(full);
-    if (raw.includes(0))
-      return refuse(`${path} is a binary file. There is nothing here to read.`);
-    return { path, bytes, text: raw.toString("utf8"), refusal: null };
-  }
   registerRepository(path: string): Promise<Repository> {
     return this.registry.register(path);
   }
@@ -403,72 +360,6 @@ export class DesktopService {
     return { ...workspace, interviews };
   }
   /**
-   * This repository's symbol and import index, read fresh from `perbo index`
-   * (D-015). The Spec pane's `@Symbol` completion and the Impact pane's
-   * warnings both read it here.
-   *
-   * The command is run for the answer rather than `.perbo/index.json` read
-   * off disk: nothing keeps that file fresh, and a stale one would let the
-   * Spec pane mark a name that has since appeared, or the Impact pane miss an
-   * importer that has since arrived. The record comes back on stdout and is
-   * held to the schema the contract declares; a repository the index cannot
-   * describe answers `supported: false`, which is a different fact from an
-   * index holding no files, so the two are parsed against their own schemas
-   * and never flattened into one.
-   */
-  private async symbolIndex(
-    repo: RegisteredRepository,
-  ): Promise<SymbolIndex | UnsupportedRepository> {
-    const record: unknown = JSON.parse(
-      requireSuccess(await this.cli.run(["index", "--json"], repo)),
-    );
-    return record !== null && typeof record === "object" && "supported" in record
-      ? UnsupportedRepositorySchema.parse(record)
-      : SymbolIndexSchema.parse(record);
-  }
-
-  /**
-   * The exported names the Spec pane completes `@Symbol` from, and marks
-   * against (D-015, SCP-321).
-   *
-   * The names come from the index and from nothing the renderer sent
-   * ([ADR-0023](../../../../docs/adr/0023-untrusted-context-boundary.md) §4).
-   * Building the index reads the whole tracked tree, so the five sections
-   * asking at once share one run.
-   */
-  private async exportedNames(
-    repo: RegisteredRepository,
-  ): Promise<SymbolIndexView> {
-    return this.reads.read("symbols:" + repo.id, repo.id, async () => {
-      const index = await this.symbolIndex(repo);
-      if ("supported" in index)
-        return { supported: false, reason: index.reason, languages: index.languages_seen };
-      // `perbo index` parses the whole tracked tree and has no never-read
-      // filter of its own, so a file this surface may not name can export a
-      // symbol (ADR-0030). Both halves of what a name carries would cross: the
-      // name itself, and the path the popup prints beside it. Nothing outside
-      // the list the explorer would show is offered.
-      const named = new Set((await this.trackedFiles(repo)).filter((path) => !isNeverReadPath(path)));
-      return {
-        supported: true,
-        names: index.files
-          .filter((file) => named.has(file.path))
-          .flatMap((file) =>
-            file.exports
-              // `export * from` records the name `*`, which is not a name a spec
-              // can refer to: what it exports is not knowable without reading the
-              // file it names.
-              .filter((each) => each.name !== "*")
-              .map((each) => ({ name: each.name, kind: each.kind, path: file.path })),
-          ),
-        headCommit: index.head_commit,
-        workingTree: index.working_tree,
-        builtAt: index.built_at,
-      };
-    });
-  }
-
-  /**
    * The impact warnings for one planning session's draft (D-015, SCP-320).
    *
    * Derived when a person asks the pane for them and never on its own: the
@@ -506,7 +397,7 @@ export class DesktopService {
       scope: session.form.draft.paths,
       tracked,
       spec,
-      index: await this.symbolIndex(repo),
+      index: await readSymbolIndex(this.cli, repo),
     });
     return { ...report, readAt: new Date().toISOString() };
   }
@@ -1367,11 +1258,18 @@ export class DesktopService {
     // Planning-lane work (D-101): answered here, never as a job, so a run is
     // never in the way of reading a file and a read is never in the way of one.
     if (request.kind === "explorerList")
-      return this.explorerList(this.repository(request.repoId));
+      return listExplorer(this.execute, this.repository(request.repoId));
     if (request.kind === "explorerRead")
-      return this.explorerRead(this.repository(request.repoId), request.path);
+      return readExplorerFile(
+        this.execute,
+        this.repository(request.repoId),
+        request.path,
+      );
     if (request.kind === "symbolIndex")
-      return this.exportedNames(this.repository(request.repoId));
+      return exportedNames(
+        { cli: this.cli, reads: this.reads, execute: this.execute },
+        this.repository(request.repoId),
+      );
     if (request.kind === "providers") return this.providers();
     if (request.kind === "login") {
       const command = LOGIN_COMMANDS[request.provider];
