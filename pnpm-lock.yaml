@@ -288,9 +288,6 @@ importers:
       '@perbo/model':
         specifier: workspace:*
         version: link:../model
-      '@perbo/review':
-        specifier: workspace:*
-        version: link:../review
       zod:
         specifier: 'catalog:'
         version: 4.4.3

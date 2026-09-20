@@ -224,7 +224,7 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
 
     // The snapshot is what the person was shown, with the model that drafted it.
     const snapshot = readDraftSnapshot(dir, "PRB-1");
-    expect(snapshot?.draft?.model.prompt_version).toBe("draft_v3");
+    expect(snapshot?.draft?.model.prompt_version).toBe("draft_v4");
     expect(snapshot?.draft?.model.provider).toBe("double");
     // As returned, plus the fields the schema fills when a draft names no
     // dependency and proposes no graph.

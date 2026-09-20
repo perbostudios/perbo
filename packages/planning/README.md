@@ -15,7 +15,7 @@ Three properties are why a draft here is safe to show a person:
 
 | | |
 |---|---|
-| `draft.ts` | `draftContract`: the system prompt, the delimited blocks, the call, the schema, the provenance record. `DRAFT_PROMPT_VERSION` is `draft_v3` and covers all of them together |
+| `draft.ts` | `draftContract`: the system prompt, the delimited blocks, the call, the schema, the provenance record. `DRAFT_PROMPT_VERSION` is `draft_v4` and covers all of them together |
 | `delimit.ts` | The `<perbo:kind trust="…">` block, mirrored from the reviewer, plus the tag defang |
 | `tree.ts` | `git ls-files` two levels deep, by argv, so proposed globs name directories that exist |
 | `issue.ts` | `SourceIssue`, the one shape drafting reads, and `fetchGitHubIssue`: `gh issue view … --json` by argv, Zod-validated, one sentence on failure |

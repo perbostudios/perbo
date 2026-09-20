@@ -16,7 +16,6 @@ import {
   type ModelCostBasis,
   type ModelUsage,
 } from "@perbo/model";
-import { renderReadFileResult, type ReadOutcome } from "@perbo/review";
 import { delimit } from "./delimit.js";
 import { DraftRejectedError, PlanningError } from "./errors.js";
 import { repositoryTree } from "./tree.js";
@@ -38,11 +37,12 @@ import { repositoryTree } from "./tree.js";
 /**
  * Covers the system prompt, the block layout and the output schema together.
  *
- * v3: a spec as a second source, an execution graph of nodes and suggested
- * edges, the requirement id a criterion was drafted from, and no cap on the
- * number of criteria (D-100, D-103).
+ * v4: a spec as a second source, an execution graph of nodes and suggested
+ * edges, the requirement id a criterion was drafted from, no cap on the number
+ * of criteria (D-100, D-103), and every file the drafter opens delimited by
+ * this package.
  */
-export const DRAFT_PROMPT_VERSION = "draft_v3";
+export const DRAFT_PROMPT_VERSION = "draft_v4";
 
 /**
  * `manual` is absent: it carries a named reviewer and a reason nobody can
@@ -363,9 +363,32 @@ export interface BoardEntry {
   approved: boolean;
 }
 
+/** One file the drafter asked for, as the reader answered. */
+export type DraftReadOutcome =
+  | { ok: true; path: string; content: string; truncated: boolean; bytes: number }
+  | { ok: false; path: string; refusal: string };
+
 /** What the drafter may open, bounded by whoever supplies it. */
 export interface DraftReader {
-  read(path: string): ReadOutcome;
+  read(path: string): DraftReadOutcome;
+}
+
+/**
+ * A file the drafter opened, as the next turn receives it.
+ *
+ * The reader is bounded, but what it serves is still bytes somebody wrote, so
+ * it arrives inside a block that names its trust tier and is defanged like
+ * every other piece of content that is not the system prompt.
+ */
+function renderRead(outcome: DraftReadOutcome): string {
+  return delimit({
+    kind: "repo_file",
+    trust: "repo",
+    attrs: outcome.ok
+      ? { path: outcome.path, ...(outcome.truncated ? { truncated: "true" } : {}) }
+      : { path: outcome.path, read: "refused" },
+    body: outcome.ok ? outcome.content : outcome.refusal,
+  });
 }
 
 /** One file the drafter opened, or asked to and was refused. */
@@ -714,7 +737,7 @@ export async function draftContract(input: DraftInput): Promise<DraftResult> {
             return {
               type: "tool_result",
               tool_use_id: call.id,
-              content: renderReadFileResult(outcome),
+              content: renderRead(outcome),
               ...(outcome.ok ? {} : { is_error: true }),
             };
           }),
