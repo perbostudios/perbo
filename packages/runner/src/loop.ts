@@ -1808,7 +1808,7 @@ async function runLockedTicket(
         // is parked has to leave the instant behind for the next run to honour.
         wait: park,
       } satisfies ExecutionAttempt);
-            // The next round inherits this one's commit and can name the attempt
+      // The next round inherits this one's commit and can name the attempt
       // that sealed it.
       ledger.addAttempt(attempt, !carriedForward ? sealed.head_commit : null);
 
