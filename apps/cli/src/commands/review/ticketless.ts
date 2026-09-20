@@ -27,7 +27,7 @@ import {
 import { isRemediableFamily, remediableFindings } from "@perbo/review";
 import type { ReviewArgs } from "./internal/args.js";
 import { UsageError } from "../../usage-error.js";
-import { readPullRequest, readRefRange, type GitRunner, type PullRequestRead } from "../../pull-request.js";
+import { readPullRequest, readRefRange, type PullRequestRead } from "../../pull-request.js";
 
 /**
  * Reviewing a change nobody admitted (SCP-179).
@@ -143,7 +143,6 @@ export interface ResolveInput {
   now: Date;
   /** The pull-request read. Production uses `gh`; a test may point at another binary. */
   gh?: { binary?: string | undefined } | undefined;
-  git?: GitRunner | undefined;
   onProgress?: ((message: string) => void) | undefined;
 }
 
@@ -172,12 +171,7 @@ export async function resolveTicketlessSource(input: ResolveInput): Promise<Tick
 
   const range =
     pull === null && args.base !== null
-      ? readRefRange({
-          repo: repoDir,
-          head: args.head!,
-          base: args.base,
-          ...(input.git ? { git: input.git } : {}),
-        })
+      ? readRefRange({ repo: repoDir, head: args.head!, base: args.base })
       : null;
 
   const contract =
