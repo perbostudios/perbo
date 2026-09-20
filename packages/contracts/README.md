@@ -25,7 +25,9 @@ a human may raise a level and may not lower one.
 
 `paths.ts` is the single home for "what counts as a migration / dependency / config / security /
 agent-configuration path". Two copies of that answer, one in scope enforcement and one in risk
-derivation, would drift.
+derivation, would drift. It is also the single home for what a path glob *means*: `matchesAny`
+is the interface, and `test/glob-conformance.json` states the semantics as cases, so a matcher
+written elsewhere to them answers that table rather than a reading of its own.
 
 `review.ts` carries one deliberate asymmetry worth knowing about. A finding's `routing` is derived
 from `blocking` when it is absent, rather than defaulted, so an artifact written before D-051 stays
