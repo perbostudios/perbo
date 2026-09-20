@@ -1,12 +1,11 @@
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
-import { isCredentialEnvName, scrubEnvironment } from "@perbo/contracts";
+import { isCredentialEnvName, redactCredentials, scrubEnvironment } from "@perbo/contracts";
 import {
   CLAUDE_CLI_ENV_ALLOW_LIST,
   codexCliModel,
   providerFailureText,
 } from "@perbo/model";
-import { redactCredentials } from "@perbo/review";
 
 /**
  * One minimal call to the reviewer, made by `perbo doctor --probe` before an

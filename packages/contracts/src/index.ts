@@ -11,6 +11,7 @@ export * from "./scheduling.js";
 export * from "./changeset.js";
 export * from "./check.js";
 export * from "./context.js";
+export * from "./credential.js";
 export * from "./review.js";
 export * from "./source.js";
 export * from "./risk.js";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findCredentials, redactCredentials } from "../src/credential.js";
+import { findCredentials, redactCredentials } from "./credential.js";
 
 const hits = (text: string) => findCredentials(text).map((m) => m.value);
 

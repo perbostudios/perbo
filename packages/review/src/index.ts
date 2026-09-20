@@ -1,7 +1,6 @@
 export * from "./agent-config.js";
 export * from "./blocking.js";
 export * from "./closure-verify.js";
-export * from "./credential.js";
 export * from "./graph.js";
 export * from "./legibility.js";
 export * from "./prompt.js";
