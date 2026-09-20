@@ -58,7 +58,6 @@ import {
 } from "@perbo/planning";
 import {
   DraftSchema,
-  EditingSessionSchema,
   HELP_LINKS,
   ManifestEditorSchema,
   PREVIEW_BYTE_CAP,
@@ -110,6 +109,8 @@ import {
   interviewSessionArgs,
 } from "../shared/contract-editing.js";
 import { WorkspaceReads } from "./workspace-reads.js";
+import { ProfileStateSchema } from "./profile/store.js";
+import type { ProfileState, RegisteredRepository } from "./profile/store.js";
 import { runnerProgress } from "../shared/runner-progress.js";
 import {
   currentMonth,
@@ -126,49 +127,6 @@ import {
 } from "./records.js";
 import { codexUsage } from "./usage-probe.js";
 
-const RepoSchema = z.object({
-  id: z.string().uuid(),
-  name: z.string(),
-  path: z.string(),
-});
-const JobSchema = z.object({
-  id: z.string().uuid(),
-  repoId: z.string().uuid(),
-  key: z.string().nullable(),
-  kind: z.string(),
-  label: z.string(),
-  state: z.enum([
-    "running",
-    "stopping",
-    "completed",
-    "failed",
-    "cancelled",
-    "interrupted",
-  ]),
-  startedAt: z.string(),
-  endedAt: z.string().nullable(),
-  log: z.string(),
-  error: z.string().nullable(),
-  resultKey: z.string().nullable(),
-  result: z.unknown(),
-  editing: z
-    .object({ sessionId: z.string().uuid(), operationId: z.string().uuid() })
-    .optional(),
-});
-const StateSchema = z.object({
-  version: z.literal(1),
-  settings: SettingsSchema,
-  repositories: z.array(RepoSchema),
-  jobs: z.array(JobSchema),
-  titles: z.record(z.string(), z.string()).default({}),
-  taskModels: z.record(z.string(), TaskModelsSchema).default({}),
-  /** Completed tickets filed away from Home by hand (S4), as `repoId:key`. */
-  archived: z.array(z.string()).default([]),
-  /** Whether the tickets already finished before this preference existed have been filed. */
-  archivedSeeded: z.boolean().default(false),
-  editingSessions: z.array(EditingSessionSchema).default([]),
-});
-type State = z.infer<typeof StateSchema>;
 const ListSchema = z.object({ tickets: z.array(TicketSchema) });
 const CheckSchema = z
   .object({
@@ -318,7 +276,7 @@ export class DesktopService {
   private readonly execute: typeof runProcess;
   private readonly spawn: typeof startLineProcess;
   private readonly statePath: string;
-  private state: State;
+  private state: ProfileState;
   private readonly editing: ContractEditing;
   private readonly reads = new WorkspaceReads();
   private sequence = 0;
@@ -358,7 +316,7 @@ export class DesktopService {
           .parse(JSON.parse(readFileSync(this.statePath, "utf8")))
       : null;
     this.state = stored
-      ? StateSchema.parse(stored)
+      ? ProfileStateSchema.parse(stored)
       : {
           version: 1,
           settings: SettingsSchema.parse({}),
@@ -468,7 +426,7 @@ export class DesktopService {
       archived: this.state.archived,
     });
   }
-  private repository(id: string): z.infer<typeof RepoSchema> {
+  private repository(id: string): RegisteredRepository {
     const repo = this.state.repositories.find((entry) => entry.id === id);
     if (!repo)
       throw new Error(
@@ -482,7 +440,7 @@ export class DesktopService {
     return repo;
   }
   private safePath(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     ...parts: string[]
   ): string {
     const path = resolve(repo.path, ...parts),
@@ -504,7 +462,7 @@ export class DesktopService {
     return path;
   }
   /** The repository's `.perbo/config.json`, or null where it has none. */
-  private readConfig(repo: z.infer<typeof RepoSchema>): Record<string, unknown> | null {
+  private readConfig(repo: RegisteredRepository): Record<string, unknown> | null {
     const path = this.safePath(repo, ".perbo", "config.json");
     if (!existsSync(path)) return null;
     try {
@@ -520,7 +478,7 @@ export class DesktopService {
   }
   /** Replaces it, through a temporary file in the same directory so a crash leaves the old one. */
   private writeConfig(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     config: Record<string, unknown>,
   ): void {
     const path = this.safePath(repo, ".perbo", "config.json");
@@ -538,7 +496,7 @@ export class DesktopService {
    * inside the repository and accept it; everything else — outside the
    * repository, a symlink on the way — `safePath` refuses.
    */
-  private explorerPath(repo: z.infer<typeof RepoSchema>, path: string): string {
+  private explorerPath(repo: RegisteredRepository, path: string): string {
     if (isAbsolute(path) || /^[A-Za-z]:[\\/]/.test(path))
       throw new Error(
         "Name the file the way the repository does, relative to its root. Perbo does not take an absolute path from a screen.",
@@ -554,13 +512,13 @@ export class DesktopService {
     return relative;
   }
   /** The repository's tracked files, from Git in the registered repository and never from a path a renderer sent. */
-  private async trackedFiles(repo: z.infer<typeof RepoSchema>): Promise<string[]> {
+  private async trackedFiles(repo: RegisteredRepository): Promise<string[]> {
     const result = await this.execute("git", ["--no-optional-locks", "ls-files", "-z"], {
       cwd: repo.path,
     });
     return requireSuccess(result).split("\0").filter((entry) => entry.length > 0);
   }
-  private async explorerList(repo: z.infer<typeof RepoSchema>): Promise<ExplorerListing> {
+  private async explorerList(repo: RegisteredRepository): Promise<ExplorerListing> {
     const tracked = await this.trackedFiles(repo);
     const files = tracked.filter((path) => !isNeverReadPath(path)).sort();
     return {
@@ -575,7 +533,7 @@ export class DesktopService {
    * the whole file, and a decoded binary is not text.
    */
   private async explorerRead(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     requested: string,
   ): Promise<ExplorerFile> {
     const path = this.explorerPath(repo, requested);
@@ -598,7 +556,7 @@ export class DesktopService {
   }
   private cli(
     args: string[],
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     options: Partial<ProcessOptions> = {},
   ): Promise<ProcessResult> {
     const env = childEnvironment();
@@ -617,7 +575,7 @@ export class DesktopService {
    */
   private cliChild(
     args: string[],
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     options: Omit<Parameters<typeof startLineProcess>[2], "cwd" | "env">,
   ): LineProcess {
     const env = childEnvironment();
@@ -629,14 +587,14 @@ export class DesktopService {
     );
   }
   private async metadata(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
   ): Promise<Repository> {
     return this.reads.read("metadata:" + repo.id, repo.id, () =>
       this.readMetadata(repo),
     );
   }
   private async readMetadata(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
   ): Promise<Repository> {
     try {
       this.repository(repo.id);
@@ -760,7 +718,7 @@ export class DesktopService {
     });
     return { ...workspace, interviews };
   }
-  private list(repo: z.infer<typeof RepoSchema>) {
+  private list(repo: RegisteredRepository) {
     return this.reads.read("list:" + repo.id, repo.id, async () =>
       ListSchema.parse(
         JSON.parse(
@@ -814,7 +772,7 @@ export class DesktopService {
    * complete, which the next save does.
    */
   private refreshNodePages(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     id: string,
     specPath: string,
   ): void {
@@ -832,7 +790,7 @@ export class DesktopService {
   }
 
   /** Where this repository keeps its specs: `specs`, or the `specs` key (D-103). */
-  private specFolder(repo: z.infer<typeof RepoSchema>): string {
+  private specFolder(repo: RegisteredRepository): string {
     const path = this.safePath(repo, ".perbo", "config.json");
     if (!existsSync(path)) return DEFAULT_SPEC_FOLDER;
     const named = z
@@ -864,7 +822,7 @@ export class DesktopService {
    * and never flattened into one.
    */
   private async symbolIndex(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
   ): Promise<SymbolIndex | UnsupportedRepository> {
     const record: unknown = JSON.parse(
       requireSuccess(await this.cli(["index", "--json"], repo)),
@@ -884,7 +842,7 @@ export class DesktopService {
    * asking at once share one run.
    */
   private async exportedNames(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
   ): Promise<SymbolIndexView> {
     return this.reads.read("symbols:" + repo.id, repo.id, async () => {
       const index = await this.symbolIndex(repo);
@@ -1021,7 +979,7 @@ export class DesktopService {
    * the session it runs on, which is this planning's drafting choice.
    */
   private interviewArgv(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     session: EditingSession,
   ): string[] {
     const models = TaskModelsSchema.strip().parse(session.form.models);
@@ -1444,7 +1402,7 @@ export class DesktopService {
    * wrong order is worse than showing none.
    */
   private readApproach(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     key: string,
     contract: PlanContract,
   ): GraphEdge[] {
@@ -1474,7 +1432,7 @@ export class DesktopService {
    * for a node whose page has not been written yet.
    */
   private nodePages(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     ticket: Ticket,
     nodes: readonly { id: string }[],
   ): Map<string, { path: string; text: string }> {
@@ -1508,7 +1466,7 @@ export class DesktopService {
    * size is counted here, and a listing crosses only through the explorer,
    * which withholds what nothing reads.
    */
-  private async graphView(repo: z.infer<typeof RepoSchema>, key: string): Promise<GraphView> {
+  private async graphView(repo: RegisteredRepository, key: string): Promise<GraphView> {
     const ticket = (await this.list(repo)).tickets.find((entry) => entry.key === key);
     if (!ticket) throw new Error("This task is no longer in the repository's ticket store.");
     const { contract, digest } = this.readContract(repo, key);
@@ -1579,7 +1537,7 @@ export class DesktopService {
    * write and no subprocess.
    */
   private async liveGraph(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     ticket: Ticket,
     nodes: readonly PlanNode[],
   ): Promise<GraphLiveView> {
@@ -1602,7 +1560,7 @@ export class DesktopService {
   }
 
   private readContract(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     key: string,
   ): { contract: Detail["contract"]; digest: string } {
     const raw = readFileSync(
@@ -1615,7 +1573,7 @@ export class DesktopService {
     };
   }
   private assertDigest(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     key: string,
     digest: string,
   ): void {
@@ -1625,7 +1583,7 @@ export class DesktopService {
       );
   }
   private limits(
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
   ): z.infer<typeof LimitsTableSchema> {
     const path = this.safePath(repo, ".perbo", "config.json");
     const record = existsSync(path)
@@ -1948,7 +1906,7 @@ export class DesktopService {
   }
   private async invoke(
     job: Job,
-    repo: z.infer<typeof RepoSchema>,
+    repo: RegisteredRepository,
     args: string[],
     signal: AbortSignal,
     allowFailure = false,
