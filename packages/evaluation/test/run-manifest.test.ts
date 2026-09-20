@@ -321,8 +321,10 @@ describe("the git a run manifest's source snapshot starts", () => {
     () => {
       const bin = join(scratch, "bin");
       const dump = join(scratch, "child-env.txt");
+      const entry = join(scratch, "entry.mjs");
       const commit = "9".repeat(40);
       mkdirSync(bin, { recursive: true });
+      writeFileSync(entry, "// the reviewer entry a manifest records the digest of\n");
       writeFileSync(
         join(bin, "git"),
         `#!/bin/sh\nenv > ${JSON.stringify(dump)}\ncase "$*" in *rev-parse*) echo ${commit};; esac\n`,
@@ -334,7 +336,7 @@ describe("the git a run manifest's source snapshot starts", () => {
       process.env.PERBO_SENTINEL_TOKEN = "a token the child must not see";
       let source: ReturnType<typeof captureRunSource>;
       try {
-        source = captureRunSource({ cliPath: join(bin, "git"), cwd: scratch });
+        source = captureRunSource({ cliPath: entry, cwd: scratch });
       } finally {
         process.env.PATH = path;
         delete process.env.PERBO_SENTINEL_TOKEN;

@@ -55,9 +55,12 @@ describe("the git repositoryTree starts", () => {
   it.skipIf(process.platform === "win32")(
     "runs in the runner's environment, with prompts off and no ambient secret",
     () => {
-      const dir = repository(["README.md"]);
+      // Only the child is under test here, so the directory it runs in has to
+      // exist and nothing more; what git would have said is the fake's.
+      const dir = join(scratch, "any-directory");
       const bin = join(scratch, "env-dumping-git");
       const dump = join(scratch, "tree-child-env.txt");
+      mkdirSync(dir, { recursive: true });
       mkdirSync(bin, { recursive: true });
       writeFileSync(
         join(bin, "git"),
