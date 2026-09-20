@@ -25,6 +25,8 @@ otherwise be copied into five packages.
 | `initRepository(dir, options?)` | A `Repository` at `dir` with one commit: files, a copied working tree, a branch, a message, extra local configuration. |
 | `initBareRepository(dir, options?)` | Somewhere for a fixture to push. |
 | `Repository`, `RepositoryOptions` | What `initRepository` takes and hands back: `dir`, `head`, `git(...args)` and `commit(files, message, { at })`. |
+| `watchOutbound()` | Every destination this process asked to reach while it was up, sockets and `fetch` alike. The caller's `vi.restoreAllMocks()` puts both spies back. |
+| `OutboundWatch` | What it hands back. |
 
 ## Rules
 

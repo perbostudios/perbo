@@ -7,3 +7,4 @@ export {
   type Repository,
   type RepositoryOptions,
 } from "./repository.js";
+export { watchOutbound, type OutboundWatch } from "./outbound.js";
