@@ -10,7 +10,7 @@ import {
   type GithubCredentialReading,
 } from "@perbo/runner";
 import { gitEnv, run as captureRun, type RunResult } from "@perbo/workspace";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 
 /**
  * Where a ticketless review gets its change from (SCP-179).

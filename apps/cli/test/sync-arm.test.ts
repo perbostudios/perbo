@@ -10,7 +10,8 @@ import {
   unattendedMergeStatus,
   type Ticket,
 } from "@perbo/contracts";
-import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
+import { parseAdmitArgs, runAdmitCommand } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { runSyncCommand } from "../src/sync.js";
 import { readTicket, storeDir, writeTicket } from "../src/tickets.js";
 

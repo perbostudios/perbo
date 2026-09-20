@@ -10,8 +10,9 @@ import {
   type ModelRequest,
   type ModelTurn,
 } from "@perbo/model";
-import { UsageError } from "../src/args.js";
-import { parseAdmitArgs, runAdmitCommand, runApproveCommand, type Streams } from "../src/admit.js";
+import { UsageError } from "../src/usage-error.js";
+import { parseAdmitArgs, runAdmitCommand, runApproveCommand } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { runEditCommand } from "../src/edit.js";
 import { TICKET_RUNS } from "../src/execute.js";
 import { listTickets, readContract, readDraftSnapshot, readTicket, storeDir } from "../src/tickets.js";

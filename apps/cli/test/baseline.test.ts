@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { BaselineFileSchema, type BaselineFile } from "@perbo/contracts";
-import { UsageError } from "../src/args.js";
+import { UsageError } from "../src/usage-error.js";
 import { parseBaselineArgs, runBaselineCommand } from "../src/baseline.js";
 import { makeTicket } from "./attempt-fixture.js";
 

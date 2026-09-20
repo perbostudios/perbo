@@ -16,7 +16,7 @@ import {
   type Ticket,
   type VerdictDecision,
 } from "@perbo/contracts";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import {
   buildInspectReport,
   buildReportForSubject,
@@ -24,7 +24,7 @@ import {
   type InspectSubject,
   type ResolveSubject,
 } from "./inspect.js";
-import { pad } from "./render.js";
+import { pad } from "./text.js";
 import { refuseUnknownReview, storedReviewSubject, storedReviewsFor } from "./reviews.js";
 import { storeDir } from "./store.js";
 import type { Streams } from "./streams.js";

@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { EXIT_CODES } from "@perbo/contracts";
 import { parseListArgs } from "./admit.js";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import { readEndpoint, type EndpointRecord } from "./endpoint.js";
 import type { Streams } from "./streams.js";
 import { storeDir } from "./tickets.js";

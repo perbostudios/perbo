@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { PRINCIPLES_FILENAME } from "@perbo/runner";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import { DEFAULT_STORE_DIRNAME } from "./tickets.js";
 
 /**

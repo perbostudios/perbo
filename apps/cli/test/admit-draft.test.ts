@@ -11,8 +11,9 @@ import {
   type ModelRequest,
   type ModelTurn,
 } from "@perbo/model";
-import { UsageError } from "../src/args.js";
-import { parseAdmitArgs, readTicket, runAdmitCommand, storeDir, type Streams } from "../src/admit.js";
+import { UsageError } from "../src/usage-error.js";
+import { parseAdmitArgs, readTicket, runAdmitCommand, storeDir } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { nextKey, readDraftSnapshot } from "../src/tickets.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-draft-test-"));

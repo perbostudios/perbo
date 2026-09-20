@@ -20,7 +20,7 @@ import {
   type StopVerdicts,
 } from "@perbo/contracts";
 import { BundleStore, parseStopAnswers, pullRequestBody } from "@perbo/runner";
-import { UsageError } from "../src/args.js";
+import { UsageError } from "../src/usage-error.js";
 import { runEscapesCommand } from "../src/escapes.js";
 import { runInspectCommand } from "../src/inspect.js";
 import { runStopsCommand } from "../src/stops.js";

@@ -77,7 +77,7 @@ import {
   statesObserved,
   writeTicket,
 } from "./admit.js";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import {
   LOCAL_RUN_SCHEMA_VERSION,
   assertLocalRunArgs,
@@ -95,7 +95,7 @@ import {
   unaskedPullRequestChecks,
   type PullRequestChecks,
 } from "./pull-request.js";
-import { describeFailure } from "./run.js";
+import { describeFailure } from "./failure.js";
 import { readCorpusCache, renderCorpusCache } from "./corpus-cache.js";
 import {
   configuredReviewer,

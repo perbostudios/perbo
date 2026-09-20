@@ -56,7 +56,8 @@ import {
 } from "@perbo/planning";
 import { ProviderError, createModel, type Model, type ModelProvider } from "@perbo/model";
 import { RepoReader } from "@perbo/review";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
+import type { Streams } from "./streams.js";
 import { prohibitedSpecPaths, regenerateNodePages, specCommitFiles } from "./specs.js";
 import { specBaseline } from "./spec-staleness.js";
 import {
@@ -171,12 +172,6 @@ export interface ListArgs {
   store: string | null;
   all: boolean;
   json: boolean;
-}
-
-export interface Streams {
-  stdout: (chunk: string) => void;
-  stderr: (chunk: string) => void;
-  isTTY: boolean;
 }
 
 const takeValue = (rest: string[], index: number, token: string): string => {

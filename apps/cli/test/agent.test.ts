@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
-import { UsageError } from "../src/args.js";
+import { UsageError } from "../src/usage-error.js";
 import { agentLaunch, parseAgentArgs, runAgentCommand, sweepStaleLaunchFiles, type AgentLaunch } from "../src/agent.js";
 import { ENDPOINT_FILE, type EndpointRecord } from "../src/endpoint.js";
 import { parseMcpArgs, runMcpCommand } from "../src/mcp.js";

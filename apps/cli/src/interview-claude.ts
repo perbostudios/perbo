@@ -1,6 +1,6 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import {
   INTERVIEW_AGENT_TOOLS,
   INTERVIEW_DENIED_TOOLS,

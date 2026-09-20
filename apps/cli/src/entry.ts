@@ -1,6 +1,6 @@
 import { EXIT_CODES } from "@perbo/contracts";
-import { UsageError } from "./args.js";
-import { describeFailure } from "./run.js";
+import { UsageError } from "./usage-error.js";
+import { describeFailure } from "./failure.js";
 import { StoreError } from "./store.js";
 import type { Streams } from "./streams.js";
 

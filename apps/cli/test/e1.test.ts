@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { E1LedgerSchema, type E1Ledger } from "@perbo/contracts";
-import { UsageError } from "../src/args.js";
+import { UsageError } from "../src/usage-error.js";
 import { runBaselineCommand } from "../src/baseline.js";
 import { parseE1Args } from "../src/e1.js";
 

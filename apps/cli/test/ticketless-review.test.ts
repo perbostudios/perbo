@@ -7,9 +7,11 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import type { Model } from "@perbo/model";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
-import { parseReviewArgs, UsageError } from "../src/args.js";
+import { parseReviewArgs } from "../src/args.js";
+import { UsageError } from "../src/usage-error.js";
 import { normalisePullRequestReference } from "../src/pull-request.js";
-import { runReviewCommand, type Streams } from "../src/run.js";
+import { runReviewCommand } from "../src/run.js";
+import type { Streams } from "../src/streams.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 /**

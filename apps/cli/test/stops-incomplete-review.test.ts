@@ -9,7 +9,7 @@ import {
   type IncompleteReviewPath,
   type Ticket,
 } from "@perbo/contracts";
-import type { Streams } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { runStopsCommand } from "../src/stops.js";
 import { writeTicket } from "../src/tickets.js";
 

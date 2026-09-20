@@ -7,6 +7,7 @@ import type {
   SourceContract,
 } from "@perbo/contracts";
 import { hasAcceptanceCriteria } from "@perbo/contracts";
+import { WIDTH, clip, pad, painter, spread, wrap, type Paint, type Style } from "./text.js";
 
 /**
  * The human rendering of a review, and of one that stopped before it reached a
@@ -16,76 +17,6 @@ import { hasAcceptanceCriteria } from "@perbo/contracts";
  * as well as a colour — verification strength, blocking status and check
  * results. Colour is decoration here; remove it and nothing is lost.
  */
-
-export const WIDTH = 80;
-
-const ANSI = {
-  reset: "[0m",
-  dim: "[38;5;242m",
-  mid: "[38;5;247m",
-  hi: "[97m",
-  ok: "[38;5;71m",
-  bad: "[38;5;167m",
-  warn: "[38;5;179m",
-  sect: "[38;5;245m",
-} as const;
-
-export type Style = keyof typeof ANSI;
-export type Paint = (text: string, style: Style) => string;
-
-const painted: Paint = (text, style) => `${ANSI[style]}${text}${ANSI.reset}`;
-const plain: Paint = (text) => text;
-
-/** The painter every rendering in this binary shares, so `inspect` reads like `review`. */
-export const painter = (color: boolean): Paint => (color ? painted : plain);
-
-/** Right-align `right` against the width, keeping at least two spaces between. */
-export function spread(left: string, right: string, paint: Paint, style: Style): string {
-  if (right === "") return left;
-  const gap = Math.max(2, WIDTH - left.length - right.length);
-  return left + " ".repeat(gap) + paint(right, style);
-}
-
-export function wrap(text: string, indent: number): string[] {
-  const room = WIDTH - indent;
-  const pad = " ".repeat(indent);
-  const out: string[] = [];
-  let line = "";
-  // A token longer than the room is broken, so a path or a reference no
-  // space ever splits still fits the column instead of running past it.
-  const step = Math.max(1, room);
-  const words = text
-    .split(/\s+/)
-    .filter(Boolean)
-    .flatMap((word) => {
-      // By code point, so a character outside the basic plane is not cut in half.
-      const chars = Array.from(word);
-      const pieces: string[] = [];
-      for (let at = 0; at < chars.length; at += step) pieces.push(chars.slice(at, at + step).join(""));
-      return pieces;
-    });
-  for (const word of words) {
-    if (line === "") {
-      line = word;
-      continue;
-    }
-    if (line.length + 1 + word.length <= room) {
-      line += ` ${word}`;
-      continue;
-    }
-    out.push(pad + line);
-    line = word;
-  }
-  if (line !== "") out.push(pad + line);
-  return out;
-}
-
-export const pad = (text: string, width: number) =>
-  text.length >= width ? text.slice(0, width) : text + " ".repeat(width - text.length);
-
-/** Nothing on a fixed-column line may push past the width, whatever it says. */
-export const clip = (text: string, width: number) =>
-  text.length <= Math.max(0, width) ? text : `${text.slice(0, Math.max(1, width - 1))}…`;
 
 const CHECK_MARK: Record<string, string> = {
   passed: "✓",
@@ -102,7 +33,7 @@ const COVERAGE_MARK = (entry: CriterionEvidenceBinding): string => {
   return "!";
 };
 
-const COVERAGE_STYLE = (entry: CriterionEvidenceBinding): keyof typeof ANSI => {
+const COVERAGE_STYLE = (entry: CriterionEvidenceBinding): Style => {
   if (entry.status === "cannot_determine" || entry.status === "not_met") return "bad";
   if (entry.verification_strength === "directly_verified") return "ok";
   if (entry.verification_strength === "proxy") return "warn";
@@ -114,7 +45,7 @@ const COVERAGE_STYLE = (entry: CriterionEvidenceBinding): keyof typeof ANSI => {
  * from the reason string. `[FIX]` is a finding that goes back to the executor:
  * real, not blocking, and not a question for the person reading this.
  */
-function findingTag(finding: Finding): { tag: string; style: keyof typeof ANSI } {
+function findingTag(finding: Finding): { tag: string; style: Style } {
   switch (finding.routing) {
     case "waived":
       return { tag: "(waived)", style: "dim" };
@@ -196,7 +127,7 @@ export function renderArtifact(
   contract: PlanContract,
   options: RenderOptions,
 ): string {
-  const paint = options.color ? painted : plain;
+  const paint = painter(options.color);
   const lines: string[] = [];
   const criterionText = new Map<string, string>(
     hasAcceptanceCriteria(contract)
@@ -231,7 +162,7 @@ export function renderArtifact(
   );
   for (const check of artifact.checks) {
     const mark = CHECK_MARK[check.status] ?? "?";
-    const style: keyof typeof ANSI = check.status === "passed" ? "ok" : "bad";
+    const style: Style = check.status === "passed" ? "ok" : "bad";
     const left = `  ${paint(mark, style)}  ${pad(check.name, 15)} ${pad(check.command ?? "", 24)}`;
     // `paint` adds invisible bytes, so measure the unpainted prefix.
     const visible = `  ${mark}  ${pad(check.name, 15)} ${pad(check.command ?? "", 24)}`;
@@ -340,7 +271,7 @@ export function renderArtifact(
   if (rest.length + remediable.length > 0) lines.push("");
 
   // --- verdict --------------------------------------------------------------
-  const verdictStyle: keyof typeof ANSI =
+  const verdictStyle: Style =
     artifact.decision === "approve"
       ? "ok"
       : artifact.decision === "escalate" || artifact.decision === "remediable"
@@ -389,7 +320,7 @@ export function renderArtifact(
   );
   lines.push(paint("          executor narrative and transcript: not read", "dim"));
   if (options.routing) {
-    const routeStyle: keyof typeof ANSI =
+    const routeStyle: Style =
       options.routing.decision === "pass" ? "ok" : options.routing.decision === "executor" ? "warn" : "bad";
     lines.push(
       paint("ROUTING", "sect") + "   " + paint(options.routing.decision, routeStyle),

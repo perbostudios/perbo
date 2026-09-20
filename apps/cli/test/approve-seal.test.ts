@@ -3,14 +3,9 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { UsageError } from "../src/args.js";
-import {
-  loadAdmitted,
-  parseAdmitArgs,
-  runAdmitCommand,
-  runApproveCommand,
-  type Streams,
-} from "../src/admit.js";
+import { UsageError } from "../src/usage-error.js";
+import { loadAdmitted, parseAdmitArgs, runAdmitCommand, runApproveCommand } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { runEditCommand } from "../src/edit.js";
 import { parseExecuteArgs, runExecuteCommand } from "../src/execute.js";
 import { readContract, readDraftSnapshot, readTicket, storeDir } from "../src/tickets.js";

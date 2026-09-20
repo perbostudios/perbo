@@ -6,7 +6,8 @@ import { EXIT_CODES } from "@perbo/contracts";
 import type { Model, ModelRequest } from "@perbo/model";
 import { parseReviewArgs } from "../src/args.js";
 import { exitForThrown } from "../src/entry.js";
-import { runReviewCommand, type Streams } from "../src/run.js";
+import { runReviewCommand } from "../src/run.js";
+import type { Streams } from "../src/streams.js";
 import { USAGE } from "../src/usage.js";
 
 /**

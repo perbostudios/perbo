@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { EXIT_CODES } from "@perbo/contracts";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import { readEndpoint, type EndpointRecord } from "./endpoint.js";
 import { agentOrientation } from "./endpoint-tools.js";
 import { mcpConfig } from "./mcp.js";

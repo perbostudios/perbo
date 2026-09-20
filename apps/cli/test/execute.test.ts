@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { LimitsTableSchema } from "@perbo/contracts";
 import { DEFAULT_DELIVERED_CHECKS_BOUND_MS, TicketRunConfigSchema } from "@perbo/runner";
 import { describe, expect, it, vi } from "vitest";
-import { UsageError } from "../src/args.js";
+import { UsageError } from "../src/usage-error.js";
 import { readPullRequestChecks } from "../src/pull-request.js";
 import { parseAdmitArgs, runAdmitCommand } from "../src/admit.js";
 import {

@@ -12,8 +12,9 @@ import {
   type ModelTurn,
 } from "@perbo/model";
 import { commitSpec } from "@perbo/runner";
-import { UsageError } from "../src/args.js";
-import { parseAdmitArgs, runAdmitCommand, runApproveCommand, type Streams } from "../src/admit.js";
+import { UsageError } from "../src/usage-error.js";
+import { parseAdmitArgs, runAdmitCommand, runApproveCommand } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { TICKET_RUNS } from "../src/execute.js";
 import { buildInspectReport, renderInspect, type InspectReport } from "../src/inspect.js";
 import { runIndexCommand } from "../src/symbol-index.js";

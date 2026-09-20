@@ -15,7 +15,7 @@ import {
   summarizeBaseline,
   type BaselineFile,
 } from "@perbo/contracts";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import { E1_COMMANDS, isE1Command, runE1Command } from "./e1.js";
 import { formatDuration } from "./execute.js";
 import { storeDir } from "./store.js";

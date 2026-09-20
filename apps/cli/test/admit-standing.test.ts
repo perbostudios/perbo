@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
+import { parseAdmitArgs, runAdmitCommand } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { readContract, storeDir } from "../src/tickets.js";
 
 /**

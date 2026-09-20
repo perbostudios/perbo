@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { z } from "zod";
-import { VERSION } from "./run.js";
+import { VERSION } from "./version.js";
 import { toolsFor, type QueueSurface, type ToolContext, type ToolRole } from "./endpoint-tools.js";
 
 /**

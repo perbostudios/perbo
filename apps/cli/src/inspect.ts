@@ -41,7 +41,7 @@ import {
   type TicketSource,
 } from "@perbo/contracts";
 import { BundleStore, parseDeclines, runNumbers, type Decline } from "@perbo/runner";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import {
   BASE_SOURCE_LABEL,
   ceilingResourceFor,
@@ -61,7 +61,7 @@ import {
   type LocalRunRecord,
   type RunBase,
 } from "./local-run.js";
-import { WIDTH, clip, pad, painter, spread, wrap, type Paint } from "./render.js";
+import { WIDTH, clip, pad, painter, spread, wrap, type Paint } from "./text.js";
 import { specStaleness } from "./spec-staleness.js";
 import { storeDir } from "./store.js";
 import type { Streams } from "./streams.js";
@@ -69,7 +69,7 @@ import { readLocalVerdictsOrWarn } from "./verdicts.js";
 // `admission.js` and not `tickets.js`: a leaner reading of the same file,
 // which stays loose about everything the store's own writer already checked.
 import type { StoredAdmission } from "./admission.js";
-import { VERSION } from "./run.js";
+import { VERSION } from "./version.js";
 import {
   TicketStoreError,
   listTickets,

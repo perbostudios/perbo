@@ -20,7 +20,8 @@ import {
   pullRequestBody,
   type TicketDeliveryState,
 } from "@perbo/runner";
-import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
+import { parseAdmitArgs, runAdmitCommand } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { recordDelivery, runSyncCommand } from "../src/sync.js";
 import { readTicket, storeDir, writeTicket } from "../src/tickets.js";
 import { makeAttempt, makeReview } from "./attempt-fixture.js";

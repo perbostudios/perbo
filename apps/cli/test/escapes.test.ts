@@ -12,7 +12,7 @@ import {
   type TicketEscapes,
 } from "@perbo/contracts";
 import { TicketDeliveryStateSchema, type TicketDeliveryState } from "@perbo/runner";
-import type { Streams } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { baselinePath } from "../src/baseline.js";
 import {
   EscapeCollectionError,

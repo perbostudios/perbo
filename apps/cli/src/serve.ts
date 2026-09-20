@@ -29,7 +29,7 @@ import { RunRefusedError, ServeLockedError, acquireServeLock, liveRunLocks } fro
 import { startEndpoint, type RunningEndpoint } from "./endpoint.js";
 import { gitEnv, run } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type DraftProvider } from "./admit.js";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import { effectiveLimits, readRepoConfig, requireBase, resolveBase } from "./execute.js";
 import type { Streams } from "./streams.js";
 import { derivedBranch, isStranded, runSyncCommand } from "./sync.js";

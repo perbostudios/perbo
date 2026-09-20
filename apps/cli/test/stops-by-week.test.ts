@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { PARTNER_READING_CAVEAT, STOP_VERDICTS_SCHEMA_VERSION, type StopVerdicts } from "@perbo/contracts";
-import type { Streams } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { HIDING_WARNING, parseStopsArgs, runStopsCommand, weekHidingWarning } from "../src/stops.js";
 
 /**

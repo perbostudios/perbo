@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES, TICKET_SCHEMA_VERSION, TicketSchema, wilsonInterval, type Ticket } from "@perbo/contracts";
 import { GithubCredentialError, TicketDeliveryStateSchema, type TicketDeliveryState } from "@perbo/runner";
-import type { Streams } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { runStopsCommand } from "../src/stops.js";
 import { runSyncCommand } from "../src/sync.js";
 import { readTicket, storeDir, writeTicket } from "../src/tickets.js";

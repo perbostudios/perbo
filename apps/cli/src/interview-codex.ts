@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
 import { interviewSaidMessage } from "@perbo/contracts/interview-protocol";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import {
   INTERVIEW_SERVER_NAME,
   type InterviewSession,

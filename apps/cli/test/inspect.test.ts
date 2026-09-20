@@ -11,7 +11,7 @@ import {
   type RunBundleKind,
 } from "@perbo/contracts";
 import { BundleStore } from "@perbo/runner";
-import { UsageError } from "../src/args.js";
+import { UsageError } from "../src/usage-error.js";
 import {
   buildInspectReport,
   formatHumanElapsed,

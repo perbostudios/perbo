@@ -21,7 +21,7 @@ import {
   type SourceContract,
 } from "@perbo/contracts";
 import { BaseSourceSchema } from "@perbo/runner";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import { readPullRequest } from "./pull-request.js";
 import { headCommit, repositoryId } from "./store.js";
 import type { ExecuteArgs } from "./execute.js";

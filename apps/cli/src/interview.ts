@@ -37,7 +37,7 @@ import {
   type WorktreeScope,
 } from "@perbo/runner";
 import { parseAdmitArgs, runAdmitCommand, type AdmitArgs } from "./admit.js";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import { runEdit, type EditArgs } from "./edit.js";
 import { adrFolder, specFolder, storeDir, trackedFiles } from "./store.js";
 import type { Streams } from "./streams.js";

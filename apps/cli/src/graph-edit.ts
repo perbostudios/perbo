@@ -7,7 +7,7 @@ import {
   type GraphState,
 } from "@perbo/planning";
 import type { ApproachRecord, PlanContract } from "@perbo/contracts";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 
 /**
  * The command's side of the validated edit path (D-100): the engine is

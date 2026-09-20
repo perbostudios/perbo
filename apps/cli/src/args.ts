@@ -4,8 +4,7 @@
  */
 
 import type { ModelProvider } from "@perbo/model";
-
-export class UsageError extends Error {}
+import { UsageError } from "./usage-error.js";
 
 /**
  * What `--format` accepts. `json` is first because it is the default, and the

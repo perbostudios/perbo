@@ -11,8 +11,9 @@ import {
   type ModelRequest,
   type ModelTurn,
 } from "@perbo/model";
-import { UsageError } from "../src/args.js";
-import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
+import { UsageError } from "../src/usage-error.js";
+import { parseAdmitArgs, runAdmitCommand } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { runEditCommand } from "../src/edit.js";
 import { INTERVIEW_SESSION_FILE } from "../src/interview.js";
 import { specCommitFiles } from "../src/specs.js";

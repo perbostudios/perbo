@@ -5,14 +5,8 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, HAND_OFF_NOTE, OPENER_UNKNOWN_NOTE, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import {
-  ListJsonSchema,
-  parseAdmitArgs,
-  parseListArgs,
-  runAdmitCommand,
-  runListCommand,
-  type Streams,
-} from "../src/admit.js";
+import { ListJsonSchema, parseAdmitArgs, parseListArgs, runAdmitCommand, runListCommand } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { buildInspectReport } from "../src/inspect.js";
 import { recordDelivery, runSyncCommand } from "../src/sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.js";

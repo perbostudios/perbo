@@ -11,8 +11,8 @@ import {
   type StopVerdicts,
 } from "@perbo/contracts";
 import { parseStopAnswers } from "@perbo/runner";
-import { UsageError } from "../src/args.js";
-import type { Streams } from "../src/admit.js";
+import { UsageError } from "../src/usage-error.js";
+import type { Streams } from "../src/streams.js";
 import { HIDING_WARNING, parseStopsArgs, runStopsCommand } from "../src/stops.js";
 
 /**

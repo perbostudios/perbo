@@ -25,7 +25,7 @@ import {
   type SymbolIndex,
   type UnsupportedRepository,
 } from "@perbo/contracts";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import { StoreError, headCommit, storeDir } from "./store.js";
 import type { Streams } from "./streams.js";
 

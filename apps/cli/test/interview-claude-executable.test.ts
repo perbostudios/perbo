@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { UsageError } from "../src/args.js";
+import { UsageError } from "../src/usage-error.js";
 import { resolveClaudeExecutable } from "../src/interview-claude.js";
 
 /**

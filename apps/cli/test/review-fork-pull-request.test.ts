@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Model } from "@perbo/model";
 import { parseReviewArgs } from "../src/args.js";
-import { runReviewCommand, type Streams } from "../src/run.js";
+import { runReviewCommand } from "../src/run.js";
+import type { Streams } from "../src/streams.js";
 
 /**
  * `perbo review --pr` on a pull request opened from a fork (SCP-211).

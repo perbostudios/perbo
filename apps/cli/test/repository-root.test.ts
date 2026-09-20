@@ -6,7 +6,8 @@ import { win32 } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { StoredTicketSchema, type Ticket } from "@perbo/contracts";
 import { TicketRunConfigSchema } from "@perbo/runner";
-import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
+import { parseAdmitArgs, runAdmitCommand } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { TICKET_RUNS } from "../src/execute.js";
 import { TicketStoreError, listTickets, readTicket, storeDir, writeTicket } from "../src/tickets.js";
 

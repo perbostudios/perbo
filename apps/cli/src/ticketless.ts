@@ -25,7 +25,8 @@ import {
   type SourceContract,
 } from "@perbo/contracts";
 import { isRemediableFamily, remediableFindings } from "@perbo/review";
-import { UsageError, type ReviewArgs } from "./args.js";
+import type { ReviewArgs } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import { readPullRequest, readRefRange, type GitRunner, type PullRequestRead } from "./pull-request.js";
 
 /**

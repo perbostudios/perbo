@@ -6,9 +6,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ReviewArtifactSchema, type ReviewArtifact } from "@perbo/contracts";
 import type { Model } from "@perbo/model";
 import { assessLegibility } from "@perbo/review";
-import { UsageError, parseReviewArgs } from "../src/args.js";
+import { parseReviewArgs } from "../src/args.js";
+import { UsageError } from "../src/usage-error.js";
 import { renderReviewMarkdown } from "../src/markdown.js";
-import { runReviewCommand, type Streams } from "../src/run.js";
+import { runReviewCommand } from "../src/run.js";
+import type { Streams } from "../src/streams.js";
 
 /**
  * `review --format markdown` (SCP-219).

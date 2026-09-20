@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TicketSchema, type Ticket } from "@perbo/contracts";
-import { UsageError } from "../src/args.js";
+import { UsageError } from "../src/usage-error.js";
 import { reopen } from "../src/execute.js";
 
 /**

@@ -10,7 +10,7 @@ import {
   readSpecFile,
   writeNodePages,
 } from "@perbo/planning";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import { INTERVIEW_SESSION_FILE } from "./interview.js";
 import { adrFolder, specFolder } from "./store.js";
 

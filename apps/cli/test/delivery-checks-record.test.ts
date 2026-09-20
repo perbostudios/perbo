@@ -11,7 +11,8 @@ import {
   type Ticket,
 } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
+import { parseAdmitArgs, runAdmitCommand } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { recordDelivery, runSyncCommand } from "../src/sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../src/tickets.js";
 

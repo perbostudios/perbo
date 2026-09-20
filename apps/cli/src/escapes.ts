@@ -17,8 +17,8 @@ import {
   type TicketCommit,
   type TicketEscapes,
 } from "@perbo/contracts";
-import { UsageError } from "./args.js";
-import type { Streams } from "./admit.js";
+import { UsageError } from "./usage-error.js";
+import type { Streams } from "./streams.js";
 import { baselinePath } from "./baseline.js";
 import { countDueness, dueAt, duenessOf, escapeReading, type DueCounts } from "./escape-due.js";
 import {

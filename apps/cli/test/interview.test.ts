@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { InterviewEventSchema, InterviewTurnSchema } from "@perbo/contracts/interview-protocol";
-import { UsageError } from "../src/args.js";
+import { UsageError } from "../src/usage-error.js";
 import { claudeInterviewTransport } from "../src/interview-claude.js";
 
 /** What the transport is told to run. The scripted SDK spawns nothing. */

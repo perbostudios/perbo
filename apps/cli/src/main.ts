@@ -20,7 +20,8 @@ import {
 } from "./execute.js";
 import { runInspectCommand } from "./inspect.js";
 import { parsePrincipleArgs, runPrincipleCommand } from "./principles.js";
-import { VERSION, runReviewCommand } from "./run.js";
+import { runReviewCommand } from "./run.js";
+import { VERSION } from "./version.js";
 import { runStopsCommand } from "./stops.js";
 import { runIndexCommand } from "./symbol-index.js";
 import { runAgentCommand } from "./agent.js";

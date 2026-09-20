@@ -24,7 +24,7 @@ import {
   type E1Result,
   type E1Thresholds,
 } from "@perbo/contracts";
-import { UsageError } from "./args.js";
+import { UsageError } from "./usage-error.js";
 import { baselinePath, readBaselineFile } from "./baseline.js";
 import { formatDuration } from "./execute.js";
 import { storeDir } from "./store.js";

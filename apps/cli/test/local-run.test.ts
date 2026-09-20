@@ -24,7 +24,8 @@ import {
 } from "@perbo/contracts";
 import { pollPullRequest, type PreflightRequest, type PreflightResult } from "@perbo/runner";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand, type Streams } from "../src/admit.js";
+import { parseAdmitArgs, runAdmitCommand } from "../src/admit.js";
+import type { Streams } from "../src/streams.js";
 import { runEscapesCommand } from "../src/escapes.js";
 import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "../src/execute.js";
 import { buildInspectReport } from "../src/inspect.js";

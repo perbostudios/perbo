@@ -23,8 +23,8 @@ import {
   type UnattendedMergesSummary,
   type WilsonInterval,
 } from "@perbo/contracts";
-import { UsageError } from "./args.js";
-import type { Streams } from "./admit.js";
+import { UsageError } from "./usage-error.js";
+import type { Streams } from "./streams.js";
 import {
   attemptsRecordSubject,
   buildReportForSubject,
