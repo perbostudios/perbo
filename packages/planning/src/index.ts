@@ -1,6 +1,5 @@
-export * from "./delimit.js";
 export * from "./diff.js";
-export * from "./draft.js";
+export * from "./draft/index.js";
 export * from "./errors.js";
 export * from "./file-issue.js";
 export * from "./graph-edit.js";
@@ -11,4 +10,3 @@ export * from "./node-pages.js";
 export * from "./spec-text.js";
 export * from "./spec.js";
 export * from "./spec-write.js";
-export * from "./tree.js";
