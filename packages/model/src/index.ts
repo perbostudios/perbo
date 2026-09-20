@@ -12,3 +12,5 @@ export type { CodexCliOptions } from "./codex-cli.js";
 export { codexCliModel } from "./codex-cli.js";
 export type { CreateModelOptions, ModelProvider } from "./provider.js";
 export { MODEL_PROVIDERS, createModel } from "./provider.js";
+export type { Session, SessionAccounting, ToolResult } from "./session.js";
+export { openSession } from "./session.js";
