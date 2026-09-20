@@ -20,8 +20,8 @@ import {
   listLeases,
   provision,
   reclaimStaleWorktrees,
-} from "../src/worktree.js";
-import { makeRepo } from "./support.js";
+} from "./worktree.js";
+import { makeRepo } from "./test-support/repository.js";
 
 const scratch = () => mkdtempSync(join(tmpdir(), "perbo-wt-"));
 

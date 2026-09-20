@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { diagnose, enclosingWorkspaceRoot } from "../src/diagnostic.js";
-import { makeRepo } from "./support.js";
+import { diagnose, enclosingWorkspaceRoot } from "./diagnostic.js";
+import { makeRepo } from "./test-support/repository.js";
 
 const scratch = () => mkdtempSync(join(tmpdir(), "perbo-nest-"));
 

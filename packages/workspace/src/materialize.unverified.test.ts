@@ -8,10 +8,10 @@ import {
   type InstallStrategy,
   type MaterializationManifest,
 } from "@perbo/contracts";
-import { diagnose } from "../src/diagnostic.js";
-import { materialize } from "../src/materialize.js";
-import { provision } from "../src/worktree.js";
-import { git } from "./support.js";
+import { diagnose } from "./diagnostic.js";
+import { materialize } from "./materialize.js";
+import { provision } from "./worktree.js";
+import { git } from "./test-support/repository.js";
 
 /**
  * A repository whose own scripts give a worktree nothing to run is accepted, not

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { run } from "../src/exec.js";
+import { run } from "./exec.js";
 
 /**
  * A child that exits while a grandchild holds its pipes must still settle.

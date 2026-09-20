@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { SuspendDetector } from "../src/suspend.js";
-import { allocatePortRange, databaseSchemaFor, portFree } from "../src/ports.js";
+import { SuspendDetector } from "./suspend.js";
+import { allocatePortRange, databaseSchemaFor, portFree } from "./ports.js";
 
 describe("SuspendDetector", () => {
   it("reads a very late tick as the host having slept", () => {

@@ -1,8 +1,8 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { diagnose, verificationServiceNeed } from "../src/diagnostic.js";
-import { makeRepo } from "./support.js";
+import { diagnose, verificationServiceNeed } from "./diagnostic.js";
+import { makeRepo } from "./test-support/repository.js";
 
 /**
  * Materialization copies files. It cannot start a database.

@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_LIMITS_TABLE } from "@perbo/contracts";
-import { diagnose, unpinnedInstallEnv } from "../src/diagnostic.js";
-import { materialize } from "../src/materialize.js";
-import { provision } from "../src/worktree.js";
-import { git } from "./support.js";
+import { diagnose, unpinnedInstallEnv } from "./diagnostic.js";
+import { materialize } from "./materialize.js";
+import { provision } from "./worktree.js";
+import { git } from "./test-support/repository.js";
 
 /**
  * A checkout that has no lockfile yet.

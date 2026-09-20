@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { CommandFailedError } from "../exec.js";
 import { createGh, createGit, git } from "./index.js";
 import { fakeGitProcess } from "./test-support/fake-process.js";
-import { git as fixtureGit, makeRepo } from "../../test/support.js";
+import { git as fixtureGit, makeRepo } from "../test-support/repository.js";
 
 const scratch = () => mkdtempSync(join(tmpdir(), "perbo-repo-"));
 

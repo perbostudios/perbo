@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { directoryBytes } from "../src/disk.js";
+import { directoryBytes } from "./disk.js";
 
 const scratchRoot = mkdtempSync(join(tmpdir(), "perbo-disk-"));
 afterAll(() => rmSync(scratchRoot, { recursive: true, force: true }));

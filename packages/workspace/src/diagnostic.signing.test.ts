@@ -3,8 +3,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { diagnose } from "../src/diagnostic.js";
-import { git, makeRepo } from "./support.js";
+import { diagnose } from "./diagnostic.js";
+import { git, makeRepo } from "./test-support/repository.js";
 
 /**
  * A repository whose git configuration signs commits, diagnosed before an
