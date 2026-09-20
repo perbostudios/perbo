@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -7,6 +6,7 @@ import {
   type DecidedBy,
   type LocalVerdicts,
 } from "@perbo/contracts";
+import { git } from "@perbo/workspace";
 import type { Streams } from "../../streams.js";
 
 /**
@@ -89,14 +89,10 @@ export const GIT_IDENTITY_COMMANDS = [
 export function readGitIdentity(repositoryRoot: string): GitIdentity {
   const config = (key: string): string | null => {
     try {
-      const value = execFileSync("git", ["config", "--get", key], {
-        cwd: repositoryRoot,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-      return value === "" ? null : value;
+      return git.configSync(repositoryRoot, key);
     } catch {
-      // No git, no repository, or no such key: none of them is an error here.
+      // No git, no repository, or a read that did not finish: none of them is
+      // an error here, and none of them names anybody.
       return null;
     }
   };
