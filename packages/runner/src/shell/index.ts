@@ -1,4 +1,23 @@
 import { lstatSync } from "node:fs";
+import {
+  anyPresent,
+  basename,
+  isAssignment,
+  optionSet,
+  optionsPresent,
+  type Context,
+} from "./internal/command.js";
+import {
+  SEQUENTIAL_OPERATORS,
+  heredocQueue,
+  scanSegments,
+  tokenize,
+  withoutHeredocBodies,
+  type HeredocBody,
+  type Item,
+  type StdinSource,
+  type Word,
+} from "./internal/lexer.js";
 import { dirname } from "node:path";
 import {
   destinationSentence,
@@ -23,6 +42,7 @@ export {
   resolveScope,
 } from "./internal/scope.js";
 export type { Cwd, ResolvedScope, WorktreeScope } from "./internal/scope.js";
+export { splitCommandSegments, withoutHeredocBodies } from "./internal/lexer.js";
 export type {
   WriteCause,
   WriteFinding,
@@ -122,580 +142,6 @@ export interface CommandReading {
  * environment of the next.
  */
 const SCRATCH_REBOUND = /\b(?:TMPDIR|TMP|TEMP)=|\bunset\b[^\n]*\b(?:TMPDIR|TMP|TEMP)\b/;
-
-/* ------------------------------------------------------------------ lexer */
-
-interface Word {
-  /** As written, so a refusal names what the agent typed. */
-  raw: string;
-  /** Quotes and escapes removed. */
-  value: string;
-  /** Command bodies found in `$(…)` or backticks outside single quotes. */
-  substitutions: string[];
-  /** True when an unexpanded `$name` or `${name}` survives in the value. */
-  variable: boolean;
-  /**
-   * True for a word that belongs to a redirect rather than to the command: its
-   * target, or the descriptor number written against its operator. Both join
-   * the command's words so a write verb's operands are judged with them, and
-   * neither can be the command word — a wrapper that lost its own is still
-   * option-only with `> log.txt` or `2>&1` after it (SCP-186).
-   */
-  redirect?: boolean;
-}
-
-interface Redirect {
-  target: Word | null;
-  reason: string | null;
-}
-
-/**
- * Where a command's standard input comes from, as the line spells it.
- *
- * It matters for one class of command: an interpreter or a shell given no
- * program on its command line runs whatever arrives on standard input, so the
- * question "what is this process about to run" is answered here or not at all.
- */
-type StdinSource =
-  | { kind: "heredoc"; tag: string; expanded: boolean; body: string }
-  /** A here-string, `<<< word`, whose text is on the line. */
-  | { kind: "word"; word: Word }
-  /** A file, `< path`, whose contents this guard does not read. */
-  | { kind: "file"; word: Word }
-  /** A descriptor or an input this guard cannot name at all. */
-  | { kind: "opaque"; raw: string }
-  /** The stage before it in a pipeline, as the words that stage was written as. */
-  | { kind: "pipe"; producer: Word[] };
-
-type Item =
-  | { kind: "word"; word: Word }
-  | { kind: "redirect"; redirect: Redirect }
-  | { kind: "stdin"; source: StdinSource }
-  | { kind: "operator"; text: string };
-
-const WORD_BREAK = new Set([">", "<", "|", ";", "&", "(", ")"]);
-
-/**
- * The operators that end one command and start the next.
- *
- * `&&`, `||` and `;` run the next command in the same shell, so a `cd` before
- * one moves it. `|`, `|&` and `&` run their command in a subshell, so a `cd`
- * inside it moves nothing after it.
- */
-const SEQUENTIAL_OPERATORS = new Set(["&&", "||", ";", "\n", "\r\n", ""]);
-
-/** Read the operator at `from`, longest form first, or null. */
-function readOperator(text: string, from: number): string | null {
-  const two = text.slice(from, from + 2);
-  if (two === "&&" || two === "||" || two === "|&") return two;
-  const newline = /^\r?\n/.exec(text.slice(from));
-  if (newline !== null) return newline[0];
-  const ch = text[from];
-  return ch === ";" || ch === "|" || ch === "&" ? ch : null;
-}
-
-/** Read the body of a `$(…)` or a backtick pair, tracking nesting and quotes. */
-function readSubstitution(text: string, from: number): { body: string; end: number } | null {
-  if (text.startsWith("`", from)) {
-    const close = text.indexOf("`", from + 1);
-    return close === -1 ? null : { body: text.slice(from + 1, close), end: close + 1 };
-  }
-  let depth = 1;
-  let quote: string | null = null;
-  for (let i = from + 2; i < text.length; i += 1) {
-    const ch = text[i]!;
-    if (quote !== null) {
-      if (ch === "\\" && quote === '"') i += 1;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === "\\") {
-      i += 1;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (ch === "(") depth += 1;
-    else if (ch === ")") {
-      depth -= 1;
-      if (depth === 0) return { body: text.slice(from + 2, i), end: i + 1 };
-    }
-  }
-  return null;
-}
-
-/** What a backslash inside double quotes escapes, as bash reads it. */
-const DOUBLE_QUOTED_ESCAPES = new Set(["$", "`", '"', "\\", "\n"]);
-
-function readWord(text: string, from: number): { word: Word; end: number; balanced: boolean } {
-  let value = "";
-  const substitutions: string[] = [];
-  let variable = false;
-  let balanced = true;
-  let quote: string | null = null;
-  let i = from;
-  while (i < text.length) {
-    const ch = text[i]!;
-    if (quote === "'") {
-      if (ch === "'") quote = null;
-      else value += ch;
-      i += 1;
-      continue;
-    }
-    if (ch === "\\") {
-      // Inside double quotes a backslash escapes only `$`, a backtick, `"`, `\`
-      // and a newline, as bash reads it; before any other character it stays in
-      // the word, which on Windows makes it a separator.
-      const next = text[i + 1] ?? "";
-      if (quote === '"' && !DOUBLE_QUOTED_ESCAPES.has(next)) value += ch;
-      value += next;
-      i += 2;
-      continue;
-    }
-    if (quote === null && (ch === '"' || ch === "'")) {
-      quote = ch;
-      i += 1;
-      continue;
-    }
-    if (quote === '"' && ch === '"') {
-      quote = null;
-      i += 1;
-      continue;
-    }
-    if (ch === "`" || (ch === "$" && text[i + 1] === "(")) {
-      const read = readSubstitution(text, i);
-      if (read === null) {
-        balanced = false;
-        value += text.slice(i);
-        i = text.length;
-        continue;
-      }
-      substitutions.push(read.body);
-      value += text.slice(i, read.end);
-      i = read.end;
-      continue;
-    }
-    if (ch === "$") variable = true;
-    if (quote === null && (/\s/.test(ch) || WORD_BREAK.has(ch))) break;
-    value += ch;
-    i += 1;
-  }
-  if (quote !== null) balanced = false;
-  return { word: { raw: text.slice(from, i), value, substitutions, variable }, end: i, balanced };
-}
-
-/** A heredoc a line opened: the terminator to look for, and how to match it. */
-interface Heredoc {
-  tag: string;
-  /** `<<-`, which strips leading tabs from the body lines and the terminator. */
-  stripTabs: boolean;
-  /**
-   * True for `<<'EOF'` and `<<"EOF"`, whose body the shell hands over verbatim.
-   * An unquoted tag lets the shell expand `$name` and `$(…)` inside the body,
-   * so what the command receives is not what the line says.
-   */
-  quoted: boolean;
-}
-
-/** A heredoc's tag and the lines the shell feeds to the command's input. */
-interface HeredocBody extends Heredoc {
-  body: string;
-}
-
-/** Read the tag of a `<<`, `from` being the character after the operator. */
-function readHeredocTag(text: string, from: number): { heredoc: Heredoc; end: number } | null {
-  let i = from;
-  const stripTabs = text[i] === "-";
-  if (stripTabs) i += 1;
-  while (text[i] === " " || text[i] === "\t") i += 1;
-  const read = readWord(text, i);
-  if (read.word.value.length === 0) return null;
-  const quoted = read.word.raw !== read.word.value;
-  return { heredoc: { tag: read.word.value, stripTabs, quoted }, end: read.end };
-}
-
-/**
- * Where the text after the bodies of `opened` starts, `from` being line one,
- * and the body each of them consumed.
- */
-function skipHeredocBodies(
-  text: string,
-  from: number,
-  opened: readonly Heredoc[],
-  bodies: HeredocBody[],
-): number {
-  let at = from;
-  for (const heredoc of opened) {
-    const { tag, stripTabs } = heredoc;
-    const lines: string[] = [];
-    while (at < text.length) {
-      const newline = text.indexOf("\n", at);
-      const end = newline === -1 ? text.length : newline;
-      const line = text.slice(at, end).replace(/\r$/, "");
-      at = newline === -1 ? end : newline + 1;
-      const stripped = stripTabs ? line.replace(/^\t+/, "") : line;
-      if (stripped === tag) break;
-      lines.push(stripped);
-    }
-    bodies.push({ ...heredoc, body: lines.join("\n") });
-  }
-  return at;
-}
-
-/**
- * The same line with every heredoc body removed.
- *
- * `cat >> file <<'EOF'` feeds the lines that follow to the command's standard
- * input. They are its data: a `>` or a `cd` written inside one redirects and
- * moves nothing, and a quote inside one opens nothing. The operator and its tag
- * stay, so the redirect standing before them is judged exactly as it was.
- *
- * A body starts after the newline that ends the line its operator stands on —
- * two operators on one line take their bodies in that order — and ends at the
- * first line equal to the tag. An unterminated body runs to the end of the
- * text. `<<<` is a here-string, whose word is on the line itself, and is left
- * alone.
- *
- * What the command does with the data is the command's own — with one
- * exception, and it is the reason the bodies are returned rather than dropped:
- * where the command is an interpreter or a shell, that data **is** its program,
- * and the guard reads it as such (SCP-177).
- */
-export function withoutHeredocBodies(command: string): { text: string; bodies: HeredocBody[] } {
-  const bodies: HeredocBody[] = [];
-  if (!command.includes("<<")) return { text: command, bodies };
-  let kept = "";
-  let start = 0;
-  let opened: Heredoc[] = [];
-  let quote: string | null = null;
-  let i = 0;
-  while (i < command.length) {
-    const ch = command[i]!;
-    if (quote === "'") {
-      if (ch === "'") quote = null;
-      i += 1;
-      continue;
-    }
-    if (ch === "\\") {
-      // An escaped newline continues the line, so the body it opens still
-      // begins after the next newline that ends one.
-      i += 2;
-      continue;
-    }
-    if (quote === null && (ch === '"' || ch === "'")) {
-      quote = ch;
-      i += 1;
-      continue;
-    }
-    if (quote === '"') {
-      if (ch === '"') quote = null;
-      i += 1;
-      continue;
-    }
-    if (ch === "`" || (ch === "$" && command[i + 1] === "(")) {
-      // A heredoc inside a substitution belongs to the command the substitution
-      // runs, which is read on its own.
-      const read = readSubstitution(command, i);
-      if (read === null) break;
-      i = read.end;
-      continue;
-    }
-    if (ch === "<" && command[i + 1] === "<") {
-      if (command[i + 2] === "<") {
-        // A here-string. Its word is on this line, and the two characters it
-        // ends with are not an operator of their own.
-        i += 3;
-        continue;
-      }
-      const read = readHeredocTag(command, i + 2);
-      if (read === null) {
-        i += 2;
-        continue;
-      }
-      opened.push(read.heredoc);
-      i = read.end;
-      continue;
-    }
-    if (ch === "\n" && opened.length > 0) {
-      kept += command.slice(start, i + 1);
-      i = skipHeredocBodies(command, i + 1, opened, bodies);
-      start = i;
-      opened = [];
-      continue;
-    }
-    i += 1;
-  }
-  return { text: kept + command.slice(start), bodies };
-}
-
-/**
- * The bodies a line opened, taken by tag as each `<<` is read.
- *
- * By tag rather than by position, because the collector walks the line and the
- * lexer walks the segments it was split into: a tag names its own body under
- * either walk, and a `<<` whose body is missing is left unreadable rather than
- * handed the next one along.
- */
-function heredocQueue(bodies: readonly HeredocBody[]): Map<string, HeredocBody[]> {
-  const queue = new Map<string, HeredocBody[]>();
-  for (const body of bodies) {
-    const held = queue.get(body.tag);
-    if (held === undefined) queue.set(body.tag, [body]);
-    else held.push(body);
-  }
-  return queue;
-}
-
-/**
- * One shell line, as the commands it runs and the separators between them.
- *
- * Splitting is quote-aware: a separator inside `"…"`, `'…'`, a `$(…)`, a
- * backtick pair or a subshell is part of a command, not a boundary. Heredoc
- * bodies come out before anything else is read, because they are input rather
- * than command text (SCP-174). Line continuations are joined next, because
- * `git branch \<newline> -D main` deletes a branch.
- */
-function scanSegments(command: string): {
-  texts: string[];
-  separators: string[];
-  balanced: boolean;
-  bodies: HeredocBody[];
-} {
-  const read = withoutHeredocBodies(command);
-  const bodies = read.bodies;
-  const text = read.text.replace(/\\\r?\n/g, " ");
-  const texts: string[] = [];
-  const separators: string[] = [];
-  let start = 0;
-  let quote: string | null = null;
-  let depth = 0;
-  let balanced = true;
-  let i = 0;
-  const push = (end: number, separator: string) => {
-    texts.push(text.slice(start, end));
-    separators.push(separator);
-    start = end + separator.length;
-  };
-  while (i < text.length) {
-    const ch = text[i]!;
-    if (quote === "'") {
-      if (ch === "'") quote = null;
-      i += 1;
-      continue;
-    }
-    if (ch === "\\") {
-      i += 2;
-      continue;
-    }
-    if (quote === null && (ch === '"' || ch === "'")) {
-      quote = ch;
-      i += 1;
-      continue;
-    }
-    if (quote === '"') {
-      if (ch === '"') quote = null;
-      i += 1;
-      continue;
-    }
-    if (ch === "`" || (ch === "$" && text[i + 1] === "(")) {
-      const read = readSubstitution(text, i);
-      if (read === null) {
-        balanced = false;
-        break;
-      }
-      i = read.end;
-      continue;
-    }
-    if (ch === "&" && text[i + 1] === ">") {
-      // `&>` redirects both streams; the `&` is part of the operator.
-      i += 1;
-      continue;
-    }
-    if (ch === ">") {
-      // `>|` is one operator, and the `&` of `2>&1` is part of this one: in
-      // neither is the second character a separator.
-      i += 1;
-      if (text[i] === ">" || text[i] === "|") i += 1;
-      if (text[i] === "&") i += 1;
-      continue;
-    }
-    if (ch === "(") {
-      depth += 1;
-      i += 1;
-      continue;
-    }
-    if (ch === ")") {
-      depth = Math.max(0, depth - 1);
-      i += 1;
-      continue;
-    }
-    if (depth === 0) {
-      const operator = readOperator(text, i);
-      if (operator !== null) {
-        push(i, operator);
-        i += operator.length;
-        continue;
-      }
-    }
-    i += 1;
-  }
-  if (quote !== null || depth !== 0) balanced = false;
-  texts.push(text.slice(start));
-  separators.push("");
-  return { texts, separators, balanced, bodies };
-}
-
-/** The list `inspectCommand` evaluates its pattern rules against. */
-export function splitCommandSegments(command: string): string[] {
-  return scanSegments(command)
-    .texts.map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0);
-}
-
-/** Classify one input redirect, `opened` being how many `<` it was written with. */
-function stdinSource(
-  word: Word,
-  opened: number,
-  descriptor: boolean,
-  raw: string,
-  heredocs: Map<string, HeredocBody[]>,
-): StdinSource {
-  if (descriptor || word.value.length === 0) return { kind: "opaque", raw };
-  if (opened === 3) return { kind: "word", word };
-  if (opened === 2) {
-    const held = heredocs.get(word.value);
-    const body = held?.shift();
-    if (body === undefined) return { kind: "opaque", raw };
-    return { kind: "heredoc", tag: body.tag, expanded: !body.quoted, body: body.body };
-  }
-  return { kind: "file", word };
-}
-
-function tokenize(
-  segment: string,
-  heredocs: Map<string, HeredocBody[]> = new Map(),
-): { items: Item[]; balanced: boolean } {
-  const items: Item[] = [];
-  let balanced = true;
-  let i = 0;
-  while (i < segment.length) {
-    const ch = segment[i]!;
-    if (ch === "\n" || ch === "\r") {
-      // A newline ends a command inside `( … )` as it does at the top level,
-      // where splitting has already consumed it.
-      const operator = readOperator(segment, i);
-      items.push({ kind: "operator", text: operator ?? "\n" });
-      i += operator?.length ?? 1;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      i += 1;
-      continue;
-    }
-    if (ch === "&" && segment[i + 1] === ">") {
-      // `&>` redirects both streams; the redirect is read from the `>`.
-      i += 1;
-      continue;
-    }
-    if (ch === "<") {
-      let opened = 1;
-      i += 1;
-      while (segment[i] === "<" && opened < 3) {
-        opened += 1;
-        i += 1;
-      }
-      if (opened === 1 && segment[i] === ">") {
-        // `<>` opens the named file for writing as well as for reading.
-        i += 1;
-      } else {
-        // An input redirect names where the command's standard input comes
-        // from. Nothing is written through one — and for a command whose
-        // program **is** its standard input, it is the only place the line
-        // says what that program is.
-        const start = i;
-        if (opened === 2 && segment[i] === "-") i += 1;
-        const descriptor = segment[i] === "&";
-        if (descriptor) i += 1;
-        while (segment[i] === " " || segment[i] === "\t") i += 1;
-        const read = readWord(segment, i);
-        if (!read.balanced) balanced = false;
-        const raw = `${"<".repeat(opened)}${segment.slice(start, read.end)}`;
-        items.push({
-          kind: "stdin",
-          source: stdinSource(read.word, opened, descriptor, raw, heredocs),
-        });
-        i = read.end === i ? i + 1 : read.end;
-        continue;
-      }
-    } else if (ch === ">") {
-      i += 1;
-      if (segment[i] === ">" || segment[i] === "|") i += 1;
-      // `2>&1` and `>&-` duplicate a descriptor; they open no file.
-      const duplication = /^&\s*(?:\d+|-)(?![\w./-])/.exec(segment.slice(i));
-      if (duplication !== null) {
-        i += duplication[0].length;
-        continue;
-      }
-      if (segment[i] === "&") i += 1;
-    } else if (ch === "(" || ch === ")") {
-      items.push({ kind: "word", word: { raw: ch, value: ch, substitutions: [], variable: false } });
-      i += 1;
-      continue;
-    } else if (WORD_BREAK.has(ch)) {
-      const operator = readOperator(segment, i);
-      if (operator === null) {
-        i += 1;
-        continue;
-      }
-      items.push({ kind: "operator", text: operator });
-      i += operator.length;
-      continue;
-    } else {
-      const read = readWord(segment, i);
-      if (!read.balanced) balanced = false;
-      // A bare number written against a redirect operator is the descriptor
-      // being redirected — the `2` of `2>&1` — not an operand of the command.
-      const descriptor =
-        /^\d+$/.test(read.word.value) && (segment[read.end] === ">" || segment[read.end] === "<");
-      items.push({
-        kind: "word",
-        word: descriptor ? { ...read.word, redirect: true } : read.word,
-      });
-      i = read.end === i ? i + 1 : read.end;
-      continue;
-    }
-
-    // A redirect operator; its target is the word that follows it.
-    while (segment[i] === " " || segment[i] === "\t") i += 1;
-    const substitution = /^>?\(/.exec(segment.slice(i));
-    if (substitution !== null) {
-      const close = segment.indexOf(")", i);
-      const end = close === -1 ? segment.length : close + 1;
-      items.push({
-        kind: "redirect",
-        redirect: {
-          target: { raw: segment.slice(i, end), value: "", substitutions: [], variable: false },
-          reason: "a process substitution",
-        },
-      });
-      i = end;
-      continue;
-    }
-    const read = readWord(segment, i);
-    if (!read.balanced) balanced = false;
-    items.push({
-      kind: "redirect",
-      redirect:
-        read.word.value.length > 0
-          ? { target: read.word, reason: null }
-          : { target: null, reason: "the operator has no target" },
-    });
-    i = read.end === i ? i + 1 : read.end;
-  }
-  return { items, balanced };
-}
 
 /* --------------------------------------------------------------- analysis */
 
@@ -840,8 +286,6 @@ interface WrapperSpec {
   operands?: number;
 }
 
-const set = (values: readonly string[] | undefined) => new Set(values ?? []);
-
 const WRAPPERS = new Map<string, WrapperSpec>([
   ["env", {
     flags: ["-i", "-0", "-v", "--ignore-environment", "--null", "--debug", "--help", "--version"],
@@ -965,47 +409,6 @@ interface Analysis {
   unreadablePrograms: string[];
 }
 
-interface Context {
-  scope: ResolvedScope;
-  cwd: Cwd;
-  segment: string;
-  depth: number;
-  /** Where the command's standard input comes from, where the line says. */
-  stdin?: StdinSource | undefined;
-}
-
-const basename = (word: string) => word.slice(word.lastIndexOf("/") + 1);
-const isAssignment = (value: string) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(value);
-
-/**
- * Every option a command was given, long names and short letters alike, read
- * before the operands are. A `sed` is only an edit while `-i` is present and a
- * `tar -f` is only a write while `-c` is, and neither question can be answered
- * from the word that stands in front of the option.
- *
- * A value attached to a short cluster contributes its characters as though they
- * were option letters. The set is only ever asked whether an option is present,
- * so the surplus can widen a judgement and never narrow one.
- */
-function optionsPresent(rest: readonly Word[]): Set<string> {
-  const present = new Set<string>();
-  for (const word of rest) {
-    const value = word.value;
-    if (value === "--") break;
-    if (!value.startsWith("-") || value === "-") continue;
-    if (value.startsWith("--")) {
-      const eq = value.indexOf("=");
-      present.add(eq === -1 ? value : value.slice(0, eq));
-      continue;
-    }
-    for (const letter of value.slice(1)) present.add(`-${letter}`);
-  }
-  return present;
-}
-
-const any = (options: readonly string[] | undefined, present: Set<string>) =>
-  options !== undefined && options.some((option) => present.has(option));
-
 /**
  * A destination on another host: `host:path`, `user@host:path`. It is not a path
  * this guard can resolve and it is not inside the worktree, so it is reported as
@@ -1021,15 +424,15 @@ function writerFindings(
   context: Context,
 ): WriteFinding[] {
   const present = optionsPresent(rest);
-  if (spec.onlyWith !== undefined && !any(spec.onlyWith, present)) return [];
+  if (spec.onlyWith !== undefined && !anyPresent(spec.onlyWith, present)) return [];
   const takesDestination =
-    spec.destinationWith === undefined || any(spec.destinationWith, present);
+    spec.destinationWith === undefined || anyPresent(spec.destinationWith, present);
 
-  const targetDirectories = set(spec.targetDirectory);
-  const destinations = takesDestination ? set(spec.destination) : new Set<string>();
-  const values = new Set([...set(spec.values), ...(takesDestination ? [] : (spec.destination ?? []))]);
-  const everyOperandOptions = set(spec.everyOperand);
-  const assignments = set(spec.assignments);
+  const targetDirectories = optionSet(spec.targetDirectory);
+  const destinations = takesDestination ? optionSet(spec.destination) : new Set<string>();
+  const values = new Set([...optionSet(spec.values), ...(takesDestination ? [] : (spec.destination ?? []))]);
+  const everyOperandOptions = optionSet(spec.everyOperand);
+  const assignments = optionSet(spec.assignments);
 
   const written: Array<{ word: Word; label: string }> = [];
   const operands: Word[] = [];
@@ -1131,7 +534,7 @@ function writerFindings(
   if (targetDirectory !== null) {
     return [...findings, ...judge(targetDirectory, `the ${verb} destination`)];
   }
-  const skip = spec.skip !== undefined && !any(spec.skipUnless, present) ? spec.skip : 0;
+  const skip = spec.skip !== undefined && !anyPresent(spec.skipUnless, present) ? spec.skip : 0;
   const remaining = operands.slice(skip);
   if (everyOperand || spec.operands === "all") {
     return [...findings, ...remaining.flatMap((operand) => judge(operand, `the ${verb} target`))];
@@ -2357,14 +1760,14 @@ function interpreterFindings(
   rest: Word[],
   context: Context,
 ): { findings: WriteFinding[]; program: boolean; operands: Word[] } {
-  const code = set(spec.code);
-  const values = set(spec.values);
+  const code = optionSet(spec.code);
+  const values = optionSet(spec.values);
   const findings: WriteFinding[] = [];
   const operands: Word[] = [];
   let optionsEnded = false;
   let subcommand = false;
   /** True once the command line has said what the interpreter runs. */
-  let program = any(spec.fromFile, optionsPresent(rest));
+  let program = anyPresent(spec.fromFile, optionsPresent(rest));
   for (let i = 0; i < rest.length; i += 1) {
     const word = rest[i]!;
     const value = word.value;
@@ -2436,8 +1839,8 @@ function interpreterFindings(
   if (
     spec.firstOperand === true &&
     findings.length === 0 &&
-    !any(spec.fromFile, optionsPresent(rest)) &&
-    !any(spec.code, optionsPresent(rest)) &&
+    !anyPresent(spec.fromFile, optionsPresent(rest)) &&
+    !anyPresent(spec.code, optionsPresent(rest)) &&
     operands.length > 0
   ) {
     program = true;
@@ -2764,11 +2167,11 @@ function analyzeWords(words: Word[], context: Context): Analysis {
    * cannot be seen through, and null when the next word names the program.
    */
   const consumeOptions = (wrapper: string, spec: WrapperSpec): Analysis | null => {
-    const flags = set(spec.flags);
-    const values = set(spec.values);
-    const commands = set(spec.commands);
-    const dirs = set(spec.dirs);
-    const refused = set(spec.refuse);
+    const flags = optionSet(spec.flags);
+    const values = optionSet(spec.values);
+    const commands = optionSet(spec.commands);
+    const dirs = optionSet(spec.dirs);
+    const refused = optionSet(spec.refuse);
     while (i < words.length) {
       const word = words[i]!;
       const raw = word.value;
