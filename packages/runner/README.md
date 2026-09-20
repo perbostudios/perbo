@@ -37,8 +37,9 @@ The half of execution that is not the agent.
   Every file the spec commit holds is excluded from it, so the checks, the review, the verification
   and the pull request read one range and the review reads the diff after the spec.
 - `bundle.ts` — immutable, content-addressed run bundles with a computed replayability tier.
-- `delivery.ts` — push and pull request through local `git` and `gh`. The runner holds the
-  credential; the agent never sees a token; nothing here merges.
+- `delivery.ts` — push and pull request through `@perbo/workspace`'s repository module, which
+  starts every `git` and `gh` this package runs. The runner holds the credential; the agent never
+  sees a token; nothing here merges.
 - `checks.ts` — the pinned set, run in the worktree after the seal: uncached, one at a time, with
   a failed unit check re-run on its own failing files. A ticket whose plan carries an execution
   graph runs the set again once per node afterwards, narrowed to the change's test files inside
