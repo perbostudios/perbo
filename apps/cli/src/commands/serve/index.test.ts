@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import { parseAdmitArgs, runAdmitCommand } from "../admit.js";
 import type { Streams } from "../../streams.js";
 import { ServeTickSchema, keyFromAdmitJson, parseServeArgs, processDeps, runServeCommand, type ServeDeps } from "./index.js";
 import { readEndpoint } from "../../endpoint/index.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
 import { readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 
 /**
@@ -904,4 +905,62 @@ describe("processDeps", () => {
       process.argv[1] = entry;
     }
   });
+
+  /**
+   * More paths than a generic read of a command holds. The queue decides which
+   * tickets wait on which from these lists, so a list that arrived short is
+   * two runs told they share nothing while they share a file — and a diff of
+   * three thousand paths is a large change, not an impossible one.
+   */
+  it("names every sealed path of a branch whose diff runs past half a megabyte", async () => {
+    const repo = mkdtempSync(join(scratch, "sealed-"));
+    const git = (...args: string[]): string =>
+      execFileSync("git", ["-C", repo, ...args], { env: gitIdentity, encoding: "utf8" }).trim();
+    git("init", "-q", "-b", "main");
+    writeFileSync(join(repo, "README.md"), "base\n");
+    git("add", "-A");
+    git("commit", "-qm", "base");
+    git("checkout", "-q", "-b", "sealed");
+    mkdirSync(join(repo, "wide"));
+    for (let n = 0; n < 3000; n += 1) {
+      writeFileSync(join(repo, "wide", `${String(n).padStart(6, "0")}${"p".repeat(190)}.md`), "x\n");
+    }
+    git("add", "-A");
+    git("commit", "-qm", "wide");
+
+    const sealed = await processDeps({ repo, store: null, cwd: repo }).sealedPaths({
+      repository_root: repo,
+      base_ref: "main",
+      branch: "sealed",
+    });
+    expect(sealed).toHaveLength(3000);
+    expect(sealed?.every((path) => path.startsWith("wide/"))).toBe(true);
+  }, SPAWN_TEST_TIMEOUT_MS);
+
+  /**
+   * The same for `gh`: a listing cut at the ceiling is refused as one, so the
+   * line a person reads says the answer was too large rather than blaming
+   * `gh` for JSON it wrote in full.
+   */
+  it("refuses an issue listing that arrived cut, saying so", async () => {
+    const bin = mkdtempSync(join(scratch, "gh-huge-"));
+    const script = join(bin, "gh");
+    writeFileSync(
+      script,
+      ['#!/bin/sh', 'printf \'[{"number":1,"title":"\'', "dd if=/dev/zero bs=1024 count=600 2>/dev/null | tr '\\0' 't'", 'printf \'"}]\'', ""].join("\n"),
+    );
+    chmodSync(script, 0o755);
+    const original = process.env.PATH;
+    process.env.PATH = `${bin}:${original ?? ""}`;
+    try {
+      const listed = await processDeps({ repo: bin, store: null, cwd: bin }).listIssues({
+        repository: "o/r",
+        label: "perbo",
+      });
+      expect(listed.ok).toBe(false);
+      expect(listed.ok === false && listed.detail).toContain("only the tail");
+    } finally {
+      process.env.PATH = original;
+    }
+  }, SPAWN_TEST_TIMEOUT_MS);
 });
