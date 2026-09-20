@@ -167,8 +167,8 @@ export interface BaselineOptions {
 
 export async function runBaselineCommand(input: BaselineOptions): Promise<number> {
   // The stopwatch and the harness are one command because they are one
-  // measurement: `e1.ts` is where a reading becomes a partner's sealed ten and
-  // the ratio the product is held to (D-038, SCP-080).
+  // measurement: `internal/e1/` is where a reading becomes a partner's sealed
+  // ten and the ratio the product is held to (D-038, SCP-080).
   if (isE1Command(input.argv[0])) {
     const { argv, streams, cwd } = input;
     return runE1Command(input.now ? { argv, streams, cwd, now: input.now } : { argv, streams, cwd });

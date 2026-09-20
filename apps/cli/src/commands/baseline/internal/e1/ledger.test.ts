@@ -33,9 +33,6 @@ import {
  * and an arm that is never pooled with a partner's. The confounders are
  * asserted by the one question that matters about them — whether they can move
  * the ratio — rather than by reading their field names back.
- *
- * Fail-first, measured 2026-09-05: with `packages/contracts/src/e1.ts` moved
- * out of the tree this file does not collect at all.
  */
 
 const T0 = Date.parse("2026-09-01T09:00:00.000Z");
