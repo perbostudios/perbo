@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EditingSessionSchema, SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
@@ -107,6 +107,8 @@ describe("specView", () => {
     writeFileSync(path, readFileSync(path, "utf8").replace("A person can retry", "Edited by hand"));
     const view = specView(deps(repo, session({ specSlug: written.view.slug })), sessionId);
     expect(view.sections.outcome).toBe("Edited by hand");
+    // The requirement keeps the id the file gives it, whoever last wrote it.
+    expect(view.requirements[0]?.id).toBe("R1");
   });
 });
 
@@ -123,6 +125,34 @@ describe("saveSpec", () => {
     );
   });
 
+  it("gives each requirement an id, and lands none in a node before there is a plan", () => {
+    const repo = repository();
+    const written = saveSpec(
+      deps(repo, session()),
+      repo,
+      request({
+        title: "A light colour mode",
+        sections: {
+          ...sections,
+          requirements:
+            "- The person can choose Light, Dark or System without a restart.\n" +
+            "- Text meets WCAG AA contrast against its background.",
+          no_gos: "- Changing the brand colours.",
+        },
+      }),
+    );
+    expect(written.view.slug).toBe("a-light-colour-mode");
+    expect(written.view.path).toBe("specs/a-light-colour-mode/spec.md");
+    expect(written.view.requirements.map((each) => each.id)).toEqual(["R1", "R2"]);
+    // Nothing is drafted yet, so no requirement has landed in a node.
+    expect(written.view.requirements.every((each) => each.nodes.length === 0)).toBe(true);
+
+    const file = readFileSync(join(repo.path, "specs", "a-light-colour-mode", "spec.md"), "utf8");
+    expect(file).toContain("# A light colour mode");
+    expect(file).toContain("- R1: The person can choose Light, Dark or System without a restart.");
+    expect(file).toContain("## No-Gos");
+  });
+
   it("refuses a planning that belongs to another repository", () => {
     const repo = repository();
     const other = { ...repo, id: "80000000-0000-4000-8000-00000000000f" };
@@ -131,7 +161,141 @@ describe("saveSpec", () => {
     );
   });
 
-  it("writes nothing where another writer moved a section first, and says which", () => {
+  it("refuses a specs folder spelled with a backslash or a `..`, as the CLI and the runner do", () => {
+    for (const named of ["docs\\specs", "nope/../specs", "/specs"]) {
+      const repo = repository();
+      mkdirSync(join(repo.path, ".perbo"), { recursive: true });
+      writeFileSync(join(repo.path, ".perbo", "config.json"), JSON.stringify({ specs: named }));
+      expect(() => saveSpec(deps(repo, session()), repo, request()), named).toThrow(
+        /repository-relative folder/,
+      );
+      // The refusal comes before anything is written, under either name.
+      expect(existsSync(join(repo.path, "docs")), named).toBe(false);
+      expect(existsSync(join(repo.path, "specs")), named).toBe(false);
+    }
+  });
+
+  it("refuses a second spec whose title takes a slug the repository already holds", () => {
+    const repo = repository();
+    saveSpec(deps(repo, session()), repo, request({ title: "A light colour mode" }));
+    expect(() =>
+      saveSpec(deps(repo, session()), repo, request({ title: "A  light  colour  mode!" })),
+    ).toThrow(/already exists/);
+  });
+});
+
+/**
+ * SCP-321: `spec.md` has three writers — the person in the Spec pane, the
+ * interview and the Impact pane turning a warning into a No-Go — but only the
+ * two panes' saves go through `saveSpec`; the interview writes the same file
+ * through its own tools. Every save says what it read, and the check is on the
+ * bytes at the moment of the write rather than on when anybody last looked
+ * (D-102, D-103).
+ */
+describe("when the spec moved under a save", () => {
+  /** One session's first save, and what it then holds as what it read. */
+  const started = (): {
+    repo: RegisteredRepository;
+    wiring: SpecDeps;
+    base: { title: string; sections: SpecSections };
+    onDisk: () => string;
+  } => {
+    const repo = repository();
+    const wiring = deps(repo, session());
+    const first = saveSpec(wiring, repo, request());
+    const path = join(repo.path, "specs", first.view.slug!, "spec.md");
+    return {
+      repo,
+      wiring,
+      base: { title: first.view.title, sections: first.view.sections },
+      onDisk: () => readFileSync(path, "utf8"),
+    };
+  };
+
+  it("names the section the other writer wrote, sends the file back, and writes nothing", () => {
+    const { repo, wiring, base, onDisk } = started();
+    // The interview writes the Outcome, reading and writing the file itself.
+    saveSpec(wiring, repo, request({
+      title: base.title,
+      sections: { ...base.sections, outcome: "The interview's sentence." },
+      base,
+    }));
+    const before = onDisk();
+
+    const reply = saveSpec(wiring, repo, request({
+      title: base.title,
+      sections: { ...base.sections, outcome: "The person's sentence." },
+      base,
+    }));
+    expect(reply.conflicting).toEqual(["outcome"]);
+    // The file comes back with it, so the pane has the half it did not type.
+    expect(reply.view.sections.outcome).toBe("The interview's sentence.");
+    expect(onDisk()).toBe(before);
+  });
+
+  /**
+   * The case above changes only the section that conflicts, so a half save of
+   * the merged non-conflicting sections would leave the same bytes a refusal
+   * should. Here the writer also changes a section the file did not, which a
+   * half save would still write.
+   */
+  it("writes nothing at all when refused, not even a section the file itself did not touch", () => {
+    const { repo, wiring, base, onDisk } = started();
+    saveSpec(wiring, repo, request({
+      title: base.title,
+      sections: { ...base.sections, outcome: "The interview's sentence." },
+      base,
+    }));
+    const before = onDisk();
+
+    const reply = saveSpec(wiring, repo, request({
+      title: base.title,
+      sections: { ...base.sections, outcome: "The person's sentence.", notes: "The person's note." },
+      base,
+    }));
+    expect(reply.conflicting).toEqual(["outcome"]);
+    expect(onDisk()).toBe(before);
+    // The section nobody else touched comes back as it was read, not as what
+    // was sent.
+    expect(reply.view.sections.notes).toBe(base.sections.notes);
+  });
+
+  it("refuses the other way round too: this writer saved first, and the file moved after", () => {
+    const { repo, wiring, base, onDisk } = started();
+    // The person saves, and keeps writing against what they had read.
+    saveSpec(wiring, repo, request({
+      title: base.title,
+      sections: { ...base.sections, notes: "The person's note." },
+      base,
+    }));
+    const before = onDisk();
+    const reply = saveSpec(wiring, repo, request({
+      title: base.title,
+      sections: { ...base.sections, notes: "The interview's note." },
+      base,
+    }));
+    expect(reply.conflicting).toEqual(["notes"]);
+    expect(onDisk()).toBe(before);
+  });
+
+  it("writes a section nobody else touched and keeps the one somebody else wrote", () => {
+    const { repo, wiring, base } = started();
+    saveSpec(wiring, repo, request({
+      title: base.title,
+      sections: { ...base.sections, no_gos: "- The interview's No-Go." },
+      base,
+    }));
+    const reply = saveSpec(wiring, repo, request({
+      title: base.title,
+      sections: { ...base.sections, notes: "The person's note." },
+      base,
+    }));
+    expect(reply.conflicting).toEqual([]);
+    expect(reply.view.sections.notes).toBe("The person's note.");
+    expect(reply.view.sections.no_gos).toBe("- The interview's No-Go.");
+  });
+
+  it("carries the file back as it stands, rather than what was sent", () => {
     const repo = repository();
     const first = saveSpec(deps(repo, session()), repo, request());
     const slug = first.view.slug!;
@@ -142,10 +306,38 @@ describe("saveSpec", () => {
       sections: { ...sections, outcome: "The pane writes that" },
       base: { title: "Retry a failed run", sections },
     }));
-    expect(reply.conflicting.length).toBeGreaterThan(0);
+    expect(reply.conflicting).toEqual(["outcome"]);
     // The file is untouched, and the view carries what is actually in it.
     expect(readFileSync(path, "utf8")).toContain("The interview wrote this");
     expect(reply.view.sections.outcome).toBe("The interview wrote this");
+  });
+});
+
+describe("the slug a session records", () => {
+  it("is a path segment, so a record naming a folder outside the repository is not one", () => {
+    // The slug is a path segment, so the record that carries it is held to the
+    // shape it is minted in rather than to a length.
+    for (const slug of [
+      "",
+      ".",
+      "..",
+      "../../outside",
+      "../outside",
+      "a-light-colour-mode/",
+      "./a-light-colour-mode",
+      "a-light-colour-mode/../..",
+      "/a-light-colour-mode",
+      "..\\outside",
+      "C:\\outside",
+      "a-light-colour-mode/nodes",
+    ])
+      expect(
+        EditingSessionSchema.safeParse({ ...session(), specSlug: slug }).success,
+        slug,
+      ).toBe(false);
+    expect(
+      EditingSessionSchema.parse({ ...session(), specSlug: "a-light-colour-mode" }).specSlug,
+    ).toBe("a-light-colour-mode");
   });
 });
 

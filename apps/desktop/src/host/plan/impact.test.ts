@@ -143,4 +143,49 @@ describe("impactView", () => {
     expect(view.index).toMatchObject({ read: false });
     expect(view.index.note).toContain("no parser");
   });
+
+  it("reports an index that could not be built, rather than an empty answer", async () => {
+    const repo = repository();
+    const wiring = deps(repo, session(["src/main.ts"]));
+    await expect(
+      impactView(
+        {
+          ...wiring,
+          cli: {
+            run: () =>
+              Promise.resolve({
+                code: 2,
+                stdout: "",
+                stderr: "this checkout has no HEAD to read",
+                cancelled: false,
+              }),
+          },
+        },
+        sessionId,
+      ),
+    ).rejects.toThrow(/this checkout has no HEAD to read/);
+  });
+
+  /**
+   * A record a bare cast would carry into the report unnoticed: the first
+   * builds a whole report the pane heads "against not a s", the second a note
+   * reading "Nothing here reads imports: .".
+   */
+  it("refuses an index record the contract's schema does not admit, either shape", async () => {
+    const repo = repository();
+    const wiring = deps(repo, session(["src/main.ts"]));
+    const answering = (stdout: string): ImpactDeps => ({
+      ...wiring,
+      cli: { run: () => Promise.resolve({ code: 0, stdout, stderr: "", cancelled: false }) },
+    });
+    await expect(
+      impactView(answering(JSON.stringify({ ...index, head_commit: "not a sha" })), sessionId),
+    ).rejects.toThrow(/a commit sha/);
+    await expect(
+      impactView(
+        answering(JSON.stringify({ supported: false, reason: "", languages_seen: [".py"] })),
+        sessionId,
+      ),
+    ).rejects.toThrow(/"path": \[\n\s*"reason"/);
+  });
 });

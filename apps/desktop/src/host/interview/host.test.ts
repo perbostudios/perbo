@@ -133,6 +133,8 @@ describe("starting an interview", () => {
     const session = await w.open();
     expect(() => w.interviews.start(session.id)).toThrow();
     expect(w.spawned).toHaveLength(0);
+    // A refusal leaves no interview behind for the snapshot to count.
+    expect(w.interviews.running()).toEqual([]);
   });
 
   it("starts one child per session, and says it is running before it has spoken", async () => {
@@ -198,7 +200,8 @@ describe("a person's turn", () => {
   it("asks for a title where the message names nothing", async () => {
     const w = host(repository());
     const session = await w.open();
-    expect(() => w.interviews.turn(session.id, "...")).toThrow();
+    expect(() => w.interviews.turn(session.id, "?!?!")).toThrow(/spec title first/);
+    expect(w.editing.read(session.id).specSlug).toBeNull();
     expect(w.spawned).toHaveLength(0);
   });
 

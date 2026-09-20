@@ -54,8 +54,21 @@ describe("relayed", () => {
     if (read.kind !== "started") throw new Error("expected a started reading");
     expect(read.session).toHaveLength(200);
     if (read.note.kind !== "note") throw new Error("expected a note");
-    expect(read.note.text).toContain("The session is");
+    // The note names the id that was recorded, which is the one a later start
+    // continues, rather than the longer one that arrived.
+    expect(read.note.text).toContain(`The session is ${"s".repeat(200)},`);
     expect(read.note.text).toContain("specs/retry/spec.md");
+  });
+
+  it("redacts a credential the reason names, however many fields it runs to", () => {
+    const many: Record<string, unknown> = { type: "started" };
+    many["sk-ant-notreal0123456789"] = "x";
+    for (let at = 0; at < 900; at += 1) many[`unrecognised_key_${at}`] = "x";
+    const read = relayed(line(many));
+    if (read.kind !== "line" || read.line.kind !== "note") throw new Error("expected a note");
+    expect(read.line.text.startsWith("The interview wrote a line this build")).toBe(true);
+    expect(read.line.text.length).toBeLessThan(2_200);
+    expect(read.line.text).not.toContain("sk-ant-notreal0123456789");
   });
 
   it("carries a refusal as refused, with each field clipped", () => {

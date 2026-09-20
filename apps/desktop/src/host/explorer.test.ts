@@ -35,9 +35,17 @@ const tracking = (...paths: string[]): Execute =>
 describe("listExplorer", () => {
   it("lists the tracked files in order, and counts what it withholds", async () => {
     const repo = repository();
-    const listing = await listExplorer(tracking("src/main.ts", "README.md", ".env"), repo);
+    const listing = await listExplorer(
+      tracking("src/main.ts", "README.md", ".env", "certs.pem", "packages/app/secrets/token.txt"),
+      repo,
+    );
     expect(listing.files).toEqual(["README.md", "src/main.ts"]);
-    expect(listing.hidden).toBe(1);
+    // Tracked in the repository, and never named here.
+    for (const hidden of [".env", "certs.pem", "packages/app/secrets/token.txt"])
+      expect(listing.files, hidden).not.toContain(hidden);
+    expect(listing.hidden).toBe(3);
+    expect(listing.files).toEqual([...listing.files].sort());
+    expect(listing.standing).toEqual([]);
   });
 
   it("carries the standing prohibitions the repository recorded", async () => {
@@ -68,6 +76,7 @@ describe("readExplorerFile", () => {
       text: "export const a = 1;\n",
       refusal: null,
     });
+    expect(file.bytes).toBe(20);
   });
 
   it("refuses a path no surface reads, before it is opened", async () => {
@@ -99,7 +108,7 @@ describe("readExplorerFile", () => {
     writeFileSync(join(repo.path, "big.txt"), "x".repeat(PREVIEW_BYTE_CAP + 1));
     const file = await readExplorerFile(tracking("big.txt"), repo, "big.txt");
     expect(file.text).toBeNull();
-    expect(file.refusal).toContain("256 KiB");
+    expect(file.refusal).toMatch(/larger than the 256 KiB/);
     expect(file.bytes).toBe(PREVIEW_BYTE_CAP + 1);
   });
 
@@ -127,5 +136,16 @@ describe("readExplorerFile", () => {
     await expect(
       readExplorerFile(tracking("README.md"), repo, join(repo.path, "README.md")),
     ).rejects.toThrow("Perbo does not take an absolute path from a screen.");
+  });
+});
+
+describe("a repository whose configuration cannot be read", () => {
+  it("says which one it was, rather than listing without its standing marks", async () => {
+    const repo = repository();
+    mkdirSync(join(repo.path, ".perbo"), { recursive: true });
+    writeFileSync(configPath(repo), "{");
+    await expect(listExplorer(tracking("README.md"), repo)).rejects.toThrow(
+      /could not be read as a JSON object/,
+    );
   });
 });

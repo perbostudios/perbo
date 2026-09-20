@@ -280,4 +280,27 @@ describe("shutdown", () => {
     expect(settled).toBe(true);
     expect(w.jobs.live()).toEqual([]);
   });
+
+  it("aborts every lane, and marks each job it closed cancelled", async () => {
+    const w = runner();
+    const aborted: string[] = [];
+    const lanes = [
+      { kind: "run", label: "Run engineering loop" },
+      { kind: "admit", label: "Save task contract" },
+    ];
+    const held = lanes.map(() => pending());
+    const jobs = lanes.map((lane, at) =>
+      w.jobs.start({ repo, key: null, ...lane }, async (job, context) => {
+        await held[at]!.operation(job, context);
+        if (context.signal.aborted) aborted.push(lane.kind);
+      }),
+    );
+    await Promise.all(held.map((one) => one.started));
+    const closing = w.jobs.shutdown();
+    for (const one of held) one.finish();
+    await closing;
+    expect([...aborted].sort()).toEqual(["admit", "run"]);
+    expect(jobs.map((job) => job.state)).toEqual(["cancelled", "cancelled"]);
+    expect(w.jobs.live()).toEqual([]);
+  });
 });

@@ -128,19 +128,21 @@ describe("graphView", () => {
 
   it("refuses an approach record belonging to another plan", async () => {
     const repo = repository();
-    writeFileSync(
-      ticketPath(repo, "PRB-1", ".approach.json"),
-      JSON.stringify({
-        schema_version: 1,
-        ticket_id: "ticket_1",
-        plan_id: "plan_00000000000009",
-        edges: [],
-        no_gos: [],
-      }),
-    );
-    await expect(graphView(deps(), repo, "PRB-1")).rejects.toThrow(
-      "approach record belongs to another plan",
-    );
+    const record = {
+      schema_version: 1,
+      ticket_id: "ticket_1",
+      plan_id: "plan_00000000000001",
+      edges: [],
+      no_gos: [],
+    };
+    // Either half naming another plan is the same refusal: the record says
+    // which ticket and which plan it orders, and both must be this one.
+    for (const over of [{ ticket_id: "ticket_0000000000000000" }, { plan_id: "plan_0000000000000000" }]) {
+      writeFileSync(ticketPath(repo, "PRB-1", ".approach.json"), JSON.stringify({ ...record, ...over }));
+      await expect(graphView(deps(), repo, "PRB-1"), JSON.stringify(over)).rejects.toThrow(
+        "approach record belongs to another plan",
+      );
+    }
   });
 
   it("refuses an approach record that is not one", async () => {
@@ -148,6 +150,14 @@ describe("graphView", () => {
     writeFileSync(ticketPath(repo, "PRB-1", ".approach.json"), "{not json");
     await expect(graphView(deps(), repo, "PRB-1")).rejects.toThrow(
       "could not be read as an order between its nodes",
+    );
+  });
+
+  it("says a draft record that is not one could not be read, rather than the parser's line", async () => {
+    const repo = repository();
+    writeFileSync(ticketPath(repo, "PRB-1", ".draft.json"), "{not json");
+    await expect(graphView(deps(), repo, "PRB-1")).rejects.toThrow(
+      "draft record could not be read",
     );
   });
 

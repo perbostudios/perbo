@@ -18,12 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { DesktopService, type ServiceOptions } from "./service.js";
 import { runProcess, startLineProcess } from "./process.js";
-import {
-  EditingSessionSchema,
-  GRAPH_NODE_STATES,
-  PREVIEW_BYTE_CAP,
-  SettingsSchema,
-} from "../shared/protocol.js";
+import { GRAPH_NODE_STATES, SettingsSchema } from "../shared/protocol.js";
 import { lane } from "../shared/jobs.js";
 import type {
   Change,
@@ -177,75 +172,6 @@ describe("the spec a planning session holds", () => {
     notes: "",
   };
 
-  it("creates specs/<slug>/spec.md, gives each requirement an id, and reads the file back", async () => {
-    const { service, repo } = fixture();
-    const registered = await service.registerRepository(repo);
-    const session = await service.request({
-      kind: "editingOpen",
-      target: { kind: "fresh", repoId: registered.id },
-    });
-    expect((await service.request({ kind: "specRead", id: session.id })).slug).toBeNull();
-
-    const written = await saveSpec(service, {
-      kind: "specSave",
-      id: session.id,
-      repoId: registered.id,
-      title: "A light colour mode",
-      sections,
-    });
-    expect(written.slug).toBe("a-light-colour-mode");
-    expect(written.path).toBe("specs/a-light-colour-mode/spec.md");
-    expect(written.requirements.map((each) => each.id)).toEqual(["R1", "R2"]);
-    // Nothing is drafted yet, so no requirement has landed in a node.
-    expect(written.requirements.every((each) => each.nodes.length === 0)).toBe(true);
-
-    const file = readFileSync(join(repo, "specs", "a-light-colour-mode", "spec.md"), "utf8");
-    expect(file).toContain("# A light colour mode");
-    expect(file).toContain("- R1: The person can choose Light, Dark or System without a restart.");
-    expect(file).toContain("## No-Gos");
-
-    // The session records which spec it writes, so it opens the same one again.
-    const reopened = await service.request({ kind: "editingOpen", target: { kind: "session", id: session.id } });
-    expect(reopened.specSlug).toBe("a-light-colour-mode");
-    expect((await service.request({ kind: "specRead", id: session.id })).title).toBe(
-      "A light colour mode",
-    );
-  });
-
-  it("refuses a specs folder spelled with a backslash or a `..`, as the CLI and the runner do", async () => {
-    for (const named of ["docs\\specs", "nope/../specs", "/specs"]) {
-      const { service, repo } = fixture();
-      mkdirSync(join(repo, ".perbo"), { recursive: true });
-      writeFileSync(join(repo, ".perbo", "config.json"), JSON.stringify({ specs: named }));
-      const registered = await service.registerRepository(repo);
-      const session = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: registered.id } });
-      await expect(
-        saveSpec(service, {
-          kind: "specSave", id: session.id, repoId: registered.id,
-          title: "A light colour mode", sections,
-        }),
-        named,
-      ).rejects.toThrow(/repository-relative folder/);
-      expect(existsSync(join(repo, "docs")), named).toBe(false);
-      expect(existsSync(join(repo, "specs")), named).toBe(false);
-    }
-  });
-
-  it("shows the file again when the file changed outside the app", async () => {
-    const { service, repo } = fixture();
-    const registered = await service.registerRepository(repo);
-    const session = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: registered.id } });
-    await saveSpec(service, {
-      kind: "specSave", id: session.id, repoId: registered.id,
-      title: "A light colour mode", sections,
-    });
-    const path = join(repo, "specs", "a-light-colour-mode", "spec.md");
-    writeFileSync(path, readFileSync(path, "utf8").replace("without a restart", "without a relaunch"));
-    const read = await service.request({ kind: "specRead", id: session.id });
-    expect(read.sections.requirements).toContain("without a relaunch");
-    expect(read.requirements[0]?.id).toBe("R1");
-  });
-
   it("rewrites the node pages when the spec is saved, and names each requirement's node", async () => {
     const { service, repo } = fixture();
     const registered = await service.registerRepository(repo);
@@ -290,175 +216,13 @@ describe("the spec a planning session holds", () => {
       readFileSync(join(repo, "specs", "a-light-colour-mode", "nodes", "node_1.md"), "utf8"),
     ).toContain("A high-contrast mode.");
   });
-
-  it("refuses a session record whose slug would name a folder outside the repository", async () => {
-    const { service, repo } = fixture();
-    const registered = await service.registerRepository(repo);
-    const session = await service.request({
-      kind: "editingOpen",
-      target: { kind: "fresh", repoId: registered.id },
-    });
-    await saveSpec(service, {
-      kind: "specSave", id: session.id, repoId: registered.id,
-      title: "A light colour mode", sections,
-    });
-    // The slug is a path segment, so the record that carries it is held to the
-    // shape it is minted in rather than to a length.
-    expect(() =>
-      EditingSessionSchema.parse({ ...session, specSlug: "../../outside" }),
-    ).toThrow();
-    expect(EditingSessionSchema.parse({ ...session, specSlug: "a-light-colour-mode" }).specSlug).toBe(
-      "a-light-colour-mode",
-    );
-  });
-
-  /**
-   * SCP-321: `spec.md` has three writers — the person in the Spec pane, the
-   * interview and the Impact pane turning a warning into a No-Go — but only the
-   * two panes' saves go through `specSave`; the interview writes the same file
-   * through its own tools. Every save through here says what it read, and the
-   * check is on the bytes at the moment of the write rather than on when
-   * anybody last looked (D-102, D-103).
-   */
-  describe("when the spec moved under a save", () => {
-    /** The pane's first save, and what it then holds as what it read. */
-    const started = async (): Promise<{
-      service: DesktopService;
-      repo: string;
-      id: string;
-      repoId: string;
-      base: { title: string; sections: SpecSections };
-    }> => {
-      const { service, repo } = fixture();
-      const registered = await service.registerRepository(repo);
-      const session = await service.request({
-        kind: "editingOpen",
-        target: { kind: "fresh", repoId: registered.id },
-      });
-      await saveSpec(service, {
-        kind: "specSave", id: session.id, repoId: registered.id,
-        title: "A light colour mode", sections,
-      });
-      const read = await service.request({ kind: "specRead", id: session.id });
-      return {
-        service, repo, id: session.id, repoId: registered.id,
-        base: { title: read.title, sections: read.sections },
-      };
-    };
-    const onDisk = (repo: string): string =>
-      readFileSync(join(repo, "specs", "a-light-colour-mode", "spec.md"), "utf8");
-
-    it("names the section the other writer wrote, sends the file back, and writes nothing", async () => {
-      const { service, repo, id, repoId, base } = await started();
-      // The interview writes the Outcome, reading and writing the file itself.
-      await saveSpec(service, {
-        kind: "specSave", id, repoId,
-        title: base.title,
-        sections: { ...base.sections, outcome: "The interview's sentence." },
-      });
-      const before = onDisk(repo);
-
-      const reply = await service.request({
-        kind: "specSave", id, repoId,
-        title: base.title,
-        sections: { ...base.sections, outcome: "The person's sentence." },
-        base,
-      });
-      expect(reply.conflicting).toEqual(["outcome"]);
-      // The file comes back with it, so the pane has the half it did not type.
-      expect(reply.view.sections.outcome).toBe("The interview's sentence.");
-      expect(onDisk(repo)).toBe(before);
-    });
-
-    /**
-     * The case above changes only the section that conflicts, so a half save
-     * of the merged non-conflicting sections would leave the same bytes a
-     * refusal should. Here the writer also changes a section the file did
-     * not, which a half save would still write.
-     */
-    it("writes nothing at all when refused, not even a section the file itself did not touch", async () => {
-      const { service, repo, id, repoId, base } = await started();
-      await saveSpec(service, {
-        kind: "specSave", id, repoId,
-        title: base.title,
-        sections: { ...base.sections, outcome: "The interview's sentence." },
-      });
-      const before = onDisk(repo);
-
-      const reply = await service.request({
-        kind: "specSave", id, repoId,
-        title: base.title,
-        sections: { ...base.sections, outcome: "The person's sentence.", notes: "The person's note." },
-        base,
-      });
-      expect(reply.conflicting).toEqual(["outcome"]);
-      expect(onDisk(repo)).toBe(before);
-      // The section nobody else touched comes back as it was read, not as
-      // what was sent.
-      expect(reply.view.sections.notes).toBe(base.sections.notes);
-    });
-
-    it("refuses the other way round too: this writer saved first, and the file moved after", async () => {
-      const { service, repo, id, repoId, base } = await started();
-      // The person saves, and keeps writing against what they had read.
-      await saveSpec(service, {
-        kind: "specSave", id, repoId,
-        title: base.title,
-        sections: { ...base.sections, notes: "The person's note." },
-      });
-      const before = onDisk(repo);
-      const reply = await service.request({
-        kind: "specSave", id, repoId,
-        title: base.title,
-        sections: { ...base.sections, notes: "The interview's note." },
-        base,
-      });
-      expect(reply.conflicting).toEqual(["notes"]);
-      expect(onDisk(repo)).toBe(before);
-    });
-
-    it("writes a section nobody else touched and keeps the one somebody else wrote", async () => {
-      const { service, id, repoId, base } = await started();
-      await saveSpec(service, {
-        kind: "specSave", id, repoId,
-        title: base.title,
-        sections: { ...base.sections, no_gos: "- The interview's No-Go." },
-      });
-      const reply = await service.request({
-        kind: "specSave", id, repoId,
-        title: base.title,
-        sections: { ...base.sections, notes: "The person's note." },
-        base,
-      });
-      expect(reply.conflicting).toEqual([]);
-      expect(reply.view.sections.notes).toBe("The person's note.");
-      expect(reply.view.sections.no_gos).toBe("- The interview's No-Go.");
-    });
-  });
-
-  it("refuses a second spec whose title takes a slug the repository already holds", async () => {
-    const { service, repo } = fixture();
-    const registered = await service.registerRepository(repo);
-    const first = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: registered.id } });
-    await saveSpec(service, {
-      kind: "specSave", id: first.id, repoId: registered.id,
-      title: "A light colour mode", sections,
-    });
-    const second = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: registered.id } });
-    await expect(
-      saveSpec(service, {
-        kind: "specSave", id: second.id, repoId: registered.id,
-        title: "A  light  colour  mode!", sections,
-      }),
-    ).rejects.toThrow(/already exists/);
-  });
 });
 
 /**
  * SCP-321: the names the Spec pane completes `@Symbol` from, and marks against,
  * come from `perbo index` run by the host over the registered repository
  * (D-015). Nothing a renderer sent reaches the command
- * ([ADR-0023](../../../docs/adr/0023-untrusted-context-boundary.md) §4): the
+ * ([ADR-0023](../../../../docs/adr/0023-untrusted-context-boundary.md) §4): the
  * request carries a repository id and gets back a list.
  */
 describe("the exported names a planning session completes from", () => {
@@ -496,45 +260,6 @@ describe("the exported names a planning session completes from", () => {
     if (answer.supported) throw new Error("expected no index");
     expect(answer.reason).toContain("no tracked TypeScript or JavaScript");
     expect(answer.languages).toEqual([".md"]);
-  });
-
-  /**
-   * `perbo index` parses the whole tracked tree with no never-read filter of
-   * its own, so a file this surface may not name can still export a symbol
-   * (ADR-0030). Both halves would cross if nothing narrowed it: the name, and
-   * the path the popup prints beside it — the explorer withholds that path, and
-   * a completion list is no better a place to print it.
-   */
-  it("offers nothing a file this surface may not read exports, as a name or a path", async () => {
-    const { service, repo } = fixture();
-    mkdirSync(join(repo, ".claude"), { recursive: true });
-    writeFileSync(join(repo, ".claude", "helper.ts"), "export function hiddenHelper(): void {}\n");
-    writeFileSync(join(repo, "signup.ts"), "export function signup(): void {}\n");
-    execFileSync("git", ["add", ".claude/helper.ts", "signup.ts"], { cwd: repo });
-    execFileSync("git", ["commit", "-m", "Add both"], { cwd: repo, stdio: "ignore" });
-    const registered = await service.registerRepository(repo);
-
-    const answer = await service.request({ kind: "symbolIndex", repoId: registered.id });
-    if (!answer.supported) throw new Error(`expected an index: ${answer.reason}`);
-    expect(answer.names.map((each) => each.name)).toEqual(["signup"]);
-    // Not in a path either, which is the half a filter on names alone misses.
-    expect(JSON.stringify(answer)).not.toContain(".claude");
-    expect(JSON.stringify(answer)).not.toContain("hiddenHelper");
-  });
-
-  it("offers no `*`, which `export * from` records and no spec can refer to", async () => {
-    const { service, repo } = fixture();
-    writeFileSync(join(repo, "one.ts"), "export const kept = 1;\n");
-    writeFileSync(join(repo, "all.ts"), 'export * from "./one.js";\n');
-    execFileSync("git", ["add", "one.ts", "all.ts"], { cwd: repo });
-    execFileSync("git", ["commit", "-m", "Add a barrel"], { cwd: repo, stdio: "ignore" });
-    const registered = await service.registerRepository(repo);
-
-    const answer = await service.request({ kind: "symbolIndex", repoId: registered.id });
-    if (!answer.supported) throw new Error(`expected an index: ${answer.reason}`);
-    // The index records `*` on the barrel, because what it re-exports cannot be
-    // known without reading the file it names.
-    expect(answer.names.map((each) => each.name)).toEqual(["kept"]);
   });
 });
 
@@ -753,31 +478,6 @@ describe("the graph a planning session curates", () => {
     expect(page?.text).toContain("No change to the signup form.");
   });
 
-  it("refuses a graph whose approach record is another plan's", async () => {
-    const { service, repo, repoId } = await admitted();
-    await finished(
-      service,
-      (
-        await service.request({
-          kind: "graphEdit",
-          repoId,
-          key: "PRB-1",
-          edit: { op: "add_node", title: "Queue one email", criteria: ["ac_1"], new_criteria: [], paths: ["packages/auth/**"] },
-        })
-      ).id,
-    );
-    const path = join(repo, ".perbo", "tickets", "PRB-1.approach.json");
-    const record = JSON.parse(readFileSync(path, "utf8")) as { ticket_id: string; plan_id: string };
-    writeFileSync(path, JSON.stringify({ ...record, ticket_id: "ticket_0000000000000000" }));
-    await expect(service.request({ kind: "graphRead", repoId, key: "PRB-1" })).rejects.toThrow(
-      /belongs to another plan/,
-    );
-    writeFileSync(path, JSON.stringify({ ...record, plan_id: "plan_0000000000000000" }));
-    await expect(service.request({ kind: "graphRead", repoId, key: "PRB-1" })).rejects.toThrow(
-      /belongs to another plan/,
-    );
-  });
-
   it("carries no path across the boundary that nothing reads, and no file list at all", async () => {
     const { service, repo, repoId } = await admitted();
     mkdirSync(join(repo, "secrets"), { recursive: true });
@@ -790,32 +490,6 @@ describe("the graph a planning session curates", () => {
     for (const hidden of [".env.production", "deploy.pem", "secrets/db.txt"])
       expect(wire, hidden).not.toContain(hidden);
     expect(view).not.toHaveProperty("files");
-  });
-
-  it("says what a draft or approach record that is not JSON is, rather than the parser's line", async () => {
-    const { service, repo, repoId } = await admitted();
-    await finished(
-      service,
-      (
-        await service.request({
-          kind: "graphEdit",
-          repoId,
-          key: "PRB-1",
-          edit: { op: "add_node", title: "Queue one email", criteria: ["ac_1"], new_criteria: [], paths: ["packages/auth/**"] },
-        })
-      ).id,
-    );
-    const tickets = join(repo, ".perbo", "tickets");
-    const draft = readFileSync(join(tickets, "PRB-1.draft.json"), "utf8");
-    writeFileSync(join(tickets, "PRB-1.draft.json"), "{not json");
-    await expect(service.request({ kind: "graphRead", repoId, key: "PRB-1" })).rejects.toThrow(
-      /draft record could not be read/,
-    );
-    writeFileSync(join(tickets, "PRB-1.draft.json"), draft);
-    writeFileSync(join(tickets, "PRB-1.approach.json"), "{not json");
-    await expect(service.request({ kind: "graphRead", repoId, key: "PRB-1" })).rejects.toThrow(
-      /approach record could not be read/,
-    );
   });
 
   it("opens planning mode over a ticket in plan_review, and refuses one that has moved on", async () => {
@@ -1902,36 +1576,6 @@ describe("desktop bridge against the actual bundled CLI", () => {
     symlinkSync(outside, join(repo, ".perbo"));
     await expect(service.registerRepository(repo)).rejects.toThrow("symlink");
   });
-  it("preserves preferences and records an interrupted job after restart", async () => {
-    const { service, options, root } = fixture();
-    await service.request({
-      kind: "saveSettings",
-      settings: SettingsSchema.parse({
-        name: "Morgan",
-        executorProvider: "codex-cli",
-      }),
-    });
-    const statePath = join(root, "profile", "workspace.json"),
-      state = JSON.parse(readFileSync(statePath, "utf8")) as { jobs: Job[] };
-    state.jobs.push({
-      id: "80000000-0000-4000-8000-000000000001",
-      repoId: "80000000-0000-4000-8000-000000000002",
-      key: "PRB-1",
-      kind: "run",
-      label: "Run",
-      state: "running",
-      startedAt: new Date().toISOString(),
-      endedAt: null,
-      log: "",
-      error: null,
-      resultKey: null,
-      result: null,
-    });
-    writeFileSync(statePath, JSON.stringify(state));
-    const restored = await new DesktopService(options).snapshot();
-    expect(restored.settings.name).toBe("Morgan");
-    expect(restored.jobs[0]?.state).toBe("interrupted");
-  });
 });
 /**
  * The explorer's reads (SCP-318). A renderer names a repository and a
@@ -1944,100 +1588,11 @@ describe("the explorer's host reads", () => {
     const state = fixture();
     const { repo } = state;
     mkdirSync(join(repo, "src"), { recursive: true });
-    mkdirSync(join(repo, "packages", "app", "secrets"), { recursive: true });
     writeFileSync(join(repo, "src", "index.ts"), "export const answer = 42;\n");
-    writeFileSync(join(repo, ".env"), "TOKEN=shhh\n");
-    writeFileSync(join(repo, "certs.pem"), "-----BEGIN-----\n");
-    writeFileSync(join(repo, "packages", "app", "secrets", "token.txt"), "shhh\n");
-    writeFileSync(join(repo, "big.txt"), "x".repeat(PREVIEW_BYTE_CAP + 1));
-    writeFileSync(join(repo, "logo.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d]));
-    symlinkSync(join(repo, "src", "index.ts"), join(repo, "link.ts"));
     execFileSync("git", ["add", "-A"], { cwd: repo });
     execFileSync("git", ["commit", "-m", "Stock the explorer"], { cwd: repo, stdio: "ignore" });
     return state;
   }
-
-  it("lists the tracked files and leaves out the ones nothing reads", async () => {
-    const { service, repo } = stocked();
-    const registered = await service.registerRepository(repo);
-    const listing = await service.request({ kind: "explorerList", repoId: registered.id });
-    expect(listing.files).toContain("src/index.ts");
-    expect(listing.files).toContain("README.md");
-    // Present in the repository, and never named here.
-    for (const hidden of [".env", "certs.pem", "packages/app/secrets/token.txt"])
-      expect(listing.files, hidden).not.toContain(hidden);
-    expect(listing.hidden).toBe(3);
-    expect(listing.files).toEqual([...listing.files].sort());
-    expect(listing.standing).toEqual([]);
-  });
-
-  it("reads one tracked file, read-only, with its size", async () => {
-    const { service, repo } = stocked();
-    const registered = await service.registerRepository(repo);
-    const file = await service.request({
-      kind: "explorerRead",
-      repoId: registered.id,
-      path: "src/index.ts",
-    });
-    expect(file.text).toBe("export const answer = 42;\n");
-    expect(file.refusal).toBeNull();
-    expect(file.bytes).toBe(26);
-  });
-
-  it("refuses a path that is not a repository-relative file in this repository", async () => {
-    const { service, repo } = stocked();
-    const registered = await service.registerRepository(repo);
-    const refusals: [string, RegExp][] = [
-      ["../etc/passwd", /leave the repository/],
-      ["src/../../etc/passwd", /leave the repository/],
-      [join(repo, "src", "index.ts"), /absolute path/],
-      ["/etc/passwd", /absolute path/],
-      [".env", /never lists nor reads/],
-      ["packages/app/secrets/token.txt", /never lists nor reads/],
-      ["link.ts", /symlink/],
-      ["src", /folder/],
-      ["src/absent.ts", /not a tracked file/],
-    ];
-    for (const [path, reason] of refusals)
-      await expect(
-        service.request({ kind: "explorerRead", repoId: registered.id, path }),
-        path,
-      ).rejects.toThrow(reason);
-  });
-
-  it("refuses a file that exists but is not tracked, and names a configuration it cannot read", async () => {
-    const { service, repo } = stocked();
-    const registered = await service.registerRepository(repo);
-    writeFileSync(join(repo, "src", "scratch.ts"), "export {};\n");
-    await expect(
-      service.request({ kind: "explorerRead", repoId: registered.id, path: "src/scratch.ts" }),
-    ).rejects.toThrow(/not a tracked file/);
-    mkdirSync(join(repo, ".perbo"), { recursive: true });
-    writeFileSync(join(repo, ".perbo", "config.json"), "{");
-    await expect(
-      service.request({ kind: "explorerList", repoId: registered.id }),
-    ).rejects.toThrow(/could not be read as a JSON object/);
-  });
-
-  it("refuses a file over the cap and reports a binary one, rather than showing either", async () => {
-    const { service, repo } = stocked();
-    const registered = await service.registerRepository(repo);
-    const big = await service.request({
-      kind: "explorerRead",
-      repoId: registered.id,
-      path: "big.txt",
-    });
-    expect(big.text).toBeNull();
-    expect(big.refusal).toMatch(/larger than the 256 KiB/);
-    expect(big.bytes).toBe(PREVIEW_BYTE_CAP + 1);
-    const binary = await service.request({
-      kind: "explorerRead",
-      repoId: registered.id,
-      path: "logo.png",
-    });
-    expect(binary.text).toBeNull();
-    expect(binary.refusal).toMatch(/binary file/);
-  });
 
   it("answers a read while an exclusive command holds the repository", async () => {
     const { service, repo } = stocked();
@@ -2060,25 +1615,6 @@ describe("the explorer's host reads", () => {
       await finished(service, doctor.id);
     }
   });
-
-  it("reports the repository's standing prohibited list with the listing", async () => {
-    const { service, repo } = stocked();
-    const registered = await service.registerRepository(repo);
-    mkdirSync(join(repo, ".perbo"), { recursive: true });
-    writeFileSync(
-      join(repo, ".perbo", "config.json"),
-      JSON.stringify({ paths_prohibited: ["src/generated/**"] }),
-    );
-    const listing = await service.request({ kind: "explorerList", repoId: registered.id });
-    expect(listing.standing).toEqual([
-      {
-        path: "src/generated/**",
-        draft: null,
-        source: "written in .perbo/config.json",
-        added_at: null,
-      },
-    ]);
-  });
 });
 
 /**
@@ -2088,12 +1624,6 @@ describe("the explorer's host reads", () => {
  * the draft that added the entry and taken off again by undo.
  */
 describe("the explorer's marks through the host", () => {
-  const config = (repo: string): Record<string, unknown> =>
-    JSON.parse(readFileSync(join(repo, ".perbo", "config.json"), "utf8")) as Record<
-      string,
-      unknown
-    >;
-
   it("carries a prohibited path into the admitted contract's scope", async () => {
     const { service, repo } = fixture();
     const registered = await service.registerRepository(repo);
@@ -2111,73 +1641,6 @@ describe("the explorer's marks through the host", () => {
     const detail = await service.detail(registered.id, "PRB-1");
     expect(detail.contract.scope.paths_prohibited).toContain("src/generated/**");
     expect(detail.contract.scope.paths_allowed).toEqual(["src/**", "test/**"]);
-  });
-
-  it("writes the standing list beside the repository's other configuration, and undo removes it", async () => {
-    const { service, repo } = fixture();
-    mkdirSync(join(repo, ".perbo"), { recursive: true });
-    writeFileSync(
-      join(repo, ".perbo", "config.json"),
-      JSON.stringify({ test_command: "pnpm test" }),
-    );
-    const registered = await service.registerRepository(repo);
-    const opened = await service.request({
-      kind: "editingOpen",
-      target: { kind: "fresh", repoId: registered.id },
-    });
-    const marked = await service.request({
-      kind: "explorerMark",
-      id: opened.id,
-      revision: opened.revision,
-      path: "src/generated/",
-      mark: "prohibited",
-      always: true,
-    });
-    expect(marked.form.draft.prohibited).toEqual(["src/generated/**"]);
-    expect(config(repo)).toEqual({
-      test_command: "pnpm test",
-      paths_prohibited: [
-        {
-          path: "src/generated/**",
-          draft: opened.id,
-          source: "this draft",
-          added_at: expect.any(String) as unknown as string,
-        },
-      ],
-    });
-    const undone = await service.request({
-      kind: "explorerUndo",
-      id: marked.id,
-      revision: marked.revision,
-      edit: marked.history.at(-1)!.n,
-    });
-    expect(undone.form.draft.prohibited).toEqual([]);
-    expect(config(repo)).toEqual({ test_command: "pnpm test", paths_prohibited: [] });
-  });
-
-  it("refuses to move an entry this draft did not add", async () => {
-    const { service, repo } = fixture();
-    mkdirSync(join(repo, ".perbo"), { recursive: true });
-    writeFileSync(
-      join(repo, ".perbo", "config.json"),
-      JSON.stringify({ paths_prohibited: ["specs/**"] }),
-    );
-    const registered = await service.registerRepository(repo);
-    const opened = await service.request({
-      kind: "editingOpen",
-      target: { kind: "fresh", repoId: registered.id },
-    });
-    await expect(
-      service.request({
-        kind: "explorerMark",
-        id: opened.id,
-        revision: opened.revision,
-        path: "specs/",
-        mark: "prohibited",
-        always: false,
-      }),
-    ).rejects.toThrow(/standing list/);
-    expect(config(repo)).toEqual({ paths_prohibited: ["specs/**"] });
   });
 });
 
@@ -2368,44 +1831,6 @@ readline.createInterface({ input: process.stdin })
       change.kind === "interview" && change.entry !== null ? [change.entry] : [],
     );
 
-  it("builds its argv from the registered repository and the session's own records", async () => {
-    const { service, registered, repoId, id, fake } = await planning();
-    await service.request({ kind: "interviewStart", repoId, id });
-    await running(service, id);
-    const first = JSON.parse(readFileSync(fake.argv, "utf8")) as string[];
-    // The spec folder is derived, the model comes from the drafting choice on
-    // the session's form, and the repository is the registered path.
-    expect(first).toEqual([
-      "interview",
-      "--spec",
-      "specs/activation-email",
-      "--model",
-      "claude-opus-5",
-      "--provider",
-      "claude",
-      "--repo",
-      registered,
-    ]);
-    // Nothing continues a session nobody has started yet.
-    expect(first).not.toContain("--session");
-
-    // The session id comes off the `started` event, and the next start continues it.
-    expect((await service.request({ kind: "editingRead", id })).interviewSession).toBe("sdk-session-1");
-    await service.request({ kind: "interviewStop", id });
-    await spoken(service, id, (lines) => lines.some((line) => line.line.kind === "note" && line.line.text.includes("ended")));
-    await service.request({ kind: "interviewStart", repoId, id });
-    for (let count = 0; count < 400; count++) {
-      if ((JSON.parse(readFileSync(fake.argv, "utf8")) as string[]).includes("--session")) break;
-      await delay(10);
-    }
-    const second = JSON.parse(readFileSync(fake.argv, "utf8")) as string[];
-    expect(second.slice(second.indexOf("--session"), second.indexOf("--session") + 2)).toEqual([
-      "--session",
-      "sdk-session-1",
-    ]);
-    await service.request({ kind: "interviewStop", id });
-  });
-
   it("names the spec from the person's first turn when the planning has none", async () => {
     const { service, repoId, fake } = await planning();
     const fresh = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
@@ -2432,15 +1857,6 @@ readline.createInterface({ input: process.stdin })
     );
     expect(kinds(lines)).toContain("turn");
     await service.request({ kind: "interviewStop", id: fresh.id });
-  });
-
-  it("refuses a first turn no folder name can come from, and names nothing", async () => {
-    const { service, repoId } = await planning();
-    const fresh = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
-    await expect(
-      service.request({ kind: "interviewTurn", id: fresh.id, text: "?!?!" }),
-    ).rejects.toThrow(/spec title first/);
-    expect((await service.request({ kind: "editingRead", id: fresh.id })).specSlug).toBeNull();
   });
 
   it("relays each event in order and writes the person's turn to the child's stdin", async () => {
@@ -2646,51 +2062,6 @@ readline.createInterface({ input: process.stdin })
     await service.request({ kind: "interviewStop", id });
   });
 
-  it("says a line it could not read in its own words, whatever the reason runs to", async () => {
-    const { service, repoId, id } = await planning();
-    await service.request({ kind: "interviewStart", repoId, id });
-    await running(service, id);
-    // A line the schema refuses for four hundred fields: the reason names every
-    // one of them, and the sentence the person reads is the host's.
-    await service.request({ kind: "interviewTurn", id, text: "a line with many keys" });
-    const lines = await spoken(service, id, (entries) =>
-      entries.some((entry) => entry.line.kind === "note" && entry.line.text.includes("could not read")),
-    );
-    const note = lines.find(
-      (entry) => entry.line.kind === "note" && entry.line.text.includes("could not read"),
-    )!.line;
-    expect(note.kind === "note" && note.text.startsWith("The interview wrote a line this build")).toBe(
-      true,
-    );
-    expect(note.kind === "note" && note.text.length).toBeLessThanOrEqual(12_000);
-    // And nothing the child wrote reaches the record unredacted.
-    expect(note.kind === "note" && note.text).not.toContain("sk-ant-notreal0123456789");
-    await service.request({ kind: "interviewStop", id });
-  });
-
-  it("keeps a session id longer than the record holds, rather than losing the line", async () => {
-    const { service, repoId, id } = await planning();
-    await service.request({ kind: "interviewStart", repoId, id });
-    await running(service, id);
-    // A `started` event the protocol caps at nothing, against a record that
-    // caps it: dropped, the chat comes back with no session and no lines.
-    await service.request({ kind: "interviewTurn", id, text: "start a long session" });
-    const lines = await spoken(service, id, (entries) =>
-      entries.some((entry) => entry.line.kind === "note" && entry.line.text.includes("s".repeat(40))),
-    );
-    // The id the second `started` reported, kept at what the record holds
-    // rather than dropped with the line that carried it.
-    const session = await service.request({ kind: "editingRead", id });
-    expect(session.interviewSession).toBe("s".repeat(200));
-    // And the note names the id that was recorded, which is the one a later
-    // start continues, rather than the longer one that arrived.
-    const note = lines.find(
-      (entry) => entry.line.kind === "note" && entry.line.text.includes("s".repeat(40)),
-    )!.line;
-    expect(note.kind === "note" && note.text).toContain(`The session is ${"s".repeat(200)},`);
-    await service.request({ kind: "interviewStop", id });
-  });
-
   it("starts the interview on the session this planning drafts with", async () => {
     const { service, repoId, id, fake } = await planning();
     const session = await service.request({ kind: "editingRead", id });
@@ -2716,40 +2087,6 @@ readline.createInterface({ input: process.stdin })
     expect(started.interviewProvider).toBe("codex");
     expect(interviewSessionArgs(started, "codex")).toEqual(["--session", "sdk-session-1"]);
     await service.request({ kind: "interviewStop", id });
-  });
-
-  /**
-   * Resolve, then judge: the spec folder the interview is handed is checked
-   * where it lands, not as it was spelled, and it comes from two places that
-   * are both inputs — the record this app wrote, and the repository's own
-   * configuration.
-   */
-  it("judges the spec folder where it lands, whatever spelled it", async () => {
-    const { service, repo, repoId, id } = await planning();
-    const record = await service.request({ kind: "editingRead", id });
-    for (const slug of [
-      "",
-      ".",
-      "..",
-      "../outside",
-      "activation-email/",
-      "./activation-email",
-      "activation-email/../..",
-      "/activation-email",
-      "..\\outside",
-      "C:\\outside",
-      "activation-email/nodes",
-    ])
-      expect(EditingSessionSchema.safeParse({ ...record, specSlug: slug }).success, slug).toBe(false);
-
-    // The folder every spec sits in, reached through a symlink: refused before
-    // an argv is built, as every other path a surface names is.
-    const elsewhere = join(repo, "..", "elsewhere");
-    mkdirSync(elsewhere, { recursive: true });
-    rmSync(join(repo, "specs"), { recursive: true, force: true });
-    symlinkSync(elsewhere, join(repo, "specs"));
-    await expect(service.request({ kind: "interviewStart", repoId, id })).rejects.toThrow(/symlink/);
-    expect((await service.snapshot()).interviews).toEqual([]);
   });
 });
 
@@ -2932,46 +2269,6 @@ describe("the impact a draft reaches", () => {
     expect(existsSync(join(repo, ".perbo", "index.json"))).toBe(false);
   });
 
-  it("reports an index that could not be built, rather than an empty answer", async () => {
-    const runner: typeof runProcess = async (binary, args, options) =>
-      args[1] === "index"
-        ? { code: 2, stdout: "", stderr: "this checkout has no HEAD to read", cancelled: false }
-        : runProcess(binary, args, options);
-    const { service, repo } = fixture(runner);
-    const registered = await service.registerRepository(repo);
-    const id = await planning(service, registered.id, ["packages/auth/src/**"]);
-    await expect(service.request({ kind: "impactRead", id })).rejects.toThrow(
-      /this checkout has no HEAD to read/,
-    );
-  });
-
-  it("refuses an index record the contract's schema does not admit, either shape", async () => {
-    // A record a bare cast would carry into the report unnoticed: the first
-    // builds a whole report the pane heads "against not a s", the second a note
-    // reading "Nothing here reads imports: .".
-    let record = "";
-    const runner: typeof runProcess = async (binary, args, options) =>
-      args[1] === "index"
-        ? { code: 0, stdout: record, stderr: "", cancelled: false }
-        : runProcess(binary, args, options);
-    const { service, repo } = fixture(runner);
-    const registered = await service.registerRepository(repo);
-    const id = await planning(service, registered.id, ["packages/auth/src/**"]);
-    record = JSON.stringify({
-      schema_version: 1,
-      built_at: "2026-09-14T00:00:00.000Z",
-      head_commit: "not a sha",
-      working_tree: "clean",
-      files: [],
-      skipped: [],
-    });
-    await expect(service.request({ kind: "impactRead", id })).rejects.toThrow(/a commit sha/);
-    record = JSON.stringify({ supported: false, reason: "", languages_seen: [".py"] });
-    await expect(service.request({ kind: "impactRead", id })).rejects.toThrow(
-      /"path": \[\n\s*"reason"/,
-    );
-  });
-
   it("never names a path nothing here reads, and answers beside an exclusive command", async () => {
     const { service, repo } = monorepo();
     writeFileSync(join(repo, "packages", "auth", ".env"), "TOKEN=shhh\n");
@@ -3112,42 +2409,6 @@ describe("UI v2 host behaviour", () => {
       readFileSync(join(repo, ".perbo", "tickets", "PRB-1.json"), "utf8"),
     ) as { state: string };
     expect(ticket.state).toBe("merged");
-  });
-
-  it("forgets a repository together with its tickets' titles, models and archive marks", async () => {
-    const { service, repo } = fixture();
-    const registered = await service.registerRepository(repo);
-    await finished(
-      service,
-      (await service.request({ kind: "admit", repoId: registered.id, draft }))
-        .id,
-    );
-    await service.request({
-      kind: "rename",
-      repoId: registered.id,
-      key: "PRB-1",
-      title: "Renamed by hand",
-    });
-    setTicketState(repo, "PRB-1", "merged");
-    await service.request({
-      kind: "archive",
-      repoId: registered.id,
-      keys: ["PRB-1"],
-      archived: true,
-    });
-    const before = await service.snapshot();
-    expect(before.titles?.[registered.id + ":PRB-1"]).toBe("Renamed by hand");
-    expect(before.archived).toEqual([registered.id + ":PRB-1"]);
-    await service.request({ kind: "forgetRepository", repoId: registered.id });
-    const after = await service.snapshot();
-    expect(after.repositories).toEqual([]);
-    expect(after.archived).toEqual([]);
-    expect(Object.keys(after.titles ?? {})).toEqual([]);
-    expect(
-      Object.keys(after.taskModels ?? {}).filter((entry) =>
-        entry.startsWith(registered.id + ":"),
-      ),
-    ).toEqual([]);
   });
 
   it("summarises a ticket from its retained attempts and reports the month's ledger with injected provider windows", async () => {
@@ -3351,94 +2612,6 @@ describe("UI v2 host behaviour", () => {
       detail: null,
       since: null,
     });
-  });
-
-  it("keeps an older profile's single notification switch meaning what it said", async () => {
-    const { service, options } = fixture();
-    await service.shutdown();
-    const profile = join(options.dataDirectory, "workspace.json");
-    const stored = JSON.parse(readFileSync(profile, "utf8")) as {
-      settings: Record<string, unknown>;
-    };
-    delete stored.settings["notifyOn"];
-    stored.settings["notifications"] = false;
-    writeFileSync(profile, JSON.stringify(stored));
-    const restarted = new DesktopService(options);
-    services.push(restarted);
-    expect((await restarted.snapshot()).settings.notifyOn).toEqual({
-      decision: false,
-      review: false,
-      ceiling: false,
-      stage: false,
-    });
-  });
-
-  it("deletes only a contract that has never run, and refuses one with evidence", async () => {
-    const { service, repo } = fixture();
-    const registered = await service.registerRepository(repo);
-    await finished(
-      service,
-      (await service.request({ kind: "admit", repoId: registered.id, draft }))
-        .id,
-    );
-    await finished(
-      service,
-      (
-        await service.request({
-          kind: "admit",
-          repoId: registered.id,
-          draft: { ...draft, outcome: "Second" },
-        })
-      ).id,
-    );
-    await service.request({
-      kind: "rename",
-      repoId: registered.id,
-      key: "PRB-1",
-      title: "Renamed",
-    });
-    const { ticket_id } = setTicketState(repo, "PRB-2", "plan_review");
-    mkdirSync(join(repo, ".perbo", "state"), { recursive: true });
-    writeFileSync(
-      join(repo, ".perbo", "state", `${ticket_id}.attempts.json`),
-      JSON.stringify({ ticket_id, attempts: [{ attempt_id: "att_1" }] }),
-    );
-    await expect(
-      service.request({ kind: "discard", repoId: registered.id, key: "PRB-2" }),
-    ).rejects.toThrow(/recorded attempts/);
-    await service.request({
-      kind: "discard",
-      repoId: registered.id,
-      key: "PRB-1",
-    });
-    const snapshot = await service.snapshot();
-    expect(snapshot.tasks.map((row) => row.ticket.key)).toEqual(["PRB-2"]);
-    expect(snapshot.titles).toEqual({});
-    for (const suffix of [".json", ".contract.json", ".draft.json"])
-      expect(
-        existsSync(join(repo, ".perbo", "tickets", "PRB-1" + suffix)),
-      ).toBe(false);
-    await expect(
-      service.request({ kind: "discard", repoId: registered.id, key: "PRB-1" }),
-    ).rejects.toThrow(/no longer/);
-  });
-
-  it("opens the terminal on the provider's fixed sign-in command, and names the command where it cannot", async () => {
-    const opened: string[][] = [];
-    const { service, options } = fixture();
-    options.io.openTerminal = async (command) => {
-      opened.push([...command]);
-    };
-    await service.request({ kind: "login", provider: "claude" });
-    await service.request({ kind: "login", provider: "codex" });
-    expect(opened).toEqual([
-      ["claude", "auth", "login"],
-      ["codex", "login"],
-    ]);
-    delete options.io.openTerminal;
-    await expect(
-      service.request({ kind: "login", provider: "codex" }),
-    ).rejects.toThrow(/Run codex login in your terminal/);
   });
 
   it("opens the worktree on the branch a ticket already has, whatever its key would derive", async () => {
@@ -3723,42 +2896,6 @@ describe("planning beside a run (SCP-335)", () => {
     }
   });
 
-  it("holds a contract's deletion for the commands running in its repository, and not for another's", async () => {
-    const holder = held();
-    const { service, repo } = fixture(holder.runner);
-    const registered = await service.registerRepository(repo);
-    const other = join(dirname(repo), "other repository");
-    mkdirSync(other);
-    for (const args of [["init", "--initial-branch=main"], ["config", "user.name", "Desktop Test"], ["config", "user.email", "desktop@example.invalid"], ["config", "commit.gpgsign", "false"]])
-      execFileSync("git", args, { cwd: other, stdio: "ignore" });
-    writeFileSync(join(other, "README.md"), "# Other\n");
-    execFileSync("git", ["add", "README.md"], { cwd: other });
-    execFileSync("git", ["commit", "-m", "Initial"], { cwd: other, stdio: "ignore" });
-    const second = await service.registerRepository(other);
-    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
-    await finished(service, (await service.request({ kind: "admit", repoId: second.id, draft })).id);
-
-    holder.holdAdmit();
-    const planning = await service.request({
-      kind: "admit",
-      repoId: second.id,
-      draft: { ...draft, outcome: "Planned in the other repository" },
-    });
-    await holder.inAdmit;
-    // A draft in the other repository holds nothing here.
-    await service.request({ kind: "discard", repoId: registered.id, key: "PRB-1" });
-    // One in the same repository holds its contracts and its disconnection.
-    await expect(service.request({ kind: "discard", repoId: second.id, key: "PRB-1" })).rejects.toThrow(
-      "Wait for the commands running in this repository to finish before deleting a contract.",
-    );
-    await expect(service.request({ kind: "forgetRepository", repoId: second.id })).rejects.toThrow(
-      "Wait for the commands running in this repository to finish before disconnecting it.",
-    );
-    await service.request({ kind: "cancel", jobId: planning.id });
-    await finished(service, planning.id);
-    holder.release();
-  });
-
   it("refuses to stop a job that has finished while its receipt is still being saved", async () => {
     const holder = held();
     const { service, repo } = fixture(holder.runner);
@@ -3778,25 +2915,5 @@ describe("planning beside a run (SCP-335)", () => {
     // Nothing is left in the way: the lane is free once the receipt is saved.
     const snapshot = await service.snapshot();
     expect(snapshot.jobs.filter((job) => ["running", "stopping"].includes(job.state))).toEqual([]);
-  });
-
-  it("aborts and awaits every active job on shutdown", async () => {
-    const holder = held();
-    const { service, repo } = fixture(holder.runner);
-    const registered = await service.registerRepository(repo);
-    const run = await runInFlight(service, registered.id);
-    holder.holdAdmit();
-    const planning = await service.request({
-      kind: "admit",
-      repoId: registered.id,
-      draft: { ...draft, outcome: "Planned while the loop runs" },
-    });
-    await holder.inAdmit;
-    await service.shutdown();
-    expect([...holder.aborted].sort()).toEqual(["admit", "run"]);
-    const jobs = (await service.snapshot()).jobs;
-    for (const id of [run.id, planning.id])
-      expect(jobs.find((job) => job.id === id)?.state).toBe("cancelled");
-    holder.release();
   });
 });

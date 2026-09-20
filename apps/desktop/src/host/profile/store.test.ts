@@ -107,9 +107,15 @@ describe("opening the profile", () => {
     const path = directory();
     const first = Profile.open(path);
     first.state.titles = { "repo:PRB-1": "Renamed" };
+    first.state.settings = SettingsSchema.parse({ name: "Morgan", executorProvider: "codex-cli" });
     first.save();
     expect(first.lastSave).toBeGreaterThan(0);
-    expect(Profile.open(path).state.titles).toEqual({ "repo:PRB-1": "Renamed" });
+    const reopened = Profile.open(path).state;
+    expect(reopened.titles).toEqual({ "repo:PRB-1": "Renamed" });
+    // The preferences are read back as they were written, so the app opens on
+    // what the person last chose.
+    expect(reopened.settings.name).toBe("Morgan");
+    expect(reopened.settings.executorProvider).toBe("codex-cli");
   });
 
   it("keeps what a profile from before the four moments said with its one switch", () => {

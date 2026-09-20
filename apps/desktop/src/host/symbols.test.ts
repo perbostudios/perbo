@@ -87,6 +87,9 @@ describe("exportedNames", () => {
     const names = view.supported ? view.names : [];
     expect(names.some((each) => each.name === "SECRET")).toBe(false);
     expect(names.some((each) => each.path === ".env")).toBe(false);
+    // Not in a path either, which is the half a filter on names alone misses.
+    expect(JSON.stringify(view)).not.toContain(".env");
+    expect(JSON.stringify(view)).not.toContain("SECRET");
   });
 
   it("offers nothing from a file Git no longer tracks", async () => {

@@ -60,11 +60,17 @@ describe("explorerPath", () => {
     expect(() => explorerPath(repo, "C:\\Windows\\win.ini")).toThrow(
       "Perbo does not take an absolute path from a screen.",
     );
+    expect(() => explorerPath(repo, "/etc/passwd")).toThrow(
+      "Perbo does not take an absolute path from a screen.",
+    );
   });
 
   it("refuses a path that climbs out, and an empty one", () => {
     const repo = repository();
     expect(() => explorerPath(repo, "src/../../elsewhere")).toThrow(
+      "That path would leave the repository.",
+    );
+    expect(() => explorerPath(repo, "../elsewhere")).toThrow(
       "That path would leave the repository.",
     );
     expect(() => explorerPath(repo, "")).toThrow("That path would leave the repository.");
@@ -74,6 +80,9 @@ describe("explorerPath", () => {
     const repo = repository();
     expect(() => explorerPath(repo, ".env")).toThrow("Perbo never lists nor reads this path");
     expect(() => explorerPath(repo, ".git/config")).toThrow(
+      "Perbo never lists nor reads this path",
+    );
+    expect(() => explorerPath(repo, "packages/app/secrets/token.txt")).toThrow(
       "Perbo never lists nor reads this path",
     );
   });
