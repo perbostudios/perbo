@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
@@ -17,6 +16,7 @@ import {
   type TicketCommit,
   type TicketEscapes,
 } from "@perbo/contracts";
+import { CommandFailedError, gh, git, type RunResult } from "@perbo/workspace";
 import { UsageError } from "../../usage-error.js";
 import type { Streams } from "../../streams.js";
 import { baselinePath } from "../baseline/index.js";
@@ -93,26 +93,22 @@ export function parseEscapesArgs(argv: readonly string[]): EscapesArgs {
  * Collection: local `git` and `gh`, under `perbo sync`.
  * ------------------------------------------------------------------ */
 
-/** A command runner, so a test can drive real `git` over a real fixture history. */
-export type CommandRunner = (command: string, args: readonly string[], cwd: string) => string;
+/**
+ * What one answer to one of these questions may be. Collection reads a branch's
+ * whole history and the paths every commit on it touched, which is large on a
+ * busy default branch and is counted rather than skimmed.
+ */
+const MAX_ANSWER_BYTES = 64 * 1024 * 1024;
 
-const runCommand: CommandRunner = (command, args, cwd) =>
-  execFileSync(command, [...args], {
-    cwd,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    // Collection asks questions it expects to be answered "no" — is there an
-    // `origin`, is this ref here — so the child's stderr is captured rather
-    // than inherited, and `detail` puts it back into the message that names it.
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+/** What a command that ran and failed said, preferring its own stderr. */
+function said(result: RunResult): string {
+  const line = result.stderr.split("\n").find((text) => text.trim() !== "");
+  if (line !== undefined) return line.trim();
+  return new CommandFailedError(result).message.split("\n")[0] ?? "";
+}
 
-/** What a failed command said, preferring its own stderr over Node's wrapper. */
-function detail(error: unknown): string {
-  const stderr = (error as { stderr?: string | Buffer | null } | null)?.stderr;
-  const text = typeof stderr === "string" ? stderr : (stderr?.toString("utf8") ?? "");
-  const said = text.split("\n").find((line) => line.trim() !== "");
-  if (said !== undefined) return said.trim();
+/** What a command that never started said, which is Node's own wrapper. */
+function reason(error: unknown): string {
   return error instanceof Error ? (error.message.split("\n")[0] ?? error.message) : String(error);
 }
 
@@ -147,30 +143,38 @@ export function readMergeFacts(args: {
   repositoryRoot: string;
   branch: string;
   pull_request_number: number | null;
-  run?: CommandRunner | undefined;
 }): MergeFacts | null {
-  const run = args.run ?? runCommand;
-  let raw: string;
+  let answer: RunResult;
   try {
-    raw = run(
-      "gh",
-      [
-        "pr",
-        "view",
-        args.pull_request_number === null ? args.branch : String(args.pull_request_number),
-        "--json",
-        "number,url,state,mergedAt,mergeCommit,baseRefName,commits",
-      ],
+    answer = gh.viewPullRequestSync(
       args.repositoryRoot,
+      args.pull_request_number === null ? args.branch : String(args.pull_request_number),
+      ["number", "url", "state", "mergedAt", "mergeCommit", "baseRefName", "commits"],
+      { maxOutputBytes: MAX_ANSWER_BYTES },
     );
   } catch (error) {
     throw new EscapeCollectionError(
-      `\`gh pr view\` could not be asked about ${args.branch}: ${detail(error)}`,
+      `\`gh pr view\` could not be asked about ${args.branch}: ${reason(error)}`,
+      { cause: error },
+    );
+  }
+  // A body that arrived cut is not a pull request that did not merge: the two
+  // must not write the same record, and only this says which one happened.
+  if (answer.truncated) {
+    throw new EscapeCollectionError(
+      `\`gh pr view\` said more about ${args.branch} than ${MAX_ANSWER_BYTES} bytes, and only ` +
+        "part of it arrived",
+    );
+  }
+  if (answer.code !== 0) {
+    throw new EscapeCollectionError(
+      `\`gh pr view\` could not be asked about ${args.branch}: ${said(answer)}`,
+      { cause: new CommandFailedError(answer) },
     );
   }
   let parsed: GhMergedPullRequest;
   try {
-    parsed = JSON.parse(raw) as GhMergedPullRequest;
+    parsed = JSON.parse(answer.stdout) as GhMergedPullRequest;
   } catch (error) {
     throw new EscapeCollectionError(
       `\`gh pr view\` returned something that is not JSON: ` +
@@ -189,23 +193,46 @@ export function readMergeFacts(args: {
   };
 }
 
-const git = (run: CommandRunner, cwd: string, ...args: string[]): string => {
+/**
+ * One read of this checkout's history, or the refusal that says it could not
+ * be read. An answer cut at the ceiling is a refusal too: these are commits
+ * and paths that get counted, and a list short by whatever was dropped counts
+ * as an escape nobody had.
+ */
+const read = (cwd: string, ...args: string[]): string => {
+  let result: RunResult;
   try {
-    return run("git", args, cwd);
+    result = git.runSync(cwd, args, { maxOutputBytes: MAX_ANSWER_BYTES });
   } catch (error) {
-    throw new EscapeCollectionError(`git ${args.join(" ")} failed in ${cwd}: ${detail(error)}`);
+    throw new EscapeCollectionError(`git ${args.join(" ")} failed in ${cwd}: ${reason(error)}`, {
+      cause: error,
+    });
   }
+  if (result.truncated) {
+    throw new EscapeCollectionError(
+      `git ${args.join(" ")} in ${cwd} said more than ${MAX_ANSWER_BYTES} bytes, and only part ` +
+        "of it arrived",
+    );
+  }
+  if (result.code !== 0) {
+    throw new EscapeCollectionError(`git ${args.join(" ")} failed in ${cwd}: ${said(result)}`, {
+      cause: new CommandFailedError(result),
+    });
+  }
+  return result.stdout;
 };
 
 /** The first of `refs` the checkout actually has; the default branch may be local, remote or both. */
-function resolveRef(run: CommandRunner, cwd: string, branch: string): string {
-  for (const ref of [`refs/remotes/origin/${branch}`, `refs/heads/${branch}`, branch]) {
+function resolveRef(cwd: string, branch: string): string {
+  const here = (ref: string): boolean => {
     try {
-      run("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], cwd);
-      return ref;
+      return git.runSync(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).code === 0;
     } catch {
-      continue;
+      return false;
     }
+  };
+  for (const ref of [`refs/remotes/origin/${branch}`, `refs/heads/${branch}`, branch]) {
+    if (here(ref)) return ref;
   }
   throw new EscapeCollectionError(
     `neither origin/${branch} nor ${branch} is in this checkout, so the history after the merge ` +
@@ -225,20 +252,24 @@ function resolveRef(run: CommandRunner, cwd: string, branch: string): string {
  * `origin` has nothing to be behind of and is refreshed by definition.
  */
 function observeBranch(args: {
-  run: CommandRunner;
   cwd: string;
   branch: string;
   streams?: Streams | undefined;
 }): { ref: string; head: ObservedHead } {
-  const { run, cwd, branch } = args;
-  /** Null when the command succeeded, otherwise what it said when it did not. */
+  const { cwd, branch } = args;
+  /**
+   * Null when the command succeeded, otherwise what it said when it did not.
+   * The fetch crosses the network and the module waits on it for as long as it
+   * waits on any other call that does, rather than for as long as it takes.
+   */
   const attempt = (command: readonly string[]): string | null => {
+    let result: RunResult;
     try {
-      run("git", [...command], cwd);
-      return null;
+      result = git.runSync(cwd, command, { maxOutputBytes: MAX_ANSWER_BYTES });
     } catch (error) {
-      return detail(error);
+      return reason(error);
     }
+    return result.code === 0 ? null : said(result);
   };
   // The fetch is asked for first and the remote is asked about only if it
   // failed: the case worth being quick about is the one where there is a remote
@@ -253,11 +284,11 @@ function observeBranch(args: {
         "reads `stale` rather than `no escape` once the window closes\n",
     );
   }
-  const ref = resolveRef(run, cwd, branch);
+  const ref = resolveRef(cwd, branch);
   // A local ref is not evidence about the branch even after a successful
   // fetch: `refs/heads/<branch>` is only as current as the last `git pull`.
   const refreshed = !hasOrigin || (failure === null && ref.startsWith("refs/remotes/"));
-  const [sha = "", committed = ""] = git(run, cwd, "log", "-1", `--format=%H${FIELD}%cI`, ref)
+  const [sha = "", committed = ""] = read(cwd, "log", "-1", `--format=%H${FIELD}%cI`, ref)
     .trim()
     .split(FIELD);
   return {
@@ -287,12 +318,12 @@ function parseLog(output: string): ObservedCommit[] {
 }
 
 /** The paths a commit put on the branch it landed on: its diff against its first parent. */
-function pathsIntroducedBy(run: CommandRunner, cwd: string, sha: string): string[] {
-  const parents = git(run, cwd, "rev-list", "--parents", "-n", "1", sha).trim().split(/\s+/).slice(1);
+function pathsIntroducedBy(cwd: string, sha: string): string[] {
+  const parents = read(cwd, "rev-list", "--parents", "-n", "1", sha).trim().split(/\s+/).slice(1);
   const output =
     parents.length === 0
-      ? git(run, cwd, "show", "--format=", "--name-only", sha)
-      : git(run, cwd, "diff", "--name-only", `${sha}^1`, sha);
+      ? read(cwd, "show", "--format=", "--name-only", sha)
+      : read(cwd, "diff", "--name-only", `${sha}^1`, sha);
   return output
     .split("\n")
     .map((line) => line.trim())
@@ -324,19 +355,16 @@ export function collectTicketEscapes(args: {
   previous: TicketEscapes | null;
   observed_at: string;
   window_days?: number | undefined;
-  run?: CommandRunner | undefined;
   streams?: Streams | undefined;
 }): TicketEscapes {
-  const run = args.run ?? runCommand;
   const cwd = args.repositoryRoot;
   const days = args.window_days ?? ESCAPE_WINDOW_DAYS;
   const { ref, head } = observeBranch({
-    run,
     cwd,
     branch: args.facts.default_branch,
     streams: args.streams,
   });
-  const subjectOf = (sha: string): string => git(run, cwd, "log", "-1", "--format=%s", sha).replace(/\n$/, "");
+  const subjectOf = (sha: string): string => read(cwd, "log", "-1", "--format=%s", sha).replace(/\n$/, "");
   const merge: TicketCommit = { sha: args.facts.merge_commit, subject: subjectOf(args.facts.merge_commit) };
   /**
    * The same, for a commit the checkout may not have. A squash or rebase merge
@@ -356,10 +384,10 @@ export function collectTicketEscapes(args: {
   // The pull request's commits as `gh` listed them, plus the ones the merge
   // itself brought in — a squashed or rebased merge has the second and not the
   // first, and a revert may name any of them.
-  const parents = git(run, cwd, "rev-list", "--parents", "-n", "1", merge.sha).trim().split(/\s+/).slice(1);
+  const parents = read(cwd, "rev-list", "--parents", "-n", "1", merge.sha).trim().split(/\s+/).slice(1);
   const merged =
     parents.length > 1
-      ? git(run, cwd, "rev-list", `${merge.sha}^1..${merge.sha}^2`)
+      ? read(cwd, "rev-list", `${merge.sha}^1..${merge.sha}^2`)
           .split("\n")
           .map((line) => line.trim())
           .filter((line) => line !== "")
@@ -370,8 +398,7 @@ export function collectTicketEscapes(args: {
 
   const closes = new Date(Date.parse(args.facts.merged_at) + days * DAY_MS).toISOString();
   const later = parseLog(
-    git(
-      run,
+    read(
       cwd,
       "log",
       "--first-parent",
@@ -392,7 +419,7 @@ export function collectTicketEscapes(args: {
     merge,
     merged_at: args.facts.merged_at,
     branch_commits,
-    changed_paths: pathsIntroducedBy(run, cwd, merge.sha),
+    changed_paths: pathsIntroducedBy(cwd, merge.sha),
     later,
     observed_head: head,
     observed_at: args.observed_at,
@@ -420,7 +447,6 @@ export function writeTicketEscapes(args: {
   facts: MergeFacts;
   observed_at: string;
   streams: Streams;
-  run?: CommandRunner | undefined;
 }): TicketEscapes | null {
   let previous: TicketEscapes | null = null;
   const path = escapesPath(args.dir, args.ticket.ticket_id);
@@ -441,7 +467,6 @@ export function writeTicketEscapes(args: {
     facts: args.facts,
     previous,
     observed_at: args.observed_at,
-    run: args.run,
     streams: args.streams,
   });
   mkdirSync(join(args.dir, "state"), { recursive: true });
