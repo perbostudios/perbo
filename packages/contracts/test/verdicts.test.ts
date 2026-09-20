@@ -12,6 +12,7 @@ import {
   verdictFor,
   verdictKey,
   type LocalVerdict,
+  type StopVerdict,
   type StopVerdicts,
 } from "../src/index.js";
 
@@ -56,12 +57,14 @@ const stopsFile = (over: Partial<StopVerdicts> = {}): StopVerdicts => ({
   ...over,
 });
 
-const stop = (finding_key: string, answer: StopVerdicts["stops"][number]["answer"], at: string) => ({
+/** A stop as a sync writes it, where the tick carries no signature: a person's. */
+const stop = (finding_key: string, answer: StopVerdict["answer"], at: string): StopVerdict => ({
   finding_key,
   rule_id: "auth.token_never_expires",
-  routing: "blocks" as const,
+  routing: "blocks",
   answer,
   answered_at: answer === null ? null : at,
+  answered_by: answer === null ? null : "person",
   first_seen_at: "2026-09-03T09:00:00.000Z",
 });
 
