@@ -63,7 +63,6 @@ import type {
   Detail,
   Change,
   ChangeInput,
-  Draft,
   EditingSession,
   ExplorerFile,
   ExplorerListing,
@@ -86,6 +85,7 @@ import type {
   SpecSections,
   SpecView,
   SymbolIndexView,
+  TaskModels,
   TaskSummary,
   UsageReport,
 } from "../shared/protocol.js";
@@ -108,6 +108,24 @@ import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/op
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
+import {
+  admitDraftArgs,
+  admitFromFileArgs,
+  admitFromSpecArgs,
+  approveArgs,
+  assertEditable,
+  assertResumable,
+  doctorArgs,
+  doctorConfig,
+  editArgs,
+  graphEditArgs,
+  principleArgs,
+  runArgs,
+  runConfig,
+  syncArgs,
+  verdictArgs,
+  writePrivate,
+} from "./jobs/commands.js";
 import {
   forgetRepository,
   setArchived,
@@ -1772,25 +1790,6 @@ export class DesktopService {
     }
     return result;
   }
-  private draftArgs(draft: Draft): string[] {
-    // The CLI's non-interactive edit syntax has a delimiter; reject ambiguous text instead of silently splitting it.
-    for (const criterion of draft.criteria)
-      if (criterion.text.includes("::") || criterion.assertion.includes("::"))
-        throw new Error(
-          "Use a single colon in a criterion. The CLI reserves a double colon for its verification separator.",
-        );
-    return [
-      "--outcome",
-      draft.outcome,
-      ...draft.criteria.flatMap((entry) => [
-        "--criterion",
-        `${entry.text} :: ${entry.assertion} :: ${entry.kind}`,
-      ]),
-      ...draft.paths.flatMap((path) => ["--path", path]),
-      ...draft.prohibited.flatMap((path) => ["--prohibit", path]),
-      "--json",
-    ];
-  }
   async request<T extends Request>(input: T): Promise<ReplyMap[T["kind"]]> {
     const request = RequestSchema.parse(input);
     return (await this.dispatch(request)) as ReplyMap[T["kind"]];
@@ -1924,21 +1923,7 @@ export class DesktopService {
         request.kind,
         request.kind === "graphUndo" ? "Undo a plan edit" : "Change the plan's graph",
         async (job, signal) => {
-          await this.invoke(
-            job,
-            repo,
-            [
-              "edit",
-              request.key,
-              ...(request.kind === "graphUndo"
-                ? ["--undo", String(request.edit)]
-                : ["--graph-edit", JSON.stringify(request.edit)]),
-              "--author",
-              "you",
-              "--json",
-            ],
-            signal,
-          );
+          await this.invoke(job, repo, graphEditArgs(request.key, request), signal);
           job.resultKey = request.key;
         },
       );
@@ -2031,35 +2016,12 @@ export class DesktopService {
           ? "Save repository configuration"
           : "Check repository readiness",
         async (job, signal) => {
-          const models = this.state.settings;
-          const path = join(
+          const path = writePrivate(
             this.options.dataDirectory,
             `doctor-${job.id}.json`,
+            JSON.stringify(doctorConfig(this.state.settings)),
           );
-          writeFileSync(
-            path,
-            JSON.stringify({
-              agent_binary:
-                models.executorProvider === "codex-cli" ? "codex" : "claude",
-              agent_provider: models.executorProvider,
-              model: models.executorModel,
-              reviewer_provider: models.reviewerProvider,
-              reviewer_model: models.reviewerModel,
-            }),
-            { mode: 0o600, flag: "wx" },
-          );
-          await this.invoke(
-            job,
-            repo,
-            [
-              "doctor",
-              "--json",
-              "--config",
-              path,
-              ...(request.writeConfig ? ["--write-config"] : []),
-            ],
-            signal,
-          );
+          await this.invoke(job, repo, doctorArgs(path, request.writeConfig), signal);
         },
       );
     if (request.kind === "specSave") {
@@ -2110,31 +2072,18 @@ export class DesktopService {
             throw new Error("This planning belongs to another repository.");
           if (session.specSlug === null)
             throw new Error("Write the spec before generating a plan from it.");
-          const spec = `${specFolder(repo)}/${session.specSlug}/spec.md`;
           await this.invoke(
             job,
             repo,
-            [
-              "admit",
-              "--prefix",
-              "PRB",
-              "--from-spec",
-              spec,
-              ...(request.kind === "startOver" ? ["--start-over", request.key] : []),
-              "--provider",
+            admitFromSpecArgs(
+              `${specFolder(repo)}/${session.specSlug}/spec.md`,
+              request.kind === "startOver" ? request.key : null,
               request.models?.draftingProvider ?? this.state.settings.draftingProvider,
-              "--model",
               request.models?.executorModel ?? this.state.settings.executorModel,
-              "--json",
-            ],
+            ),
             signal,
           );
-          const admitted = z.object({ ticket: TicketSchema }).parse(job.result);
-          job.resultKey = admitted.ticket.key;
-          if (request.models) {
-            this.state.taskModels[repo.id + ":" + admitted.ticket.key] = request.models;
-            this.preferencesChanged();
-          }
+          this.recordAdmitted(job, repo, request.models);
         },
         owner,
       );
@@ -2147,42 +2096,20 @@ export class DesktopService {
           ? "Draft a task contract"
           : "Save task contract",
         async (job, signal) => {
-          let args: string[];
-          if (request.kind === "draft") {
-            const path = join(
-              this.options.dataDirectory,
-              `source-${job.id}.md`,
-            );
-            writeFileSync(path, request.outcome, { mode: 0o600, flag: "wx" });
-            args = [
-              "admit",
-              "--prefix",
-              "PRB",
-              "--from-file",
-              path,
-              "--provider",
-              request.models?.draftingProvider ??
-                this.state.settings.draftingProvider,
-              "--model",
-              request.models?.executorModel ??
-                this.state.settings.executorModel,
-              "--json",
-            ];
-          } else
-            args = [
-              "admit",
-              "--prefix",
-              "PRB",
-              ...this.draftArgs(DraftSchema.parse(request.draft)),
-            ];
+          const args =
+            request.kind === "draft"
+              ? admitFromFileArgs(
+                  writePrivate(
+                    this.options.dataDirectory,
+                    `source-${job.id}.md`,
+                    request.outcome,
+                  ),
+                  request.models?.draftingProvider ?? this.state.settings.draftingProvider,
+                  request.models?.executorModel ?? this.state.settings.executorModel,
+                )
+              : admitDraftArgs(DraftSchema.parse(request.draft));
           await this.invoke(job, repo, args, signal);
-          const admitted = z.object({ ticket: TicketSchema }).parse(job.result);
-          job.resultKey = admitted.ticket.key;
-          if (request.models) {
-            this.state.taskModels[repo.id + ":" + admitted.ticket.key] =
-              request.models;
-            this.preferencesChanged();
-          }
+          this.recordAdmitted(job, repo, request.models);
         },
         owner,
       );
@@ -2194,22 +2121,8 @@ export class DesktopService {
         "Update task contract",
         async (job, signal) => {
           this.assertDigest(repo, request.key, request.digest);
-          const current = this.readContract(repo, request.key).contract;
-          if (
-            "acceptance_criteria" in current &&
-            current.acceptance_criteria.some(
-              (criterion) => criterion.expected_verification.kind === "manual",
-            )
-          )
-            throw new Error(
-              "This contract has named manual reviewers. Edit it with the CLI to preserve those assignments.",
-            );
-          await this.invoke(
-            job,
-            repo,
-            ["edit", request.key, ...this.draftArgs(request.draft)],
-            signal,
-          );
+          assertEditable(this.readContract(repo, request.key).contract);
+          await this.invoke(job, repo, editArgs(request.key, request.draft), signal);
           job.resultKey = request.key;
           if (request.models) {
             this.state.taskModels[repo.id + ":" + request.key] = request.models;
@@ -2225,7 +2138,7 @@ export class DesktopService {
         request.kind,
         "Refresh delivery from GitHub",
         async (job, signal) => {
-          await this.invoke(job, repo, ["sync", request.key], signal);
+          await this.invoke(job, repo, syncArgs(request.key), signal);
         },
       );
     if (request.kind === "principle")
@@ -2235,12 +2148,7 @@ export class DesktopService {
         request.kind,
         "Record a product decision",
         async (job, signal) => {
-          await this.invoke(
-            job,
-            repo,
-            ["principle", "add", request.answer],
-            signal,
-          );
+          await this.invoke(job, repo, principleArgs(request.answer), signal);
         },
       );
     if (request.kind === "verdict")
@@ -2253,17 +2161,7 @@ export class DesktopService {
           await this.invoke(
             job,
             repo,
-            [
-              "verdict",
-              request.key,
-              `--${request.decision}`,
-              request.findingKey,
-              "--note",
-              request.note,
-              "--author",
-              this.state.settings.name || "Local user",
-              "--json",
-            ],
+            verdictArgs(request, this.state.settings.name || "Local user"),
             signal,
           );
         },
@@ -2277,77 +2175,44 @@ export class DesktopService {
         async (job, signal) => {
           this.assertDigest(repo, request.key, request.digest);
           const resumeFrom = request.kind === "run" ? request.resumeFrom : null;
-          if (resumeFrom) {
-            const current = await this.detail(repo.id, request.key);
-            if (
-              !current.attempts.some((attempt) =>
-                attempt.bundles.some(
-                  (bundle) =>
-                    bundle.bundle_id === resumeFrom &&
-                    bundle.kind === "execution",
-                ),
-              )
-            )
-              throw new Error(
-                "The recovery bundle does not belong to this task.",
-              );
-          }
+          if (resumeFrom)
+            assertResumable(await this.detail(repo.id, request.key), resumeFrom);
           if (request.kind === "decide") {
-            await this.invoke(
-              job,
-              repo,
-              ["principle", "add", request.answer],
-              signal,
-            );
+            await this.invoke(job, repo, principleArgs(request.answer), signal);
             if (signal.aborted) return;
           }
-          // Always carry explicit publication authority and person-only merge into this one invocation.
-          const models =
-            this.state.taskModels[repo.id + ":" + request.key] ??
-            this.state.settings;
-          const config = {
-            agent_binary:
-              models.executorProvider === "codex-cli" ? "codex" : "claude",
-            agent_provider: models.executorProvider,
-            executor_skills: models.executorSkills,
-            model: models.executorModel,
-            reviewer_provider: models.reviewerProvider,
-            reviewer_model: models.reviewerModel,
-            limits: effectiveLimits(repo, this.state.settings),
-            publish: request.kind === "run" ? request.publish : false,
-            merge: "person",
-          };
-          const path = join(this.options.dataDirectory, `run-${job.id}.json`);
-          writeFileSync(path, JSON.stringify(config), {
-            mode: 0o600,
-            flag: "wx",
-          });
-          if (request.kind === "run" && request.approve)
-            await this.invoke(
-              job,
-              repo,
-              ["approve", request.key, "--json"],
-              signal,
-            );
-          if (signal.aborted) return;
-          await this.invoke(
-            job,
-            repo,
-            [
-              "run",
-              "--ticket",
-              request.key,
-              "--config",
-              path,
-              "--json",
-              ...(resumeFrom ? ["--resume-from", resumeFrom] : []),
-            ],
-            signal,
+          const path = writePrivate(
+            this.options.dataDirectory,
+            `run-${job.id}.json`,
+            JSON.stringify(
+              runConfig(
+                this.state.taskModels[repo.id + ":" + request.key] ?? this.state.settings,
+                effectiveLimits(repo, this.state.settings),
+                request.kind === "run" ? request.publish : false,
+              ),
+            ),
           );
+          if (request.kind === "run" && request.approve)
+            await this.invoke(job, repo, approveArgs(request.key), signal);
+          if (signal.aborted) return;
+          await this.invoke(job, repo, runArgs(request.key, path, resumeFrom), signal);
         },
       );
     const unreachable: never = request;
     throw new Error(`Unsupported request ${String(unreachable)}`);
+  }
+  /** The key admission handed back, and the models the person chose for it. */
+  private recordAdmitted(
+    job: Job,
+    repo: RegisteredRepository,
+    models: TaskModels | undefined,
+  ): void {
+    const admitted = z.object({ ticket: TicketSchema }).parse(job.result);
+    job.resultKey = admitted.ticket.key;
+    if (models) {
+      this.state.taskModels[repo.id + ":" + admitted.ticket.key] = models;
+      this.preferencesChanged();
+    }
   }
   /** What a module reading a ticket's records is given, so it never reads the store twice over. */
   private ticketRecords(): TicketRecords {

@@ -1,0 +1,212 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { z } from "zod";
+import type { LimitsTableSchema, PlanContract } from "@perbo/contracts";
+import type { Detail, Draft, RequestOf, Settings, TaskModels } from "../../shared/protocol.js";
+
+/**
+ * Every argv the host runs the CLI with, built here from the person's own
+ * request and this host's own records.
+ *
+ * Nothing a model returned reaches an argument
+ * ([ADR-0023](../../../../../docs/adr/0023-untrusted-context-boundary.md) §4):
+ * what a person typed travels as one element of the array, so a value holding
+ * a space, a quote or a `$(…)` is that value and not a command.
+ */
+
+/** Which binary the loop starts for the executor, from the provider it was given. */
+const agentBinary = (provider: TaskModels["executorProvider"]): string =>
+  provider === "codex-cli" ? "codex" : "claude";
+
+export function draftArgs(draft: Draft): string[] {
+  // The CLI's non-interactive edit syntax has a delimiter; reject ambiguous text instead of silently splitting it.
+  for (const criterion of draft.criteria)
+    if (criterion.text.includes("::") || criterion.assertion.includes("::"))
+      throw new Error(
+        "Use a single colon in a criterion. The CLI reserves a double colon for its verification separator.",
+      );
+  return [
+    "--outcome",
+    draft.outcome,
+    ...draft.criteria.flatMap((entry) => [
+      "--criterion",
+      `${entry.text} :: ${entry.assertion} :: ${entry.kind}`,
+    ]),
+    ...draft.paths.flatMap((path) => ["--path", path]),
+    ...draft.prohibited.flatMap((path) => ["--prohibit", path]),
+    "--json",
+  ];
+}
+
+/** Every edit the Graph pane makes, applied and recorded by the CLI (D-100). */
+export function graphEditArgs(
+  key: string,
+  request: RequestOf<"graphEdit"> | RequestOf<"graphUndo">,
+): string[] {
+  return [
+    "edit",
+    key,
+    ...(request.kind === "graphUndo"
+      ? ["--undo", String(request.edit)]
+      : ["--graph-edit", JSON.stringify(request.edit)]),
+    "--author",
+    "you",
+    "--json",
+  ];
+}
+
+export function doctorConfig(settings: Settings): object {
+  return {
+    agent_binary: agentBinary(settings.executorProvider),
+    agent_provider: settings.executorProvider,
+    model: settings.executorModel,
+    reviewer_provider: settings.reviewerProvider,
+    reviewer_model: settings.reviewerModel,
+  };
+}
+
+export function doctorArgs(configPath: string, writeConfig: boolean): string[] {
+  return ["doctor", "--json", "--config", configPath, ...(writeConfig ? ["--write-config"] : [])];
+}
+
+export function admitFromSpecArgs(
+  spec: string,
+  startOver: string | null,
+  provider: string,
+  model: string,
+): string[] {
+  return [
+    "admit",
+    "--prefix",
+    "PRB",
+    "--from-spec",
+    spec,
+    ...(startOver === null ? [] : ["--start-over", startOver]),
+    "--provider",
+    provider,
+    "--model",
+    model,
+    "--json",
+  ];
+}
+
+export function admitFromFileArgs(path: string, provider: string, model: string): string[] {
+  return [
+    "admit",
+    "--prefix",
+    "PRB",
+    "--from-file",
+    path,
+    "--provider",
+    provider,
+    "--model",
+    model,
+    "--json",
+  ];
+}
+
+export function admitDraftArgs(draft: Draft): string[] {
+  return ["admit", "--prefix", "PRB", ...draftArgs(draft)];
+}
+
+export function editArgs(key: string, draft: Draft): string[] {
+  return ["edit", key, ...draftArgs(draft)];
+}
+
+export function approveArgs(key: string): string[] {
+  return ["approve", key, "--json"];
+}
+
+export function principleArgs(answer: string): string[] {
+  return ["principle", "add", answer];
+}
+
+export function syncArgs(key: string): string[] {
+  return ["sync", key];
+}
+
+export function verdictArgs(request: RequestOf<"verdict">, author: string): string[] {
+  return [
+    "verdict",
+    request.key,
+    `--${request.decision}`,
+    request.findingKey,
+    "--note",
+    request.note,
+    "--author",
+    author,
+    "--json",
+  ];
+}
+
+/**
+ * The configuration one run is started with. Publication authority and
+ * person-only merge are carried explicitly on every invocation: a run this
+ * host started never merges, and only publishes where the person asked it to.
+ */
+export function runConfig(
+  models: TaskModels | Settings,
+  limits: z.infer<typeof LimitsTableSchema>,
+  publish: boolean,
+): object {
+  return {
+    agent_binary: agentBinary(models.executorProvider),
+    agent_provider: models.executorProvider,
+    executor_skills: models.executorSkills,
+    model: models.executorModel,
+    reviewer_provider: models.reviewerProvider,
+    reviewer_model: models.reviewerModel,
+    limits,
+    publish,
+    merge: "person",
+  };
+}
+
+export function runArgs(key: string, configPath: string, resumeFrom: string | null): string[] {
+  return [
+    "run",
+    "--ticket",
+    key,
+    "--config",
+    configPath,
+    "--json",
+    ...(resumeFrom === null ? [] : ["--resume-from", resumeFrom]),
+  ];
+}
+
+/** A contract whose criteria name a person to check them is edited with the CLI, which keeps the assignment. */
+export function assertEditable(contract: PlanContract): void {
+  if (
+    "acceptance_criteria" in contract &&
+    contract.acceptance_criteria.some(
+      (criterion) => criterion.expected_verification.kind === "manual",
+    )
+  )
+    throw new Error(
+      "This contract has named manual reviewers. Edit it with the CLI to preserve those assignments.",
+    );
+}
+
+/** A run resumes only from a bundle this task's own attempts sealed. */
+export function assertResumable(detail: Detail, bundleId: string): void {
+  if (
+    !detail.attempts.some((attempt) =>
+      attempt.bundles.some(
+        (bundle) => bundle.bundle_id === bundleId && bundle.kind === "execution",
+      ),
+    )
+  )
+    throw new Error("The recovery bundle does not belong to this task.");
+}
+
+/**
+ * A file only this job reads, in the profile directory: the person's own
+ * configuration and their own words, written where the CLI can be pointed at
+ * them rather than passed on a command line. Written exclusively, so a job
+ * never writes over another's.
+ */
+export function writePrivate(directory: string, name: string, content: string): string {
+  const path = join(directory, name);
+  writeFileSync(path, content, { mode: 0o600, flag: "wx" });
+  return path;
+}
