@@ -130,18 +130,19 @@ jobs:
   # The reviewer's regression suite, against the public corpus pinned in
   # `.github/corpus-pin.json` — so a pull request that touches the reviewer
   # cannot silently point the suite at a corpus commit nobody chose. The live
-  # run fires for any change under `packages/review/`, a wider net than the
-  # obligation D-010 places on the prompt, the blocking matrix and the default
-  # model or provider, because a path filter cannot see which change moved the
-  # default model.
+  # run fires for any change under `packages/review/` or `packages/model/`, a
+  # wider net than the obligation D-010 places on the prompt, the blocking
+  # matrix and the default model or provider, because a path filter cannot see
+  # which change moved the default model — and the default model, the request
+  # each transport builds and the price card are in `packages/model`.
   #
   # Two steps, and the difference between them is money. The dry run always
   # runs, reaches no provider and costs nothing: it resolves the suite's thirty
   # fixture ids against the cloned corpus and lists them. The live run is
   # thirty reviews on the maintainer's own key — about fifteen dollars a time —
-  # so it runs only when the pull request changes the reviewer, and only where
-  # the key exists. A pull request from a fork is not given the secret, and a
-  # pull request that does not touch `packages/review/` does not need the
+  # so it runs only when the pull request changes the reviewer or the model
+  # client, and only where the key exists. A pull request from a fork is not
+  # given the secret, and one that touches neither package does not need the
   # number, so neither spends anything. `workflow_dispatch` is the maintainer's
   # way to ask for the live run by hand.
   regression-suite:
@@ -216,11 +217,11 @@ jobs:
           # dies of SIGPIPE, so the pipeline reports failure exactly when the
           # reviewer *was* touched — the one case that must not be missed.
           git diff --name-only "$BASE_SHA...$HEAD_SHA" > changed-files.txt
-          if grep -q "^packages/review/" changed-files.txt; then
-            echo "This pull request changes the reviewer — the live suite runs."
+          if grep -qE "^packages/(review|model)/" changed-files.txt; then
+            echo "This pull request changes the reviewer or the model client — the live suite runs."
             echo "run=yes" >> "$GITHUB_OUTPUT"
           else
-            echo "This pull request does not touch packages/review/ — the live suite does not run."
+            echo "This pull request touches neither packages/review/ nor packages/model/ — the live suite does not run."
             echo "run=no" >> "$GITHUB_OUTPUT"
           fi
 
