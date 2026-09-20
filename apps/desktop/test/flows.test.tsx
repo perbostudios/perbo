@@ -13,7 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { App, type Route, type TaskView } from "../src/renderer/shell/App.js";
 import type { Detail, Snapshot } from "../src/shared/protocol.js";
-import { runnerProgress } from "../src/renderer/presentation.js";
+import { runnerProgress } from "../src/shared/runner-progress.js";
 import { HomePage } from "../src/renderer/tasks/HomePage.js";
 import { TaskPage } from "../src/renderer/tasks/TaskPage.js";
 import { sampleBridge } from "../src/sample-host/bridge.js";
