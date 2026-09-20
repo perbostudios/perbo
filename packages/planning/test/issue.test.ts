@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -44,7 +44,6 @@ describe("fetchGitHubIssue", () => {
       body: "Steps: sign up.",
       url: "https://github.com/o/r/issues/412",
     });
-    const { readFileSync } = await import("node:fs");
     expect(readFileSync(argvFile, "utf8").trim().split("\n")).toEqual([
       "issue",
       "view",
@@ -76,4 +75,54 @@ describe("fetchGitHubIssue", () => {
     const binary = fakeGh("gh-junk", `printf '%s' '{"title":"","number":"x"}'`);
     await expect(fetchGitHubIssue("o/r#2", { binary })).rejects.toThrow(PlanningError);
   });
+});
+
+/**
+ * `gh` runs in the runner's environment, not in this process's.
+ *
+ * Drafting is reached from the command line, where the person's own shell holds
+ * whatever it holds. What `gh` needs from it — the host, the configuration
+ * directory, the token — is named; the rest is not passed on, and a prompt is a
+ * failure rather than a process waiting on a terminal nobody is watching.
+ */
+describe("the gh fetchGitHubIssue starts", () => {
+  it.skipIf(process.platform === "win32")("runs with prompts off and no ambient secret", async () => {
+    const dump = join(scratch, "issue-child-env.txt");
+    const binary = fakeGh(
+      "gh-env",
+      `env > ${JSON.stringify(dump)}\n` +
+        `printf '%s' '{"title":"t","body":"b","url":"https://github.com/o/r/issues/3","number":3}'`,
+    );
+    process.env.PERBO_SENTINEL_TOKEN = "a token the child must not see";
+    try {
+      expect((await fetchGitHubIssue("o/r#3", { binary })).number).toBe(3);
+    } finally {
+      delete process.env.PERBO_SENTINEL_TOKEN;
+    }
+
+    const child = readFileSync(dump, "utf8").split("\n");
+    expect(child).toContain("GH_PROMPT_DISABLED=1");
+    expect(child).toContain("GIT_TERMINAL_PROMPT=0");
+    expect(child.filter((line) => line.startsWith("PERBO_SENTINEL_TOKEN="))).toEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "refuses an answer too large to hold, rather than reading the part that fits",
+    async () => {
+      // An issue body is what a spec is drafted from, so a body that arrived
+      // cut is a spec missing requirements nobody knows are missing. The tail
+      // `gh` leaves behind also still parses as nothing in particular, so the
+      // refusal has to say what happened.
+      const binary = fakeGh(
+        "gh-flood",
+        `printf '{"title":"t","body":"'\n` +
+          `head -c 17000000 /dev/zero | tr '\\0' 'a'\n` +
+          `printf '","url":"https://github.com/o/r/issues/4","number":4}'`,
+      );
+      await expect(fetchGitHubIssue("o/r#4", { binary })).rejects.toThrow(
+        /gh's answer for o\/r#4 is larger than .*only part of it/,
+      );
+    },
+    60_000,
+  );
 });

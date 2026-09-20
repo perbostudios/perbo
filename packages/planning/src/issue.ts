@@ -1,9 +1,9 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { CommandFailedError, createGh, type RunResult } from "@perbo/workspace";
 import { z } from "zod";
 import { PlanningError } from "./errors.js";
 
-const run = promisify(execFile);
+/** What one issue's JSON may be, past which only part of it would arrive. */
+const MAX_ANSWER_BYTES = 16 * 1024 * 1024;
 
 const REFERENCE = /^([\w.-]+)\/([\w.-]+)#([1-9]\d*)$/;
 
@@ -61,36 +61,54 @@ export interface GitHubIssue extends SourceIssue {
   url: string;
 }
 
+/** The one line of a failure a person is shown, whatever shape it arrived in. */
+function firstLine(text: string): string {
+  return text.trim().split("\n")[0] ?? "";
+}
+
 /**
  * Read one issue through the locally installed `gh`, with the user's own
  * credential. Argv only: the number and the repository are arguments, and a
  * reference that did not parse never reaches the process at all.
+ *
+ * The call goes through `@perbo/workspace`'s repository module, so it runs in
+ * the runner's environment rather than the shell's, with `gh`'s prompts off and
+ * a bound on how long it may wait.
  */
 export async function fetchGitHubIssue(
   reference: string,
   options: { binary?: string; timeoutMs?: number } = {},
 ): Promise<GitHubIssue> {
   const { owner, repo, number } = parseIssueReference(reference);
-  let stdout: string;
+  let result: RunResult;
   try {
-    const result = await run(
-      options.binary ?? "gh",
+    result = await createGh({ binary: options.binary }).run(
+      process.cwd(),
       ["issue", "view", String(number), "--repo", `${owner}/${repo}`, "--json", "title,body,url,number"],
-      { encoding: "utf8", timeout: options.timeoutMs ?? 60_000, maxBuffer: 16 * 1024 * 1024 },
+      { timeoutMs: options.timeoutMs ?? 60_000, maxOutputBytes: MAX_ANSWER_BYTES },
     );
-    stdout = result.stdout;
   } catch (error) {
-    const failure = error as { stderr?: string; message?: string };
-    const reason =
-      (failure.stderr ?? "").trim().split("\n")[0] ||
-      (failure.message ?? String(error)).split("\n")[0] ||
-      "unknown failure";
-    throw new PlanningError(`gh could not read ${reference}: ${reason}`, { cause: error });
+    // `gh` never started: it is not installed, or not where the caller said.
+    const reason = error instanceof Error ? firstLine(error.message) : String(error);
+    throw new PlanningError(`gh could not read ${reference}: ${reason || "unknown failure"}`, { cause: error });
+  }
+  if (result.code !== 0) {
+    const failed = new CommandFailedError(result);
+    const reason = firstLine(result.stderr) || firstLine(failed.message) || "unknown failure";
+    throw new PlanningError(`gh could not read ${reference}: ${reason}`, { cause: failed });
+  }
+  // A body that arrived cut is a spec drafted from requirements nobody knows
+  // are missing, and the tail `gh` leaves behind parses as nothing in
+  // particular — so the size is the answer here, not the bytes that fit.
+  if (result.truncated) {
+    throw new PlanningError(
+      `gh's answer for ${reference} is larger than ${MAX_ANSWER_BYTES} bytes, and only part of it arrived`,
+    );
   }
 
   let raw: unknown;
   try {
-    raw = JSON.parse(stdout);
+    raw = JSON.parse(result.stdout);
   } catch (error) {
     throw new PlanningError(`gh did not return JSON for ${reference}`, { cause: error });
   }
