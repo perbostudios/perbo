@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -7,9 +7,6 @@ import {
 import { z } from "zod";
 import {
   ApproachRecordSchema,
-  PlanContractSchema,
-  ReviewArtifactSchema,
-  RunBundleSchema,
   TicketSchema,
   STANDING_PROHIBITED_KEY,
   SymbolIndexSchema,
@@ -30,7 +27,6 @@ import type {
 } from "@perbo/contracts";
 import type { PlanNode } from "@perbo/contracts/plan";
 import { busyMessage, exclusiveJob, heldRepository, isLive, lane } from "../shared/jobs.js";
-import { judgingChecks } from "../shared/checks.js";
 import {
   impactReport,
   readSpecText,
@@ -68,12 +64,10 @@ import type {
   Snapshot,
   SymbolIndexView,
   TaskModels,
-  TaskSummary,
   UsageReport,
 } from "../shared/protocol.js";
-import { childEnvironment, redact, requireSuccess, runProcess, startLineProcess } from "./process.js";
-import type { LineProcess, ProcessOptions, ProcessResult } from "./process.js";
-import { isArchived } from "../shared/archive.js";
+import { redact, requireSuccess, runProcess, startLineProcess } from "./process.js";
+import type { LineProcess, ProcessResult } from "./process.js";
 import { discoverModels } from "./model-catalog.js";
 import {
   ContractEditing,
@@ -86,6 +80,8 @@ import { WorkspaceReads } from "./workspace-reads.js";
 import { Profile } from "./profile/store.js";
 import { Changes } from "./changes.js";
 import { RepositoryRegistry } from "./repository/registry.js";
+import { createCli, type Cli } from "./cli.js";
+import { TicketReads } from "./tickets/reads.js";
 import { explorerPath, safePath } from "./repository/paths.js";
 import { trackedFiles } from "./repository/git.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
@@ -116,7 +112,7 @@ import {
   verdictArgs,
   writePrivate,
 } from "./jobs/commands.js";
-import { setArchived } from "./profile/preferences.js";
+import { seedArchived, setArchived } from "./profile/preferences.js";
 import {
   effectiveLimits,
   readConfig,
@@ -127,9 +123,7 @@ import {
 } from "./repository/config.js";
 import {
   attemptsPath,
-  bundlesPath,
   objectsPath,
-  principlesPath,
   ticketPath,
 } from "./repository/layout.js";
 import type { ProfileState, RegisteredRepository } from "./profile/store.js";
@@ -138,91 +132,13 @@ import {
   currentMonth,
   isEarlyStop,
   ledgerFor,
-  listBundles,
   liveGraph,
   readAttempts,
   readDraftEdits,
   readLatestDraftEdit,
-  summariseTicket,
   type StoredAttempt,
 } from "./records.js";
 import { codexUsage } from "./usage-probe.js";
-
-const ListSchema = z.object({ tickets: z.array(TicketSchema) });
-const CheckSchema = z
-  .object({
-    name: z.string().optional(),
-    check_id: z.string().optional(),
-    status: z.string(),
-    summary: z.string().optional(),
-    detail: z.string().nullable().optional(),
-    command: z.string().nullable().optional(),
-    output: z.unknown().optional(),
-    /**
-     * Present on a result the runner ran for one node of an execution graph
-     * (D-107). The desktop shows what judges the change, which is the results
-     * without it.
-     */
-    node: z.object({ node_id: z.string() }).passthrough().optional(),
-  })
-  .passthrough();
-const ReportSchema = z
-  .object({
-    attempts: z.array(
-      z
-        .object({
-          attempt_id: z.string(),
-          run: z.number(),
-          round: z.number(),
-          started_at: z.string(),
-          outcome: z.string(),
-          termination: z
-            .object({ reason: z.string(), detail: z.string() })
-            .passthrough(),
-          agent: z.object({ model: z.string() }).passthrough(),
-          cost: z.object({
-            micros: z.number().nullable(),
-            basis: z.string(),
-            partial: z.boolean(),
-          }),
-          ceilings: z.array(
-            z.object({
-              resource: z.string(),
-              used: z.number().nullable(),
-              // Null where nothing bounds the resource, which after D-096 is
-              // most of them on most runs.
-              ceiling: z.number().nullable(),
-              hit: z.boolean(),
-            }),
-          ),
-          review: ReviewArtifactSchema.nullable(),
-          review_decision: z.string().nullable(),
-          changed_files: z
-            .array(
-              z.object({
-                path: z.string(),
-                change_kind: z.string(),
-                additions: z.number().nullable(),
-                deletions: z.number().nullable(),
-              }),
-            )
-            .nullable(),
-          checks: z.array(CheckSchema).nullable(),
-          verification: z.unknown(),
-          bundles: z.array(RunBundleSchema),
-        })
-        .passthrough(),
-    ),
-    total_cost: z
-      .object({
-        micros: z.number(),
-        partial: z.number(),
-        unavailable: z.number(),
-      })
-      .passthrough(),
-    verdicts: z.array(z.unknown()),
-  })
-  .passthrough();
 
 export interface HostIO {
   chooseDirectory(): Promise<string | null>;
@@ -298,7 +214,9 @@ export class DesktopService {
   private readonly spawn: typeof startLineProcess;
   private readonly profile: Profile;
   private readonly changes: Changes;
+  private readonly cli: Cli;
   private readonly registry: RepositoryRegistry;
+  private readonly tickets: TicketReads;
   private readonly editing: ContractEditing;
   private readonly reads = new WorkspaceReads();
   /** Every command still running, by job id: planning beside a run (D-101). */
@@ -339,12 +257,25 @@ export class DesktopService {
       save: () => this.profile.save(),
       emit: (change) => options.changed(change),
     });
+    this.cli = createCli({
+      nodeBinary: options.nodeBinary,
+      cliPath: options.cliPath,
+      electronNode: options.electronNode,
+      execute: this.execute,
+      spawn: this.spawn,
+    });
     this.registry = new RepositoryRegistry({
       profile: this.profile,
       changes: this.changes,
       reads: this.reads,
       execute: this.execute,
       liveJobs: () => this.liveJobs(),
+    });
+    this.tickets = new TicketReads({
+      reads: this.reads,
+      cli: this.cli,
+      registry: this.registry,
+      settings: () => this.state.settings,
     });
     this.editing = new ContractEditing({
       records: () => this.state.editingSessions,
@@ -432,38 +363,6 @@ export class DesktopService {
       return refuse(`${path} is a binary file. There is nothing here to read.`);
     return { path, bytes, text: raw.toString("utf8"), refusal: null };
   }
-  private cli(
-    args: string[],
-    repo: RegisteredRepository,
-    options: Partial<ProcessOptions> = {},
-  ): Promise<ProcessResult> {
-    const env = childEnvironment();
-    if (this.options.electronNode) env.ELECTRON_RUN_AS_NODE = "1";
-    return this.execute(
-      this.options.nodeBinary,
-      [this.options.cliPath, ...args, "--repo", repo.path],
-      { ...options, cwd: repo.path, env },
-    );
-  }
-  /**
-   * The same CLI, the same environment and the same `--repo`, as a child that
-   * stays: stdin written a line at a time and stdout read the same way. The
-   * interview is the one command shaped like that, because the conversation is
-   * the process (D-102).
-   */
-  private cliChild(
-    args: string[],
-    repo: RegisteredRepository,
-    options: Omit<Parameters<typeof startLineProcess>[2], "cwd" | "env">,
-  ): LineProcess {
-    const env = childEnvironment();
-    if (this.options.electronNode) env.ELECTRON_RUN_AS_NODE = "1";
-    return this.spawn(
-      this.options.nodeBinary,
-      [this.options.cliPath, ...args, "--repo", repo.path],
-      { ...options, cwd: repo.path, env },
-    );
-  }
   registerRepository(path: string): Promise<Repository> {
     return this.registry.register(path);
   }
@@ -474,25 +373,14 @@ export class DesktopService {
     const interviews = [...this.interviews.keys()];
     const workspace = await this.reads.read("snapshot", "snapshot", async () => {
       const records = await Promise.all(
-        this.state.repositories.map((repo) => this.repositorySnapshot(repo.id)),
+        this.state.repositories.map((repo) => this.tickets.repositorySnapshot(repo.id)),
       );
       const tasks = records.flatMap((entry) => entry.tasks);
       if (
-        !this.state.archivedSeeded &&
-        !records.some((entry) => entry.errors.length)
-      ) {
-        // The first complete listing after this preference arrived: what had already finished is already filed.
-        this.state.archived = [
-          ...new Set([
-            ...this.state.archived,
-            ...tasks
-              .filter((row) => isArchived(row.ticket.state))
-              .map((row) => row.repoId + ":" + row.ticket.key),
-          ]),
-        ];
-        this.state.archivedSeeded = true;
+        !records.some((entry) => entry.errors.length) &&
+        seedArchived(this.state, tasks)
+      )
         this.profile.save();
-      }
       return {
         mode: "desktop" as const,
         version: this.options.version,
@@ -514,50 +402,6 @@ export class DesktopService {
     });
     return { ...workspace, interviews };
   }
-  private list(repo: RegisteredRepository) {
-    return this.reads.read("list:" + repo.id, repo.id, async () =>
-      ListSchema.parse(
-        JSON.parse(
-          requireSuccess(
-            await this.cli(["list", "--all", "--json"], repo),
-          ),
-        ),
-      ),
-    );
-  }
-  private async repositorySnapshot(
-    repoId: string,
-  ): Promise<ReplyMap["repositorySnapshot"]> {
-    const repo = this.repository(repoId);
-    return this.reads.read("repository:" + repoId, repoId, async () => {
-      const [metadata, listing] = await Promise.allSettled([
-        this.registry.metadata(repo),
-        this.list(repo),
-      ]);
-      if (metadata.status === "rejected") throw metadata.reason;
-      const repository = metadata.value;
-      try {
-        if (repository.error) throw new Error(repository.error);
-        if (listing.status === "rejected") throw listing.reason;
-        const list = listing.value;
-        return {
-          repository,
-          tasks: list.tickets.map((ticket) => ({
-            repoId,
-            repository: repo.name,
-            ticket,
-          })),
-          errors: [],
-        };
-      } catch (error) {
-        return {
-          repository,
-          tasks: [],
-          errors: [`${repo.name}: ${redact(String(error))}`],
-        };
-      }
-    });
-  }
   /**
    * This repository's symbol and import index, read fresh from `perbo index`
    * (D-015). The Spec pane's `@Symbol` completion and the Impact pane's
@@ -576,7 +420,7 @@ export class DesktopService {
     repo: RegisteredRepository,
   ): Promise<SymbolIndex | UnsupportedRepository> {
     const record: unknown = JSON.parse(
-      requireSuccess(await this.cli(["index", "--json"], repo)),
+      requireSuccess(await this.cli.run(["index", "--json"], repo)),
     );
     return record !== null && typeof record === "object" && "supported" in record
       ? UnsupportedRepositorySchema.parse(record)
@@ -790,7 +634,7 @@ export class DesktopService {
     const repo = this.repository(session.repoId);
     const args = this.interviewArgv(repo, session);
     let stderr = "";
-    const child = this.cliChild(args, repo, {
+    const child = this.cli.spawn(args, repo, {
       onLine: (line) => this.relay(id, line),
       // What the chat shows comes off the events; stderr is the same refusals
       // in prose, and is kept only to say why a session that never started did
@@ -1162,9 +1006,9 @@ export class DesktopService {
    * which withholds what nothing reads.
    */
   private async graphView(repo: RegisteredRepository, key: string): Promise<GraphView> {
-    const ticket = (await this.list(repo)).tickets.find((entry) => entry.key === key);
+    const ticket = (await this.tickets.list(repo)).tickets.find((entry) => entry.key === key);
     if (!ticket) throw new Error("This task is no longer in the repository's ticket store.");
-    const { contract, digest } = this.readContract(repo, key);
+    const { contract, digest } = this.tickets.contract(repo, key);
     const criteria: GraphCriterionView[] = hasAcceptanceCriteria(contract)
       ? contract.acceptance_criteria.map((criterion) => ({
           id: criterion.id,
@@ -1239,11 +1083,7 @@ export class DesktopService {
     const record = readAttempts(
       attemptsPath(repo, ticket.ticket_id),
     );
-    const bundles = record.attempts.length
-      ? await this.reads.read("bundles:" + repo.id, repo.id, async () =>
-          listBundles(bundlesPath(repo)),
-        )
-      : [];
+    const bundles = record.attempts.length ? await this.tickets.bundles(repo) : [];
     return liveGraph({
       nodes: nodes.map((node) => ({ id: node.id, paths: node.paths, criteria: node.criteria })),
       attempts: record.attempts,
@@ -1254,102 +1094,8 @@ export class DesktopService {
     });
   }
 
-  private readContract(
-    repo: RegisteredRepository,
-    key: string,
-  ): { contract: Detail["contract"]; digest: string } {
-    const raw = readFileSync(
-      ticketPath(repo, key, ".contract.json"),
-      "utf8",
-    );
-    return {
-      contract: PlanContractSchema.parse(JSON.parse(raw)),
-      digest: createHash("sha256").update(raw).digest("hex"),
-    };
-  }
-  private assertDigest(
-    repo: RegisteredRepository,
-    key: string,
-    digest: string,
-  ): void {
-    if (this.readContract(repo, key).digest !== digest)
-      throw new Error(
-        "The contract changed since you opened it. Refresh and review the latest version before approving or editing.",
-      );
-  }
   async detail(repoId: string, key: string): Promise<Detail> {
-    return this.reads.read("detail:" + repoId + ":" + key, repoId, () =>
-      this.readDetail(repoId, key),
-    );
-  }
-  private async readDetail(repoId: string, key: string): Promise<Detail> {
-    const repo = this.repository(repoId);
-    const list = await this.list(repo);
-    const ticket = list.tickets.find((entry) => entry.key === key);
-    if (!ticket)
-      throw new Error(
-        "This task is no longer in the repository's ticket store.",
-      );
-    const report = ReportSchema.parse(
-      JSON.parse(
-        requireSuccess(await this.cli(["inspect", key, "--json"], repo)),
-      ),
-    );
-    const principles = principlesPath(repo);
-    const limits = effectiveLimits(repo, this.state.settings).limits;
-    return {
-      ticket,
-      ...this.readContract(repo, key),
-      attempts: report.attempts.map((attempt) => ({
-        id: attempt.attempt_id,
-        run: attempt.run,
-        round: attempt.round,
-        startedAt: attempt.started_at,
-        outcome: attempt.outcome,
-        termination: `${attempt.termination.reason}: ${attempt.termination.detail}`,
-        model: attempt.agent.model,
-        costMicros: attempt.cost.micros,
-        costBasis: attempt.cost.basis,
-        partial: attempt.cost.partial,
-        ceilings: attempt.ceilings,
-        review: attempt.review,
-        reviewDecision: attempt.review_decision,
-        changes: attempt.changed_files ?? [],
-        checks: judgingChecks(attempt.checks ?? []).map((check) => ({
-          name: check.name ?? check.check_id ?? "Check",
-          status: check.status,
-          detail: [
-            check.command,
-            check.summary,
-            check.detail ??
-              (check.output === undefined
-                ? null
-                : typeof check.output === "string"
-                  ? check.output
-                  : JSON.stringify(check.output, null, 2)),
-          ]
-            .filter(Boolean)
-            .join("\n\n"),
-        })),
-        verification: attempt.verification,
-        bundles: attempt.bundles,
-      })),
-      cost: {
-        micros: report.total_cost.micros,
-        partial:
-          report.total_cost.partial > 0 || report.total_cost.unavailable > 0,
-        unavailable: report.total_cost.unavailable,
-      },
-      principles: existsSync(principles)
-        ? readFileSync(principles, "utf8").slice(0, 100_000)
-        : "",
-      verdicts: report.verdicts,
-      effective: {
-        stallMinutes: limits["attempt_stall_ms"]! / 60_000,
-        ticketDollars: limits["ticket_cost_micros"]! / 1_000_000,
-      },
-      report,
-    };
+    return this.tickets.detail(repoId, key);
   }
   async providers(): Promise<Provider[]> {
     const probe = async (id: "claude" | "codex"): Promise<Provider> => {
@@ -1533,7 +1279,7 @@ export class DesktopService {
     signal: AbortSignal,
     allowFailure = false,
   ): Promise<ProcessResult> {
-    const result = await this.cli(args, repo, {
+    const result = await this.cli.run(args, repo, {
       signal,
       timeoutMs: 12 * 60 * 60 * 1000,
       onOutput: (output) => {
@@ -1617,7 +1363,7 @@ export class DesktopService {
     if (request.kind === "interviewStop") return this.stopInterview(request.id);
     if (request.kind === "snapshot") return this.snapshot();
     if (request.kind === "repositorySnapshot")
-      return this.repositorySnapshot(request.repoId);
+      return this.tickets.repositorySnapshot(request.repoId);
     // Planning-lane work (D-101): answered here, never as a job, so a run is
     // never in the way of reading a file and a read is never in the way of one.
     if (request.kind === "explorerList")
@@ -1689,7 +1435,7 @@ export class DesktopService {
       );
     if (request.kind === "detail") return this.detail(repo.id, request.key);
     if (request.kind === "taskSummary")
-      return this.taskSummary(repo.id, request.key);
+      return this.tickets.summary(repo.id, request.key);
     if (request.kind === "discard") {
       await discardTicket(
         {
@@ -1705,7 +1451,7 @@ export class DesktopService {
       return null;
     }
     if (request.kind === "archive") {
-      const list = await this.list(repo);
+      const list = await this.tickets.list(repo);
       const keys = [...new Set(request.keys)];
       if (keys.some((key) => !list.tickets.some((ticket) => ticket.key === key)))
         throw new Error("A ticket to file is not in the repository's ticket store.");
@@ -1733,7 +1479,7 @@ export class DesktopService {
       return null;
     }
     if (request.kind === "rename") {
-      this.readContract(repo, request.key);
+      this.tickets.contract(repo, request.key);
       this.state.titles[repo.id + ":" + request.key] = request.title;
       this.changes.preferences(this.state);
       return null;
@@ -1848,8 +1594,8 @@ export class DesktopService {
         request.kind,
         "Update task contract",
         async (job, signal) => {
-          this.assertDigest(repo, request.key, request.digest);
-          assertEditable(this.readContract(repo, request.key).contract);
+          this.tickets.assertDigest(repo, request.key, request.digest);
+          assertEditable(this.tickets.contract(repo, request.key).contract);
           await this.invoke(job, repo, editArgs(request.key, request.draft), signal);
           job.resultKey = request.key;
           if (request.models) {
@@ -1901,7 +1647,7 @@ export class DesktopService {
         request.kind,
         "Run engineering loop",
         async (job, signal) => {
-          this.assertDigest(repo, request.key, request.digest);
+          this.tickets.assertDigest(repo, request.key, request.digest);
           const resumeFrom = request.kind === "run" ? request.resumeFrom : null;
           if (resumeFrom)
             assertResumable(await this.detail(repo.id, request.key), resumeFrom);
@@ -1934,7 +1680,7 @@ export class DesktopService {
     return {
       editing: this.editing,
       repository: (id) => this.repository(id),
-      contract: (repo, key) => this.readContract(repo, key),
+      contract: (repo, key) => this.tickets.contract(repo, key),
     };
   }
   /** The key admission handed back, and the models the person chose for it. */
@@ -1953,40 +1699,9 @@ export class DesktopService {
   /** What a module reading a ticket's records is given, so it never reads the store twice over. */
   private ticketRecords(): TicketRecords {
     return {
-      list: (repo) => this.list(repo),
-      contract: (repo, key) => this.readContract(repo, key),
+      list: (repo) => this.tickets.list(repo),
+      contract: (repo, key) => this.tickets.contract(repo, key),
     };
-  }
-  private async taskSummary(repoId: string, key: string): Promise<TaskSummary> {
-    return this.reads.read(
-      "summary:" + repoId + ":" + key,
-      repoId,
-      async () => {
-        const repo = this.repository(repoId);
-        const ticket = (await this.list(repo)).tickets.find(
-          (entry) => entry.key === key,
-        );
-        if (!ticket)
-          throw new Error(
-            "This task is no longer in the repository's ticket store.",
-          );
-        const record = readAttempts(
-          attemptsPath(repo, ticket.ticket_id),
-        );
-        const bundles = record.attempts.length
-          ? await this.reads.read("bundles:" + repoId, repoId, async () =>
-              listBundles(bundlesPath(repo)),
-            )
-          : [];
-        return summariseTicket({
-          ticket,
-          attempts: record.attempts,
-          attemptsError: record.error,
-          bundles,
-          objectsDirectory: objectsPath(repo),
-        });
-      },
-    );
   }
   /** The month's ledger from retained attempts, and each provider's own account of its plan (S6E). */
   private async usage(): Promise<UsageReport> {
@@ -1995,7 +1710,7 @@ export class DesktopService {
     for (const repo of this.state.repositories) {
       try {
         this.repository(repo.id);
-        for (const ticket of (await this.list(repo)).tickets) {
+        for (const ticket of (await this.tickets.list(repo)).tickets) {
           const record = readAttempts(
             attemptsPath(repo, ticket.ticket_id),
           );
@@ -2120,7 +1835,7 @@ export class DesktopService {
     if (!repo) return;
     let ticket: Ticket | undefined;
     try {
-      ticket = (await this.list(repo)).tickets.find(
+      ticket = (await this.tickets.list(repo)).tickets.find(
         (entry) => entry.key === job.key,
       );
     } catch {

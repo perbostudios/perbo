@@ -6,6 +6,7 @@ import {
   discardEditingFor,
   forgetRepository,
   forgetTicket,
+  seedArchived,
   setArchived,
 } from "./preferences.js";
 
@@ -118,5 +119,33 @@ describe("discardEditingFor", () => {
     });
     discardEditingFor(state, alpha, "PRB-1");
     expect(state.editingSessions.map((entry) => entry.phase)).toEqual(["editing", "editing"]);
+  });
+});
+
+describe("seedArchived", () => {
+  const row = (key: string, state: string): { repoId: string; ticket: { key: string; state: string } } => ({
+    repoId: alpha,
+    ticket: { key, state },
+  });
+
+  it("files what had already finished, once", () => {
+    const state = profile({ archived: [], archivedSeeded: false });
+    expect(
+      seedArchived(state, [row("PRB-1", "merged"), row("PRB-2", "executing"), row("PRB-3", "closed")]),
+    ).toBe(true);
+    expect(state.archived).toEqual([alpha + ":PRB-1", alpha + ":PRB-3"]);
+    expect(state.archivedSeeded).toBe(true);
+  });
+
+  it("does nothing on a profile that has already been seeded", () => {
+    const state = profile({ archived: [], archivedSeeded: true });
+    expect(seedArchived(state, [row("PRB-1", "merged")])).toBe(false);
+    expect(state.archived).toEqual([]);
+  });
+
+  it("keeps what the person had already filed by hand", () => {
+    const state = profile({ archived: [alpha + ":PRB-9"], archivedSeeded: false });
+    seedArchived(state, [row("PRB-1", "merged")]);
+    expect(state.archived).toEqual([alpha + ":PRB-9", alpha + ":PRB-1"]);
   });
 });
