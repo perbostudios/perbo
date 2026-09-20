@@ -69,6 +69,17 @@ describe("the shipped bundle's module graph", () => {
       expect(modules, module).toContain(module);
     }
   });
+
+  it("carries no test and no fake", () => {
+    // Two things keep them out — `tsconfig.build.json` compiles neither into
+    // `dist/`, and the lint rule refuses the import that would reach one — and
+    // this is the assertion over the artefact that fails if either stops
+    // holding.
+    const shipping = shipped.modules.filter((path) =>
+      /\.test\.js$|\/test-support\//.test(path),
+    );
+    expect(shipping).toEqual([]);
+  });
 });
 
 describe("what the shipped bundle leaves outside itself", () => {
