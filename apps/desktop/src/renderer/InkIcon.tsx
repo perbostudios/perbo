@@ -37,7 +37,14 @@ export function InkIcon({
     | "info"
     | "chat"
     | "play"
-    | "skip-forward";
+    | "skip-forward"
+    | "document"
+    | "add-circle"
+    | "growth-chart"
+    | "share"
+    | "coffee-beans"
+    | "clipboard"
+    | "inbox";
   size?: number;
   className?: string;
 }) {
