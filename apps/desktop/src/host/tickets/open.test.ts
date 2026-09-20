@@ -6,7 +6,8 @@ import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./open.js";
 import { attemptsPath } from "../repository/layout.js";
 import type { Execute } from "../repository/git.js";
 import type { RegisteredRepository } from "../profile/store.js";
-import type { Detail, Ticket } from "../../shared/protocol.js";
+import type { Ticket } from "@perbo/contracts";
+import type { Detail } from "../../shared/protocol.js";
 
 const temporary: string[] = [];
 afterEach(() => {

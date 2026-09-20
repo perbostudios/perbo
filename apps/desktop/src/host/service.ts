@@ -13,10 +13,6 @@ import { basename, dirname, join } from "node:path";
 import { z } from "zod";
 import {
   ApproachRecordSchema,
-  DEFAULT_LIMITS,
-  DEFAULT_SPEC_FOLDER,
-  PER_TOKEN_COST_LIMITS,
-  LimitsTableSchema,
   MaterializationManifestSchema,
   PlanContractSchema,
   ReviewArtifactSchema,
@@ -27,7 +23,6 @@ import {
   UnsupportedRepositorySchema,
   hasAcceptanceCriteria,
   isNeverReadPath,
-  isRepositoryRelativeFolder,
   planNodes,
   planSizeCounts,
   readStandingProhibited,
@@ -58,7 +53,6 @@ import {
 import {
   DraftSchema,
   HELP_LINKS,
-  ManifestEditorSchema,
   PREVIEW_BYTE_CAP,
   RequestSchema,
   SettingsSchema,
@@ -98,7 +92,7 @@ import type {
 } from "../shared/protocol.js";
 import { childEnvironment, redact, requireSuccess, runProcess, startLineProcess } from "./process.js";
 import type { LineProcess, ProcessOptions, ProcessResult } from "./process.js";
-import { archiveCsv, archiveRows, isArchived } from "../shared/archive.js";
+import { isArchived } from "../shared/archive.js";
 import { discoverModels } from "./model-catalog.js";
 import {
   ContractEditing,
@@ -112,12 +106,20 @@ import { ProfileStateSchema } from "./profile/store.js";
 import { explorerPath, safePath } from "./repository/paths.js";
 import { repositoryStatus, topLevel, trackedFiles } from "./repository/git.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
+import { archiveExport, ticketExport } from "./tickets/export.js";
+import { retainedOutput } from "./tickets/output.js";
+import {
+  effectiveLimits,
+  readConfig,
+  readManifest,
+  saveManifest,
+  specFolder,
+  writeConfig,
+} from "./repository/config.js";
 import {
   attemptsPath,
   bundlesPath,
   configPath,
-  configTemporaryPath,
-  objectPath,
   objectsPath,
   perboPath,
   principlesPath,
@@ -134,7 +136,6 @@ import {
   readAttempts,
   readDraftEdits,
   readLatestDraftEdit,
-  readObject,
   summariseTicket,
   type StoredAttempt,
 } from "./records.js";
@@ -395,11 +396,11 @@ export class DesktopService {
         await this.dispatch({ kind: "cancel", jobId });
       },
       id: randomUUID,
-      standing: (repoId) => readStandingProhibited(this.readConfig(this.repository(repoId))),
+      standing: (repoId) => readStandingProhibited(readConfig(this.repository(repoId))),
       setStanding: (repoId, entries) => {
         const repo = this.repository(repoId);
-        this.writeConfig(repo, {
-          ...(this.readConfig(repo) ?? {}),
+        writeConfig(repo, {
+          ...(readConfig(repo) ?? {}),
           [STANDING_PROHIBITED_KEY]: entries,
         });
         this.changed(true, { kind: "records", repoId: repo.id, key: null });
@@ -452,35 +453,6 @@ export class DesktopService {
     perboPath(repo);
     return repo;
   }
-  /** The repository's `.perbo/config.json`, or null where it has none. */
-  private readConfig(repo: RegisteredRepository): Record<string, unknown> | null {
-    const path = configPath(repo);
-    if (!existsSync(path)) return null;
-    try {
-      return z.record(z.string(), z.unknown()).parse(JSON.parse(readFileSync(path, "utf8")));
-    } catch (error) {
-      throw new Error(
-        `This repository's .perbo/config.json could not be read as a JSON object: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        { cause: error },
-      );
-    }
-  }
-  /** Replaces it, through a temporary file in the same directory so a crash leaves the old one. */
-  private writeConfig(
-    repo: RegisteredRepository,
-    config: Record<string, unknown>,
-  ): void {
-    const path = configPath(repo);
-    mkdirSync(perboPath(repo), { recursive: true });
-    const temporary = configTemporaryPath(repo, randomUUID());
-    writeFileSync(temporary, JSON.stringify(config, null, 2) + "\n", {
-      flag: "wx",
-      mode: 0o600,
-    });
-    renameSync(temporary, path);
-  }
   private trackedFiles(repo: RegisteredRepository): Promise<string[]> {
     return trackedFiles(this.execute, repo.path);
   }
@@ -490,7 +462,7 @@ export class DesktopService {
     return {
       files,
       hidden: tracked.length - files.length,
-      standing: readStandingProhibited(this.readConfig(repo)),
+      standing: readStandingProhibited(readConfig(repo)),
     };
   }
   /**
@@ -739,24 +711,6 @@ export class DesktopService {
     writeNodePages({ repositoryRoot: repo.path, specFolder: dirname(specPath), spec, contract });
   }
 
-  /** Where this repository keeps its specs: `specs`, or the `specs` key (D-103). */
-  private specFolder(repo: RegisteredRepository): string {
-    const path = configPath(repo);
-    if (!existsSync(path)) return DEFAULT_SPEC_FOLDER;
-    const named = z
-      .record(z.string(), z.unknown())
-      .parse(JSON.parse(readFileSync(path, "utf8")))["specs"];
-    if (named === undefined) return DEFAULT_SPEC_FOLDER;
-    if (typeof named !== "string" || !isRepositoryRelativeFolder(named))
-      throw new Error(
-        "This repository's .perbo/config.json sets 'specs' to something that is not a " +
-          "repository-relative folder, for example \"specs\" or \"docs/specs\".",
-      );
-    // Through safePath as well, so a link on the way is refused with its own sentence.
-    safePath(repo, named);
-    return named;
-  }
-
   /**
    * This repository's symbol and import index, read fresh from `perbo index`
    * (D-015). The Spec pane's `@Symbol` completion and the Impact pane's
@@ -842,7 +796,7 @@ export class DesktopService {
     if (session.specSlug === null)
       return { slug: null, path: null, title: "", sections: empty, requirements: [] };
     const repo = this.repository(session.repoId);
-    const folder = `${this.specFolder(repo)}/${session.specSlug}`;
+    const folder = `${specFolder(repo)}/${session.specSlug}`;
     const path = `${folder}/spec.md`;
     const read = readSpecText(safePath(repo, ...path.split("/")));
     // The nodes a requirement landed in come from the contract this session
@@ -904,7 +858,7 @@ export class DesktopService {
         : readSpecText(
             safePath(
               repo,
-              ...`${this.specFolder(repo)}/${session.specSlug}/spec.md`.split("/"),
+              ...`${specFolder(repo)}/${session.specSlug}/spec.md`.split("/"),
             ),
           ).markdown;
     const report = impactReport({
@@ -935,7 +889,7 @@ export class DesktopService {
     const models = TaskModelsSchema.strip().parse(session.form.models);
     if (session.specSlug === null)
       throw new Error(INTERVIEW_NEEDS_A_TITLE);
-    const spec = `${this.specFolder(repo)}/${session.specSlug}`;
+    const spec = `${specFolder(repo)}/${session.specSlug}`;
     safePath(repo, ...spec.split("/"));
     const provider = interviewProviderFor(models);
     return [
@@ -1289,7 +1243,7 @@ export class DesktopService {
     }
     const written = writeSpecFile({
       repositoryRoot: repo.path,
-      folder: this.specFolder(repo),
+      folder: specFolder(repo),
       slug: null,
       text: { ...EMPTY_SPEC_TEXT, title },
       base: EMPTY_SPEC_TEXT,
@@ -1532,39 +1486,6 @@ export class DesktopService {
         "The contract changed since you opened it. Refresh and review the latest version before approving or editing.",
       );
   }
-  private limits(
-    repo: RegisteredRepository,
-  ): z.infer<typeof LimitsTableSchema> {
-    const path = configPath(repo);
-    const record = existsSync(path)
-      ? z
-          .record(z.string(), z.unknown())
-          .parse(JSON.parse(readFileSync(path, "utf8")))
-      : {};
-    const current = LimitsTableSchema.parse(
-      record["limits"] ?? { organisation: "local" },
-    );
-    const settings = this.state.settings;
-    // D-096: a run started here has no time, token, iteration or command
-    // ceiling, and the shell sets neither. What it can tighten is the stall
-    // window and the ticket cost cap, and a repository that set a lower one of
-    // either keeps it.
-    return {
-      ...current,
-      limits: {
-        ...current.limits,
-        attempt_stall_ms: Math.min(
-          current.limits["attempt_stall_ms"] ?? DEFAULT_LIMITS.attempt_stall_ms,
-          settings.stallMinutes * 60_000,
-        ),
-        ticket_cost_micros: Math.min(
-          current.limits["ticket_cost_micros"] ??
-            PER_TOKEN_COST_LIMITS.ticket_cost_micros,
-          Math.round(settings.ticketDollars * 1_000_000),
-        ),
-      },
-    };
-  }
   async detail(repoId: string, key: string): Promise<Detail> {
     return this.reads.read("detail:" + repoId + ":" + key, repoId, () =>
       this.readDetail(repoId, key),
@@ -1584,7 +1505,7 @@ export class DesktopService {
       ),
     );
     const principles = principlesPath(repo);
-    const limits = this.limits(repo).limits;
+    const limits = effectiveLimits(repo, this.state.settings).limits;
     return {
       ticket,
       ...this.readContract(repo, key),
@@ -1637,46 +1558,6 @@ export class DesktopService {
         ticketDollars: limits["ticket_cost_micros"]! / 1_000_000,
       },
       report,
-    };
-  }
-  private async output(
-    repoId: string,
-    key: string,
-    attemptId?: string,
-  ): Promise<ReplyMap["output"]> {
-    const repo = this.repository(repoId),
-      detail = await this.detail(repoId, key);
-    const attempt = attemptId
-      ? detail.attempts.find((entry) => entry.id === attemptId)
-      : detail.attempts.at(-1);
-    if (attemptId && !attempt)
-      throw new Error("The selected attempt does not belong to this task.");
-    const bundle = attempt?.bundles.find(
-      (bundle) =>
-        bundle.kind === "execution" &&
-        bundle.subject_id === attempt.id &&
-        bundle.ticket_id === detail.ticket.ticket_id,
-    );
-    const notes: string[] = [];
-    const read = (name: "transcript.jsonl" | "change.diff"): string | null => {
-      const artifact = bundle?.artifacts.find(
-        (artifact) => artifact.name === name,
-      );
-      if (!artifact?.retained) return null;
-      const result = readObject(
-        objectPath(repo, artifact.sha256),
-        artifact,
-      );
-      if (result.text === null) {
-        notes.push(result.note);
-        return null;
-      }
-      return redact(result.text);
-    };
-    return {
-      transcript: read("transcript.jsonl"),
-      diff: read("change.diff"),
-      notes,
     };
   }
   async providers(): Promise<Provider[]> {
@@ -1986,11 +1867,8 @@ export class DesktopService {
     if (request.kind === "models") return discoverModels(request.provider);
     if (request.kind === "exportArchive") {
       if (request.repoId !== null) this.repository(request.repoId);
-      const snapshot = await this.snapshot();
-      return this.options.io.saveFile(
-        "perbo-archive.csv",
-        redact(archiveCsv(archiveRows(snapshot, request), snapshot.titles)),
-      );
+      const { name, content } = archiveExport(await this.snapshot(), request);
+      return this.options.io.saveFile(name, content);
     }
     if (request.kind === "openHelp") {
       await this.options.io.openExternal(HELP_LINKS[request.page]);
@@ -2163,47 +2041,21 @@ export class DesktopService {
       return null;
     }
     if (request.kind === "output")
-      return this.output(repo.id, request.key, request.attemptId);
-    if (request.kind === "manifest" || request.kind === "saveManifest") {
-      const path = configPath(repo);
-      if (!existsSync(path))
-        throw new Error(
-          "Run the environment check and save its proposed configuration first.",
-        );
-      const text = readFileSync(path, "utf8");
-      const digest = createHash("sha256").update(text).digest("hex");
-      const config = z.record(z.string(), z.unknown()).parse(JSON.parse(text));
-      const manifest = MaterializationManifestSchema.parse(
-        config["materialization_manifest"],
+      return retainedOutput(
+        repo,
+        await this.detail(repo.id, request.key),
+        request.attemptId,
       );
-      if (request.kind === "manifest")
-        return {
-          digest,
-          testCommand: manifest.verify.command.join(" "),
-          value: ManifestEditorSchema.parse({
-            entries: manifest.entries,
-            offLimits: config["protected_paths"] ?? [],
-          }),
-        };
+    if (request.kind === "manifest") return readManifest(repo);
+    if (request.kind === "saveManifest") {
+      // The refusals keep their order: a repository with no configuration to
+      // edit says so before a busy one does, and a stale digest after both.
+      readManifest(repo);
       if (heldRepository(this.liveJobs(), repo.id))
         throw new Error(
           "Wait for the commands running in this repository to finish before changing the manifest.",
         );
-      if (digest !== request.digest)
-        throw new Error(
-          "The repository configuration changed. Reopen the manifest before saving.",
-        );
-      config["materialization_manifest"] = MaterializationManifestSchema.parse({
-        ...manifest,
-        entries: request.value.entries,
-      });
-      config["protected_paths"] = request.value.offLimits;
-      const temporary = configTemporaryPath(repo, randomUUID());
-      writeFileSync(temporary, JSON.stringify(config, null, 2) + "\n", {
-        flag: "wx",
-        mode: 0o600,
-      });
-      renameSync(temporary, path);
+      saveManifest(repo, request.digest, request.value);
       this.changed(true, { kind: "records", repoId: repo.id, key: null });
       return null;
     }
@@ -2234,19 +2086,13 @@ export class DesktopService {
       return null;
     }
     if (request.kind === "export") {
-      const content = request.key
-        ? JSON.stringify(await this.detail(repo.id, request.key), null, 2)
-        : JSON.stringify(
-            (await this.snapshot()).tasks.filter(
-              (row) => row.repoId === repo.id,
-            ),
-            null,
-            2,
-          );
-      return this.options.io.saveFile(
-        `perbo-${request.key ?? repo.name}.json`,
-        redact(content),
+      const { name, content } = ticketExport(
+        request.key ?? repo.name,
+        request.key
+          ? await this.detail(repo.id, request.key)
+          : (await this.snapshot()).tasks.filter((row) => row.repoId === repo.id),
       );
+      return this.options.io.saveFile(name, content);
     }
     if (request.kind === "doctor")
       return this.start(
@@ -2296,7 +2142,7 @@ export class DesktopService {
       try {
         written = writeSpecFile({
           repositoryRoot: repo.path,
-          folder: this.specFolder(repo),
+          folder: specFolder(repo),
           slug: session.specSlug,
           text: { title: request.title, ...request.sections },
           base: { title: request.base.title, ...request.base.sections },
@@ -2336,7 +2182,7 @@ export class DesktopService {
             throw new Error("This planning belongs to another repository.");
           if (session.specSlug === null)
             throw new Error("Write the spec before generating a plan from it.");
-          const spec = `${this.specFolder(repo)}/${session.specSlug}/spec.md`;
+          const spec = `${specFolder(repo)}/${session.specSlug}/spec.md`;
           await this.invoke(
             job,
             repo,
@@ -2539,7 +2385,7 @@ export class DesktopService {
             model: models.executorModel,
             reviewer_provider: models.reviewerProvider,
             reviewer_model: models.reviewerModel,
-            limits: this.limits(repo),
+            limits: effectiveLimits(repo, this.state.settings),
             publish: request.kind === "run" ? request.publish : false,
             merge: "person",
           };
