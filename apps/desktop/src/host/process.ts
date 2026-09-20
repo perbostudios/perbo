@@ -331,6 +331,21 @@ export function startLineProcess(
   };
 }
 
+/**
+ * The stdout of a command that succeeded. A non-zero exit is the command's own
+ * stderr where it wrote one, and a cancellation says so rather than reporting
+ * a failure the person caused.
+ */
+export function requireSuccess(result: ProcessResult): string {
+  if (result.code !== 0)
+    throw new Error(
+      result.cancelled
+        ? "Command stopped. Refresh the ticket to read its recorded outcome."
+        : result.stderr.trim() || `CLI exited with code ${result.code}.`,
+    );
+  return result.stdout;
+}
+
 /** Fixed binary + argv only. Cancelling the process group reaches the CLI's provider children too. */
 export function runProcess(
   binary: string,
