@@ -5,7 +5,7 @@ import {
   costMicros,
   resolveModelCost,
   type ModelUsage,
-} from "../src/provider.js";
+} from "./usage.js";
 
 /**
  * The price card and the rule that decides which number a review records.

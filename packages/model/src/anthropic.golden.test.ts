@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { anthropicModel, type AnthropicModelOptions } from "../src/provider.js";
-import { expectGolden } from "./golden.js";
+import { anthropicModel, type AnthropicModelOptions } from "./anthropic.js";
+import { expectGolden } from "./test-support/golden.js";
 
 /**
  * The bytes the SDK transport puts on the wire.

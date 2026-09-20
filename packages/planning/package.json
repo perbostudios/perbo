@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@perbo/contracts": "workspace:*",
+    "@perbo/model": "workspace:*",
     "@perbo/review": "workspace:*",
     "zod": "catalog:"
   },

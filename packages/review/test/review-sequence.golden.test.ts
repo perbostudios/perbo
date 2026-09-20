@@ -3,9 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { CheckResult, PlanContract } from "@perbo/contracts";
-import type { ModelRequest, ModelTurn, ReviewModel } from "../src/provider.js";
+import {
+  READ_FILE_TOOL,
+  SUBMIT_REVIEW_TOOL,
+  type Model,
+  type ModelRequest,
+  type ModelTurn,
+} from "@perbo/model";
 import { runReview } from "../src/review.js";
-import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL } from "../src/verdict.js";
 import { coverageEntry } from "./double.js";
 import { expectGolden } from "./golden.js";
 
@@ -87,7 +92,7 @@ const met = {
 /** A model that records the conversation as it was on each turn. */
 function recordingModel(
   script: Array<Array<{ tool: string; input: unknown }>>,
-): ReviewModel & { requests: Array<{ forceSubmit: boolean; messages: unknown }> } {
+): Model & { requests: Array<{ forceSubmit: boolean; messages: unknown }> } {
   const requests: Array<{ forceSubmit: boolean; messages: unknown }> = [];
   let turn = 0;
   return {

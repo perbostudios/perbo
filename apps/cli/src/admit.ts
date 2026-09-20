@@ -56,12 +56,12 @@ import {
 } from "@perbo/planning";
 import {
   ProviderError,
-  RepoReader,
   anthropicModel,
   claudeCliModel,
   codexCliModel,
-  type ReviewModel,
-} from "@perbo/review";
+  type Model,
+} from "@perbo/model";
+import { RepoReader } from "@perbo/review";
 import { UsageError } from "./args.js";
 import { prohibitedSpecPaths, regenerateNodePages, specCommitFiles } from "./specs.js";
 import { specBaseline } from "./spec-staleness.js";
@@ -895,7 +895,7 @@ function describeContractDifference(
 }
 
 /** The drafting transport, the reviewer's own, constrained to the draft schema. */
-function draftingModel(provider: DraftProvider, modelId: string | null): ReviewModel {
+function draftingModel(provider: DraftProvider, modelId: string | null): Model {
   const options = {
     submitSchema: CONTRACT_DRAFT_JSON_SCHEMA,
     ...(modelId ? { modelId } : {}),
@@ -934,7 +934,7 @@ export interface AdmitInput {
   cwd: string;
   now?: Date;
   /** The drafting model, for tests. Otherwise built from `--provider`. */
-  model?: ReviewModel;
+  model?: Model;
   /** The issue reader, for tests. Otherwise `gh issue view`. */
   fetchIssue?: (reference: string) => Promise<GitHubIssue>;
 }

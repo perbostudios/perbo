@@ -38,19 +38,19 @@ import { PROMPT_VERSION, buildContext, renderReadFileResult, systemPrompt } from
 import { DEFAULT_REPO_LIMITS, RepoReader, type RepoLimits } from "./repo.js";
 import {
   ProviderError,
+  READ_FILE_TOOL,
+  SUBMIT_REVIEW_TOOL,
   ZERO_USAGE,
   addUsage,
   resolveModelCost,
+  type Model,
   type ModelUsage,
-  type ReviewModel,
-} from "./provider.js";
+} from "@perbo/model";
 import { NO_MEASUREMENTS, type RuleAuthority, type SuppressionLookup } from "./suppression.js";
 import { assessLegibility, illegibleReadFindings } from "./legibility.js";
 import { assessScope } from "./scope.js";
 import {
   MalformedVerdictError,
-  READ_FILE_TOOL,
-  SUBMIT_REVIEW_TOOL,
   UnknownCriterionError,
   verdictSchemas,
   type ClosureAuthority,
@@ -78,7 +78,7 @@ export interface ReviewInput {
   changeset?: ChangeSet | undefined;
   checks: CheckResult[];
   repoDir: string;
-  model: ReviewModel;
+  model: Model;
   head_commit?: string | undefined;
   /**
    * Whether the base the change was cut from passed the workspace's verify

@@ -11,13 +11,12 @@ import {
   SUBMIT_REVIEW_TOOL,
   ZERO_USAGE,
   addUsage,
-  renderReadFileResult,
   resolveModelCost,
+  type Model,
   type ModelCostBasis,
   type ModelUsage,
-  type ReadOutcome,
-  type ReviewModel,
-} from "@perbo/review";
+} from "@perbo/model";
+import { renderReadFileResult, type ReadOutcome } from "@perbo/review";
 import { delimit } from "./delimit.js";
 import { DraftRejectedError, PlanningError } from "./errors.js";
 import { repositoryTree } from "./tree.js";
@@ -401,7 +400,7 @@ export interface DraftInput {
   repositoryId: string;
   defaultProhibited: readonly string[];
   defaultGenerated: readonly string[];
-  model: ReviewModel;
+  model: Model;
   /** The tree to show instead of listing `repositoryRoot`. Tests supply one. */
   tree?: readonly string[];
   /**

@@ -15,7 +15,7 @@ import {
   type ReviewArtifact,
   type VerificationStrength,
 } from "@perbo/contracts";
-import type { ReviewModel } from "./provider.js";
+import type { Model } from "@perbo/model";
 import { deriveDecision, escalationCount, runReview, type ReviewInput, type ReviewOutcome } from "./review.js";
 
 /**
@@ -40,7 +40,7 @@ export interface ReviewGraphOptions {
    * what that node's own, narrower review submits. Absent, every call reuses
    * `input.model` unchanged, as before this existed.
    */
-  modelFor?: (contract: ReviewInput["contract"], checks: readonly CheckResult[]) => ReviewModel;
+  modelFor?: (contract: ReviewInput["contract"], checks: readonly CheckResult[]) => Model;
 }
 
 /**

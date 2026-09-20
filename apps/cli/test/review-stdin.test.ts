@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
-import type { ModelRequest, ReviewModel } from "@perbo/review";
+import type { Model, ModelRequest } from "@perbo/model";
 import { parseReviewArgs } from "../src/args.js";
 import { exitForThrown } from "../src/entry.js";
 import { runReviewCommand, type Streams } from "../src/run.js";
@@ -88,7 +88,7 @@ writeFileSync(join(scratch, "checks.json"), JSON.stringify(checks));
 const requests: ModelRequest[] = [];
 
 /** A reviewer that answers the one criterion, and counts what it was asked. */
-function stubModel(turns: { count: number }): ReviewModel {
+function stubModel(turns: { count: number }): Model {
   return {
     provider: "double",
     model_id: "scripted",

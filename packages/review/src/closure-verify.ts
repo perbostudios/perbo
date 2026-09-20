@@ -1,8 +1,15 @@
 import type { ChangeSet, CheckResult, Finding, Scope } from "@perbo/contracts";
 import { assessLegibility } from "./legibility.js";
 import { assessScope } from "./scope.js";
-import type { ModelCostBasis, ModelTurn, ModelUsage, ReviewModel } from "./provider.js";
-import { ZERO_USAGE, addUsage, resolveModelCost } from "./provider.js";
+import {
+  ZERO_USAGE,
+  addUsage,
+  resolveModelCost,
+  type Model,
+  type ModelCostBasis,
+  type ModelTurn,
+  type ModelUsage,
+} from "@perbo/model";
 
 /**
  * Closure verification (D-061, SCP-101): the question asked after a remediation
@@ -147,7 +154,7 @@ export async function verifyClosures(args: {
   checks: CheckResult[];
   scope: Scope;
   changeset: ChangeSet;
-  model: ReviewModel;
+  model: Model;
   onProgress?: (message: string) => void;
 }): Promise<ClosureVerification> {
   const progress = args.onProgress ?? (() => undefined);

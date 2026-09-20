@@ -65,10 +65,13 @@ import {
   type Workspace,
 } from "@perbo/workspace";
 import {
-  PROMPT_VERSION,
   anthropicModel,
   claudeCliModel,
   codexCliModel,
+  type Model,
+} from "@perbo/model";
+import {
+  PROMPT_VERSION,
   closureVerifySchema,
   isRemediableFamily,
   redactCredentials,
@@ -78,7 +81,6 @@ import {
   verdictSchemas,
   verifyClosures,
   type ClosureVerification,
-  type ReviewModel,
   redactReviewArtifact,
 } from "@perbo/review";
 import {
@@ -3649,7 +3651,7 @@ function reviewerModel(
   config: TicketRunConfig,
   contract: PlanContractWithCriteria,
   checks: readonly CheckResult[],
-): ReviewModel {
+): Model {
   const schema = verdictSchemas(
     contract.acceptance_criteria.map((criterion) => criterion.id),
     [...checks.map((check) => check.check_id), "check_scope", "check_agent_config"],
@@ -3683,7 +3685,7 @@ function contractWithCriteria(
  * submit schema enumerates exactly the finding keys under verification, so the
  * tool cannot invent a finding or omit one silently.
  */
-function verifierModel(config: TicketRunConfig, keys: string[]): ReviewModel {
+function verifierModel(config: TicketRunConfig, keys: string[]): Model {
   const schema = closureVerifySchema(keys);
   const modelId = config.reviewer_model ?? undefined;
   return config.reviewer_provider === "claude-cli"

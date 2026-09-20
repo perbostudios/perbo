@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
-import type { ReviewModel } from "@perbo/review";
+import type { Model } from "@perbo/model";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { parseReviewArgs, UsageError } from "../src/args.js";
 import { normalisePullRequestReference } from "../src/pull-request.js";
@@ -127,7 +127,7 @@ interface Seen {
  * is kept, which is how a test can see what the reviewer was told the criteria
  * were.
  */
-function replayModel(seen: Seen, statuses: Record<string, string> = {}): ReviewModel {
+function replayModel(seen: Seen, statuses: Record<string, string> = {}): Model {
   let ids: string[] = [];
   return {
     provider: "double",
@@ -157,9 +157,9 @@ function replayModel(seen: Seen, statuses: Record<string, string> = {}): ReviewM
         stop_reason: "tool_use",
       };
     },
-    // Not part of ReviewModel: the harness sets the ids from the schema below.
+    // Not part of Model: the harness sets the ids from the schema below.
     ...({ setIds: (next: string[]) => (ids = next) } as unknown as object),
-  } as ReviewModel & { setIds(next: string[]): void };
+  } as Model & { setIds(next: string[]): void };
 }
 
 /** The criterion ids the review enumerated into the submit schema. */
@@ -202,7 +202,7 @@ async function review(
     /** Unset means the real one, which `makeModel` being set turns off. */
     preflight?: (request: PreflightRequest) => PreflightResult;
     /** A reviewer that answers something other than a well-formed verdict. */
-    model?: ReviewModel;
+    model?: Model;
   },
 ): Promise<Ran> {
   let out = "";
@@ -222,7 +222,7 @@ async function review(
     ...(options.preflight ? { preflight: options.preflight } : {}),
     makeModel: (schema) => {
       if (options.model) return options.model;
-      const model = replayModel(seen, options.statuses ?? {}) as ReviewModel & {
+      const model = replayModel(seen, options.statuses ?? {}) as Model & {
         setIds(next: string[]): void;
       };
       model.setIds(criterionIdsOf(schema));
@@ -534,7 +534,7 @@ describe("ac_3: the record covers the verdicts, and only the verdicts", () => {
     // A reviewer that answers `submit_review` with something that is not a
     // verdict, every turn. After the second the review gives up: there is a
     // review here, and its outcome is that the reviewer could not be believed.
-    const malformed: ReviewModel = {
+    const malformed: Model = {
       provider: "double",
       model_id: "malformed",
       async turn() {

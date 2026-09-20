@@ -2,9 +2,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { codexCliModel } from "../src/provider-codex-cli.js";
-import { expectGolden } from "./golden.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
+import { codexCliModel } from "./codex-cli.js";
+import { expectGolden } from "./test-support/golden.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "./test-support/spawn-timeout.js";
 
 /**
  * Every JSON-RPC request the codex-cli transport sends over one thread: the

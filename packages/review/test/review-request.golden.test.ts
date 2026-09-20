@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CheckResult, PlanContract } from "@perbo/contracts";
-import { anthropicModel } from "../src/provider.js";
+import { anthropicModel } from "@perbo/model";
 import { runReview } from "../src/review.js";
 import { verdictSchemas } from "../src/verdict.js";
 import { expectGolden } from "./golden.js";

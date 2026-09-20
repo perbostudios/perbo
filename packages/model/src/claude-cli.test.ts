@@ -2,11 +2,11 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { ProviderError, providerFailureText } from "../src/provider.js";
-import { CLAUDE_CLI_ENV_ALLOW_LIST, claudeCliModel, pendingTurnText } from "../src/provider-cli.js";
-import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL } from "../src/verdict.js";
-import { argumentOf, fakeClaudeBinary } from "./fake-claude.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
+import { CLAUDE_CLI_ENV_ALLOW_LIST, claudeCliModel, pendingTurnText } from "./claude-cli.js";
+import { ProviderError, providerFailureText } from "./failure.js";
+import { argumentOf, fakeClaudeBinary } from "./test-support/fake-claude.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "./test-support/spawn-timeout.js";
+import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL } from "./turn.js";
 
 /**
  * The mapping from the CLI's result envelope onto the tool calls the

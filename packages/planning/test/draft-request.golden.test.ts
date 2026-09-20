@@ -3,11 +3,11 @@ import {
   READ_FILE_TOOL,
   SUBMIT_REVIEW_TOOL,
   anthropicModel,
+  type Model,
   type ModelRequest,
   type ModelTurn,
-  type ReadOutcome,
-  type ReviewModel,
-} from "@perbo/review";
+} from "@perbo/model";
+import type { ReadOutcome } from "@perbo/review";
 import { CONTRACT_DRAFT_JSON_SCHEMA, draftContract } from "../src/index.js";
 import { validDraft } from "./double.js";
 import { expectGolden } from "./golden.js";
@@ -21,7 +21,7 @@ import { expectGolden } from "./golden.js";
 
 const tree = ["packages/", "packages/auth/", "packages/queue/", "docs/", "README.md"];
 
-const input = (model: ReviewModel) => ({
+const input = (model: Model) => ({
   title: "Users aren't getting the welcome email",
   body: "Users are not getting the email.",
   url: "https://github.com/example/webstore/issues/412",
@@ -57,7 +57,7 @@ const reader = {
 /** A drafter that records the conversation as it was on each turn. */
 function recordingDrafter(
   script: Array<Array<{ tool: string; input: unknown }>>,
-): ReviewModel & { requests: Array<{ forceSubmit: boolean; messages: unknown[] }> } {
+): Model & { requests: Array<{ forceSubmit: boolean; messages: unknown[] }> } {
   const requests: Array<{ forceSubmit: boolean; messages: unknown[] }> = [];
   let turn = 0;
   return {

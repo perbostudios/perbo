@@ -1,4 +1,9 @@
-import { SUBMIT_REVIEW_TOOL, type ModelRequest, type ModelTurn, type ReviewModel } from "@perbo/review";
+import {
+  SUBMIT_REVIEW_TOOL,
+  type Model,
+  type ModelRequest,
+  type ModelTurn,
+} from "@perbo/model";
 
 /**
  * A scripted drafter. Everything the planning package promises is a property
@@ -7,7 +12,7 @@ import { SUBMIT_REVIEW_TOOL, type ModelRequest, type ModelTurn, type ReviewModel
  */
 export function scriptedDrafter(
   script: Array<Array<{ tool: string; input: unknown }>>,
-): ReviewModel & { requests: ModelRequest[] } {
+): Model & { requests: ModelRequest[] } {
   const requests: ModelRequest[] = [];
   let turn = 0;
   return {
@@ -107,7 +112,7 @@ export const graphedDraft = {
  * writes a session to the user's store and removes it in `dispose`, so a
  * drafting path that never calls it leaves one behind per admission.
  */
-export function disposingDrafter(options: { throws?: boolean } = {}): ReviewModel & {
+export function disposingDrafter(options: { throws?: boolean } = {}): Model & {
   disposed: () => number;
 } {
   let disposed = 0;

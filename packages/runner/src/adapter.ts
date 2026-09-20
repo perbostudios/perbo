@@ -13,7 +13,7 @@ import {
   type PermissionProfile,
   type TerminationReason,
 } from "@perbo/contracts";
-import { MODEL_ID, costMicros as providerListCostMicros } from "@perbo/review";
+import { PRICED_MODEL_ID, costMicros as providerListCostMicros } from "@perbo/model";
 import {
   DEFAULT_SUSPEND_INTERVAL_MS,
   DEFAULT_SUSPEND_THRESHOLD_MS,
@@ -754,7 +754,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
 
   /** Price the accounting read so far only where this exact model has a card. */
   const noteProviderListEstimate = (): void => {
-    if (costBasis === "transport_reported" || request.model !== MODEL_ID) return;
+    if (costBasis === "transport_reported" || request.model !== PRICED_MODEL_ID) return;
     costMicros = providerListCostMicros({
       input_tokens: freshInputTokens,
       cache_creation_input_tokens: cacheCreationTokens,

@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { isCredentialEnvName, scrubEnvironment } from "@perbo/contracts";
 import {
   CLAUDE_CLI_ENV_ALLOW_LIST,
-  providerFailureText,
-  redactCredentials,
   codexCliModel,
-} from "@perbo/review";
+  providerFailureText,
+} from "@perbo/model";
+import { redactCredentials } from "@perbo/review";
 
 /**
  * One minimal call to the reviewer, made by `perbo doctor --probe` before an

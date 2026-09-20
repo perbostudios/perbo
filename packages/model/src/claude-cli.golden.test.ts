@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, it } from "vitest";
-import { claudeCliModel } from "../src/provider-cli.js";
-import { fakeClaudeBinary } from "./fake-claude.js";
-import { expectGolden } from "./golden.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
+import { claudeCliModel } from "./claude-cli.js";
+import { fakeClaudeBinary } from "./test-support/fake-claude.js";
+import { expectGolden } from "./test-support/golden.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "./test-support/spawn-timeout.js";
 
 /**
  * What the claude-cli transport hands the binary: its argv, the prompt on

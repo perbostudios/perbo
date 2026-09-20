@@ -4,18 +4,14 @@ import { lstat, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
-import {
-  ProviderError,
-  providerFailureText,
-  type ModelRequest,
-  type ModelTurn,
-  type ReviewModel,
-} from "./provider.js";
+import { DEFAULT_CLAUDE_MODEL } from "./defaults.js";
+import { ProviderError, providerFailureText } from "./failure.js";
 import {
   structuredTurnSchema,
   structuredTurnToolCalls,
   type StructuredTurn,
-} from "./provider-structured.js";
+} from "./structured.js";
+import type { Model, ModelRequest, ModelTurn } from "./turn.js";
 
 /**
  * One invocation, with the prompt written to the process's stdin.
@@ -202,12 +198,12 @@ async function removeTranscript(store: string, sessionId: string): Promise<void>
   }
 }
 
-export interface ClaudeCliModel extends ReviewModel {
+export interface ClaudeCliModel extends Model {
   dispose(): Promise<void>;
 }
 
 export function claudeCliModel(options: ClaudeCliOptions): ClaudeCliModel {
-  const modelId = options.modelId ?? "claude-opus-5";
+  const modelId = options.modelId ?? DEFAULT_CLAUDE_MODEL;
   const binary = options.binary ?? "claude";
   const schema = JSON.stringify(structuredTurnSchema(options.submitSchema));
   // Never the repository under review: nothing there should be auto-discovered.

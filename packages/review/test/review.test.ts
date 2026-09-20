@@ -1,16 +1,12 @@
-import { readFileSync } from "node:fs";
-import { existsSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { CheckResult, PlanContract } from "@perbo/contracts";
 import { PlanNotReviewableError, runReview } from "../src/review.js";
-import { ProviderError, type ModelRequest, type ReviewModel } from "../src/provider.js";
-import { claudeCliModel } from "../src/provider-cli.js";
+import { ProviderError, type Model, type ModelRequest } from "@perbo/model";
 import { buildSuppressions } from "../src/suppression.js";
 import { coverageEntry, reads, scriptedModel, submits } from "./double.js";
-import { argumentOf, fakeClaudeBinary } from "./fake-claude.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-review-test-"));
 mkdirSync(join(scratch, "packages/a/src"), { recursive: true });
@@ -170,7 +166,7 @@ describe("a complete, clean review", () => {
 
   it("retains cache reads and writes separately while reporting total input", async () => {
     const base = scriptedModel([submits(bothMet)]);
-    const model: ReviewModel = {
+    const model: Model = {
       provider: base.provider,
       model_id: base.model_id,
       async turn(request) {
@@ -195,7 +191,7 @@ describe("a complete, clean review", () => {
   it("does not undercount a review when only some turns report cost", async () => {
     const base = scriptedModel([reads("a/src/helper.ts"), submits(bothMet)]);
     let turn = 0;
-    const model: ReviewModel = {
+    const model: Model = {
       provider: base.provider,
       model_id: base.model_id,
       async turn(request) {
@@ -630,7 +626,7 @@ describe("suppression", () => {
 
 describe("a review that did not complete is not a pass", () => {
   it("reports error when the provider fails", async () => {
-    const failing: ReviewModel = {
+    const failing: Model = {
       provider: "double",
       model_id: "failing",
       async turn(_request: ModelRequest) {
@@ -648,7 +644,7 @@ describe("a review that did not complete is not a pass", () => {
 
   it("names what the reviewer was reading when the failure came (SCP-188)", async () => {
     let turns = 0;
-    const failingOnTheAnswer: ReviewModel = {
+    const failingOnTheAnswer: Model = {
       provider: "double",
       model_id: "failing",
       async turn(_request: ModelRequest) {
@@ -893,7 +889,7 @@ describe("the reviewer's inputs do not grow when an executor exists", () => {
 describe("the review releases its transport", () => {
   const counting = (
     behaviour: (turn: number) => { tool: string; input: unknown }[] | Error,
-  ): ReviewModel & { disposed: () => number } => {
+  ): Model & { disposed: () => number } => {
     let disposed = 0;
     let turn = 0;
     return {
@@ -956,68 +952,6 @@ describe("the review releases its transport", () => {
 });
 
 /**
- * The reviewer's session, end to end over the claude-cli transport: the review
- * opens one session of its own, resumes it, and leaves none of it behind in the
- * user's session store however the review ended.
- */
-describe("a review carried by the claude-cli transport", () => {
-  const helperRead = { next: "read_files", read_paths: ["a/src/helper.ts"], review: null };
-  const submitted = { next: "submit_review", read_paths: [], review: bothMet };
-
-  const transcript = (home: string, id: string) =>
-    join(home, ".claude", "projects", "-scratch-review", `${id}.jsonl`);
-  const neighbours = (home: string) => [
-    join(home, ".claude", "projects", "-scratch-review", "a-session-of-the-users.jsonl"),
-    join(home, ".claude", "projects", "-another-project", "a-second-session.jsonl"),
-  ];
-
-  const review = (options: { structured: unknown[]; failOnCall?: number }) => {
-    const home = mkdtempSync(join(scratch, "cli-home-"));
-    const fake = fakeClaudeBinary({ dir: scratch, ...options });
-    const model = claudeCliModel({
-      submitSchema: { type: "object" },
-      binary: fake.path,
-      env: { PATH: process.env.PATH ?? "", HOME: home },
-    });
-    return { home, fake, model };
-  };
-
-  it("resumes one session across the review's turns and removes it at the end", async () => {
-    const { home, fake, model } = review({ structured: [helperRead, submitted] });
-
-    const { artifact } = await run({ model });
-    expect(artifact.decision).toBe("approve");
-
-    const [first, second] = fake.invocations();
-    const id = argumentOf(first?.argv ?? [], "--session-id") ?? "";
-    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    expect(argumentOf(second?.argv ?? [], "--resume")).toBe(id);
-    // The second turn carries only what is new; the plan went with the first.
-    expect(second?.stdin ?? "").not.toContain("acceptance criteria");
-
-    expect(existsSync(transcript(home, id))).toBe(false);
-    for (const path of neighbours(home)) {
-      expect(existsSync(path), path).toBe(true);
-    }
-  });
-
-  it("removes it when the review's second turn fails", async () => {
-    const { home, fake, model } = review({ structured: [helperRead, submitted], failOnCall: 2 });
-
-    const { artifact } = await run({ model });
-    expect(artifact.error).not.toBeNull();
-
-    const id = argumentOf(fake.calls()[0] ?? [], "--session-id") ?? "";
-    expect(id).not.toBe("");
-    expect(existsSync(transcript(home, id))).toBe(false);
-    for (const path of neighbours(home)) {
-      expect(existsSync(path), path).toBe(true);
-    }
-  });
-}, SPAWN_TEST_TIMEOUT_MS);
-
-
-/**
  * A source file carrying a NUL byte (SCP-188).
  *
  * AYO-33, 2026-09-04: the executor wrote two NUL bytes into
@@ -1048,7 +982,7 @@ index 0000000..1111111
 Binary files /dev/null and b/a/src/verdicts.ts differ
 `;
 
-  const reviewOfIt = (model: ReviewModel) =>
+  const reviewOfIt = (model: Model) =>
     runReview({
       contract: contract(),
       diff: binaryDiff,
@@ -1113,28 +1047,4 @@ Binary files /dev/null and b/a/src/verdicts.ts differ
     expect(finding?.blocking).toBe(true);
     expect(finding?.caused_by_change).toBe(false);
   });
-
-  it("completes over the claude-cli transport, whose argv could never have carried it", async () => {
-    const home = mkdtempSync(join(scratch, "nul-home-"));
-    const fake = fakeClaudeBinary({
-      dir: scratch,
-      structured: [
-        { next: "read_files", read_paths: ["a/src/verdicts.ts"], review: null },
-        { next: "submit_review", read_paths: [], review: bothMet },
-      ],
-    });
-    const model = claudeCliModel({
-      submitSchema: { type: "object" },
-      binary: fake.path,
-      env: { PATH: process.env.PATH ?? "", HOME: home },
-    });
-
-    const { artifact } = await reviewOfIt(model);
-
-    expect(artifact.error).toBeNull();
-    expect(
-      artifact.findings.some((entry) => entry.rule_id === "legibility.nul_byte_in_file"),
-    ).toBe(true);
-    expect(fake.invocations()).toHaveLength(2);
-  });
-}, SPAWN_TEST_TIMEOUT_MS);
+});

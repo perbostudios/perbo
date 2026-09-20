@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { LimitExceededError, PlanContractSchema, hasAcceptanceCriteria } from "@perbo/contracts";
-import { ProviderError, type ReviewModel } from "@perbo/review";
+import { ProviderError, type Model } from "@perbo/model";
 import { AgentConfigurationPresentError, DeliveryError } from "@perbo/runner";
 import { WorkspaceError } from "@perbo/workspace";
 import { parseReviewArgs, UsageError } from "../src/args.js";
@@ -105,7 +105,7 @@ const entry = (overrides: Record<string, unknown>) => ({
   ...overrides,
 });
 
-function stubModel(input: unknown): ReviewModel {
+function stubModel(input: unknown): Model {
   return {
     provider: "double",
     model_id: "scripted",
@@ -124,7 +124,7 @@ function stubModel(input: unknown): ReviewModel {
   };
 }
 
-function failingModel(kind: "provider_unavailable" | "timeout" = "provider_unavailable"): ReviewModel {
+function failingModel(kind: "provider_unavailable" | "timeout" = "provider_unavailable"): Model {
   return {
     provider: "double",
     model_id: "scripted",
@@ -147,7 +147,7 @@ beforeEach(() => {
 
 async function invoke(
   argv: string[],
-  model: ReviewModel,
+  model: Model,
   isTTY = false,
   extra: Partial<RunOptions> = {},
 ): Promise<Captured> {
@@ -388,7 +388,7 @@ describe("a reviewer that could not be reached", () => {
 describe("preflight", () => {
   it("refuses to start on a machine that lacks the reviewer, with the fix, before any model call", async () => {
     let turns = 0;
-    const model: ReviewModel = {
+    const model: Model = {
       ...stubModel(bothMet),
       async turn() {
         turns += 1;
@@ -965,7 +965,7 @@ index 0000000..3333333
   ];
 
   /** A model that answers each `.turn()` in order from a fixed script, once each. */
-  function sequentialModel(inputs: unknown[]): ReviewModel & { calls: number } {
+  function sequentialModel(inputs: unknown[]): Model & { calls: number } {
     const model = {
       provider: "double",
       model_id: "scripted",

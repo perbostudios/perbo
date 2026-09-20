@@ -1,5 +1,4 @@
-import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL } from "./verdict.js";
-import type { ModelRequest, ToolCall } from "./provider.js";
+import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL, type ModelRequest, type ToolCall } from "./turn.js";
 
 export interface StructuredTurn {
   next?: string;

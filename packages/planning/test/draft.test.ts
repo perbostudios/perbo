@@ -1,4 +1,4 @@
-import { READ_FILE_TOOL } from "@perbo/review";
+import { READ_FILE_TOOL } from "@perbo/model";
 import { describe, expect, it } from "vitest";
 import {
   CONTRACT_DRAFT_JSON_SCHEMA,

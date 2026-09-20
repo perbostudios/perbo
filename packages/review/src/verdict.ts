@@ -136,9 +136,6 @@ const DIRECTION_DESCRIPTION =
   "This is not severity: a minor finding with a direction is still 'negative', and a large " +
   "behavioural surprise with no direction is still 'neutral'.";
 
-export const SUBMIT_REVIEW_TOOL = "submit_review";
-export const READ_FILE_TOOL = "read_file";
-
 export interface VerdictSchemas {
   /** JSON Schema for the provider's `strict` tool definition. */
   toolInputSchema: Record<string, unknown>;
