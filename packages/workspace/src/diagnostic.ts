@@ -13,8 +13,8 @@ import {
   type DiagnosticResult,
   isRefusal,
 } from "@perbo/contracts";
-import { gitEnv } from "./repository/index.js";
-import { run, type RunResult } from "./exec.js";
+import type { RunResult } from "./exec.js";
+import { git } from "./repository/index.js";
 import { DEFAULT_PORT_BASE, DEFAULT_PORT_SPAN } from "./ports.js";
 
 /**
@@ -836,9 +836,10 @@ export class IgnoredPathsUnavailableError extends Error {
 }
 
 export async function ignoredPaths(checkout: string, timeoutMs = 60_000): Promise<string[]> {
-  const result = await run(
-    ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],
-    { cwd: checkout, env: gitEnv(), timeoutMs },
+  const result = await git.run(
+    checkout,
+    ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],
+    { timeoutMs },
   );
   // A failure here used to return `[]`, which is indistinguishable from "this
   // repository needs nothing materialized" — so a directory that is not a git
@@ -992,6 +993,8 @@ export function verificationServiceNeed(
 
 /** Long enough for a signer that is going to answer; short enough to fail a run's diagnostic. */
 const SIGNING_PROBE_TIMEOUT_MS = 20_000;
+/** A probe reads the repository's own configuration, which is on this disk. */
+const PROBE_READ_TIMEOUT_MS = 10_000;
 /** Lines of the signer's stderr the finding quotes. */
 const SIGNER_LINES = 8;
 
@@ -1001,23 +1004,25 @@ const SIGNER_LINES = 8;
  * diagnostic has other things to say about.
  */
 async function probeRun(
-  argv: string[],
+  args: string[],
   checkout: string,
-  env: NodeJS.ProcessEnv,
   timeoutMs: number,
+  overlay?: Readonly<Record<string, string>>,
 ): Promise<RunResult | null> {
   try {
-    return await run(argv, { cwd: checkout, env, timeoutMs });
+    return await git.run(checkout, args, overlay === undefined ? { timeoutMs } : { timeoutMs, overlay });
   } catch {
     return null;
   }
 }
 
 /** A configured value, or null where git resolves none. */
-async function gitConfig(checkout: string, key: string, type: string[] = []): Promise<string | null> {
-  const result = await probeRun(["git", "config", "--get", ...type, key], checkout, gitEnv(), 10_000);
-  const value = result?.stdout.trim() ?? "";
-  return result?.code === 0 && value.length > 0 ? value : null;
+async function gitConfig(checkout: string, key: string, type?: "bool"): Promise<string | null> {
+  try {
+    return await git.config(checkout, key, type, { timeoutMs: PROBE_READ_TIMEOUT_MS });
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1046,10 +1051,10 @@ function objectSources(objectsDir: string): string[] {
 /** The tree the probe signs over: the checkout's own, or the empty one. */
 async function treeToSign(checkout: string): Promise<string | null> {
   for (const argv of [
-    ["git", "rev-parse", "--verify", "--quiet", "HEAD^{tree}"],
-    ["git", "hash-object", "-t", "tree", "/dev/null"],
+    ["rev-parse", "--verify", "--quiet", "HEAD^{tree}"],
+    ["hash-object", "-t", "tree", "/dev/null"],
   ]) {
-    const result = await probeRun(argv, checkout, gitEnv(), 10_000);
+    const result = await probeRun(argv, checkout, PROBE_READ_TIMEOUT_MS);
     const oid = result?.stdout.trim() ?? "";
     if (result?.code === 0 && oid.length > 0) return oid;
   }
@@ -1102,16 +1107,11 @@ export async function signableCommit(
   checkout: string,
   timeoutMs = SIGNING_PROBE_TIMEOUT_MS,
 ): Promise<DiagnosticFinding | null> {
-  if ((await gitConfig(checkout, "commit.gpgsign", ["--type=bool"])) !== "true") return null;
+  if ((await gitConfig(checkout, "commit.gpgsign", "bool")) !== "true") return null;
   const format = (await gitConfig(checkout, "gpg.format")) ?? "openpgp";
   const key = await gitConfig(checkout, "user.signingkey");
 
-  const objects = await probeRun(
-    ["git", "rev-parse", "--git-path", "objects"],
-    checkout,
-    gitEnv(),
-    10_000,
-  );
+  const objects = await probeRun(["rev-parse", "--git-path", "objects"], checkout, PROBE_READ_TIMEOUT_MS);
   if (objects === null || objects.code !== 0) return null;
   const tree = await treeToSign(checkout);
   if (tree === null) return null;
@@ -1122,8 +1122,7 @@ export async function signableCommit(
     writeFileSync(askpass, "#!/bin/sh\nexit 1\n", { mode: 0o700 });
     const written = join(scratch, "objects");
     mkdirSync(written, { recursive: true });
-    const env: NodeJS.ProcessEnv = {
-      ...gitEnv(),
+    const overlay: Record<string, string> = {
       GIT_OBJECT_DIRECTORY: written,
       GIT_ALTERNATE_OBJECT_DIRECTORIES: objectSources(
         resolve(checkout, objects.stdout.trim()),
@@ -1139,10 +1138,10 @@ export async function signableCommit(
     };
 
     const attempt = await probeRun(
-      ["git", "commit-tree", "-S", "-m", "signing probe", tree],
+      ["commit-tree", "-S", "-m", "signing probe", tree],
       checkout,
-      env,
       timeoutMs,
+      overlay,
     );
     if (attempt === null || attempt.code === 0) return null;
 
@@ -1150,10 +1149,10 @@ export async function signableCommit(
     // was the probe rather than the key — an object store shaped in a way this
     // could not redirect — and a repository is not refused for that.
     const unsigned = await probeRun(
-      ["git", "commit-tree", "-m", "signing probe", tree],
+      ["commit-tree", "-m", "signing probe", tree],
       checkout,
-      env,
       timeoutMs,
+      overlay,
     );
     if (unsigned === null || unsigned.code !== 0) return null;
 

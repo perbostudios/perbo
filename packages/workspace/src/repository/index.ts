@@ -41,32 +41,32 @@ const QUERY_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 const NETWORK_COMMANDS = new Set(["clone", "fetch", "ls-remote", "pull", "push"]);
 
 export interface CallOptions {
-  timeoutMs?: number;
-  maxOutputBytes?: number;
+  timeoutMs?: number | undefined;
+  maxOutputBytes?: number | undefined;
   /**
    * Added over the environment the module builds, for the one caller that
    * redirects git's object store: the signing probe, which writes the object a
    * signature would produce into a directory of its own.
    */
-  overlay?: Readonly<Record<string, string>>;
+  overlay?: Readonly<Record<string, string>> | undefined;
 }
 
 export interface RepositoryOptions {
   /** Default: this process starts its own children. */
-  process?: GitProcess;
+  process?: GitProcess | undefined;
   /**
    * Where the environment is taken from, read at every call rather than at
    * import: a test that puts a fake `git` first on `PATH` does it after this
    * module is loaded.
    */
-  environment?: () => NodeJS.ProcessEnv;
-  binary?: string;
+  environment?: (() => NodeJS.ProcessEnv) | undefined;
+  binary?: string | undefined;
 }
 
 export type AddWorktree =
   | { path: string; branch: string }
   | { path: string; newBranch: string; startPoint: string }
-  | { path: string; detach: string; force?: boolean };
+  | { path: string; detach: string; force?: boolean | undefined };
 
 export interface Git {
   /** The exit status is data; a non-zero exit is a result, not an error. */
@@ -93,7 +93,11 @@ export interface Git {
   addWorktree(cwd: string, spec: AddWorktree, options?: CallOptions): Promise<RunResult>;
   removeWorktree(cwd: string, path: string, options?: CallOptions): Promise<RunResult>;
   pruneWorktrees(cwd: string, options?: CallOptions): Promise<void>;
-  stage(cwd: string, pathspec: readonly string[], options?: { force?: boolean } & CallOptions): Promise<void>;
+  stage(
+    cwd: string,
+    pathspec: readonly string[],
+    options?: { force?: boolean | undefined } & CallOptions,
+  ): Promise<void>;
   stagedPaths(cwd: string, pathspec: readonly string[], options?: CallOptions): Promise<string[]>;
   /** The new commit's sha. Signing is whatever the person's configuration says. */
   commit(cwd: string, message: string, options?: CallOptions): Promise<string>;
@@ -101,13 +105,13 @@ export interface Git {
     parent: string,
     source: string,
     into: string,
-    options?: { noTags?: boolean; noHardlinks?: boolean } & CallOptions,
+    options?: { noTags?: boolean | undefined; noHardlinks?: boolean | undefined } & CallOptions,
   ): Promise<RunResult>;
 }
 
 /** A `gh` call's environment, where the caller holds one of its own. */
 export interface GhCallOptions extends CallOptions {
-  base?: NodeJS.ProcessEnv;
+  base?: NodeJS.ProcessEnv | undefined;
 }
 
 export interface Gh {
@@ -117,15 +121,19 @@ export interface Gh {
     cwd: string,
     selector: string,
     fields: readonly string[],
-    options?: GhCallOptions & { repo?: string },
+    options?: GhCallOptions & { repo?: string | undefined },
   ): Promise<RunResult>;
   viewPullRequestSync(
     cwd: string,
     selector: string,
     fields: readonly string[],
-    options?: GhCallOptions & { repo?: string },
+    options?: GhCallOptions & { repo?: string | undefined },
   ): RunResult;
-  api(cwd: string, path: string, options?: GhCallOptions & { accept?: string; silent?: boolean }): Promise<RunResult>;
+  api(
+    cwd: string,
+    path: string,
+    options?: GhCallOptions & { accept?: string | undefined; silent?: boolean | undefined },
+  ): Promise<RunResult>;
 }
 
 /** The trimmed first answer, or null where git said it has none. */
@@ -284,7 +292,11 @@ export function createGh(options: RepositoryOptions = {}): Gh {
   const environment = options.environment ?? (() => process.env);
   const binary = options.binary ?? "gh";
 
-  const spawnOptions = (cwd: string, call: GhCallOptions | undefined, fallbackMaxOutputBytes: number): ProcessOptions => ({
+  const spawnOptions = (
+    cwd: string,
+    call: GhCallOptions | undefined,
+    fallbackMaxOutputBytes: number,
+  ): ProcessOptions => ({
     cwd,
     env: { ...ghEnv(call?.base ?? environment()), ...(call?.overlay ?? {}) },
     // Every `gh` call crosses the network.
