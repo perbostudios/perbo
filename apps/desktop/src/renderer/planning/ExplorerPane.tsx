@@ -6,8 +6,9 @@ import { planNodes } from "@perbo/contracts/plan";
 import { LineIcon } from "../icons.js";
 import { bridge, errorMessage } from "../data.js";
 import type { DraftMark } from "../../shared/contract-editing.js";
-import type { Snapshot } from "../../shared/protocol.js";
+import type { PageProps } from "../shell/App.js";
 import type { useContractEditing } from "../tasks/contract-editor.js";
+import { ConfirmPlan } from "./ConfirmPlan.js";
 import { nodesNaming, rowMark, treeRows, viaLabel, type RowMark } from "./explorer-tree.js";
 
 type Editor = ReturnType<typeof useContractEditing>;
@@ -22,7 +23,7 @@ type Editor = ReturnType<typeof useContractEditing>;
  * here (D-105). Both go through the host, which resolves the path under the
  * registered repository and refuses anything it should not read.
  */
-export function ExplorerPane({ workspace, editor }: { workspace: Snapshot; editor: Editor }) {
+export function ExplorerPane({ workspace, navigate, editor }: PageProps & { editor: Editor }) {
   const client = useQueryClient();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
@@ -346,6 +347,7 @@ export function ExplorerPane({ workspace, editor }: { workspace: Snapshot; edito
           )}
         </div>
       </div>
+      <ConfirmPlan workspace={workspace} navigate={navigate} editor={editor} />
     </section>
   );
 }

@@ -47,7 +47,11 @@ export function Composer({
   useEffect(() => {
     if (session?.phase !== "ready" || !session.key || handled.current === session.operation?.id) return;
     handled.current = session.operation?.id ?? null;
-    navigate({ page: "task", repoId: session.repoId, key: session.key, view: "contract" });
+    // Always the ticket. Where a drafted ticket belongs — the graph it was
+    // divided into, or the contract — is a question about the ticket, and
+    // `TaskPage` answers it once for everybody: landing here and clicking the
+    // same ticket on Home have to agree, and a rule written twice does not.
+    navigate({ page: "task", repoId: session.repoId, key: session.key, view: "auto" });
     onCancel?.();
   }, [session, navigate, onCancel]);
   const start = (model: boolean): void => {

@@ -1019,6 +1019,45 @@ export class DesktopService {
   }
 
   /**
+   * What a compiled contract's scope does not cover, for the page that freezes
+   * it.
+   *
+   * The same derivation {@link impactView} makes of a draft, asked of the
+   * contract instead: its own allowed paths, and the spec the ticket records
+   * having been drafted from where there is one. Read from the ticket rather
+   * than from a planning session, because the contract page is reached from a
+   * ticket — one the CLI admitted has no session to ask, and a person
+   * approving it is making exactly the same decision.
+   *
+   * The spec is read from the path the ticket recorded, and a spec that has
+   * since gone leaves the reading to the scope alone rather than failing: a
+   * warning is advice, and advice that cannot be given is not an error on the
+   * page that approves.
+   */
+  private async contractImpact(repoId: string, key: string): Promise<ImpactView> {
+    const repo = this.repository(repoId);
+    const { contract } = this.readContract(repo, key);
+    const ticket = (await this.list(repo)).tickets.find((entry) => entry.key === key);
+    const tracked = (await this.trackedFiles(repo)).filter((path) => !isNeverReadPath(path));
+    let spec: string | null = null;
+    const at = ticket?.admission?.spec?.path ?? null;
+    if (at !== null) {
+      try {
+        spec = readSpecText(this.safePath(repo, ...at.split("/"))).markdown;
+      } catch {
+        spec = null;
+      }
+    }
+    const report = impactReport({
+      scope: contract.scope.paths_allowed,
+      tracked,
+      spec,
+      index: await this.symbolIndex(repo),
+    });
+    return { ...report, readAt: new Date().toISOString() };
+  }
+
+  /**
    * The interview's argv, built from the registered repository and this
    * planning's own records and from nothing a renderer sent (ADR-0023 §4).
    *
@@ -1241,12 +1280,12 @@ export class DesktopService {
         return;
       }
       // The id as it was recorded, which is the one a later start continues.
+      // The session's own id is of no use to anybody reading the chat, and
+      // the spec's path is in the pane beside it; what is worth saying once is
+      // the folder it may write that is not on screen anywhere.
       this.converse(id, {
         kind: "note",
-        text: redact(`The session is ${session}, writing ${event.spec} and ${event.adr}.`).slice(
-          0,
-          2000,
-        ),
+        text: redact(`Writing ${event.spec} and ${event.adr}.`).slice(0, 2000),
       });
       return;
     }
@@ -1357,6 +1396,12 @@ export class DesktopService {
       const session = this.editing.read(id);
       if (session.key === null) return;
       const repoId = this.interviews.get(id)?.repoId ?? session.repoId;
+      // An edit can divide a plan that was not divided, or put a divided one
+      // back together, and the rail is drawn where no contract can be read —
+      // it asks this count instead. Settling a job writes it and so does a
+      // contract re-read; an edit reaches neither, so a plan the interview
+      // split would have a graph that the rail never offered a way into.
+      this.editing.countNodes(id, planNodes(this.readContract(this.repository(repoId), session.key).contract).length);
       this.changed(true, { kind: "records", repoId, key: session.key });
     } catch {
       // A session that has gone has no plan for anything to be drawing.
@@ -1427,9 +1472,9 @@ export class DesktopService {
     // was called while the spec is still empty enough to start again.
     this.converse(id, {
       kind: "note",
-      text:
-        `Named from your first message: ${written.folder}. The folder keeps this name; ` +
-        "the title itself you can change in the Spec pane.",
+      // That the title can be changed is what an editable field says by being
+      // one, and that a folder keeps its name is how folders work.
+      text: `Named ${written.folder} from your first message.`,
     });
   }
 
@@ -2042,6 +2087,56 @@ export class DesktopService {
       "--json",
     ];
   }
+  /**
+   * Delete a contract that has never run, with everything it carries.
+   *
+   * Answers with the reason it stays rather than throwing, because there are
+   * two callers with two different needs: deleting a contract outright says
+   * the reason to the person, and throwing away the planning that drafted it
+   * takes the ticket along only where it can, and keeps going where it
+   * cannot — a ticket whose loop has run is work, not a draft.
+   */
+  private async deleteContract(
+    repo: z.infer<typeof RepoSchema>,
+    key: string,
+  ): Promise<string | null> {
+    if (heldRepository(this.liveJobs(), repo.id))
+      return "Wait for the commands running in this repository to finish before deleting a contract.";
+    const ticket = (await this.list(repo)).tickets.find((entry) => entry.key === key);
+    if (!ticket) return "This task is no longer in the repository's ticket store.";
+    if (!["draft", "specifying", "plan_review", "ready", "plan_invalid"].includes(ticket.state))
+      return "Only a contract that has never run can be deleted. This one has moved past the contract stage.";
+    const attempts = readAttempts(
+      this.safePath(repo, ".perbo", "state", `${ticket.ticket_id}.attempts.json`),
+    );
+    const bundles = listBundles(this.safePath(repo, ".perbo", "bundles", "bundles"));
+    if (
+      attempts.attempts.length ||
+      attempts.error ||
+      bundles.some((bundle) => bundle.ticket_id === ticket.ticket_id)
+    )
+      return "This contract has recorded attempts or evidence, so it stays. Only a never-run contract can be deleted.";
+    if (ticket.delivery.pull_request_url)
+      return "This contract has a pull request on record, so it stays.";
+    for (const suffix of [".json", ".contract.json", ".draft.json"]) {
+      const path = this.safePath(repo, ".perbo", "tickets", `${key}${suffix}`);
+      if (existsSync(path) && !lstatSync(path).isSymbolicLink()) rmSync(path);
+    }
+    const entry = repo.id + ":" + key;
+    delete this.state.titles[entry];
+    delete this.state.taskModels[entry];
+    this.state.archived = this.state.archived.filter((item) => item !== entry);
+    for (const session of this.state.editingSessions)
+      if (session.repoId === repo.id && session.key === key && session.phase !== "discarded") {
+        session.phase = "discarded";
+        session.resumeNew = false;
+        session.revision++;
+      }
+    this.changed(true, { kind: "records", repoId: repo.id, key: null });
+    this.preferencesChanged();
+    return null;
+  }
+
   async request<T extends Request>(input: T): Promise<ReplyMap[T["kind"]]> {
     const request = RequestSchema.parse(input);
     return (await this.dispatch(request)) as ReplyMap[T["kind"]];
@@ -2068,7 +2163,30 @@ export class DesktopService {
         request.operationId,
         request.intent,
       );
-    if (request.kind === "explorerMark")
+    if (request.kind === "explorerMark") {
+      // Scope is one of the four fields approval freezes, and the freeze is
+      // enforced by the CLI: `perbo edit` refuses every state but plan_review.
+      // Nothing on this path asked, so a mark on an approved ticket was taken,
+      // written to the draft, and could never be compiled in — a mark the
+      // person would have gone on believing in. The standing list is the one
+      // exception: it is the repository's, not this ticket's, and D-105 has
+      // the guard read it again when a run starts, so it binds an approved
+      // ticket and is allowed to be written for one.
+      //
+      // Either way on the list, which is what `always` being set at all means:
+      // true adds the path and false takes back what this draft added, and a
+      // rule that admitted only the adding would let a person put a path on
+      // the repository's list from an approved ticket and never take it off.
+      // Null is the ticket's own scope, and that is what the freeze holds.
+      const session = this.editing.read(request.id);
+      if (session.key !== null && request.always === null) {
+        const repo = this.repository(session.repoId);
+        const ticket = (await this.list(repo)).tickets.find((entry) => entry.key === session.key);
+        if (ticket?.approved_at)
+          throw new Error(
+            "This contract is approved, so its scope is frozen. Start over from the spec to plan it again.",
+          );
+      }
       return this.editing.mark(
         request.id,
         request.revision,
@@ -2076,14 +2194,26 @@ export class DesktopService {
         request.mark,
         request.always,
       );
+    }
     if (request.kind === "explorerUndo")
       return this.editing.undo(request.id, request.revision, request.edit);
     if (request.kind === "editingStop") return this.editing.stop(request.id);
     if (request.kind === "editingDiscard") {
-      // The chat goes with the planning it belonged to: there is no longer a
-      // spec for the interview to write or a plan for it to change.
+      // The ticket this planning drafted goes with it. Without that, throwing
+      // the plan away left the ticket on the board with no way back to the
+      // plan it came from — a delete that deleted the way in and not the thing.
+      // A ticket that has run is not a draft, so it stays, and the reason is
+      // the same one deleting a contract outright would have given.
+      //
+      // The one it drafted, and never one it was merely opened over: planning
+      // started from a ticket the CLI admitted, or from one another session
+      // made, holds that key from birth. Discarding on the key alone would
+      // throw away work this planning did not do and cannot give back.
+      const session = this.editing.read(request.id);
       const discarded = this.editing.discard(request.id, request.revision);
       this.stopInterview(request.id);
+      if (session.key !== null && session.admitted)
+        await this.deleteContract(this.repository(session.repoId), session.key);
       return discarded;
     }
     // The interview docked beside the panes (D-102). Planning-lane work, like
@@ -2145,6 +2275,8 @@ export class DesktopService {
     }
     if (request.kind === "specRead") return this.specView(request.id);
     if (request.kind === "impactRead") return this.impactView(request.id);
+    if (request.kind === "impactContract")
+      return this.contractImpact(request.repoId, request.key);
     if (request.kind === "usage") return this.usage();
     if (request.kind === "cancel") {
       const entry = this.active.get(request.jobId);
@@ -2217,79 +2349,8 @@ export class DesktopService {
     if (request.kind === "taskSummary")
       return this.taskSummary(repo.id, request.key);
     if (request.kind === "discard") {
-      if (heldRepository(this.liveJobs(), repo.id))
-        throw new Error(
-          "Wait for the commands running in this repository to finish before deleting a contract.",
-        );
-      const ticket = (await this.list(repo)).tickets.find(
-        (entry) => entry.key === request.key,
-      );
-      if (!ticket)
-        throw new Error(
-          "This task is no longer in the repository's ticket store.",
-        );
-      if (
-        ![
-          "draft",
-          "specifying",
-          "plan_review",
-          "ready",
-          "plan_invalid",
-        ].includes(ticket.state)
-      )
-        throw new Error(
-          "Only a contract that has never run can be deleted. This one has moved past the contract stage.",
-        );
-      const attempts = readAttempts(
-        this.safePath(
-          repo,
-          ".perbo",
-          "state",
-          `${ticket.ticket_id}.attempts.json`,
-        ),
-      );
-      const bundles = listBundles(
-        this.safePath(repo, ".perbo", "bundles", "bundles"),
-      );
-      if (
-        attempts.attempts.length ||
-        attempts.error ||
-        bundles.some((bundle) => bundle.ticket_id === ticket.ticket_id)
-      )
-        throw new Error(
-          "This contract has recorded attempts or evidence, so it stays. Only a never-run contract can be deleted.",
-        );
-      if (ticket.delivery.pull_request_url)
-        throw new Error(
-          "This contract has a pull request on record, so it stays.",
-        );
-      for (const suffix of [".json", ".contract.json", ".draft.json"]) {
-        const path = this.safePath(
-          repo,
-          ".perbo",
-          "tickets",
-          `${request.key}${suffix}`,
-        );
-        if (existsSync(path) && !lstatSync(path).isSymbolicLink()) rmSync(path);
-      }
-      const entry = repo.id + ":" + request.key;
-      delete this.state.titles[entry];
-      delete this.state.taskModels[entry];
-      this.state.archived = this.state.archived.filter(
-        (item) => item !== entry,
-      );
-      for (const session of this.state.editingSessions)
-        if (
-          session.repoId === repo.id &&
-          session.key === request.key &&
-          session.phase !== "discarded"
-        ) {
-          session.phase = "discarded";
-          session.resumeNew = false;
-          session.revision++;
-        }
-      this.changed(true, { kind: "records", repoId: repo.id, key: null });
-      this.preferencesChanged();
+      const refusal = await this.deleteContract(repo, request.key);
+      if (refusal !== null) throw new Error(refusal);
       return null;
     }
     if (request.kind === "archive") {
@@ -2633,7 +2694,17 @@ export class DesktopService {
           await this.invoke(
             job,
             repo,
-            ["edit", request.key, ...this.draftArgs(request.draft)],
+            [
+              "edit",
+              request.key,
+              ...this.draftArgs(request.draft),
+              // An empty list and an absent flag are the same on a command
+              // line, and the edit replaces only what it is given: without
+              // this, unmarking the last prohibited path would be written and
+              // then quietly ignored. Admission needs no such flag — it writes
+              // the whole scope rather than replacing part of one.
+              ...(request.draft.prohibited.length === 0 ? ["--no-prohibit"] : []),
+            ],
             signal,
           );
           job.resultKey = request.key;

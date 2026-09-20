@@ -91,6 +91,66 @@ const criterion = (
   expected_verification: { kind: "test", assertion },
 });
 
+describe("what the scope does not cover, where it is approved", () => {
+  // Impact is only ever actionable before approval — a scope frozen is a scope
+  // no warning can move — so the count belongs on the page that freezes it
+  // rather than in a pane somebody has to know to open.
+  it("says how many files fall outside, and never holds the button for it", async () => {
+    const context = await contextFor([criterion()]);
+    const original = bridge.request.bind(bridge);
+    const asked = vi.spyOn(bridge, "request").mockImplementation((request) =>
+      request.kind === "impactContract"
+        ? Promise.resolve({
+            warnings: [
+              { path: "packages/auth/package.json", reasons: [{ kind: "dependency", detail: "" }] },
+              { path: "packages/ui/src/theme.ts", reasons: [{ kind: "imports_scope", detail: "" }] },
+            ],
+            index: { commit: null, files: 0, symbols: 0, supported: true, workingTree: "clean" },
+            readAt: new Date().toISOString(),
+          } as never)
+        : original(request),
+    );
+    try {
+      mount(<ContractScreen {...context} />);
+      expect(await screen.findByText(/2 files outside this scope/)).toBeTruthy();
+      // Advice, not a gate: the button it sits beside is still live. One that
+      // held approval would be one people learn to click past.
+      expect(
+        (screen.getByRole("button", { name: "Approve · start the loop" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    } finally {
+      asked.mockRestore();
+    }
+  });
+
+  // The ordinary case is a scope that covers what the work reaches, and a line
+  // reporting nothing is a line in the way of the one that matters.
+  it("says nothing when the scope covers everything", async () => {
+    const context = await contextFor([criterion()]);
+    const original = bridge.request.bind(bridge);
+    const asked = vi.spyOn(bridge, "request").mockImplementation((request) =>
+      request.kind === "impactContract"
+        ? Promise.resolve({
+            warnings: [],
+            index: { commit: null, files: 0, symbols: 0, supported: true, workingTree: "clean" },
+            readAt: new Date().toISOString(),
+          } as never)
+        : original(request),
+    );
+    try {
+      mount(<ContractScreen {...context} />);
+      await screen.findByRole("button", { name: "Approve · start the loop" });
+      await waitFor(() =>
+        expect(asked.mock.calls.some(([r]) => r.kind === "impactContract")).toBe(true),
+      );
+      expect(screen.queryByText(/outside this scope/)).toBeNull();
+    } finally {
+      asked.mockRestore();
+    }
+  });
+});
+
 describe("contract verification approval", () => {
   it("shows the assertion, evidence kind and named manual reviewer before approval", async () => {
     const context = await contextFor([

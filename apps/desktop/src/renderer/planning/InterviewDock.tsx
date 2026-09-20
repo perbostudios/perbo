@@ -7,6 +7,7 @@ import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS } from "../../shared/contract-e
 import { AskedHandle } from "./AskedHandle.js";
 import { askedHeightLimit, useAskedHeight } from "../shell/asked-size.js";
 import { InfoHint } from "../InfoHint.js";
+import { LineIcon, type LineIconName } from "../icons.js";
 import { ThinkingStatus } from "../Screen.js";
 import { INTERVIEW_CONVERSATION_CAP } from "../../shared/protocol.js";
 import type {
@@ -106,6 +107,20 @@ export function InterviewDock({
   const [busy, setBusy] = useState(false);
   const [text, setText] = useState("");
   const chat = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
+  // Picking "Something else" is a request for the box, so the box is where the
+  // next keystroke goes. Someone who has just said their answer is not on the
+  // card is already composing it, and making them find a box that appeared this
+  // moment asks twice for the one thing.
+  useEffect(() => {
+    if (!typing) return;
+    const held = box.current;
+    if (held === null) return;
+    held.focus();
+    // At the end of what is there: the box keeps whatever was typed before the
+    // card came up, and that is where the writing carries on from.
+    held.setSelectionRange(held.value.length, held.value.length);
+  }, [typing]);
 
   useEffect(() => {
     setLive([]);
@@ -341,9 +356,13 @@ export function InterviewDock({
       {failure !== null && <Notice tone="danger">{failure}</Notice>}
       {/* The card is the only way to answer while one is up, unless the person
           has said their answer is not on it. */}
-      <div className="composer" hidden={asking !== null && !typing}>
+      <div
+        className={cx("composer", asking !== null && typing && "composer--joined")}
+        hidden={asking !== null && !typing}
+      >
         <div className="composer-box">
           <textarea
+            ref={box}
             aria-label="Message the interview"
             value={text}
             placeholder="Answer, or tell the interview something…"
@@ -381,6 +400,17 @@ type Choice = Extract<
 >["groups"][number]["parts"][number]["options"][number];
 
 /**
+ * A choice as the card shows it.
+ *
+ * `icon` is the app's and not the protocol's: the two answers below are the
+ * ones this card adds to every question, and marking them is how a person sees
+ * at a glance that they are not answers to the question above. A session's own
+ * options cannot carry one, because there is nowhere in the protocol to say so
+ * — which is the point. What a model returns does not choose what is drawn.
+ */
+type Shown = Choice & { icon?: LineIconName };
+
+/**
  * The answer every part carries whatever the session offered, as the decision
  * screen carries it: a person asked something they have no view on leaves it to
  * the session rather than picking one of its options to get past the question.
@@ -393,18 +423,33 @@ type Choice = Extract<
  * following is the work. A name not here is shown as it is, so a tool added
  * later reads as itself rather than as nothing.
  */
-const TOOL_NAMES: Record<string, string> = {
-  ask_options: "Questions",
-  generate_plan: "Draft the plan",
-  edit_plan: "Change the plan",
-  undo_edit: "Undo a change",
-  read_plan: "Read the plan",
+const TOOL_NAMES: Record<string, { did: string; tried: string }> = {
+  ask_options: { did: "Questions", tried: "Questions" },
+  generate_plan: { did: "Drafted the plan", tried: "Drafting the plan" },
+  edit_plan: { did: "Changed the plan", tried: "Changing the plan" },
+  undo_edit: { did: "Took a change back", tried: "Taking a change back" },
+  read_plan: { did: "Read the plan", tried: "Reading the plan" },
 };
 
-const LEAVE_IT: Choice = {
+/**
+ * What a card calls what happened, in the tense it happened in.
+ *
+ * A card is written when the tool returns, so one that worked is past: "Draft
+ * the plan" reads as a button for something not yet done, over work already
+ * finished. One that was refused never happened at all, and saying it did would
+ * be the card contradicting the word beside it.
+ */
+const toolName = (tool: string, ok: boolean): string => {
+  const named = TOOL_NAMES[tool];
+  if (named === undefined) return tool;
+  return ok ? named.did : named.tried;
+};
+
+const LEAVE_IT: Shown = {
   label: LEAVE_IT_TO_THE_INTERVIEW,
   detail: "Its own recommendation, or its judgement where it made none.",
   recommended: false,
+  icon: "handOver",
 };
 
 /**
@@ -414,10 +459,11 @@ const LEAVE_IT: Choice = {
  * answer is not on the card should not have to pick the nearest wrong one, and
  * a card that offers no way out is a form rather than a question.
  */
-const SOMETHING_ELSE: Choice = {
+const SOMETHING_ELSE: Shown = {
   label: "Something else",
   detail: "Answer in your own words instead.",
   recommended: false,
+  icon: "ownWords",
 };
 
 /**
@@ -456,7 +502,7 @@ function QuestionCard({
   // The session's recommendation first, because a person reading a list of
   // answers reads the top of it, and the one it would pick is the one most of
   // them want. Its own order is kept under that.
-  const choicesOf = (part: (typeof group.parts)[number]): readonly Choice[] => [
+  const choicesOf = (part: (typeof group.parts)[number]): readonly Shown[] => [
     ...[...part.options].sort(
       (left, right) => Number(right.recommended) - Number(left.recommended),
     ),
@@ -482,7 +528,11 @@ function QuestionCard({
   };
   return (
     <div
-      className="asked-card"
+      // While the box for a person's own words is open under it, the card and
+      // the box are one panel with a line between them rather than two curved
+      // boxes stacked: the answer is being written in the same breath as the
+      // question is being read.
+      className={cx("asked-card", ownWords && "asked-card--joined")}
       role="group"
       aria-label={group.title ?? `Question ${number}`}
       style={{ height }}
@@ -517,6 +567,13 @@ function QuestionCard({
                   disabled={busy}
                   onChange={() => setPicked((held) => ({ ...held, [index]: choice }))}
                 />
+                {/* The two answers that are on every question, whoever asked
+                    it, are marked as such: one hands the choice back and the
+                    other asks for the box, and neither is an answer to this
+                    question the way the ones above them are. */}
+                {option.icon !== undefined && (
+                  <LineIcon name={option.icon} size={14} className="choice-icon" />
+                )}
                 <strong>{option.label}</strong>
                 {option.recommended && <span className="choice-recommended">recommended</span>}
               </span>
@@ -574,16 +631,53 @@ function Line({
       </div>
     );
   if (line.kind === "note") return <p className="msg msg--note">{line.text}</p>;
+  // A tool that worked and only repeated itself has nothing in it to act on:
+  // what it changed is on the graph, what it asked is on the card, and a panel
+  // saying it happened is a third telling of something already told. One run of
+  // edits made eight of them in a row and pushed the conversation off the top.
+  //
+  // What survives is what is said nowhere else:
+  //
+  //  - a refusal, because no `asked` follows a rejected call, so dropping it
+  //    would leave the dock saying "Working…" and then nothing at all;
+  //  - the drafting, which happens once and whose report carries the count of
+  //    instructions the spec aimed at the drafter — read as data and not
+  //    followed (ADR-0023), and told to the person nowhere else in the app;
+  //  - an undo, which is rare, person-asked, and the only word that a change
+  //    was taken back;
+  //  - the edit at the head of the plan's history, which carries the undo
+  //    D-100 allows: a control rather than a report.
+  //
+  // What is left to drop is a repeated `edit_plan` and a `read_plan`, which is
+  // exactly the run that buried the conversation.
+  if (line.kind === "tool" && line.ok && line.tool !== "generate_plan" && line.tool !== "undo_edit") {
+    const keepsUndo = line.edit !== null && onUndo !== null && undoable === line.edit.n;
+    if (!keepsUndo) return null;
+  }
   // The questions are put one group at a time under the conversation, and they
   // are written out here as well. A person who says something of their own
   // takes the rest off the card — the session is about to answer what they
   // said — so what was asked has to stay somewhere they can still read it.
   if (line.kind === "asked") {
     const parts = line.groups.reduce((count, group) => count + group.parts.length, 0);
+    // What the questions are about, which is what a person reading the chat
+    // later wants from this line. The count is what is left when the session
+    // titled none of them.
+    const about = line.groups.flatMap((group) => (group.title === null ? [] : [group.title]));
+    // Titles are the session's own words, four groups of up to two hundred
+    // characters: said in the line they would be the long account the card
+    // exists to keep out of the chat.
+    const subjects = (titles: string[]): string => {
+      const joined =
+        titles.length === 1 ? titles[0]! : `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
+      return joined.length > 120 ? `${joined.slice(0, 117).trimEnd()}…` : joined;
+    };
     return (
       <p className="msg msg--note asked-said">
-        Asked {parts === 1 ? "one question" : `${parts} questions`}
-        {line.groups.length > 1 && `, in ${line.groups.length} groups`}.
+        {`Asked ${parts === 1 ? "one question" : `${parts} questions`}${
+          line.groups.length > 1 ? ` in ${line.groups.length} groups` : ""
+        }`}
+        {about.length > 0 && `, about ${subjects(about)}`}.
         <InfoHint
           label="The questions that were asked"
           text={line.groups
@@ -650,19 +744,20 @@ function ToolCard({
         {/* What the tool is for, rather than what it is called: a person
             reading the chat is following the work, and `ask_options` is the
             name of a thing they never call. */}
-        <b>{TOOL_NAMES[line.tool] ?? line.tool}</b>
-        <span className="small muted">
-          {line.ok
-            ? "done"
-            : line.tool === "edit_plan" || line.tool === "undo_edit"
+        <b>{toolName(line.tool, line.ok)}</b>
+        {/* No word for one that worked: the name is already past, and "done"
+            beside it says a second time what it just said. */}
+        {!line.ok && (
+          <span className="small muted">
+            {line.tool === "edit_plan" || line.tool === "undo_edit"
               ? "refused by the edit path"
               : "refused"}
-        </span>
-        {/* What the tool said is read when it is asked for: the name and the
-            word beside it are what the card is for, and the account underneath
-            them was most of the dock. */}
+          </span>
+        )}
+        {/* What the tool said is read when it is asked for: the name is what
+            the card is for, and the account underneath it was most of the dock. */}
         {line.ok && (
-          <InfoHint text={line.detail} label={`What ${TOOL_NAMES[line.tool] ?? line.tool} did`} />
+          <InfoHint text={line.detail} label={`What happened: ${toolName(line.tool, true)}`} />
         )}
       </div>
       {/* What a tool did is read when it is asked for; why one was refused is

@@ -299,6 +299,7 @@ function DecisionOverlay(
     [error, setError] = useState<string | null>(null),
     [pending, setPending] = useState<string | null>(null);
   const card = useRef<HTMLDivElement>(null);
+  const own = useRef<HTMLTextAreaElement>(null);
   const action = useAction(),
     question = questions[index]!,
     selected = answers[question.id];
@@ -511,7 +512,14 @@ function DecisionOverlay(
                       type="radio"
                       name="decision-choice"
                       checked={customSelected}
-                      onChange={() => setCustomSelected(true)}
+                      onChange={() => {
+                        setCustomSelected(true);
+                        // Picking it is the request to type, so the caret goes
+                        // with it. Done on the pick and not on the state, which
+                        // also turns true when an earlier answer is restored —
+                        // focus then would take the page off where it was.
+                        own.current?.focus();
+                      }}
                     />
                     <strong>
                       {question.options.length
@@ -520,6 +528,7 @@ function DecisionOverlay(
                     </strong>
                   </span>
                   <textarea
+                    ref={own}
                     aria-label="Your approach"
                     placeholder="Type the approach in a sentence…"
                     value={custom}

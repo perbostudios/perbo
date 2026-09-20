@@ -36,7 +36,8 @@ export type TaskView =
   | "merge"
   | "decisions"
   | "called-off"
-  | "complete";
+  | "complete"
+  | "explorer";
 export type SettingsSection =
   | "general"
   | "usage"
@@ -95,6 +96,7 @@ function readRoute(): Route {
         "decisions",
         "called-off",
         "complete",
+        "explorer",
       ].includes(view ?? "")
         ? view
         : "auto") as TaskView,
@@ -258,6 +260,7 @@ export function App() {
                     route={route}
                     navigate={navigate}
                     attention={attention}
+                    drafts={data?.drafts}
                   />
                 )}
                 <main id="content" className="workspace-shell">

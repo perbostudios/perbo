@@ -2,9 +2,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { InterviewEventSchema, InterviewTurnSchema } from "@perbo/contracts/interview-protocol";
 import { UsageError } from "../src/args.js";
+import { NEXT_STEPS, withoutNextStep } from "../src/next-step.js";
 import { claudeInterviewTransport } from "../src/interview-claude.js";
 
 /** What the transport is told to run. The scripted SDK spawns nothing. */
@@ -34,7 +36,7 @@ import { claudeHarness, codexHarness } from "./interview-harness.js";
 import { scriptedSdk, type ScriptStep } from "./interview-sdk.js";
 
 /** The built command, for the approval an interview cannot make. */
-const CLI = join(dirname(new URL(import.meta.url).pathname), "..", "dist", "main.js");
+const CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "main.js");
 
 /**
  * `perbo interview`: the person's own Claude Code or Codex session (D-102).
@@ -89,7 +91,7 @@ const generate: ScriptStep = { kind: "call", tool: "generate_plan", input: {} };
 async function interview(
   repo: string,
   steps: readonly ScriptStep[],
-  extra: { argv?: string[]; sessionId?: string; spec?: string } = {},
+  extra: { argv?: string[]; sessionId?: string; spec?: string; turns?: readonly string[] } = {},
 ) {
   const streams = capture();
   const sdk = scriptedSdk({ steps, cwd: repo, ...(extra.sessionId ? { sessionId: extra.sessionId } : {}) });
@@ -100,7 +102,8 @@ async function interview(
     transport: claudeInterviewTransport(sdk, CLAUDE),
     model: drafter(),
     turns: (async function* () {
-      yield JSON.stringify({ type: "turn", text: "let us write the spec" });
+      for (const text of extra.turns ?? ["let us write the spec"])
+        yield JSON.stringify({ type: "turn", text });
     })(),
   });
   return { code, streams, sdk };
@@ -355,6 +358,171 @@ describe("generate_plan (SCP-311 criterion 2)", () => {
     expect(sdk.calls[1]?.result).toContain("PRB-1");
   });
 
+  // A group is put to the person and nothing waits for it, so without a rule a
+  // session can ask and draft in the one breath — which is drafting around its
+  // own guess at the answer, and then telling them afterwards which way it
+  // went. Their answer may change the spec this drafts from.
+  it("refuses to draft while a group of questions stands unanswered", async () => {
+    const ask: ScriptStep = {
+      kind: "call",
+      tool: "ask_options",
+      input: {
+        groups: [
+          {
+            title: "Ordering within a day",
+            parts: [
+              {
+                question: "How are a day's events ordered?",
+                options: [
+                  { label: "Timed first, then untimed", detail: null, recommended: true },
+                  { label: "In the order they were written", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const repo = repository();
+    const { sdk } = await interview(repo, [writeSpec(), ask, generate]);
+    expect(sdk.calls[1]?.isError).toBe(false);
+    expect(sdk.calls[2]?.isError).toBe(true);
+    expect(sdk.calls[2]?.result).toContain("unanswered");
+    expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual([]);
+  });
+
+  // The other half: their turn is their answer, so it lets the draft through.
+  // A check nobody can pass is as useless as one nobody can fail.
+  it("drafts once their turn has answered the group", async () => {
+    const ask: ScriptStep = {
+      kind: "call",
+      tool: "ask_options",
+      input: {
+        groups: [
+          {
+            title: null,
+            parts: [
+              {
+                question: "How are a day's events ordered?",
+                options: [
+                  { label: "Timed first", detail: null, recommended: true },
+                  { label: "As written", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const repo = repository();
+    // Two turns: the session asks on the first, and drafts on the second,
+    // which is the turn their answer arrived in.
+    const { sdk } = await interview(repo, [writeSpec(), ask, { kind: "await" }, generate], {
+      turns: ["let us write the spec", "Timed first"],
+    });
+    expect(sdk.calls.at(-1)?.isError).toBe(false);
+    expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual(["PRB-1"]);
+  });
+
+  // The shape the tool's own description recommends — independent groups go
+  // separately, up to MAX_QUESTION_GROUPS — and the one a counter of turns gets
+  // wrong. The person is put one group at a time, so answering the first leaves
+  // the second on screen; a plan drafted then is drafted around a guess at it.
+  it("holds the draft until every group of a multi-group asking is answered", async () => {
+    const twoGroups: ScriptStep = {
+      kind: "call",
+      tool: "ask_options",
+      input: {
+        groups: [
+          {
+            title: "Ordering",
+            parts: [
+              {
+                question: "How are a day's events ordered?",
+                options: [
+                  { label: "Timed first", detail: null, recommended: true },
+                  { label: "As written", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+          {
+            title: "Filler days",
+            parts: [
+              {
+                question: "What fills the days around the month?",
+                options: [
+                  { label: "Left blank", detail: null, recommended: true },
+                  { label: "Greyed in", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const repo = repository();
+    const { sdk } = await interview(
+      repo,
+      // Their answer to the first group, then a draft that must still be
+      // refused, then their answer to the second, then the draft that lands.
+      [writeSpec(), twoGroups, { kind: "await" }, generate, { kind: "await" }, generate],
+      { turns: ["let us write the spec", "Timed first", "Left blank"] },
+    );
+    const drafts = sdk.calls.filter((call) => call.tool.endsWith("generate_plan"));
+    expect(drafts).toHaveLength(2);
+    expect(drafts[0]?.isError, "drafted with a group still on screen").toBe(true);
+    expect(drafts[0]?.result).toContain("unanswered");
+    expect(drafts[1]?.isError).toBe(false);
+    expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual(["PRB-1"]);
+  });
+
+  // The asking ends whole when they say something of their own, exactly as the
+  // planning record ends it (D-117), so the guard cannot deadlock a session
+  // whose questions the person simply talked past.
+  it("lets the draft through once they answer with something of their own", async () => {
+    const twoGroups: ScriptStep = {
+      kind: "call",
+      tool: "ask_options",
+      input: {
+        groups: [
+          {
+            title: null,
+            parts: [
+              {
+                question: "How are a day's events ordered?",
+                options: [
+                  { label: "Timed first", detail: null, recommended: true },
+                  { label: "As written", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+          {
+            title: null,
+            parts: [
+              {
+                question: "What fills the days around the month?",
+                options: [
+                  { label: "Left blank", detail: null, recommended: true },
+                  { label: "Greyed in", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const repo = repository();
+    const { sdk } = await interview(
+      repo,
+      [writeSpec(), twoGroups, { kind: "await" }, generate],
+      { turns: ["let us write the spec", "forget the ordering, just build it"] },
+    );
+    expect(sdk.calls.at(-1)?.isError).toBe(false);
+    expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual(["PRB-1"]);
+  });
+
   it("refuses a second draft from a spec nothing has changed since the first", async () => {
     const repo = repository();
     const { sdk } = await interview(repo, [writeSpec(), generate, generate]);
@@ -386,6 +554,51 @@ describe("generate_plan (SCP-311 criterion 2)", () => {
     expect(existsSync(join(storeDir(repo, null), "tickets"))).toBe(false);
   });
 
+  // Each command closes its report by telling whoever ran it what to type next,
+  // which is true at a terminal and false in the app, where approving and
+  // editing are buttons. A tool's result reaches the person nearly word for
+  // word, so the lines would send someone sitting in the app off to a terminal
+  // they never opened.
+  it("relays the admission without the commands a terminal is told to type", async () => {
+    const repo = repository();
+    const { sdk } = await interview(repo, [writeSpec(), generate]);
+    const relayed = sdk.calls[1]?.result ?? "";
+    expect(relayed).toContain("PRB-1");
+    // Who approves is still said, in words that hold on either surface.
+    expect(relayed).toContain("A person reads and approves it; this session cannot.");
+    for (const step of NEXT_STEPS) expect(relayed, step).not.toContain(step);
+    expect(relayed).not.toContain("perbo approve");
+    expect(relayed).not.toContain("perbo edit");
+    // Only the block goes. What a first draft wrote is printed after it, and is
+    // the one report of where D-103's pages landed.
+    expect(relayed).toContain(`${SPEC_FOLDER}/spec.md`);
+  });
+
+  // The cut is anchored on the lines the commands write, not on the shape of a
+  // line, because a report carries text the person wrote: the spec's No-Gos are
+  // printed at an indent, so a No-Go that names a command would be read as one.
+  // What follows it includes the count of instructions the spec aimed at the
+  // drafter — so a shape-matching cut would let a spec suppress the report of
+  // what it tried.
+  it("keeps a report whole around a No-Go that names a command", () => {
+    const report = [
+      "admitted PRB-1 (plan_review)",
+      "  no-gos    from the spec, kept out of the contract",
+      "            perbo run must not be called from the queue worker.",
+      "  flagged   2 issue-authored attempts — read as data, not followed",
+      "",
+      NEXT_STEPS[0],
+      "  perbo approve PRB-1",
+      "",
+      "  spec      specs/activation-email/spec.md",
+    ].join("\n");
+    const kept = withoutNextStep(report);
+    expect(kept).toContain("perbo run must not be called from the queue worker.");
+    expect(kept).toContain("flagged   2 issue-authored attempts");
+    expect(kept).toContain("specs/activation-email/spec.md");
+    expect(kept).not.toContain(NEXT_STEPS[0]);
+    expect(kept).not.toContain("perbo approve PRB-1");
+  });
 });
 
 describe("edit_plan (SCP-311 criterion 3)", () => {
@@ -426,6 +639,41 @@ describe("edit_plan (SCP-311 criterion 3)", () => {
     ], { spec: second });
     expect(readDraftSnapshot(dir, "PRB-2")?.edits ?? []).toHaveLength(1);
     expect(readDraftSnapshot(dir, "PRB-1")?.edits ?? []).toHaveLength(0);
+  });
+
+  // The other side of the same rule. An edit's report is relayed whether it
+  // worked or not, and a refused one is the text the dock shows without asking
+  // — so it is the one most likely to be read, and was the one still naming a
+  // command to type.
+  it("relays an edit, and a refused edit, without the commands to type", async () => {
+    const repo = repository();
+    const { sdk } = await interview(repo, [
+      writeSpec(),
+      generate,
+      { kind: "call", tool: "edit_plan", input: { graph_edit: { op: "remove_edge", from: "node_1", to: "node_2" } } },
+      // An edge to a node that is not in the plan: refused by the edit path.
+      { kind: "call", tool: "edit_plan", input: { graph_edit: { op: "remove_edge", from: "node_1", to: "node_404" } } },
+    ]);
+    const applied = sdk.calls[2]?.result ?? "";
+    expect(sdk.calls[2]?.isError).toBe(false);
+    expect(applied).toContain("PRB-1");
+    for (const step of NEXT_STEPS) expect(applied, step).not.toContain(step);
+    expect(applied).not.toContain("perbo approve");
+
+    // The refusal half is not judged by the same loop, because no refusal can
+    // fail it: `perbo edit` refuses by throwing, and a thrown message is the
+    // whole of what the interview relays — whatever the command wrote to its
+    // streams before it is dropped — so no refusal it issues carries a block,
+    // and a loop over NEXT_STEPS here would pass against any relay at all.
+    // What holds of a refused edit is that it reaches the session as an error
+    // in the command's own words and nothing besides, which is also what would
+    // catch a command to type if a refusal ever came to carry one.
+    const refused = sdk.calls[3]?.result ?? "";
+    expect(sdk.calls[3]?.isError).toBe(true);
+    expect(refused.trim()).toBe("this plan has no edge node_1 -> node_404");
+    // And a refused edit is not a recorded one: the edge that did come out is
+    // still the only edit this plan has.
+    expect(readDraftSnapshot(storeDir(repo, null), "PRB-1")?.edits ?? []).toHaveLength(1);
   });
 
   it("says a plan is approved rather than that none was drafted", async () => {
@@ -572,7 +820,7 @@ describe("the streamed protocol", () => {
 
 describe("Paseo (SCP-311 criterion 8)", () => {
   it("is followed as a design and named nowhere in the interview's own code", () => {
-    const here = dirname(new URL(import.meta.url).pathname);
+    const here = dirname(fileURLToPath(import.meta.url));
     const sources = [
       join(here, "..", "src", "interview.ts"),
       join(here, "..", "src", "interview-claude.ts"),
@@ -589,7 +837,7 @@ describe("Paseo (SCP-311 criterion 8)", () => {
 
 describe("the Claude Agent SDK", () => {
   it("is pinned in the catalog and in the lockfile", () => {
-    const root = join(dirname(new URL(import.meta.url).pathname), "..", "..", "..");
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
     const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
     const pinned = /"@anthropic-ai\/claude-agent-sdk":\s*(\d+\.\d+\.\d+)\s*$/m.exec(workspace);
     expect(pinned, "the catalog pins no @anthropic-ai/claude-agent-sdk").not.toBeNull();

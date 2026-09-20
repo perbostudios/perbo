@@ -316,6 +316,7 @@ const editTicket = tool({
       // The endpoint's tool names outcome, criteria and scope; a prohibited
       // path is a person's mark in the explorer, not a field a session sets.
       prohibited: [],
+    clearProhibited: false,
       manualReviewer: null,
       manualReason: null,
       graphEdit: null,

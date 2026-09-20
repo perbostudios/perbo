@@ -818,3 +818,120 @@ describe("a section whose text arrives twice", () => {
     expect(written.lastIndexOf("### Desktop")).toBeGreaterThan(written.indexOf("### CLI"));
   });
 });
+
+/**
+ * What the section looks like on the page: one blank line between a heading and
+ * what is under it, and one between one group and the next. Never two — a file
+ * a person opens in their own editor is a file they read.
+ */
+describe("the shape of a written Requirements section", () => {
+  const render = (requirements: string, options = {}) =>
+    renderSpec(
+      { ...EMPTY_SPEC_TEXT, title: "A screen time page", outcome: "It counts.", requirements },
+      options,
+    ).markdown.split("## Requirements\n\n")[1]!.split("\n## ")[0]!;
+
+  it("leaves one blank line under a heading that only holds a deeper one", () => {
+    const written = render("### Desktop\n#### Dock\n- The dock resizes.");
+    expect(written).toContain("### Desktop\n\n#### Dock\n\n- R1: The dock resizes.");
+    expect(written).not.toContain("\n\n\n");
+  });
+
+  it("keeps the mark alone when the section is emptied, with no blank line before it", () => {
+    const written = render("", { highWater: 3, existing: [{ id: "R3", text: "gone" }] });
+    expect(written.trimEnd()).toBe("<!-- perbo:requirement-ids through R3 -->");
+  });
+
+  it("writes no blank line run anywhere, whatever the arrangement", () => {
+    for (const requirements of [
+      "### A\n### B\n- x",
+      "### A\n- R1: x\n### B\n### A\n- R2: y",
+      "### A\n#### B\n##### C\n- x",
+      "- x\n### A\n- y",
+    ]) {
+      expect(render(requirements, { highWater: 2 })).not.toContain("\n\n\n");
+    }
+  });
+});
+
+/**
+ * A repeat is dropped only when nothing survived under it — at any depth. The
+ * requirement under a repeated heading's own deeper heading belongs to that
+ * heading, and moving it under the group before is the thing this rule exists
+ * to prevent.
+ */
+describe("a repeated heading that still holds something deeper", () => {
+  it("keeps it, and keeps the requirement under it rather than under the group before", () => {
+    const requirements = [
+      "### Desktop",
+      "#### Dock",
+      "- R1: The dock resizes.",
+      "### CLI",
+      "- R2: The command takes --json.",
+      "### Desktop",
+      "#### Dock",
+      "- R1: The dock resizes.",
+      "- The rail remembers its width.",
+      "### CLI",
+      "- R2: The command takes --json.",
+    ].join("\n");
+    const { markdown, requirements: out } = renderSpec(
+      { ...EMPTY_SPEC_TEXT, title: "T", outcome: "O", requirements },
+      { highWater: 2, existing: [{ id: "R1", text: "The dock resizes." }] },
+    );
+    const written = markdown.split("## Requirements\n\n")[1]!.split("\n## ")[0]!;
+    expect(out.map((each) => each.id)).toEqual(["R1", "R2", "R3"]);
+    // The new requirement sits under the second Desktop, not under CLI.
+    expect(written.indexOf("R3")).toBeGreaterThan(written.lastIndexOf("### Desktop"));
+    expect(written.lastIndexOf("### Desktop")).toBeGreaterThan(written.indexOf("### CLI"));
+  });
+
+  it("drops a repeat whose whole subtree deduplicated away", () => {
+    const half = "### Desktop\n#### Dock\n- R1: The dock resizes.";
+    const written = renderSpec(
+      { ...EMPTY_SPEC_TEXT, title: "T", outcome: "O", requirements: `${half}\n${half}` },
+      { highWater: 1, existing: [{ id: "R1", text: "The dock resizes." }] },
+    ).markdown
+      .split("## Requirements\n\n")[1]!
+      .split("\n## ")[0]!;
+    expect(written.match(/### Desktop/g)).toHaveLength(1);
+    expect(written.match(/#### Dock/g)).toHaveLength(1);
+  });
+});
+
+/**
+ * The mark names the highest id the file has ever held. A line that merely
+ * quotes it is a line a person wrote, and deleting it would lose their sentence
+ * silently — the one thing an editor may not do.
+ */
+describe("a line that quotes the requirement-id mark", () => {
+  const quoting = "- R1: The section ends with <!-- perbo:requirement-ids through R2 --> at its foot.";
+
+  it("is kept as the requirement it is, by the editor as well as the strict parser", () => {
+    const requirements = `${quoting}\n- R2: Something else.`;
+    const { markdown, requirements: out } = renderSpec(
+      { ...EMPTY_SPEC_TEXT, title: "T", outcome: "O", requirements },
+      { highWater: 2 },
+    );
+    expect(out.map((each) => each.id)).toEqual(["R1", "R2"]);
+    expect(parseSpec(markdown).requirements.map((each) => each.id)).toEqual(["R1", "R2"]);
+    // And the editor reads back what the strict parser reads.
+    expect(readSpecSections(markdown).requirements.map((each) => each.id)).toEqual(["R1", "R2"]);
+    // A second save keeps it rather than dropping the line it quoted.
+    const again = renderSpec(
+      { ...EMPTY_SPEC_TEXT, title: "T", outcome: "O", requirements: readSpecSections(markdown).text.requirements },
+      { highWater: 2 },
+    );
+    expect(again.requirements).toHaveLength(2);
+  });
+
+  it("does not move the high-water mark to the number it quotes", () => {
+    const { highWater } = renderSpec({
+      ...EMPTY_SPEC_TEXT,
+      title: "T",
+      outcome: "O",
+      requirements: "- The line mentions <!-- perbo:requirement-ids through R9 --> and nothing else.",
+    });
+    expect(highWater).toBe(1);
+  });
+});

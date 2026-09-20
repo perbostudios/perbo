@@ -14,9 +14,9 @@ import { useSyncExternalStore } from "react";
  * second rule for the same thing is a rule the drag would stop agreeing with —
  * the edge would stand still under a pointer that was still moving.
  */
-export const DEFAULT_DOCK_WIDTH = 344;
+export const DEFAULT_DOCK_WIDTH = 300;
 /** Narrow enough to put the chat out of the way, wide enough to still read it. */
-export const MIN_DOCK_WIDTH = 280;
+export const MIN_DOCK_WIDTH = 252;
 export const MAX_DOCK_WIDTH = 760;
 /** What the pane beside it keeps, whatever the dock is dragged to. */
 export const MIN_PANE_WIDTH = 360;

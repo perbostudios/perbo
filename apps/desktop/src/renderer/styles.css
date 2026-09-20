@@ -40,10 +40,48 @@ h3 {
 p {
   line-height: 1.6;
 }
-code,
+code {
+  font-family: var(--mono);
+  font-size: calc(12px * var(--text-scale));
+}
+/* The surfaces the browser draws for us still belong to the design: a page
+   that themes its own elements and leaves the selection, the caret and the
+   scrollbars at their defaults is a page assembled rather than built. */
+::selection {
+  background: rgba(var(--amber-rgb), 0.28);
+  color: var(--ink);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
 .mono {
   font-family: var(--mono);
   font-size: calc(12px * var(--text-scale));
+  /* A figure read against the one above it is read by its columns, so the
+     digits are the same width whatever they are. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 .muted {
   color: var(--muted);
@@ -1302,6 +1340,26 @@ textarea {
   border-style: dashed;
   background: transparent;
   color: var(--muted);
+}
+/* What the scope does not cover, on the page that freezes it. Advice, so it
+   reads as a line of the contract rather than as an alarm across it: one rule
+   above it, the same ink as its neighbours, and no colour doing the arguing. */
+.scope-outside {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.5;
+}
+.scope-outside > span {
+  flex: 1;
+}
+.scope-outside .text-button {
+  flex: none;
+  white-space: nowrap;
 }
 .scope-message {
   display: flex;
@@ -4015,21 +4073,18 @@ kbd {
   color: var(--ink);
   overflow-wrap: anywhere;
 }
-/* The highlighter: a wash rather than a fill, so it reads as one in both
-   palettes — the paper colours are a hair off the surface in the dark one and
-   the mark would not be there at all. The shadow is what makes it a stroke of
-   highlighter instead of a box: it spreads the same colour past the glyphs
-   without moving them. */
+/* Weight and ink, and no wash behind it. A highlighter drawn across a line of
+   a spec fights the text it is meant to lift: the page is already short, and
+   on a short page the heavier word is the loud one without any help. */
 .spec-strong {
   font-weight: 600;
   color: var(--ink);
-  background: rgba(var(--green-rgb), 0.22);
-  box-shadow: 0 0 0 2.5px rgba(var(--green-rgb), 0.22);
-  border-radius: 2px;
 }
+/* The emphasis a writer typed, in the ink the rest of the page marks with, so
+   a spec is read in one palette rather than two. */
 .spec-em {
   font-style: italic;
-  color: var(--blue);
+  color: var(--amber-text);
 }
 .spec-missing {
   color: var(--red);
@@ -4152,13 +4207,41 @@ kbd {
   color: var(--muted);
 }
 
+/* The action sits at the end of its block, where a hand goes looking for it,
+   and what it does is read on the way there. */
 .spec-generate {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
   flex-wrap: wrap;
   padding: 20px 30px;
   border-bottom: 1.5px solid var(--line);
+}
+.spec-generate > .small {
+  margin-right: auto;
+  order: -1;
+  max-width: 62ch;
+}
+/* Mounted and out of the way: the composer is what lands on the drafted
+   contract when a job settles, so it is never unmounted — but its steps are
+   not a second way to plan, offered under the first. */
+/* The nodes a graph divided the work into, on the page that freezes them. */
+.contract-nodes ol {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.contract-nodes li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.spec-typed.spec-typed--away {
+  display: none;
 }
 .spec-typed {
   display: flex;
@@ -4758,8 +4841,29 @@ kbd {
 .approve-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
   flex: none;
+  margin-left: auto;
+}
+/* The way onward from a pane that shows the plan, sitting where every other
+   pane's primary control sits: the bottom right of its own window. It is flex
+   none against panes that scroll, so it stays put rather than scrolling away
+   from the thing it acts on. */
+.pane-confirm {
+  flex: none;
+  padding: 10px 16px 12px;
+  border-top: 1.5px solid var(--line);
+  background: var(--paper);
+  /* `.approve-actions` pushes itself to the end of the Graph's own footer row
+     with `margin-left: auto`, which here — as the last child of a column —
+     would push this bar off to the right at half the pane's width. It is the
+     footer rather than an item in one, so it spans. */
+  margin-left: 0;
+  width: 100%;
+}
+.pane-confirm .small {
+  margin-right: auto;
 }
 .graph-history {
   flex: 1;
@@ -4926,8 +5030,11 @@ kbd {
 }
 .msg {
   border-radius: var(--radius);
-  padding: 8px 11px 9px;
-  font-size: calc(12.5px * var(--text-scale));
+  padding: 7px 10px 8px;
+  /* A step down from the pane beside it: the dock is a column of short turns
+     read one after another, not a document. It still scales with the text
+     size a person set, so this narrows the column rather than fixing it. */
+  font-size: calc(11.75px * var(--text-scale));
   line-height: 1.5;
   white-space: pre-wrap;
   margin: 0;
@@ -4987,6 +5094,33 @@ kbd {
   display: flex;
   align-items: baseline;
   gap: 8px;
+}
+/* With the box for a person's own words open under it, the two are one panel:
+   the card's bottom edge is straightened and its border dropped, and the box
+   below gives up its own, so what divides them is the one line the composer
+   already draws across the dock rather than two curved edges facing each
+   other. */
+.asked-card--joined {
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-bottom: 10px;
+}
+.composer--joined .composer-box {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+/* The mark on the two answers every question carries. */
+.choice-icon {
+  flex: none;
+  color: var(--muted);
+  margin-right: 1px;
+}
+.choice.selected .choice-icon {
+  color: var(--accent);
 }
 .asked-head b {
   font-size: calc(12.5px * var(--text-scale));

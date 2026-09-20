@@ -100,11 +100,12 @@ describe("Create in the rail (SCP-334)", () => {
     expect(location.hash).toMatch(/^#planning\//);
     const panes = screen.getByRole("group", { name: "Planning panes" });
     expect(within(panes).getByRole("button", { name: "Spec" }).getAttribute("aria-current")).toBe("page");
-    expect(railNames().slice(0, 7)).toEqual([
+    // No plan yet, so no graph to offer: Spec, the files it is written
+    // against, and what it is likely to touch.
+    expect(railNames().slice(0, 6)).toEqual([
       "Create",
       "Spec",
       "Explorer",
-      "Graph",
       "Impact",
       "Home",
       "Archive",
@@ -169,7 +170,7 @@ describe("Create in the rail (SCP-334)", () => {
   it("lists a session the picker just opened first, before the host's refresh lands", async () => {
     const workspace = await previewBridge.request({ kind: "snapshot" });
     const session = await previewBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId: workspace.repositories[0]!.id } });
-    const stale = { ...workspace, drafts: [{ id: "older", repoId: session.repoId, key: null, outcome: "An older draft", phase: "editing" as const }] };
+    const stale = { ...workspace, drafts: [{ id: "older", repoId: session.repoId, key: null, outcome: "An older draft", phase: "editing" as const, nodes: 0, scope: { paths: [], prohibited: [] } }] };
     const seeded = withDraft(stale, session);
     expect(seeded.drafts!.map((draft) => draft.id)).toEqual([session.id, "older"]);
     expect(withDraft(seeded, session).drafts!.map((draft) => draft.id)).toEqual([session.id, "older"]);
@@ -582,7 +583,8 @@ describe("the Spec pane (SCP-336)", () => {
     const ready = async (): Promise<void> => {
       await startPlanning();
       await write(SPEC);
-      await screen.findByText(/exported TS symbols/);
+      // The index reports behind the dot in the pane head.
+      await screen.findAllByRole("button", { name: "About the symbol index" });
     };
     const notes = (): HTMLTextAreaElement =>
       specField("Spec Notes") as HTMLTextAreaElement;
@@ -682,8 +684,11 @@ describe("the Spec pane (SCP-336)", () => {
 
     it("counts the names not in the index, beside the index's size and its commit", async () => {
       await ready();
-      await screen.findByText("every @name resolves");
-      expect(screen.getByText("index · 7 exported TS symbols · 9f2c1ab")).toBeTruthy();
+      // Nothing is said when every name resolves: the absence of the warning
+      // below is the answer, and the index's own size is behind the dot.
+      expect(screen.queryByText(/name is not|names are not/)).toBeNull();
+      expect(screen.getAllByText(/7 exported TypeScript symbols, read at 9f2c1ab/).length)
+        .toBeGreaterThan(0);
 
       type("@signUp and @retryQueue.");
       fireEvent.blur(notes());
@@ -716,8 +721,10 @@ describe("the Spec pane (SCP-336)", () => {
     it("checks no name in a repository the index cannot describe, and says why", async () => {
       await startPlanning(/example\/landing/);
       await write({ title: "A landing page", "Spec Notes": "@signUp is not checked here." });
-      await screen.findByText("no TypeScript or JavaScript here, so no @name is checked");
-      expect(screen.getByText(/index · not built: no tracked TypeScript or JavaScript/)).toBeTruthy();
+      // A repository with nothing to check says so once, behind the dot, and
+      // not a second time in the line beside it.
+      await screen.findAllByRole("button", { name: "About the symbol index" });
+      expect(screen.queryByText(/so no @name is checked/)).toBeNull();
       // Nothing is marked wrong: there is no list to be missing from.
       expect(document.querySelectorAll(".sym--unknown")).toHaveLength(0);
       expect(screen.queryByRole("button", { name: /^Use @/ })).toBeNull();
@@ -1322,6 +1329,7 @@ describe("the Spec pane (SCP-336)", () => {
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
     const drafts = (await previewBridge.request({ kind: "drafts" })) ?? [];
     location.hash = `planning/${drafts[0]!.id}/spec`;
+    await screen.findByLabelText("Spec title");
     fireEvent.click(await screen.findByRole("button", { name: "Start over from the spec…" }));
     const dialog = await screen.findByRole("dialog", { name: "Start over from the spec?" });
     const startOver = (): HTMLButtonElement => within(dialog).getByRole("button", { name: "Start over" }) as HTMLButtonElement;
@@ -1358,7 +1366,7 @@ describe("the Spec pane (SCP-336)", () => {
 
     await screen.findByText("specs/a-light-colour-mode/spec.md");
     await waitFor(() => expect(specField("Spec Requirements").value).toContain("R2:"));
-    await screen.findByText("Saved in the repository — the file is the spec");
+    await screen.findByText("Saved");
     expect(specField("Spec Requirements").value).toContain("- R1: The person can choose Light, Dark or System.");
     expect(specField("Spec Requirements").value).toContain("- R2: Text meets WCAG AA contrast.");
     expect(specField("Spec Requirements").value).not.toContain("R3:");
@@ -1403,7 +1411,9 @@ describe("the Spec pane (SCP-336)", () => {
     await screen.findByText("Drafting the plan from your spec");
     // It lands on the drafted contract, as compiling one does.
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    expect(location.hash).toMatch(/^#task\//);
+    // The drafter divides this spec into two nodes, so the plan has a graph
+    // and the graph is what is shown; a flat plan lands on the contract.
+    expect(location.hash).toMatch(/^#planning\/[^/]+\/graph$/);
 
     // Back in planning, each requirement names the node its criteria sit in.
     const drafts = (await previewBridge.request({ kind: "drafts" })) ?? [];
@@ -1429,6 +1439,7 @@ describe("the Spec pane (SCP-336)", () => {
     const version = (await previewBridge.request({ kind: "detail", repoId: planning.repoId, key }))
       .ticket.plan_version;
     location.hash = `planning/${planning.id}/spec`;
+    await screen.findByLabelText("Spec title");
 
     fireEvent.click(await screen.findByRole("button", { name: "Start over from the spec…" }));
     const dialog = await screen.findByRole("dialog", { name: /Start over from the spec/ });
@@ -1537,19 +1548,22 @@ describe("the Graph pane (SCP-316)", () => {
   const graphOf = (plan: { repoId: string; key: string }) =>
     previewBridge.request({ kind: "graphRead", repoId: plan.repoId, key: plan.key });
 
-  it("approves the plan on the fixed binding, producing the contract the runner reads", async () => {
+  it("confirms the plan on the fixed binding, and approval waits for the contract", async () => {
     const plan = await openGraph();
     const detail = () => previewBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key });
     expect((await detail()).ticket.approved_at).toBeNull();
-    expect(screen.getByRole("button", { name: "Approve · start the loop" })).toBeTruthy();
+    // The graph says the division is right; what freezes is stated on the
+    // contract, so that is where approving happens and nowhere else.
+    expect(screen.getByRole("button", { name: "Confirm the plan" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
     // ⇧⌘↵, which is fixed and cannot be rebound.
     expect(effectiveShortcuts({}).approve).toBe("Shift+Meta+Enter");
     fireEvent.keyDown(window, { key: "Enter", metaKey: true, shiftKey: true });
-    await waitFor(async () => expect((await detail()).ticket.approved_at).not.toBeNull());
-    // The same request the contract screen sends: approve, then the loop.
-    await waitFor(async () =>
-      expect((await previewBridge.request({ kind: "snapshot" })).jobs.some((job) => job.kind === "run")).toBe(true),
-    );
+    await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/));
+    // Nothing is approved and nothing runs until it is approved there.
+    expect((await detail()).ticket.approved_at).toBeNull();
+    expect((await previewBridge.request({ kind: "snapshot" })).jobs.some((job) => job.kind === "run"))
+      .toBe(false);
   });
 
   it("moves the size estimate as the graph changes", async () => {
@@ -1711,7 +1725,7 @@ describe("the Graph pane (SCP-316)", () => {
     expect(pane("Graph").getAttribute("aria-current")).toBe("page");
   });
 
-  it("approves a flat plan, which has criteria and no graph to curate", async () => {
+  it("confirms a flat plan, which has criteria and no graph to curate", async () => {
     const plan = await planned();
     const edit = async (edit: GraphEdit) =>
       previewBridge.request({ kind: "graphEdit", repoId: plan.repoId, key: plan.key, edit });
@@ -1725,8 +1739,11 @@ describe("the Graph pane (SCP-316)", () => {
     await screen.findByText(/This plan is flat/);
     const detail = () => previewBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key });
     expect((await detail()).ticket.approved_at).toBeNull();
-    fireEvent.click(await screen.findByRole("button", { name: "Approve · start the loop" }));
-    await waitFor(async () => expect((await detail()).ticket.approved_at).not.toBeNull());
+    // A flat plan is confirmed the same way: the contract is where what
+    // freezes is stated, whether or not the work was divided.
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }));
+    await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/));
+    expect((await detail()).ticket.approved_at).toBeNull();
   });
 
   /**
@@ -1763,7 +1780,12 @@ describe("the Graph pane (SCP-316)", () => {
         ),
       ).toBe(false);
     await waitFor(settled, { timeout: 6000 });
-    fireEvent.click(await screen.findByRole("button", { name: "Approve · start the loop" }));
+    // Confirm on the graph, approve on the contract: one approval, on the
+    // page that says what freezes.
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 }),
+    );
     // The loop is running; the person comes back to the graph to watch it.
     await waitFor(
       async () =>
@@ -1840,7 +1862,11 @@ describe("the Graph pane (SCP-316)", () => {
       }),
     );
     await screen.findByLabelText("Spec title");
-    fireEvent.click(pane("Graph"));
+    // The rail does not offer Graph before there is one, so this is the pane
+    // a link or a restored route can still land on: it says what it has.
+    expect(screen.queryByRole("button", { name: "Graph" })).toBeNull();
+    const planning = (await previewBridge.request({ kind: "drafts" }))![0]!;
+    location.hash = `planning/${planning.id}/graph`;
     await screen.findByText("No graph yet");
     expect(screen.queryByRole("button", { name: "Node" })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
@@ -1914,7 +1940,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     location.hash = `planning/${plan.id}/spec`;
     mount();
     await screen.findByLabelText("Spec title");
-    for (const name of ["Spec", "Explorer", "Graph"]) {
+    for (const name of ["Spec", "Explorer", "Impact"]) {
       fireEvent.click(pane(name));
       // The dock is beside the pane, not inside it, so it survives the switch.
       await waitFor(() => expect(dock()).toBeTruthy());
@@ -1973,6 +1999,8 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       .map((node) => node.textContent ?? "")
       .join("");
     expect(shown).toContain("Asked 3 questions");
+    // The count says how much is still queued; the titles say what it is about.
+    expect(shown).toContain("about ");
     expect(shown).not.toContain("Where does the split go?");
     const dot = within(said).getByRole("button", { name: "The questions that were asked" });
     const hint = within(said).getByRole("tooltip", { hidden: true });
@@ -2112,6 +2140,10 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     await waitFor(() =>
       expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false),
     );
+    // And the box has the caret: saying the answer is not on the card is
+    // already the start of typing it, so the next keystroke lands in the box
+    // without a hand leaving the keyboard for the mouse.
+    await waitFor(() => expect(document.activeElement).toBe(composer()));
 
     await waitFor(() => expect(within(dock()).getAllByText(/Noted:/)).toHaveLength(1));
   });
@@ -2275,7 +2307,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(
-      await within(dock()).findByText(/Named from your first message: specs\/add-a-dark-mode-toggle/),
+      await within(dock()).findByText(/Named specs\/add-a-dark-mode-toggle from your first message/),
     ).toBeTruthy();
     // The turn was heard: the session answers it, and the composer is ready
     // for the next one.
@@ -2303,7 +2335,31 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     await waitFor(() => expect(composer().value).toBe("?!?!"));
   });
 
-  it("takes the Undo off a card once a later edit is in the way", async () => {
+  // The refused arm of the same rule. A call that worked is dropped for saying
+  // what the graph already says; one that was refused is said nowhere else —
+  // no `asked` follows a rejected call — so dropping it too would leave the
+  // dock on "Working…" and then nothing at all.
+  it("keeps a refused tool card, and shows its reason without asking", async () => {
+    const session = await planning();
+    location.hash = `planning/${session.id}/spec`;
+    mount();
+    await screen.findByLabelText("Message the interview");
+    fireEvent.change(composer(), { target: { value: "refuse it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    // Named for what it tried rather than what it did: it never happened.
+    expect(await within(dock()).findByText("Changing the plan")).toBeTruthy();
+    expect(within(dock()).getByText("refused by the edit path")).toBeTruthy();
+    // The reason is on the page, not behind the i: it is the thing to act on.
+    expect(within(dock()).getByText(/node_404 is not in this plan/)).toBeTruthy();
+    expect(
+      within(dock()).queryByRole("button", { name: /^What happened/ }),
+    ).toBeNull();
+    // And the turn ended, so the dock is not left saying it is working.
+    await waitFor(() => expect(within(dock()).queryByText("Working…")).toBeNull());
+  });
+
+  it("takes a card away once a later edit puts its undo out of reach", async () => {
     const session = await planning();
     const current = await previewBridge.request({ kind: "editingRead", id: session.id });
     await previewBridge.request({
@@ -2335,6 +2391,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       await waitFor(() => expect(composer().value).toBe(""));
     }
     expect(await within(dock()).findByRole("button", { name: /^Undo/ })).toBeTruthy();
+    expect(within(dock()).getByText("Changed the plan")).toBeTruthy();
 
     // A hand edit lands after it, which D-100 says an undo may not reach past.
     const plan = { repoId: session.repoId, key: key! };
@@ -2350,11 +2407,70 @@ describe("the interview docked in planning mode (SCP-313)", () => {
         expected_verification: { kind: second.kind, assertion: second.assertion },
       },
     });
-    // The card asks the plan rather than the snapshot it was drawn from, so it
-    // stops offering an undo the host would refuse.
+    // The card asks the plan rather than the snapshot it was drawn from. With
+    // the undo out of reach it carries nothing the graph does not already show,
+    // so the whole card goes rather than the button alone — asserted on the
+    // card's own name, since a missing button cannot tell the two apart.
     await waitFor(() =>
       expect(within(dock()).queryByRole("button", { name: /^Undo/ })).toBeNull(),
     );
+    expect(within(dock()).queryByText("Changed the plan")).toBeNull();
+    // The conversation it was standing in is untouched: what goes is the panel,
+    // not the turns around it.
+    expect(within(dock()).getAllByText(/tighten the first criterion/).length).toBeGreaterThan(0);
+  });
+
+  // The other two arms of the same rule. A card is kept or dropped by which
+  // tool made it, so each tool needs its own run: a drafting happens once and
+  // is the only word on what the spec aimed at the drafter, and an undo is the
+  // only word that a change was taken back. Neither is said anywhere else, and
+  // neither may be dropped for being a tool call that worked.
+  it("keeps the drafting and the undo, which are said nowhere else", async () => {
+    const session = await planning();
+    const current = await previewBridge.request({ kind: "editingRead", id: session.id });
+    await previewBridge.request({
+      kind: "editingSubmit",
+      id: session.id,
+      revision: current.revision,
+      operationId: crypto.randomUUID(),
+      intent: "generate",
+    });
+    await waitFor(
+      async () =>
+        expect((await previewBridge.request({ kind: "editingRead", id: session.id })).key).not.toBeNull(),
+      { timeout: 5000 },
+    );
+    location.hash = `planning/${session.id}/spec`;
+    mount();
+    await screen.findByLabelText("Message the interview");
+
+    const say = async (text: string): Promise<void> => {
+      fireEvent.change(composer(), { target: { value: text } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      await waitFor(() => expect(composer().value).toBe(""));
+    };
+    // A turn to get past the refusal the sample opens with, then an edit, so
+    // there is something for the undo to take back.
+    await say("what is this for?");
+    await say("tighten the first criterion");
+    expect(await within(dock()).findByText("Changed the plan")).toBeTruthy();
+
+    // The drafting: kept, and its report reachable rather than shown.
+    await say("draft it");
+    expect(await within(dock()).findByText("Drafted the plan")).toBeTruthy();
+    expect(
+      within(dock()).getByRole("button", { name: "What happened: Drafted the plan" }),
+    ).toBeTruthy();
+
+    // The undo: kept, though no undo is ever offered on an undo's own card —
+    // the plan's history refuses to undo one, so it can never be the edit the
+    // card's button points at, and a rule that kept only those would lose it.
+    await say("take it back");
+    expect(await within(dock()).findByText("Took a change back")).toBeTruthy();
+    // And the edit it took back is gone from the chat with its undo, while the
+    // drafting is still there.
+    await waitFor(() => expect(within(dock()).queryByText("Changed the plan")).toBeNull());
+    expect(within(dock()).getByText("Drafted the plan")).toBeTruthy();
   });
 
   it("opens the plan's history over the pane, with the chat still beside it", async () => {
@@ -2487,13 +2603,112 @@ describe("the Impact pane (SCP-320)", () => {
   };
   const row = (path: string) => screen.getByLabelText(path);
 
+  // A plan is the thing impact is measured against, so the plan arriving is the
+  // question being asked. Somebody who has just had one drafted and opens this
+  // pane wants what it disturbs, not a button that will tell them.
+  it("asks once on its own when the planning has a plan, and not again", async () => {
+    const asked = vi.spyOn(previewBridge, "request");
+    const runs = (): number =>
+      asked.mock.calls.filter(([request]) => request.kind === "impactRead").length;
+    try {
+      await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
+      const opened = await session();
+      expect(runs()).toBe(0);
+      // A plan needs a spec to be drafted from, through the host as the Spec
+      // pane's own Generate does.
+      await previewBridge.request({
+        kind: "specSave",
+        id: opened.id,
+        repoId: opened.repoId,
+        title: "A light colour mode",
+        sections: {
+          outcome: "The application supports a usable light colour mode.",
+          requirements: "- The person can choose Light, Dark or System without a restart.",
+          no_gos: "",
+          rabbit_holes: "",
+          notes: "",
+        },
+        base: NOTHING_YET,
+      });
+      const withSpec = await session();
+      await previewBridge.request({
+        kind: "editingSubmit",
+        id: withSpec.id,
+        revision: withSpec.revision,
+        operationId: crypto.randomUUID(),
+        intent: "generate",
+      });
+      await waitFor(
+        async () => expect((await session()).key).not.toBeNull(),
+        { timeout: 5000 },
+      );
+      // No button was pressed, and the answer arrives.
+      await waitFor(() => expect(runs()).toBeGreaterThan(0));
+      await waitFor(() => expect(screen.queryByText("not checked yet")).toBeNull());
+      const once = runs();
+      // And it is asked once: the answer is a whole `perbo index` over the
+      // tracked tree, so a re-render is not a reason to run it again.
+      await waitFor(() => expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy());
+      expect(runs()).toBe(once);
+    } finally {
+      asked.mockRestore();
+    }
+  });
+
+  // A person settles a plan from whichever pane answered their last question,
+  // so the way onward is on all three rather than only on the Graph. It
+  // confirms and never approves: the contract is the page that states what
+  // freezes, and it carries the one approval there is.
+  it.each(["Impact", "Explorer"])("offers the way to the contract from %s", async (pane) => {
+    await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
+    // No plan yet, so there is nothing to confirm and the control is absent —
+    // these panes are read while the work is still being described.
+    await openPane(pane);
+    expect(screen.queryByRole("button", { name: "Confirm the plan" })).toBeNull();
+
+    const opened = await session();
+    await previewBridge.request({
+      kind: "specSave",
+      id: opened.id,
+      repoId: opened.repoId,
+      title: "A light colour mode",
+      sections: {
+        outcome: "The application supports a usable light colour mode.",
+        requirements: "- The person can choose Light, Dark or System without a restart.",
+        no_gos: "",
+        rabbit_holes: "",
+        notes: "",
+      },
+      base: NOTHING_YET,
+    });
+    const withSpec = await session();
+    await previewBridge.request({
+      kind: "editingSubmit",
+      id: withSpec.id,
+      revision: withSpec.revision,
+      operationId: crypto.randomUUID(),
+      intent: "generate",
+    });
+    await waitFor(async () => expect((await session()).key).not.toBeNull(), { timeout: 5000 });
+
+    await openPane(pane);
+    // Read before the click: confirming leaves planning, and the session is
+    // read off the route this is standing on.
+    const key = (await session()).key!;
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }));
+    // The contract, and not an approval taken on a pane that never said what
+    // it was freezing.
+    await waitFor(() => expect(location.hash).toContain(`${key}/contract`));
+  });
+
   it("sits last in the rail's planning panes, and asks for nothing until it is asked", async () => {
     await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
-    expect(railNames().slice(0, 7)).toEqual([
+    // No plan has been drafted here, so there is no graph to offer and Impact
+    // is last of the three that are.
+    expect(railNames().slice(0, 6)).toEqual([
       "Create",
       "Spec",
       "Explorer",
-      "Graph",
       "Impact",
       "Home",
       "Archive",

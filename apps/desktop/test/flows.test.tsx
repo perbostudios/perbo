@@ -146,6 +146,14 @@ describe("interactive desktop flows", () => {
     expect(
       within(dialog).getByText("Choose an approach before continuing."),
     ).toBeTruthy();
+    // Picking "Something else" hands the box under it the caret: saying the
+    // answer is not on the list is already the start of writing one.
+    fireEvent.click(
+      within(dialog).getByRole("radio", { name: /Something else/ }),
+    );
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("textbox", { name: "Your approach" }),
+    );
     fireEvent.click(within(dialog).getAllByRole("radio")[0]!);
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     fireEvent.click(await screen.findByRole("button", { name: "Answer" }));
@@ -557,5 +565,215 @@ describe("interactive desktop flows", () => {
       .find((task) => task.ticket.key === "PRB-421")!;
     expect(after.ticket.state).toBe(state);
     await running.stop();
+  });
+});
+
+/**
+ * The repository's files, reached from the contract and read-only there.
+ *
+ * Scope is one of the four fields approval freezes, and it reads as globs; the
+ * files those globs reach are what a person is actually approving. Marking is
+ * deliberately absent: a mark writes the editing session's draft and reaches
+ * the contract only through a compile, while approval sends the contract
+ * file's digest, which a mark never changes.
+ */
+describe("the files a contract's scope reaches", () => {
+  it("opens from the contract read-only, says what is in scope, and goes back", async () => {
+    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const row = workspace.tasks[0]!;
+    const detail = structuredClone(
+      await previewBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }),
+    );
+    detail.ticket = { ...row.ticket, state: "plan_review", approved_at: null };
+    detail.attempts = [];
+    client.setQueryData(["detail", row.repoId, row.ticket.key], detail);
+    function AtTheContract() {
+      const [view, setView] = useState<TaskView>("contract");
+      return (
+        <TaskPage
+          workspace={workspace}
+          navigate={(next) => setView(next.page === "task" ? next.view ?? "contract" : "contract")}
+          repoId={row.repoId}
+          taskKey={row.ticket.key}
+          view={view}
+          edit={false}
+        />
+      );
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <AtTheContract />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Browse the files this scope reaches" }),
+    );
+    const tree = await screen.findByRole("tree", { name: "Tracked files" });
+
+    // Read-only: none of the planning pane's mark controls came with it.
+    expect(screen.queryByRole("group", { name: "Mark for this draft" })).toBeNull();
+    expect(screen.queryByText("For this draft")).toBeNull();
+
+    // What it says instead is whether this contract reaches a row. A collapsed
+    // folder is not reached by a glob that points inside it, so the files the
+    // glob names are what is asked for — the filter flattens the tree to them.
+    const inside = detail.contract.scope.paths_allowed[0]!.replace(/[*?[\]].*$/, "").replace(/\/$/, "");
+    fireEvent.change(screen.getByLabelText("Filter files"), { target: { value: inside } });
+    await waitFor(() =>
+      expect(within(tree).queryAllByText("in scope").length).toBeGreaterThan(0),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to the contract" }));
+    await screen.findByText(/Four fields freeze when you approve/);
+  });
+});
+
+/**
+ * Throwing the planning away takes the ticket it drafted with it.
+ *
+ * Discarding used to mark the session discarded and nothing else, so a ticket
+ * that planning had already drafted stayed on the board with no way back to
+ * the plan it came from — a delete that deleted the way in and not the thing.
+ */
+describe("discarding a plan", () => {
+  it("deletes the ticket it drafted itself", async () => {
+    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const repoId = workspace.repositories[0]!.id;
+    const opened = await previewBridge.request({
+      kind: "editingOpen",
+      target: { kind: "fresh", repoId },
+    });
+    // It has to draft one: a planning that never admitted a ticket has none of
+    // its own to throw away.
+    expect(opened.key).toBeNull();
+    await previewBridge.request({
+      kind: "specSave",
+      id: opened.id,
+      repoId,
+      title: "A light colour mode",
+      sections: {
+        outcome: "The application supports a usable light colour mode.",
+        requirements: "- The person can choose Light, Dark or System without a restart.",
+        no_gos: "",
+        rabbit_holes: "",
+        notes: "",
+      },
+      base: {
+        title: "",
+        sections: { outcome: "", requirements: "", no_gos: "", rabbit_holes: "", notes: "" },
+      },
+    });
+    const withSpec = await previewBridge.request({ kind: "editingRead", id: opened.id });
+    await previewBridge.request({
+      kind: "editingSubmit",
+      id: opened.id,
+      revision: withSpec.revision,
+      operationId: crypto.randomUUID(),
+      intent: "generate",
+    });
+    let key: string | null = null;
+    await waitFor(
+      async () => {
+        key = (await previewBridge.request({ kind: "editingRead", id: opened.id })).key;
+        expect(key).not.toBeNull();
+      },
+      { timeout: 5000 },
+    );
+
+    await previewBridge.request({ kind: "editingDiscard", id: opened.id });
+    const after = await previewBridge.request({ kind: "snapshot" });
+    expect(after.tasks.some((each) => each.ticket.key === key)).toBe(false);
+    expect(after.drafts?.some((draft) => draft.id === opened.id) ?? false).toBe(false);
+  });
+
+  // The other side of the same rule, and the one that costs somebody their
+  // work if it is wrong. A planning opened over a ticket the CLI admitted, or
+  // over one another session drafted, holds that key from birth and did not
+  // make it: throwing the planning away must leave the ticket where it was.
+  it("leaves a ticket it was only opened over", async () => {
+    const before = await previewBridge.request({ kind: "snapshot" });
+    const row = before.tasks.find((each) => each.ticket.state === "plan_review") ?? before.tasks[0]!;
+    const session = await previewBridge.request({
+      kind: "editingOpen",
+      target: { kind: "ticket", repoId: row.repoId, key: row.ticket.key },
+    });
+    expect(session.key).toBe(row.ticket.key);
+
+    await previewBridge.request({ kind: "editingDiscard", id: session.id });
+    const after = await previewBridge.request({ kind: "snapshot" });
+    expect(after.tasks.some((each) => each.ticket.key === row.ticket.key)).toBe(true);
+    // The planning is gone; only the ticket it never made stays.
+    expect(after.drafts?.some((draft) => draft.id === session.id) ?? false).toBe(false);
+  });
+
+  // A ticket that has run is kept twice over: this planning did not admit it,
+  // and `deleteContract` refuses a state past planning anyway. The first
+  // answer comes first, so what this proves is that the ticket survives —
+  // not which of the two rules saved it.
+  it("keeps a ticket whose loop has run", async () => {
+    const before = await previewBridge.request({ kind: "snapshot" });
+    const run = before.tasks.find(
+      (each) => !["draft", "specifying", "plan_review", "ready", "plan_invalid"].includes(each.ticket.state),
+    );
+    if (!run) return;
+    const session = await previewBridge.request({
+      kind: "editingOpen",
+      target: { kind: "ticket", repoId: run.repoId, key: run.ticket.key },
+    });
+    await previewBridge.request({ kind: "editingDiscard", id: session.id });
+    const after = await previewBridge.request({ kind: "snapshot" });
+    expect(after.tasks.some((each) => each.ticket.key === run.ticket.key)).toBe(true);
+  });
+});
+
+/**
+ * An approved contract's scope is frozen, and the freeze is the CLI's:
+ * `perbo edit` refuses every state but plan_review. Nothing on the mark path
+ * asked, so a mark against an approved ticket was taken and could never be
+ * compiled in.
+ *
+ * The standing list is the one exception, and it is the half that has to be
+ * shown as well: it is the repository's list rather than this ticket's, and
+ * D-105 has the guard read it again when a run starts, so it binds an approved
+ * ticket and is written from one.
+ */
+describe("marking a path on an approved contract", () => {
+  it("is refused, while the repository's own standing list stays writable", async () => {
+    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const row = workspace.tasks.find((each) => each.ticket.approved_at) ?? workspace.tasks[0]!;
+    row.ticket = { ...row.ticket, approved_at: "2026-09-01T00:00:00.000Z" };
+    const session = await previewBridge.request({
+      kind: "editingOpen",
+      target: { kind: "ticket", repoId: row.repoId, key: row.ticket.key },
+    });
+    await expect(
+      previewBridge.request({
+        kind: "explorerMark",
+        id: session.id,
+        revision: session.revision,
+        path: "packages/",
+        mark: "allowed",
+        always: null,
+      }),
+    ).rejects.toThrow(/approved, so its scope is frozen/);
+
+    // The same path, on the repository's list rather than this contract's
+    // scope: taken, recorded in the draft's history with the rest, and on the
+    // list with the draft that wrote it, which is what lets it be taken off
+    // again. A refusal that reached here would leave a person unable to
+    // prohibit a path for the repository from any approved ticket.
+    const marked = await previewBridge.request({
+      kind: "explorerMark",
+      id: session.id,
+      revision: session.revision,
+      path: "packages/",
+      mark: "prohibited",
+      always: true,
+    });
+    expect(marked.history.at(-1)?.summary).toBe("Always prohibit packages/** in this repository");
+    expect(marked.form.draft.prohibited).toContain("packages/**");
+    const listing = await previewBridge.request({ kind: "explorerList", repoId: row.repoId });
+    expect(listing.standing.find((entry) => entry.path === "packages/**")?.draft).toBe(session.id);
   });
 });

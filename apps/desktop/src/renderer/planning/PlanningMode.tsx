@@ -92,9 +92,9 @@ export function PlanningMode({
     );
   const open =
     pane === "explorer" ? (
-      <ExplorerPane workspace={workspace} editor={editor} />
+      <ExplorerPane workspace={workspace} navigate={navigate} editor={editor} />
     ) : pane === "impact" ? (
-      <ImpactPane workspace={workspace} editor={editor} />
+      <ImpactPane workspace={workspace} navigate={navigate} editor={editor} />
     ) : pane === "graph" ? (
       <Suspense fallback={<Opening what="the graph" />}>
         <GraphPane workspace={workspace} navigate={navigate} editor={editor} />
@@ -113,6 +113,10 @@ export function PlanningMode({
         {open}
         {history && <HistoryDrawer editor={editor} onClose={() => setHistory(false)} />}
       </section>
+      {/* The chat stays on every pane: its work after a draft is changing the
+          plan through the validated edit path, each change a card with an undo
+          (D-102, D-100). It opens narrow so the pane beside it — the graph
+          most of all — has the room, and the bar between them still moves. */}
       <DockHandle width={dock} limit={limit} />
       <InterviewDock
         workspace={workspace}

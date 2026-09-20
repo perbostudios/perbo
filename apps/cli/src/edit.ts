@@ -51,6 +51,7 @@ import {
   type EditAuthor,
 } from "./tickets.js";
 import { applyGraphEdit, emptyApproach, undoGraphEdit } from "./graph-edit.js";
+import { NEXT_STEPS } from "./next-step.js";
 
 /**
  * `perbo edit KEY` — the person's half of a drafted contract.
@@ -61,7 +62,7 @@ import { applyGraphEdit, emptyApproach, undoGraphEdit } from "./graph-edit.js";
  * person fixes their text rather than losing it. Only a ticket in
  * `plan_review` may be edited: an approved contract is immutable (ADR-0016).
  *
- * `--outcome`, `--criterion`, `--path` and `--prohibit` edit without an editor,
+ * `--outcome`, `--criterion`, `--path`, `--prohibit` and `--no-prohibit` edit without an editor,
  * for scripts and tests; each replaces the whole of its part.
  *
  * After either kind of edit the level is derived again from the new scope and
@@ -78,6 +79,14 @@ export interface EditArgs {
   paths: string[];
   /** Paths the executor may not write even inside the allowed ones (D-105). Replaces the list. */
   prohibited: string[];
+  /**
+   * Empty the prohibited list.
+   *
+   * A flag that is absent and a list that is empty look the same on a command
+   * line, and this edit replaces only what it is given — so without a way to
+   * say "none", the last prohibition could be written but never taken back.
+   */
+  clearProhibited: boolean;
   manualReviewer: string | null;
   manualReason: string | null;
   /** One graph edit, as JSON. See `GraphEditSchema` in `@perbo/contracts`. */
@@ -114,6 +123,7 @@ export function parseEditArgs(argv: readonly string[]): { key: string; args: Edi
     criteria: [],
     paths: [],
     prohibited: [],
+    clearProhibited: false,
     manualReviewer: null,
     manualReason: null,
     graphEdit: null,
@@ -143,6 +153,9 @@ export function parseEditArgs(argv: readonly string[]): { key: string; args: Edi
         break;
       case "--path":
         args.paths.push(takeValue(tokens, ++i, token));
+        break;
+      case "--no-prohibit":
+        args.clearProhibited = true;
         break;
       case "--prohibit":
         args.prohibited.push(takeValue(tokens, ++i, token));
@@ -192,7 +205,8 @@ export function parseEditArgs(argv: readonly string[]): { key: string; args: Edi
     args.outcome !== null ||
     args.criteria.length > 0 ||
     args.paths.length > 0 ||
-    args.prohibited.length > 0
+    args.prohibited.length > 0 ||
+    args.clearProhibited
       ? "--outcome/--criterion/--path/--prohibit"
       : null,
   ].filter((each): each is string => each !== null);
@@ -333,7 +347,8 @@ export async function runEdit(input: {
     args.outcome === null &&
     args.criteria.length === 0 &&
     args.paths.length === 0 &&
-    args.prohibited.length === 0;
+    args.prohibited.length === 0 &&
+    !args.clearProhibited;
   const path = contractPathFor(dir, key);
 
   // What the edit is measured against: the contract as it stands, or — when a
@@ -444,7 +459,11 @@ export async function runEdit(input: {
     scope = {
       ...before.scope,
       ...(args.paths.length > 0 ? { paths_allowed: args.paths } : {}),
-      ...(args.prohibited.length > 0 ? { paths_prohibited: args.prohibited } : {}),
+      ...(args.prohibited.length > 0
+        ? { paths_prohibited: args.prohibited }
+        : args.clearProhibited
+          ? { paths_prohibited: [] }
+          : {}),
     };
     // A file whose nodes differ from the counter-seal was changed by hand
     // and left that way; a flag edit re-seals the file, and must not seal a
@@ -606,7 +625,7 @@ export async function runEdit(input: {
       (diff.count > 0 ? ` (${diff.changes.join(", ")})` : "") +
       "\n" +
       levelNote +
-      `\nRead it once more, then approve it:\n  perbo approve ${key}\n`,
+      `\n${NEXT_STEPS[0]}\n  perbo approve ${key}\n`,
   );
   return EXIT_CODES.approve;
 }
@@ -757,7 +776,7 @@ async function runGraphEdit(input: {
       (entry.keys.length > 0 ? `, touching ${entry.keys.join(", ")}` : "") +
       "\n" +
       (ticket.approved_at === null
-        ? `\nRead it once more, then approve it:\n  perbo approve ${key}\n`
+        ? `\n${NEXT_STEPS[0]}\n  perbo approve ${key}\n`
         : `\nThe approach may change while the work runs; the contract may not.\n`),
   );
   return EXIT_CODES.approve;

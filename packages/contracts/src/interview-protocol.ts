@@ -189,3 +189,46 @@ export function decodeInterviewTurn(line: string): InterviewTurn | null {
   if (line.trim().length === 0) return null;
   return InterviewTurnSchema.parse(JSON.parse(line));
 }
+
+/**
+ * The answer a person has when they have no view on the question.
+ *
+ * Somebody asked something they do not care about should not have to pick one
+ * of the offered answers to get past it. The dock offers it, the host reads it
+ * back and the interview counts it, so it is declared once, here, beside the
+ * shape of the question it is always added to.
+ */
+export const LEAVE_IT_TO_THE_INTERVIEW = "Let the interview decide";
+
+/** The letters a group's parts are read and answered under: 1a, 1b, 1c. */
+export const PART_LETTERS = "abcdefghijklmnopqrstuvwxyz";
+
+/**
+ * Whether one turn is this group's answer, in the shape the dock sends: the
+ * option's own words for a single part, and the parts lettered as they were
+ * read for more than one.
+ *
+ * Read back rather than flagged on the way in, so a person who types the
+ * wording out themselves is answering as much as one who picked it, and so
+ * nothing has to be threaded through the turn the host writes down.
+ *
+ * It lives here, in the protocol, because two sides count on it and a second
+ * copy would drift: the desktop host moves its record of the asking on by it,
+ * and `perbo interview` refuses to draft a plan while a group it asked is
+ * still unanswered. A CLI that counted answers its own way would let a plan be
+ * drafted around a question the person can still see on screen.
+ */
+export function answersGroup(group: InterviewQuestionGroup, text: string): boolean {
+  const offered = (part: InterviewQuestionGroup["parts"][number]): string[] => [
+    ...part.options.map((option) => option.label),
+    LEAVE_IT_TO_THE_INTERVIEW,
+  ];
+  if (group.parts.length === 1) return offered(group.parts[0]!).includes(text.trim());
+  const lines = text.trim().split("\n");
+  if (lines.length !== group.parts.length) return false;
+  return group.parts.every((part, index) =>
+    offered(part).some(
+      (label) => lines[index]!.trim() === `${PART_LETTERS[index] ?? index + 1}) ${label}`,
+    ),
+  );
+}

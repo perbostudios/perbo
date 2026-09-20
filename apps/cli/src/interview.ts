@@ -14,6 +14,7 @@ import {
 import {
   InterviewQuestionGroupSchema,
   MAX_QUESTION_GROUPS,
+  answersGroup,
   decodeInterviewTurn,
   encodeInterviewEvent,
   type InterviewEvent,
@@ -39,6 +40,7 @@ import {
 import { parseAdmitArgs, runAdmitCommand, type AdmitArgs } from "./admit.js";
 import { UsageError } from "./args.js";
 import { runEdit, type EditArgs } from "./edit.js";
+import { withoutNextStep } from "./next-step.js";
 import { adrFolder, specFolder, storeDir, trackedFiles } from "./store.js";
 import type { Streams } from "./streams.js";
 import {
@@ -1285,6 +1287,7 @@ const said = (text: string, isError = false): InterviewToolResult => ({
   ...(isError ? { isError: true } : {}),
 });
 
+
 /** What the interview's tools are given: the checkout, the store and the spec. */
 export interface InterviewContext {
   cwd: string;
@@ -1297,6 +1300,15 @@ export interface InterviewContext {
   /** Whether the session has written the spec since the last draft. */
   specWritten: () => boolean;
   specTaken: () => void;
+  /**
+   * How many groups of questions stand in front of the person unanswered.
+   *
+   * Set when `ask_options` puts them and cleared by the person's next turn,
+   * which is how an answer arrives (D-117). Nothing waits on it — the tool
+   * asks and returns — so without this a session can ask and draft in the one
+   * breath, which is drafting around its own guess at the answer.
+   */
+  asking: () => number;
   /** The drafting model, injected by a test. Otherwise `admit`'s own. */
   model?: ReviewModel | undefined;
 }
@@ -1380,10 +1392,24 @@ const generatePlan = tool({
     "Draft the plan from the spec. Write spec.md first, bringing it up to date with this " +
     "conversation; this then drafts one ticket from it in plan_review, re-drafting the ticket " +
     "already drafted from this spec while that ticket is still in plan_review and refusing, " +
-    "rather than admitting a second from one spec, once it is not. It cannot approve.",
+    "rather than admitting a second from one spec, once it is not. Refused while a group of " +
+    "questions stands unanswered, since their answer may change the spec. It cannot approve.",
   shape: {},
   input: z.strictObject({}),
   run: async (_input, context) => {
+    // A group still in front of them is a question this plan would be drafted
+    // around the guess at. Their answer is their next turn, so this is refused
+    // until one arrives — the answer may change the spec this drafts from.
+    const open = context.asking();
+    if (open > 0) {
+      return said(
+        `${open === 1 ? "A group of questions is" : `${String(open)} groups of questions are`} ` +
+          "in front of the person and unanswered. Wait for their turn: what they say may change " +
+          "the spec this would draft from, and a plan drafted first is drafted around your own " +
+          "guess at their answer. Say nothing further until they have answered",
+        true,
+      );
+    }
     if (!context.specWritten()) {
       return said(
         `${context.spec} is as this session last saw it. Bring the spec up to date with the ` +
@@ -1426,12 +1452,12 @@ const generatePlan = tool({
         ...(context.model === undefined ? {} : { model: context.model }),
       }),
     );
-    if (ran.code !== EXIT_CODES.approve) return said(ran.text, true);
+    if (ran.code !== EXIT_CODES.approve) return said(withoutNextStep(ran.text), true);
     context.specTaken();
     const key = startOver ?? ticketFromSpec(context) ?? "the ticket";
     return said(
       `${startOver === null ? "admitted" : "re-drafted"} ${key} in plan_review from ${context.spec}. ` +
-        `A person reads and approves it; this session cannot.\n${ran.text}`,
+        `A person reads and approves it; this session cannot.\n${withoutNextStep(ran.text)}`,
     );
   },
 });
@@ -1522,6 +1548,7 @@ async function applyEdit(
     // A prohibited path is the person's own mark in the explorer (D-105), and
     // a manual reviewer is their own choice: neither is a field this sets.
     prohibited: [],
+    clearProhibited: false,
     manualReviewer: null,
     manualReason: null,
     author: INTERVIEW_AUTHOR,
@@ -1532,13 +1559,13 @@ async function applyEdit(
   const ran = await captured((streams) =>
     runEdit({ key, args, streams, cwd: context.cwd, env: {} }),
   );
-  if (ran.code !== EXIT_CODES.approve) return said(ran.text, true);
+  if (ran.code !== EXIT_CODES.approve) return said(withoutNextStep(ran.text), true);
   const snapshot = readDraftSnapshot(context.storeDirectory, key);
   const entry = snapshot?.edits.at(-1);
   return said(
     `${key}: edit ${snapshot?.edits.length ?? 0}${entry?.summary ? ` — ${entry.summary}` : ""}\n` +
       JSON.stringify({ before: entry?.before ?? {}, after: entry?.after ?? {} }, null, 2) +
-      `\n${ran.text}`,
+      `\n${withoutNextStep(ran.text)}`,
   );
 }
 
@@ -1596,9 +1623,10 @@ const askOptions = tool({
   name: "ask_options",
   description:
     "Put a question to the person with the answers they can pick from, rather than writing it out in " +
-    "prose. Ask only what you cannot settle yourself: a question the repository, the spec or what " +
-    "they have already said answers is not one to put to them, and being able to ask cheaply is not " +
-    "a reason to ask more. What you do ask, ask in one call: questions whose answers depend on each " +
+    "prose. Ask what the evidence cannot settle: a question the repository, the spec or what they " +
+    "have already said answers is not one to put to them, but one that turns on what they want is " +
+    "theirs however obvious your own answer seems, and recording the call you made instead is not " +
+    "asking. Being able to ask cheaply is not a reason to ask more. What you do ask, ask in one call: questions whose answers depend on each " +
     "other go in one group as its parts, independent groups go separately, and the person is put one " +
     "group at a time. Every part needs at least two options, and one of them may be marked as your " +
     "recommendation. They can always answer in their own words instead, or leave the choice to you. " +
@@ -1663,7 +1691,9 @@ When the spec states the work, write it and then call generate_plan, which draft
 plan_review. After that the plan changes only through edit_plan and undo_edit, each change recorded as
 yours and undoable, and the spec is brought back into step with it in the same turn. read_plan reads it
 back. You cannot approve, publish or merge, and there is no tool for any of the three: prepare the plan
-and say what is ready for the person's keystroke. State names, keys and numbers come from the tools,
+and say what is ready for the person to approve. Never tell them to run a command to do it, and do
+not repeat one a tool's report names: you cannot see whether they are at a terminal or in the app,
+where approving, editing and running are buttons and nothing is typed. State names, keys and numbers come from the tools,
 never from memory.
 
 Write the spec to be read at a glance, because it is read far more often than it is written. One
@@ -1680,7 +1710,21 @@ Ask through ask_options rather than writing questions out in prose, and ask only
 settle from the repository, the spec or what they have already told you: they see only what needs
 them. What you do ask goes in the one call — parts whose answers depend on each other in one group,
 independent groups separately — and the person is put one group at a time. Their answers come back as
-their next turn in the options' own words.`;
+their next turn in the options' own words.
+
+Never settle an open question by drafting your way past it and saying afterwards which way you went.
+If the repository, the spec and what they have said do not answer it, it is theirs to answer: put it
+through ask_options before you draft, with the answer you would have picked marked as your
+recommendation and the one you weighed against it beside it. A line in the spec's Notes recording the
+call you made is not asking — they cannot act on it without reading the whole file, and by then the
+plan is drafted around it. This is what ask_options is for, and a question asked before drafting
+costs a turn where one found afterwards costs the draft.
+
+What you say in the chat is what needs them: a question, or something that needs their word. Not an
+account of what you wrote. The spec is on the screen beside this conversation and the plan is a pane
+away, both of them better read there than described here, and a summary of them buries the one line
+that did need reading. When the spec is written, say so in a sentence. When a plan is drafted, say
+that, and what is ready for them to approve, in a sentence.`;
   return withExecutorSkills(base, [...INTERVIEW_SKILLS]).prompt;
 }
 
@@ -1826,6 +1870,14 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     say: (line) => input.streams.stderr(line),
   });
 
+  // The groups put to the person and not yet answered, in the order they are
+  // put. Moved on by the same rule the planning record uses (D-117): a turn
+  // that answers the group in front of them drops that one, and a turn that
+  // does not — they said something of their own — ends the asking whole, which
+  // is what the dock does with the card. Counting turns instead would let the
+  // two disagree on every asking that carries more than one group, and a plan
+  // would be drafted around a question still on screen.
+  let pending: InterviewQuestionGroup[] = [];
   const context: InterviewContext = {
     cwd: input.cwd,
     repo: args.repo,
@@ -1835,6 +1887,7 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     spec,
     specWritten: permission.specWritten,
     specTaken: permission.specTaken,
+    asking: () => pending.length,
     model: input.model,
   };
 
@@ -1856,8 +1909,10 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
       emit({ type: "tool", tool: each.name, ok: result.isError !== true, detail });
       // The questions are their own line: the card says a tool ran, and what
       // the person answers is put to them beside it.
-      if (result.asks !== undefined && result.asks.length > 0)
+      if (result.asks !== undefined && result.asks.length > 0) {
+        pending = [...pending, ...result.asks];
         emit({ type: "asked", groups: [...result.asks] });
+      }
       return result;
     },
   }));
@@ -1902,7 +1957,10 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     orientation: interviewOrientation({ repositoryRoot, spec, adr }),
     tools,
     decide: (tool, toolInput, where) => permission.canUseTool(tool, toolInput, where),
-    turns: turnsAsText(input),
+    turns: answering(turnsAsText(input), (turn) => {
+      pending =
+        pending.length > 0 && answersGroup(pending[0]!, turn) ? pending.slice(1) : [];
+    }),
     sessionId: () => sessionId,
     stderr: (data) => input.streams.stderr(data),
   };
@@ -2094,6 +2152,25 @@ function isSymlink(path: string): boolean {
 }
 
 /** The person's turns, as text, one line of stdin each. */
+/**
+ * The person's turns, each read against the group it may be answering.
+ *
+ * A group is put to them and nothing waits for it; what comes back is an
+ * ordinary turn, and only its own words say whether it answered the question
+ * or changed the subject (D-117). `answered` is given the turn so it can tell
+ * the two apart, and runs before the turn is handed on, so a tool called in
+ * the turn it releases sees it released.
+ */
+async function* answering(
+  turns: AsyncGenerator<string>,
+  answered: (turn: string) => void,
+): AsyncGenerator<string> {
+  for await (const turn of turns) {
+    answered(turn);
+    yield turn;
+  }
+}
+
 async function* turnsAsText(input: InterviewInput): AsyncGenerator<string> {
   for await (const line of input.turns ?? linesOfStdin()) {
     const turn = decodeInterviewTurn(line);
