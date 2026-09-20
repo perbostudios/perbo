@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
@@ -32,12 +31,15 @@ import {
   declaredVerifyCommand,
   detectPackageManager,
   diagnose,
+  gh,
+  git,
   pinInstallCommand,
   proposedInstall,
   proposedInstallStep,
   verificationServiceNeed,
   workspaceMembership,
   type DiagnoseRequest,
+  type RunResult,
 } from "@perbo/workspace";
 import {
   DEFAULT_DELIVERED_CHECKS_BOUND_MS,
@@ -2757,34 +2759,29 @@ export const BASE_SOURCE_DETAIL: Record<BaseSource, string> = {
     "remote default: the remote's default branch, because this checkout is not on one",
 };
 
-/** One line of a git command's output, or null where it did not answer. */
-function gitLine(checkout: string, argv: readonly string[]): string | null {
-  try {
-    const out = execFileSync("git", [...argv], {
-      cwd: checkout,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 30_000,
-    }).trim();
-    return out.length > 0 ? out : null;
-  } catch {
-    return null;
-  }
-}
+/**
+ * How long either binary may take to name a branch. `doctor` prints this
+ * answer beside a dozen others, so a read that has to be waited on is a read
+ * that did not answer.
+ */
+const BASE_READ = { timeoutMs: 30_000 } as const;
 
-/** One line of `gh`'s output, or null where it is absent or did not answer. */
-function ghLine(checkout: string, argv: readonly string[]): string | null {
+/**
+ * The one line a read named, or null where it did not name one — the binary is
+ * not installed, the command exited non-zero, the wait ran out, or the answer
+ * arrived cut. Every one of them is "this source cannot say", and the next
+ * source is asked.
+ */
+function named(read: () => RunResult): string | null {
+  let result: RunResult;
   try {
-    const out = execFileSync("gh", [...argv], {
-      cwd: checkout,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 30_000,
-    }).trim();
-    return out.length > 0 ? out : null;
+    result = read();
   } catch {
     return null;
   }
+  if (result.code !== 0 || result.timed_out || result.truncated) return null;
+  const out = result.stdout.trim();
+  return out.length > 0 ? out : null;
 }
 
 /**
@@ -2808,24 +2805,25 @@ export function proposedBase(
   checkout: string,
   options: { publish: boolean },
 ): ProposedBase | null {
-  const branch = gitLine(checkout, ["symbolic-ref", "--short", "HEAD"]);
+  const branch = named(() => git.runSync(checkout, ["symbolic-ref", "--short", "HEAD"], BASE_READ));
   if (branch !== null) return { base_ref: branch, from: "branch" };
 
-  const remoteHead = gitLine(checkout, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-  const named = remoteHead?.startsWith("origin/") ? remoteHead.slice("origin/".length) : null;
-  if (named) return { base_ref: named, from: "remote_default" };
+  const remoteHead = named(() =>
+    git.runSync(checkout, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], BASE_READ),
+  );
+  const declared = remoteHead?.startsWith("origin/") ? remoteHead.slice("origin/".length) : null;
+  if (declared) return { base_ref: declared, from: "remote_default" };
 
   // Asked of GitHub only where the run is publishing: a `gh` process on a
   // diagnostic that publishes nothing would be a network call nobody asked for.
   if (options.publish) {
-    const viewed = ghLine(checkout, [
-      "repo",
-      "view",
-      "--json",
-      "defaultBranchRef",
-      "--jq",
-      ".defaultBranchRef.name",
-    ]);
+    const viewed = named(() =>
+      gh.runSync(
+        checkout,
+        ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+        BASE_READ,
+      ),
+    );
     if (viewed) return { base_ref: viewed, from: "remote_default" };
   }
   return null;
