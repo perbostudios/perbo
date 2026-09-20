@@ -43,9 +43,11 @@ export interface CallOptions {
   timeoutMs?: number | undefined;
   maxOutputBytes?: number | undefined;
   /**
-   * Added over the environment the module builds, for the one caller that
-   * redirects git's object store: the signing probe, which writes the object a
-   * signature would produce into a directory of its own.
+   * Added over the environment the module builds, for a caller that needs a
+   * name it does not carry: the signing probe redirects git's object store so
+   * that the object a signature would produce is written into a directory of
+   * its own, and the runner's own delivery hands the two commands that reach
+   * GitHub the credential their helper presents.
    */
   overlay?: Readonly<Record<string, string>> | undefined;
 }
