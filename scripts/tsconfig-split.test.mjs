@@ -19,13 +19,6 @@ import { test } from "node:test";
 import { REPO_ROOT, workspacePackages } from "./check.mjs";
 
 /**
- * Packages that still carry their own compiler options instead of extending the
- * shared presets. A burn-down list: an entry may only leave it, and the set
- * goes away with its last entry.
- */
-const PENDING = new Set([]);
-
-/**
  * The files a package's typecheck program is allowed not to contain. Both are
  * protected tests that do not compile against the current `Finding` and
  * `BlockingInput` types; a pull request may not edit them, so the reviewer's
@@ -128,12 +121,6 @@ function sourceFiles(dir) {
   return found.sort();
 }
 
-test("PENDING names packages that exist", () => {
-  for (const name of PENDING) {
-    assert.ok(PACKAGES.has(name), `${name} is in PENDING but is not a workspace package`);
-  }
-});
-
 test("the packages found on disk are the ones check.mjs names", () => {
   assert.deepEqual([...PACKAGES.keys()].sort(), workspacePackages(REPO_ROOT));
 });
@@ -156,9 +143,8 @@ for (const [name, dir] of [...PACKAGES].sort()) {
   // The tooling packages ship `.mjs` and JSON, run no compiler, and so have no
   // program to hold to the split.
   if (typeof manifest.scripts?.typecheck !== "string") continue;
-  const skip = PENDING.has(name) && "still carries its own compiler options";
 
-  test(`${name}: typecheck reads its tests and emits nothing`, { skip }, () => {
+  test(`${name}: typecheck reads its tests and emits nothing`, () => {
     const typecheck = parseConfig(dir, "tsconfig.json");
     assert.equal(typecheck.options.noEmit, true, `${typecheck.where} emits`);
     const contains = new Set(typecheck.fileNames);
@@ -168,7 +154,7 @@ for (const [name, dir] of [...PACKAGES].sort()) {
   });
 
   if (BUNDLED.has(name)) {
-    test(`${name}: is bundled, so it has no build config`, { skip }, () => {
+    test(`${name}: is bundled, so it has no build config`, () => {
       assert.doesNotMatch(manifest.scripts.build, /^tsc\b/, `${name} builds with tsc after all`);
       assert.ok(
         !existsSync(join(dir, "tsconfig.build.json")),
@@ -178,7 +164,7 @@ for (const [name, dir] of [...PACKAGES].sort()) {
     continue;
   }
 
-  test(`${name}: build emits src to dist and no test`, { skip }, () => {
+  test(`${name}: build emits src to dist and no test`, () => {
     const build = parseConfig(dir, "tsconfig.build.json");
     const tests = build.fileNames.filter((file) => /\.test\.tsx?$/.test(file) || file.includes("/test-support/"));
     assert.deepEqual(tests, [], `${build.where} would publish test code in dist`);
@@ -186,7 +172,7 @@ for (const [name, dir] of [...PACKAGES].sort()) {
     assert.equal(repoPath(build.options.outDir ?? ""), `${repoPath(dir)}/dist`);
   });
 
-  test(`${name}: runs one config to build and the other to typecheck`, { skip }, () => {
+  test(`${name}: runs one config to build and the other to typecheck`, () => {
     assert.ok(
       manifest.scripts.build.startsWith("tsc -p tsconfig.build.json"),
       `${name} build is "${manifest.scripts.build}"`,

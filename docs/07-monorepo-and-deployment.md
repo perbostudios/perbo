@@ -19,7 +19,7 @@ packages/
 tooling/
   package/        the CLI tarball and the corpus assembly
   skills/         vendored engineering-skill guidance, bundled into execution briefs
-  tsconfig/       one strict TypeScript base every package extends
+  tsconfig/       the strict base every package extends, and the presets it typechecks and builds with
 docs/             canonical documents, ADRs, design boards
 diagrams/         rendered architecture diagrams
 scripts/          repository validators and local setup
@@ -56,7 +56,7 @@ packages/<name>/
 
 ## Build graph and gates
 
-pnpm workspaces (`apps/*`, `packages/*`, `tooling/*`) with one pinned third-party version catalog. Turborepo runs the task graph: `build` depends on its dependencies' own `build` output (`^build`); `typecheck` and `lint` depend only on `^build`; `test` depends on `^build` **and** the package's own `build`, because several suites spawn the built CLI binary rather than calling functions directly — a stale `dist/` is a real hazard, not just a slow one.
+pnpm workspaces (`apps/*`, `packages/*`, `tooling/*`) with one pinned third-party version catalog. Turborepo runs the task graph: `build` depends on its dependencies' own `build` output (`^build`); `typecheck` and `lint` depend only on `^build`; `test` depends on `^build` **and** the package's own `build`, because several suites spawn the built CLI binary rather than calling functions directly — a stale `dist/` is a real hazard, not just a slow one. A package's `typecheck` reads its tests and its own configuration files as well as `src`, and its `build` emits `src` without them; `scripts/tsconfig-split.test.mjs` holds every package to that.
 
 The gate is `pnpm check`: `scripts/check.mjs` runs every stage in order, `pnpm check --filter @perbo/<package>` runs one package after building what it depends on, and `.github/workflows/build.yml` runs the same stages as steps on every pull request, so a check is added to the script and nowhere else. [`AGENTS.md`](../AGENTS.md) names the stages.
 
