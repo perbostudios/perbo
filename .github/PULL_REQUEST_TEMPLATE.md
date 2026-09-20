@@ -61,6 +61,7 @@ Check any changed surface and link the corresponding update:
 - [ ] Autonomy/risk/approval policy
 - [ ] Planning/review/run-bundle/evaluation contract
 - [ ] Trust boundary, prohibited action, or agent permission profile
+- [ ] A package's interface: its entry file's named exports or its `package.json` subpaths
 - [ ] Public promise, target customer, or roadmap gate
 - [ ] No canonical architecture surface changed
 

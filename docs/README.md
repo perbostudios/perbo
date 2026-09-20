@@ -40,7 +40,8 @@ Each diagram has a Graphviz `.dot` source beside its `.svg` and `.png`.
 | `scripts/validate_docs.py` | Links, decision and ADR ids, this index's coverage, lifecycle states agreeing between docs/04 and its diagram, foreign keys against edges in docs/03 |
 | `scripts/validate_diagrams.py` | A rendering that no longer matches its source |
 | `scripts/validate_fixture_diffs.py` | A corpus fixture whose diff is not what its own trees produce |
-| `pnpm exec turbo run typecheck test lint` | The product code |
+| `pnpm exec turbo run typecheck test lint` | The product code and its tests |
+| `node --test scripts/lint-boundaries.test.mjs` | A package imported past its interface, a module reached past its surface, `export *` in a source file, production code importing test code |
 | `node packages/evaluation/dist/main.js` | A corpus fixture that is not well formed, or an expectation naming something that does not exist |
 | `node .github/scripts/protected-paths.mjs` | A pull request that edits a file a change is judged against |
 | `node scripts/sync-protected-paths.mjs --check` | A protected-paths list that differs between the runner's, CI's and Claude Code's copies |

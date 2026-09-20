@@ -139,6 +139,7 @@ export const STAGES = [
         "node",
         "--test",
         "scripts/check.test.mjs",
+        "scripts/lint-boundaries.test.mjs",
         "scripts/sync-protected-paths.test.mjs",
         "scripts/tsconfig-split.test.mjs",
       ]);

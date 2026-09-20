@@ -23,6 +23,65 @@ const NO_PROCESS_EXECUTION = {
     "No process execution in the reviewer. Model output must never reach a command (ADR-0023).",
 };
 
+/**
+ * A package states its interface by name, and a module keeps an interior
+ * (ADR-NEW-package-interface; the layout is in docs/07 "Package layout").
+ * `export *` re-exports whatever a file happens to hold, so the interface is
+ * whatever the implementation is.
+ */
+const NO_EXPORT_ALL = {
+  selector: "ExportAllDeclaration",
+  message: "Name what the module exports (docs/07 Package layout).",
+};
+
+/** Only a module's own `index.ts` and its siblings reach `./internal/…`. */
+const NO_FOREIGN_INTERIOR = {
+  regex: "^(?!\\./internal/).*(^|/)internal/",
+  message: "A module's `internal/` is imported only by that module (docs/07 Package layout).",
+};
+
+/** A package promises its entry and its subpaths, not the files behind them. */
+const NO_DEEP_PACKAGE_IMPORT = {
+  regex: "^@perbo/[^/]+/(src|dist)/",
+  message:
+    "Import a package by its name, not a file under its `src/` or `dist/` (docs/07 Package layout).",
+};
+
+/** A module's fakes are for its tests; the build never emits them. */
+const NO_TEST_SUPPORT = {
+  regex: "(^|/)test-support/",
+  message: "Production code imports no test code (docs/07 Package layout).",
+};
+
+const NO_TEST_MODULE = {
+  regex: "\\.test\\.js$",
+  message: "Production code imports no test code (docs/07 Package layout).",
+};
+
+/** Where a package's interface and its modules live. */
+const SOURCE = ["**/src/**"];
+
+/** A source file that is not a test of one, and not a fake for one. */
+const PRODUCTION_SOURCE_ONLY = {
+  ignores: ["**/*.test.ts", "**/*.test.tsx", "**/test-support/**"],
+};
+
+/**
+ * Entry files that still re-export with `*`. A burn-down list: a file may only
+ * leave it, and the exception goes away with its last entry. The change that
+ * curates a package's entry into named exports takes that entry off this list.
+ */
+export const EXPORT_ALL_BURN_DOWN = [
+  "apps/cli/src/index.ts",
+  "packages/contracts/src/index.ts",
+  "packages/contracts/src/materialisation.ts",
+  "packages/evaluation/src/index.ts",
+  "packages/planning/src/index.ts",
+  "packages/review/src/index.ts",
+  "packages/runner/src/index.ts",
+  "packages/workspace/src/index.ts",
+];
+
 export default tseslint.config(
   {
     ignores: [
@@ -47,10 +106,29 @@ export default tseslint.config(
     },
   },
   {
+    // A source file names what it exports. A later config object replaces the
+    // rule's options whole, so every array that reaches a source file repeats
+    // both bans. A file on the burn-down list falls back to the array above,
+    // which is how it keeps the shell-string ban while it still uses `*`.
+    files: SOURCE,
+    ignores: EXPORT_ALL_BURN_DOWN,
+    rules: {
+      "no-restricted-syntax": ["error", NO_SHELL_STRING, NO_EXPORT_ALL],
+    },
+  },
+  {
     // The semantic reviewer has no process execution surface by default.
     files: ["packages/review/**"],
     rules: {
       "no-restricted-syntax": ["error", NO_PROCESS_EXECUTION],
+    },
+  },
+  {
+    // The reviewer's source, which the object above no longer reaches.
+    files: ["packages/review/src/**"],
+    ignores: EXPORT_ALL_BURN_DOWN,
+    rules: {
+      "no-restricted-syntax": ["error", NO_PROCESS_EXECUTION, NO_EXPORT_ALL],
     },
   },
   {
@@ -62,7 +140,36 @@ export default tseslint.config(
       "packages/review/src/provider-codex-cli.ts",
     ],
     rules: {
-      "no-restricted-syntax": ["error", NO_SHELL_STRING],
+      "no-restricted-syntax": ["error", NO_SHELL_STRING, NO_EXPORT_ALL],
+    },
+  },
+  {
+    // A package is imported by its name, and a module's interior is its own.
+    files: SOURCE,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: [NO_FOREIGN_INTERIOR, NO_DEEP_PACKAGE_IMPORT] },
+      ],
+    },
+  },
+  {
+    // What ships imports nothing that only a test needs. The two patterns
+    // above are repeated because this object replaces the rule's options.
+    files: SOURCE,
+    ...PRODUCTION_SOURCE_ONLY,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            NO_FOREIGN_INTERIOR,
+            NO_DEEP_PACKAGE_IMPORT,
+            NO_TEST_SUPPORT,
+            NO_TEST_MODULE,
+          ],
+        },
+      ],
     },
   },
 );
