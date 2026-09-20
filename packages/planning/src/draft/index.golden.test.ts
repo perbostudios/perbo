@@ -11,9 +11,9 @@ import {
   CONTRACT_DRAFT_JSON_SCHEMA,
   draftContract,
   type DraftReadOutcome,
-} from "../src/index.js";
-import { validDraft } from "./double.js";
-import { expectGolden } from "./golden.js";
+} from "./index.js";
+import { validDraft } from "./test-support/drafter.js";
+import { expectGolden } from "./test-support/golden.js";
 
 /**
  * What drafting sends: the request the SDK transport builds from the drafter's
@@ -139,7 +139,7 @@ describe("what drafting sends", () => {
     ).rejects.toThrow();
     expect(bodies).toHaveLength(1);
 
-    expectGolden(new URL("./draft-request.golden.json", import.meta.url), bodies[0]);
+    expectGolden(new URL("../../test/draft-request.golden.json", import.meta.url), bodies[0]);
   });
 
   it("appends the messages recorded", async () => {
@@ -159,7 +159,7 @@ describe("what drafting sends", () => {
     ]);
     await draftContract(input(withoutReader));
 
-    expectGolden(new URL("./draft-sequence.golden.json", import.meta.url), {
+    expectGolden(new URL("../../test/draft-sequence.golden.json", import.meta.url), {
       with_reader: deltas(withReader.requests),
       without_reader: deltas(withoutReader.requests),
     });

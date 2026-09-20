@@ -2,7 +2,8 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { PlanningError, fetchGitHubIssue, parseIssueReference } from "../src/index.js";
+import { PlanningError } from "./errors.js";
+import { fetchGitHubIssue, parseIssueReference } from "./issue.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-planning-issue-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));

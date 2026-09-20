@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { PlanningError, SPEC_HEADINGS, parseSpec } from "../src/index.js";
+import { PlanningError } from "./errors.js";
+import { SPEC_HEADINGS } from "./spec-text.js";
+import { parseSpec } from "./spec.js";
 
 const spec = `# Activation email
 

@@ -3,7 +3,8 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { PlanningError, repositoryTree } from "../src/index.js";
+import { PlanningError } from "../../errors.js";
+import { repositoryTree } from "./tree.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-planning-tree-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));

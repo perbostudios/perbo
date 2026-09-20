@@ -4,7 +4,7 @@ import {
   type PlanContractWithCriteria,
 } from "@perbo/contracts";
 import { describe, expect, it } from "vitest";
-import { contractDifferences, contractEditCount } from "../src/index.js";
+import { contractDifferences, contractEditCount } from "./diff.js";
 
 // The P1 schema rather than the union, because every assertion below reads the
 // criteria a P0 contract does not have.

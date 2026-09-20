@@ -2,13 +2,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { PlanningError } from "./errors.js";
 import {
   MAX_ISSUE_FILE_BYTES,
-  PlanningError,
   fileReference,
   parseIssueMarkdown,
   readIssueFile,
-} from "../src/index.js";
+} from "./file-issue.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-planning-file-issue-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));

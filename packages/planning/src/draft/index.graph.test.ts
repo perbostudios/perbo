@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { DraftRejectedError } from "../errors.js";
 import {
   CONTRACT_DRAFT_JSON_SCHEMA,
   ContractDraftSchema,
   DRAFT_PROMPT_VERSION,
-  DraftRejectedError,
   draftContract,
-} from "../src/index.js";
-import { graphedDraft, scriptedDrafter, submits, validDraft } from "./double.js";
+} from "./index.js";
+import { graphedDraft, scriptedDrafter, submits, validDraft } from "./test-support/drafter.js";
 
 const tree = ["packages/", "packages/auth/", "packages/queue/", "docs/", "README.md"];
 

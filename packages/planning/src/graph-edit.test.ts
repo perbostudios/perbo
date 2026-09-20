@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PlanContractSchema, planNodes, type PlanContract } from "@perbo/contracts";
-import { PlanningError, applyGraphEdit, emptyApproach, undoGraphEdit } from "../src/index.js";
+import { PlanningError } from "./errors.js";
+import { applyGraphEdit, emptyApproach, undoGraphEdit } from "./graph-edit.js";
 
 /**
  * The validated edit path lives here rather than in `perbo edit` (D-100),
