@@ -1,7 +1,7 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import {
   DEFAULT_REVIEW_TIMEOUT_MS,
   runCorpus,
@@ -24,8 +24,8 @@ import { sampleDir } from "./sample-fixtures.js";
  * the deadline is visible on the command line and in the run manifest.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "perbo-review-timeout-test-"));
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+const scratchDirectory = scratchDirectories("perbo-review-timeout-test-");
+const scratch = scratchDirectory();
 
 let runs = 0;
 function runIsolatedCorpus(options: HarnessOptions): Promise<HarnessResult> {

@@ -1,16 +1,8 @@
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript";
 import { afterEach, describe, expect, it } from "vitest";
+import { createScratch } from "@perbo/test-support";
 
 /**
  * No suite in this package reads the corpus except through the gate.
@@ -566,10 +558,11 @@ describe("no suite reads the corpus outside the gate", () => {
   const modules = loaderModules(SRC_DIR);
 
   /** A directory of planted files, removed after each test that asks for one. */
+  const scratchDirectory = createScratch("perbo-corpus-guard-");
   let scratch: string | null = null;
 
   afterEach(() => {
-    if (scratch !== null) rmSync(scratch, { recursive: true, force: true });
+    scratchDirectory.removeAll();
     scratch = null;
   });
 
@@ -580,7 +573,7 @@ describe("no suite reads the corpus outside the gate", () => {
    * may collect.
    */
   function scratchDir(): string {
-    scratch ??= mkdtempSync(join(tmpdir(), "perbo-corpus-guard-"));
+    scratch ??= scratchDirectory();
     return scratch;
   }
 
