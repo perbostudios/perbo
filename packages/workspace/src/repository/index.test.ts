@@ -137,6 +137,23 @@ describe("how long a call may take, and how much it may say", () => {
     expect(call?.options.env.GIT_TERMINAL_PROMPT).toBe("0");
   });
 
+  it("lets a caller hand gh an environment of its own, and name the binary", () => {
+    const process_ = fakeGitProcess();
+    const hub = createGh({
+      process: process_,
+      environment: () => ({ PATH: "/usr/bin", GH_TOKEN: "the runner's" }),
+      binary: "/opt/gh",
+    });
+
+    hub.runSync("/repo", ["auth", "status"], { base: { PATH: "/usr/bin", GH_TOKEN: "the caller's" } });
+    hub.viewPullRequestSync("/repo", "13", ["state"]);
+
+    expect(process_.calls.map((call) => [call.argv, call.options.env.GH_TOKEN, call.options.timeoutMs])).toEqual([
+      [["/opt/gh", "auth", "status"], "the caller's", 180_000],
+      [["/opt/gh", "pr", "view", "13", "--json", "state"], "the runner's", 180_000],
+    ]);
+  });
+
   it("builds gh's argv from what the caller asked, not from a command line", async () => {
     const process_ = fakeGitProcess();
     const hub = createGh({ process: process_ });
