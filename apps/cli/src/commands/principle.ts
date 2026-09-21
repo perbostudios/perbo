@@ -1,7 +1,18 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { z } from "zod";
+import { EXIT_CODES } from "@perbo/contracts";
 import { PRINCIPLES_FILENAME } from "@perbo/runner";
-import { UsageError } from "../usage-error.js";
+import { UsageError, readInput } from "../usage-error.js";
+import {
+  parseArgv,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../command-line/grammar.js";
+import type { CommandContext, Rendered } from "../command.js";
+import type { ReportCommand } from "../command-line/terminal.js";
+import { StoreTargetSchema, type StoreTarget } from "../store/index.js";
 import { DEFAULT_STORE_DIRNAME } from "../store/tickets.js";
 
 /**
@@ -22,66 +33,124 @@ Each entry states what the product should do; the executor consults these and
 they never widen scope, weaken security, or excuse a failing check.
 `;
 
-export interface PrincipleArgs {
-  action: "add" | "list";
-  text: string | null;
-  repo: string;
-  store: string | null;
+/** The two things this command does: write one answer down, or read them back. */
+export const PRINCIPLE_VERBS = ["add", "list"] as const;
+export type PrincipleVerb = (typeof PRINCIPLE_VERBS)[number];
+
+export const PrincipleInputSchema = z.discriminatedUnion("verb", [
+  z.strictObject({
+    verb: z.literal("add"),
+    target: StoreTargetSchema,
+    /** What the product should do, as one sentence a later brief reads. */
+    text: z.string().trim().min(1, "principle add needs the principle's text as its one argument"),
+  }),
+  z.strictObject({ verb: z.literal("list"), target: StoreTargetSchema }),
+]);
+export type PrincipleInput = z.infer<typeof PrincipleInputSchema>;
+
+/** What the command did, and the file it did it to. */
+export type PrincipleReport =
+  | { readonly verb: "add"; readonly path: string }
+  /** `text` is null where nothing has been recorded in this store yet. */
+  | { readonly verb: "list"; readonly path: string; readonly text: string | null };
+
+export function principlesPath(cwd: string, target: StoreTarget): string {
+  return join(target.store ?? join(resolve(cwd, target.repo), DEFAULT_STORE_DIRNAME), PRINCIPLES_FILENAME);
 }
 
-export function parsePrincipleArgs(argv: string[]): PrincipleArgs {
-  const [action, ...rest] = argv;
-  if (action !== "add" && action !== "list") {
-    throw new UsageError("usage: perbo principle add \"<what the product should do>\" | perbo principle list");
-  }
-  const args: PrincipleArgs = { action, text: null, repo: ".", store: null };
-  for (let i = 0; i < rest.length; i += 1) {
-    const token = rest[i]!;
-    if (token === "--") {
-      // End of options: everything after is the principle's text, even when it
-      // starts with a dash.
-      const remainder = rest.slice(i + 1).join(" ").trim();
-      if (remainder.length > 0 && args.text === null) args.text = remainder;
-      break;
-    }
-    if (token === "--repo") {
-      const next = rest[++i];
-      if (!next) throw new UsageError("--repo requires a value");
-      args.repo = next;
-    } else if (token === "--store") {
-      const next = rest[++i];
-      if (!next) throw new UsageError("--store requires a value");
-      args.store = next;
-    } else if (!token.startsWith("--") && args.text === null) {
-      args.text = token;
-    } else {
-      throw new UsageError(`unknown argument '${token}'`);
-    }
-  }
-  if (args.action === "add" && (args.text === null || args.text.trim().length === 0)) {
-    throw new UsageError("principle add needs the principle's text as its one argument");
-  }
-  return args;
-}
-
-export function principlesPath(args: PrincipleArgs): string {
-  return join(args.store ?? join(resolve(args.repo), DEFAULT_STORE_DIRNAME), PRINCIPLES_FILENAME);
-}
-
-export function runPrincipleCommand(args: PrincipleArgs): number {
-  const path = principlesPath(args);
-  if (args.action === "list") {
-    if (!existsSync(path)) {
-      process.stderr.write(`no principles recorded (${path} does not exist)\n`);
-      return 0;
-    }
-    process.stdout.write(readFileSync(path, "utf8"));
-    return 0;
+export function principle(input: PrincipleInput, context: CommandContext): PrincipleReport {
+  const path = principlesPath(context.cwd, input.target);
+  if (input.verb === "list") {
+    return { verb: "list", path, text: existsSync(path) ? readFileSync(path, "utf8") : null };
   }
   mkdirSync(dirname(path), { recursive: true });
   if (!existsSync(path)) writeFileSync(path, HEADER);
-  const date = new Date().toISOString().slice(0, 10);
-  appendFileSync(path, `\n- (${date}) ${args.text!.trim().replace(/\n+/g, " ")}\n`);
-  process.stderr.write(`recorded in ${path}\n`);
-  return 0;
+  const date = context.now.toISOString().slice(0, 10);
+  appendFileSync(path, `\n- (${date}) ${input.text.trim().replace(/\n+/g, " ")}\n`);
+  return { verb: "add", path };
 }
+
+const FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+} satisfies FlagTable;
+
+const ADD_GRAMMAR: Grammar<typeof FLAGS> = {
+  command: "principle add",
+  flags: FLAGS,
+  positionals: {
+    min: 1,
+    max: 1,
+    /**
+     * One argument, because the text is one sentence. Text beginning with a
+     * dash goes after `--`, which the desktop cannot reach: it appends
+     * `--repo` last, so what it records can never start with one (SCP-091).
+     */
+    refusal:
+      'principle add needs the principle\'s text as its one argument, e.g. perbo principle add ' +
+      '"perbo list shows open tickets; finished ones need --all."',
+  },
+  afterDoubleDash: "positionals",
+};
+
+const LIST_GRAMMAR: Grammar<typeof FLAGS> = {
+  command: "principle list",
+  flags: FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal: "principle list takes no argument: it prints what is recorded, e.g. perbo principle list",
+  },
+  afterDoubleDash: "positionals",
+};
+
+const VERB_USAGE =
+  'usage: perbo principle add "<what the product should do>" | perbo principle list';
+
+/**
+ * The verb's own grammar, so the whole of the rest of the line is read by it.
+ *
+ * A line naming no verb is read by `add`'s, and refused by {@link read}: a
+ * `perbo principle --help` is a person asking what the command takes, and
+ * answering it with a refusal would be answering a different question.
+ */
+const grammarFor = (argv: readonly string[]): Grammar =>
+  argv[0] === "list" ? LIST_GRAMMAR : ADD_GRAMMAR;
+
+export const principleCommandLine: ReportCommand<
+  PrincipleInput,
+  { json: boolean },
+  PrincipleReport
+> = {
+  kind: "report",
+  name: "principle",
+  grammars: [ADD_GRAMMAR, LIST_GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor,
+  read(argv) {
+    const verb = argv[0];
+    if (verb !== "add" && verb !== "list") throw new UsageError(VERB_USAGE);
+    const line = parseArgv(verb === "list" ? LIST_GRAMMAR : ADD_GRAMMAR, argv.slice(1));
+    const target = { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null };
+    return {
+      input: readInput(
+        PrincipleInputSchema,
+        verb === "list" ? { verb, target } : { verb, target, text: line.positionals[0] },
+      ),
+      output: { json: false },
+    };
+  },
+  run: principle,
+  render(report): Rendered {
+    if (report.verb === "add") {
+      return { stdout: "", stderr: `recorded in ${report.path}\n`, exitCode: EXIT_CODES.approve };
+    }
+    return report.text === null
+      ? {
+          stdout: "",
+          stderr: `no principles recorded (${report.path} does not exist)\n`,
+          exitCode: EXIT_CODES.approve,
+        }
+      : { stdout: report.text, stderr: "", exitCode: EXIT_CODES.approve };
+  },
+};

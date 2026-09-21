@@ -8,7 +8,7 @@ import { escapesCommandLine } from "./commands/escapes/index.js";
 import { parseExecuteArgs, runDoctorCommand, runExecuteCommand } from "./commands/run/index.js";
 import { COMMAND_NAMES, type CommandName } from "./command-line/names.js";
 import { inspectCommandLine } from "./commands/inspect.js";
-import { parsePrincipleArgs, runPrincipleCommand } from "./commands/principle.js";
+import { principleCommandLine } from "./commands/principle.js";
 import { runReviewCommand } from "./commands/review/index.js";
 import { VERSION } from "./version.js";
 import { stopsCommandLine } from "./commands/stops.js";
@@ -78,7 +78,7 @@ export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
       case "escapes":
         return runCommandLine(escapesCommandLine, { argv: rest, streams, cwd });
       case "principle":
-        return runPrincipleCommand(parsePrincipleArgs(rest));
+        return runCommandLine(principleCommandLine, { argv: rest, streams, cwd });
       case "index":
         return runIndexCommand({ argv: rest, streams, cwd });
       default:

@@ -4,7 +4,7 @@ import { editCommandLine } from "../commands/edit/index.js";
 import { syncCommandLine } from "../commands/sync.js";
 import { inspectCommandLine } from "../commands/inspect.js";
 import { parseInterviewArgs } from "../commands/interview/index.js";
-import { parsePrincipleArgs } from "../commands/principle.js";
+import { principleCommandLine } from "../commands/principle.js";
 import { parseReviewArgs } from "../commands/review/index.js";
 import { parseExecuteArgs } from "../commands/run/index.js";
 import { parseIndexArgs } from "../commands/symbol-index.js";
@@ -183,11 +183,10 @@ describe("the desktop host", () => {
   });
 
   it("reads a recorded principle as its one argument", () => {
-    expect(parsePrincipleArgs(["add", "Prefer a refusal to a guess", "--repo", REPO])).toEqual({
-      action: "add",
+    expect(principleCommandLine.read(["add", "Prefer a refusal to a guess", "--repo", REPO]).input).toEqual({
+      verb: "add",
+      target: { repo: REPO, store: null },
       text: "Prefer a refusal to a guess",
-      repo: REPO,
-      store: null,
     });
   });
 
