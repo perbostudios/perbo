@@ -335,6 +335,9 @@ export type Step =
     }
   | { next: "reenter"; conflict: ConflictInterruption };
 
+/** The step that ends a run, for a routing function that returns only that. */
+export type Stop = Extract<Step, { next: "stop" }>;
+
 /** The state the first round of a run enters with. */
 export function initialRoundState(workspace: Workspace, continuing: Continuation | null): RoundState {
   return {

@@ -130,7 +130,7 @@ import {
   type RoundRecord,
   type RunOutcome,
 } from "./loop/state.js";
-import { verifierModel } from "./loop/verify.js";
+import { refuseWidening, routeVerification, verifierModel } from "./loop/verify.js";
 
 /**
  * Contract → worktree → one agent → sealed change set → deterministic checks →
@@ -2073,14 +2073,17 @@ async function runLockedTicket(
         // paid to verify it. Nothing is lost — the change set stays on the
         // branch and the finding stays open — and the stop says which paths
         // arrived and what the contract admits.
-        if (widened.length > 0) {
+        const widenedStep = refuseWidening({
+          widened,
+          scopeGiven,
+          remediationRound: state.remediationRound,
+          pathsAllowed,
+        });
+        if (widenedStep !== null) {
           ledger.addRound(record());
-          outcome = "changes_requested";
-          detail =
-            `remediation round ${state.remediationRound} was given ${scopeGiven.length} scope ` +
-            `finding(s) and widened the change set instead: ` +
-            `${widened.slice(0, 5).join(", ")}${widened.length > 5 ? ", …" : ""} were not in ` +
-            `the change set it was asked to narrow. ${allowedPathsSentence(pathsAllowed)}`;
+          state = applyStep(state, widenedStep);
+          outcome = widenedStep.end.outcome;
+          detail = widenedStep.end.detail;
           break;
         }
         const declinedKeys = new Set(declines.map((decline) => decline.finding_key));
@@ -2178,106 +2181,23 @@ async function runLockedTicket(
           declines,
         });
 
-        if (verification.deterministic_failure !== null) {
-          outcome = "changes_requested";
-          // A round given a failing pinned check (d069) that leaves the checks
-          // failing did not regress anything: it was the once, and the stop says
-          // so. A scope or legibility failure after such a round is a regression.
-          detail =
-            verification.deterministic_failure_kind === "check" &&
-            toVerify.some(
-              (finding) => finding.source === "deterministic" && finding.rule_id.startsWith("check."),
-            )
-              ? `the pinned checks still fail after remediation round ${state.remediationRound}: ${verification.deterministic_failure}`
-              : `the fix regressed: ${verification.deterministic_failure}`;
-          break;
-        }
-        // Declined findings leave the executor's open set — the person decides
-        // them — so the loop continues only for findings verification left open.
-        const stillOpen = state.openFindings.filter((finding) =>
-          verification.open_keys.includes(finding.key),
-        );
-        if (stillOpen.length === 0) {
-          if (ledger.declines.length === 0) {
-            outcome = "approved";
-            detail =
-              `round 0's routed findings verified closed after ${state.remediationRound} ` +
-              "remediation round(s)";
-          } else {
-            outcome = "escalated";
-            detail =
-              `${ledger.declines.length} finding(s) declared no-determinable-practice by the ` +
-              "executor; a person decides — the reasons are on the round record, and in the " +
-              "pull request when one is opened";
-          }
-          break;
-        }
-
-        /**
-         * SCP-194: what earns the next round is progress, not an unspent count.
-         *
-         * A round that closed at least one finding has shown that the brief is
-         * one the executor can act on, and the next round is the same brief
-         * against a smaller set. A round that closed none has not, and running
-         * it again is the same request against the same evidence for the same
-         * money — which is how AYO-34 stopped `remediation_exhausted` with one
-         * finding open that its own next round would have closed.
-         *
-         * The cap and the ticket budget sit above the rule rather than instead
-         * of it: progress can keep earning rounds only while there are rounds
-         * and money left.
-         */
-        const closedHere = verification.per_finding.filter(
-          (row) => row.status === "closed",
-        ).length;
-        const openKeys = stillOpen.map((finding) => finding.key);
-        if (closedHere === 0) {
-          outcome = "remediation_stalled";
-          detail =
-            `remediation round ${state.remediationRound} closed none of the ${toVerify.length} ` +
-            `finding(s) it was given, so the next round would be the same brief against the ` +
-            `same evidence. Still open: ${openKeys.join(", ")}` +
-            (ledger.declines.length > 0
-              ? ` (and ${ledger.declines.length} declined for a person)`
-              : "");
-          break;
-        }
-        const spentSoFar = ledger.spend();
-        const remediationBudget = ticketBudgetMicros(
-          agentResult.invocation.credential_class,
-        );
-        if (state.remediationRound >= maxRounds) {
-          outcome = "remediation_exhausted";
-          detail =
-            `remediation round ${state.remediationRound} closed ${closedHere} finding(s) and ` +
-            `${stillOpen.length} remain, but ${maxRounds} is the cap — raise ` +
-            `max_remediation_rounds or limits.limits.remediation_rounds in ${configPath}. ` +
-            `Still open: ${openKeys.join(", ")}` +
-            (ledger.declines.length > 0 ? ` (and ${ledger.declines.length} declined for a person)` : "");
-          break;
-        }
-        if (
-          remediationBudget !== null &&
-          spentSoFar.priced > 0 &&
-          spentSoFar.micros >= remediationBudget
-        ) {
-          outcome = "remediation_exhausted";
-          detail =
-            `remediation round ${state.remediationRound} closed ${closedHere} finding(s) and ` +
-            `${stillOpen.length} remain, but the ticket has spent ` +
-            `$${(spentSoFar.micros / 1_000_000).toFixed(2)} of the ` +
-            `$${(remediationBudget / 1_000_000).toFixed(2)} in ` +
-            `limits.limits.ticket_cost_micros (${configPath}). Still open: ` +
-            `${openKeys.join(", ")}` +
-            (ledger.declines.length > 0 ? ` (and ${ledger.declines.length} declined for a person)` : "");
-          break;
-        }
-        state = applyStep(state, {
-          next: "advance",
-          kind: "remediate",
-          remediation: true,
-          carry: { openFindings: stillOpen },
+        const verificationStep = routeVerification({
+          verification,
+          toVerify,
+          openFindings: state.openFindings,
+          declines: ledger.declines.length,
+          remediationRound: state.remediationRound,
+          maxRounds,
+          spend: ledger.spend(),
+          budget: ticketBudgetMicros(agentResult.invocation.credential_class),
+          configPath,
         });
+        state = applyStep(state, verificationStep);
+        if (verificationStep.next === "stop") {
+          outcome = verificationStep.end.outcome;
+          detail = verificationStep.end.detail;
+          break;
+        }
         continue;
       }
 
