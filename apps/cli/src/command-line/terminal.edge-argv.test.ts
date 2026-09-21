@@ -298,7 +298,9 @@ describe("the queue", () => {
   });
 
   it("reads the sync it asks for, with and without the merge", () => {
-    // [<key>, "--repo", …, "--store", …] and the same with "--merge".
+    // The queue asks for this one with values rather than a line, so what is
+    // pinned here is the grammar the same sync is written in by hand: the key
+    // as the one positional, a store outside the repository, and the merge.
     expect(syncCommandLine.read([KEY, "--repo", ".", "--store", "/tmp/.perbo"]).input).toEqual({
       mode: "ticket",
       target: { repo: ".", store: "/tmp/.perbo" },
