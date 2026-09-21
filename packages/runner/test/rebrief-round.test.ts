@@ -7,7 +7,8 @@ import type { BriefRecords } from "../src/brief.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { finding, makeContract, makeReview } from "../src/test-support/records.js";
-import { makeRepo, scratch } from "./support.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+import { scratch } from "./support.js";
 
 /**
  * D-096: what the round hands the re-injection mechanisms.
@@ -123,7 +124,7 @@ const closingVerifier = (async (input: Record<string, unknown>) => {
 
 describe("the records a round hands the re-injection (D-096)", () => {
   it("carries the contract, the scope, the No-Gos and the round's open findings", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const plan = makeContract();
     plan.base.base_commit = repo.head;
     const root = scratch("perbo-rebrief-round-");

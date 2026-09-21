@@ -20,7 +20,8 @@ import {
   scratchPath,
 } from "../src/scratch.js";
 import { sealChangeSet, untrackedAfterChecks } from "../src/seal.js";
-import { makeRepo, scratch } from "./support.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+import { scratch } from "./support.js";
 
 /**
  * The scratch directory inside the boundary (SCP-166).
@@ -96,7 +97,7 @@ const agentRequest = (worktree: string, binary: string, env: NodeJS.ProcessEnv) 
 
 describe("the temporary directory the runner hands the executor", () => {
   it("exists before the executor starts, and the three names point into the worktree", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_scratch_env");
     const report = join(scratch("perbo-scp166-report-"), "env.txt");
     const binary = recordingExecutor(workspace.path, report);
@@ -150,7 +151,7 @@ describe("the temporary directory the runner hands the executor", () => {
  */
 describe("the guard the adapter runs over the executor's commands", () => {
   it("lets a write through $TMPDIR run, and records no prohibited action", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_scratch_allowed");
     const binary = toolCallExecutor(workspace.path, "writes-to-tmpdir", "printf x > $TMPDIR/x");
 
@@ -164,7 +165,7 @@ describe("the guard the adapter runs over the executor's commands", () => {
   }, 60_000);
 
   it("still terminates the attempt on the literal /tmp the directory exists to replace", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_scratch_refused");
     const binary = toolCallExecutor(workspace.path, "writes-to-tmp", "cat > /tmp/x");
 
@@ -180,7 +181,7 @@ describe("the guard the adapter runs over the executor's commands", () => {
 
 describe("the scratch directory and the seal", () => {
   it("never carries a file the executor wrote there into the sealed change set", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_scratch_seal");
 
     const path = prepareScratchDirectory(workspace.path);
@@ -218,7 +219,7 @@ describe("the scratch directory and the seal", () => {
   }, 30_000);
 
   it("is not mistaken for output a pinned check produced", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_scratch_untracked");
 
     const path = prepareScratchDirectory(workspace.path);

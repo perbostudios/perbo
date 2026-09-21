@@ -27,7 +27,9 @@ import {
   makeReview,
   withoutInstall,
 } from "../src/test-support/records.js";
-import { git, makeRepo, scratch } from "./support.js";
+import type { Repository } from "@perbo/test-support";
+import { git, runnerRepository } from "../src/test-support/repository.js";
+import { scratch } from "./support.js";
 
 /**
  * The loop, with the agent and the reviewer replaced by doubles.
@@ -123,7 +125,7 @@ function makeConfig(
 
 describe("the loop closes", () => {
   it("routes a finding to the executor, re-seals, and grades the answer independently", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -212,7 +214,7 @@ describe("the loop closes", () => {
   }, 60_000);
 
   it("carries a decline end to end: parsed from the transcript, skipped by the verifier, escalated to a person", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -304,7 +306,7 @@ describe("the loop closes", () => {
   }, 60_000);
 
   it("bounds the rounds and hands it to a human rather than looping", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = TicketRunConfigSchema.parse({
@@ -360,7 +362,7 @@ describe("the loop closes", () => {
   }, 60_000);
 
   it("a check regression during remediation is changes_requested, not a fresh review", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = TicketRunConfigSchema.parse({
@@ -416,7 +418,7 @@ describe("the loop closes", () => {
     kind: "check" | "scope",
     failure: string,
   ): Promise<{ outcome: string; detail: string | null }> => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = TicketRunConfigSchema.parse({
@@ -489,7 +491,7 @@ describe("the loop closes", () => {
   }, 60_000);
 
   it("does not hand an injected-instruction finding back to the executor", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -528,7 +530,7 @@ describe("the loop closes", () => {
 
 describe("the record", () => {
   it("writes a bundle for every attempt and every review, and never rewrites one", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -595,7 +597,7 @@ describe("the record", () => {
    * contract, and not one an unrequested change here was the place to answer.
    */
   it("records the reviewer's own target as the review bundle's change set", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -669,7 +671,7 @@ describe("the record", () => {
 
 describe("actual_risk exceeding planned_risk", () => {
   it("escalates the attempt rather than discarding it", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -716,7 +718,7 @@ describe("actual_risk exceeding planned_risk", () => {
   }, 60_000);
 
   it("appends a retry rather than overwriting its predecessor", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -847,7 +849,7 @@ function verdictModel(verdicts: unknown[]): {
 
 describe("a verdict the plan cannot accept", () => {
   const setUp = () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     // The fixture's lockfile is rewritten while the worktree is provisioned.
@@ -916,7 +918,7 @@ describe("a verdict the plan cannot accept", () => {
     // The executor's sealed commit is still the branch's tip: the reviewer's
     // malformed output cost the review, not the attempt.
     expect(result.rounds[0]?.attempt.head_commit).not.toBeNull();
-    expect(git(repo.dir, "rev-parse", result.workspace.branch).trim()).toBe(
+    expect(repo.git("rev-parse", result.workspace.branch).trim()).toBe(
       result.rounds[0]?.attempt.head_commit,
     );
 
@@ -951,7 +953,7 @@ describe("a verdict the plan cannot accept", () => {
 
 describe("a review that did not complete", () => {
   const setUp = () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -1068,7 +1070,7 @@ describe("a review that did not complete", () => {
 
 describe("the reviewer's kill switch", () => {
   it("stops the run before an attempt is paid for when the reviewer provider is disabled", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = TicketRunConfigSchema.parse({
@@ -1096,7 +1098,7 @@ describe("the reviewer's kill switch", () => {
 
 describe("a ceiling termination", () => {
   it("names the configuration key and file that raise it", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -1154,16 +1156,16 @@ describe("a ceiling termination", () => {
  * as it does after a run that was terminated once its work was sealed.
  */
 function sealOnBranch(
-  repo: { dir: string; head: string },
+  repo: Repository,
   contract: PlanContract,
   files: Record<string, string>,
   branch = branchName({ ticket_key: TICKET_KEY, ticket_id: contract.ticket_id, outcome: contract.outcome }),
 ): string {
   const path = join(scratch("perbo-prior-"), "wt");
-  if (git(repo.dir, "branch", "--list", branch).trim().length > 0) {
-    git(repo.dir, "worktree", "add", path, branch);
+  if (repo.git("branch", "--list", branch).trim().length > 0) {
+    repo.git("worktree", "add", path, branch);
   } else {
-    git(repo.dir, "worktree", "add", "-b", branch, path, repo.head);
+    repo.git("worktree", "add", "-b", branch, path, repo.head);
   }
   for (const [name, body] of Object.entries(files)) {
     mkdirSync(dirname(join(path, name)), { recursive: true });
@@ -1172,7 +1174,7 @@ function sealOnBranch(
   git(path, "add", "-A");
   git(path, "commit", "-qm", `an earlier run sealed ${Object.keys(files).join(", ")}`);
   const head = git(path, "rev-parse", "HEAD").trim();
-  git(repo.dir, "worktree", "remove", "--force", path);
+  repo.git("worktree", "remove", "--force", path);
   return head;
 }
 
@@ -1202,7 +1204,7 @@ describe("a re-run of a ticket whose branch is already recorded", () => {
   const CARRIED = { "src/carried.ts": "export const carried = 1;\n" };
 
   it("keeps the branch its delivery record names", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = TicketRunConfigSchema.parse({
@@ -1223,11 +1225,11 @@ describe("a re-run of a ticket whose branch is already recorded", () => {
     // The earlier run's commit is on the branch this attempt worked on.
     expect(attempt.prior_commits.map((commit) => commit.sha)).toEqual([prior]);
     // And no branch was cut under the prefix the key derives.
-    expect(git(repo.dir, "branch", "--list", "prb/*").trim()).toBe("");
+    expect(repo.git("branch", "--list", "prb/*").trim()).toBe("");
   }, 60_000);
 
   it("keeps the branch its latest attempt was on", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = TicketRunConfigSchema.parse({
@@ -1264,13 +1266,13 @@ describe("a re-run of a ticket whose branch is already recorded", () => {
     const attempt = result.rounds[0]!.attempt;
     expect(attempt.branch).toBe(RECORDED);
     expect(attempt.prior_commits.map((commit) => commit.sha)).toEqual([prior]);
-    expect(git(repo.dir, "branch", "--list", "prb/*").trim()).toBe("");
+    expect(repo.git("branch", "--list", "prb/*").trim()).toBe("");
   }, 60_000);
 });
 
 describe("a re-run on a branch that already carries sealed commits", () => {
   it("reviews the commit an earlier run sealed when the executor changes nothing", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, withoutInstall(repo.dir));
@@ -1306,7 +1308,7 @@ describe("a re-run on a branch that already carries sealed commits", () => {
   }, 60_000);
 
   it("counts every commit on the branch that predates the attempt", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, withoutInstall(repo.dir));
@@ -1329,7 +1331,7 @@ describe("a re-run on a branch that already carries sealed commits", () => {
   }, 60_000);
 
   it("refuses a judging artifact an earlier attempt sealed, which this one never touched", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, withoutInstall(repo.dir));
@@ -1370,7 +1372,7 @@ describe("a re-run on a branch that already carries sealed commits", () => {
    * in the runner rather than buying a review that would find it.
    */
   it("stops the attempt as runner_defect when a changed path is outside the contract's scope", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, withoutInstall(repo.dir));
@@ -1398,7 +1400,7 @@ describe("a re-run on a branch that already carries sealed commits", () => {
   }, 60_000);
 
   it("still records no_changes when the branch adds nothing to its base", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, withoutInstall(repo.dir));
@@ -1429,7 +1431,7 @@ describe("a re-run on a branch that already carries sealed commits", () => {
    * runner refused on the way.
    */
   const runWithShellAgent = async (commands: readonly string[]) => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, withoutInstall(repo.dir));
@@ -1493,7 +1495,7 @@ describe("a re-run on a branch that already carries sealed commits", () => {
   }, 90_000);
 
   it("reviews the old files and the new ones when the executor adds to what is there", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, withoutInstall(repo.dir));
@@ -1518,7 +1520,7 @@ describe("a re-run on a branch that already carries sealed commits", () => {
   }, 60_000);
 
   it("names the attempt that sealed a commit when that record is on hand", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -1627,7 +1629,7 @@ const approvingReviewCapturing = (reviewInputs: Array<Record<string, unknown>>) 
 
 describe("a unit check that fails once", () => {
   it("re-runs it, records the flake, and hands the reviewer a check that passed", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const check = flakyUnitCheck(false);
@@ -1670,7 +1672,7 @@ describe("a unit check that fails once", () => {
   }, 60_000);
 
   it("closes the gate when the failure reproduces, and names the test that closed it", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const check = flakyUnitCheck(true);
@@ -1732,7 +1734,7 @@ describe("an attempt the runner stopped", () => {
   };
 
   it("records the charge reported before the stop, and the bundle agrees", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -1790,10 +1792,10 @@ describe("the pull request the loop publishes", () => {
     // configuration proves the field survives; neither notices the argument
     // going missing between them, which is the only place it can be lost.
     const issue = "/repo/inbox/SCP-169.md";
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const remote = scratch("perbo-remote-");
     git(remote, "init", "-q", "--bare");
-    git(repo.dir, "remote", "add", "origin", remote);
+    repo.git("remote", "add", "origin", remote);
 
     // A `gh` that records the body it is handed and refuses `pr view`, so
     // creation is the path taken. The runner holds the credential and shells
@@ -1904,7 +1906,7 @@ describe("an attempt whose model transport gave up", () => {
     ).attempts;
 
   it("waits, runs one more attempt from the same base, and the run finishes", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -1979,10 +1981,10 @@ describe("an attempt whose model transport gave up", () => {
   }, 60_000);
 
   it("prices both attempts in the pull request and claims no round it did not run", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const remote = scratch("perbo-remote-");
     git(remote, "init", "-q", "--bare");
-    git(repo.dir, "remote", "add", "origin", remote);
+    repo.git("remote", "add", "origin", remote);
 
     // A `gh` that records the body it is handed and refuses `pr view`, so
     // creation is the path taken.
@@ -2042,7 +2044,7 @@ describe("an attempt whose model transport gave up", () => {
   }, 60_000);
 
   it("fails the ticket on the second one in a row, naming the transport error", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2091,7 +2093,7 @@ describe("an attempt whose model transport gave up", () => {
   }, 60_000);
 
   it("leaves an ordinary agent failure to fail the ticket on its first attempt", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2122,7 +2124,7 @@ describe("an attempt whose model transport gave up", () => {
   }, 60_000);
 
   it("buys no extra attempt for a 529 the transport retried and served", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2236,7 +2238,7 @@ describe("a run a ceiling cut", () => {
     ).attempts;
 
   it("starts the next attempt over the sealed branch instead of ending the run", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2287,7 +2289,7 @@ describe("a run a ceiling cut", () => {
   }, 60_000);
 
   it("stops with the ticket budget named once the budget is spent", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2324,7 +2326,7 @@ describe("a run a ceiling cut", () => {
   }, 60_000);
 
   it("continues until the budget is reached and prices the run as the sum", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2358,7 +2360,7 @@ describe("a run a ceiling cut", () => {
   }, 60_000);
 
   it("leaves a subscription attempt's figure out of a per-token budget (D-096)", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2439,7 +2441,7 @@ describe("a run a provider's session limit cut", () => {
   };
 
   it("parks until the reset, records the wait before sleeping, and resumes the same attempt", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2503,7 +2505,7 @@ describe("a run a provider's session limit cut", () => {
   }, 60_000);
 
   it("refuses to wait past the bound rather than waking before the provider does", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2534,7 +2536,7 @@ describe("a run a provider's session limit cut", () => {
   }, 60_000);
 
   it("honours a park a killed run left on the record", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2581,7 +2583,7 @@ describe("a run a provider's session limit cut", () => {
 
 describe("a second run of a ticket that is already running", () => {
   it("refuses with the pid and the wait, and takes over a lock whose process is gone", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2730,7 +2732,7 @@ describe("remediation bounded by progress", () => {
     });
 
   it("runs a third round after 2 and 1 closures, then stalls on the round that closed none", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2756,7 +2758,7 @@ describe("remediation bounded by progress", () => {
   }, 90_000);
 
   it("finishes on the third round when each round closes one", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2778,7 +2780,7 @@ describe("remediation bounded by progress", () => {
   }, 90_000);
 
   it("stops at the cap while it is still closing findings, and says which cap", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2846,7 +2848,7 @@ describe("a re-run of a ticket whose last review left findings open", () => {
     }) as never;
 
   it("starts a remediation round from them rather than reviewing the same commit again", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2892,7 +2894,7 @@ describe("a re-run of a ticket whose last review left findings open", () => {
   }, 90_000);
 
   it("reviews afresh when the branch has moved since that review", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -2949,7 +2951,7 @@ describe("a scope escape handed back to a remediation round", () => {
   });
 
   it("puts it first with the globs quoted, and refuses a round that widened instead", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -3014,7 +3016,7 @@ describe("a conflict round in the middle of a ticket's rounds", () => {
   };
 
   it("does not spend a remediation round, so the finding still gets one", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -3118,7 +3120,7 @@ describe("a graphed ticket's round", () => {
     });
 
   it("records the pinned check once per node beside the whole-change result", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = graphed(repo.head);
     const config = makeConfig(repo.dir);
     const agent = writesBoth();
@@ -3167,7 +3169,7 @@ describe("a graphed ticket's round", () => {
   }, 90_000);
 
   it("records no node at all for a plan without a graph", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -3196,7 +3198,7 @@ describe("a graphed ticket's round", () => {
   }, 90_000);
 
   it("a node-only blocking finding closes the gate the overall call alone left open", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = graphed(repo.head);
     const config = makeConfig(repo.dir);
     const agent = writesBoth();

@@ -11,7 +11,8 @@ import {
   TicketDeliveryStateSchema,
 } from "../src/delivery.js";
 import { finding, makeContract, makeReview } from "../src/test-support/records.js";
-import { makeRepo, scratch } from "./support.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+import { scratch } from "./support.js";
 import { readFileSync as read } from "node:fs";
 
 async function worktreeFor(repo: { dir: string; head: string }, attempt = "att_seal") {
@@ -41,7 +42,7 @@ const sealArgs = (workspace: { path: string; base_commit: string }, secrets: Sec
 
 describe("sealing a change set", () => {
   it("records base and head, and the pair moves when the change moves", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo);
     writeFileSync(join(workspace.path, "src", "feature.ts"), "export const a = 1;\n");
 
@@ -57,7 +58,7 @@ describe("sealing a change set", () => {
   }, 30_000);
 
   it("returns nothing when the attempt changed nothing", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_empty");
     const sealed = await sealChangeSet(sealArgs(workspace, new SecretIndex()));
     expect(sealed.changeset).toBeNull();
@@ -65,7 +66,7 @@ describe("sealing a change set", () => {
   }, 30_000);
 
   it("keeps a materialized secret out of the commit by content, under an innocuous name", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_secret");
     const secrets = new SecretIndex();
     const body = "SESSION_SECRET=s3cr3t_value_abcdef\n";
@@ -83,7 +84,7 @@ describe("sealing a change set", () => {
   }, 30_000);
 
   it("catches a prohibited path a command allow-list would never see", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_policy");
     mkdirSync(join(workspace.path, ".github", "workflows"), { recursive: true });
     writeFileSync(join(workspace.path, ".github", "workflows", "validate.yml"), "on: push\n");
@@ -101,7 +102,7 @@ describe("sealing a change set", () => {
  */
 describe("a seal whose commit fails", () => {
   it("carries the command and git's own words, so the failure says why", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     writeFileSync(
       join(repo.dir, ".git", "hooks", "pre-commit"),
       "#!/bin/sh\necho 'the pre-commit hook would not have this commit' >&2\nexit 1\n",
@@ -131,7 +132,7 @@ describe("a seal whose commit fails", () => {
  */
 describe("the spec commit's files, kept out of the change set", () => {
   it("excludes the recorded path and not another the same spelling would match as a glob", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_spec_literal");
     mkdirSync(join(workspace.path, "src", "nodes"), { recursive: true });
     // A recorded name git reads as a character class unless the pathspec is
@@ -151,7 +152,7 @@ describe("the spec commit's files, kept out of the change set", () => {
 
 describe("a changed path outside the contract's allowed paths", () => {
   it("is reported by the seal, with the path named", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_scope");
     writeFileSync(join(workspace.path, "src", "feature.ts"), "export const a = 1;\n");
     mkdirSync(join(workspace.path, "docs"), { recursive: true });
@@ -166,7 +167,7 @@ describe("a changed path outside the contract's allowed paths", () => {
   }, 30_000);
 
   it("says nothing where every changed path is inside them", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_scope_clean");
     writeFileSync(join(workspace.path, "src", "feature.ts"), "export const a = 1;\n");
 
@@ -178,7 +179,7 @@ describe("a changed path outside the contract's allowed paths", () => {
   }, 30_000);
 
   it("admits everything where no globs were named, which is how the seal ran before", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_scope_unscoped");
     mkdirSync(join(workspace.path, "docs"), { recursive: true });
     writeFileSync(join(workspace.path, "docs", "notes.md"), "notes\n");
@@ -288,7 +289,7 @@ describe("delivery", () => {
 
 describe("the diff that gets reviewed", () => {
   it("is what the reviewer receives, and the transcript is not in it", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_diff");
     writeFileSync(join(workspace.path, "src", "feature.ts"), "export const a = 1;\n");
     const sealed = await sealChangeSet(sealArgs(workspace, new SecretIndex()));
@@ -299,7 +300,7 @@ describe("the diff that gets reviewed", () => {
   }, 30_000);
 
   it("withholds a diff past the cap rather than cutting it, and keeps every changed path", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_large");
     // Alphabetically first, so a tail-truncated diff would lose it first.
     writeFileSync(join(workspace.path, "src", "aaa-first.ts"), "export const first = 1;\n");
@@ -332,7 +333,7 @@ describe("the diff that gets reviewed", () => {
 
 describe("check output from a previous round", () => {
   it("is kept out of the next round's diff rather than committed as the agent's work", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_artifacts");
 
     // Round N: the agent writes a file, the checks write a coverage report the
@@ -351,7 +352,7 @@ describe("check output from a previous round", () => {
   }, 30_000);
 
   it("reports what the working tree gained, so the next seal knows", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_untracked");
     writeFileSync(join(workspace.path, "coverage.json"), "{}");
     const seen = await untrackedAfterChecks({ worktree: workspace.path });
@@ -359,7 +360,7 @@ describe("check output from a previous round", () => {
   }, 30_000);
 
   it("refuses a listing it could not read whole, rather than seal what it lost", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_untracked_cut");
     writeFileSync(join(workspace.path, "coverage.json"), "{}");
     writeFileSync(join(workspace.path, "profile.json"), "{}");
@@ -373,7 +374,7 @@ describe("check output from a previous round", () => {
 
 describe("what counts as check output", () => {
   it("is untracked files only, so a modified tracked file still reaches the reviewer", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const workspace = await worktreeFor(repo, "att_modified");
     // A check that rewrites a tracked file is a bigger problem than a coverage
     // directory, and hiding it would also drop the same file if the agent edits

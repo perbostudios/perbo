@@ -7,7 +7,8 @@ import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { mergeUp } from "../src/merge-up.js";
 import { finding, makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
-import { git, makeRepo, scratch } from "./support.js";
+import { git, runnerRepository } from "../src/test-support/repository.js";
+import { scratch } from "./support.js";
 
 /**
  * SCP-192: the loop keeps its branch level with the base.
@@ -136,7 +137,7 @@ const MERGE_UP_TIMEOUT_MS = 60_000;
 
 describe("the branch is level with the base before the review reads it", () => {
   it("merges a base commit that landed under the run, and reviews against the new base", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -171,12 +172,12 @@ describe("the branch is level with the base before the review reads it", () => {
     expect(attempt.base_commit).toBe(movedTo);
     // The branch really carries the base commit: `--is-ancestor` exits 0.
     expect(() =>
-      git(repo.dir, "merge-base", "--is-ancestor", movedTo, attempt.head_commit!),
+      repo.git("merge-base", "--is-ancestor", movedTo, attempt.head_commit!),
     ).not.toThrow();
   }, MERGE_UP_TIMEOUT_MS);
 
   it("hands a conflicting base commit to a round that names those files and nothing else", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -231,7 +232,7 @@ describe("the branch is level with the base before the review reads it", () => {
   }, MERGE_UP_TIMEOUT_MS);
 
   it("stops the ticket with the files named when the round cannot resolve the conflict", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -263,7 +264,7 @@ describe("the branch is level with the base before the review reads it", () => {
   }, MERGE_UP_TIMEOUT_MS);
 
   it("stops when the resolution leaves conflict markers in the change set", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -277,7 +278,7 @@ describe("the branch is level with the base before the review reads it", () => {
       }
       // The executor did the merge itself and committed the conflict as it
       // stood — the failure mode a person meets as a branch full of markers.
-      const tip = git(repo.dir, "rev-parse", "main").trim();
+      const tip = repo.git("rev-parse", "main").trim();
       try {
         git(worktree, "merge", "--no-edit", tip);
       } catch {
@@ -303,7 +304,7 @@ describe("the branch is level with the base before the review reads it", () => {
   }, MERGE_UP_TIMEOUT_MS);
 
   it("starts a re-run from a merged-up branch, so the executor sees what the base has", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -361,7 +362,7 @@ describe("the branch is level with the base before the review reads it", () => {
   }, MERGE_UP_TIMEOUT_MS);
 
   it("merges up again before the pull request, and records the base tip it opened over", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = { ...makeConfig(repo.dir), publish: true };
@@ -392,7 +393,7 @@ describe("the branch is level with the base before the review reads it", () => {
         push: (async () => ({ pushed: true, detail: "test" })) as never,
         open: (async (request: { branch: string; base_ref: string }) => {
           opened.push({
-            head: git(repo.dir, "rev-parse", request.branch).trim(),
+            head: repo.git("rev-parse", request.branch).trim(),
             base_ref: request.base_ref,
           });
           return { url: "https://example.invalid/pull/1", number: 1 };
@@ -411,7 +412,7 @@ describe("the branch is level with the base before the review reads it", () => {
     // The branch the pull request opened over carries the commit that landed
     // after the review: it is mergeable at the moment it opens.
     expect(() =>
-      git(repo.dir, "merge-base", "--is-ancestor", movedTo, opened[0]!.head),
+      repo.git("merge-base", "--is-ancestor", movedTo, opened[0]!.head),
     ).not.toThrow();
     expect(result.merged_base).toBe(movedTo);
   }, MERGE_UP_TIMEOUT_MS);
@@ -426,7 +427,7 @@ describe("mergeUp itself", () => {
   }
 
   it("does nothing for a base ref this checkout cannot resolve", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const worktree = branchWorktree(repo.dir, "unresolvable");
 
     const result = await mergeUp({
@@ -443,7 +444,7 @@ describe("mergeUp itself", () => {
   }, MERGE_UP_TIMEOUT_MS);
 
   it("does nothing for a base ref that could be read as an option", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const worktree = branchWorktree(repo.dir, "optionish");
 
     const result = await mergeUp({
@@ -459,7 +460,7 @@ describe("mergeUp itself", () => {
   }, MERGE_UP_TIMEOUT_MS);
 
   it("refuses a conflict whose unmerged paths do not fit in one listing", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const worktree = branchWorktree(repo.dir, "cut-listing");
     const conflicting = "src/index.ts";
     writeFileSync(join(worktree, conflicting), "export const version = 2;\n");
@@ -483,7 +484,7 @@ describe("mergeUp itself", () => {
   }, MERGE_UP_TIMEOUT_MS);
 
   it("names no path when the merge failed for a reason that is not a conflict", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const worktree = branchWorktree(repo.dir, "blocked");
     // The branch has a commit of its own, so the merge is not a fast-forward.
     writeFileSync(join(worktree, "src", "own.ts"), "export const own = 1;\n");
@@ -516,7 +517,7 @@ describe("mergeUp itself", () => {
 
 describe("a base that has not moved costs nothing", () => {
   it("adds no merge commit and records no merged base", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -559,7 +560,7 @@ describe("a base that has not moved costs nothing", () => {
  */
 describe("the scope assertion survives the merge-up", () => {
   it("still stops the attempt as runner_defect when the base moved under the round", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);

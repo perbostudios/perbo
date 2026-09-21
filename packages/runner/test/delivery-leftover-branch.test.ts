@@ -3,7 +3,9 @@ import { chmodSync, existsSync, readFileSync, symlinkSync, writeFileSync } from 
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { pushAttemptBranch } from "../src/delivery.js";
-import { git, scratch } from "./support.js";
+import { initBareRepository, initRepository } from "@perbo/test-support";
+import { git } from "../src/test-support/repository.js";
+import { scratch } from "./support.js";
 
 /**
  * A remote attempt branch, `prb/…` or `ayo/…`, a failed publish left behind
@@ -45,35 +47,28 @@ interface Fixture {
 
 /** A worktree on `BRANCH`, and a bare `origin` that may already hold it. */
 function fixture(options: { leftover?: boolean } = {}): Fixture {
-  const origin = scratch("perbo-origin-");
-  git(origin, "init", "-q", "--bare", "-b", "main");
-  const work = scratch("perbo-work-");
-  git(work, "init", "-q", "-b", "main");
-  git(work, "config", "user.name", "test");
-  git(work, "config", "user.email", "test@example.com");
-  git(work, "config", "commit.gpgsign", "false");
-  writeFileSync(join(work, "first.txt"), "first\n");
-  git(work, "add", "-A");
-  git(work, "commit", "-qm", "first");
-  git(work, "remote", "add", "origin", origin);
-  git(work, "push", "-q", "origin", "main");
+  const origin = initBareRepository(scratch("perbo-origin-"));
+  const repository = initRepository(scratch("perbo-work-"), {
+    files: { "first.txt": "first\n" },
+    message: "first",
+  });
+  const work = repository.dir;
+  repository.git("remote", "add", "origin", origin);
+  repository.git("push", "-q", "origin", "main");
 
   const commit = (branch: string, file: string) => {
-    git(work, "checkout", "-q", "-b", branch, "main");
-    writeFileSync(join(work, file), `${file}\n`);
-    git(work, "add", "-A");
-    git(work, "commit", "-qm", file);
-    return git(work, "rev-parse", "HEAD").trim();
+    repository.git("checkout", "-q", "-b", branch, "main");
+    return repository.commit({ [file]: `${file}\n` }, file);
   };
 
   const mine = commit(BRANCH, "mine.txt");
   const leftover = commit("leftover", "leftover.txt");
   const moved = commit("moved", "moved.txt");
-  git(work, "push", "-q", "origin", "moved:refs/heads/moved");
+  repository.git("push", "-q", "origin", "moved:refs/heads/moved");
   if (options.leftover !== false) {
-    git(work, "push", "-q", "origin", `leftover:refs/heads/${BRANCH}`);
+    repository.git("push", "-q", "origin", `leftover:refs/heads/${BRANCH}`);
   }
-  git(work, "checkout", "-q", BRANCH);
+  repository.git("checkout", "-q", BRANCH);
 
   return {
     origin,

@@ -13,7 +13,8 @@ import { BundleStore } from "../src/bundle.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
 import { finding, makeReview, withoutInstall } from "../src/test-support/records.js";
-import { makeRepo, scratch, watchOutbound } from "./support.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+import { scratch, watchOutbound } from "./support.js";
 
 /**
  * The loop on a contract nobody admitted (AYO-32).
@@ -198,7 +199,7 @@ const writes = (file: string, contents: string) =>
 
 describe("a run with nothing admitted behind it", () => {
   it("leaves attempts, bundles, checks and review in the repository's own .perbo/", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, label } = mint(repo);
     const agent = fakeAgent(scratch, [
       writes("src/feature.ts", "export const total = (n) => n.reduce((a, b) => a + b, 0);\n"),
@@ -270,7 +271,7 @@ describe("a run with nothing admitted behind it", () => {
   }, 120_000);
 
   it("records what a remediation round's checks measured, which no review reports", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, label } = mint(repo);
     const agent = fakeAgent(scratch, [
       writes("src/feature.ts", "export const total = (n) => n.reduce((a, b) => a + b, 0);\n"),
@@ -305,7 +306,7 @@ describe("a run with nothing admitted behind it", () => {
 
 describe("the ceilings a run with nothing admitted stops at", () => {
   it("stops where the spend crosses the ceiling, and keeps the stopped attempt's record", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, label } = mint(repo);
     // The executor reports $0.002; the ceiling is a tenth of that. D-096: a
     // cost ceiling cuts only an executor billed per token, so the credential
@@ -352,7 +353,7 @@ describe("the ceilings a run with nothing admitted stops at", () => {
   }, 120_000);
 
   it("stops after one attempt when the ceiling allows one, with that attempt priced", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, label } = mint(repo);
     const agent = fakeAgent(scratch, [writes("src/feature.ts", "export const total = 1;\n")]);
 

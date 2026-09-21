@@ -19,7 +19,8 @@ import { BundleStore } from "../src/bundle.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { makeAttempt, makeContract, makeReview } from "../src/test-support/records.js";
-import { makeRepo, scratch } from "./support.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+import { scratch } from "./support.js";
 
 /**
  * Re-running one approved contract.
@@ -346,7 +347,7 @@ describe("replacing the attempts record", () => {
 
 describe("a re-run of the same ticket", () => {
   it("keeps the ceiling-stopped run on the record and chains the new one to it", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const root = scratch("perbo-rerun-");
@@ -422,7 +423,7 @@ describe("a re-run of the same ticket", () => {
   }, 120_000);
 
   it("counts the runs on its own record when nothing tracks the ticket", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const root = scratch("perbo-rerun-bare-");

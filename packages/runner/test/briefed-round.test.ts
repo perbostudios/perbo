@@ -16,7 +16,8 @@ import { buildPermissionProfile } from "../src/profile.js";
 import { executorPrompt, remediationPrompt } from "../src/prompt.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
 import { finding, makeContract, makeReview } from "../src/test-support/records.js";
-import { makeRepo, scratch } from "./support.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+import { scratch } from "./support.js";
 
 /**
  * D-092: a remediation round is briefed with its predecessor's own account,
@@ -304,7 +305,7 @@ const closingVerifier = (async (input: Record<string, unknown>) => {
 
 describe("the account is sealed with the change set and briefs the next round (D-092)", () => {
   it("lands on the attempt record and reaches the executor's own next round", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const plan = makeContract();
     plan.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, {});
@@ -370,7 +371,7 @@ const iterationDouble = (iterations: number) => {
 
 describe("a remediation round is bounded by round_iterations (D-092)", () => {
   it("cuts the round on the round ceiling and names it on the record", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const plan = makeContract();
     plan.base.base_commit = repo.head;
     // Five turns is inside the attempt ceiling and outside the round's, so the
@@ -395,7 +396,7 @@ describe("a remediation round is bounded by round_iterations (D-092)", () => {
   }, 60_000);
 
   it("leaves the initial attempt bound by attempt_iterations", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const plan = makeContract();
     plan.base.base_commit = repo.head;
     // SCP-193 would follow a cut attempt with another over the sealed branch,

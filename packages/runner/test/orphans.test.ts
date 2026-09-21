@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
 import { TicketRunConfigSchema, runTicket, type TicketRunResult } from "../src/loop.js";
 import { makeContract, makeReview } from "../src/test-support/records.js";
-import { makeRepo, scratch } from "./support.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+import { scratch } from "./support.js";
 
 /**
  * What an attempt leaves running when it ends.
@@ -193,7 +194,7 @@ async function runWith(input: {
   config: { state_root: string };
   ticket_id: string;
 }> {
-  const repo = makeRepo();
+  const repo = runnerRepository(scratch);
   const contract = makeContract();
   contract.base.base_commit = repo.head;
   const config = configFor(repo.dir, input.checkCommand);

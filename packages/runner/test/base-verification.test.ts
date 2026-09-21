@@ -13,7 +13,8 @@ import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { makeAttempt, makeContract, withoutInstall } from "../src/test-support/records.js";
-import { git, makeRepo, scratch } from "./support.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+import { scratch } from "./support.js";
 
 /**
  * Which commit's verification a check failure is attributed to.
@@ -198,7 +199,7 @@ const closesEverything = async (input: Record<string, unknown>) => ({
 
 describe("a check failure on an attempt that continued a sealed commit", () => {
   it("is the change's, because the base — not the sealed head — is what was verified", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const manifest = manifestVerifying(repo.dir, failsWhile(BREAKS));
@@ -260,12 +261,12 @@ describe("a check failure on an attempt that continued a sealed commit", () => {
   }, 120_000);
 
   it("blocks when the base itself fails the verify", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     // The base carries the file the verify and the check both refuse.
     writeFileSync(join(repo.dir, BREAKS), "export const broken = true;\n");
-    git(repo.dir, "add", "-A");
-    git(repo.dir, "commit", "-qm", "a base that does not verify");
-    const head = git(repo.dir, "rev-parse", "HEAD").trim();
+    repo.git("add", "-A");
+    repo.git("commit", "-qm", "a base that does not verify");
+    const head = repo.git("rev-parse", "HEAD").trim();
 
     const contract = makeContract();
     contract.base.base_commit = head;
@@ -293,7 +294,7 @@ describe("a check failure on an attempt that continued a sealed commit", () => {
   }, 120_000);
 
   it("tells the review nothing while no run has measured the base", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const manifest = manifestVerifying(repo.dir, failsWhile(BREAKS));
@@ -308,18 +309,18 @@ describe("a check failure on an attempt that continued a sealed commit", () => {
       ticket_id: contract.ticket_id,
       outcome: contract.outcome,
     });
-    git(repo.dir, "checkout", "-q", "-b", branch);
+    repo.git("checkout", "-q", "-b", branch);
     writeFileSync(join(repo.dir, BREAKS), "export const broken = true;\n");
-    git(repo.dir, "add", "-A");
-    git(repo.dir, "commit", "-qm", "sealed by a run this record predates");
-    git(repo.dir, "checkout", "-q", "main");
+    repo.git("add", "-A");
+    repo.git("commit", "-qm", "sealed by a run this record predates");
+    repo.git("checkout", "-q", "main");
 
     // Written as a record from before the fields existed: the two keys are
     // absent, not null, which is what a reader has to cope with.
     const { base_verification, provisioning_verify, ...older } = makeAttempt({
       attempt_id: "att_00000000000000ff",
       ticket_id: contract.ticket_id,
-      head_commit: git(repo.dir, "rev-parse", branch).trim(),
+      head_commit: repo.git("rev-parse", branch).trim(),
       branch,
     });
     void base_verification;
@@ -352,7 +353,7 @@ describe("a check failure on an attempt that continued a sealed commit", () => {
   }, 120_000);
 
   it("tells the review nothing where the verify measures nothing, whatever the record says", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     // `git status --porcelain` passes on any checkout Git can read, and the
@@ -367,7 +368,7 @@ describe("a check failure on an attempt that continued a sealed commit", () => {
       ticket_id: contract.ticket_id,
       outcome: contract.outcome,
     });
-    git(repo.dir, "branch", branch);
+    repo.git("branch", branch);
     const recorded = {
       ...makeAttempt({
         attempt_id: "att_00000000000000fe",

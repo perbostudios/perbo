@@ -6,7 +6,8 @@ import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { finding, makeContract, makeReview } from "../src/test-support/records.js";
-import { makeRepo, scratch } from "./support.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+import { scratch } from "./support.js";
 
 /**
  * An `incomplete` verdict whose unjudgeable criteria hang on a finding the
@@ -138,7 +139,7 @@ const incomplete = (review_id: string, findings: ReturnType<typeof finding>[]) =
   });
 
 const setUp = () => {
-  const repo = makeRepo();
+  const repo = runnerRepository(scratch);
   const contract = makeContract();
   contract.base.base_commit = repo.head;
   return { contract, config: makeConfig(repo.dir), agent: agentDouble() };
