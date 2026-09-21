@@ -41,7 +41,7 @@ import {
 } from "../../command-line/grammar.js";
 import { effectiveLimits, readRepoConfig, requireBase, resolveBase } from "../run/index.js";
 import type { Streams } from "../../streams.js";
-import { derivedBranch, isStranded, runSyncCommand } from "../sync.js";
+import { derivedBranch, isStranded, sync } from "../sync.js";
 import { listTickets, readContract, readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 import { describeWaits } from "./waits.js";
 
@@ -241,11 +241,19 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
   },
 
   async sync({ key, merge, onLine }) {
-    return runSyncCommand({
-      argv: [key, "--repo", target.repo, ...(target.store ? ["--store", target.store] : []), ...(merge ? ["--merge"] : [])],
-      streams: lineStreams(onLine),
-      cwd: target.cwd,
-    });
+    // Built as values, as the draft below is: a key the queue read out of the
+    // store is an argument, and there is no line here for it to become part of.
+    const lines = lineStreams(onLine);
+    return sync(
+      { mode: "ticket", target: { repo: target.repo, store: target.store }, key, merge },
+      {
+        cwd: target.cwd,
+        now: new Date(),
+        diagnostics: lines,
+        stdout: lines.stdout,
+        isTTY: lines.isTTY,
+      },
+    );
   },
 
   async sealedPaths({ repository_root, base_ref, branch }) {

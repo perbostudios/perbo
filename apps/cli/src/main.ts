@@ -17,7 +17,7 @@ import { runAgentCommand } from "./commands/agent.js";
 import { runInterviewCommand } from "./commands/interview/index.js";
 import { mcpCommandLine } from "./commands/mcp.js";
 import { runServeCommand } from "./commands/serve/index.js";
-import { runSyncCommand } from "./commands/sync.js";
+import { syncCommandLine } from "./commands/sync.js";
 import { USAGE } from "./command-line/usage.js";
 import { runVerdictCommand } from "./commands/verdict/index.js";
 
@@ -64,7 +64,7 @@ export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
       case "list":
         return runCommandLine(listCommandLine, { argv: rest, streams, cwd });
       case "sync":
-        return runSyncCommand({ argv: rest, streams, cwd });
+        return runCommandLine(syncCommandLine, { argv: rest, streams, cwd });
       case "serve":
         return runServeCommand({ argv: rest, streams, cwd });
       case "mcp":

@@ -37,7 +37,7 @@ import {
   type LocalRunRecord,
 } from "./local.js";
 import { stopsCommandLine } from "../stops.js";
-import { runSyncCommand } from "../sync.js";
+import { syncCommandLine } from "../sync.js";
 import {
   headCommit,
   idsFor,
@@ -1311,11 +1311,11 @@ describe("a run with nothing admitted, after its pull request is open", () => {
     else process.env.GITHUB_TOKEN = originalGithubToken;
   });
 
-  const withGh = async <T>(bin: string, body: () => Promise<T>): Promise<T> => {
+  const withGh = async <T>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
     process.env.PATH = `${bin}:${originalPath ?? ""}`;
     process.env.GH_TOKEN = "test-token";
     delete process.env.GITHUB_TOKEN;
-    return body();
+    return await body();
   };
 
   describe("sync over a store that holds only local runs", () => {
@@ -1350,7 +1350,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       const streams = captureStreams();
       const code = await withGh(bin, () =>
-        runSyncCommand({ argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
@@ -1406,7 +1406,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       const streams = captureStreams();
       const code = await withGh(bin, () =>
-        runSyncCommand({ argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
@@ -1430,7 +1430,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       const streams = captureStreams();
       const code = await withGh(fakeGh("no-pull-request", {}), () =>
-        runSyncCommand({ argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
@@ -1471,15 +1471,17 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       const streams = captureStreams();
       const code = await withGh(bin, () =>
-        runSyncCommand({
+        runCommandLine(syncCommandLine, {
           argv: ["--repo", repo.root],
           streams,
           cwd: repo.root,
           now: NOW,
-          poll: async (args) =>
-            args.branch === branchOf(broken)
-              ? Promise.reject(new Error("gh: the remote end hung up unexpectedly"))
-              : pollPullRequest(args),
+          deps: {
+            poll: async (args) =>
+              args.branch === branchOf(broken)
+                ? Promise.reject(new Error("gh: the remote end hung up unexpectedly"))
+                : pollPullRequest(args),
+          },
         }),
       );
 
@@ -1510,7 +1512,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
           },
         }),
         () =>
-          runSyncCommand({ argv: [run.run_id, "--repo", repo.root], streams: read, cwd: repo.root, now: NOW }),
+          runCommandLine(syncCommandLine, { argv: [run.run_id, "--repo", repo.root], streams: read, cwd: repo.root, now: NOW }),
       );
       expect(readCode).toBe(EXIT_CODES.approve);
       expect(read.out.join("")).toContain(`${run.run_id}  pr_open  open`);
@@ -1522,7 +1524,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       process.env.PATH = originalPath;
       delete process.env.GH_TOKEN;
       delete process.env.GITHUB_TOKEN;
-      const unreadCode = await runSyncCommand({
+      const unreadCode = await runCommandLine(syncCommandLine, {
         argv: [run.run_id, "--repo", repo.root],
         streams: unread,
         cwd: repo.root,
@@ -1540,7 +1542,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       expect(existsSync(join(root, ".perbo"))).toBe(false);
 
       const streams = captureStreams();
-      const code = await runSyncCommand({ argv: ["--repo", root], streams, cwd: root, now: NOW });
+      const code = await runCommandLine(syncCommandLine, { argv: ["--repo", root], streams, cwd: root, now: NOW });
 
       expect(code).toBe(EXIT_CODES.approve);
       const said = [...streams.out, ...streams.err].join("");
@@ -1554,7 +1556,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       mkdirSync(repo.dir, { recursive: true });
 
       const streams = captureStreams();
-      const code = await runSyncCommand({ argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW });
+      const code = await runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW });
 
       expect(code).toBe(EXIT_CODES.approve);
       expect(
@@ -1701,7 +1703,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       });
 
       await withGh(bin, async () => {
-        const ticketSync = await runSyncCommand({
+        const ticketSync = await runCommandLine(syncCommandLine, {
           argv: ["AYO-1", "--repo", repo.root],
           streams: captureStreams(),
           cwd: repo.root,
@@ -1709,7 +1711,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
         });
         expect(ticketSync).toBe(EXIT_CODES.approve);
         const sweep = captureStreams();
-        const runSync = await runSyncCommand({
+        const runSync = await runCommandLine(syncCommandLine, {
           argv: ["--repo", repo.root],
           streams: sweep,
           cwd: repo.root,
@@ -1816,7 +1818,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
           },
         }),
         async () => {
-          const code = await runSyncCommand({
+          const code = await runCommandLine(syncCommandLine, {
             argv: ["AYO-2", "--repo", ticketed.root],
             streams: captureStreams(),
             cwd: ticketed.root,
@@ -1842,7 +1844,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
           },
         }),
         async () => {
-          const code = await runSyncCommand({
+          const code = await runCommandLine(syncCommandLine, {
             argv: ["--repo", local.root],
             streams: captureStreams(),
             cwd: local.root,

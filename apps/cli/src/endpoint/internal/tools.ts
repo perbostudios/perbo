@@ -17,8 +17,7 @@ import { escapesReport } from "../../commands/escapes/index.js";
 import { AttemptIdSchema, inspectReport } from "../../commands/inspect.js";
 import type { ServeTick } from "../../commands/serve/index.js";
 import { stopsReport, IsoInstantSchema } from "../../commands/stops.js";
-import type { Streams } from "../../streams.js";
-import { runSyncCommand } from "../../commands/sync.js";
+import { sync } from "../../commands/sync.js";
 
 /**
  * The tools the queue's endpoint offers a session (the founder's decision of
@@ -77,55 +76,6 @@ export interface EndpointTool<Input extends z.ZodType = z.ZodType> {
 /** One tool, typed by its own schema on the way in and widened on the way out. */
 function tool<Input extends z.ZodType>(definition: EndpointTool<Input>): EndpointTool {
   return definition as unknown as EndpointTool;
-}
-
-const repoArgs = (context: ToolContext): string[] => [
-  "--repo",
-  context.repo,
-  ...(context.store === null ? [] : ["--store", context.store]),
-];
-
-/**
- * Run one command with its streams captured, and turn what it wrote into a
- * tool result: the JSON it printed as the structured content where it printed
- * one, everything else as text, and its exit code as the error flag.
- */
-async function captured(
-  json: boolean,
-  command: (streams: Streams) => number | Promise<number>,
-): Promise<ToolResult> {
-  const out: string[] = [];
-  const err: string[] = [];
-  const streams: Streams = {
-    stdout: (chunk) => out.push(chunk),
-    stderr: (chunk) => err.push(chunk),
-    isTTY: false,
-  };
-  let code: number;
-  try {
-    code = await command(streams);
-  } catch (error) {
-    return {
-      content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-      isError: true,
-    };
-  }
-  const stdout = out.join("");
-  const stderr = err.join("").trim();
-  let structuredContent: unknown;
-  if (json && stdout.trim().length > 0) {
-    try {
-      structuredContent = JSON.parse(stdout);
-    } catch {
-      // Not the JSON the command promised: the text below still carries it.
-    }
-  }
-  const text = [stdout.trim(), stderr].filter((part) => part.length > 0).join("\n");
-  return {
-    content: [{ type: "text", text: text.length === 0 ? `exit ${code}` : text }],
-    ...(structuredContent === undefined ? {} : { structuredContent }),
-    ...(code === EXIT_CODES.approve ? {} : { isError: true }),
-  };
 }
 
 /** The store this endpoint's commands work against, as their input names it. */
@@ -228,9 +178,6 @@ const KeySchema = TicketKeySchema.describe("A ticket key, e.g. PRB-118.");
  * for is what it says rather than the shape of a flag — a ticket key is a key,
  * an issue reference is one, a model id is what a provider's own CLI will be
  * started with, which is an action parameter (ADR-0023 §4).
- *
- * `sync_ticket` is the one tool that still hands a command a line, built from
- * a key this schema has already read and the store `serve` was pointed at.
  */
 const AbsoluteFileSchema = z
   .string()
@@ -441,7 +388,14 @@ const syncTicket = tool({
   role: "write",
   input: z.object({ key: KeySchema }),
   run: (input, context) =>
-    captured(false, (streams) => runSyncCommand({ argv: [input.key, ...repoArgs(context)], streams, cwd: context.cwd })),
+    narrated(
+      (_output, commandContext) =>
+        sync(
+          { mode: "ticket", target: targetOf(context), key: input.key, merge: false },
+          commandContext,
+        ),
+      context,
+    ),
 });
 
 const queuePause = tool({

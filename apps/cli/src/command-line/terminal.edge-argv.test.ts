@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { admitCommandLine, approveCommandLine, listCommandLine, parseListArgs } from "../commands/admit.js";
+import { admitCommandLine, approveCommandLine, listCommandLine } from "../commands/admit.js";
 import { editCommandLine } from "../commands/edit/index.js";
+import { syncCommandLine } from "../commands/sync.js";
 import { inspectCommandLine } from "../commands/inspect.js";
 import { parseInterviewArgs } from "../commands/interview/index.js";
 import { parsePrincipleArgs } from "../commands/principle.js";
@@ -191,9 +192,14 @@ describe("the desktop host", () => {
   });
 
   it("reads a sync as the key and the flags after it", () => {
-    // ["sync", <key>] + --repo: the key is argv[0] and the rest is read for
-    // the repository, as it is for approve.
-    expect(parseListArgs(["--repo", REPO])).toMatchObject({ repo: REPO, store: null });
+    // ["sync", <key>] + --repo: the key is the one positional and the rest is
+    // read for the repository, as it is for approve.
+    expect(syncCommandLine.read([KEY, "--repo", REPO]).input).toEqual({
+      mode: "ticket",
+      target: { repo: REPO, store: null },
+      key: KEY,
+      merge: false,
+    });
   });
 
   it("reads a verdict's decision, finding, note and author", () => {
@@ -290,10 +296,15 @@ describe("the queue", () => {
 
   it("reads the sync it asks for, with and without the merge", () => {
     // [<key>, "--repo", …, "--store", …] and the same with "--merge".
-    expect(parseListArgs(["--repo", ".", "--store", "/tmp/.perbo"])).toMatchObject({
-      repo: ".",
-      store: "/tmp/.perbo",
+    expect(syncCommandLine.read([KEY, "--repo", ".", "--store", "/tmp/.perbo"]).input).toEqual({
+      mode: "ticket",
+      target: { repo: ".", store: "/tmp/.perbo" },
+      key: KEY,
+      merge: false,
     });
+    expect(
+      syncCommandLine.read([KEY, "--repo", ".", "--store", "/tmp/.perbo", "--merge"]).input,
+    ).toMatchObject({ mode: "ticket", key: KEY, merge: true });
   });
 });
 

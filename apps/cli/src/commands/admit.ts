@@ -327,13 +327,6 @@ export interface AdmitDeps {
   fetchIssue: (reference: string) => Promise<GitHubIssue>;
 }
 
-export interface ListArgs {
-  repo: string;
-  store: string | null;
-  all: boolean;
-  json: boolean;
-}
-
 const ADMIT_FLAGS = {
   "--repo": valueFlag(),
   "--store": valueFlag(),
@@ -465,20 +458,6 @@ function readAdmission(argv: readonly string[]): {
       approve: flags["--approve"] === true,
     }),
     output: { json: flags["--json"] === true },
-  };
-}
-
-/**
- * The flags `perbo sync <key>` reads for the store it works against, which are
- * the listing's own.
- */
-export function parseListArgs(argv: readonly string[]): ListArgs {
-  const line = parseArgv(LIST_GRAMMAR, argv);
-  return {
-    repo: line.flags["--repo"] ?? ".",
-    store: line.flags["--store"] ?? null,
-    all: line.flags["--all"] === true,
-    json: line.flags["--json"] === true,
   };
 }
 

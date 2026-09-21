@@ -12,7 +12,7 @@ import { TicketDeliveryStateSchema, type TicketDeliveryState } from "@perbo/runn
 import type { Streams } from "../../streams.js";
 import { baselinePath } from "../baseline/index.js";
 import { EscapeCollectionError, TicketEscapesSchema, escapeStatus, escapesCommandLine, escapesPath, readMergeFacts, type MergeFacts, type TicketEscapes } from "./index.js";
-import { runSyncCommand } from "../sync.js";
+import { syncCommandLine } from "../sync.js";
 import { idsFor, readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 
@@ -169,24 +169,26 @@ const sync = (
   observedAt: string,
   options: { real?: boolean; streams?: Streams } = {},
 ) =>
-  runSyncCommand({
+  runCommandLine(syncCommandLine, {
     argv: [ticket.key, "--repo", fixtureAt.repo],
     streams: options.streams ?? capture(),
     cwd: fixtureAt.repo,
     now: new Date(observedAt),
-    poll: () => Promise.resolve(delivery(ticket, observedAt)),
-    ...(options.real === true
-      ? {}
-      : {
-          mergeFacts: (): MergeFacts => ({
-            default_branch: "main",
-            merge_commit: fixtureAt.merges[ticket.key]!,
-            merged_at: mergedAt,
-            branch_commits: [],
-            pull_request_url: ticket.delivery.pull_request_url,
-            pull_request_number: ticket.delivery.pull_request_number,
+    deps: {
+      poll: () => Promise.resolve(delivery(ticket, observedAt)),
+      ...(options.real === true
+        ? {}
+        : {
+            mergeFacts: (): MergeFacts => ({
+              default_branch: "main",
+              merge_commit: fixtureAt.merges[ticket.key]!,
+              merged_at: mergedAt,
+              branch_commits: [],
+              pull_request_url: ticket.delivery.pull_request_url,
+              pull_request_number: ticket.delivery.pull_request_number,
+            }),
           }),
-        }),
+    },
   });
 
 /**
@@ -226,7 +228,7 @@ function fakeGh(name: string, payload: unknown) {
       }
     },
     /** The same, held across an `await` — `sync` reaches `gh` after one. */
-    during: async <T>(body: () => Promise<T>): Promise<T> => {
+    during: async <T>(body: () => T | Promise<T>): Promise<Awaited<T>> => {
       const path = process.env.PATH;
       process.env.PATH = `${bin}${path === undefined ? "" : `:${path}`}`;
       try {
@@ -459,20 +461,22 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     f.git("2026-08-03T00:00:00Z", "revert", "-m", "1", "--no-edit", f.merges["AYO-1"]!);
     const absent = "9".repeat(40);
     const ticket = ticketAt(f, "AYO-1", "ayo/AYO-1", 1);
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: [ticket.key, "--repo", f.repo],
       streams: capture(),
       cwd: f.repo,
       now: new Date(OBSERVED_AT),
-      poll: () => Promise.resolve(delivery(ticket, OBSERVED_AT)),
-      mergeFacts: (): MergeFacts => ({
-        default_branch: "main",
-        merge_commit: f.merges["AYO-1"]!,
-        merged_at: MERGED_AT,
-        branch_commits: [absent],
-        pull_request_url: ticket.delivery.pull_request_url,
-        pull_request_number: ticket.delivery.pull_request_number,
-      }),
+      deps: {
+        poll: () => Promise.resolve(delivery(ticket, OBSERVED_AT)),
+        mergeFacts: (): MergeFacts => ({
+          default_branch: "main",
+          merge_commit: f.merges["AYO-1"]!,
+          merged_at: MERGED_AT,
+          branch_commits: [absent],
+          pull_request_url: ticket.delivery.pull_request_url,
+          pull_request_number: ticket.delivery.pull_request_number,
+        }),
+      },
     });
     const record = JSON.parse(readFileSync(escapesPath(f.dir, ticket.ticket_id), "utf8")) as {
       branch_commits: Array<{ sha: string; subject: string }>;
@@ -730,12 +734,14 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     const silent = fakeGh("gh-silent-bin", null);
     const streams = capture();
     await silent.during(() =>
-      runSyncCommand({
+      runCommandLine(syncCommandLine, {
         argv: [ticket.key, "--repo", f.repo],
         streams,
         cwd: f.repo,
         now: new Date("2026-09-20T00:00:00.000Z"),
-        poll: () => Promise.resolve(delivery(ticket, "2026-09-20T00:00:00.000Z")),
+        deps: {
+          poll: () => Promise.resolve(delivery(ticket, "2026-09-20T00:00:00.000Z")),
+        },
       }),
     );
     expect(readFileSync(escapesPath(f.dir, ticket.ticket_id), "utf8")).toBe(written);
@@ -1023,40 +1029,42 @@ describe("ac_4 / SCP-157 — a hand-off reconciliation counts toward the merged 
     writeTicket(f.dir, ticket);
 
     const PR_URL = "https://github.com/o/r/pull/99";
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["AYO-9", "--repo", f.repo],
       streams: capture(),
       cwd: f.repo,
       now: new Date(OBSERVED_AT),
-      poll: () =>
-        Promise.resolve(
-          TicketDeliveryStateSchema.parse({
-            ticket_id: ticket.ticket_id,
-            branch,
-            pull_request_url: PR_URL,
-            pull_request_number: 99,
-            state: "merged",
-            merge_state: null,
-            checks: [],
-            observed: true,
-            human_review_verdicts: [],
-            finding_outcomes: {},
-            candidate_missed_recall: 0,
-            reverted_by: null,
-            fixed_by: null,
-            attempts: [],
-            observed_at: OBSERVED_AT,
-            stop_answers: [],
-          }),
-        ),
-      mergeFacts: (): MergeFacts => ({
-        default_branch: "main",
-        merge_commit: f.merges["AYO-9"]!,
-        merged_at: MERGED_AT,
-        branch_commits: [],
-        pull_request_url: PR_URL,
-        pull_request_number: 99,
-      }),
+      deps: {
+        poll: () =>
+          Promise.resolve(
+            TicketDeliveryStateSchema.parse({
+              ticket_id: ticket.ticket_id,
+              branch,
+              pull_request_url: PR_URL,
+              pull_request_number: 99,
+              state: "merged",
+              merge_state: null,
+              checks: [],
+              observed: true,
+              human_review_verdicts: [],
+              finding_outcomes: {},
+              candidate_missed_recall: 0,
+              reverted_by: null,
+              fixed_by: null,
+              attempts: [],
+              observed_at: OBSERVED_AT,
+              stop_answers: [],
+            }),
+          ),
+        mergeFacts: (): MergeFacts => ({
+          default_branch: "main",
+          merge_commit: f.merges["AYO-9"]!,
+          merged_at: MERGED_AT,
+          branch_commits: [],
+          pull_request_url: PR_URL,
+          pull_request_number: 99,
+        }),
+      },
     });
 
     const after = readTicket(f.dir, "AYO-9");

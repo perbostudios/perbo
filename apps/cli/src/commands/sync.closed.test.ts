@@ -8,7 +8,7 @@ import { pollPullRequest, type TicketDeliveryState } from "@perbo/runner";
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
 import { runCommandLine } from "../command-line/terminal.js";
@@ -103,11 +103,11 @@ afterEach(() => {
   else process.env.GITHUB_TOKEN = originalGithubToken;
 });
 
-const withGh = <T,>(bin: string, body: () => Promise<T>): Promise<T> => {
+const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   process.env.GH_TOKEN = "test-token";
   delete process.env.GITHUB_TOKEN;
-  return body();
+  return Promise.resolve(body());
 };
 
 /** A ticket sitting at `pr_open` behind a pull request the loop published. */
@@ -160,15 +160,17 @@ describe("sync records a pull request GitHub closed without merging", () => {
     const code = await withGh(
       fakeGh("closed-conflicting", ghAnswer("CONFLICTING", "DIRTY", { state: "CLOSED", closedAt: "2026-09-03T04:00:00.000Z" })),
       () =>
-        runSyncCommand({
+        runCommandLine(syncCommandLine, {
           argv: ["PRB-1", "--repo", repo],
           streams,
           cwd: repo,
           now: NOW,
-          poll: async (args) => {
-            const result = await pollPullRequest(args);
-            captured = result;
-            return result;
+          deps: {
+            poll: async (args) => {
+              const result = await pollPullRequest(args);
+              captured = result;
+              return result;
+            },
           },
         }),
     );
@@ -202,7 +204,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
           comments: [{ body: "thanks" }, verdictComment("CHANGES REQUESTED")],
         }),
       ),
-      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -232,7 +234,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
           comments: [verdictComment("APPROVE")],
         }),
       ),
-      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -247,7 +249,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
     const streams = capture();
 
     const code = await withGh(fakeGh("still-open-conflicting", ghAnswer("CONFLICTING", "DIRTY")), () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);

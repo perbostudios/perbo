@@ -8,7 +8,7 @@ import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { makeAttempt } from "../test-support/attempt-fixture.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
 import { stopsCommandLine } from "./stops.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { REPO_ROOT } from "../test-support/paths.js";
@@ -180,11 +180,11 @@ afterEach(() => {
 });
 
 /** The `gh` on PATH, and the credential every read and the merge go through. */
-const withGh = <T,>(bin: string, body: () => Promise<T>): Promise<T> => {
+const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   process.env.GH_TOKEN = "test-token";
   delete process.env.GITHUB_TOKEN;
-  return body();
+  return Promise.resolve(body());
 };
 
 /** A ticket at `pr_open` behind a pull request the loop published. */
@@ -259,12 +259,14 @@ const NOW = new Date("2026-09-04T10:00:00.000Z");
 
 /** `perbo sync <KEY> --merge`, with the escape collection left out of it. */
 const syncMerge = (repo: string, streams: Streams) =>
-  runSyncCommand({
+  runCommandLine(syncCommandLine, {
     argv: ["PRB-1", "--merge", "--repo", repo],
     streams,
     cwd: repo,
     now: NOW,
-    mergeFacts: () => null,
+    deps: {
+      mergeFacts: () => null,
+    },
   });
 
 /** The `gh` invocation whose verb is `pr merge`, or undefined if there was none. */

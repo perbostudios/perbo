@@ -8,7 +8,7 @@ import { parseInterviewArgs } from "../commands/interview/index.js";
 import { mcpCommandLine } from "../commands/mcp.js";
 import { parseServeArgs } from "../commands/serve/index.js";
 import { stopsCommandLine } from "../commands/stops.js";
-import { parseSyncAllMergedArgs } from "../commands/sync.js";
+import { syncCommandLine } from "../commands/sync.js";
 import { parseVerdictArgs } from "../commands/verdict/index.js";
 
 /**
@@ -82,11 +82,21 @@ describe("admit", () => {
   });
 });
 
-describe("sync --all-merged", () => {
+describe("sync", () => {
   it("keeps a repository path whole rather than forcing a re-read", () => {
-    const args = parseSyncAllMergedArgs(["--repo", "--x=--force"]);
-    expect(args.repo).toBe("--x=--force");
-    expect(args.force).toBe(false);
+    const { input } = syncCommandLine.read(["--all-merged", "--repo", "--x=--force"]);
+    expect(input.mode).toBe("all-merged");
+    expect(input.target.repo).toBe("--x=--force");
+    if (input.mode !== "all-merged") throw new Error("unreachable");
+    expect(input.force).toBe(false);
+  });
+
+  it("keeps a repository path from merging the ticket it syncs", () => {
+    const { input } = syncCommandLine.read(["PRB-1", "--repo", "--x=--merge"]);
+    expect(input.mode).toBe("ticket");
+    expect(input.target.repo).toBe("--x=--merge");
+    if (input.mode !== "ticket") throw new Error("unreachable");
+    expect(input.merge).toBe(false);
   });
 });
 

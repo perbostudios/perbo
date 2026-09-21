@@ -24,7 +24,7 @@ import { buildInspectReport, inspectCommandLine, renderInspect } from "./inspect
 import { LIST_JSON_SCHEMA_VERSION, ListJsonSchema, admitCommandLine, applyObservedPath, approveCommandLine, listCommandLine, loadAdmitted, statesObserved } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { PACKAGE_ROOT, REPO_ROOT } from "../test-support/paths.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
 import {
   TicketDeliveryStateSchema,
   TicketRunConfigSchema,
@@ -1487,13 +1487,15 @@ describe("perbo sync", () => {
     runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     const streams = capture();
     let called = false;
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams,
       cwd: repo,
-      poll: () => {
-        called = true;
-        return observed("open");
+      deps: {
+        poll: () => {
+          called = true;
+          return observed("open");
+        },
       },
     });
     expect(called).toBe(false);
@@ -1502,11 +1504,13 @@ describe("perbo sync", () => {
 
   it("moves a ticket to merged when gh says the pull request merged", async () => {
     const { repo, dir } = await delivered("sync-merged");
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
-      poll: () => observed("merged"),
+      deps: {
+        poll: () => observed("merged"),
+      },
     });
     const ticket = readTicket(dir, "PRB-1");
     expect(ticket.state).toBe("merged");
@@ -1516,12 +1520,14 @@ describe("perbo sync", () => {
   it("is idempotent: syncing twice leaves the same record and no second history entry", async () => {
     const { repo, dir } = await delivered("sync-idempotent");
     const run = () =>
-      runSyncCommand({
+      runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date("2026-08-28T02:00:00.000Z"),
-        poll: () => observed("merged"),
+        deps: {
+          poll: () => observed("merged"),
+        },
       });
     await run();
     const first = readTicket(dir, "PRB-1");
@@ -1539,11 +1545,13 @@ describe("perbo sync", () => {
     const { repo, dir } = await delivered("sync-unreachable");
     const before = readTicket(dir, "PRB-1");
     const streams = capture();
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams,
       cwd: repo,
-      poll: () => observed("none", false),
+      deps: {
+        poll: () => observed("none", false),
+      },
     });
     const after = readTicket(dir, "PRB-1");
     expect(after.delivery).toEqual(before.delivery);
@@ -1553,11 +1561,13 @@ describe("perbo sync", () => {
 
   it("does not invent a merge from an open pull request", async () => {
     const { repo, dir } = await delivered("sync-open");
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
-      poll: () => observed("open"),
+      deps: {
+        poll: () => observed("open"),
+      },
     });
     expect(readTicket(dir, "PRB-1").state).toBe("pr_open");
   });

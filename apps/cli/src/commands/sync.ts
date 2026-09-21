@@ -40,7 +40,8 @@ import {
   type TicketDeliveryState,
 } from "@perbo/runner";
 import { branchName, recordedBranch } from "@perbo/workspace";
-import { UsageError } from "../usage-error.js";
+import { z } from "zod";
+import { UsageError, readInput } from "../usage-error.js";
 import {
   parseArgv,
   switchFlag,
@@ -48,7 +49,10 @@ import {
   type FlagTable,
   type Grammar,
 } from "../command-line/grammar.js";
-import { applyObservedPath, parseListArgs, UnreachableStateError } from "./admit.js";
+import type { CommandContext } from "../command.js";
+import type { NarratedCommand } from "../command-line/terminal.js";
+import { StoreTargetSchema, storeFor } from "../store/index.js";
+import { applyObservedPath, UnreachableStateError } from "./admit.js";
 import type { Streams } from "../streams.js";
 import {
   listLocalRuns,
@@ -64,7 +68,6 @@ import {
   localRunChange,
   readContract,
   readTicket,
-  storeDir,
   ticketChange,
   writeTicket,
   type SyncedChange,
@@ -229,45 +232,179 @@ function repositoryMergeMode(dir: string): MergeMode {
   );
 }
 
-export async function runSyncCommand(input: {
-  argv: string[];
+/**
+ * Which of sync's three reads was asked for, and what each needs.
+ *
+ * One ticket, every local run in the store, or every merged ticket: three
+ * readings of the same pull-request state, told apart by the mode rather than
+ * by which fields happen to be filled in, so a caller cannot ask for a merge
+ * across a sweep by leaving a key out.
+ */
+export const SyncInputSchema = z.discriminatedUnion("mode", [
+  z.strictObject({
+    mode: z.literal("ticket"),
+    target: StoreTargetSchema,
+    /** A ticket key, or the id of a local run this store holds (SCP-284). */
+    key: z.string().min(1, "sync takes a ticket key or a local run id, e.g. PRB-1"),
+    /** Merge it first, where the repository's own switch allows it (SCP-202, D-077). */
+    merge: z.boolean(),
+  }),
+  z.strictObject({ mode: z.literal("sweep"), target: StoreTargetSchema }),
+  z.strictObject({
+    mode: z.literal("all-merged"),
+    target: StoreTargetSchema,
+    /** Re-read a ticket even where `commits_outside_loop` is already known. */
+    force: z.boolean(),
+  }),
+]);
+export type SyncInput = z.infer<typeof SyncInputSchema>;
+
+/** The two reads of the world a sync makes, which a test replaces. */
+export interface SyncDeps {
+  poll: typeof pollPullRequest;
+  /** The merge as `gh` reports it, for the escape record (SCP-145). */
+  mergeFacts: typeof readMergeFacts;
+}
+
+/** What a sync is given: where it runs, what it says as it goes, and its reads. */
+export type SyncContext = CommandContext & {
+  stdout(chunk: string): void;
+  isTTY: boolean;
+} & Partial<SyncDeps>;
+
+/**
+ * `perbo sync`, over typed input: whichever of the three reads was asked for.
+ *
+ * It answers while it works — one row a change, then what the reading was
+ * worth saying about — so there is no record to hand back, and the queue and
+ * the endpoint read the same lines a person does.
+ */
+export function sync(input: SyncInput, context: SyncContext): Promise<number> {
+  const streams: Streams = {
+    stdout: context.stdout,
+    stderr: (chunk) => context.diagnostics.stderr(chunk),
+    isTTY: context.isTTY,
+  };
+  const repo = resolve(context.cwd, input.target.repo);
+  const dir = storeFor(context.cwd, input.target);
+  const now = context.now;
+  const poll = context.poll ? { poll: context.poll } : {};
+  switch (input.mode) {
+    case "all-merged":
+      return syncAllMerged({ dir, streams, now, force: input.force, ...poll });
+    case "sweep":
+      return syncLocalRuns({ repo, dir, streams, now, ...poll });
+    case "ticket":
+      return syncTicket({
+        dir,
+        streams,
+        now,
+        key: input.key,
+        merge: input.merge,
+        ...poll,
+        ...(context.mergeFacts ? { mergeFacts: context.mergeFacts } : {}),
+      });
+  }
+}
+
+const SYNC_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--merge": switchFlag(),
+  "--all-merged": switchFlag(),
+  "--force": switchFlag(),
+} satisfies FlagTable;
+
+const SYNC_GRAMMAR: Grammar<typeof SYNC_FLAGS> = {
+  command: "sync",
+  flags: SYNC_FLAGS,
+  positionals: {
+    min: 0,
+    max: 1,
+    refusal:
+      "sync takes one ticket key or local run id, e.g. perbo sync PRB-1 — or none, to read " +
+      "every local run in the store",
+  },
+  afterDoubleDash: "positionals",
+};
+
+/**
+ * Which read the line asked for, and the three lines that ask for two at once.
+ *
+ * `--all-merged` and `--merge` are switches wherever they are written, so the
+ * mode is decided by what was given rather than by which token came first.
+ */
+export const syncCommandLine: NarratedCommand<SyncInput, Record<string, never>, SyncDeps> = {
+  kind: "narrated",
+  name: "sync",
+  grammars: [SYNC_GRAMMAR],
+  grammarFor: () => SYNC_GRAMMAR,
+  read(argv) {
+    const line = parseArgv(SYNC_GRAMMAR, argv);
+    const target = { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null };
+    const key = line.positionals[0];
+    const merge = line.flags["--merge"] === true;
+    if (line.flags["--all-merged"] === true) {
+      if (merge) {
+        throw new UsageError(
+          "--merge takes one ticket: --all-merged is a read across the store, and merging every " +
+            "pull request it finds is not something this command offers",
+        );
+      }
+      if (key !== undefined) {
+        throw new UsageError(
+          "sync --all-merged takes no ticket key: it reads every merged ticket in the store, " +
+            "and one ticket is synced by name — perbo sync PRB-1",
+        );
+      }
+      return {
+        input: readInput(SyncInputSchema, {
+          mode: "all-merged",
+          target,
+          force: line.flags["--force"] === true,
+        }),
+        output: {},
+      };
+    }
+    if (line.flags["--force"] === true) {
+      throw new UsageError(
+        "--force belongs to --all-merged: it re-reads a merged ticket whose " +
+          "commits_outside_loop is already known, and every other sync reads its pull request " +
+          "anyway",
+      );
+    }
+    if (key === undefined) {
+      // SCP-284: no key is the local-run sweep. A repository whose work was
+      // never admitted has no key to name, and the runs in its store are the
+      // whole population, so `perbo sync` on its own is the whole command.
+      if (merge) {
+        throw new UsageError(
+          "--merge takes one ticket: a sweep over the local runs is a read, and merging every " +
+            "pull request it finds is not something this command offers",
+        );
+      }
+      return { input: readInput(SyncInputSchema, { mode: "sweep", target }), output: {} };
+    }
+    return {
+      input: readInput(SyncInputSchema, { mode: "ticket", target, key, merge }),
+      output: {},
+    };
+  },
+  run: (input, _output, context) => sync(input, context),
+};
+
+async function syncTicket(input: {
+  dir: string;
   streams: Streams;
-  cwd: string;
-  now?: Date;
+  now: Date;
+  key: string;
+  merge: boolean;
   poll?: typeof pollPullRequest;
   /** The merge as `gh` reports it, for the escape record (SCP-145). */
-  mergeFacts?: typeof readMergeFacts | undefined;
+  mergeFacts?: typeof readMergeFacts;
 }): Promise<number> {
-  const now = input.now ?? new Date();
-  // SCP-202: taken out before the key is read, so it may be written either
-  // side of it — `sync PRB-1 --merge` and `sync --merge PRB-1` are one thing
-  // said two ways, and neither is worth a usage error.
-  const merging = input.argv.includes("--merge");
-  const argv = merging ? input.argv.filter((token) => token !== "--merge") : input.argv;
-  if (argv[0] === "--all-merged") {
-    if (merging) {
-      throw new UsageError(
-        "--merge takes one ticket: --all-merged is a read across the store, and merging every " +
-          "pull request it finds is not something this command offers",
-      );
-    }
-    return runSyncAllMergedCommand({ ...input, argv: argv.slice(1), now });
-  }
-  const [key, ...rest] = argv;
-  if (!key || key.startsWith("--")) {
-    // SCP-284: no key is the local-run sweep. A repository whose work was
-    // never admitted has no key to name, and the runs in its store are the
-    // whole population, so `perbo sync` on its own is the whole command.
-    if (merging) {
-      throw new UsageError(
-        "--merge takes one ticket: a sweep over the local runs is a read, and merging every " +
-          "pull request it finds is not something this command offers",
-      );
-    }
-    return runSyncLocalRunsCommand({ ...input, argv, now });
-  }
-  const args = parseListArgs(rest);
-  const dir = storeDir(resolve(input.cwd, args.repo), args.store);
+  const { dir, key, now } = input;
+  const merging = input.merge;
   // SCP-284: a name that is not a ticket may still be a run this store holds
   // the record of, which is the only kind of name a repository with no ticket
   // store has. The ticket store is asked first, so a store holding both is
@@ -864,16 +1001,15 @@ async function syncLocalRun(input: {
  * a directory that was never created told a person who had run nothing that
  * their store was broken, when what is true is that nothing has run yet.
  */
-async function runSyncLocalRunsCommand(input: {
-  argv: string[];
+async function syncLocalRuns(input: {
+  /** The repository the store belongs to, for the line about it having none. */
+  repo: string;
+  dir: string;
   streams: Streams;
-  cwd: string;
   now: Date;
   poll?: typeof pollPullRequest;
 }): Promise<number> {
-  const args = parseListArgs(input.argv);
-  const repo = resolve(input.cwd, args.repo);
-  const dir = storeDir(repo, args.store);
+  const { repo, dir } = input;
   if (!existsSync(dir)) {
     input.streams.stdout(
       `nothing to sync: ${repo} has no ${dir} yet, so nothing has run here — ` +
@@ -942,46 +1078,6 @@ async function runSyncLocalRunsCommand(input: {
   return EXIT_CODES.approve;
 }
 
-export interface SyncAllMergedArgs {
-  repo: string;
-  store: string | null;
-  /** Re-read a ticket even where `commits_outside_loop` is already known. */
-  force: boolean;
-}
-
-const ALL_MERGED_FLAGS = {
-  "--repo": valueFlag(),
-  "--store": valueFlag(),
-  "--force": switchFlag(),
-} satisfies FlagTable;
-
-/**
- * Its own grammar rather than the listing's: `--force` has no meaning for any
- * other list-shaped command, and giving every one of them a flag this is the
- * only user of would be a wider surface for no reader's benefit.
- */
-const ALL_MERGED_GRAMMAR: Grammar<typeof ALL_MERGED_FLAGS> = {
-  command: "sync --all-merged",
-  flags: ALL_MERGED_FLAGS,
-  positionals: {
-    min: 0,
-    max: 0,
-    refusal:
-      "sync --all-merged takes no ticket key: it reads every merged ticket in the store, " +
-      "and one ticket is synced by name — perbo sync PRB-1",
-  },
-  afterDoubleDash: "positionals",
-};
-
-export function parseSyncAllMergedArgs(argv: readonly string[]): SyncAllMergedArgs {
-  const line = parseArgv(ALL_MERGED_GRAMMAR, argv);
-  return {
-    repo: line.flags["--repo"] ?? ".",
-    store: line.flags["--store"] ?? null,
-    force: line.flags["--force"] === true,
-  };
-}
-
 /** How `commits_outside_loop` reads on one row of `sync --all-merged`'s output. */
 const commitsOutsideLoopCell = (value: boolean | null): string => (value === null ? "unknown" : String(value));
 
@@ -1010,15 +1106,14 @@ const commitsOutsideLoopCell = (value: boolean | null): string => (value === nul
  * same distinction `sync <key>` already draws between "no pull request" and
  * "could not ask".
  */
-async function runSyncAllMergedCommand(input: {
-  argv: string[];
+async function syncAllMerged(input: {
+  dir: string;
   streams: Streams;
-  cwd: string;
   now: Date;
+  force: boolean;
   poll?: typeof pollPullRequest;
 }): Promise<number> {
-  const args = parseSyncAllMergedArgs(input.argv);
-  const dir = storeDir(resolve(input.cwd, args.repo), args.store);
+  const { dir } = input;
   const merged = listTickets(dir).filter((ticket) => ticket.delivery.state === "merged");
 
   let filled = 0;
@@ -1026,7 +1121,7 @@ async function runSyncAllMergedCommand(input: {
   let unreadable = 0;
 
   for (const ticket of merged) {
-    if (!args.force && ticket.delivery.commits_outside_loop !== null) {
+    if (!input.force && ticket.delivery.commits_outside_loop !== null) {
       unchanged += 1;
       input.streams.stdout(
         `${ticket.key}  ${ticket.delivery.opened_by ?? "none"}  ` +

@@ -9,7 +9,7 @@ import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { makeAttempt } from "../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
 import { stopsCommandLine } from "./stops.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
@@ -103,11 +103,11 @@ afterEach(() => {
  * before the read, so a suite that let the machine's own environment decide it
  * would ask `gh auth status` on one developer's machine and not on another's.
  */
-const withGh = <T,>(bin: string, body: () => Promise<T>): Promise<T> => {
+const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   process.env.GH_TOKEN = "test-token";
   delete process.env.GITHUB_TOKEN;
-  return body();
+  return Promise.resolve(body());
 };
 
 /** A ticket sitting at `pr_open` behind a pull request the loop published. */
@@ -161,7 +161,7 @@ describe("sync reads commits_outside_loop from gh, by message, not by author", (
         { oid: "c1", messageHeadline: "PRB-1: pagination", messageBody: "Attempt: att_1\nBase: aaa\n" },
         { oid: "c2", messageHeadline: "PRB-1: merge main into the attempt branch", messageBody: "Attempt: att_1\nBase: bbb\n" },
       ])),
-      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -181,7 +181,7 @@ describe("sync reads commits_outside_loop from gh, by message, not by author", (
         // the loop uses — the message is what tells them apart, not the name.
         { oid: "c2", messageHeadline: "fix the off-by-one the review missed", messageBody: "" },
       ])),
-      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(readTicket(dir, "PRB-1").delivery.commits_outside_loop).toBe(true);
@@ -192,7 +192,7 @@ describe("sync reads commits_outside_loop from gh, by message, not by author", (
     const streams = capture();
 
     await withGh(fakeGh("no-commits-field", ghAnswer("OPEN", [])), () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(readTicket(dir, "PRB-1").delivery.commits_outside_loop).toBeNull();
