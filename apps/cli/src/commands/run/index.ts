@@ -1396,8 +1396,6 @@ export interface DoctorDeps {
    */
   diagnose: (request: DiagnoseRequest) => Promise<DiagnosticResult>;
   baseRef: (checkout: string, options: { publish: boolean }) => ProposedBase | null;
-  /** The commands reported as the COMMANDS block. {@link COMMAND_NAMES} unless a caller names another. */
-  commands: readonly string[];
   /** A ticket key per ticket id, for the ceiling hits below. The ticket store answers unless a caller names another. */
   keyFor: (store: string) => Map<string, string>;
   /**
@@ -1433,7 +1431,6 @@ interface DoctorOptions extends Partial<DoctorDeps> {
 const DOCTOR_CHECKS_TIMEOUT_MS = 10_000;
 
 async function runDoctor(options: DoctorOptions): Promise<number> {
-  const commands = options.commands ?? COMMAND_NAMES;
   const checkMachine = options.preflight ?? preflight;
   const materialise = options.diagnose ?? diagnose;
   const readBase = options.baseRef ?? proposedBase;
@@ -1719,7 +1716,7 @@ async function runDoctor(options: DoctorOptions): Promise<number> {
             dependency: probeDependency,
             blocking: probeBlocking,
           },
-          commands: [...commands],
+          commands: [...COMMAND_NAMES],
           config: {
             path: configPath,
             present: storedConfig !== null,
@@ -1821,7 +1818,7 @@ async function runDoctor(options: DoctorOptions): Promise<number> {
       ...renderCheckAdvisories(advisories, configSource),
     );
     lines.push("", renderCorpusCache(corpusCache));
-    lines.push("", ...renderCommands(commands));
+    lines.push("", ...renderCommands(COMMAND_NAMES));
     lines.push("");
     if (written) {
       lines.push(`CONFIG    wrote ${configPath}`);
@@ -3114,7 +3111,6 @@ export const doctorCommandLine: NarratedCommand<DoctorArgs, Record<string, never
       ...(context.preflight ? { preflight: context.preflight } : {}),
       ...(context.diagnose ? { diagnose: context.diagnose } : {}),
       ...(context.baseRef ? { baseRef: context.baseRef } : {}),
-      ...(context.commands ? { commands: context.commands } : {}),
       ...(context.keyFor ? { keyFor: context.keyFor } : {}),
       ...(context.pullRequestChecks ? { pullRequestChecks: context.pullRequestChecks } : {}),
     });

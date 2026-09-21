@@ -15,7 +15,7 @@ import { EXIT_CODES } from "@perbo/contracts";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import { type ExecuteDeps, executeCommandLine } from "./index.js";
-import { attemptsRecordSubject, inspectCommandLine } from "../inspect.js";
+import { inspectCommandLine } from "../inspect.js";
 import { storeDir } from "../../store/index.js";
 
 /**
@@ -288,8 +288,7 @@ describe("a repository the diagnostic refuses", () => {
         argv: [runId, "--repo", repo],
         streams: read.streams,
         cwd: repo,
-        deps: { subject: attemptsRecordSubject },
-      });
+          });
       return read.out.join("");
     };
     expect((JSON.parse(await inspected(false)) as RecordedRefusal).refusal).toEqual(record.refusal);

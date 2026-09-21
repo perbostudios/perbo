@@ -2246,12 +2246,6 @@ export function buildInspectReport(input: {
   });
 }
 
-/** How the name on the command line is resolved to the work it stands for. */
-export interface InspectDeps {
-  /** {@link ticketSubject} unless a caller names another. */
-  subject: ResolveSubject;
-}
-
 /**
  * What `perbo inspect` answers: a reading of one piece of work, or a verdict
  * on the bytes of one attempt.
@@ -2260,14 +2254,10 @@ export type InspectOutcome =
   | { kind: "report"; report: InspectReport; attempt: string | null }
   | { kind: "verification"; verification: VerifyReport };
 
-export function inspect(
-  input: InspectInput,
-  context: CommandContext & Partial<InspectDeps>,
-): InspectOutcome {
+export function inspect(input: InspectInput, context: CommandContext): InspectOutcome {
   const storeDirectory = storeFor(context.cwd, input.target);
-  const resolveSubject = context.subject ?? ticketSubject;
   if (input.verify !== null) {
-    const subject = resolveSubject(storeDirectory, input.key);
+    const subject = ticketSubject(storeDirectory, input.key);
     return {
       kind: "verification",
       verification: verifyAttemptObjects({
@@ -2283,7 +2273,7 @@ export function inspect(
     attempt: input.attempt,
     report: buildReportForSubject({
       storeDirectory,
-      subject: resolveSubject(storeDirectory, input.key),
+      subject: ticketSubject(storeDirectory, input.key),
       attempt: input.attempt,
       streams: context.diagnostics,
     }),
@@ -2315,7 +2305,7 @@ const GRAMMAR: Grammar<typeof FLAGS> = {
  * Reached by the terminal through its line below, and by a caller in this
  * process — the queue's endpoint — over the same typed input.
  */
-export const inspectReport: CommandReport<InspectInput, { json: boolean }, InspectOutcome, InspectDeps> = {
+export const inspectReport: CommandReport<InspectInput, { json: boolean }, InspectOutcome> = {
   run: inspect,
   toJson: (outcome) =>
     outcome.kind === "verification" ? outcome.verification : outcome.report,
@@ -2354,8 +2344,7 @@ export const inspectReport: CommandReport<InspectInput, { json: boolean }, Inspe
 export const inspectCommandLine: ReportCommand<
   InspectInput,
   { json: boolean },
-  InspectOutcome,
-  InspectDeps
+  InspectOutcome
 > = {
   kind: "report",
   name: "inspect",

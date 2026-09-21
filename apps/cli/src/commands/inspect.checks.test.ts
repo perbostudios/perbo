@@ -9,7 +9,7 @@ import {
   type PreflightResult,
 } from "@perbo/runner";
 import { type ExecuteDeps, executeCommandLine } from "./run/index.js";
-import { attemptsRecordSubject, inspectCommandLine } from "./inspect.js";
+import { inspectCommandLine } from "./inspect.js";
 import { runCommandLine } from "../command-line/terminal.js";
 
 /**
@@ -510,14 +510,12 @@ async function inspect(
     argv: [runId, "--repo", repo],
     streams: asJson.streams,
     cwd: repo,
-    deps: { subject: attemptsRecordSubject },
   });
   const onTty = capture(true);
   await runCommandLine(inspectCommandLine, {
     argv: [runId, "--repo", repo],
     streams: onTty.streams,
     cwd: repo,
-    deps: { subject: attemptsRecordSubject },
   });
   return {
     report: JSON.parse(asJson.out.join("")) as { delivery_checks: RunReport["delivery_checks"] },

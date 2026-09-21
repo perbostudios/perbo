@@ -15,7 +15,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { type ExecuteDeps, doctorCommandLine, executeCommandLine, resolveBase } from "./index.js";
-import { attemptsRecordSubject, inspectCommandLine } from "../inspect.js";
+import { inspectCommandLine } from "../inspect.js";
 import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import { storeDir } from "../../store/index.js";
 
@@ -866,8 +866,7 @@ describe("what says where a run publishes", () => {
         argv: [reported.ticket_id, "--repo", repo],
         streams: asJson.streams,
         cwd: repo,
-        deps: { subject: attemptsRecordSubject },
-      }),
+          }),
     ).toBe(0);
     const report = JSON.parse(asJson.out.join("")) as { base: { ref: string; from: string } | null };
     expect(report.base).toEqual({ ref: "develop", from: "remote_default" });
@@ -879,8 +878,7 @@ describe("what says where a run publishes", () => {
         argv: [reported.ticket_id, "--repo", repo],
         streams: onTty.streams,
         cwd: repo,
-        deps: { subject: attemptsRecordSubject },
-      }),
+          }),
     ).toBe(0);
     const shown = uncoloured(onTty.out.join(""));
     expect(shown).toContain("base develop (remote default)");

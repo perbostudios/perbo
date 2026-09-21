@@ -90,7 +90,7 @@ async function doctor(repo: string, json = false): Promise<{ text: string; code:
     argv: doctorArgs(repo, json),
     streams: json ? sinks.machine : sinks.human,
     cwd: process.cwd(),
-    deps: { commands: ["doctor", "review", "run"], preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
+    deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
   });
   return { text: sinks.out.join(""), code };
 }
