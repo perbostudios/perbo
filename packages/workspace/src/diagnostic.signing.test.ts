@@ -1,10 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { scratchDirectories, type Repository } from "@perbo/test-support";
 import { diagnose } from "./diagnostic.js";
-import { git, makeRepo } from "./test-support/repository.js";
+import { workspaceRepository } from "./test-support/repository.js";
 
 /**
  * A repository whose git configuration signs commits, diagnosed before an
@@ -24,7 +23,7 @@ import { git, makeRepo } from "./test-support/repository.js";
  * diagnostic's answer rather than on an import.
  */
 
-const scratch = () => mkdtempSync(join(tmpdir(), "perbo-signing-"));
+const scratch = scratchDirectories("perbo-signing-");
 
 /** A key pair, locked behind `passphrase` where one is given. */
 function keypair(name: string, passphrase: string): { pub: string; secret: string } {
@@ -36,12 +35,12 @@ function keypair(name: string, passphrase: string): { pub: string; secret: strin
 }
 
 /** A repository that signs its commits with `pub`, and is otherwise well formed. */
-function signsWith(pub: string): string {
-  const repo = makeRepo();
-  git(repo.dir, "config", "commit.gpgsign", "true");
-  git(repo.dir, "config", "gpg.format", "ssh");
-  git(repo.dir, "config", "user.signingkey", pub);
-  return repo.dir;
+function signsWith(pub: string): Repository {
+  const repository = workspaceRepository(scratch);
+  repository.git("config", "commit.gpgsign", "true");
+  repository.git("config", "gpg.format", "ssh");
+  repository.git("config", "user.signingkey", pub);
+  return repository;
 }
 
 /**
@@ -73,7 +72,7 @@ describe("a repository whose configuration signs commits", () => {
     const key = keypair("locked", "a-passphrase-no-agent-holds");
     const repo = signsWith(key.pub);
 
-    const result = await diagnose({ checkout: repo, repository_id: "repo_fixture" });
+    const result = await diagnose({ checkout: repo.dir, repository_id: "repo_fixture" });
 
     const finding = result.findings.find((candidate) => candidate.reason === SIGNING);
     expect(finding, `findings were ${result.findings.map((f) => f.reason).join(", ")}`).toBeDefined();
@@ -94,20 +93,20 @@ describe("a repository whose configuration signs commits", () => {
   it("says nothing where the key signs, and leaves the repository as it found it", async () => {
     const key = keypair("open", "");
     const repo = signsWith(key.pub);
-    const before = git(repo, "fsck", "--no-progress", "--unreachable", "--dangling");
+    const before = repo.git("fsck", "--no-progress", "--unreachable", "--dangling");
 
-    const result = await diagnose({ checkout: repo, repository_id: "repo_fixture" });
+    const result = await diagnose({ checkout: repo.dir, repository_id: "repo_fixture" });
 
     expect(result.findings.map((finding) => finding.reason)).toEqual([]);
     expect(result.materializable).toBe(true);
     // The probe signs, so it makes a commit object; it must not make one here.
-    expect(git(repo, "fsck", "--no-progress", "--unreachable", "--dangling")).toBe(before);
-    expect(git(repo, "status", "--porcelain")).toBe("");
+    expect(repo.git("fsck", "--no-progress", "--unreachable", "--dangling")).toBe(before);
+    expect(repo.git("status", "--porcelain")).toBe("");
   }, 60_000);
 
   it("says nothing about a repository that does not sign", async () => {
-    // `makeRepo` sets `commit.gpgsign false`, which is the ordinary case.
-    const repo = makeRepo();
+    // `workspaceRepository` sets `commit.gpgsign false`, which is the ordinary case.
+    const repo = workspaceRepository(scratch);
 
     const result = await diagnose({ checkout: repo.dir, repository_id: "repo_fixture" });
 

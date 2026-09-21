@@ -2,7 +2,10 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { diagnose, verificationServiceNeed } from "./diagnostic.js";
-import { makeRepo } from "./test-support/repository.js";
+import { scratchDirectories } from "@perbo/test-support";
+import { workspaceRepository } from "./test-support/repository.js";
+
+const scratch = scratchDirectories("perbo-ws-");
 
 /**
  * Materialization copies files. It cannot start a database.
@@ -14,7 +17,7 @@ import { makeRepo } from "./test-support/repository.js";
  */
 
 function repoWith(scripts: Record<string, string>, extra: Record<string, unknown> = {}) {
-  const repo = makeRepo();
+  const repo = workspaceRepository(scratch);
   writeFileSync(
     join(repo.dir, "package.json"),
     JSON.stringify({ name: "x", scripts, ...extra }),

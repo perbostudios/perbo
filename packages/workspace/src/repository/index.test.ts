@@ -1,13 +1,13 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { CommandFailedError } from "../exec.js";
 import { createGh, createGit, git } from "./index.js";
 import { fakeGitProcess } from "./test-support/fake-process.js";
-import { git as fixtureGit, makeRepo } from "../test-support/repository.js";
+import { workspaceRepository } from "../test-support/repository.js";
 
-const scratch = () => mkdtempSync(join(tmpdir(), "perbo-repo-"));
+const scratch = scratchDirectories("perbo-repo-");
 
 /**
  * A `git` or `gh` first on `PATH` that writes the environment it was given to a
@@ -170,7 +170,7 @@ describe("how long a call may take, and how much it may say", () => {
 
 describe("the questions, against a real repository", () => {
   it("answers the head, the merge base and what changed, the same way on both paths", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
 
     expect(await git.head(repo.dir)).toBe(repo.head);
     expect(git.headSync(repo.dir)).toBe(repo.head);
@@ -196,7 +196,7 @@ describe("the questions, against a real repository", () => {
   });
 
   it("lists the tracked files, and says so when the listing did not fit", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
 
     expect((await git.trackedFiles(repo.dir)).sort()).toEqual([".gitignore", "package.json", "pnpm-lock.yaml", "src.ts"]);
     expect(git.trackedFilesSync(repo.dir).sort()).toEqual([".gitignore", "package.json", "pnpm-lock.yaml", "src.ts"]);
@@ -206,14 +206,14 @@ describe("the questions, against a real repository", () => {
   });
 
   it("says whether the tracked files have changed", () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     expect(git.hasTrackedChangesSync(repo.dir)).toBe(false);
     writeFileSync(join(repo.dir, "src.ts"), "export const value = 2;\n");
     expect(git.hasTrackedChangesSync(repo.dir)).toBe(true);
   });
 
   it("stages what it is given, commits it, and reports the commit", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     writeFileSync(join(repo.dir, "added.ts"), "export const added = true;\n");
 
     await git.stage(repo.dir, ["."]);
@@ -226,7 +226,7 @@ describe("the questions, against a real repository", () => {
   });
 
   it("stages a path the repository ignores only when told to force it", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     writeFileSync(join(repo.dir, ".env"), "SECRET=1\n");
 
     // git refuses a pathspec it is ignoring, and the refusal reaches the caller
@@ -238,11 +238,11 @@ describe("the questions, against a real repository", () => {
   });
 
   it("leaves signing to the repository's own configuration", async () => {
-    const repo = makeRepo();
-    fixtureGit(repo.dir, "config", "commit.gpgsign", "true");
-    fixtureGit(repo.dir, "config", "gpg.format", "ssh");
-    fixtureGit(repo.dir, "config", "gpg.ssh.program", "/bin/false");
-    fixtureGit(repo.dir, "config", "user.signingkey", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIkey");
+    const repo = workspaceRepository(scratch);
+    repo.git("config", "commit.gpgsign", "true");
+    repo.git("config", "gpg.format", "ssh");
+    repo.git("config", "gpg.ssh.program", "/bin/false");
+    repo.git("config", "user.signingkey", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIkey");
     writeFileSync(join(repo.dir, "added.ts"), "export const added = true;\n");
     await git.stage(repo.dir, ["."]);
 
@@ -253,7 +253,7 @@ describe("the questions, against a real repository", () => {
   });
 
   it("reads the worktrees git has registered, path by path", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     const spaced = join(root, "a space");
     const detached = join(root, "detached");
@@ -275,9 +275,9 @@ describe("the questions, against a real repository", () => {
   });
 
   it("adds a worktree on a branch that already exists", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
-    fixtureGit(repo.dir, "branch", "existing", repo.first);
+    repo.git("branch", "existing", repo.first);
 
     const added = await git.addWorktree(repo.dir, { path: join(root, "existing"), branch: "existing" });
     expect(added.code).toBe(0);
@@ -286,7 +286,7 @@ describe("the questions, against a real repository", () => {
   });
 
   it("clones a repository into a directory that does not exist yet", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     const into = join(root, "clone");
 
@@ -296,7 +296,7 @@ describe("the questions, against a real repository", () => {
   });
 
   it("hands a command with one caller its exit status as data, and throws where asked to", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
 
     const missing = await git.run(repo.dir, ["rev-parse", "--verify", "--quiet", "refs/heads/absent"]);
     expect(missing.code).not.toBe(0);
@@ -310,7 +310,7 @@ describe("the questions, against a real repository", () => {
 
 describe("a repository whose worktree directory is gone", () => {
   it("still lists it, because git's registration is what a listing reads", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     const path = join(root, "vanished");
     mkdirSync(root, { recursive: true });

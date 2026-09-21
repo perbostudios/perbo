@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -11,6 +10,7 @@ import {
   type InstallStrategy,
 } from "@perbo/contracts";
 import { MaterializationMeasurementSchema } from "@perbo/contracts";
+import { initRepository, scratchDirectories } from "@perbo/test-support";
 import {
   assertAttemptFootprint,
   materialize,
@@ -19,9 +19,9 @@ import {
 } from "./materialize.js";
 import { WorkspaceError, provision } from "./worktree.js";
 import { diagnose, validateManifest } from "./diagnostic.js";
-import { git, makeRepo } from "./test-support/repository.js";
+import { workspaceRepository } from "./test-support/repository.js";
 
-const scratch = () => mkdtempSync(join(tmpdir(), "perbo-mat-"));
+const scratch = scratchDirectories("perbo-mat-");
 
 describe("materializeEntry", () => {
   it("copies a secret and indexes it by content, not by name", () => {
@@ -121,7 +121,7 @@ describe("materializationEnv", () => {
 
 describe("diagnose", () => {
   it("proposes the untracked files a fresh worktree would not have", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     writeFileSync(join(repo.dir, ".env"), "SECRET_TOKEN=abcdef0123456789\n");
     mkdirSync(join(repo.dir, "certs"));
     writeFileSync(join(repo.dir, "certs", "dev.pem"), "-----BEGIN CERTIFICATE-----\n");
@@ -136,7 +136,7 @@ describe("diagnose", () => {
   });
 
   it("does not propose build output or dependency trees", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     mkdirSync(join(repo.dir, "node_modules"));
     writeFileSync(join(repo.dir, "node_modules", "x.js"), "//\n");
     const result = await diagnose({ checkout: repo.dir, repository_id: "repo_fixture" });
@@ -145,7 +145,7 @@ describe("diagnose", () => {
   });
 
   it("names a repository with no verification command, and verifies it with Git", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     writeFileSync(join(repo.dir, "package.json"), JSON.stringify({ name: "x" }));
     const result = await diagnose({ checkout: repo.dir, repository_id: "repo_fixture" });
     expect(result.materializable).toBe(true);
@@ -155,7 +155,7 @@ describe("diagnose", () => {
   });
 
   it("names an unsupported package manager rather than trying it", async () => {
-    const bare = mkdtempSync(join(tmpdir(), "perbo-uv-"));
+    const bare = scratch("perbo-uv-");
     writeFileSync(join(bare, "uv.lock"), "version = 1\n");
     writeFileSync(
       join(bare, "package.json"),
@@ -208,7 +208,7 @@ describe("diagnose", () => {
 
 describe("materialize", () => {
   it("makes the worktree runnable and reports what it cost", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     writeFileSync(join(repo.dir, ".env"), "TOKEN=abcdefghijklmnop\n");
     const root = scratch();
     const workspace = await provision({
@@ -325,30 +325,27 @@ const RUNS: InstallStrategy = {
  * `package.json` a command run in the worktree reads is visible in its answer.
  */
 function memberRepository(): { workspace: string; member: string; head: string } {
-  const workspace = mkdtempSync(join(tmpdir(), "perbo-monorepo-"));
+  const workspace = scratch("perbo-monorepo-");
   writeFileSync(join(workspace, "pnpm-workspace.yaml"), "packages:\n  - 'services/*'\n");
   writeFileSync(join(workspace, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
   writeFileSync(
     join(workspace, "package.json"),
     JSON.stringify({ name: "monorepo", private: true, scripts: { test: "turbo run test" } }),
   );
-  const member = join(workspace, "services", "api");
-  mkdirSync(member, { recursive: true });
-  git(member, "init", "-q", "-b", "main");
-  git(member, "config", "user.name", "test");
-  git(member, "config", "user.email", "test@example.com");
-  git(member, "config", "commit.gpgsign", "false");
-  writeFileSync(join(member, ".gitignore"), ".env\nnode_modules/\n");
+  const repository = initRepository(join(workspace, "services", "api"), {
+    files: {
+      ".gitignore": ".env\nnode_modules/\n",
+      "package.json": JSON.stringify({
+        name: "@fixture/api",
+        scripts: { test: "vitest run services/api" },
+      }),
+    },
+    message: "first",
+  });
   // Untracked and needed: the diagnostic proposes it as an entry, so whether it
   // reached the worktree says whether materialization got that far.
-  writeFileSync(join(member, ".env"), "TOKEN=abcdefghijklmnop\n");
-  writeFileSync(
-    join(member, "package.json"),
-    JSON.stringify({ name: "@fixture/api", scripts: { test: "vitest run services/api" } }),
-  );
-  git(member, "add", "-A");
-  git(member, "commit", "-qm", "first");
-  return { workspace, member, head: git(member, "rev-parse", "HEAD").trim() };
+  writeFileSync(join(repository.dir, ".env"), "TOKEN=abcdefghijklmnop\n");
+  return { workspace, member: repository.dir, head: repository.head };
 }
 
 /**
@@ -367,30 +364,28 @@ function monorepoRepository(args: { ignoreMember?: boolean } = {}): {
   member: string;
   head: string;
 } {
-  const root = mkdtempSync(join(tmpdir(), "perbo-monorepo-one-"));
-  git(root, "init", "-q", "-b", "main");
-  git(root, "config", "user.name", "test");
-  git(root, "config", "user.email", "test@example.com");
-  git(root, "config", "commit.gpgsign", "false");
-  writeFileSync(join(root, "pnpm-workspace.yaml"), "packages:\n  - 'services/*'\n");
-  writeFileSync(join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-  writeFileSync(
-    join(root, "package.json"),
-    JSON.stringify({ name: "monorepo", private: true, scripts: { test: "turbo run test" } }),
-  );
-  writeFileSync(
-    join(root, ".gitignore"),
-    `node_modules/\n${args.ignoreMember === true ? "services/api/\n" : ""}`,
-  );
-  const member = join(root, "services", "api");
-  mkdirSync(member, { recursive: true });
-  writeFileSync(
-    join(member, "package.json"),
-    JSON.stringify({ name: "@fixture/api", scripts: { test: "vitest run services/api" } }),
-  );
-  git(root, "add", "-A");
-  git(root, "commit", "-qm", "first");
-  return { root, member, head: git(root, "rev-parse", "HEAD").trim() };
+  const repository = initRepository(scratch("perbo-monorepo-one-"), {
+    files: {
+      "pnpm-workspace.yaml": "packages:\n  - 'services/*'\n",
+      "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+      "package.json": JSON.stringify({
+        name: "monorepo",
+        private: true,
+        scripts: { test: "turbo run test" },
+      }),
+      ".gitignore": `node_modules/\n${args.ignoreMember === true ? "services/api/\n" : ""}`,
+      "services/api/package.json": JSON.stringify({
+        name: "@fixture/api",
+        scripts: { test: "vitest run services/api" },
+      }),
+    },
+    message: "first",
+  });
+  return {
+    root: repository.dir,
+    member: join(repository.dir, "services", "api"),
+    head: repository.head,
+  };
 }
 
 let attempt = 0;
@@ -430,7 +425,7 @@ const manifestFor = (workspace: { repository_root: string }, install: InstallStr
 
 describe("the directory the install runs in", () => {
   it("runs it in the worktree for a checkout that is its own workspace", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const workspace = await worktreeOf(repo.dir, repo.head);
 
     const result = await materialize({
@@ -512,7 +507,7 @@ describe("the directory the install runs in", () => {
 
 describe("the worktree's measured size", () => {
   it("is measured on a machine with no `du`, which Windows does not have", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const workspace = await worktreeOf(repo.dir, repo.head);
     // Nothing on PATH at all: a `none` install spawns nothing, and the
     // verification names its binary by path.
