@@ -1,11 +1,9 @@
 import { join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { z } from "zod";
-import { withExecutorSkills } from "./skills.js";
 import {
   EXECUTION_ATTEMPT_SCHEMA_VERSION,
   ExecutionAttemptSchema,
-  admittedWriteGlobs,
   assertProviderEnabled,
   failedChecks,
   hasAcceptanceCriteria,
@@ -13,7 +11,6 @@ import {
   limitFor,
   limitsForCredential,
   planNodes,
-  standingProhibitedPaths,
   wholeChangeChecks,
   type AttemptWait,
   type CredentialClass,
@@ -24,7 +21,6 @@ import {
   type PlanContract,
   type PlanContractWithCriteria,
   type ReviewArtifact,
-  type SealedCommit,
   type SecretIndex,
   type VerifiedCommit,
 } from "@perbo/contracts";
@@ -74,22 +70,16 @@ import { githubCredential } from "./github-credential.js";
 import { mergeUp, pathsWithConflictMarkers } from "./merge-up.js";
 import { sweepWorktree } from "./orphans.js";
 import type { LoopMergeOutcome } from "./merge.js";
-import type { BriefRecords } from "./brief.js";
 import { buildAgentEnvironment, buildPermissionProfile } from "./profile.js";
 import {
   EXECUTOR_PROMPT_VERSION,
   RESUMED_EXECUTOR_PROMPT_VERSION,
-  conflictPrompt,
   conflictPromptVersion,
-  executorPrompt,
-  remediationPrompt,
 } from "./prompt.js";
 import {
   RETAINED_DIFF_ARTIFACT,
   ResumeRefusedError,
-  applyRetainedDiff,
   resolveResumeSource,
-  resumeNote,
   resumedFromRecord,
   sameCommit,
   type ResumeSource,
@@ -101,15 +91,15 @@ import { parseDeclines } from "./declines.js";
 import { readPrinciples, readPrinciplesFile } from "./principles.js";
 import { quarantine, release, restoreAny } from "./quarantine.js";
 import {
-  commitsSince,
   describeRange,
   headCommit,
   sealChangeSet,
   untrackedAfterChecks,
 } from "./seal.js";
 import { resetInText } from "./transport.js";
-import { guardProhibitedPaths, type TicketRunConfig } from "./loop/config.js";
+import { type TicketRunConfig } from "./loop/config.js";
 import { withCeilingGuidance } from "./loop/attempt.js";
+import { briefRound } from "./loop/brief.js";
 import { confirmContinuation, remediationToContinue } from "./loop/continuation.js";
 import { levelBeforeExecutor, mergeFailedDetail, takeMergeUp } from "./loop/level.js";
 import {
@@ -904,133 +894,36 @@ async function runLockedTicket(
         continue;
       }
 
-      // Read before the executor runs, so a commit the executor makes itself is
-      // this attempt's rather than one it inherited. The spec commit is left
-      // out: the loop made it before any executor ran, and the change set the
-      // review reads does not contain it (D-103).
-      const inherited = (
-        await commitsSince({ worktree: state.workspace.path, base_commit: state.baseCommit })
-      ).filter((sha) => sha !== specCommit);
-      const prior_commits: SealedCommit[] = inherited.map((sha) => ({
-        sha,
-        attempt_id: ledger.sealedBy(sha),
-      }));
-      if (inherited.length > 0) {
-        progress(`branch carries ${inherited.length} commit(s) sealed before this attempt`);
-      }
-
-      // A conflict round carries the open findings without being asked to close
-      // any of them: it may hand the loop back to the verification that was
-      // interrupted, and that verification is about exactly this set.
-      const toClose = state.kind === "execute" ? [] : state.openFindings;
-      if (state.kind === "remediate" && toClose.length === 0) {
-        // Unreachable by construction — round 0 only continues with a
-        // non-empty family-filtered set — kept as a guard because reaching it
-        // would mean the loop was about to run an agent with nothing to close.
-        outcome = "escalated";
-        detail = "no routed finding remains for the executor";
+      const briefed = await briefRound({
+        config,
+        contract,
+        ledger,
+        state,
+        specCommit,
+        resumeSource,
+        principles,
+        maxRounds,
+        previous,
+        previousRunAccount,
+        progress,
+      });
+      if ("next" in briefed) {
+        state = applyStep(state, briefed);
+        outcome = briefed.end.outcome;
+        detail = briefed.end.detail;
         break;
       }
-
-      // SCP-154: the cut attempt's work goes into the worktree before the
-      // executor is invoked, at round 0 and only there — by round 1 it is
-      // sealed, checked and reviewed like any other part of the change set.
-      //
-      // SCP-172: the further attempt a transport failure buys runs in the round's
-      // own worktree, where the diff is already applied — sealed onto the branch,
-      // in fact, by the failed attempt's own seal — so it is applied once per
-      // round rather than once per attempt. The retry is still a resumed attempt
-      // and still records itself as one; only the application is skipped.
-      const resumedHere =
-        state.kind === "execute" && state.round === state.executeRound ? resumeSource : null;
-      if (resumedHere !== null && state.transportRetry === 0 && state.ceilingContinuation === 0) {
-        await applyRetainedDiff({ worktree: state.workspace.path, source: resumedHere });
-        progress(resumeNote(resumedHere));
-      }
-
-      // SCP-195: one list, read by the pre-execution hook, by the transcript
-      // reading, by the seal's assertion and by the sentence in the brief — so
-      // none of the four can hold a different contract than the others.
-      const pathsAllowed = admittedWriteGlobs(contract.scope);
-      // D-105: the contract's own prohibitions and the repository's standing
-      // list, beside the globs above and judged before them, so the guard
-      // refuses a prohibited path inside the admitted ones rather than leaving
-      // it to the reviewer's backstop.
-      const pathsProhibited = guardProhibitedPaths(contract.scope.paths_prohibited, config);
-
-      const basePrompt =
-        state.kind === "resolve_conflict"
-          ? conflictPrompt({
-              base_ref: config.base_ref,
-              base_commit: state.conflict!.tip,
-              paths: state.conflict!.paths,
-              merged: config.relevel_context,
-            })
-          : state.kind === "execute"
-            ? executorPrompt(contract, {
-                principles,
-                resumed: resumedHere
-                  ? { attempt_id: resumedHere.attempt_id, bundle_id: resumedHere.bundle_id }
-                  : null,
-              })
-            : remediationPrompt({
-                contract,
-                findings: toClose,
-                round: state.remediationRound,
-                max_rounds: maxRounds,
-                principles,
-                // D-092: the predecessor's own account of its change. Inside
-                // one run that is the last attempt this run recorded; opening
-                // a run on findings left open, it is the last attempt on the
-                // ticket's record. It reaches the executor's next round and
-                // nothing else — the reviewer's inputs are unchanged.
-                previous_account:
-                  previous !== undefined ? previous.executor_account : previousRunAccount,
-                // SCP-194: a scope finding is answered by quoting what the
-                // contract admits, and the brief says it in the same words the
-                // guard refuses in (SCP-195's sentence).
-                paths_allowed: pathsAllowed,
-              });
-
-      const { prompt, receipts: executorSkills } = withExecutorSkills(basePrompt, config.executor_skills);
-
-      /**
-       * D-096: what a compaction's state block is composed from.
-       *
-       * The records, not the brief: the contract's outcome and criteria with
-       * the graph that groups them, the two path lists the guard judges by,
-       * the approach record's No-Gos, the principles file, what the checks
-       * have measured so far and what this round is open on. The composer
-       * reads them at the moment of injection, in the hook or the adapter,
-       * so both transports state the same round.
-       */
-      const briefRecords: BriefRecords = {
-        outcome: contract.outcome,
-        acceptance_criteria: contract.acceptance_criteria,
-        nodes: [...planNodes(contract)],
-        paths_allowed: pathsAllowed,
-        // Joined as the guard joins them, so the block states the boundary
-        // rather than the half of it the contract happened to name (D-103).
-        paths_prohibited: [
-          ...new Set([...pathsProhibited, ...standingProhibitedPaths(config.specs)]),
-        ],
-        no_gos: [...config.no_gos],
-        principles,
-        // What the pinned set measured on the round before this one, per node
-        // where the plan has a graph (D-107). Empty on a run's first round,
-        // which nothing has measured yet, and on a round whose predecessor was
-        // cut before its checks ran.
-        checks: ledger.rounds[ledger.rounds.length - 1]?.checks ?? [],
-        open_findings: [...toClose],
-      };
-
-      progress(
-        state.kind === "resolve_conflict"
-          ? `resolving the base conflict on ${state.conflict!.paths.length} file(s)`
-          : state.kind === "execute"
-            ? "executing"
-            : `remediation round ${state.remediationRound} of at most ${maxRounds}`,
-      );
+      const {
+        inherited,
+        prior_commits,
+        toClose,
+        resumedHere,
+        pathsAllowed,
+        pathsProhibited,
+        prompt,
+        executorSkills,
+        briefRecords,
+      } = briefed.brief;
 
       // ADR-0030 requirement 2, around every handover including remediation.
       const journal = quarantine({
