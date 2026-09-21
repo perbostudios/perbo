@@ -208,3 +208,21 @@ describe("perbo baseline", () => {
     await expect(baseline(dir, ["start", "x"], at(0))).rejects.toThrow(/baseline\.json is not a baseline record/);
   });
 });
+
+describe("what a pipe carries", () => {
+  it("is the record for the two verbs that have one, and the same line for the rest", async () => {
+    // `jsonWhenPiped` is the command's, so it holds for every verb behind it;
+    // what each verb does with it is the rendering's. The line verbs write the
+    // same sentence either way, which is what docs/04 promises (D-NEW-cli-grammar).
+    const dir = repo("piped");
+    const piped = await baseline(dir, ["start", "a title"], at(0), false);
+    const terminal = await baseline(repo("terminal"), ["start", "a title"], at(0), true);
+    expect(piped.out).toBe(terminal.out);
+    expect(piped.out).toMatch(/^started bl_/);
+
+    const listed = await baseline(dir, ["list"], at(1), false);
+    expect(JSON.parse(listed.out)).toMatchObject({ summary: { entries: 1, open: 1 } });
+    const read = await baseline(dir, ["list"], at(1), true);
+    expect(() => JSON.parse(read.out)).toThrow();
+  });
+});
