@@ -30,11 +30,7 @@ import {
   type MaterializedWorkspace,
   type Workspace,
 } from "@perbo/workspace";
-import {
-  PROMPT_VERSION,
-  remediableFindings,
-  reviewGraph,
-} from "@perbo/review";
+import { PROMPT_VERSION } from "@perbo/review";
 import {
   lastAttemptBranch,
   lastAttemptId,
@@ -81,14 +77,7 @@ import { checkRound } from "./loop/check.js";
 import { execute } from "./loop/execute.js";
 import { sealRound } from "./loop/seal.js";
 import { levelBeforeExecutor, mergeFailedDetail } from "./loop/level.js";
-import {
-  contractWithCriteria,
-  countDirectlyVerified,
-  flakyCheckFindings,
-  reviewerModel,
-  routeReview,
-  writeReviewBundle,
-} from "./loop/review.js";
+import { reviewRound } from "./loop/review.js";
 import { resolvePorts, type LoopPorts } from "./loop/context.js";
 import {
   applyStep,
@@ -1121,120 +1110,28 @@ async function runLockedTicket(
         continue;
       }
 
-      // The independent review: round 0's, and the re-review of a round that
-      // answered an incomplete verdict. Its inputs are the plan, the change
-      // set, the checks and the files it selects — and nothing about the
-      // attempt that produced them.
-      progress(`review round ${state.round}`);
-      // A verdict the plan cannot accept is the reviewer's error, not the
-      // executor's: the review asks once for a correction and, failing that,
-      // records `review_failed` with the reasons (SCP-165). The change set is
-      // sealed either way and stays on the branch.
-      const graphOutcome = await reviewGraph(
-        {
-          contract,
-          diff: sealed.diff,
-          // The sealed form: its file list is complete whatever the diff's
-          // size, and a withheld diff is refused rather than reviewed.
-          changeset: sealed.changeset ?? undefined,
-          // The full pinned set: whole-change and, on a graphed plan, every
-          // node's own run beside it (D-107). reviewGraph narrows this to
-          // each node's own results and to wholeChangeChecks for the overall
-          // call, which is what `gating` already is for a flat plan.
-          checks,
-          repoDir: state.workspace.path,
-          model: reviewerModel(config, contract, gating),
-          head_commit: sealed.head_commit ?? undefined,
-          remediationAvailable: state.remediationRound < maxRounds,
-          // Whether the contract's base commit passed the workspace's verify
-          // command (d069 reads a pinned check failing now as the change's own
-          // breakage). It is the ticket's answer, measured on the attempt that
-          // provisioned at the base and read back from the record by every
-          // attempt after it, so an attempt continuing over commits an earlier
-          // one sealed is not told its own predecessor's breakage is the base's.
-          // Verify may run fewer checks than the pinned set, and a base merged up
-          // mid-run is not re-verified: a wrong reading costs one round, which the
-          // verifier's own run of the checks then stops. Undefined where nothing
-          // has measured the base, which the review reads as unknown.
-          baseVerified: baseVerification === null ? undefined : baseVerification.verified,
-          onProgress: progress,
-        },
-        reviewRunner,
-        { modelFor: (nodeContract, nodeChecks) => reviewerModel(config, contractWithCriteria(nodeContract, contract), nodeChecks) },
-      );
-      const reviewOutcome = graphOutcome.overall;
-
-      // The artifact is the review as written. Provenance stamping belonged to
-      // the retired second-review design; artifacts that carry a remediation
-      // block remain readable.
-      //
-      // The target's provenance is the runner's to state: the reviewer judged
-      // the whole range and was told nothing about which of its commits came
-      // from which attempt.
-      //
-      // A check that failed and passed alone on the re-run is recorded
-      // `passed`, so the reviewer's own `check.*` finding has nothing to fire
-      // on. The flake is still the round's to report, so the runner states it
-      // here as its own advisory finding: deterministic, never blocking, and
-      // naming the tests.
-      //
-      // The combined view (D-107): a graphed plan's gate reads the overall
-      // review and every reviewed node's together, so a node-local blocking
-      // finding closes the gate exactly as a whole-change one does. A flat
-      // plan's combined view is the overall artifact itself.
-      const review: ReviewArtifact = {
-        ...graphOutcome.combined,
-        target: { ...graphOutcome.combined.target, prior_commits },
-        findings: [...graphOutcome.combined.findings, ...flakyCheckFindings(gating)],
-      };
-      const nodeReviewsThisRound: NodeReview[] = graphOutcome.nodes.map((entry) => ({
-        node_id: entry.node_id,
-        review: entry.outcome?.artifact ?? null,
-      }));
-
-      writeReviewBundle({
-        bundles,
+      const reviewed = await reviewRound({
+        config,
         contract,
-        secrets,
-        clock,
-        review,
-        outcome: reviewOutcome,
-        node_reviews: nodeReviewsThisRound,
-        sealed,
-        round: state.round,
-        remediation_available: state.remediationRound < maxRounds,
-      });
-
-      state = { ...state, finalReview: review, nodeReviews: nodeReviewsThisRound };
-      ledger.addRound({
-        round: state.round,
-        kind: state.kind,
+        state,
+        ledger,
+        bundles,
         attempt,
-        superseded_attempts: state.superseded,
-        review,
-        node_reviews: nodeReviewsThisRound,
-        verification: null,
+        sealed,
+        gating,
         checks,
-        remediable_findings: remediableFindings(review.findings).length,
-        directly_verified: countDirectlyVerified(review),
-        declines: [],
-      });
-
-      // The round that answered an incomplete verdict has now been judged, so
-      // whatever this review routes next is a closure for the verifier.
-      const answeringIncomplete = state.reviewingAgain;
-      // D-057: an incomplete verdict is a person's, and only a round that can
-      // make its criteria judgeable takes it off them.
-      if (review.decision === "incomplete") outcome = "escalated";
-
-      const reviewStep = routeReview({
-        review,
-        answeringIncomplete,
-        round: state.round,
-        remediationRound: state.remediationRound,
+        priorCommits: prior_commits,
+        baseVerification,
         maxRounds,
         configPath,
+        secrets,
+        review: reviewRunner,
+        clock,
+        progress,
       });
+      state = reviewed.state;
+      if (reviewed.escalated) outcome = "escalated";
+      const reviewStep = reviewed.step;
       if (reviewStep.next === "advance" && reviewStep.say !== undefined) progress(reviewStep.say);
       state = applyStep(state, reviewStep);
       if (reviewStep.next === "stop") {
