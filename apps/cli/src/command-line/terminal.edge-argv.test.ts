@@ -7,7 +7,7 @@ import { parseInterviewArgs } from "../commands/interview/index.js";
 import { principleCommandLine } from "../commands/principle.js";
 import { parseReviewArgs } from "../commands/review/index.js";
 import { parseExecuteArgs } from "../commands/run/index.js";
-import { parseIndexArgs } from "../commands/symbol-index.js";
+import { indexCommandLine } from "../commands/symbol-index.js";
 import { parseVerdictArgs } from "../commands/verdict/index.js";
 
 /**
@@ -226,7 +226,10 @@ describe("the desktop host", () => {
   });
 
   it("reads the symbol index, the listing and one ticket", () => {
-    expect(parseIndexArgs(["--json", "--repo", REPO])).toEqual({ json: true, repo: REPO });
+    expect(indexCommandLine.read(["--json", "--repo", REPO])).toEqual({
+      input: { repo: REPO },
+      output: { json: true },
+    });
     expect(listCommandLine.read(["--all", "--json", "--repo", REPO])).toEqual({
       input: { target: { repo: REPO, store: null }, all: true },
       output: { json: true },

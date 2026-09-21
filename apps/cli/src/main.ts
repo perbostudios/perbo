@@ -12,7 +12,7 @@ import { principleCommandLine } from "./commands/principle.js";
 import { runReviewCommand } from "./commands/review/index.js";
 import { VERSION } from "./version.js";
 import { stopsCommandLine } from "./commands/stops.js";
-import { runIndexCommand } from "./commands/symbol-index.js";
+import { indexCommandLine } from "./commands/symbol-index.js";
 import { runAgentCommand } from "./commands/agent.js";
 import { runInterviewCommand } from "./commands/interview/index.js";
 import { mcpCommandLine } from "./commands/mcp.js";
@@ -80,7 +80,7 @@ export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
       case "principle":
         return runCommandLine(principleCommandLine, { argv: rest, streams, cwd });
       case "index":
-        return runIndexCommand({ argv: rest, streams, cwd });
+        return runCommandLine(indexCommandLine, { argv: rest, streams, cwd });
       default:
         // Unreachable: the shell refuses anything not in `commands`, and this
         // switch covers every one of them. A command added to the table and not

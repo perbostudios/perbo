@@ -15,7 +15,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { specBaseline, specStaleness } from "./staleness.js";
-import { runIndexCommand } from "../commands/symbol-index.js";
+import { indexCommandLine } from "../commands/symbol-index.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * Whether a ticket's spec is still the one its contract was drafted from
@@ -101,7 +102,7 @@ function repository(spec = SPEC, extra: Record<string, string> = {}): { repo: st
 
 /** `perbo index --repo <dir>`, which is what writes the record the check reads. */
 function index(repo: string): void {
-  const code = runIndexCommand({
+  const code = runCommandLine(indexCommandLine, {
     argv: ["--repo", repo],
     streams: { stdout: () => undefined, stderr: () => undefined, isTTY: false },
     cwd: repo,

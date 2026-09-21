@@ -17,7 +17,7 @@ import { admitCommandLine, approveCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
 import { TICKET_RUNS } from "./index.js";
 import { buildInspectReport, renderInspect, type InspectReport } from "../inspect.js";
-import { runIndexCommand } from "../symbol-index.js";
+import { indexCommandLine } from "../symbol-index.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 
@@ -88,7 +88,7 @@ function repository(spec = SPEC): { repo: string; specPath: string } {
   );
   execFileSync("git", ["-C", repo, "add", "-A"], { env: gitIdentity });
   execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitIdentity });
-  runIndexCommand({ argv: ["--repo", repo], streams: capture(), cwd: repo });
+  runCommandLine(indexCommandLine, { argv: ["--repo", repo], streams: capture(), cwd: repo });
   return { repo, specPath };
 }
 
@@ -324,7 +324,7 @@ describe("a run starting a ticket that has not started", () => {
       "export function send(): number {\n  return 1;\n}\n",
     );
     execFileSync("git", ["-C", repo, "commit", "-qam", "rename the sender"], { env: gitIdentity });
-    runIndexCommand({ argv: ["--repo", repo], streams: capture(), cwd: repo });
+    runCommandLine(indexCommandLine, { argv: ["--repo", repo], streams: capture(), cwd: repo });
     expect(() => TICKET_RUNS.starting(work(repo), false)).toThrow(/@sendActivation/);
     expect(readTicket(dir, "PRB-1").state).toBe("plan_invalid");
   });
@@ -405,7 +405,7 @@ describe("a run starting a ticket that has not started", () => {
       "export function send(): number {\n  return 1;\n}\n",
     );
     execFileSync("git", ["-C", repo, "commit", "-qam", "rename the sender"], { env: gitIdentity });
-    runIndexCommand({ argv: ["--repo", repo], streams: capture(), cwd: repo });
+    runCommandLine(indexCommandLine, { argv: ["--repo", repo], streams: capture(), cwd: repo });
 
     const said: string[] = [];
     const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
@@ -506,7 +506,7 @@ describe("what approval records about the spec", () => {
       "export function send(): number {\n  return 1;\n}\n",
     );
     execFileSync("git", ["-C", repo, "commit", "-qam", "rename the sender"], { env: gitIdentity });
-    runIndexCommand({ argv: ["--repo", repo], streams: capture(), cwd: repo });
+    runCommandLine(indexCommandLine, { argv: ["--repo", repo], streams: capture(), cwd: repo });
 
     const report = buildInspectReport({ storeDirectory: dir, key: "PRB-1", attempt: null });
     expect(report.spec_staleness?.stale).toEqual([]);
@@ -537,7 +537,7 @@ describe("what approval records about the spec", () => {
       "export function send(): number {\n  return 1;\n}\n",
     );
     execFileSync("git", ["-C", repo, "commit", "-qam", "rename the sender"], { env: gitIdentity });
-    runIndexCommand({ argv: ["--repo", repo], streams: capture(), cwd: repo });
+    runCommandLine(indexCommandLine, { argv: ["--repo", repo], streams: capture(), cwd: repo });
 
     // Judged, so the lost name is stale and the run stops — the reading such a
     // ticket has always had, through the strict record and the loose one.
