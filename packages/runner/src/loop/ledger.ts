@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Decline } from "../declines.js";
-import type { ExecutionAttempt } from "@perbo/contracts";
+import { CostBasisSchema, costOf, rollCosts } from "@perbo/contracts";
+import type { Cost, ExecutionAttempt } from "@perbo/contracts";
 import { appendAttempts, sealedByAttempt, type AttemptsRecord } from "../attempts.js";
 import type { RoundRecord } from "./state.js";
 
@@ -36,6 +37,8 @@ const USAGE = z.looseObject({
     cost_basis: z.string(),
   }),
 });
+/** A record can name a basis this version cannot price, and an unpriced one is counted. */
+const BASIS = CostBasisSchema.catch("unavailable");
 
 export class Ledger {
   /** The ticket's attempts record on disk. */
@@ -119,25 +122,24 @@ export class Ledger {
    * reports is a measure of work and not a bill, and the budget is a bill.
    */
   spend(): TicketSpend {
-    let micros = 0;
-    let priced = 0;
-    let unpriced = 0;
+    const components: Cost[] = [];
     for (const record of [...(this.prior?.attempts ?? []), ...this.mine]) {
       const parsed = USAGE.safeParse(record);
+      // A record this cannot read priced nothing it can defend.
       if (!parsed.success) {
-        unpriced += 1;
+        components.push(costOf({ micros: 0, basis: "unavailable" }));
         continue;
       }
       if (parsed.data.agent?.credential_class === "subscription") continue;
-      const basis = parsed.data.usage.cost_basis;
-      if (basis === "unavailable") unpriced += 1;
-      else if (basis === "not_incurred") continue;
-      else {
-        micros += parsed.data.usage.cost_micros;
-        priced += 1;
-      }
+      components.push(
+        costOf({
+          micros: parsed.data.usage.cost_micros,
+          basis: BASIS.parse(parsed.data.usage.cost_basis),
+        }),
+      );
     }
-    return { micros, priced, unpriced };
+    const roll = rollCosts(components);
+    return { micros: roll.micros, priced: roll.priced, unpriced: roll.unavailable };
   }
 
   /** Write what the run has made so far, so a park that never wakes leaves it. */
