@@ -1,4 +1,5 @@
 import type {
+  AttemptWait,
   CheckResult,
   ExecutionAttempt,
   Finding,
@@ -324,6 +325,14 @@ export type Step =
        */
       counter: "transport" | "ceiling";
       superseded: ExecutionAttempt;
+      /**
+       * The outage the loop sits out before the next attempt, and the park it
+       * records first where the wait is long enough to outlive the process.
+       * Null where the next attempt starts at once.
+       */
+      wait: { ms: number; park: AttemptWait | null } | null;
+      /** What the loop tells the person before the next attempt. */
+      say: string;
     }
   | {
       next: "advance";
@@ -337,6 +346,9 @@ export type Step =
 
 /** The step that ends a run, for a routing function that returns only that. */
 export type Stop = Extract<Step, { next: "stop" }>;
+
+/** The step that buys one more attempt of the round, with the wait it sits out. */
+export type Retry = Extract<Step, { next: "retry" }>;
 
 /** The state the first round of a run enters with. */
 export function initialRoundState(workspace: Workspace, continuing: Continuation | null): RoundState {

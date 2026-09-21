@@ -109,7 +109,7 @@ import {
   sealChangeSet,
   untrackedAfterChecks,
 } from "./seal.js";
-import { TRANSPORT_RETRY_DELAY_MS, resetInText } from "./transport.js";
+import { resetInText } from "./transport.js";
 import { guardProhibitedPaths, type TicketRunConfig } from "./loop/config.js";
 import { withCeilingGuidance } from "./loop/attempt.js";
 import { remediationToContinue } from "./loop/continuation.js";
@@ -128,8 +128,10 @@ import {
   attemptIdFor,
   initialRoundState,
   type RoundRecord,
+  type Retry,
   type RunOutcome,
 } from "./loop/state.js";
+import { routeStopped } from "./loop/route.js";
 import { refuseWidening, routeVerification, verifierModel } from "./loop/verify.js";
 
 /**
@@ -990,6 +992,30 @@ async function runLockedTicket(
     };
   };
 
+  /**
+   * The outage a retry sits out before the next attempt of the same round.
+   *
+   * A park is on the record before the sleep, because the whole point of it is
+   * that it is long: the wait has to outlive this process, and the lock has to
+   * say so while it lasts.
+   */
+  const waitOut = async (step: Retry): Promise<void> => {
+    if (step.wait === null) {
+      progress(step.say);
+      return;
+    }
+    if (step.wait.park === null) {
+      progress(step.say);
+      await wait(step.wait.ms);
+      return;
+    }
+    ledger.flush();
+    lock.parked(step.wait.park);
+    progress(step.say);
+    await wait(step.wait.ms);
+    lock.parked(null);
+  };
+
   try {
     while (state.round <= roundCeiling) {
       /**
@@ -1807,156 +1833,38 @@ async function runLockedTicket(
       });
 
       if (termination.reason !== "completed") {
-        /**
-         * A transport that was overloaded is not a ticket that failed
-         * (SCP-172). The attempt is on the ticket's attempts record with the
-         * status and the error text that ended it; the loop waits for the
-         * weather and starts one more attempt from the same base, in the same
-         * worktree, against the same brief. One, and only where the attempt
-         * before it was not already that retry — two of these in a row is the
-         * provider telling the run to stop rather than an outage to sit out.
-         *
-         * No round record is pushed for it: the round has not been answered
-         * yet, and the attempt is carried on `superseded` so the record the
-         * round does get names it.
-         */
-        if (termination.reason === "transport_unavailable" && state.transportRetry === 0) {
-          // SCP-193: the provider named a reset this run may not wait for.
-          // Stopping says which instant and which key, so raising the bound is
-          // a decision a person makes with the number in front of them.
-          if (reset !== null && park === null) {
-            ledger.addRound(record());
-            outcome = "terminated";
-            detail =
-              `${termination.reason}: ${termination.detail} The provider resets at ` +
-              `${reset.until.toISOString()} (${reset.zone}), which is ${Math.round(parkMs / 60_000)} ` +
-              `minute(s) away and past limits.limits.wait_for_provider_ms in ${configPath} ` +
-              `(currently ${waitBoundMs} ms). Waiting less would spend an attempt against a limit ` +
-              "still in force, so the run stops rather than waking early.";
-            break;
-          }
-          state = applyStep(state, { next: "retry", counter: "transport", superseded: attempt });
-          if (park !== null) {
-            // On the record before the sleep: the wait has to outlive this
-            // process, because the whole point of it is that it is long.
-            ledger.flush();
-            lock.parked(park);
-            progress(
-              `the provider resets at ${park.until} (${park.zone}); parking ` +
-                `${config.ticket_key} for ${Math.round(park.waited_ms / 60_000)} minute(s) and ` +
-                "resuming the same attempt then.",
-            );
-            await wait(park.waited_ms);
-            lock.parked(null);
-          } else {
-            progress(
-              `${termination.detail} Waiting ${Math.round(TRANSPORT_RETRY_DELAY_MS / 1000)}s and ` +
-                "starting one more attempt from the same base.",
-            );
-            await wait(TRANSPORT_RETRY_DELAY_MS);
-          }
-          continue;
-        }
-
-        /**
-         * SCP-193: an attempt a ceiling cut left its work sealed on the branch,
-         * and the next attempt of the same round starts over those commits.
-         *
-         * This is SCP-164's re-run path, inside one run: the branch carries the
-         * commits, `prior_commits` attributes them, and the executor gets the
-         * ticket's own brief again. What bounds it is the ticket budget rather
-         * than a retry count, because the ceiling it is answering is a spend
-         * ceiling and the honest bound on spend is more spend.
-         *
-         * Only the two ceilings a continuation can make progress against. A
-         * wall clock or a command ceiling ends attempts the same way each time,
-         * and a token ceiling is the same spend under another name; those still
-         * stop the run, and so does a stall, which is a hang rather than
-         * progress. The two iteration ceilings reach this path only where the
-         * repository configured them (D-096).
-         *
-         * And only where there is a ticket budget to measure the continuation
-         * against, which means an executor billed per token (D-096). On a
-         * subscription the dollar figure an attempt reports is a measure of
-         * work rather than a bill, so no number of them adds up to a budget,
-         * and the run ends here saying so.
-         *
-         * And only where the cut attempt sealed something of its own. There is
-         * no "sealed work" to continue over otherwise, and an attempt that
-         * reached a ceiling having added nothing to the branch is one the next
-         * attempt would repeat under the same ceiling for the same money.
-         */
-        const sealedItsOwn = !carriedForward && sealed.head_commit !== null;
-        if (
-          sealedItsOwn &&
-          (termination.reason === "cost_ceiling_exceeded" ||
-            termination.reason === "iteration_ceiling_exceeded" ||
-            // D-092: the round ceiling ends a round the way the attempt
-            // ceiling ends an attempt, this path included.
-            termination.reason === "round_iteration_ceiling_exceeded")
-        ) {
-          const spend = ledger.spend();
-          const budget = ticketBudgetMicros(agentResult.invocation.credential_class);
-          const room = (budget ?? 0) - spend.micros;
-          if (budget !== null && spend.priced > 0 && room > 0) {
-            state = applyStep(state, { next: "retry", counter: "ceiling", superseded: attempt });
-            progress(
-              `${termination.reason} on ${attempt.attempt_id}; its work is sealed on ` +
-                `${state.workspace.branch}, and run ${runNumber} attempt ${ledger.attempts.length + 1} ` +
-                `continues over it — $${(spend.micros / 1_000_000).toFixed(2)} of the ` +
-                `$${((budget ?? 0) / 1_000_000).toFixed(2)} ticket budget is spent`,
-            );
-            continue;
-          }
-          ledger.addRound(record());
-          outcome = "terminated";
-          detail =
-            `${termination.reason}: ${termination.detail} ` +
-            (budget === null
-              ? // D-096: on a subscription the dollar figure an attempt reports
-                // is a measure of work rather than a bill, so no number of them
-                // adds up to a budget a continuation could be allowed against.
-                `${config.ticket_key} is running on a credential nothing bills per token, so ` +
-                "limits.limits.ticket_cost_micros measures nothing and the run does not start " +
-                "another attempt over the sealed work."
-              : spend.priced === 0
-                ? `No attempt of ${config.ticket_key} carries a dollar figure, so the ` +
-                  "limits.limits.ticket_cost_micros budget cannot be measured and the run does not " +
-                  "start another attempt."
-                : `The ticket has spent $${(spend.micros / 1_000_000).toFixed(2)} of the ` +
-                  `$${(budget / 1_000_000).toFixed(2)} in ` +
-                  `limits.limits.ticket_cost_micros (${configPath}), so no further attempt ` +
-                  `continues it` +
-                  (spend.unpriced > 0
-                    ? `; ${spend.unpriced} attempt(s) carry no dollar figure and are not in that sum`
-                    : "") +
-                  ".");
+        const stoppedStep = routeStopped({
+          termination,
+          attempt,
+          transportRetry: state.transportRetry,
+          reset,
+          park,
+          parkMs,
+          waitBoundMs,
+          // An attempt that carried an earlier one's commits forward sealed
+          // nothing of its own to continue over.
+          sealedItsOwn: !carriedForward && sealed.head_commit !== null,
+          spend: ledger.spend(),
+          budget: ticketBudgetMicros(agentResult.invocation.credential_class),
+          declines: declines.length,
+          ticketKey: config.ticket_key,
+          branch: state.workspace.branch,
+          runNumber,
+          attemptsSoFar: ledger.attempts.length,
+          configPath,
+        });
+        // A round that stops here has been answered; one that buys another
+        // attempt has not, and the attempt it replaces is named on the record
+        // the round does get.
+        if (stoppedStep.next === "stop") ledger.addRound(record());
+        state = applyStep(state, stoppedStep);
+        if (stoppedStep.next === "stop") {
+          outcome = stoppedStep.end.outcome;
+          detail = stoppedStep.end.detail;
           break;
         }
-        ledger.addRound(record());
-        if (termination.reason === "transport_unavailable") {
-          outcome = "terminated";
-          detail =
-            `${termination.reason}: ${termination.detail} The attempt before it ended the same ` +
-            "way, so the run stops rather than starting a third.";
-          break;
-        }
-        // Both no-change endings are the same fact to the run: nothing reached
-        // the branch. Why they differ is on the attempt's termination reason,
-        // which travels with the record either way.
-        const nothingChanged =
-          termination.reason === "no_changes" ||
-          termination.reason === "no_changes_after_denials";
-        if (nothingChanged && declines.length > 0) {
-          outcome = "escalated";
-          detail =
-            `${declines.length} finding(s) declared no-determinable-practice and nothing else ` +
-            "was changed; a person decides";
-        } else {
-          outcome = nothingChanged ? "no_changes" : "terminated";
-          detail = `${termination.reason}: ${termination.detail}`;
-        }
-        break;
+        await waitOut(stoppedStep);
+        continue;
       }
 
       // SCP-192: the round produced a change set the base will not merge into.

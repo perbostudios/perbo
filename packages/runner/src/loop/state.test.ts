@@ -91,14 +91,27 @@ describe("what one step does to the round state", () => {
     const state = roundState({ transportRetry: 0, ceilingContinuation: 2 });
     const cut = attempt({ attempt_id: "att_0000000000000002" });
     expect(
-      applyStep(state, { next: "retry", counter: "transport", superseded: cut }),
+      applyStep(state, {
+        next: "retry",
+        counter: "transport",
+        superseded: cut,
+        wait: { ms: 60_000, park: null },
+        say: "waiting for the transport",
+      }),
     ).toMatchObject({ transportRetry: 1, ceilingContinuation: 2, superseded: [cut] });
   });
 
   it("starts a ceiling continuation with the transport's retry whole", () => {
     const state = roundState({ transportRetry: 1, ceilingContinuation: 0 });
     const cut = attempt({ attempt_id: "att_0000000000000002" });
-    expect(applyStep(state, { next: "retry", counter: "ceiling", superseded: cut })).toMatchObject({
+    const continued = applyStep(state, {
+      next: "retry",
+      counter: "ceiling",
+      superseded: cut,
+      wait: null,
+      say: "continuing over the sealed work",
+    });
+    expect(continued).toMatchObject({
       transportRetry: 0,
       ceilingContinuation: 1,
       superseded: [cut],
