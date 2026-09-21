@@ -91,7 +91,7 @@ describe("sync --all-merged", () => {
 });
 
 describe("verdict and baseline", () => {
-  it.fails("does not let a note take a decision", () => {
+  it("does not let a note take a decision", () => {
     // Two positionals once the note is one value: the reference and `abc`,
     // which is the refusal a person needs rather than a recorded decision.
     expect(() => parseVerdictArgs(["PRB-1", "--note", "--x=--endorse", "abc"])).toThrow(

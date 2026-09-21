@@ -10,6 +10,13 @@ import {
 } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
 import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../command-line/grammar.js";
+import {
   buildInspectReport,
   buildReportForSubject,
   ticketSubject,
@@ -101,132 +108,117 @@ export interface VerdictListArgs extends VerdictCommonArgs {
 
 export type VerdictArgs = VerdictRecordArgs | VerdictListArgs;
 
-const DECISION_FLAGS: Record<string, VerdictDecision> = {
+/** The four decisions, each spelled as the flag that takes it. */
+const DECISION_FLAGS = {
   "--endorse": "endorse",
   "--override": "override",
   "--accept": "accept",
   "--reject": "reject",
+} as const satisfies Record<`--${string}`, VerdictDecision>;
+
+type DecisionFlag = keyof typeof DECISION_FLAGS;
+
+const isDecisionFlag = (name: string): name is DecisionFlag => name in DECISION_FLAGS;
+
+/**
+ * SCP-189: a decision flag refuses a value that is missing or starts with
+ * `--`, because there it is another flag whose own value the person forgot
+ * rather than a key — and a key taken from it would be reported later as
+ * something else entirely, or as a positional count naming no flag at all.
+ */
+const decisionFlag = (name: DecisionFlag) => valueFlag({ refuseFlagShaped: `missing key after ${name}` });
+
+const VERDICT_FLAGS = {
+  "--endorse": decisionFlag("--endorse"),
+  "--override": decisionFlag("--override"),
+  "--accept": decisionFlag("--accept"),
+  "--reject": decisionFlag("--reject"),
+  "--note": valueFlag(),
+  "--author": valueFlag(),
+  "--replace": switchFlag(),
+  "--stand-in": switchFlag(),
+  "--list": switchFlag(),
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const VERDICT_GRAMMAR: Grammar<typeof VERDICT_FLAGS> = {
+  command: "verdict",
+  flags: VERDICT_FLAGS,
+  positionals: {
+    min: 1,
+    max: 1,
+    refusal:
+      "verdict takes exactly one review — a ticket key, a pull request or a review id, " +
+      "e.g. perbo verdict PRB-7 --override <key>",
+  },
+  afterDoubleDash: "positionals",
 };
 
 export function parseVerdictArgs(argv: readonly string[]): VerdictArgs {
-  const tokens = argv.flatMap((token) =>
-    token.startsWith("--") && token.includes("=")
-      ? [token.slice(0, token.indexOf("=")), token.slice(token.indexOf("=") + 1)]
-      : [token],
-  );
-  const value = (index: number, token: string): string => {
-    const next = tokens[index];
-    if (next === undefined) throw new UsageError(`${token} requires a value`);
-    return next;
+  const line = parseArgv(VERDICT_GRAMMAR, argv);
+  const flags = line.flags;
+
+  // Two decisions in one invocation is a person meaning one of them, and
+  // guessing which is how a record stops being evidence. Read from the order
+  // they were written, so the refusal names the two that were.
+  const decisions = line.given.filter(isDecisionFlag);
+  if (decisions.length > 1) {
+    throw new UsageError(`${decisions[0]} and ${decisions[1]} are two decisions; take one at a time`);
+  }
+  const taken = decisions[0] ?? null;
+
+  const note = flags["--note"] ?? null;
+  const author = flags["--author"] ?? null;
+  const replace = flags["--replace"] === true;
+  const standIn = flags["--stand-in"] === true;
+  const common = {
+    reference: line.positionals[0]!,
+    repo: flags["--repo"] ?? ".",
+    store: flags["--store"] ?? null,
+    json: flags["--json"] === true,
   };
 
-  const positional: string[] = [];
-  let decision: VerdictDecision | null = null;
-  let key: string | null = null;
-  let taken: string | null = null;
-  let list = false;
-  const args: Omit<VerdictRecordArgs, "list" | "reference" | "decision" | "key"> = {
-    note: null,
-    author: null,
-    replace: false,
-    standIn: false,
-    repo: ".",
-    store: null,
-    json: false,
-  };
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    if (!token.startsWith("--")) {
-      positional.push(token);
-      continue;
-    }
-    const flagged = DECISION_FLAGS[token];
-    if (flagged !== undefined) {
-      // Two decisions in one invocation is a person meaning one of them, and
-      // guessing which is how a record stops being evidence.
-      if (decision !== null) {
-        throw new UsageError(`${taken} and ${token} are two decisions; take one at a time`);
-      }
-      // SCP-189: a token starting with `--` right after a decision flag is
-      // another flag whose value the person forgot, not a key — `value()`
-      // would happily hand it over and let a later check report the wrong
-      // thing (or, worse, a positional-count mismatch naming no flag at all).
-      const next = tokens[i + 1];
-      if (next === undefined || next.startsWith("--")) {
-        throw new UsageError(`missing key after ${token}`);
-      }
-      decision = flagged;
-      taken = token;
-      key = next;
-      i += 1;
-      continue;
-    }
-    switch (token) {
-      case "--note":
-        args.note = value(++i, token);
-        break;
-      case "--author":
-        args.author = value(++i, token);
-        break;
-      case "--replace":
-        args.replace = true;
-        break;
-      case "--stand-in":
-        args.standIn = true;
-        break;
-      case "--list":
-        list = true;
-        break;
-      case "--repo":
-        args.repo = value(++i, token);
-        break;
-      case "--store":
-        args.store = value(++i, token);
-        break;
-      case "--json":
-        args.json = true;
-        break;
-      default:
-        throw new UsageError(`unknown option '${token}' for verdict`);
-    }
-  }
-
-  if (positional.length !== 1) {
-    throw new UsageError(
-      "verdict takes exactly one review — a ticket key, a pull request or a review id, " +
-        "e.g. perbo verdict PRB-7 --override <key>",
-    );
-  }
-  if (list) {
+  if (flags["--list"] === true) {
     // `--list` reads the record; the flags that write to it have nothing to do
     // here. Refused rather than ignored, because a person who typed a note
     // beside `--list` believed they were recording something.
-    if (decision !== null) {
+    if (taken !== null) {
       throw new UsageError(
         `--list prints the decisions already recorded and ${taken} takes one; ask for one or the other`,
       );
     }
     const writing = [
-      args.note === null ? null : "--note",
-      args.author === null ? null : "--author",
-      args.replace ? "--replace" : null,
-      args.standIn ? "--stand-in" : null,
+      note === null ? null : "--note",
+      author === null ? null : "--author",
+      replace ? "--replace" : null,
+      standIn ? "--stand-in" : null,
     ].filter((flag): flag is string => flag !== null);
     if (writing.length > 0) {
       throw new UsageError(`${writing.join(" and ")} belong to taking a decision; --list only reads`);
     }
-    return { list: true, reference: positional[0]!, repo: args.repo, store: args.store, json: args.json };
+    return { list: true, ...common };
   }
-  if (decision === null || key === null) {
+  if (taken === null) {
     throw new UsageError(
       "verdict needs one decision: --endorse or --override <stop key>, or --accept or " +
         "--reject <finding key>",
     );
   }
-  if (args.note !== null && args.note.trim() === "") {
+  if (note !== null && note.trim() === "") {
     throw new UsageError("--note requires text; leave it out to record no note");
   }
-  return { ...args, list: false, reference: positional[0]!, decision, key };
+  return {
+    ...common,
+    list: false,
+    decision: DECISION_FLAGS[taken],
+    key: flags[taken]!,
+    note,
+    author,
+    replace,
+    standIn,
+  };
 }
 
 /**
