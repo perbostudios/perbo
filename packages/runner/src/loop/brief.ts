@@ -119,39 +119,43 @@ export async function briefRound(args: {
   // it to the reviewer's backstop.
   const pathsProhibited = guardProhibitedPaths(contract.scope.paths_prohibited, config);
 
-  const basePrompt =
-    state.kind === "resolve_conflict"
-      ? conflictPrompt({
-          base_ref: config.base_ref,
-          base_commit: state.conflict!.tip,
-          paths: state.conflict!.paths,
-          merged: config.relevel_context,
-        })
-      : state.kind === "execute"
-        ? executorPrompt(contract, {
-            principles: args.principles,
-            resumed: resumedHere
-              ? { attempt_id: resumedHere.attempt_id, bundle_id: resumedHere.bundle_id }
-              : null,
-          })
-        : remediationPrompt({
-            contract,
-            findings: toClose,
-            round: state.remediationRound,
-            max_rounds: args.maxRounds,
-            principles: args.principles,
-            // D-092: the predecessor's own account of its change. Inside
-            // one run that is the last attempt this run recorded; opening
-            // a run on findings left open, it is the last attempt on the
-            // ticket's record. It reaches the executor's next round and
-            // nothing else — the reviewer's inputs are unchanged.
-            previous_account:
-              args.previous !== undefined ? args.previous.executor_account : args.previousRunAccount,
-            // SCP-194: a scope finding is answered by quoting what the
-            // contract admits, and the brief says it in the same words the
-            // guard refuses in (SCP-195's sentence).
-            paths_allowed: pathsAllowed,
-          });
+  const basePrompt = executorBrief();
+  function executorBrief(): string {
+    if (state.kind === "resolve_conflict") {
+      return conflictPrompt({
+        base_ref: config.base_ref,
+        base_commit: state.conflict!.tip,
+        paths: state.conflict!.paths,
+        merged: config.relevel_context,
+      });
+    }
+    if (state.kind === "execute") {
+      return executorPrompt(contract, {
+        principles: args.principles,
+        resumed: resumedHere
+          ? { attempt_id: resumedHere.attempt_id, bundle_id: resumedHere.bundle_id }
+          : null,
+      });
+    }
+    return remediationPrompt({
+      contract,
+      findings: toClose,
+      round: state.remediationRound,
+      max_rounds: args.maxRounds,
+      principles: args.principles,
+      // D-092: the predecessor's own account of its change. Inside
+      // one run that is the last attempt this run recorded; opening
+      // a run on findings left open, it is the last attempt on the
+      // ticket's record. It reaches the executor's next round and
+      // nothing else — the reviewer's inputs are unchanged.
+      previous_account:
+        args.previous !== undefined ? args.previous.executor_account : args.previousRunAccount,
+      // SCP-194: a scope finding is answered by quoting what the
+      // contract admits, and the brief says it in the same words the
+      // guard refuses in (SCP-195's sentence).
+      paths_allowed: pathsAllowed,
+    });
+  }
 
   const { prompt, receipts: executorSkills } = withExecutorSkills(basePrompt, config.executor_skills);
 
@@ -185,13 +189,16 @@ export async function briefRound(args: {
     open_findings: [...toClose],
   };
 
-  progress(
-    state.kind === "resolve_conflict"
-      ? `resolving the base conflict on ${state.conflict!.paths.length} file(s)`
-      : state.kind === "execute"
-        ? "executing"
-        : `remediation round ${state.remediationRound} of at most ${args.maxRounds}`,
-  );
+  progress(roundLine());
+
+  /** What the person is told the round is about to do. */
+  function roundLine(): string {
+    if (state.kind === "resolve_conflict") {
+      return `resolving the base conflict on ${state.conflict!.paths.length} file(s)`;
+    }
+    if (state.kind === "execute") return "executing";
+    return `remediation round ${state.remediationRound} of at most ${args.maxRounds}`;
+  }
 
   return {
     brief: {

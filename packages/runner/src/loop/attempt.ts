@@ -72,6 +72,17 @@ export function withCeilingGuidance(
   };
 }
 
+/** Which executor prompt a round was briefed with, as the bundle records it. */
+export function executorPromptVersion(
+  config: TicketRunConfig,
+  kind: RoundState["kind"],
+  resumed: boolean,
+): string {
+  if (kind === "resolve_conflict") return conflictPromptVersion(config.relevel_context);
+  if (kind !== "execute") return "executor_remediation_v7";
+  return resumed ? RESUMED_EXECUTOR_PROMPT_VERSION : EXECUTOR_PROMPT_VERSION;
+}
+
 /**
  * What the attempt ended as, once what it wrote has been judged.
  *
@@ -106,50 +117,50 @@ export function classifyTermination(args: {
         `${command.denial_target ?? command.detail.slice(0, 80)}`,
     )
     .join("; ");
-  const termination =
-    agentResult.termination.reason !== "completed"
-      ? withCeilingGuidance(agentResult.termination, config)
-      : sealed.prohibited.length > 0
-        ? {
-            reason: "prohibited_action" as const,
-            detail: sealed.prohibited.map((hit) => `${hit.action}: ${hit.detail}`).join("; "),
-          }
-        : // SCP-195: the guard refuses a write outside the contract's globs
-          // before it happens, so a path here that is still outside them is
-          // one the guard never saw. That is a hole in the runner, and the
-          // record says so rather than passing the change on to a review
-          // that would spend a round finding it.
-          sealed.outside_allowed_paths.length > 0
-          ? {
-              reason: "runner_defect" as const,
-              detail:
-                `the sealed change set carries ${sealed.outside_allowed_paths.length} path(s) ` +
-                `outside what the contract admits a write under, which the pre-execution ` +
-                `guard should have refused: ` +
-                `${sealed.outside_allowed_paths.slice(0, 5).join(", ")} — ` +
-                `${allowedPathsSentence(pathsAllowed)}`,
-            }
-        : sealed.changeset === null
-          ? denied.length > 0
-            ? {
-                reason: "no_changes_after_denials" as const,
-                detail:
-                  `the branch adds no change to its base, and ${denied.length} command(s) ` +
-                  `the executor asked for were refused: ${deniedSummary}`,
-              }
-            : {
-                reason: "no_changes" as const,
-                detail: "the branch adds no change to its base",
-              }
-          : carriedForward
-            ? {
-                reason: "completed" as const,
-                detail:
-                  `the executor added nothing to the ${inherited.length} commit(s) already ` +
-                  "on the branch; that change set is what was checked and reviewed",
-              }
-            : { reason: "completed" as const, detail: "" };
-  return termination;
+  if (agentResult.termination.reason !== "completed") {
+    return withCeilingGuidance(agentResult.termination, config);
+  }
+  if (sealed.prohibited.length > 0) {
+    return {
+      reason: "prohibited_action",
+      detail: sealed.prohibited.map((hit) => `${hit.action}: ${hit.detail}`).join("; "),
+    };
+  }
+  // SCP-195: the guard refuses a write outside the contract's globs before it
+  // happens, so a path here that is still outside them is one the guard never
+  // saw. That is a hole in the runner, and the record says so rather than
+  // passing the change on to a review that would spend a round finding it.
+  if (sealed.outside_allowed_paths.length > 0) {
+    return {
+      reason: "runner_defect",
+      detail:
+        `the sealed change set carries ${sealed.outside_allowed_paths.length} path(s) ` +
+        `outside what the contract admits a write under, which the pre-execution ` +
+        `guard should have refused: ` +
+        `${sealed.outside_allowed_paths.slice(0, 5).join(", ")} — ` +
+        `${allowedPathsSentence(pathsAllowed)}`,
+    };
+  }
+  if (sealed.changeset === null) {
+    if (denied.length === 0) {
+      return { reason: "no_changes", detail: "the branch adds no change to its base" };
+    }
+    return {
+      reason: "no_changes_after_denials",
+      detail:
+        `the branch adds no change to its base, and ${denied.length} command(s) ` +
+        `the executor asked for were refused: ${deniedSummary}`,
+    };
+  }
+  if (carriedForward) {
+    return {
+      reason: "completed",
+      detail:
+        `the executor added nothing to the ${inherited.length} commit(s) already ` +
+        "on the branch; that change set is what was checked and reviewed",
+    };
+  }
+  return { reason: "completed", detail: "" };
 }
 
 /**
@@ -428,14 +439,7 @@ export function recordAttempt(args: {
     context_manifest: [],
     versions: {
       code: "stage-2",
-      prompt:
-        state.kind === "resolve_conflict"
-          ? conflictPromptVersion(config.relevel_context)
-          : state.kind === "execute"
-            ? brief.resumedHere === null
-              ? EXECUTOR_PROMPT_VERSION
-              : RESUMED_EXECUTOR_PROMPT_VERSION
-            : "executor_remediation_v7",
+      prompt: executorPromptVersion(config, state.kind, brief.resumedHere !== null),
       policy: profile.autonomy_class,
       model: attempt.agent.model,
       tool: attempt.agent.binary_version,
