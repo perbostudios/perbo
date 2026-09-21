@@ -14,7 +14,8 @@ import {
 } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile, PINNED_PROVIDER_BASE_URL } from "../src/profile.js";
-import { fakeAgent, scratch } from "./support.js";
+import { fakeAgent } from "../src/test-support/fake-agent.js";
+import { scratch } from "./support.js";
 
 const worktree = mkdtempSync(join(tmpdir(), "perbo-adapter-"));
 const profile = buildPermissionProfile({ worktree });
@@ -129,7 +130,7 @@ describe("an agent that exited without finishing", () => {
   };
 
   it("records exhausted transport retries as transport_unavailable, with the status and the error text", async () => {
-    const agent = fakeAgent([{ kind: "overloaded", status: 529, retries: 10 }]);
+    const agent = fakeAgent(scratch, [{ kind: "overloaded", status: 529, retries: 10 }]);
     const result = await runFake(agent.binary);
 
     expect(result.termination.reason).toBe("transport_unavailable");
@@ -142,7 +143,7 @@ describe("an agent that exited without finishing", () => {
   }, 30_000);
 
   it("leaves an ordinary non-zero exit as agent_error", async () => {
-    const agent = fakeAgent([{ kind: "agent_error" }]);
+    const agent = fakeAgent(scratch, [{ kind: "agent_error" }]);
     const result = await runFake(agent.binary);
 
     expect(result.termination.reason).toBe("agent_error");
@@ -153,7 +154,7 @@ describe("an agent that exited without finishing", () => {
     // The transcript contains a 529 — the agent printed the retry notice — and
     // the agent then worked and failed on something else. The provider is not
     // what ended this attempt and must not be named as though it were.
-    const agent = fakeAgent([{ kind: "recovered_blip" }]);
+    const agent = fakeAgent(scratch, [{ kind: "recovered_blip" }]);
     const result = await runFake(agent.binary);
 
     expect(result.termination.reason).toBe("agent_error");
@@ -177,7 +178,7 @@ describe("the admission decision on the attempt's record", () => {
     reported_denials: readonly string[] = [],
   ) => {
     const worktree = scratch("perbo-adapter-decide-");
-    const agent = fakeAgent([{ kind: "shell", commands, reported_denials }]);
+    const agent = fakeAgent(scratch, [{ kind: "shell", commands, reported_denials }]);
     return runAgent({
       binary: agent.binary,
       worktree,
@@ -357,7 +358,7 @@ describe("a prohibited action on a call the guard refused first", () => {
   /** `hookProgram` absent runs the real guard, which writes the decision line. */
   const runScripted = async (options: { hookProgram?: readonly string[] } = {}) => {
     const worktree = scratch("perbo-scp177-settle-");
-    const agent = fakeAgent([
+    const agent = fakeAgent(scratch, [
       {
         kind: "scripted",
         steps: [
@@ -432,7 +433,9 @@ describe("an unlisted egress host, under each supervision", () => {
 
   const reach = async (supervision: "runner_guard" | "agent_permissions") => {
     const worktree = scratch("perbo-adapter-egress-");
-    const agent = fakeAgent([{ kind: "shell", commands: [`curl https://${HOST}/upload`] }]);
+    const agent = fakeAgent(scratch, [
+      { kind: "shell", commands: [`curl https://${HOST}/upload`] },
+    ]);
     return runAgent({
       binary: agent.binary,
       worktree,
@@ -489,7 +492,7 @@ describe("a finding the transcript reading could not place", () => {
   const runOne = async (command: string) => {
     const worktree = scratch("perbo-scp234-settle-");
     const call = { id: "toolu_scp234_1", tool: "Bash", input: { command } };
-    const agent = fakeAgent([
+    const agent = fakeAgent(scratch, [
       {
         kind: "scripted",
         steps: [

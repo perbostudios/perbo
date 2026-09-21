@@ -14,7 +14,8 @@ import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { buildPermissionProfile } from "../src/profile.js";
 import { executorPrompt, remediationPrompt } from "../src/prompt.js";
-import { fakeAgent, finding, makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { fakeAgent } from "../src/test-support/fake-agent.js";
+import { finding, makeContract, makeRepo, makeReview, scratch } from "./support.js";
 
 /**
  * D-092: a remediation round is briefed with its predecessor's own account,
@@ -146,7 +147,7 @@ describe("the account is read from the executor's final message (D-092)", () => 
 describe("the adapter carries the executor's final message (D-092)", () => {
   const runScripted = async (steps: ReadonlyArray<Record<string, unknown>>) => {
     const worktree = scratch("perbo-account-");
-    const agent = fakeAgent([{ kind: "scripted", steps } as never]);
+    const agent = fakeAgent(scratch, [{ kind: "scripted", steps } as never]);
     return runAgent({
       binary: agent.binary,
       worktree,

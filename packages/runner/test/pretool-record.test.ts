@@ -7,7 +7,8 @@ import { ADMISSION_RULES } from "../src/admission.js";
 import { runAgent } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { fakeAgent, scratch } from "./support.js";
+import { fakeAgent } from "../src/test-support/fake-agent.js";
+import { scratch } from "./support.js";
 
 /**
  * SCP-177, at the seam: what the hook decided is what the record says, and what
@@ -26,7 +27,7 @@ const run = async (
   extra: { reported_denials?: readonly string[]; hookProgram?: readonly string[] } = {},
 ) => {
   const worktree = scratch("perbo-scp177-record-");
-  const agent = fakeAgent([
+  const agent = fakeAgent(scratch, [
     {
       kind: "guarded",
       calls,

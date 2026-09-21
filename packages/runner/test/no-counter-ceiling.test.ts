@@ -3,7 +3,8 @@ import { LimitsTableSchema } from "@perbo/contracts";
 import { runAgent } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { SPAWN_TEST_TIMEOUT_MS, fakeAgent, scratch } from "./support.js";
+import { fakeAgent } from "../src/test-support/fake-agent.js";
+import { SPAWN_TEST_TIMEOUT_MS, scratch } from "./support.js";
 
 /**
  * D-096: an attempt is stopped by the stall detector, by a cost cap where the
@@ -28,7 +29,7 @@ const runTurns = async (
   options: { round?: boolean } = {},
 ) => {
   const worktree = scratch("perbo-no-counter-");
-  const agent = fakeAgent([
+  const agent = fakeAgent(scratch, [
     { kind: "shell", commands: Array.from({ length: turns }, () => "git status") },
   ]);
   return runAgent({

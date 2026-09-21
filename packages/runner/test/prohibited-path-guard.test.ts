@@ -19,7 +19,8 @@ import {
 import { buildPermissionProfile } from "../src/profile.js";
 import { inspectCommand, inspectToolWrite } from "../src/prohibited.js";
 import { inspectWritePath, resolveScope } from "../src/shell/index.js";
-import { fakeAgent, scratch } from "./support.js";
+import { fakeAgent } from "../src/test-support/fake-agent.js";
+import { scratch } from "./support.js";
 
 /**
  * D-105: a path the contract prohibits is refused at write time, not at review.
@@ -247,7 +248,7 @@ describe("the rule on the record", () => {
     const worktree = scratch("perbo-d105-agent-");
     mkdirSync(join(worktree, "src", "generated"), { recursive: true });
     const target = join(worktree, "src", "generated", "api.ts");
-    const agent = fakeAgent([
+    const agent = fakeAgent(scratch, [
       {
         kind: "guarded",
         calls: [{ tool: "Write", input: { file_path: target, content: "written" } }],

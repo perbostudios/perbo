@@ -11,8 +11,8 @@ import {
 } from "@perbo/contracts";
 import { BundleStore } from "../src/bundle.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
+import { fakeAgent } from "../src/test-support/fake-agent.js";
 import {
-  fakeAgent,
   finding,
   makeRepo,
   makeReview,
@@ -206,7 +206,7 @@ describe("a run with nothing admitted behind it", () => {
   it("leaves attempts, bundles, checks and review in the repository's own .perbo/", async () => {
     const repo = makeRepo();
     const { contract, label } = mint(repo);
-    const agent = fakeAgent([
+    const agent = fakeAgent(scratch, [
       writes("src/feature.ts", "export const total = (n) => n.reduce((a, b) => a + b, 0);\n"),
     ]);
     // Nothing on this path may reach a hosted plane, so every socket this
@@ -278,7 +278,7 @@ describe("a run with nothing admitted behind it", () => {
   it("records what a remediation round's checks measured, which no review reports", async () => {
     const repo = makeRepo();
     const { contract, label } = mint(repo);
-    const agent = fakeAgent([
+    const agent = fakeAgent(scratch, [
       writes("src/feature.ts", "export const total = (n) => n.reduce((a, b) => a + b, 0);\n"),
       writes("test/feature.test.ts", "// exercises total()\n"),
     ]);
@@ -316,7 +316,7 @@ describe("the ceilings a run with nothing admitted stops at", () => {
     // The executor reports $0.002; the ceiling is a tenth of that. D-096: a
     // cost ceiling cuts only an executor billed per token, so the credential
     // the attempt records has to be an API key for one to be in force at all.
-    const agent = fakeAgent([writes("src/feature.ts", "export const total = 1;\n")], {
+    const agent = fakeAgent(scratch, [writes("src/feature.ts", "export const total = 1;\n")], {
       apiKeySource: "ANTHROPIC_API_KEY",
     });
 
@@ -360,7 +360,7 @@ describe("the ceilings a run with nothing admitted stops at", () => {
   it("stops after one attempt when the ceiling allows one, with that attempt priced", async () => {
     const repo = makeRepo();
     const { contract, label } = mint(repo);
-    const agent = fakeAgent([writes("src/feature.ts", "export const total = 1;\n")]);
+    const agent = fakeAgent(scratch, [writes("src/feature.ts", "export const total = 1;\n")]);
 
     // The reviewer routes a finding back, so a second attempt is what this run
     // would do next and the ceiling is the only thing that stops it.

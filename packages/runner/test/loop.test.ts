@@ -19,8 +19,8 @@ import { BundleStore } from "../src/bundle.js";
 import { RunLockedError, acquireRunLock } from "../src/lock.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { TRANSPORT_RETRY_DELAY_MS } from "../src/transport.js";
+import { fakeAgent } from "../src/test-support/fake-agent.js";
 import {
-  fakeAgent,
   finding,
   git,
   makeAttempt,
@@ -1425,7 +1425,7 @@ describe("a re-run on a branch that already carries sealed commits", () => {
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, withoutInstall(repo.dir));
-    config.agent_binary = fakeAgent([{ kind: "shell", commands }]).binary;
+    config.agent_binary = fakeAgent(scratch, [{ kind: "shell", commands }]).binary;
 
     const reviewInputs: Array<Record<string, unknown>> = [];
     const result = await runTicket({
@@ -1900,7 +1900,7 @@ describe("an attempt whose model transport gave up", () => {
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
-    const agent = fakeAgent([
+    const agent = fakeAgent(scratch, [
       { kind: "overloaded", status: 529, retries: 10 },
       { kind: "succeed", file: "src/feature.ts", contents: "export const total = (n) => n.length;\n" },
     ]);
@@ -1997,7 +1997,7 @@ describe("an attempt whose model transport gave up", () => {
 
     const contract = makeContract();
     contract.base.base_commit = repo.head;
-    const agent = fakeAgent([
+    const agent = fakeAgent(scratch, [
       { kind: "overloaded", status: 529, retries: 10 },
       { kind: "succeed", file: "src/feature.ts", contents: "export const total = (n) => n.length;\n" },
     ]);
@@ -2040,7 +2040,7 @@ describe("an attempt whose model transport gave up", () => {
     const config = makeConfig(repo.dir);
     // The last behaviour repeats, so this executor's transport is out for the
     // whole run rather than for one attempt.
-    const agent = fakeAgent([{ kind: "overloaded", status: 529, retries: 10 }]);
+    const agent = fakeAgent(scratch, [{ kind: "overloaded", status: 529, retries: 10 }]);
     config.agent_binary = agent.binary;
 
     const waited: number[] = [];
@@ -2087,7 +2087,7 @@ describe("an attempt whose model transport gave up", () => {
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
-    const agent = fakeAgent([{ kind: "agent_error" }]);
+    const agent = fakeAgent(scratch, [{ kind: "agent_error" }]);
     config.agent_binary = agent.binary;
 
     const waited: number[] = [];
@@ -2121,7 +2121,7 @@ describe("an attempt whose model transport gave up", () => {
     // A 529 on stderr, retried and served, work after it, and then a failure
     // of the agent's own. The transport is in the transcript but is not what
     // ended the attempt, so this is an ordinary failure on its first attempt.
-    const agent = fakeAgent([{ kind: "recovered_blip" }]);
+    const agent = fakeAgent(scratch, [{ kind: "recovered_blip" }]);
     config.agent_binary = agent.binary;
 
     const waited: number[] = [];
@@ -2435,7 +2435,7 @@ describe("a run a provider's session limit cut", () => {
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
-    const agent = fakeAgent([
+    const agent = fakeAgent(scratch, [
       { kind: "session_limit", message: SESSION_LIMIT },
       { kind: "succeed", file: "src/feature.ts", contents: "export const total = (n) => n.length;\n" },
     ]);
@@ -2504,7 +2504,7 @@ describe("a run a provider's session limit cut", () => {
       // One hour, against a reset three and a quarter hours out.
       limits: { concurrent_local_attempts: 4, wait_for_provider_ms: 3_600_000 },
     });
-    const agent = fakeAgent([{ kind: "session_limit", message: SESSION_LIMIT }]);
+    const agent = fakeAgent(scratch, [{ kind: "session_limit", message: SESSION_LIMIT }]);
     config.agent_binary = agent.binary;
 
     const waited: number[] = [];
@@ -2530,7 +2530,7 @@ describe("a run a provider's session limit cut", () => {
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
-    const agent = fakeAgent([
+    const agent = fakeAgent(scratch, [
       { kind: "succeed", file: "src/feature.ts", contents: "export const total = (n) => n.length;\n" },
     ]);
     config.agent_binary = agent.binary;
@@ -2577,7 +2577,7 @@ describe("a second run of a ticket that is already running", () => {
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
-    const agent = fakeAgent([
+    const agent = fakeAgent(scratch, [
       { kind: "succeed", file: "src/feature.ts", contents: "export const total = (n) => n.length;\n" },
     ]);
     config.agent_binary = agent.binary;
