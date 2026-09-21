@@ -14,8 +14,15 @@ import {
   PER_TOKEN_COST_LIMITS,
   PlanContractSchema,
   UNCHECKED,
+  addRolls,
+  costOf,
+  costPhrase,
   failedChecks,
+  formatUsd,
   limitFor,
+  rollCosts,
+  rollLabel,
+  type CostRoll,
   type DefaultedResource,
   type DiagnosticResult,
   type ExecutionAttempt,
@@ -367,79 +374,6 @@ export function exitCodeForRun(outcome: TicketRunResult["outcome"]): number {
 }
 
 /**
- * One dollar figure, and what it is. `micros` is null where the basis carries
- * no dollars at all — `$0.00` and "nobody measured this" are different facts,
- * and a terminated attempt used to be printed as the first when it was the
- * second. `partial` says the component was stopped before its transport wrote a
- * final accounting line, so the figure covers only what was read by the stop.
- */
-export interface AttemptCost {
-  micros: number | null;
-  basis: ExecutionAttempt["usage"]["cost_basis"];
-  partial: boolean;
-}
-
-/**
- * Costs added up: a round's components, a run's, or a ticket's. A component
- * with no dollars is counted rather than dropped, so a subtotal never reads as
- * complete when part of it is missing, and the partial ones are named for the
- * same reason.
- */
-export interface CostRoll {
-  /** Micro-dollars from the components that carry a figure. */
-  micros: number;
-  /** Components that could carry one; `not_incurred` is not among them. */
-  components: number;
-  priced: number;
-  /** Priced by the transport's own dollar total. */
-  reported: number;
-  /** Priced from token usage at the provider's recorded list rates. */
-  estimated: number;
-  unavailable: number;
-  /** Of the priced ones, how many are a charge up to a stop rather than a total. */
-  partial: number;
-}
-
-export function rollCosts(components: readonly AttemptCost[]): CostRoll {
-  const counted = components.filter((cost) => cost.basis !== "not_incurred");
-  const priced = counted.filter((cost) => cost.micros !== null);
-  return {
-    micros: priced.reduce((total, cost) => total + (cost.micros ?? 0), 0),
-    components: counted.length,
-    priced: priced.length,
-    reported: priced.filter((cost) => cost.basis === "transport_reported").length,
-    estimated: priced.filter((cost) => cost.basis === "provider_list_estimate").length,
-    unavailable: counted.length - priced.length,
-    partial: priced.filter((cost) => cost.partial).length,
-  };
-}
-
-export function addRolls(a: CostRoll, b: CostRoll): CostRoll {
-  return {
-    micros: a.micros + b.micros,
-    components: a.components + b.components,
-    priced: a.priced + b.priced,
-    reported: a.reported + b.reported,
-    estimated: a.estimated + b.estimated,
-    unavailable: a.unavailable + b.unavailable,
-    partial: a.partial + b.partial,
-  };
-}
-
-/** A basis that carries no dollars carries no figure either. */
-export function dollars(
-  micros: number,
-  basis: ExecutionAttempt["usage"]["cost_basis"],
-  partial = false,
-): AttemptCost {
-  return {
-    micros: basis === "unavailable" || basis === "not_incurred" ? null : micros,
-    basis,
-    partial,
-  };
-}
-
-/**
  * What the run in front of you cost: every attempt it made — the ones a
  * transport failure superseded included, because they were paid for — plus the
  * one independent review and each round's closure verification.
@@ -454,32 +388,26 @@ export function runCost(result: TicketRunResult): CostRoll {
     .map((round) =>
       rollCosts([
         ...[round.attempt, ...(round.superseded_attempts ?? [])].map((attempt) =>
-          dollars(
-            attempt.usage.cost_micros,
-            attempt.usage.cost_basis,
-            attempt.usage.cost_partial === true,
-          ),
+          costOf({
+            micros: attempt.usage.cost_micros,
+            basis: attempt.usage.cost_basis,
+            partial: attempt.usage.cost_partial === true,
+          }),
         ),
-        ...(round.review ? [dollars(round.review.cost_micros, round.review.model.cost_basis)] : []),
+        ...(round.review
+          ? [costOf({ micros: round.review.cost_micros, basis: round.review.model.cost_basis })]
+          : []),
         ...(round.verification
-          ? [dollars(round.verification.cost_micros, round.verification.cost_basis)]
+          ? [
+              costOf({
+                micros: round.verification.cost_micros,
+                basis: round.verification.cost_basis,
+              }),
+            ]
           : []),
       ]),
     )
     .reduce(addRolls, rollCosts([]));
-}
-
-/** A roll as a person reads it: what it adds up to, and what is missing from it. */
-export function renderCostRoll(roll: CostRoll): string {
-  if (roll.components === 0) return "not incurred";
-  if (roll.priced === 0) return `unavailable — ${roll.unavailable} component(s) unpriced`;
-  const notes = [`${roll.priced} of ${roll.components} priced`];
-  if (roll.estimated > 0) {
-    notes.push(`${roll.reported} reported`, `${roll.estimated} estimated`);
-  }
-  if (roll.partial > 0) notes.push(`${roll.partial} partial`);
-  if (roll.unavailable > 0) notes.push(`${roll.unavailable} unavailable`);
-  return `$${(roll.micros / 1_000_000).toFixed(4)} — ${notes.join(", ")}`;
 }
 
 export function renderRun(
@@ -491,14 +419,6 @@ export function renderRun(
   },
 ): string {
   const lines: string[] = [];
-  const renderCost = (
-    micros: number,
-    basis: "transport_reported" | "provider_list_estimate" | "unavailable",
-  ): string =>
-    basis === "unavailable"
-      ? "cost unavailable"
-      : `$${(micros / 1_000_000).toFixed(4)} ` +
-        (basis === "transport_reported" ? "reported" : "estimated");
   lines.push(`${run?.local ? "RUN      " : "TICKET   "} ${result.ticket_id}`);
   lines.push(`BRANCH    ${result.workspace.branch}`);
   lines.push("");
@@ -516,7 +436,7 @@ export function renderRun(
       lines.push(
         `  ${"".padEnd(16)} ${String(round.remediable_findings).padStart(2)} to the executor · ` +
           `${round.directly_verified}/${review.coverage.length} directly verified · ` +
-          `${renderCost(review.cost_micros, review.model?.cost_basis ?? "provider_list_estimate")}`,
+          `${costPhrase(costOf({ micros: review.cost_micros, basis: review.model?.cost_basis ?? "provider_list_estimate" }))}`,
       );
     }
   }
@@ -524,7 +444,7 @@ export function renderRun(
   lines.push(`OUTCOME   ${result.outcome} — ${result.detail}`);
   // What it cost, on every outcome including the ones a ceiling ended: a run
   // that stopped still spent, and the figure belongs beside the reason.
-  lines.push(`COST      ${renderCostRoll(runCost(result))}`);
+  lines.push(`COST      ${rollLabel(runCost(result))}`);
   if (result.pull_request) lines.push(`PR        ${result.pull_request.url}`);
   // What GitHub said about the head, beside the pull request it is on. A red
   // check is not a judgement of the change — the review already made that —
@@ -1298,7 +1218,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
   // spent money on the way to being reached — so the figure is read where the
   // run ends rather than by opening the store afterwards.
   const cost = runCost(result);
-  streams.stderr(`\ncost      ${renderCostRoll(cost)}\n`);
+  streams.stderr(`\ncost      ${rollLabel(cost)}\n`);
   if (local) {
     streams.stderr(
       `read it back with: perbo inspect ${result.ticket_id}` +
@@ -2181,20 +2101,6 @@ export function ceilingTerminations(
   return { hits, unreadable };
 }
 
-/**
- * A dollar figure only where there is one. `unavailable` means the transport
- * exposes no dollar measure, and printing that as $0 is the lie the field
- * exists to prevent; `not_incurred` means no model was called.
- */
-export function formatCost(
-  micros: number,
-  basis: "transport_reported" | "provider_list_estimate" | "unavailable" | "not_incurred",
-): string {
-  if (basis === "unavailable") return "cost unavailable";
-  if (basis === "not_incurred") return "not incurred";
-  return `$${(micros / 1_000_000).toFixed(4)} ${basis === "transport_reported" ? "reported" : "estimated"}`;
-}
-
 const withThousands = (n: number) => n.toLocaleString("en-US");
 
 /** A resource's value in the unit a person thinks in, beside the raw number. */
@@ -2206,7 +2112,7 @@ function humanLimit(resource: LimitedResource, value: number): string {
       return formatDuration(value);
     case "attempt_cost_micros":
     case "ticket_cost_micros":
-      return `$${(value / 1_000_000).toFixed(2)}`;
+      return formatUsd(value, 2);
     case "local_workspace_bytes":
       return `${(value / (1024 * 1024 * 1024)).toFixed(value % (1024 * 1024 * 1024) === 0 ? 0 : 1)} GiB`;
     default:

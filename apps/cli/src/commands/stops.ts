@@ -5,6 +5,7 @@ import {
   EXIT_CODES,
   PARTNER_READING_CAVEAT,
   StopVerdictsSchema,
+  formatUsd,
   judgeAgainstD060,
   summariseStops,
   summariseUnattendedMerges,
@@ -396,7 +397,7 @@ export function renderD060(reading: D060Reading, summary: StopsSummary, pooled?:
  */
 export function unattendedRows(summary: UnattendedMergesSummary, cost: MergedCostSummary): string[][] {
   const n = summary.unattended + summary.attended;
-  const perTicket = cost.tickets === 0 ? "—" : `$${(cost.micros / cost.tickets / 1_000_000).toFixed(4)}`;
+  const perTicket = cost.tickets === 0 ? "—" : formatUsd(cost.micros / cost.tickets, 4);
   const unpriced =
     cost.unpriced_attempts.length === 0
       ? ""

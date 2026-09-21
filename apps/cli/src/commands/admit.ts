@@ -13,6 +13,8 @@ import {
   TicketSchema,
   VERIFICATION_KINDS,
   compareLevels,
+  costOf,
+  costPhrase,
   derivePlannedRisk,
   isActive,
   isConfigPath,
@@ -1362,9 +1364,6 @@ function admitting(input: Admitting, started: number): AdmissionReport | Promise
   return admitted(input, started, resolveTyped(input));
 }
 
-const money = (micros: number, basis: string): string =>
-  basis === "unavailable" ? "cost unavailable" : `$${(micros / 1_000_000).toFixed(4)}`;
-
 function admitted(input: Admitting, started: number, resolved: Resolved): AdmissionReport {
   const { args, now } = input;
   const repositoryRoot = resolve(input.cwd, args.target.repo);
@@ -1906,7 +1905,8 @@ function renderAdmitted(report: AdmissionReport): string {
     ? `\ndrafted ${key} (${ticket.state}) from ` +
       `${resolved.sourcePath ?? resolved.issue?.reference} in ` +
       `${formatDuration(ticket.admission.elapsed_ms)} — ${drafted.model.provider} ` +
-      `${drafted.model.model_id}, ${money(drafted.model.cost_micros, drafted.model.cost_basis)}\n`
+      `${drafted.model.model_id}, ` +
+      `${costPhrase(costOf({ micros: drafted.model.cost_micros, basis: drafted.model.cost_basis }))}\n`
     : `\nadmitted ${key} (${ticket.state}) in ${formatDuration(ticket.admission.elapsed_ms)}\n`;
   const next = ticket.approved_at
     ? `\nApproved. The contract is immutable from here.\n  perbo run --ticket ${key}\n`

@@ -221,6 +221,27 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
     expect(err).toContain("proposed by the model");
   });
 
+  it("says what priced the draft, and gives no figure where nothing did", async () => {
+    const repo = repository("admit-from-cost");
+    const estimated = capture();
+    await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from", "o/r#412"], streams: estimated, cwd: repo, deps: { model: drafter(), fetchIssue } });
+    // The transport reported no dollars, so the figure is priced at list and
+    // the line says so: an amount without its basis is an amount nobody can
+    // weigh (D-070).
+    expect(estimated.err.join("")).toMatch(/— double scripted, \$\d+\.\d{4} estimated\n/);
+
+    const unavailable = repository("admit-from-cost-unavailable");
+    const nothing = capture();
+    await runCommandLine(admitCommandLine, {
+      argv: ["--repo", unavailable, "--from", "o/r#412"],
+      streams: nothing,
+      cwd: unavailable,
+      deps: { model: Object.assign(drafter(), { unreported_cost_basis: "unavailable" as const }), fetchIssue },
+    });
+    expect(nothing.err.join("")).toContain("cost unavailable");
+    expect(nothing.err.join("")).not.toContain("$0.0000");
+  });
+
   it("lets a typed flag override the draft's corresponding part", async () => {
     const repo = repository("admit-from-override");
     await runCommandLine(admitCommandLine, { argv: [

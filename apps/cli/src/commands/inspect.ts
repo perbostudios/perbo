@@ -4,22 +4,32 @@ import { join } from "node:path";
 import { z } from "zod";
 import {
   CheckResultsFileSchema,
+  CostBasisSchema,
   EXIT_CODES,
   NodeReviewsSchema,
   ReviewArtifactSchema,
   RunBundleSchema,
+  addRolls,
+  costLabel,
+  costOf,
+  costPhrase,
+  formatUsd,
   limitFor,
   limitsForCredential,
   parseUnifiedDiff,
   planNodes,
   planSizeCounts,
   pullRequestAttribution,
+  rollCosts,
+  rollLabel,
   sizeEstimate,
   ticketSourceLabel,
   wholeChangeChecks,
   type ArtifactRef,
   type AttemptWait,
   type CheckResult,
+  type Cost,
+  type CostRoll,
   type DeliveredCheck,
   type DeliveryChecksState,
   type ExecutionAttempt,
@@ -44,7 +54,6 @@ import {
   BASE_SOURCE_LABEL,
   ceilingResourceFor,
   effectiveLimits,
-  formatCost,
   limitAtBreach,
   readAttemptsFile,
   readRepoConfig,
@@ -183,7 +192,7 @@ const ClosureVerificationFileSchema = z.object({
   all_closed: z.boolean(),
   open_keys: z.array(z.string()),
   cost_micros: z.number().int().min(0),
-  cost_basis: z.enum(["transport_reported", "provider_list_estimate", "unavailable", "not_incurred"]),
+  cost_basis: CostBasisSchema,
 });
 type ClosureVerificationFile = z.infer<typeof ClosureVerificationFileSchema>;
 
@@ -193,65 +202,6 @@ export interface CeilingUse {
   /** Null where nothing bounds the resource, which is the counters' default. */
   ceiling: number | null;
   hit: boolean;
-}
-
-/**
- * One dollar figure, and what it is. `micros` is null where the basis carries
- * no dollars at all — `$0.00` and "nobody measured this" are different facts,
- * and a terminated attempt used to be printed as the first when it was the
- * second. `partial` says the attempt was stopped before its transport wrote a
- * final accounting line, so the figure covers only what was read by the stop.
- */
-export interface AttemptCost {
-  micros: number | null;
-  basis: ExecutionAttempt["usage"]["cost_basis"];
-  partial: boolean;
-}
-
-/**
- * Costs added up: the round's components, or the ticket's. A component with no
- * dollars is counted rather than dropped, so a subtotal never reads as complete
- * when part of it is missing, and the partial ones are named for the same reason.
- */
-export interface CostRoll {
-  /** Micro-dollars from the components that carry a figure. */
-  micros: number;
-  /** Components that could carry one; `not_incurred` is not among them. */
-  components: number;
-  priced: number;
-  /** Priced by the transport's own dollar total. */
-  reported: number;
-  /** Priced from token usage at the provider's recorded list rates. */
-  estimated: number;
-  unavailable: number;
-  /** Of the priced ones, how many are a charge up to a stop rather than a total. */
-  partial: number;
-}
-
-export function rollCosts(components: readonly AttemptCost[]): CostRoll {
-  const counted = components.filter((cost) => cost.basis !== "not_incurred");
-  const priced = counted.filter((cost) => cost.micros !== null);
-  return {
-    micros: priced.reduce((total, cost) => total + (cost.micros ?? 0), 0),
-    components: counted.length,
-    priced: priced.length,
-    reported: priced.filter((cost) => cost.basis === "transport_reported").length,
-    estimated: priced.filter((cost) => cost.basis === "provider_list_estimate").length,
-    unavailable: counted.length - priced.length,
-    partial: priced.filter((cost) => cost.partial).length,
-  };
-}
-
-export function addRolls(a: CostRoll, b: CostRoll): CostRoll {
-  return {
-    micros: a.micros + b.micros,
-    components: a.components + b.components,
-    priced: a.priced + b.priced,
-    reported: a.reported + b.reported,
-    estimated: a.estimated + b.estimated,
-    unavailable: a.unavailable + b.unavailable,
-    partial: a.partial + b.partial,
-  };
 }
 
 /**
@@ -321,7 +271,7 @@ export interface AttemptReport {
   agent: { model: string; binary_version: string; adapter: string; credential_class: string };
   ceilings: CeilingUse[];
   tokens: { input: number; cache_read: number; output: number };
-  cost: AttemptCost;
+  cost: Cost;
   /** Execution, review and closure verification for this round, added up. */
   round_cost: CostRoll;
   /**
@@ -830,26 +780,17 @@ export function reportAttempt(
         ? "carried_forward"
         : `carried_forward · ${reached}`;
 
-  // A basis that carries no dollars carries no figure either: null, so nothing
-  // downstream can render "we did not measure this" as "$0.00".
-  const dollars = (
-    micros: number,
-    basis: ExecutionAttempt["usage"]["cost_basis"],
-    partial = false,
-  ): AttemptCost => ({
-    micros: basis === "unavailable" || basis === "not_incurred" ? null : micros,
-    basis,
-    partial,
+  const cost = costOf({
+    micros: attempt.usage.cost_micros,
+    basis: attempt.usage.cost_basis,
+    partial: attempt.usage.cost_partial === true,
   });
-  const cost = dollars(
-    attempt.usage.cost_micros,
-    attempt.usage.cost_basis,
-    attempt.usage.cost_partial === true,
-  );
   const round_cost = rollCosts([
     cost,
-    ...(review ? [dollars(review.cost_micros, review.model.cost_basis)] : []),
-    ...(verification ? [dollars(verification.cost_micros, verification.cost_basis)] : []),
+    ...(review ? [costOf({ micros: review.cost_micros, basis: review.model.cost_basis })] : []),
+    ...(verification
+      ? [costOf({ micros: verification.cost_micros, basis: verification.cost_basis })]
+      : []),
   ]);
 
   const denials: DenialReport[] = attempt.commands
@@ -1026,45 +967,14 @@ const RESOURCE_LABEL: Record<string, string> = {
   attempt_cost_micros: "cost",
 };
 
-/**
- * A cost the way a person reads it. `partial` replaces the basis word rather
- * than joining it: what a reader needs first is that this is not the whole
- * charge. The round and ticket totals retain the reported/estimated split.
- *
- * D-070: a basis carrying no dollars is a word and never an amount, so no
- * reading of this ever produces `$0` for an attempt nobody priced. The word
- * alone, without `formatCost`'s own `cost ` prefix — the label on the line and
- * the column heading above it already say which quantity this is, and the
- * prefix read as "cost cost unavailable" under them.
- */
-function costLabel(cost: AttemptCost): string {
-  if (cost.micros === null) return cost.basis === "not_incurred" ? "not incurred" : "unavailable";
-  const amount = `$${(cost.micros / 1_000_000).toFixed(4)}`;
-  if (cost.partial) return `${amount} partial`;
-  return `${amount} ${cost.basis === "transport_reported" ? "reported" : "estimated"}`;
-}
-
-/** The same, for a subtotal: what it adds up to, and what is missing from it. */
-function rollLabel(roll: CostRoll): string {
-  if (roll.components === 0) return "not incurred";
-  if (roll.priced === 0) return `unavailable — ${roll.unavailable} component(s) unpriced`;
-  const notes = [`${roll.priced} of ${roll.components} priced`];
-  if (roll.estimated > 0) {
-    notes.push(`${roll.reported} reported`, `${roll.estimated} estimated`);
-  }
-  if (roll.partial > 0) notes.push(`${roll.partial} partial`);
-  if (roll.unavailable > 0) notes.push(`${roll.unavailable} unavailable`);
-  return `$${(roll.micros / 1_000_000).toFixed(4)} — ${notes.join(", ")}`;
-}
-
-function renderUse(use: CeilingUse, cost: AttemptCost): string {
+function renderUse(use: CeilingUse, cost: Cost): string {
   const show = (value: number): string => {
     switch (use.resource) {
       case "attempt_stall_ms":
       case "attempt_wall_clock_ms":
         return formatDuration(value);
       case "attempt_cost_micros":
-        return `$${(value / 1_000_000).toFixed(4)}`;
+        return formatUsd(value, 4);
       default:
         return value.toLocaleString("en-US");
     }
@@ -1801,7 +1711,7 @@ export function renderInspect(
       const review = attempt.review;
       const right =
         `${review.findings.length} finding(s) · ` +
-        `${formatCost(review.cost_micros, review.model.cost_basis)}`;
+        `${costPhrase(costOf({ micros: review.cost_micros, basis: review.model.cost_basis }))}`;
       lines.push(spread(paint("  REVIEW", "sect") + `    ${review.review_id}   ${review.decision}`, right, paint, "dim"));
       // A verdict the plan could not accept cost the review, not the change
       // set. Its reason is what says which — so it is printed beside the round,
@@ -1868,7 +1778,10 @@ export function renderInspect(
         );
       }
       lines.push(
-        paint(`    ${formatCost(verification.cost_micros, verification.cost_basis)}`, "dim"),
+        paint(
+          `    ${costPhrase(costOf({ micros: verification.cost_micros, basis: verification.cost_basis }))}`,
+          "dim",
+        ),
         "",
       );
     }
