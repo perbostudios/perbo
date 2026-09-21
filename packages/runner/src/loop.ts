@@ -44,7 +44,6 @@ import {
 } from "@perbo/workspace";
 import {
   PROMPT_VERSION,
-  isRemediableFamily,
   remediableFindings,
   reviewGraph,
 } from "@perbo/review";
@@ -119,12 +118,18 @@ import {
   contractWithCriteria,
   countDirectlyVerified,
   flakyCheckFindings,
-  incompleteReviewCauses,
   reviewerModel,
+  routeReview,
   writeReviewBundle,
 } from "./loop/review.js";
 import { resolvePorts, type LoopPorts } from "./loop/context.js";
-import { applyStep, attemptIdFor, initialRoundState, type RoundRecord } from "./loop/state.js";
+import {
+  applyStep,
+  attemptIdFor,
+  initialRoundState,
+  type RoundRecord,
+  type RunOutcome,
+} from "./loop/state.js";
 import { verifierModel } from "./loop/verify.js";
 
 /**
@@ -168,7 +173,7 @@ import { verifierModel } from "./loop/verify.js";
 
 export { resolvePorts, type LoopPorts } from "./loop/context.js";
 export { incompleteReviewCauses } from "./loop/review.js";
-export { type RoundKind, type RoundRecord } from "./loop/state.js";
+export { type RoundKind, type RoundRecord, type RunOutcome } from "./loop/state.js";
 
 export {
   BaseSourceSchema,
@@ -222,43 +227,7 @@ export interface TicketRunResult {
    * a GitHub-side step, and a run that took none has nothing to say about it.
    */
   github_credential: GithubCredential | null;
-  outcome:
-    | "approved"
-    | "changes_requested"
-    | "escalated"
-    | "remediation_exhausted"
-    /**
-     * SCP-194: a remediation round closed none of the findings it was given, so
-     * the next round would be the same brief against the same evidence. The
-     * detail names the keys still open. Distinct from `remediation_exhausted`,
-     * which is a run that was still closing findings when it ran out of rounds
-     * or of budget — the two ask a person for different things.
-     */
-    | "remediation_stalled"
-    | "no_changes"
-    | "terminated"
-    /**
-     * SCP-192: the branch cannot reach the base it would be merged into, and
-     * the round that was given the conflict did not resolve it. Not a judgement
-     * of the change either — the change set stays on its branch, and the detail
-     * names the files a person or a re-run has to reconcile.
-     */
-    | "base_conflict"
-    /**
-     * The review itself did not complete: a provider outage, or every verdict
-     * the reviewer returned being one the plan could not accept. Neither is a
-     * judgement of the change, and the change set stays on its branch.
-     */
-    | "review_failed"
-    /** SCP-227: a re-level run found the branch already level with its base. Nothing was done or paid for. */
-    | "level"
-    /**
-     * SCP-227: a re-level run merged the base's tip into the branch and the
-     * result stands — the checks pass and the base touched nothing in the
-     * contract's scope, or a fresh review approved the merged change set. The
-     * branch is pushed and the merge step read; no pull request is opened.
-     */
-    | "relevelled";
+  outcome: RunOutcome;
   detail: string;
   /**
    * Which way a review that could not resolve every criterion reached its end,
@@ -2414,135 +2383,26 @@ async function runLockedTicket(
       // The round that answered an incomplete verdict has now been judged, so
       // whatever this review routes next is a closure for the verifier.
       const answeringIncomplete = state.reviewingAgain;
-      state = { ...state, reviewingAgain: false };
+      // D-057: an incomplete verdict is a person's, and only a round that can
+      // make its criteria judgeable takes it off them.
+      if (review.decision === "incomplete") outcome = "escalated";
 
-      if (review.decision === "approve") {
-        outcome = "approved";
-        detail = "the gate is open";
+      const reviewStep = routeReview({
+        review,
+        answeringIncomplete,
+        round: state.round,
+        remediationRound: state.remediationRound,
+        maxRounds,
+        configPath,
+      });
+      if (reviewStep.next === "advance" && reviewStep.say !== undefined) progress(reviewStep.say);
+      state = applyStep(state, reviewStep);
+      if (reviewStep.next === "stop") {
+        outcome = reviewStep.end.outcome;
+        detail = reviewStep.end.detail;
         break;
       }
-      if (review.decision === "error") {
-        // Neither an outage nor a rejected verdict is a judgement of the
-        // change. Recording either as `changes_requested` would move the ticket
-        // on the strength of a provider being down or a reviewer mis-filling a
-        // form. The reason is on the detail, and both are on it when a verdict
-        // was rejected twice.
-        //
-        // A review that stopped at the transport also says what it was reading.
-        // A note carrying only `provider_unavailable` gives a re-run nothing to
-        // do differently: AYO-33 died on the one file in its change set holding
-        // a NUL byte, could not say which, and a re-run over the same sealed
-        // commit would have died the same way (SCP-188). A verdict the plan
-        // could not accept implicates no file and names none.
-        outcome = "review_failed";
-        const atTheTransport =
-          review.error?.kind === "provider_unavailable" ||
-          review.error?.kind === "timeout" ||
-          review.error?.kind === "budget_exhausted";
-        const reading = review.error?.reading ?? [];
-        detail =
-          `review_failed: ${review.error?.kind ?? "unknown"} — ` +
-          `${review.error?.message ?? "the review did not complete"}` +
-          (!atTheTransport
-            ? ""
-            : reading.length > 0
-              ? ` (reading ${reading.join(", ")})`
-              : " (no file named: the review had read nothing when the transport failed)");
-        break;
-      }
-      if (review.decision === "incomplete") {
-        // D-057: a review that could not resolve every criterion has not judged
-        // the change, and nothing here can judge it in the reviewer's place.
-        //
-        // Who is asked next depends on why it could not. Where every criterion
-        // it could not resolve hangs on a finding the executor may be handed,
-        // the executor is asked first: that is one round against a cause the
-        // product already routes, and the re-review after it reaches its own
-        // verdict. Where any of them hangs on something else, or no round is
-        // left, a person is asked at once — a round cannot make that criterion
-        // judgeable, and spending one only delays the person.
-        const { unresolved, causes, unexplained } = incompleteReviewCauses(review);
-        const criteria = unresolved.join(", ") || "no criterion resolved";
-        const tooLarge = review.findings.find((finding) => finding.rule_id === "changeset.too_large_to_review");
-        outcome = "escalated";
-        if (tooLarge) {
-          // A review handed no diff read nothing, so there is no cause on it to
-          // route: the size is the cause, and it is a person's.
-          state = { ...state, incompleteReview: "incomplete_escalated" };
-          detail =
-            `incomplete_escalated: the change set was withheld from review: ${tooLarge.statement} — ` +
-            "split the change or raise the cap; a person decides";
-          break;
-        }
-        if (answeringIncomplete) {
-          detail =
-            `incomplete_remediated: the re-review after ${state.remediationRound} remediation round(s) was ` +
-            `still incomplete (${criteria}), so the change is still unjudged and a person decides`;
-          break;
-        }
-        if (unexplained.length > 0) {
-          state = { ...state, incompleteReview: "incomplete_escalated" };
-          detail =
-            `incomplete_escalated: the review was incomplete (${criteria}) and ` +
-            `${unexplained.join(", ")} rests on nothing the executor may be handed, so no ` +
-            "remediation round can make it judgeable; a person decides";
-          break;
-        }
-        if (state.remediationRound >= maxRounds) {
-          state = { ...state, incompleteReview: "incomplete_escalated" };
-          detail =
-            `incomplete_escalated: the review was incomplete (${criteria}) on ${causes.length} ` +
-            `finding(s) the executor could have closed, but ${maxRounds} remediation round(s) ` +
-            `are already spent — raise max_remediation_rounds or ` +
-            `limits.limits.remediation_rounds in ${configPath}; a person decides`;
-          break;
-        }
-        progress(
-          `the review could not resolve ${criteria} and ${causes.length} finding(s) it routed to ` +
-            "the executor are why; remediating those and reviewing again",
-        );
-        state = applyStep(state, {
-          next: "advance",
-          kind: "remediate",
-          remediation: true,
-          carry: {
-            incompleteReview: "incomplete_remediated",
-            openFindings: causes,
-            reviewingAgain: true,
-          },
-        });
-        continue;
-      }
-      if (review.decision === "remediable") {
-        const routed = remediableFindings(review.findings).filter((finding) =>
-          isRemediableFamily(finding.rule_id),
-        );
-        if (routed.length === 0) {
-          // Quoting attacker-authored text into an executor brief is the
-          // laundering path the trust tiers exist to prevent; a routed set
-          // made entirely of never-remediated families goes to a person.
-          outcome = "escalated";
-          detail = "the findings that closed the gate are not ones the executor may be handed";
-          break;
-        }
-        if (state.remediationRound < maxRounds) {
-          state = applyStep(state, {
-            next: "advance",
-            kind: "remediate",
-            remediation: true,
-            carry: { openFindings: routed },
-          });
-          continue;
-        }
-      }
-      outcome =
-        review.decision === "remediable"
-          ? "remediation_exhausted"
-          : review.decision === "escalate"
-            ? "escalated"
-            : "changes_requested";
-      detail = `review ${review.decision} after ${state.round + 1} attempt(s)`;
-      break;
+      continue;
     }
 
     let pull_request: TicketRunResult["pull_request"] = null;

@@ -52,6 +52,11 @@ export function review(overrides: {
     status: "met" | "not_met" | "cannot_determine";
     verification_strength?: "directly_verified" | "proxy" | "asserted_only";
   }>;
+  error?: {
+    kind: NonNullable<ReviewArtifact["error"]>["kind"];
+    message?: string;
+    reading?: string[];
+  };
 } = {}): ReviewArtifact {
   return ReviewArtifactSchema.parse({
     schema_version: 1,
@@ -107,7 +112,16 @@ export function review(overrides: {
       input_tokens: 1,
       output_tokens: 1,
     },
-    error: null,
+    error:
+      overrides.error === undefined
+        ? null
+        : {
+            kind: overrides.error.kind,
+            message: overrides.error.message ?? "the review did not complete",
+            attempts: 1,
+            unresolved_criteria: [],
+            reading: overrides.error.reading ?? [],
+          },
   });
 }
 

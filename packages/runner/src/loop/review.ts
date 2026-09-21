@@ -20,6 +20,7 @@ import {
 import { createModel, type Model } from "@perbo/model";
 import type { BundleStore } from "../bundle.js";
 import type { TicketRunConfig } from "./config.js";
+import type { Step } from "./state.js";
 
 /**
  * The independent review of a round, and the bundle it is recorded in.
@@ -79,6 +80,192 @@ export function incompleteReviewCauses(review: ReviewArtifact): {
  * round 0, at the re-review of an incomplete verdict, and at a re-level's
  * fresh review of the merged change set (SCP-227).
  */
+/** What a round's independent review is routed against. */
+export interface ReviewFacts {
+  review: ReviewArtifact;
+  /** Whether the round this review judged was answering an incomplete verdict. */
+  answeringIncomplete: boolean;
+  round: number;
+  remediationRound: number;
+  maxRounds: number;
+  /** The repository's limits file, so a stop at the cap names where to raise it. */
+  configPath: string;
+}
+
+/**
+ * What the round's verdict comes to: a stop, or the remediation round it buys.
+ *
+ * Every round that is reviewed rather than verified ends here, so the whole
+ * ladder from an approval to a person being asked is one function of the
+ * artifact and the rounds already spent.
+ */
+export function routeReview(facts: ReviewFacts): Step {
+  const { review, answeringIncomplete, remediationRound, maxRounds, configPath } = facts;
+  if (review.decision === "approve") {
+    return {
+      next: "stop",
+      end: { outcome: "approved", detail: "the gate is open" },
+      carry: { reviewingAgain: false },
+    };
+  }
+  if (review.decision === "error") {
+    // Neither an outage nor a rejected verdict is a judgement of the
+    // change. Recording either as `changes_requested` would move the ticket
+    // on the strength of a provider being down or a reviewer mis-filling a
+    // form. The reason is on the detail, and both are on it when a verdict
+    // was rejected twice.
+    //
+    // A review that stopped at the transport also says what it was reading.
+    // A note carrying only `provider_unavailable` gives a re-run nothing to
+    // do differently: AYO-33 died on the one file in its change set holding
+    // a NUL byte, could not say which, and a re-run over the same sealed
+    // commit would have died the same way (SCP-188). A verdict the plan
+    // could not accept implicates no file and names none.
+    const atTheTransport =
+      review.error?.kind === "provider_unavailable" ||
+      review.error?.kind === "timeout" ||
+      review.error?.kind === "budget_exhausted";
+    const reading = review.error?.reading ?? [];
+    return {
+      next: "stop",
+      end: {
+        outcome: "review_failed",
+        detail:
+          `review_failed: ${review.error?.kind ?? "unknown"} — ` +
+          `${review.error?.message ?? "the review did not complete"}` +
+          (!atTheTransport
+            ? ""
+            : reading.length > 0
+              ? ` (reading ${reading.join(", ")})`
+              : " (no file named: the review had read nothing when the transport failed)"),
+      },
+      carry: { reviewingAgain: false },
+    };
+  }
+  if (review.decision === "incomplete") {
+    // D-057: a review that could not resolve every criterion has not judged
+    // the change, and nothing here can judge it in the reviewer's place.
+    //
+    // Who is asked next depends on why it could not. Where every criterion
+    // it could not resolve hangs on a finding the executor may be handed,
+    // the executor is asked first: that is one round against a cause the
+    // product already routes, and the re-review after it reaches its own
+    // verdict. Where any of them hangs on something else, or no round is
+    // left, a person is asked at once — a round cannot make that criterion
+    // judgeable, and spending one only delays the person.
+    const { unresolved, causes, unexplained } = incompleteReviewCauses(review);
+    const criteria = unresolved.join(", ") || "no criterion resolved";
+    const tooLarge = review.findings.find(
+      (finding) => finding.rule_id === "changeset.too_large_to_review",
+    );
+    if (tooLarge) {
+      // A review handed no diff read nothing, so there is no cause on it to
+      // route: the size is the cause, and it is a person's.
+      return {
+        next: "stop",
+        end: {
+          outcome: "escalated",
+          detail:
+            `incomplete_escalated: the change set was withheld from review: ${tooLarge.statement} — ` +
+            "split the change or raise the cap; a person decides",
+        },
+        carry: { reviewingAgain: false, incompleteReview: "incomplete_escalated" },
+      };
+    }
+    if (answeringIncomplete) {
+      return {
+        next: "stop",
+        end: {
+          outcome: "escalated",
+          detail:
+            `incomplete_remediated: the re-review after ${remediationRound} remediation round(s) was ` +
+            `still incomplete (${criteria}), so the change is still unjudged and a person decides`,
+        },
+        carry: { reviewingAgain: false },
+      };
+    }
+    if (unexplained.length > 0) {
+      return {
+        next: "stop",
+        end: {
+          outcome: "escalated",
+          detail:
+            `incomplete_escalated: the review was incomplete (${criteria}) and ` +
+            `${unexplained.join(", ")} rests on nothing the executor may be handed, so no ` +
+            "remediation round can make it judgeable; a person decides",
+        },
+        carry: { reviewingAgain: false, incompleteReview: "incomplete_escalated" },
+      };
+    }
+    if (remediationRound >= maxRounds) {
+      return {
+        next: "stop",
+        end: {
+          outcome: "escalated",
+          detail:
+            `incomplete_escalated: the review was incomplete (${criteria}) on ${causes.length} ` +
+            `finding(s) the executor could have closed, but ${maxRounds} remediation round(s) ` +
+            `are already spent — raise max_remediation_rounds or ` +
+            `limits.limits.remediation_rounds in ${configPath}; a person decides`,
+        },
+        carry: { reviewingAgain: false, incompleteReview: "incomplete_escalated" },
+      };
+    }
+    return {
+      next: "advance",
+      kind: "remediate",
+      remediation: true,
+      say:
+        `the review could not resolve ${criteria} and ${causes.length} finding(s) it routed to ` +
+        "the executor are why; remediating those and reviewing again",
+      carry: {
+        incompleteReview: "incomplete_remediated",
+        openFindings: causes,
+        reviewingAgain: true,
+      },
+    };
+  }
+  if (review.decision === "remediable") {
+    const routed = remediableFindings(review.findings).filter((finding) =>
+      isRemediableFamily(finding.rule_id),
+    );
+    if (routed.length === 0) {
+      // Quoting attacker-authored text into an executor brief is the
+      // laundering path the trust tiers exist to prevent; a routed set
+      // made entirely of never-remediated families goes to a person.
+      return {
+        next: "stop",
+        end: {
+          outcome: "escalated",
+          detail: "the findings that closed the gate are not ones the executor may be handed",
+        },
+        carry: { reviewingAgain: false },
+      };
+    }
+    if (remediationRound < maxRounds) {
+      return {
+        next: "advance",
+        kind: "remediate",
+        remediation: true,
+        carry: { openFindings: routed, reviewingAgain: false },
+      };
+    }
+  }
+  return {
+    next: "stop",
+    end: {
+      outcome:
+        review.decision === "remediable"
+          ? "remediation_exhausted"
+          : review.decision === "escalate"
+            ? "escalated"
+            : "changes_requested",
+      detail: `review ${review.decision} after ${facts.round + 1} attempt(s)`,
+    },
+    carry: { reviewingAgain: false },
+  };
+}
+
 export function writeReviewBundle(args: {
   bundles: BundleStore;
   contract: PlanContractWithCriteria;

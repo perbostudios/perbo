@@ -31,6 +31,57 @@ import type { remediationToContinue } from "./continuation.js";
  */
 export type RoundKind = "execute" | "remediate" | "resolve_conflict";
 
+/**
+ * How a run ended.
+ *
+ * Every one of these is a fact about the change or about the run, never about
+ * the machinery: what a person is being asked for is different in each, and
+ * `detail` says which files, which limit or which finding it turns on.
+ */
+export type RunOutcome =
+  | "approved"
+  | "changes_requested"
+  | "escalated"
+  | "remediation_exhausted"
+  /**
+   * SCP-194: a remediation round closed none of the findings it was given, so
+   * the next round would be the same brief against the same evidence. The
+   * detail names the keys still open. Distinct from `remediation_exhausted`,
+   * which is a run that was still closing findings when it ran out of rounds
+   * or of budget — the two ask a person for different things.
+   */
+  | "remediation_stalled"
+  | "no_changes"
+  | "terminated"
+  /**
+   * SCP-192: the branch cannot reach the base it would be merged into, and
+   * the round that was given the conflict did not resolve it. Not a judgement
+   * of the change either — the change set stays on its branch, and the detail
+   * names the files a person or a re-run has to reconcile.
+   */
+  | "base_conflict"
+  /**
+   * The review itself did not complete: a provider outage, or every verdict
+   * the reviewer returned being one the plan could not accept. Neither is a
+   * judgement of the change, and the change set stays on its branch.
+   */
+  | "review_failed"
+  /** SCP-227: a re-level run found the branch already level with its base. Nothing was done or paid for. */
+  | "level"
+  /**
+   * SCP-227: a re-level run merged the base's tip into the branch and the
+   * result stands — the checks pass and the base touched nothing in the
+   * contract's scope, or a fresh review approved the merged change set. The
+   * branch is pushed and the merge step read; no pull request is opened.
+   */
+  | "relevelled";
+
+/** How a run ended, and what a person reads to know why. */
+export interface RunEnd {
+  outcome: RunOutcome;
+  detail: string;
+}
+
 export interface RoundRecord {
   round: number;
   kind: RoundKind;
@@ -255,12 +306,15 @@ type Carry = Partial<
 >;
 
 /**
- * What a round's routing tells the loop to do next, short of stopping.
+ * What a round's routing tells the loop to do next.
  *
- * `advance` moves to the next round, `retry` buys one more attempt of this
- * one, and `reenter` keeps the round where it is and changes what it is for.
+ * `stop` ends the run, `advance` moves to the next round, `retry` buys one
+ * more attempt of this one, and `reenter` keeps the round where it is and
+ * changes what it is for. A routing function returns one of these rather than
+ * acting, so what a round comes to can be asked of it directly.
  */
 export type Step =
+  | { next: "stop"; end: RunEnd; carry?: Carry }
   | {
       next: "retry";
       /**
@@ -271,7 +325,14 @@ export type Step =
       counter: "transport" | "ceiling";
       superseded: ExecutionAttempt;
     }
-  | { next: "advance"; kind: RoundKind; remediation: boolean; carry?: Carry }
+  | {
+      next: "advance";
+      kind: RoundKind;
+      remediation: boolean;
+      carry?: Carry;
+      /** What the loop tells the person before taking the step. */
+      say?: string;
+    }
   | { next: "reenter"; conflict: ConflictInterruption };
 
 /** The state the first round of a run enters with. */
@@ -303,6 +364,9 @@ export function initialRoundState(workspace: Workspace, continuing: Continuation
  * retry sits out, the record a round leaves — is the loop's.
  */
 export function applyStep(state: RoundState, step: Step): RoundState {
+  if (step.next === "stop") {
+    return { ...state, ...step.carry };
+  }
   if (step.next === "reenter") {
     return { ...state, kind: "resolve_conflict", conflict: step.conflict };
   }
