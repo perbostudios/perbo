@@ -165,6 +165,13 @@ export function parseReviewArgs(argv: string[]): ReviewArgs {
   const format = line.flags["--format"];
   const provider = line.flags["--provider"];
   const maxTurns = line.flags["--max-turns"];
+  // `--color` and `--no-color` are one decision in two spellings, so the last
+  // of them written is the one meant — a script that appends `--no-color` to a
+  // line someone else built turns colour off. Which flags came in which order
+  // is the only thing `flags` cannot say, so it is read from `given`.
+  const colourFlag = line.given
+    .filter((flag) => flag === "--color" || flag === "--no-color")
+    .at(-1);
   const args: ReviewArgs = {
     contract: line.flags["--contract"] ?? null,
     diff: line.flags["--diff"] ?? null,
@@ -184,7 +191,7 @@ export function parseReviewArgs(argv: string[]): ReviewArgs {
     resume: line.flags["--resume"] ?? null,
     format: format === undefined ? null : readFormat(format),
     json: line.flags["--json"] === true,
-    color: line.flags["--color"] === true ? true : line.flags["--no-color"] === true ? false : null,
+    color: colourFlag === undefined ? null : colourFlag === "--color",
     model: line.flags["--model"] ?? null,
     provider: provider === undefined ? "claude-cli" : readProvider(provider),
     maxTurns: maxTurns === undefined ? null : readMaxTurns(maxTurns),
