@@ -14,7 +14,7 @@ import { EditingSessionSchema } from "../src/shared/protocol.js";
 import type { ReplyMap, Request } from "../src/shared/protocol.js";
 import { editingForm } from "../src/shared/contract-editing.js";
 import { bridge } from "../src/renderer/data.js";
-import { previewBridge } from "../src/renderer/preview.js";
+import { sampleBridge } from "../src/sample-host/bridge.js";
 import { Composer } from "../src/renderer/tasks/Composer.js";
 import { ContractScreen } from "../src/renderer/tasks/ContractScreen.js";
 import type { TaskContext } from "../src/renderer/tasks/task-context.js";
@@ -34,11 +34,11 @@ afterEach(() => {
 
 async function contextFor(criteria: AcceptanceCriterion[]): Promise<TaskContext> {
   const workspace = structuredClone(
-    await previewBridge.request({ kind: "snapshot" }),
+    await sampleBridge.request({ kind: "snapshot" }),
   );
   const row = workspace.tasks.find((task) => task.ticket.key === "PRB-421")!;
   const detail = structuredClone(
-    await previewBridge.request({
+    await sampleBridge.request({
       kind: "detail",
       repoId: row.repoId,
       key: row.ticket.key,
@@ -48,8 +48,6 @@ async function contextFor(criteria: AcceptanceCriterion[]): Promise<TaskContext>
     throw new Error("A criterion contract is required");
   detail.contract.acceptance_criteria = criteria;
   detail.attempts = [];
-  delete detail.sample;
-  workspace.mode = "desktop";
   workspace.jobs = [];
   return {
     workspace,

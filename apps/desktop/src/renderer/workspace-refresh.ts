@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { ChangeSchema } from "../shared/protocol.js";
+import { ALL_SCOPE, ReadGenerations, SNAPSHOT_SCOPE } from "../shared/read-generations.js";
 import type { Change, DesktopBridge, Job, Snapshot } from "../shared/protocol.js";
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -8,13 +9,12 @@ const message = (error: unknown): string => error instanceof Error ? error.messa
 export class WorkspaceRefresh {
   private readonly client: QueryClient;
   private readonly connection: DesktopBridge;
-  private readonly generations = new Map<string, number>();
+  private readonly generations = new ReadGenerations();
   private readonly pending = new Set<string>();
   private readonly refreshing = new Map<string, Promise<void>>();
   private readonly jobs = new Map<string, { job: Job; sequence: number }>();
   private preferences: Extract<Change, { kind: "preferences" }> | undefined;
   private power: Extract<Change, { kind: "power" }> | undefined;
-  private revision = 0;
   private users = 0;
   private unsubscribe: (() => void) | undefined;
   constructor(client: QueryClient, connection: DesktopBridge) { this.client = client; this.connection = connection; }
@@ -31,24 +31,6 @@ export class WorkspaceRefresh {
   private wake = (): void => {
     if (document.visibilityState === "visible") this.refreshAll();
   };
-  private token(scope: string): string {
-    return scope === "snapshot" ? String(this.revision) : `${this.generations.get("all") ?? 0}:${this.generations.get(scope) ?? 0}`;
-  }
-  private invalidate(scope: string): void {
-    this.revision++;
-    this.generations.set(scope, (this.generations.get(scope) ?? 0) + 1);
-  }
-  private async read<T>(scope: string, load: () => Promise<T>): Promise<T> {
-    for (;;) {
-      const token = this.token(scope);
-      try {
-        const result = await load();
-        if (token === this.token(scope)) return result;
-      } catch (error) {
-        if (token === this.token(scope)) throw error;
-      }
-    }
-  }
   private patch(update: (snapshot: Snapshot) => Snapshot): void {
     this.client.setQueryData<Snapshot>(["workspace"], (snapshot) => snapshot ? update(snapshot) : undefined);
   }
@@ -72,12 +54,12 @@ export class WorkspaceRefresh {
   }
   private async visible(repoId?: string): Promise<void> {
     await this.client.invalidateQueries({
-      predicate: (query) => ["detail", "output", "summary"].includes(String(query.queryKey[0])) && (!repoId || query.queryKey[1] === repoId),
+      predicate: (query) => ["detail", "output", "summary", "graph"].includes(String(query.queryKey[0])) && (!repoId || query.queryKey[1] === repoId),
       refetchType: "active",
     }, { cancelRefetch: false, throwOnError: true });
   }
   snapshot = async (): Promise<Snapshot> => {
-    const snapshot = await this.read("snapshot", async () => {
+    const snapshot = await this.generations.read(SNAPSHOT_SCOPE, async () => {
       const result = await this.connection.request({ kind: "snapshot" });
       // Focused evidence failures remain on their own query; Home must still load.
       await this.visible().catch(() => undefined);
@@ -90,8 +72,10 @@ export class WorkspaceRefresh {
     for (const id of this.pending) if (!snapshot.repositories.some((repo) => repo.id === id)) this.pending.delete(id);
     return this.merge(snapshot);
   };
-  detail = (repoId: string, key: string) => this.read(repoId, () => this.connection.request({ kind: "detail", repoId, key }));
-  output = (repoId: string, key: string, attemptId?: string) => this.read(repoId, () => this.connection.request({ kind: "output", repoId, key, ...(attemptId ? { attemptId } : {}) }));
+  detail = (repoId: string, key: string) => this.generations.read(repoId, () => this.connection.request({ kind: "detail", repoId, key }));
+  output = (repoId: string, key: string, attemptId?: string) => this.generations.read(repoId, () => this.connection.request({ kind: "output", repoId, key, ...(attemptId ? { attemptId } : {}) }));
+  summary = (repoId: string, key: string) => this.generations.read(repoId, () => this.connection.request({ kind: "taskSummary", repoId, key }));
+  graph = (repoId: string, key: string) => this.generations.read(repoId, () => this.connection.request({ kind: "graphRead", repoId, key }));
 
   // An editing session changed: the picker's list of open drafts follows it, and nothing else in the snapshot does.
   private refreshDrafts(): void {
@@ -100,7 +84,7 @@ export class WorkspaceRefresh {
       .catch(() => undefined);
   }
   private refreshAll(): void {
-    this.invalidate("all");
+    this.generations.invalidate(ALL_SCOPE);
     void this.client.invalidateQueries({ queryKey: ["workspace"] }, { cancelRefetch: false });
   }
   private refreshRepository(repoId: string): void {
@@ -108,11 +92,11 @@ export class WorkspaceRefresh {
     const work = (async () => {
       try {
         for (;;) {
-          const token = this.token(repoId);
+          const token = this.generations.token(repoId);
           const results = await Promise.allSettled([
             this.connection.request({ kind: "repositorySnapshot", repoId }), this.visible(repoId),
           ]);
-          if (token !== this.token(repoId)) continue;
+          if (token !== this.generations.token(repoId)) continue;
           const [records, visible] = results;
           if (records.status === "rejected") throw records.reason;
           const result = records.value;
@@ -167,13 +151,13 @@ export class WorkspaceRefresh {
     if (change.kind === "preferences") {
       if (this.preferences && this.preferences.sequence > change.sequence) return;
       this.preferences = change;
-      this.invalidate("all");
+      this.generations.invalidate(ALL_SCOPE);
       this.patch((snapshot) => this.merge(snapshot));
       void this.visible().catch((error: unknown) => this.patch((snapshot) => ({ ...snapshot, errors: [...snapshot.errors, message(error)] })));
       return;
     }
     if (change.kind === "records" && change.repoId) {
-      this.invalidate(change.repoId);
+      this.generations.invalidate(change.repoId);
       this.markPending(change.repoId);
       this.refreshRepository(change.repoId);
     } else {

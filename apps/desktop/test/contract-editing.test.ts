@@ -10,7 +10,7 @@ import { ContractEditor, flushContractEditors, useContractEditing } from "../src
 import { bridge } from "../src/renderer/data.js";
 import { INTERVIEW_CONVERSATION_CAP, TaskModelsSchema } from "../src/shared/protocol.js";
 import type { Change, DesktopBridge, Detail, EditingSession, Job, ReplyMap, Request } from "../src/shared/protocol.js";
-import { previewBridge } from "../src/renderer/preview.js";
+import { sampleBridge } from "../src/sample-host/bridge.js";
 
 const repoId = "10000000-0000-4000-8000-000000000001";
 const otherRepo = "10000000-0000-4000-8000-000000000002";
@@ -22,9 +22,9 @@ function deferred<T>() {
   return { promise, resolve };
 }
 async function fixture() {
-  const snapshot = await previewBridge.request({ kind: "snapshot" });
+  const snapshot = await sampleBridge.request({ kind: "snapshot" });
   const row = snapshot.tasks.find((entry) => entry.ticket.key === "PRB-421")!;
-  const sample = structuredClone(await previewBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }));
+  const sample = structuredClone(await sampleBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }));
   sample.ticket.approved_at = null;
   let records: EditingSession[] = [];
   const repositories = new Set([repoId, otherRepo]);

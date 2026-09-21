@@ -11,7 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { App } from "../src/renderer/shell/App.js";
 import { ContractScreen } from "../src/renderer/tasks/ContractScreen.js";
-import { previewBridge } from "../src/renderer/preview.js";
+import { sampleBridge } from "../src/sample-host/bridge.js";
 import { setPlatformForTests } from "../src/shared/shortcuts.js";
 import type { TaskContext } from "../src/renderer/tasks/task-context.js";
 
@@ -52,14 +52,12 @@ function mount(element: ReactNode): void {
 }
 
 async function contractContext(): Promise<TaskContext> {
-  const workspace = structuredClone(await previewBridge.request({ kind: "snapshot" }));
+  const workspace = structuredClone(await sampleBridge.request({ kind: "snapshot" }));
   const row = workspace.tasks.find((task) => task.ticket.key === "PRB-421")!;
   const detail = structuredClone(
-    await previewBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }),
+    await sampleBridge.request({ kind: "detail", repoId: row.repoId, key: row.ticket.key }),
   );
   detail.attempts = [];
-  delete detail.sample;
-  workspace.mode = "desktop";
   workspace.jobs = [];
   return { workspace, detail, repoId: row.repoId, navigate: vi.fn(), show: vi.fn() };
 }

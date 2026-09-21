@@ -213,7 +213,7 @@ export function ModelPicker({
                     ? "Your saved model is no longer listed. Choose a model to replace it."
                     : selectedChoice.description}
             {catalog.data?.source === "sample" && (
-              <div>Sample catalog · browser preview</div>
+              <div>Sample catalog</div>
             )}
             {catalog.isError && choices.length > 0 && (
               <div>

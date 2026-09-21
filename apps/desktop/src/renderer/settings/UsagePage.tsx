@@ -1,6 +1,6 @@
 import { Button, InkIcon, Notice, NumberPop, PageHeader, SectionLabel } from "../ui/index.js";
 import { errorMessage, useUsage } from "../data.js";
-import { timeAgo } from "../presentation.js";
+import { timeAgo } from "../time-ago.js";
 import type { PageProps } from "../shell/App.js";
 import type { UsageLedger, UsageWindow } from "../../shared/protocol.js";
 
@@ -62,7 +62,7 @@ export function LedgerFacts({ ledger }: { ledger: UsageLedger }) {
 }
 
 /** Settings · Usage (S6E): can I start another ticket right now, from the providers' own replies and this machine's ledger. */
-export function UsagePage({ workspace, navigate }: PageProps) {
+export function UsagePage({ navigate }: PageProps) {
   const usage = useUsage();
   const report = usage.data;
   const hot = report?.providers.flatMap((provider) =>
@@ -179,9 +179,6 @@ export function UsagePage({ workspace, navigate }: PageProps) {
             {report.notes.map((note) => (
               <Notice key={note}>{note}</Notice>
             ))}
-            {workspace.mode === "preview" && (
-              <p className="small muted">Sample figures. The desktop reads its own records.</p>
-            )}
           </div>
         </div>
       )}

@@ -10,7 +10,7 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "../src/renderer/shell/App.js";
-import { previewBridge } from "../src/renderer/preview.js";
+import { sampleBridge } from "../src/sample-host/bridge.js";
 import { bridge } from "../src/renderer/data.js";
 import { setPlatformForTests } from "../src/shared/shortcuts.js";
 import { resetRailSize } from "../src/renderer/shell/rail-size.js";
@@ -51,8 +51,8 @@ function mount() {
   );
 }
 async function resetPreviewSettings(): Promise<void> {
-  const snapshot = await previewBridge.request({ kind: "snapshot" });
-  await previewBridge.request({
+  const snapshot = await sampleBridge.request({ kind: "snapshot" });
+  await sampleBridge.request({
     kind: "saveSettings",
     settings: { ...snapshot.settings, theme: "system", textSize: "default", reduceMotion: false, shortcuts: {} },
   });
@@ -91,7 +91,7 @@ describe("UI v2", () => {
     await waitFor(() => expect(document.documentElement.dataset.motion).toBe("reduced"));
     fireEvent.click(screen.getByRole("checkbox", { name: /Any stage changes/ }));
     await waitFor(async () => {
-      const saved = (await previewBridge.request({ kind: "snapshot" })).settings;
+      const saved = (await sampleBridge.request({ kind: "snapshot" })).settings;
       expect(saved.theme).toBe("dark");
       expect(saved.reduceMotion).toBe(true);
       expect(saved.notifyOn.stage).toBe(true);
@@ -153,8 +153,12 @@ describe("UI v2", () => {
     fireEvent.change(search, { target: { value: "" } });
     fireEvent.click(screen.getByLabelText("Filter tickets"));
     fireEvent.click(screen.getByRole("option", { name: "Show · needs you" }));
-    expect(screen.getAllByRole("button", { name: /Answer|Merge/ })).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: "Rate-limit the invite endpoint" })).toBeNull();
+    // A decision to answer, a pull request to merge, and two tickets mid-run
+    // with nothing running them, which is what recovery looks like.
+    expect(
+      screen.getAllByRole("button", { name: /Answer|Merge|Review and recover/ }),
+    ).toHaveLength(4);
+    expect(screen.queryByRole("button", { name: "Split the settings page into tabs" })).toBeNull();
     fireEvent.click(screen.getByLabelText("Filter tickets"));
     fireEvent.click(screen.getByRole("option", { name: "Show · all" }));
     fireEvent.keyDown(window, { key: "k", metaKey: true });
@@ -215,7 +219,7 @@ describe("UI v2", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Delete this contract" }, { timeout: 5000 }));
     fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
     await waitFor(async () => {
-      const workspace = await previewBridge.request({ kind: "snapshot" });
+      const workspace = await sampleBridge.request({ kind: "snapshot" });
       expect(workspace.tasks.some((row) => row.ticket.key === "PRB-421")).toBe(false);
     });
     await screen.findByRole("heading", { name: /Hi, / });

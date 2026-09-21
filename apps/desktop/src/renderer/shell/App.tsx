@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Brand, Button, HeaderSlotProvider, InkIcon, Notice, TitleBar, cx } from "../ui/index.js";
+import { Brand, Button, HeaderSlotProvider, InkIcon, Notice, TitleBar } from "../ui/index.js";
 import { errorMessage, useWorkspace } from "../data.js";
 import { HomePage } from "../tasks/HomePage.js";
 import { Onboarding } from "../settings/Onboarding.js";
@@ -244,10 +244,7 @@ export function App() {
         >
           <CreateProvider workspace={data} navigate={navigate}>
           <HeaderSlotProvider>
-            <div
-              className={cx("app-shell", "app--" + data.mode)}
-              data-preview={data.mode === "preview" || undefined}
-            >
+            <div className="app-shell">
               {/* The bar is the drag region; the toggle and the header's controls punch no-drag holes in it. */}
               <TitleBar>{!setup && <RailToggle />}</TitleBar>
               <div className="app-body">
@@ -282,14 +279,6 @@ export function App() {
                   </Suspense>
                 </main>
               </div>
-              {data.mode === "preview" && (
-                <div
-                  className="preview-indicator"
-                  title="Interactive preview with sample records. No coding agents run and no repositories are accessed."
-                >
-                  Sample workspace
-                </div>
-              )}
             </div>
           </HeaderSlotProvider>
           </CreateProvider>

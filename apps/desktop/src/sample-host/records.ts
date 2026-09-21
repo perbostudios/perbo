@@ -1,14 +1,11 @@
 import {
-  HELP_LINKS,
   EditingSessionSchema,
   INTERVIEW_NEEDS_A_TITLE,
   PREVIEW_BYTE_CAP,
-  RequestSchema,
   TaskModelsSchema,
 } from "../shared/protocol.js";
 import {
   EMPTY_SPEC_TEXT,
-  mergeSpecText,
   readSpecSections,
   renderSpec,
   requirementNodes,
@@ -24,13 +21,11 @@ import {
   type GraphEditOutcome,
 } from "@perbo/planning/graph-edit";
 import { renderNodePage } from "@perbo/planning/node-page-text";
-import { impactReport } from "@perbo/planning/impact";
 import { planNodes } from "@perbo/contracts/plan";
 import { planSizeCounts, sizeEstimate } from "@perbo/contracts/size";
-import { ContractEditing, interviewProviderFor, openDrafts, type EditingOwner } from "../shared/contract-editing.js";
-import { archiveCsv, archiveRows } from "../shared/archive.js";
-import { nodeState } from "../shared/graph-state.js";
-import { busyMessage, exclusiveJob, isLive, lane } from "../shared/jobs.js";
+import { ContractEditing, interviewProviderFor, type EditingOwner } from "../shared/contract-editing.js";
+import { assembleLiveGraph } from "../shared/graph-live.js";
+import { busyMessage, exclusiveJob, lane } from "../shared/jobs.js";
 import type {
   PlanContract,
   ReviewArtifact,
@@ -39,19 +34,16 @@ import type {
   UnsupportedRepository,
 } from "@perbo/contracts";
 import type { ApproachRecord } from "@perbo/contracts/approach";
-import type { GraphEdit } from "@perbo/contracts/graph-edit";
 import type { StandingProhibitedEntry } from "@perbo/contracts/standing";
-import { isNeverReadPath, matchesAny } from "@perbo/contracts/paths";
+import { isNeverReadPath } from "@perbo/contracts/paths";
+import { answer } from "./handlers.js";
 import { SettingsSchema } from "../shared/protocol.js";
 import type {
-  DesktopBridge,
   Detail,
   Draft,
   ExplorerFile,
   Job,
   ManifestEditor,
-  ReplyMap,
-  Request,
   Snapshot,
   TaskRow,
   TaskSummary,
@@ -67,20 +59,25 @@ import type {
   InterviewStatus,
 } from "../shared/protocol.js";
 
-/** The supplied mockup's records, isolated behind the browser-only bridge.
- * No native process, credential, repository or network operation is available here.
- * The same screens and transitions render native records in Electron.
+/**
+ * The sample records, and the one bridge that answers requests over them. No
+ * native process, credential, repository or network operation is reachable
+ * here. The same screens and transitions render native records in Electron.
  */
 const repoId = "80000000-0000-4000-8000-000000000001";
 const landingId = "80000000-0000-4000-8000-000000000002";
-const at = "2026-09-08T09:40:00.000Z";
+export const at = "2026-09-08T09:40:00.000Z";
 const base = "a1b2c3d" + "0".repeat(33);
-const plans = new Map<string, PlanContract>(),
-  /** The order between a plan's nodes and the spec's No-Gos, beside the ticket (D-100). */
-  approaches = new Map<string, ApproachRecord>(),
-  approved = new Set<string>(),
-  decisionsAnswered = new Set<string>();
-const criteriaText = [
+/** The finding the sample review raises, and the key a round's closure names (D-061). */
+const FINDING_KEY = "d".repeat(64);
+/** When the remediation round recorded that closure, which is after the review. */
+const closedAt = "2026-09-08T10:10:00.000Z";
+export const plans = new Map<string, PlanContract>();
+/** The order between a plan's nodes and the spec's No-Gos, beside the ticket (D-100). */
+const approaches = new Map<string, ApproachRecord>();
+export const approved = new Set<string>();
+export const decisionsAnswered = new Set<string>();
+export const criteriaText = [
   "A signup POST queues exactly one activation email.",
   "No email is sent for a duplicate signup inside five minutes.",
   "A send failure is retried three times, then dead-lettered.",
@@ -88,6 +85,10 @@ const criteriaText = [
 const activationOutcome =
   "New users receive an activation email within 60 seconds of signing up.";
 let next = 422;
+/** The next sample ticket a sample admission hands back, keyed in sequence. */
+export function newSampleTicket(title: string, state: Ticket["state"]): Ticket {
+  return sample(next++, title, state);
+}
 function sample(number: number, title: string, state: Ticket["state"]): Ticket {
   const key = "PRB-" + number;
   // Every identifier is the one its schema declares, because the Graph pane's
@@ -186,158 +187,38 @@ function sample(number: number, title: string, state: Ticket["state"]): Ticket {
     history: [],
   } as unknown as Ticket;
 }
-function row(
-  number: number,
-  title: string,
-  state: Ticket["state"],
-  summary: TaskRow["summary"],
-): TaskRow {
-  return {
-    repoId,
-    repository: "webstore",
-    ticket: sample(number, title, state),
-    ...(summary ? { summary } : {}),
-  };
+function row(number: number, title: string, state: Ticket["state"]): TaskRow {
+  return { repoId, repository: "webstore", ticket: sample(number, title, state) };
 }
+/** What each sample ticket's attempts cost, which `taskSummary` reports. */
+const sampleCosts = new Map<string, number>([["PRB-398", 610_000]]);
 const home = [
-  row(412, "Activation email never sent on signup", "changes_requested", {
-    created: "22 min ago",
-    stage: 4,
-    description:
-      "Activation mail is queued but never sent for a fresh signup. One decision is waiting: where a permanently failed send should be retained.",
-  }),
-  row(377, "Backfill the audit table", "pr_open", {
-    created: "yesterday",
-    stage: 6,
-    description:
-      "Both loops finished and the reviewer approved. 3 of 3 criteria directly verified — the merge is the only thing left, and it is yours.",
-  }),
-  row(398, "Rate-limit the invite endpoint", "executing", {
-    created: "1h ago",
-    stage: 2,
-    description:
-      "Editing packages/api/invite.ts — step 3 of the agent’s own plan.",
-    progress: 58,
-    elapsed: "4m 12s",
-    cost: "$0.61",
-    files: 6,
-  }),
-  row(404, "Cache the pricing table response", "verifying", {
-    created: "2h ago",
-    stage: 3,
-    description:
-      "Running typecheck, lint and 184 tests on the sealed change set. Nothing needed from you unless one of them fails.",
-  }),
-  row(421, "Split the settings page into tabs", "plan_review", {
-    created: "3h ago",
-    stage: 1,
-    description:
-      "Criteria drafted and the contract is compiled, waiting for your approval before the loop starts.",
-  }),
+  row(412, "Activation email never sent on signup", "changes_requested"),
+  row(377, "Backfill the audit table", "pr_open"),
+  row(398, "Rate-limit the invite endpoint", "executing"),
+  row(404, "Cache the pricing table response", "verifying"),
+  row(421, "Split the settings page into tabs", "plan_review"),
 ];
 home.forEach((row, index) => {
   row.ticket.updated_at = new Date(Date.parse(at) - index * 1000).toISOString();
 });
+/** The archive's sample rows: the key, its title, what it cost, how it was delivered, and where. */
 const archived = [
-  [
-    409,
-    "Retry the webhook dispatcher three times",
-    4,
-    4,
-    "$2.14",
-    "#418 · 2 Sep",
-    "webstore",
-  ],
-  [
-    402,
-    "Reject signups with a plus-addressed duplicate",
-    3,
-    3,
-    "$0.91",
-    "#411 · 31 Aug",
-    "webstore",
-  ],
-  [
-    396,
-    "Show runway on the billing page",
-    2,
-    3,
-    "$3.40",
-    "closed unmerged",
-    "landing",
-  ],
-  [
-    390,
-    "Move session cookies to the shared domain",
-    2,
-    2,
-    "$0.62",
-    "#399 · 28 Aug",
-    "webstore",
-  ],
-  [
-    385,
-    "Dead-letter the invoice sync job",
-    3,
-    3,
-    "$1.77",
-    "#394 · 26 Aug",
-    "webstore",
-  ],
-  [
-    381,
-    "Debounce the search-as-you-type request",
-    2,
-    2,
-    "$0.48",
-    "#388 · 24 Aug",
-    "landing",
-  ],
-  [
-    374,
-    "Expire password reset links after an hour",
-    3,
-    3,
-    "$0.83",
-    "#379 · 21 Aug",
-    "webstore",
-  ],
-  [
-    366,
-    "Paginate the members table",
-    2,
-    2,
-    "$1.12",
-    "#371 · 19 Aug",
-    "webstore",
-  ],
-  [
-    359,
-    "Stop double-charging annual upgrades",
-    4,
-    4,
-    "$2.86",
-    "#364 · 16 Aug",
-    "webstore",
-  ],
-  [
-    352,
-    "Log webhook retries with a request id",
-    2,
-    2,
-    "$0.54",
-    "#357 · 14 Aug",
-    "landing",
-  ],
+  [409, "Retry the webhook dispatcher three times", "$2.14", "#418 · 2 Sep", "webstore"],
+  [402, "Reject signups with a plus-addressed duplicate", "$0.91", "#411 · 31 Aug", "webstore"],
+  [396, "Show runway on the billing page", "$3.40", "closed unmerged", "landing"],
+  [390, "Move session cookies to the shared domain", "$0.62", "#399 · 28 Aug", "webstore"],
+  [385, "Dead-letter the invoice sync job", "$1.77", "#394 · 26 Aug", "webstore"],
+  [381, "Debounce the search-as-you-type request", "$0.48", "#388 · 24 Aug", "landing"],
+  [374, "Expire password reset links after an hour", "$0.83", "#379 · 21 Aug", "webstore"],
+  [366, "Paginate the members table", "$1.12", "#371 · 19 Aug", "webstore"],
+  [359, "Stop double-charging annual upgrades", "$2.86", "#364 · 16 Aug", "webstore"],
+  [352, "Log webhook retries with a request id", "$0.54", "#357 · 14 Aug", "landing"],
 ] as const;
 const archive: TaskRow[] = archived.map(
-  ([number, title, met, total, cost, delivery, repository], index) => {
-    const result = row(
-      number,
-      title,
-      delivery === "closed unmerged" ? "closed" : "merged",
-      { criteriaMet: met, criteriaTotal: total, cost, delivery },
-    );
+  ([number, title, cost, delivery, repository], index) => {
+    const result = row(number, title, delivery === "closed unmerged" ? "closed" : "merged");
+    sampleCosts.set(result.ticket.key, Math.round(Number(cost.replace("$", "")) * 1_000_000));
     result.repoId = repository === "landing" ? landingId : repoId;
     result.repository = repository;
     result.ticket.updated_at = new Date(
@@ -347,19 +228,14 @@ const archive: TaskRow[] = archived.map(
   },
 );
 for (let i = 0; i < 118; i++) {
-  const result = row(300 - i, "Sample archived task " + (i + 11), "merged", {
-    criteriaMet: 2,
-    criteriaTotal: 2,
-    cost: "$1.00",
-    delivery: "sample",
-  });
+  const result = row(300 - i, "Sample archived task " + (i + 11), "merged");
+  sampleCosts.set(result.ticket.key, 1_000_000);
   result.ticket.updated_at = new Date(
     Date.parse(at) - (i + 11) * 86_400_000,
   ).toISOString();
   archive.push(result);
 }
-const initial: Snapshot = {
-  mode: "preview",
+export const initial: Snapshot = {
   version: "0.1.0",
   settings: SettingsSchema.parse({
     name: "Lian",
@@ -422,7 +298,7 @@ const sampleDiffs: Record<string, [string, number, number, number]> = {
   "PRB-359": ["perbo/359-annual-double-charge", 6, 205, 77],
   "PRB-352": ["perbo/352-onboarding-copy", 1, 9, 2],
 };
-function sampleSummary(key: string): TaskSummary {
+export function sampleSummary(key: string): TaskSummary {
   const row = snapshot.tasks.find((entry) => entry.ticket.key === key);
   if (!row) throw new Error("Sample task not found.");
   const known = sampleDiffs[key];
@@ -433,7 +309,7 @@ function sampleSummary(key: string): TaskSummary {
     branch: known?.[0] ?? `perbo/${number}-sample`,
     attempts: 1,
     latestAttemptAt: row.ticket.updated_at,
-    costMicros: row.summary?.cost ? Math.round(Number(row.summary.cost.replace("$", "")) * 1_000_000) : 610_000,
+    costMicros: sampleCosts.get(key) ?? 610_000,
     costBasis: "priced",
     diff: known
       ? { files: known[1], additions: known[2], deletions: known[3] }
@@ -441,7 +317,7 @@ function sampleSummary(key: string): TaskSummary {
     note: null,
   };
 }
-const snapshot: Snapshot = new URLSearchParams(location.search).has("empty")
+export const snapshot: Snapshot = new URLSearchParams(location.search).has("empty")
   ? {
       ...initial,
       settings: SettingsSchema.parse({}),
@@ -450,7 +326,7 @@ const snapshot: Snapshot = new URLSearchParams(location.search).has("empty")
       archived: [],
     }
   : initial;
-const sampleManifests = new Map<
+export const sampleManifests = new Map<
   string,
   {
     digest: string;
@@ -462,17 +338,24 @@ const sampleManifests = new Map<
   }
 >();
 const listeners = new Set<(change: Change) => void>();
-const emit = (input: ChangeInput = { kind: "records", repoId: null, key: null }): void => {
+/** What the bridge hands a renderer: every change these records emit, until it lets go. */
+export function subscribe(listener: (change: Change) => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+export const emit = (input: ChangeInput = { kind: "records", repoId: null, key: null }): void => {
   snapshot.sequence = (snapshot.sequence ?? 0) + 1;
   const change = { ...input, sequence: snapshot.sequence };
   for (const listener of listeners) listener(structuredClone(change));
 };
-function ticketRow(key: string): TaskRow {
+export function ticketRow(key: string): TaskRow {
   const row = snapshot.tasks.find((row) => row.ticket.key === key);
   if (!row) throw new Error("Sample task not found.");
   return row;
 }
-function applyDraft(ticket: Ticket, draft: Draft): void {
+export function applyDraft(ticket: Ticket, draft: Draft): void {
   const plan = plans.get(ticket.key)!;
   plan.outcome = draft.outcome;
   plan.scope.paths_allowed = draft.paths;
@@ -525,20 +408,23 @@ const sampleChecks: { name: string; status: string; node: string | null }[] = [
   { name: "Tests", status: "passed", node: "node_1" },
   { name: "Tests", status: "failed", node: "node_2" },
 ];
+/**
+ * The review on record. A remediation round does not replace it: a round is
+ * verified rather than reviewed again (D-061), so this stays escalating and
+ * what answers its finding is the closure the round recorded beside it.
+ */
 function reviewFor(key: string): ReviewArtifact {
-  const isApproved = approved.has(key),
-    plan = plans.get(key)!,
+  const plan = plans.get(key)!,
     criteria = "acceptance_criteria" in plan ? plan.acceptance_criteria : [];
   return {
     review_id: "rev_preview",
     created_at: at,
     target: { base_commit: base, head_commit: "c".repeat(40) },
-    decision: isApproved ? "approve" : "escalate",
+    decision: "escalate",
     coverage: criteria.map((criterion, index) => ({
       criterion_id: criterion.id,
-      status: isApproved || index !== 2 ? "met" : "cannot_determine",
-      verification_strength:
-        isApproved || index !== 2 ? "directly_verified" : "asserted_only",
+      status: index !== 2 ? "met" : "cannot_determine",
+      verification_strength: index !== 2 ? "directly_verified" : "asserted_only",
       evidence: {
         assertion: criterion.expected_verification.assertion,
         location: {
@@ -549,208 +435,81 @@ function reviewFor(key: string): ReviewArtifact {
       },
       note: null,
     })),
-    findings: isApproved
-      ? []
-      : [
-          {
-            key: "d".repeat(64),
-            rule_id: "product.dead_letter",
-            criterion_id: "ac_3",
-            severity: "major",
-            routing: "escalates",
-            status: "open",
-            blocking: true,
-            blocking_reason: "Criterion 03 leaves a product choice unresolved.",
-            closure: "human",
-            direction: "positive",
-            file: "packages/queue/retry.ts",
-            line: 67,
-            statement: "Where should a permanently failed email go?",
-          },
-        ],
+    findings: [
+      {
+        key: FINDING_KEY,
+        rule_id: "product.dead_letter",
+        criterion_id: "ac_3",
+        severity: "major",
+        routing: "escalates",
+        status: "open",
+        blocking: true,
+        blocking_reason: "Criterion 03 leaves a product choice unresolved.",
+        closure: "human",
+        direction: "positive",
+        file: "packages/queue/retry.ts",
+        line: 67,
+        statement: "Where should a permanently failed email go?",
+      },
+    ],
   } as unknown as ReviewArtifact;
 }
-function detail(key: string): Detail {
+export function detail(key: string): Detail {
   const { ticket } = ticketRow(key),
     contract = plans.get(key)!;
-  const isApproved = approved.has(key),
-    waiting = !isApproved && ticket.state === "changes_requested";
-  const sample: NonNullable<Detail["sample"]> = {
-    progress: waiting ? 52 : 38,
-    stage: waiting ? 4 : ticket.state === "verifying" ? 3 : 2,
-    current: "Editing packages/queue/retry.ts",
-    elapsed: "21m",
-    steps: [
-      {
-        text: "Worktree materialised from a1b2c3d with 3 manifest files",
-        time: "39s",
-        state: "complete",
-      },
-      {
-        text: "Read packages/queue — found the webhook failure table",
-        time: "1m 04s",
-        state: "complete",
-      },
-      {
-        text: "Wrote the retry path in auth/signup.ts",
-        time: "2m 11s",
-        state: "complete",
-      },
-      {
-        text: "Editing queue/retry.ts — dead-letter behaviour",
-        time: "now",
-        state: "current",
-      },
-      {
-        text: "Run pnpm test, typecheck, lint and the scope ledger",
-        time: "queued",
-        state: "queued",
-      },
-      {
-        text: "Hand the sealed change set to the reviewer",
-        time: "queued",
-        state: "queued",
-      },
-    ],
-    decisions: waiting
-      ? [
-          {
-            id: "dead-letter",
-            title: "Where should a permanently failed email go?",
-            context:
-              "Criterion 03 says “dead-lettered”. The queue has no dead-letter table, so this changes the shape of the diff rather than a line of it.",
-            options: [
-              {
-                title: "A new dead_letters table",
-                detail:
-                  "Matches how packages/queue already stores webhook failures, so the reviewer can check it against tests that exist.",
-                recommended: true,
-                metadata: ["+1 migration", "reversible", "~2 min more"],
-              },
-              {
-                title: "A status column on the existing table",
-                detail:
-                  "Smaller diff. Failures then compete with live rows for the same index.",
-              },
-              {
-                title: "Log it and drop it",
-                detail:
-                  "Cheapest. Criterion 03 becomes provable only by a log assertion — marked asserted_only.",
-              },
-            ],
-          },
-          {
-            id: "retention",
-            title: "How long should a dead-lettered row be kept?",
-            context:
-              "Choose how long failed deliveries remain available for inspection.",
-            options: [
-              {
-                title: "30 days, then a scheduled purge",
-                detail:
-                  "Keeps recent failures available without growing the table forever.",
-                recommended: true,
-              },
-              {
-                title: "Keep rows until manually removed",
-                detail: "Retains every failure for investigation.",
-              },
-            ],
-          },
-          {
-            id: "retry",
-            title: "Should the retry delay be configurable?",
-            context: "Choose the behaviour to ship with this change.",
-            options: [
-              {
-                title: "Hard-code 30s for now, note it in the PR",
-                detail: "Keep the first version simple.",
-                recommended: true,
-              },
-              {
-                title: "Make the delay configurable",
-                detail: "Expose the retry delay as a setting.",
-              },
-            ],
-          },
-        ]
-      : [],
-    transcript: [
-      {
-        author: "Executor",
-        label: "plan · 2m 04s",
-        text: "The queue stores webhook failures in webhook_failures, keyed by delivery. Activation mail has no equivalent, so criterion 03 has nowhere to record a permanent failure. Two shapes are possible: reuse that table’s shape for a new one, or widen the existing queue row.",
-      },
-      {
-        author: "Executor",
-        label: "decision raised · 4m 12s",
-        text: "This is a choice the contract does not settle, and it changes the shape of the diff rather than a line of it. Pausing to ask instead of picking for you.",
-      },
-      {
-        author: "Executor",
-        label: "resume · 5m 52s",
-        text: "Answer received: a new dead_letters table. Writing the migration first, then the terminal branch.",
-      },
-      {
-        author: "Reviewer",
-        label: "review · 11m 08s",
-        text: "I have the diff, the three criteria and the check output. I do not have the executor’s account of what it did, by design.",
-      },
-      {
-        author: "Reviewer",
-        label: "finding · 11m 40s",
-        text: "Criterion 03 is proven by queue/retry.test.ts:88, which never ran — describe.skip is still in the file. 184 tests passed and not one of them touched retry behaviour. Marking it asserted_only and returning it to the executor.",
-      },
-    ],
-    terminal:
-      "$ pnpm test --filter queue\nRUN v2.1.4 /worktrees/ayo_wt_2\n✓ auth/signup.test.ts (2 tests) 412ms\n✓ queue/retry.test.ts (3 tests) 388ms\nTest Files 12 passed (12)\n     Tests 186 passed (186)",
-  };
+  // The round that answered the review's finding: a second attempt carrying
+  // the verification, never a second review (D-061).
+  const remediated = approved.has(key);
+  const reviewed = {
+    id: "preview-attempt-" + key,
+    run: 1,
+    round: 0,
+    startedAt: at,
+    outcome: "escalate",
+    termination: "Sample attempt complete",
+    model: "sonnet-class",
+    costMicros: 610_000,
+    costBasis: "sample",
+    partial: false,
+    ceilings: [{ resource: "attempt_commands", used: 23, ceiling: 40, hit: false }],
+    review: reviewFor(key),
+    reviewDecision: "escalate",
+    changes: sampleChanges,
+    // What gates the change is the whole-change run; a node's own result is
+    // evidence for that node's review (D-107).
+    checks: sampleChecks
+      .filter((check) => check.node === null)
+      .map((check) => ({ name: check.name, status: check.status, detail: "Sample result" })),
+    verification: null,
+    bundles: [],
+  } satisfies Detail["attempts"][number];
+  const closing = {
+    ...reviewed,
+    id: "preview-round-" + key,
+    round: 1,
+    startedAt: closedAt,
+    outcome: "approve",
+    costMicros: 1_330_000,
+    review: null,
+    reviewDecision: null,
+    verification: {
+      all_closed: true,
+      deterministic_failure: null,
+      open_keys: [],
+      per_finding: [
+        { finding_key: FINDING_KEY, status: "closed", pointer: "packages/queue/dead_letters.ts:1" },
+      ],
+    },
+  } satisfies Detail["attempts"][number];
+  const attempts =
+    ticket.state === "plan_review" ? [] : remediated ? [reviewed, closing] : [reviewed];
   return {
     ticket,
     contract,
     digest: String(ticket.plan_version).repeat(64),
-    attempts:
-      ticket.state === "plan_review"
-        ? []
-        : [
-            {
-              id: "preview-attempt-" + key,
-              run: 1,
-              round: 0,
-              startedAt: at,
-              outcome: isApproved ? "approve" : "escalate",
-              termination: "Sample attempt complete",
-              model: "sonnet-class",
-              costMicros: isApproved ? 1940000 : 610000,
-              costBasis: "sample",
-              partial: false,
-              ceilings: [
-                {
-                  resource: "attempt_commands",
-                  used: 23,
-                  ceiling: 40,
-                  hit: false,
-                },
-              ],
-              review: reviewFor(key),
-              reviewDecision: isApproved ? "approve" : "escalate",
-              changes: sampleChanges,
-              // What gates the change is the whole-change run; a node's own
-              // result is evidence for that node's review (D-107).
-              checks: sampleChecks
-                .filter((check) => check.node === null)
-                .map((check) => ({
-                  name: check.name,
-                  status: check.status,
-                  detail: "Sample result",
-                })),
-              verification: null,
-              bundles: [],
-            },
-          ],
+    attempts,
     cost: {
-      micros:
-        ticket.state === "plan_review" ? 0 : isApproved ? 1940000 : 610000,
+      micros: attempts.reduce((sum, attempt) => sum + (attempt.costMicros ?? 0), 0),
       partial: false,
       unavailable: 0,
     },
@@ -758,8 +517,39 @@ function detail(key: string): Detail {
     verdicts: [],
     effective: { stallMinutes: 12, ticketDollars: 2.5 },
     report: { sample: true },
-    sample,
   };
+}
+/**
+ * The executor's retained transcript, in the records' own format: what a run
+ * leaves behind is provider output, which the screen interprets for display
+ * and nothing else ([ADR-0023](../../../../docs/adr/0023-untrusted-context-boundary.md)).
+ */
+export function sampleTranscript(): string {
+  const message = (text: string): string =>
+    JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text }] } });
+  return [
+    message(
+      "The queue stores webhook failures in webhook_failures, keyed by delivery. Activation mail " +
+        "has no equivalent, so criterion 03 has nowhere to record a permanent failure. Two shapes " +
+        "are possible: reuse that table’s shape for a new one, or widen the existing queue row.",
+    ),
+    message(
+      "This is a choice the contract does not settle, and it changes the shape of the diff rather " +
+        "than a line of it. Pausing to ask instead of picking for you.",
+    ),
+    JSON.stringify({
+      item: {
+        type: "commandExecution",
+        command: "pnpm test --filter queue",
+        aggregatedOutput:
+          "RUN v2.1.4 /worktrees/ayo_wt_2\n✓ auth/signup.test.ts (2 tests) 412ms\n" +
+          "✓ queue/retry.test.ts (3 tests) 388ms\nTest Files 12 passed (12)\n     Tests 186 passed (186)",
+      },
+    }),
+    message(
+      "Answer received: a new dead_letters table. Writing the migration first, then the terminal branch.",
+    ),
+  ].join("\n");
 }
 /** The labels the native host gives each command, kind for kind, so a refusal names what the person sees there. */
 const LABELS: Record<string, string> = {
@@ -775,7 +565,7 @@ const LABELS: Record<string, string> = {
   principle: "Record a product decision",
   verdict: "Record finding feedback",
 };
-function job(
+export function job(
   kind: string,
   repository: string,
   key: string | null,
@@ -897,7 +687,7 @@ const SAMPLE_TEXT: Record<string, string> = {
  * commit the names were read at, which a person compares against the
  * checkout themselves. Both panes print only its first 7 characters.
  */
-const SAMPLE_INDEX: Record<string, SymbolIndex | UnsupportedRepository> = {
+export const SAMPLE_INDEX: Record<string, SymbolIndex | UnsupportedRepository> = {
   [repoId]: {
     schema_version: 1,
     built_at: "2026-09-14T09:00:00.000Z",
@@ -981,7 +771,7 @@ const SAMPLE_STANDING: Record<string, StandingProhibitedEntry[]> = {
   ],
 };
 /** Kept where the sample's editing sessions are kept, so a reload holds what was marked. */
-function standingFor(id: string): StandingProhibitedEntry[] {
+export function standingFor(id: string): StandingProhibitedEntry[] {
   const stored: unknown = JSON.parse(localStorage.getItem("perbo:preview-standing") ?? "null");
   if (stored === null || typeof stored !== "object") return SAMPLE_STANDING[id] ?? [];
   return (stored as Record<string, StandingProhibitedEntry[]>)[id] ?? [];
@@ -1000,13 +790,13 @@ function sampleText(path: string): string | null {
   if (/\.(png|jpe?g|gif|webp|ico|woff2?)$/.test(path)) return null;
   return `// ${path}\n// This sample file's text is not part of the preview.\n`;
 }
-function sampleFiles(id: string): string[] {
+export function sampleFiles(id: string): string[] {
   const listed = SAMPLE_FILES[id];
   if (!listed) throw new Error("This sample repository is no longer connected.");
   return listed;
 }
 /** The read the native host performs, over sample bytes: the same refusals, in the same words. */
-function sampleRead(id: string, requested: string): ExplorerFile {
+export function sampleRead(id: string, requested: string): ExplorerFile {
   if (requested.startsWith("/") || /^[A-Za-z]:[\\/]/.test(requested))
     throw new Error(
       "Name the file the way the repository does, relative to its root. Perbo does not take an absolute path from a screen.",
@@ -1045,7 +835,7 @@ function sampleRead(id: string, requested: string): ExplorerFile {
  * would; what it stands in for is the filesystem, which a browser has none of.
  */
 const SPECS_KEY = "perbo:preview-specs";
-const specFiles = (): Record<string, string> => {
+export const specFiles = (): Record<string, string> => {
   try {
     const raw: unknown = JSON.parse(localStorage.getItem(SPECS_KEY) ?? "{}");
     return raw !== null && typeof raw === "object" ? (raw as Record<string, string>) : {};
@@ -1053,7 +843,7 @@ const specFiles = (): Record<string, string> => {
     return {};
   }
 };
-const saveSpec = (slug: string, markdown: string): void => {
+export const saveSpec = (slug: string, markdown: string): void => {
   localStorage.setItem(SPECS_KEY, JSON.stringify({ ...specFiles(), [slug]: markdown }));
 };
 const EMPTY_SECTIONS: SpecSections = {
@@ -1064,7 +854,7 @@ const EMPTY_SECTIONS: SpecSections = {
   notes: "",
 };
 /** The spec a session holds, read back from the folder: the file is canonical. */
-function specView(id: string): SpecView {
+export function specView(id: string): SpecView {
   const session = editing.read(id);
   if (session.specSlug === null)
     return { slug: null, path: null, title: "", sections: EMPTY_SECTIONS, requirements: [] };
@@ -1119,7 +909,7 @@ interface PreviewGraphEdit extends GraphEditView {
 const graphEdits = new Map<string, PreviewGraphEdit[]>();
 /** Which spec a sample ticket was drafted from, as admission records it (D-103). */
 const specOf = new Map<string, string>();
-const graphLog = (key: string): PreviewGraphEdit[] => {
+export const graphLog = (key: string): PreviewGraphEdit[] => {
   const held = graphEdits.get(key);
   if (held) return held;
   const made: PreviewGraphEdit[] = [];
@@ -1161,7 +951,7 @@ function changesFrom(outcome: GraphEditOutcome): string[] {
 }
 
 /** Apply one edit, or an undo of one, and record it as the CLI records it: with the engine's own summary, unless an undo names the edit it undid. */
-function writeGraphEdit(
+export function writeGraphEdit(
   key: string,
   run: (state: { contract: PlanContract; approach: ApproachRecord }) => GraphEditOutcome,
   undoes: number | null,
@@ -1199,7 +989,7 @@ function writeGraphEdit(
 }
 
 /** `perbo edit --undo <n>`, with D-100's rule about a later edit in the way. */
-function undoGraphEditAt(key: string, number: number): void {
+export function undoGraphEditAt(key: string, number: number): void {
   const log = graphLog(key);
   const target = log[number - 1];
   if (!target) throw new Error(`There is no edit ${number} to undo.`);
@@ -1220,71 +1010,46 @@ function undoGraphEditAt(key: string, number: number): void {
 }
 
 /**
- * What the sample records say about a sample graph (SCP-317), through the same
- * derivation the host uses: the sealed change set, the pinned checks per node
- * and the review artifact's coverage, and nothing the executor said. The
- * sample has one review of one plan, so the host's staleness and closure reads
- * have nothing to answer here.
+ * What the sample records say about a sample graph (SCP-317). The records are
+ * assembled from the samples and read by {@link assembleLiveGraph}, the same
+ * derivation the host runs over a repository's own, so a closure, a stale
+ * review and a check's scope read here exactly as they read there.
  */
 function liveFor(key: string, nodes: readonly { id: string; paths: readonly string[]; criteria: readonly string[] }[]): GraphLiveView {
   const { ticket } = ticketRow(key);
-  if (ticket.state === "plan_review" || ticket.state === "ready")
-    return {
-      attempt: null,
-      nodes: nodes.map((node) => ({
-        id: node.id,
-        state: "untouched",
-        changed: [],
-        checks: [],
-        criteria: node.criteria.map((id) => ({ id, state: "unbound", strength: null, evidence: null, finding: null })),
-      })),
-      outside: [],
-      note: null,
-    };
+  const before = ticket.state === "plan_review" || ticket.state === "ready";
   const review = reviewFor(key);
-  const bound = new Map(review.coverage.map((entry) => [entry.criterion_id, entry]));
-  const open = new Map(
-    review.findings
-      .filter((finding) => finding.criterion_id !== null && finding.status === "open")
-      .map((finding) => [finding.criterion_id!, finding.statement]),
+  return assembleLiveGraph(
+    nodes,
+    before
+      ? { attempt: null, changed: [], sealed: false, checks: [], review: null, closures: [] }
+      : {
+          attempt: "preview-attempt-" + key,
+          changed: sampleChanges.map((change) => change.path),
+          sealed: true,
+          // The loop narrows a pinned check to a node's own changed files
+          // (D-107); a sample check with no node is the whole command.
+          checks: sampleChecks.map((check) => ({
+            name: check.name,
+            status: check.status,
+            node: check.node ? { id: check.node, scope: "files" } : null,
+          })),
+          review: {
+            planVersion: ticket.plan_version,
+            createdAt: at,
+            coverage: review.coverage,
+            findings: review.findings,
+          },
+          // What the round since that review closed (D-061), which is what
+          // takes the finding off the node the criterion belongs to.
+          closures: approved.has(key) ? [{ createdAt: closedAt, closed: [FINDING_KEY] }] : [],
+        },
+    ticket.plan_version,
   );
-  const changed = sampleChanges.map((change) => change.path);
-  return {
-    attempt: "preview-attempt-" + key,
-    nodes: nodes.map((node) => {
-      const touched = changed.filter((path) => matchesAny(path, node.paths)).sort();
-      const ran = sampleChecks
-        .filter((check) => check.node === node.id)
-        .map((check) => ({ name: check.name, status: check.status }));
-      const criteria = node.criteria.map((id) => {
-        const binding = bound.get(id);
-        const place = binding?.evidence?.location ?? null;
-        return {
-          id,
-          state: binding?.status ?? ("unbound" as const),
-          strength: binding?.verification_strength ?? null,
-          evidence: place ? (place.line ? `${place.file}:${place.line}` : place.file) : (binding?.evidence?.ref ?? null),
-          finding: open.get(id) ?? null,
-        };
-      });
-      return {
-        id: node.id,
-        state: nodeState({ touched, ran, criteria }),
-        changed: touched,
-        checks: ran,
-        criteria,
-      };
-    }),
-    outside:
-      nodes.length === 0
-        ? []
-        : changed.filter((path) => !nodes.some((node) => matchesAny(path, node.paths))).sort(),
-    note: null,
-  };
 }
 
 /** One plan's graph, its size and its history, as the native host reads them. */
-function graphView(repoId: string, key: string): GraphView {
+export function graphView(repoId: string, key: string): GraphView {
   const { ticket } = ticketRow(key);
   if (!snapshot.tasks.some((row) => row.repoId === repoId && row.ticket.key === key))
     throw new Error("Sample task not found in this repository.");
@@ -1364,7 +1129,7 @@ function graphView(repoId: string, key: string): GraphView {
  * requirement, each citing it, grouped into two nodes so a requirement's node
  * is something to look at.
  */
-function draftFromSpec(key: string, markdown: string, slug: string): void {
+export function draftFromSpec(key: string, markdown: string, slug: string): void {
   const read = readSpecSections(markdown);
   const plan = plans.get(key)!;
   plan.outcome = read.text.outcome.split("\n")[0] || read.text.title || "Untitled work";
@@ -1407,8 +1172,8 @@ function draftFromSpec(key: string, markdown: string, slug: string): void {
   specOf.set(key, slug);
 }
 
-const editingRecords = () => EditingSessionSchema.array().parse(JSON.parse(localStorage.getItem("perbo:preview-editing") ?? "[]"));
-const editing = new ContractEditing({
+export const editingRecords = () => EditingSessionSchema.array().parse(JSON.parse(localStorage.getItem("perbo:preview-editing") ?? "[]"));
+export const editing = new ContractEditing({
   records: editingRecords,
   persist: (records) => {
     const previous = EditingSessionSchema.array().parse(JSON.parse(localStorage.getItem("perbo:preview-editing") ?? "[]"));
@@ -1423,8 +1188,8 @@ const editing = new ContractEditing({
     if (!snapshot.tasks.some((row) => row.repoId === repoId && row.ticket.key === key)) throw new Error("Sample task not found in this repository.");
     return structuredClone(detail(key));
   },
-  start: (request, owner) => previewRequest(request, owner),
-  stop: async (jobId) => { await previewRequest({ kind: "cancel", jobId }); },
+  start: (request, owner) => answer(request, owner),
+  stop: async (jobId) => { await answer({ kind: "cancel", jobId }); },
   id: () => crypto.randomUUID(),
   standing: (id) => standingFor(id),
   setStanding: (id, entries) => {
@@ -1443,10 +1208,10 @@ editing.recover();
  * validated edit path — so the chat can be seen and tested without Electron
  * and behaves the same when it reaches one.
  */
-const sampleInterviews = new Set<string>();
+export const sampleInterviews = new Set<string>();
 const sampleTurns = new Map<string, number>();
 /** The asking this planning is putting, or null where it holds none or has gone. */
-function askingOf(id: string): { entry: number; answered: number } | null {
+export function askingOf(id: string): { entry: number; answered: number } | null {
   try {
     return editing.read(id).asking;
   } catch {
@@ -1454,16 +1219,16 @@ function askingOf(id: string): { entry: number; answered: number } | null {
   }
 }
 /** Say what the asking is now, with no line to add — the host's own push. */
-function askingChanged(id: string): void {
+export function askingChanged(id: string): void {
   emit({ kind: "interview", sessionId: id, running: sampleInterviews.has(id), entry: null, asking: askingOf(id) });
 }
 /** Kept as the host keeps it, so the conversation survives a reload here too. */
-function converse(id: string, line: InterviewEntry["line"]): InterviewEntry {
+export function converse(id: string, line: InterviewEntry["line"]): InterviewEntry {
   const entry = editing.converse(id, line, new Date().toISOString());
   emit({ kind: "interview", sessionId: id, running: sampleInterviews.has(id), entry, asking: askingOf(id) });
   return entry;
 }
-function interviewStatus(id: string): InterviewStatus {
+export function interviewStatus(id: string): InterviewStatus {
   const session = editing.read(id);
   return {
     id,
@@ -1476,7 +1241,7 @@ function interviewStatus(id: string): InterviewStatus {
  * The host's own naming of an unnamed spec from the person's first turn, in
  * the preview's terms: the same title, the same slug, the same note.
  */
-function nameSpecFromTurn(id: string, text: string): void {
+export function nameSpecFromTurn(id: string, text: string): void {
   const session = editing.read(id);
   if (session.specSlug !== null) return;
   let title;
@@ -1501,7 +1266,7 @@ function nameSpecFromTurn(id: string, text: string): void {
       "the title itself you can change in the Spec pane.",
   });
 }
-function startSampleInterview(id: string): InterviewStatus {
+export function startSampleInterview(id: string): InterviewStatus {
   if (sampleInterviews.has(id)) return interviewStatus(id);
   const session = editing.read(id);
   if (session.specSlug === null)
@@ -1522,7 +1287,7 @@ function startSampleInterview(id: string): InterviewStatus {
  * plan the second asks for an edit, which goes through the same edit path the
  * Graph pane uses and lands in the same history as the interview's.
  */
-function answerSampleTurn(id: string, text: string): void {
+export function answerSampleTurn(id: string, text: string): void {
   const turns = (sampleTurns.get(id) ?? 0) + 1;
   sampleTurns.set(id, turns);
   // Asking with options, as the real session does through ask_options: two
@@ -1627,522 +1392,3 @@ function answerSampleTurn(id: string, text: string): void {
     text: `Noted: “${text}”. This is the sample workspace, so nothing here reaches a provider.`,
   });
 }
-
-async function previewRequest<T extends Request>(request: T, owner?: EditingOwner): Promise<ReplyMap[T["kind"]]> {
-    let result: unknown = null;
-    switch (request.kind) {
-      case "editingOpen": result = await editing.open(request.target, request.legacy); break;
-      case "editingRead": result = editing.read(request.id); break;
-      case "drafts": result = openDrafts(editingRecords()); break;
-      case "editingSave": result = editing.save(request.id, request.revision, request.repoId, request.form); break;
-      case "editingSubmit": result = await editing.submit(request.id, request.revision, request.operationId, request.intent); break;
-      case "editingStop": result = await editing.stop(request.id); break;
-      case "explorerList": {
-        const tracked = sampleFiles(request.repoId);
-        const files = tracked.filter((path) => !isNeverReadPath(path)).sort();
-        result = { files, hidden: tracked.length - files.length, standing: standingFor(request.repoId) };
-        break;
-      }
-      case "explorerRead": result = sampleRead(request.repoId, request.path); break;
-      case "graphRead": result = graphView(request.repoId, request.key); break;
-      case "graphEdit":
-      case "graphUndo":
-        result = job(
-          request.kind,
-          request.repoId,
-          request.key,
-          (job) => {
-            if (request.kind === "graphUndo") undoGraphEditAt(request.key, request.edit);
-            else {
-              const edit: GraphEdit = request.edit;
-              writeGraphEdit(
-                request.key,
-                (state) =>
-                  applyGraphEdit(
-                    state,
-                    edit,
-                    graphLog(request.key)
-                      .flatMap((each) => each.keys)
-                      .filter((key) => key.startsWith("node:") || key.startsWith("criterion:"))
-                      .map((key) => key.slice(key.indexOf(":") + 1)),
-                  ),
-                null,
-              );
-            }
-            job.resultKey = request.key;
-          },
-          120,
-        );
-        break;
-      case "explorerMark":
-        result = editing.mark(request.id, request.revision, request.path, request.mark, request.always);
-        break;
-      case "explorerUndo": result = editing.undo(request.id, request.revision, request.edit); break;
-      case "editingDiscard":
-        result = editing.discard(request.id, request.revision);
-        sampleInterviews.delete(request.id);
-        emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id) });
-        break;
-      case "interviewStart": {
-        const session = editing.read(request.id);
-        if (session.repoId !== request.repoId)
-          throw new Error("This planning belongs to another repository.");
-        result = startSampleInterview(request.id);
-        break;
-      }
-      case "interviewTurn": {
-        if (!sampleInterviews.has(request.id)) {
-          nameSpecFromTurn(request.id, request.text);
-          startSampleInterview(request.id);
-        }
-        converse(request.id, { kind: "turn", text: request.text });
-        editing.answerAsking(request.id, request.text);
-        askingChanged(request.id);
-        const text = request.text;
-        setTimeout(() => answerSampleTurn(request.id, text), 120);
-        result = interviewStatus(request.id);
-        break;
-      }
-      case "interviewStop":
-        sampleInterviews.delete(request.id);
-        emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id) });
-        converse(request.id, { kind: "note", text: "The interview ended: you stopped it." });
-        result = interviewStatus(request.id);
-        break;
-      case "specRead": result = specView(request.id); break;
-      case "symbolIndex": {
-        const index = SAMPLE_INDEX[request.repoId];
-        if (index === undefined)
-          throw new Error(
-            "This repository is no longer connected. Choose it again in Settings.",
-          );
-        result =
-          "supported" in index
-            ? { supported: false, reason: index.reason, languages: index.languages_seen }
-            : {
-                supported: true,
-                names: index.files.flatMap((file) =>
-                  file.exports
-                    // `export * from` records the name `*`, which is not a name
-                    // a spec can refer to.
-                    .filter((each) => each.name !== "*")
-                    .map((each) => ({ name: each.name, kind: each.kind, path: file.path })),
-                ),
-                headCommit: index.head_commit,
-                workingTree: index.working_tree,
-                builtAt: index.built_at,
-              };
-        break;
-      }
-      case "impactRead": {
-        const session = editing.read(request.id);
-        const tracked = sampleFiles(session.repoId).filter((path) => !isNeverReadPath(path));
-        const index = SAMPLE_INDEX[session.repoId];
-        if (index === undefined) throw new Error("This sample repository is no longer connected.");
-        const markdown = session.specSlug === null ? null : (specFiles()[session.specSlug] ?? null);
-        result = {
-          ...impactReport({ scope: session.form.draft.paths, tracked, spec: markdown, index }),
-          readAt: new Date().toISOString(),
-        };
-        break;
-      }
-      case "specSave": {
-        const session = editing.read(request.id);
-        if (session.repoId !== request.repoId)
-          throw new Error("This planning belongs to another repository.");
-        const slug = session.specSlug ?? specSlug(request.title);
-        const existing = specFiles()[slug];
-        if (session.specSlug === null && existing !== undefined)
-          throw new Error(`specs/${slug}/spec.md already exists. Give this one a title of its own.`);
-        const current = existing === undefined ? null : readSpecSections(existing);
-        // The same merge the host does (SCP-321): a section this writer did not
-        // change takes whatever the file says, and one both changed is refused
-        // rather than overwritten.
-        const merged = mergeSpecText({
-          base: { title: request.base.title, ...request.base.sections },
-          next: { title: request.title, ...request.sections },
-          current: current?.text ?? EMPTY_SPEC_TEXT,
-        });
-        if (merged.conflicting.length > 0) {
-          result = { view: specView(request.id), conflicting: merged.conflicting };
-          break;
-        }
-        const rendered = renderSpec(merged.text, {
-          highWater: current?.highWater ?? 0,
-          existing: current?.requirements ?? [],
-        });
-        saveSpec(slug, rendered.markdown);
-        editing.recordSpec(request.id, slug);
-        result = { view: specView(request.id), conflicting: [] };
-        break;
-      }
-      case "generatePlan":
-      case "startOver":
-        result = job(
-          "draft",
-          request.repoId,
-          request.kind === "startOver" ? request.key : null,
-          (job) => {
-            const session = editing.read(request.id);
-            if (session.specSlug === null) throw new Error("Write the spec before generating a plan from it.");
-            const markdown = specFiles()[session.specSlug] ?? "";
-            if (request.kind === "startOver") {
-              const { ticket } = ticketRow(request.key);
-              if (ticket.approved_at) throw new Error("An approved contract is immutable.");
-              draftFromSpec(request.key, markdown, session.specSlug);
-              ticket.plan_version += 1;
-              job.resultKey = request.key;
-              return;
-            }
-            const ticket = sample(next++, readSpecSections(markdown).text.title || "Untitled work", "plan_review");
-            draftFromSpec(ticket.key, markdown, session.specSlug);
-            ticket.title = plans.get(ticket.key)!.outcome;
-            snapshot.tasks.push({ repoId: request.repoId, repository: "webstore", ticket });
-            job.resultKey = ticket.key;
-          },
-          1400,
-          owner,
-        );
-        break;
-      case "login":
-        throw new Error("This is a sample workspace. The desktop app opens your terminal on the provider's sign-in command.");
-      case "openHelp":
-        window.open(HELP_LINKS[request.page], "_blank", "noopener");
-        break;
-      case "snapshot":
-        result = {
-          ...structuredClone(snapshot),
-          drafts: openDrafts(editingRecords()),
-          interviews: [...sampleInterviews],
-        };
-        break;
-      case "repositorySnapshot": {
-        const repository = snapshot.repositories.find((entry) => entry.id === request.repoId);
-        if (!repository) throw new Error("This sample repository is no longer connected.");
-        result = structuredClone({ repository, tasks: snapshot.tasks.filter((entry) => entry.repoId === request.repoId), errors: [] });
-        break;
-      }
-      case "detail":
-        if (!snapshot.tasks.some((row) => row.repoId === request.repoId && row.ticket.key === request.key)) throw new Error("Sample task not found in this repository.");
-        result = detail(request.key);
-        break;
-      case "manifest":
-        result = structuredClone(
-          sampleManifests.get(request.repoId) ?? {
-            digest: "1".repeat(64),
-            testCommand: "pnpm test",
-            value: {
-              offLimits: [".github/**", "infra/**", "**/*.env*"],
-              entries: [
-                ".env.local",
-                ".certs/dev.pem",
-                "fixtures/seed.json",
-              ].map((path) => ({
-                path,
-                source_path: path,
-                kind: "file" as const,
-                strategy: "copy" as const,
-                secret: true,
-                required: true,
-                reason: "Sample local setup",
-              })),
-            },
-          },
-        );
-        break;
-      case "saveManifest":
-        sampleManifests.set(request.repoId, {
-          digest: "2".repeat(64),
-          value: request.value,
-          testCommand: "pnpm test",
-        });
-        snapshot.repositories = snapshot.repositories.map((repo) =>
-          repo.id === request.repoId
-            ? {
-                ...repo,
-                manifestCount: request.value.entries.length,
-                prohibitedPaths: request.value.offLimits,
-              }
-            : repo,
-        );
-        emit();
-        break;
-      case "models":
-        result = {
-          provider: request.provider,
-          source: "sample",
-          discoveredAt: new Date().toISOString(),
-          models: (request.provider === "codex-cli"
-            ? [
-                ["o-class", "O-class", "Sample reviewer"],
-                ["codex-sample", "Codex sample", "Sample coding model"],
-              ]
-            : [
-                ["sonnet-class", "Sonnet-class", "Sample executor"],
-                ["opus-sample", "Opus sample", "Sample reasoning model"],
-              ]
-          ).map(([id, label, description], index) => ({
-            id,
-            label,
-            description,
-            isDefault: index === 0,
-          })),
-        };
-        break;
-      case "providers":
-        result = [
-          {
-            id: "claude",
-            name: "Claude Code",
-            installed: true,
-            authenticated: true,
-            detail: "Sample connection · subscription CLI",
-            loginCommand: "claude auth login",
-            roles: ["Execution", "Independent review", "Planning"],
-          },
-          {
-            id: "codex",
-            name: "Codex",
-            installed: true,
-            authenticated: true,
-            detail: "Sample connection · subscription CLI",
-            loginCommand: "codex login",
-            roles: ["Execution", "Independent review", "Planning"],
-          },
-        ];
-        break;
-      case "saveSettings":
-        snapshot.settings = request.settings;
-        result = request.settings;
-        emit({ kind: "preferences", settings: snapshot.settings, titles: snapshot.titles ?? {}, taskModels: snapshot.taskModels ?? {}, archived: snapshot.archived ?? [] });
-        break;
-      case "archive": {
-        const entries = request.keys.map((key) => request.repoId + ":" + ticketRow(key).ticket.key);
-        snapshot.archived = request.archived
-          ? [...new Set([...(snapshot.archived ?? []), ...entries])]
-          : (snapshot.archived ?? []).filter((entry) => !entries.includes(entry));
-        emit({ kind: "preferences", settings: snapshot.settings, titles: snapshot.titles ?? {}, taskModels: snapshot.taskModels ?? {}, archived: snapshot.archived });
-        break;
-      }
-      case "discard": {
-        const row = ticketRow(request.key);
-        if (!["draft", "specifying", "plan_review", "ready", "plan_invalid"].includes(row.ticket.state))
-          throw new Error("Only a contract that has never run can be deleted. This one has moved past the contract stage.");
-        snapshot.tasks = snapshot.tasks.filter((entry) => entry !== row);
-        plans.delete(request.key);
-        emit({ kind: "records", repoId: request.repoId, key: null });
-        break;
-      }
-      case "taskSummary":
-        if (!snapshot.tasks.some((row) => row.repoId === request.repoId && row.ticket.key === request.key)) throw new Error("Sample task not found in this repository.");
-        result = sampleSummary(request.key);
-        break;
-      case "usage":
-        // The boards' figures, labelled as a sample by the preview indicator; the desktop reads its own records.
-        result = {
-          readAt: new Date().toISOString(),
-          ledger: { month: new Date().toISOString().slice(0, 7), spentMicros: 24_500_000, pricedAttempts: 41, unpricedAttempts: 0, ticketsRun: 34, ticketsMerged: 18, stoppedShort: 2, averageMergedMicros: 1_380_000 },
-          providers: [
-            { id: "claude", name: "Claude Code", role: "default executor", plan: "Max · 20×", detail: "Sample plan · read from the provider's reply", windows: [
-              { label: "Session · 5-hour window", usedPercent: 78, resetsAt: new Date(Date.now() + 108 * 60_000).toISOString() },
-              { label: "Weekly · all models", usedPercent: 41, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() },
-              { label: "Weekly · opus-class", usedPercent: 12, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() },
-            ] },
-            { id: "codex", name: "Codex", role: "default reviewer", plan: "Pro", detail: "Sample plan · read from the provider's reply", windows: [
-              { label: "Session · 5-hour window", usedPercent: 23, resetsAt: new Date(Date.now() + 133 * 60_000).toISOString() },
-              { label: "Weekly · all models", usedPercent: 18, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() },
-            ] },
-            { id: "anthropic", name: "Anthropic API", role: null, plan: null, windows: null, detail: "No API key on this machine, so there is no plan to report." },
-          ],
-          notes: [],
-        };
-        break;
-      case "rename":
-        snapshot.titles = {
-          ...snapshot.titles,
-          [request.repoId + ":" + request.key]: request.title,
-        };
-        emit({ kind: "preferences", settings: snapshot.settings, titles: snapshot.titles ?? {}, taskModels: snapshot.taskModels ?? {}, archived: snapshot.archived ?? [] });
-        break;
-      case "chooseRepository":
-        if (!snapshot.repositories.length)
-          snapshot.repositories = [...initial.repositories];
-        result = snapshot.repositories[0];
-        emit({ kind: "repositories" });
-        break;
-      case "forgetRepository":
-        snapshot.repositories = snapshot.repositories.filter(
-          (repo) => repo.id !== request.repoId,
-        );
-        snapshot.tasks = snapshot.tasks.filter(
-          (row) => row.repoId !== request.repoId,
-        );
-        emit();
-        break;
-      case "doctor":
-        result = job("doctor", request.repoId, null, (job) => {
-          const repo = snapshot.repositories.find(
-            (repo) => repo.id === request.repoId,
-          )!;
-          if (request.writeConfig) repo.configured = true;
-          job.log =
-            "Sample readiness check\n✓ Git checkout available\n✓ pnpm test detected\n✓ Worktree preparation available\n3 manifest files selected";
-        });
-        break;
-      case "draft":
-      case "admit":
-        result = job(
-          request.kind,
-          request.repoId,
-          null,
-          (job) => {
-            const ticket = sample(
-              next++,
-              request.kind === "draft"
-                ? "Activation email never sent on signup"
-                : request.draft.outcome,
-              "plan_review",
-            );
-            applyDraft(
-              ticket,
-              request.kind === "draft"
-                ? {
-                    outcome: request.outcome,
-                    criteria: criteriaText.map((text) => ({
-                      text,
-                      assertion: text,
-                      kind: "test",
-                    })),
-                    paths: ["packages/auth/**", "packages/queue/**"],
-                    prohibited: [],
-                  }
-                : request.draft,
-            );
-            snapshot.tasks.push({
-              repoId: request.repoId,
-              repository: "webstore",
-              ticket,
-            });
-            if (request.models) {
-              snapshot.taskModels = {
-                ...snapshot.taskModels,
-                [request.repoId + ":" + ticket.key]: request.models,
-              };
-              emit({ kind: "preferences", settings: snapshot.settings, titles: snapshot.titles ?? {}, taskModels: snapshot.taskModels, archived: snapshot.archived ?? [] });
-            }
-            job.resultKey = ticket.key;
-          },
-          request.kind === "draft" ? 2200 : 1100,
-          owner,
-        );
-        break;
-      case "edit":
-        result = job("edit", request.repoId, request.key, (job) => {
-          const { ticket } = ticketRow(request.key);
-          if (!snapshot.tasks.some((row) => row.repoId === request.repoId && row.ticket.key === request.key)) throw new Error("Sample task not found in this repository.");
-          if (ticket.approved_at) throw new Error("An approved contract cannot be edited.");
-          if (detail(request.key).digest !== request.digest) throw new Error("The contract changed since you viewed it.");
-          applyDraft(ticket, request.draft);
-          ticket.plan_version += 1;
-          if (request.models) {
-            snapshot.taskModels = {
-              ...snapshot.taskModels,
-              [request.repoId + ":" + ticket.key]: request.models,
-            };
-            emit({ kind: "preferences", settings: snapshot.settings, titles: snapshot.titles ?? {}, taskModels: snapshot.taskModels, archived: snapshot.archived ?? [] });
-          }
-          job.resultKey = request.key;
-        }, 1000, owner);
-        break;
-      case "run":
-      case "decide": {
-        const row = ticketRow(request.key);
-        // Nothing moves until the command is accepted: a refused run leaves the ticket where it was.
-        result = job(
-          request.kind,
-          request.repoId,
-          request.key,
-          () => {
-            if (!decisionsAnswered.has(request.key))
-              row.ticket.state = "changes_requested";
-            else {
-              row.ticket.state = "pr_open";
-              row.ticket.delivery.state = "open";
-              row.ticket.delivery.pull_request_number = 418;
-              row.ticket.delivery.pull_request_url =
-                "https://github.com/example/webstore/pull/418";
-              approved.add(request.key);
-            }
-          },
-          2600,
-        );
-        row.ticket.approved_at = at;
-        row.ticket.state = "executing";
-        delete row.summary;
-        if (request.kind === "decide") decisionsAnswered.add(request.key);
-        break;
-      }
-      case "principle":
-      case "verdict":
-        result = job(request.kind, request.repoId, request.key, () => {
-          decisionsAnswered.add(request.key);
-        });
-        break;
-      case "cancel": {
-        const active = snapshot.jobs.find((job) => job.id === request.jobId);
-        // As the host has it: a job that has finished is not one a stop can reach.
-        if (!active || !isLive(active)) throw new Error("That command is no longer active.");
-        active.state = "cancelled";
-        active.endedAt = new Date().toISOString();
-        if (active.key && ["run", "decide"].includes(active.kind)) ticketRow(active.key).ticket.state = "cancelled";
-        await editing.settled(active);
-        emit({ kind: "records", repoId: active.repoId, key: active.resultKey ?? active.key, job: active });
-        break;
-      }
-      case "sync":
-        result = job("sync", request.repoId, request.key, () => {
-          const { ticket } = ticketRow(request.key);
-          if (ticket.delivery.state === "open") {
-            ticket.state = "merged";
-            ticket.delivery.state = "merged";
-            ticket.delivery.observed_at = new Date().toISOString();
-          }
-        });
-        break;
-      case "openPullRequest":
-        break; // The UI shows the GitHub handoff; no external site opens in this sandbox.
-      case "openWorktree":
-      case "openRepository":
-        throw new Error(
-          "This is a sample repository. The desktop app opens your real folder.",
-        );
-      case "output":
-        if (!snapshot.tasks.some((row) => row.repoId === request.repoId && row.ticket.key === request.key)) throw new Error("Sample task not found in this repository.");
-        if (request.attemptId && !detail(request.key).attempts.some((entry) => entry.id === request.attemptId)) throw new Error("The selected attempt does not belong to this task.");
-        result = { transcript: null, diff: null, notes: [] };
-        break;
-      case "exportArchive": {
-        result = archiveCsv(archiveRows(snapshot, request), snapshot.titles);
-        await navigator.clipboard.writeText(result as string);
-        break;
-      }
-      case "export": {
-        const data = request.key
-          ? detail(request.key)
-          : snapshot.tasks.filter((row) => row.repoId === request.repoId);
-        result = JSON.stringify(data, null, 2);
-        await navigator.clipboard.writeText(result as string);
-        break;
-      }
-    }
-    return result as ReplyMap[T["kind"]];
-}
-export const previewBridge: DesktopBridge = {
-  request: (request) => previewRequest(RequestSchema.parse(request) as typeof request),
-  subscribe(listener) {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  },
-};

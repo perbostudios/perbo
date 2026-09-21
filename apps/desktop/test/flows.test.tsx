@@ -13,10 +13,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { App, type Route, type TaskView } from "../src/renderer/shell/App.js";
 import type { Detail, Snapshot } from "../src/shared/protocol.js";
-import { runnerProgress } from "../src/renderer/presentation.js";
+import { runnerProgress } from "../src/shared/runner-progress.js";
 import { HomePage } from "../src/renderer/tasks/HomePage.js";
 import { TaskPage } from "../src/renderer/tasks/TaskPage.js";
-import { previewBridge } from "../src/renderer/preview.js";
+import { sampleBridge } from "../src/sample-host/bridge.js";
 import { isLive } from "../src/shared/jobs.js";
 
 // A CI runner renders this app several times slower than a laptop, and the
@@ -28,9 +28,9 @@ let client: QueryClient;
 let decisionDetail: Detail;
 beforeAll(async () => {
   // Keep the recorded review independent of earlier flows that finish this sample run.
-  const workspace = await previewBridge.request({ kind: "snapshot" });
+  const workspace = await sampleBridge.request({ kind: "snapshot" });
   const row = workspace.tasks.find((task) => task.ticket.key === "PRB-412")!;
-  decisionDetail = structuredClone(await previewBridge.request({
+  decisionDetail = structuredClone(await sampleBridge.request({
     kind: "detail", repoId: row.repoId, key: row.ticket.key,
   }));
 });
@@ -97,7 +97,7 @@ describe("interactive desktop flows", () => {
       target: { value: "Every new signup queues exactly one email." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    const admitted = (await previewBridge.request({ kind: "snapshot" })).drafts!.find((draft) => draft.key)!;
+    const admitted = (await sampleBridge.request({ kind: "snapshot" })).drafts!.find((draft) => draft.key)!;
     expect(admitted.key).toMatch(/^PRB-/);
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     fireEvent.click(await screen.findByRole("button", { name: "Create" }));
@@ -134,44 +134,34 @@ describe("interactive desktop flows", () => {
     expect(location.hash).toContain(admitted.key!);
   });
 
-  it("keeps decisions pending when leaving, allows editing the summary, and resumes after confirmation", async () => {
+  it("keeps a decision pending when leaving, lets it be rewritten, and resumes after confirmation", async () => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Answer" }));
-    let dialog = await screen.findByRole("dialog", {
-      name: "Decisions required",
-    });
+    let dialog = await screen.findByRole("dialog", { name: "Decisions required" });
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Save and continue" }),
     );
     expect(
-      within(dialog).getByText("Choose an approach before continuing."),
+      within(dialog).getByText("Write your approach before continuing."),
     ).toBeTruthy();
-    fireEvent.click(within(dialog).getAllByRole("radio")[0]!);
-    fireEvent.click(screen.getByRole("button", { name: "Home" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Answer" }));
-    dialog = await screen.findByRole("dialog", { name: "Decisions required" });
-    expect(
-      (within(dialog).getAllByRole("radio")[0] as HTMLInputElement).checked,
-    ).toBe(true);
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Save and continue" }),
-    );
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Let it decide" }),
-    );
     fireEvent.change(
       within(dialog).getByRole("textbox", { name: "Your approach" }),
       { target: { value: "Use thirty seconds and document it." } },
     );
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Save and continue" }),
-    );
-    dialog = await screen.findByRole("dialog", {
-      name: "Confirm your decisions",
-    });
-    fireEvent.click(
-      within(dialog).getAllByRole("button", { name: "edit" })[2]!,
-    );
+    // Left and come back: the answer is still here and still unsent.
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Answer" }));
+    dialog = await screen.findByRole("dialog", { name: "Decisions required" });
+    expect(
+      (
+        within(dialog).getByRole("textbox", {
+          name: "Your approach",
+        }) as HTMLTextAreaElement
+      ).value,
+    ).toBe("Use thirty seconds and document it.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Let it decide" }));
+    dialog = await screen.findByRole("dialog", { name: "Confirm your decisions" });
+    fireEvent.click(within(dialog).getAllByRole("button", { name: "edit" })[0]!);
     fireEvent.change(screen.getByRole("textbox", { name: "Your approach" }), {
       target: { value: "Use one minute and document it." },
     });
@@ -180,7 +170,7 @@ describe("interactive desktop flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm and resume" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(async () => {
-      const workspace = await previewBridge.request({ kind: "snapshot" });
+      const workspace = await sampleBridge.request({ kind: "snapshot" });
       expect(workspace.tasks.find((task) => task.ticket.key === "PRB-412")?.ticket.state)
         .toBe("pr_open");
     }, { timeout: 5000 });
@@ -210,18 +200,16 @@ describe("interactive desktop flows", () => {
   });
 
   it("never presents a completed local-only run as a published pull request", async () => {
-    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
     const row = workspace.tasks.find((row) => row.ticket.key === "PRB-377")!;
-    delete row.summary;
     row.ticket.delivery = {
       ...row.ticket.delivery,
       state: "none",
       pull_request_url: null,
       pull_request_number: null,
     };
-    workspace.mode = "desktop";
     workspace.tasks = [row];
-    const detail = await previewBridge.request({
+    const detail = await sampleBridge.request({
       kind: "detail",
       repoId: row.repoId,
       key: row.ticket.key,
@@ -288,14 +276,13 @@ describe("interactive desktop flows", () => {
   )(
     "offers recovery for an idle $state task and preserves an active $outcome run",
     async ({ state, outcome }) => {
-      const workspace = await previewBridge.request({ kind: "snapshot" });
+      const workspace = await sampleBridge.request({ kind: "snapshot" });
       const row = workspace.tasks[0]!;
-      const detail = await previewBridge.request({
+      const detail = await sampleBridge.request({
         kind: "detail",
         repoId: row.repoId,
         key: row.ticket.key,
       });
-      workspace.mode = "desktop";
       detail.ticket.state = state;
       detail.ticket.approved_at = new Date().toISOString();
       workspace.jobs = outcome === "unrecorded" ? [] : [{
@@ -346,20 +333,17 @@ describe("interactive desktop flows", () => {
   it.each(["failed", "unrecorded", "running", "stopping"] as const)(
     "uses the same recovery state on Home and the loop after a %s run",
     async (outcome) => {
-      const workspace = await previewBridge.request({ kind: "snapshot" });
+      const workspace = await sampleBridge.request({ kind: "snapshot" });
       const row = workspace.tasks.find((task) => task.ticket.key === "PRB-398")!;
       const newer = workspace.tasks.find((task) => task.ticket.key === "PRB-421")!;
-      const detail = structuredClone(await previewBridge.request({
+      const detail = structuredClone(await sampleBridge.request({
         kind: "detail", repoId: row.repoId, key: row.ticket.key,
       }));
-      workspace.mode = "desktop";
       workspace.titles = {};
       row.ticket.state = "provisioning";
       row.ticket.updated_at = "2026-09-01T00:00:00.000Z";
       newer.ticket.state = "ready";
       newer.ticket.updated_at = "2026-09-09T00:00:00.000Z";
-      delete row.summary;
-      delete newer.summary;
       workspace.tasks = [newer, row];
       workspace.jobs = outcome === "unrecorded" ? [] : [{
         id: "home-run",
@@ -402,17 +386,15 @@ describe("interactive desktop flows", () => {
   it.each(["changes_requested", "pr_open", "provisioning"] as const)(
     "keeps canonical %s routing when an earlier run job failed",
     async (state) => {
-      const workspace = await previewBridge.request({ kind: "snapshot" });
+      const workspace = await sampleBridge.request({ kind: "snapshot" });
       const row = workspace.tasks.find((task) => task.ticket.key === "PRB-412")!;
       const detail = structuredClone(decisionDetail);
       const attempt = detail.attempts.at(-1)!;
       if (!attempt.review?.findings.some((finding) => finding.closure === "human"))
         throw new Error("The fixture must carry a recorded human decision");
       const question = attempt.review.findings[0]!.statement;
-      workspace.mode = "desktop";
       workspace.titles = {};
       workspace.tasks = [row];
-      delete row.summary;
       row.ticket.state = state;
       row.ticket.delivery.pull_request_url = null;
       detail.ticket = row.ticket;
@@ -460,35 +442,12 @@ describe("interactive desktop flows", () => {
     },
   );
 
-  it.each(["PRB-398", "PRB-404"])(
-    "preserves the %s preview activity when no native job exists",
-    async (key) => {
-      const workspace = await previewBridge.request({ kind: "snapshot" });
-      const row = workspace.tasks.find((task) => task.ticket.key === key)!;
-      const detail = structuredClone(await previewBridge.request({
-        kind: "detail", repoId: row.repoId, key,
-      }));
-      workspace.mode = "preview";
-      workspace.jobs = [];
-      workspace.tasks = [row];
-      if (!row.summary?.description || !detail.sample?.current)
-        throw new Error("The activity preview must retain its supplied presentation");
-      mountTaskFromHome(workspace, row.repoId, detail);
-      expect(screen.getByText(row.summary.description)).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Review and recover" })).toBeNull();
-      expect(screen.queryByText("1 ticket needs action")).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Watch" }));
-      expect(screen.getByRole("heading", { name: detail.sample.current })).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Review and recover" })).toBeNull();
-    },
-  );
-
   /** Starts the sample loop on a ticket, and stops it when the test is done with it. */
   async function runInProgress(key: string) {
-    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
     const row = workspace.tasks.find((task) => task.ticket.key === key)!;
-    const detail = await previewBridge.request({ kind: "detail", repoId: row.repoId, key });
-    const job = await previewBridge.request({
+    const detail = await sampleBridge.request({ kind: "detail", repoId: row.repoId, key });
+    const job = await sampleBridge.request({
       kind: "run", repoId: row.repoId, key, digest: detail.digest,
       approve: true, publish: false, resumeFrom: null,
     });
@@ -496,8 +455,8 @@ describe("interactive desktop flows", () => {
       row, job,
       // The sample loop settles itself; a stop after that is refused as it is by the host, so only a live one is stopped.
       stop: async () => {
-        const live = (await previewBridge.request({ kind: "snapshot" })).jobs.find((entry) => entry.id === job.id && isLive(entry));
-        if (live) await previewBridge.request({ kind: "cancel", jobId: job.id });
+        const live = (await sampleBridge.request({ kind: "snapshot" })).jobs.find((entry) => entry.id === job.id && isLive(entry));
+        if (live) await sampleBridge.request({ kind: "cancel", jobId: job.id });
       },
     };
   }
@@ -515,7 +474,7 @@ describe("interactive desktop flows", () => {
     fireEvent.click(start);
     await screen.findByText("Drafting your acceptance criteria");
     // Both are in flight: the run was never in the way of the drafting.
-    const live = (await previewBridge.request({ kind: "snapshot" })).jobs
+    const live = (await sampleBridge.request({ kind: "snapshot" })).jobs
       .filter((entry) => ["running", "stopping"].includes(entry.state));
     expect(live.map((entry) => entry.kind).sort()).toEqual(["draft", "run"]);
     expect(live.some((entry) => entry.id === running.job.id)).toBe(true);
@@ -525,9 +484,9 @@ describe("interactive desktop flows", () => {
 
   it("refuses a second run while one is going, and says which one is in the way (SCP-335)", async () => {
     const running = await runInProgress("PRB-404");
-    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
     const row = workspace.tasks.find((task) => task.ticket.key === "PRB-421")!;
-    const detail = structuredClone(await previewBridge.request({
+    const detail = structuredClone(await sampleBridge.request({
       kind: "detail", repoId: row.repoId, key: row.ticket.key,
     }));
     const state = row.ticket.state;
@@ -553,7 +512,7 @@ describe("interactive desktop flows", () => {
       "Run engineering loop is already running. Wait for it to finish or stop it before starting this one.",
     )).toBeTruthy();
     // The refused run left the ticket where it was.
-    const after = (await previewBridge.request({ kind: "snapshot" })).tasks
+    const after = (await sampleBridge.request({ kind: "snapshot" })).tasks
       .find((task) => task.ticket.key === "PRB-421")!;
     expect(after.ticket.state).toBe(state);
     await running.stop();

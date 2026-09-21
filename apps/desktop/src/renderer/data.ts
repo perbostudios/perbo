@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isLive } from "../shared/jobs.js";
 import { useEffect } from "react";
 import type { DesktopBridge, Request } from "../shared/protocol.js";
-import { previewBridge } from "./preview.js";
 import { workspaceRefresh } from "./workspace-refresh.js";
 
 const missingHost: DesktopBridge = {
@@ -15,9 +14,13 @@ const missingHost: DesktopBridge = {
     return () => undefined;
   },
 };
-export const bridge: DesktopBridge =
-  window.perbo ??
-  (navigator.userAgent.includes("Electron/") ? missingHost : previewBridge);
+/**
+ * The one adapter slot. Preload fills it in Electron, the development preview
+ * page fills it with the sample host, and the test setup fills it under jsdom;
+ * with nothing in it there is no host to ask, and saying so is the only honest
+ * answer (D-097).
+ */
+export const bridge: DesktopBridge = window.perbo ?? missingHost;
 function useRefresh() {
   const client = useQueryClient();
   const refresh = workspaceRefresh(client, bridge);
@@ -69,13 +72,24 @@ export function useOutput(
 }
 /** What a card or row can say about a ticket's work; read on demand, never for the whole listing. */
 export function useTaskSummary(repoId: string, key: string, enabled = true) {
-  useRefresh();
+  const refresh = useRefresh();
   return useQuery({
     queryKey: ["summary", repoId, key],
-    queryFn: () => bridge.request({ kind: "taskSummary", repoId, key }),
+    queryFn: () => refresh.summary(repoId, key),
     networkMode: "always",
     enabled,
     staleTime: 30_000,
+  });
+}
+/** A plan's execution graph and what the run's records say about it (D-100, SCP-317). */
+export function useGraph(repoId: string, key: string | null) {
+  const refresh = useRefresh();
+  return useQuery({
+    queryKey: ["graph", repoId, key],
+    queryFn: () => refresh.graph(repoId, key ?? ""),
+    networkMode: "always",
+    enabled: key !== null,
+    staleTime: 1000,
   });
 }
 /** The month's ledger and each provider's own account of its plan. Read when asked, never on a timer (S6E). */

@@ -397,6 +397,14 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Changes if: edits are lost, a result lands in another session, or an admission is duplicated.
 - ADR: [ADR-0034](adr/0034-desktop-editing-and-workspace-projection.md).
 
+### D-NEW-desktop-sample-host — The desktop's sample records are a test double, not a shipped mode
+
+- Owner: Founder
+- Decision: the adapter that answers the desktop's request table from sample records is a development and test surface, `src/sample-host/`, and the packaged renderer does not contain it. The tests are driven against it under jsdom and the design preview is `preview.html`, a page Vite's production build has no entry for; the renderer knows one adapter slot, `window.perbo`, filled by preload in Electron, by that page in a browser and by the test setup under jsdom. It answers the same Request table the host answers and is held to it by a conformance suite that runs one contract against both. The protocol carries no field only the sample writes: a screen renders one reply shape, whichever adapter answered.
+- Why: a double the product ships is a second implementation of every screen's data, and the fields it added — a mode flag, a curated description, a progress figure — are things the product cannot show, against "nothing shown is invented" ([D-097](11-open-decisions.md)). Held to one table by a suite that runs on both, the preview is evidence about the app rather than a picture of it.
+- Changes if: the preview needs to show something the host cannot answer, which is the point at which it has stopped standing in for the host.
+- ADR: [ADR-0033](adr/0033-focrux-local-desktop-and-subscription-providers.md), [ADR-0034](adr/0034-desktop-editing-and-workspace-projection.md).
+
 ### D-097 — Perbo UI v2; the phone's surfaces follow pairing
 
 - Owner: Founder

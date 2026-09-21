@@ -5,7 +5,7 @@ import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-
 import { App } from "../src/renderer/shell/App.js";
 import { CreateContext } from "../src/renderer/shell/create.js";
 import { HomePage } from "../src/renderer/tasks/HomePage.js";
-import { previewBridge } from "../src/renderer/preview.js";
+import { sampleBridge } from "../src/sample-host/bridge.js";
 import { bridge } from "../src/renderer/data.js";
 import { resetRailSize } from "../src/renderer/shell/rail-size.js";
 import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests } from "../src/shared/shortcuts.js";
@@ -113,7 +113,7 @@ describe("Create in the rail (SCP-334)", () => {
     const outcome = await screen.findByLabelText("Outcome");
     fireEvent.change(outcome, { target: { value: "Every export carries the month it covers." } });
     await waitFor(async () => {
-      const drafts = (await previewBridge.request({ kind: "snapshot" })).drafts ?? [];
+      const drafts = (await sampleBridge.request({ kind: "snapshot" })).drafts ?? [];
       expect(drafts.map((draft) => draft.outcome)).toContain("Every export carries the month it covers.");
     });
     // A restart: a fresh renderer over the same persisted sessions.
@@ -145,9 +145,9 @@ describe("Create in the rail (SCP-334)", () => {
   });
 
   it("shows a discarded session's link as discarded, with nothing to edit", async () => {
-    const workspace = await previewBridge.request({ kind: "snapshot" });
-    const session = await previewBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId: workspace.repositories[0]!.id } });
-    await previewBridge.request({ kind: "editingDiscard", id: session.id, revision: session.revision });
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
+    const session = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId: workspace.repositories[0]!.id } });
+    await sampleBridge.request({ kind: "editingDiscard", id: session.id, revision: session.revision });
     location.hash = `planning/${session.id}/spec`;
     mount();
     await screen.findByText("This planning was discarded");
@@ -158,8 +158,8 @@ describe("Create in the rail (SCP-334)", () => {
   });
 
   it("lists a session the picker just opened first, before the host's refresh lands", async () => {
-    const workspace = await previewBridge.request({ kind: "snapshot" });
-    const session = await previewBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId: workspace.repositories[0]!.id } });
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
+    const session = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId: workspace.repositories[0]!.id } });
     const stale = { ...workspace, drafts: [{ id: "older", repoId: session.repoId, key: null, outcome: "An older draft", phase: "editing" as const }] };
     const seeded = withDraft(stale, session);
     expect(seeded.drafts!.map((draft) => draft.id)).toEqual([session.id, "older"]);
@@ -187,7 +187,7 @@ describe("Create in the rail (SCP-334)", () => {
   });
 
   it("keeps Create out of Home's header and in its empty state", async () => {
-    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
     const open = vi.fn();
     render(
       <QueryClientProvider client={client}>
@@ -214,11 +214,11 @@ describe("Create in the rail (SCP-334)", () => {
 /**
  * The Explorer pane (SCP-318, D-101): the repository's tracked files, one of
  * them read-only, and the marks that change the draft's own scope. Driven here
- * through the real renderer against the browser preview host, which answers
- * the same requests the native host does.
+ * through the real renderer against the sample host, which answers the same
+ * requests the native host does.
  */
 const sessionId = (): string => location.hash.split("/")[1] ?? "";
-const session = () => previewBridge.request({ kind: "editingRead", id: sessionId() });
+const session = () => sampleBridge.request({ kind: "editingRead", id: sessionId() });
 const treeRow = (name: RegExp | string) => screen.getByRole("treeitem", { name });
 const filter = () => screen.getByLabelText("Filter files");
 const markAs = (label: string) => fireEvent.click(screen.getByRole("tab", { name: label }));
@@ -351,7 +351,7 @@ describe("always prohibiting a path from the Explorer pane (SCP-318)", () => {
     expect(within(standing).getByText("this draft")).toBeTruthy();
     const added = async () =>
       (
-        await previewBridge.request({ kind: "explorerList", repoId: (await session()).repoId })
+        await sampleBridge.request({ kind: "explorerList", repoId: (await session()).repoId })
       ).standing.find((entry) => entry.path === "packages/queue/src/generated/**");
     expect((await added())?.draft).toBe(sessionId());
     const edits = screen.getByRole("region", { name: "Marks in this draft" });
@@ -411,8 +411,8 @@ describe("the Explorer pane's preview (SCP-318)", () => {
 /**
  * SCP-336: the Spec pane holds the spec, in the repository (D-103).
  *
- * Everything here runs against the browser preview host, which keeps the
- * sample repository's `specs/` folder where it keeps its editing sessions, and
+ * Everything here runs against the sample host, which keeps the sample
+ * repository's `specs/` folder where it keeps its editing sessions, and
  * assigns requirement ids with `@perbo/planning`'s own code.
  */
 describe("the Spec pane (SCP-336)", () => {
@@ -514,7 +514,7 @@ describe("the Spec pane (SCP-336)", () => {
   /**
    * SCP-321: the pane completes `@Symbol` from the repository's exported names
    * and marks the ones the index does not hold (D-015). The names come from the
-   * host; the browser preview answers the same request from the sample
+   * host; the sample host answers the same request from the sample
    * repositories' own stand-in index.
    */
   describe("naming code in the spec", () => {
@@ -716,15 +716,15 @@ describe("the Spec pane (SCP-336)", () => {
   describe("when the spec moves under the pane", () => {
     /** The session the pane is open on, for a second writer to write through. */
     const openSession = async (): Promise<string> => {
-      const drafts = (await previewBridge.request({ kind: "drafts" })) ?? [];
+      const drafts = (await sampleBridge.request({ kind: "drafts" })) ?? [];
       return drafts[0]!.id;
     };
     /** Another writer — the interview — reading the file and writing one section. */
     const elsewhere = async (over: { outcome?: string; notes?: string }): Promise<void> => {
       const id = await openSession();
-      const session = await previewBridge.request({ kind: "editingRead", id });
-      const read = await previewBridge.request({ kind: "specRead", id });
-      const reply = await previewBridge.request({
+      const session = await sampleBridge.request({ kind: "editingRead", id });
+      const read = await sampleBridge.request({ kind: "specRead", id });
+      const reply = await sampleBridge.request({
         kind: "specSave",
         id,
         repoId: session.repoId,
@@ -1141,8 +1141,8 @@ describe("the Spec pane (SCP-336)", () => {
 
       // The interview reads the file — with the three requirements' own ids
       // already in it — and appends one more of its own.
-      const beforeInterview = await previewBridge.request({ kind: "specRead", id });
-      const interviewReply = await previewBridge.request({
+      const beforeInterview = await sampleBridge.request({ kind: "specRead", id });
+      const interviewReply = await sampleBridge.request({
         kind: "specSave",
         id,
         repoId: (await session()).repoId,
@@ -1176,7 +1176,7 @@ describe("the Spec pane (SCP-336)", () => {
       // requirements now disagree about what one id means.
       expect(screen.queryByRole("alert")).toBeNull();
 
-      const after = await previewBridge.request({ kind: "specRead", id });
+      const after = await sampleBridge.request({ kind: "specRead", id });
       const ids = after.requirements.map((each) => each.id);
       expect(new Set(ids).size).toBe(ids.length);
       expect(after.requirements.map((each) => each.text)).toEqual(
@@ -1259,7 +1259,7 @@ describe("the Spec pane (SCP-336)", () => {
     await write(SPEC);
     fireEvent.click(await screen.findByRole("button", { name: "Generate plan" }));
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    const drafts = (await previewBridge.request({ kind: "drafts" })) ?? [];
+    const drafts = (await sampleBridge.request({ kind: "drafts" })) ?? [];
     location.hash = `planning/${drafts[0]!.id}/spec`;
     fireEvent.click(await screen.findByRole("button", { name: "Start over from the spec…" }));
     const dialog = await screen.findByRole("dialog", { name: "Start over from the spec?" });
@@ -1345,7 +1345,7 @@ describe("the Spec pane (SCP-336)", () => {
     expect(location.hash).toMatch(/^#task\//);
 
     // Back in planning, each requirement names the node its criteria sit in.
-    const drafts = (await previewBridge.request({ kind: "drafts" })) ?? [];
+    const drafts = (await sampleBridge.request({ kind: "drafts" })) ?? [];
     const planning = drafts[0]!;
     location.hash = `planning/${planning.id}/spec`;
     const rows = within(await screen.findByRole("list", { name: "Requirements" }))
@@ -1361,11 +1361,11 @@ describe("the Spec pane (SCP-336)", () => {
     await write(SPEC);
     fireEvent.click(await screen.findByRole("button", { name: "Generate plan" }));
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    const drafts = (await previewBridge.request({ kind: "drafts" })) ?? [];
+    const drafts = (await sampleBridge.request({ kind: "drafts" })) ?? [];
     const planning = drafts[0]!;
     const key = planning.key!;
     // The number, not the record: the sample host hands back its live ticket.
-    const version = (await previewBridge.request({ kind: "detail", repoId: planning.repoId, key }))
+    const version = (await sampleBridge.request({ kind: "detail", repoId: planning.repoId, key }))
       .ticket.plan_version;
     location.hash = `planning/${planning.id}/spec`;
 
@@ -1375,7 +1375,7 @@ describe("the Spec pane (SCP-336)", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Keep editing" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /Start over/ })).toBeNull());
     expect(
-      (await previewBridge.request({ kind: "detail", repoId: planning.repoId, key })).ticket
+      (await sampleBridge.request({ kind: "detail", repoId: planning.repoId, key })).ticket
         .plan_version,
     ).toBe(version);
 
@@ -1389,21 +1389,21 @@ describe("the Spec pane (SCP-336)", () => {
     await waitFor(
       async () =>
         expect(
-          (await previewBridge.request({ kind: "detail", repoId: planning.repoId, key })).ticket
+          (await sampleBridge.request({ kind: "detail", repoId: planning.repoId, key })).ticket
             .plan_version,
         ).toBe(version + 1),
       { timeout: 5000 },
     );
     // The same ticket, never a second one.
-    const after = await previewBridge.request({ kind: "snapshot" });
+    const after = await sampleBridge.request({ kind: "snapshot" });
     expect(after.tasks.filter((row) => row.ticket.key === key)).toHaveLength(1);
   });
 });
 
 /**
  * SCP-316: the Graph pane curates the plan and approves it once (D-100,
- * D-101, D-104). Driven through the real renderer against the browser preview
- * host, which applies the same `GraphEditSchema` operations the CLI applies.
+ * D-101, D-104). Driven through the real renderer against the sample host,
+ * which applies the same `GraphEditSchema` operations the CLI applies.
  */
 describe("the Graph pane (SCP-316)", () => {
   const pane = (name: string) =>
@@ -1431,13 +1431,13 @@ describe("the Graph pane (SCP-316)", () => {
    * pane, and each test needs a ticket of its own to curate.
    */
   async function planned(): Promise<{ id: string; repoId: string; key: string }> {
-    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
     const repoId = workspace.repositories[0]!.id;
-    const opened = await previewBridge.request({
+    const opened = await sampleBridge.request({
       kind: "editingOpen",
       target: { kind: "fresh", repoId },
     });
-    await previewBridge.request({
+    await sampleBridge.request({
       kind: "specSave",
       id: opened.id,
       repoId,
@@ -1445,8 +1445,8 @@ describe("the Graph pane (SCP-316)", () => {
       sections: SECTIONS,
       base: NOTHING_YET,
     });
-    const current = await previewBridge.request({ kind: "editingRead", id: opened.id });
-    await previewBridge.request({
+    const current = await sampleBridge.request({ kind: "editingRead", id: opened.id });
+    await sampleBridge.request({
       kind: "editingSubmit",
       id: opened.id,
       revision: current.revision,
@@ -1456,7 +1456,7 @@ describe("the Graph pane (SCP-316)", () => {
     let key: string | null = null;
     await waitFor(
       async () => {
-        key = (await previewBridge.request({ kind: "editingRead", id: opened.id })).key;
+        key = (await sampleBridge.request({ kind: "editingRead", id: opened.id })).key;
         expect(key).not.toBeNull();
       },
       { timeout: 5000 },
@@ -1474,11 +1474,11 @@ describe("the Graph pane (SCP-316)", () => {
     return plan;
   }
   const graphOf = (plan: { repoId: string; key: string }) =>
-    previewBridge.request({ kind: "graphRead", repoId: plan.repoId, key: plan.key });
+    sampleBridge.request({ kind: "graphRead", repoId: plan.repoId, key: plan.key });
 
   it("approves the plan on the fixed binding, producing the contract the runner reads", async () => {
     const plan = await openGraph();
-    const detail = () => previewBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key });
+    const detail = () => sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key });
     expect((await detail()).ticket.approved_at).toBeNull();
     expect(screen.getByRole("button", { name: "Approve · start the loop" })).toBeTruthy();
     // ⇧⌘↵, which is fixed and cannot be rebound.
@@ -1487,7 +1487,7 @@ describe("the Graph pane (SCP-316)", () => {
     await waitFor(async () => expect((await detail()).ticket.approved_at).not.toBeNull());
     // The same request the contract screen sends: approve, then the loop.
     await waitFor(async () =>
-      expect((await previewBridge.request({ kind: "snapshot" })).jobs.some((job) => job.kind === "run")).toBe(true),
+      expect((await sampleBridge.request({ kind: "snapshot" })).jobs.some((job) => job.kind === "run")).toBe(true),
     );
   });
 
@@ -1561,7 +1561,7 @@ describe("the Graph pane (SCP-316)", () => {
 
   it("edits the text of a criterion proven by hand, keeping who proves it and why", async () => {
     const plan = await planned();
-    await previewBridge.request({
+    await sampleBridge.request({
       kind: "graphEdit",
       repoId: plan.repoId,
       key: plan.key,
@@ -1614,7 +1614,7 @@ describe("the Graph pane (SCP-316)", () => {
   it("replaces the plan from the spec only after the same confirmation the Spec pane asks for", async () => {
     const plan = await openGraph();
     const version = async (): Promise<number> =>
-      (await previewBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key })).ticket
+      (await sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key })).ticket
         .plan_version;
     const before = await version();
     fireEvent.click(screen.getByRole("button", { name: "Start over from the spec…" }));
@@ -1653,7 +1653,7 @@ describe("the Graph pane (SCP-316)", () => {
   it("approves a flat plan, which has criteria and no graph to curate", async () => {
     const plan = await planned();
     const edit = async (edit: GraphEdit) =>
-      previewBridge.request({ kind: "graphEdit", repoId: plan.repoId, key: plan.key, edit });
+      sampleBridge.request({ kind: "graphEdit", repoId: plan.repoId, key: plan.key, edit });
     await edit({ op: "delete_node", id: "node_2", move_criteria_to: "node_1", delete_criteria: [] });
     await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(1));
     await edit({ op: "delete_node", id: "node_1", move_criteria_to: null, delete_criteria: [] });
@@ -1662,7 +1662,7 @@ describe("the Graph pane (SCP-316)", () => {
     location.hash = `planning/${plan.id}/graph`;
     mount();
     await screen.findByText(/This plan is flat/);
-    const detail = () => previewBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key });
+    const detail = () => sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key });
     expect((await detail()).ticket.approved_at).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Approve · start the loop" }));
     await waitFor(async () => expect((await detail()).ticket.approved_at).not.toBeNull());
@@ -1697,7 +1697,7 @@ describe("the Graph pane (SCP-316)", () => {
     // Runs go one at a time, and the sample keeps one live for a while.
     const settled = async () =>
       expect(
-        (await previewBridge.request({ kind: "snapshot" })).jobs.some(
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.some(
           (job) => job.kind === "run" && ["running", "stopping"].includes(job.state),
         ),
       ).toBe(false);
@@ -1707,7 +1707,7 @@ describe("the Graph pane (SCP-316)", () => {
     await waitFor(
       async () =>
         expect(
-          (await previewBridge.request({ kind: "snapshot" })).tasks.some(
+          (await sampleBridge.request({ kind: "snapshot" })).tasks.some(
             (task) => task.ticket.key === "PRB-421" && task.ticket.state !== "plan_review",
           ),
         ).toBe(true),
@@ -1747,7 +1747,7 @@ describe("the Graph pane (SCP-316)", () => {
     const first = (await graphOf(plan)).criteria[0]!;
     expect(await screen.findByText(first.text)).toBeTruthy();
     // Somebody else's edit, straight through the host, as the interview makes one.
-    await previewBridge.request({
+    await sampleBridge.request({
       kind: "graphEdit",
       repoId: plan.repoId,
       key: plan.key,
@@ -1788,7 +1788,7 @@ describe("the Graph pane (SCP-316)", () => {
 
 /**
  * SCP-313: the interview docked beside every pane (D-102). The session here is
- * the browser preview's stand-in: no process, no provider and no repository
+ * the sample host's stand-in: no process, no provider and no repository
  * behind it, answering the same three requests the native host answers.
  */
 describe("the interview docked in planning mode (SCP-313)", () => {
@@ -1810,13 +1810,13 @@ describe("the interview docked in planning mode (SCP-313)", () => {
 
   /** One piece of planning with a spec, through the host rather than the Spec pane. */
   async function planning(): Promise<{ id: string; repoId: string }> {
-    const workspace = await previewBridge.request({ kind: "snapshot" });
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
     const repoId = workspace.repositories[0]!.id;
-    const opened = await previewBridge.request({
+    const opened = await sampleBridge.request({
       kind: "editingOpen",
       target: { kind: "fresh", repoId },
     });
-    await previewBridge.request({
+    await sampleBridge.request({
       kind: "specSave",
       id: opened.id,
       repoId,
@@ -1830,11 +1830,11 @@ describe("the interview docked in planning mode (SCP-313)", () => {
   /** That planning, and one turn already sent, so the chat has something in it. */
   async function spoken(): Promise<{ id: string; repoId: string }> {
     const plan = await planning();
-    await previewBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: plan.id });
-    await previewBridge.request({ kind: "interviewTurn", id: plan.id, text: "why two nodes?" });
+    await sampleBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: plan.id });
+    await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "why two nodes?" });
     await waitFor(async () =>
       expect(
-        (await previewBridge.request({ kind: "editingRead", id: plan.id })).conversation.some(
+        (await sampleBridge.request({ kind: "editingRead", id: plan.id })).conversation.some(
           (line) => line.line.kind === "refused",
         ),
       ).toBe(true),
@@ -1980,8 +1980,8 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     // The interview writes specs/<slug>/spec.md, so a planning with no slug
     // has nowhere to write. The person's own first message names it rather
     // than the turn being refused.
-    const workspace = await previewBridge.request({ kind: "snapshot" });
-    const opened = await previewBridge.request({
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
+    const opened = await sampleBridge.request({
       kind: "editingOpen",
       target: { kind: "fresh", repoId: workspace.repositories[0]!.id },
     });
@@ -1998,15 +1998,15 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     // for the next one.
     expect(await within(dock()).findByText(/Noted:/)).toBeTruthy();
     await waitFor(() => expect(composer().value).toBe(""));
-    const after = await previewBridge.request({ kind: "editingRead", id: opened.id });
+    const after = await sampleBridge.request({ kind: "editingRead", id: opened.id });
     expect(after.specSlug).toBe("add-a-dark-mode-toggle");
   });
 
   it("keeps the turn in the composer when no folder name can come from it", async () => {
     // A message with no letters or digits names nothing, so the refusal still
     // stands and retyping it is not the person's job.
-    const workspace = await previewBridge.request({ kind: "snapshot" });
-    const opened = await previewBridge.request({
+    const workspace = await sampleBridge.request({ kind: "snapshot" });
+    const opened = await sampleBridge.request({
       kind: "editingOpen",
       target: { kind: "fresh", repoId: workspace.repositories[0]!.id },
     });
@@ -2022,8 +2022,8 @@ describe("the interview docked in planning mode (SCP-313)", () => {
 
   it("takes the Undo off a card once a later edit is in the way", async () => {
     const session = await planning();
-    const current = await previewBridge.request({ kind: "editingRead", id: session.id });
-    await previewBridge.request({
+    const current = await sampleBridge.request({ kind: "editingRead", id: session.id });
+    await sampleBridge.request({
       kind: "editingSubmit",
       id: session.id,
       revision: current.revision,
@@ -2033,7 +2033,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     let key: string | null = null;
     await waitFor(
       async () => {
-        key = (await previewBridge.request({ kind: "editingRead", id: session.id })).key;
+        key = (await sampleBridge.request({ kind: "editingRead", id: session.id })).key;
         expect(key).not.toBeNull();
       },
       { timeout: 5000 },
@@ -2055,9 +2055,9 @@ describe("the interview docked in planning mode (SCP-313)", () => {
 
     // A hand edit lands after it, which D-100 says an undo may not reach past.
     const plan = { repoId: session.repoId, key: key! };
-    const graph = await previewBridge.request({ kind: "graphRead", ...plan });
+    const graph = await sampleBridge.request({ kind: "graphRead", ...plan });
     const second = graph.criteria[1]!;
-    await previewBridge.request({
+    await sampleBridge.request({
       kind: "graphEdit",
       ...plan,
       edit: {
@@ -2077,8 +2077,8 @@ describe("the interview docked in planning mode (SCP-313)", () => {
   it("opens the plan's history over the pane, with the chat still beside it", async () => {
     // A plan with an edit of each author, both through the one edit path.
     const session = await planning();
-    const current = await previewBridge.request({ kind: "editingRead", id: session.id });
-    await previewBridge.request({
+    const current = await sampleBridge.request({ kind: "editingRead", id: session.id });
+    await sampleBridge.request({
       kind: "editingSubmit",
       id: session.id,
       revision: current.revision,
@@ -2088,15 +2088,15 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     let key: string | null = null;
     await waitFor(
       async () => {
-        key = (await previewBridge.request({ kind: "editingRead", id: session.id })).key;
+        key = (await sampleBridge.request({ kind: "editingRead", id: session.id })).key;
         expect(key).not.toBeNull();
       },
       { timeout: 5000 },
     );
     const plan = { repoId: session.repoId, key: key! };
-    const drafted = await previewBridge.request({ kind: "graphRead", ...plan });
+    const drafted = await sampleBridge.request({ kind: "graphRead", ...plan });
     const second = drafted.criteria[1]!;
-    await previewBridge.request({
+    await sampleBridge.request({
       kind: "graphEdit",
       ...plan,
       edit: {
@@ -2106,19 +2106,19 @@ describe("the interview docked in planning mode (SCP-313)", () => {
         expected_verification: { kind: second.kind, assertion: second.assertion },
       },
     });
-    // The preview answers an edit as a job, so the hand edit is first in the
-    // log only once it has settled.
+    // The sample host answers an edit as a job, so the hand edit is first in
+    // the log only once it has settled.
     await waitFor(async () =>
       expect(
-        (await previewBridge.request({ kind: "graphRead", ...plan })).history,
+        (await sampleBridge.request({ kind: "graphRead", ...plan })).history,
       ).toHaveLength(1),
     );
-    await previewBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: session.id });
-    await previewBridge.request({ kind: "interviewTurn", id: session.id, text: "one" });
-    await previewBridge.request({ kind: "interviewTurn", id: session.id, text: "and make it 60 seconds" });
+    await sampleBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: session.id });
+    await sampleBridge.request({ kind: "interviewTurn", id: session.id, text: "one" });
+    await sampleBridge.request({ kind: "interviewTurn", id: session.id, text: "and make it 60 seconds" });
     await waitFor(async () =>
       expect(
-        (await previewBridge.request({ kind: "graphRead", ...plan })).history.map(
+        (await sampleBridge.request({ kind: "graphRead", ...plan })).history.map(
           (edit) => edit.author,
         ),
       ).toEqual(["you", "interview"]),
@@ -2170,7 +2170,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
  * scope does not cover, listed when a person asks for it, with each warning
  * turnable into the draft's own scope mark or the spec's own No-Go.
  *
- * Driven here through the real renderer against the browser preview host, which
+ * Driven here through the real renderer against the sample host, which
  * computes the same report from the same `@perbo/planning` code the native
  * host runs.
  */
@@ -2188,7 +2188,7 @@ describe("the Impact pane (SCP-320)", () => {
     fireEvent.click(within(picker).getByRole("button", { name: repository }));
     await screen.findByLabelText("Outcome");
     const opened = await session();
-    await previewBridge.request({
+    await sampleBridge.request({
       kind: "editingSave",
       id: opened.id,
       revision: opened.revision,
@@ -2277,7 +2277,7 @@ describe("the Impact pane (SCP-320)", () => {
     await openPane("Impact");
     await check();
     const noGos = async (): Promise<string> =>
-      (await previewBridge.request({ kind: "specRead", id: sessionId() })).sections.no_gos;
+      (await sampleBridge.request({ kind: "specRead", id: sessionId() })).sections.no_gos;
     // Every action on this pane is disabled while a save is out, so a click
     // fired straight after another would land on a disabled button and never
     // reach the append. Each one waits for the buttons to come back first.
@@ -2308,15 +2308,15 @@ describe("the Impact pane (SCP-320)", () => {
     await openPane("Impact");
     await check();
     const noGos = async (): Promise<string> =>
-      (await previewBridge.request({ kind: "specRead", id: sessionId() })).sections.no_gos;
+      (await sampleBridge.request({ kind: "specRead", id: sessionId() })).sections.no_gos;
     const button = (): HTMLButtonElement =>
       within(row("packages/auth/package.json")).getByRole("button", {
         name: "Add as a No-Go",
       }) as HTMLButtonElement;
 
     // Held so a second writer can land in between this action's own read and
-    // its save — the window `base` exists to cover. `bridge` and `previewBridge`
-    // are the same object in this browser preview, so the interview's own write
+    // its save — the window `base` exists to cover. `bridge` and `sampleBridge`
+    // are the same object under the sample host, so the interview's own write
     // goes through `original` directly rather than through the spy — otherwise
     // it would be held behind its own call and never land.
     let holding = true;
@@ -2371,7 +2371,7 @@ describe("the Impact pane (SCP-320)", () => {
       "textContent",
       expect.stringContaining("This planning has no spec yet") as unknown as string,
     );
-    expect((await previewBridge.request({ kind: "specRead", id: sessionId() })).slug).toBeNull();
+    expect((await sampleBridge.request({ kind: "specRead", id: sessionId() })).slug).toBeNull();
   });
 
   it("re-derives on each ask, so Check again answers the draft as it stands now", async () => {
@@ -2382,7 +2382,7 @@ describe("the Impact pane (SCP-320)", () => {
     // asked for again — it is a parse of the whole tree, not a subscription —
     // so nothing here has changed yet.
     const opened = await session();
-    await previewBridge.request({
+    await sampleBridge.request({
       kind: "editingSave",
       id: opened.id,
       revision: opened.revision,
@@ -2409,7 +2409,7 @@ describe("the Impact pane (SCP-320)", () => {
         mutations: { retry: false },
       },
     });
-    const asked = vi.spyOn(previewBridge, "request");
+    const asked = vi.spyOn(sampleBridge, "request");
     const runs = (): number =>
       asked.mock.calls.filter(([request]) => request.kind === "impactRead").length;
     try {

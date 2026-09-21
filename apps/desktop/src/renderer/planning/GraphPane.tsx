@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, Notice, cx } from "../ui/index.js";
 import { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS } from "@perbo/contracts/size";
 import type { GraphEdit } from "@perbo/contracts/graph-edit";
-import { bridge, errorMessage, useAction } from "../data.js";
+import { bridge, errorMessage, useAction, useGraph } from "../data.js";
 import { isLive } from "../../shared/jobs.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { GraphInspector, SplitDialog } from "./GraphInspector.js";
@@ -82,13 +82,7 @@ export function GraphPane({
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const graph = useQuery({
-    queryKey: ["graph", repoId, key],
-    queryFn: () => bridge.request({ kind: "graphRead", repoId, key: key ?? "" }),
-    networkMode: "always",
-    enabled: key !== null,
-    staleTime: 1000,
-  });
+  const graph = useGraph(repoId, key);
   const view: GraphView | undefined = graph.data;
 
   /**

@@ -24,7 +24,7 @@ import { displayKey } from "./ticket-workspace.js";
 
 export function ReviewScreen(context: TaskContext) {
   const { detail, repoId, show, navigate } = context;
-  const { ticket, criteria, latest, busy, sample, elapsed, projection } =
+  const { ticket, criteria, latest, busy, elapsed, projection } =
     taskRecords(context);
   const [table, setTable] = useState(false),
     [feedback, setFeedback] = useState<string | null>(null),
@@ -223,7 +223,7 @@ export function ReviewScreen(context: TaskContext) {
                 className="run-facts"
                 rows={[
                   ["Total spent", costLabel(detail)],
-                  ["Time elapsed", sample?.elapsed ?? elapsed],
+                  ["Time elapsed", elapsed],
                   ["Refinements", Math.max(0, detail.attempts.length - 1)],
                   ["Diff", (latest?.changes.length ?? 0) + " files"],
                 ]}
@@ -356,7 +356,7 @@ export function ReviewScreen(context: TaskContext) {
 }
 export function OutputScreen(context: TaskContext) {
   const { detail, repoId, show } = context,
-    { ticket, jobs, latest, sample } = taskRecords(context);
+    { ticket, jobs, latest } = taskRecords(context);
   const [tab, setTab] = useState("Transcript"),
     [copied, setCopied] = useState(false),
     [follow, setFollow] = useState(true);
@@ -366,10 +366,9 @@ export function OutputScreen(context: TaskContext) {
     jobs.at(-1)?.log ??
     "No desktop command output has been recorded for this task.";
   const recorded = retainedOutput(output.data?.transcript);
-  const transcript = sample?.transcript ?? recorded.entries;
+  const transcript = recorded.entries;
   const terminal =
-    sample?.terminal ??
-    ([
+    [
       recorded.terminal,
       latest?.checks
         .map((check) => check.detail)
@@ -377,8 +376,7 @@ export function OutputScreen(context: TaskContext) {
         .join("\n\n"),
     ]
       .filter(Boolean)
-      .join("\n\n") ||
-      log);
+      .join("\n\n") || log;
   return (
     <section className="screen screen--output" data-screen="s12b">
       <PageHeader
@@ -453,12 +451,7 @@ export function OutputScreen(context: TaskContext) {
         {tab !== "Changes" && (
           <div className="output-terminal">
             <SectionLabel>
-              Terminal ·{" "}
-              {sample
-                ? "sample output"
-                : latest
-                  ? "retained output"
-                  : "runner progress"}
+              Terminal · {latest ? "retained output" : "runner progress"}
             </SectionLabel>
             <pre
               className="terminal-output"
@@ -582,7 +575,6 @@ export function MergeScreen(context: TaskContext) {
       review,
       latest,
       repo,
-      sample,
       busy,
       elapsed,
     } = taskRecords(context);
@@ -680,7 +672,7 @@ export function MergeScreen(context: TaskContext) {
               · {latest?.changes.length ?? 0} files
             </span>
             <span className="mono muted">
-              {costLabel(detail)} · {sample?.elapsed ?? elapsed} ·{" "}
+              {costLabel(detail)} · {elapsed} ·{" "}
               {Math.max(0, detail.attempts.length - 1)} refinements
             </span>
           </div>
@@ -740,12 +732,7 @@ export function MergeScreen(context: TaskContext) {
 export function CompletionScreen(context: TaskContext & { merged: boolean }) {
   const { detail, navigate, merged } = context,
     { repo, ticket } = taskRecords(context),
-    [seconds, setSeconds] = useState(() =>
-      context.workspace.mode === "preview" &&
-      new URLSearchParams(location.search).has("slow")
-        ? 8
-        : 3,
-    );
+    [seconds, setSeconds] = useState(3);
   useEffect(() => {
     const timer = setInterval(
       () => setSeconds((value) => Math.max(0, value - 1)),
