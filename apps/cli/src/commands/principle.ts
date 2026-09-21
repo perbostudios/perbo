@@ -36,12 +36,15 @@ they never widen scope, weaken security, or excuse a failing check.
 export const PRINCIPLE_VERBS = ["add", "list"] as const;
 export type PrincipleVerb = (typeof PRINCIPLE_VERBS)[number];
 
+/** Said the same way whether the text was left out or was only blank space. */
+const TEXT_REQUIRED = "principle add needs the principle's text as its one argument";
+
 export const PrincipleInputSchema = z.discriminatedUnion("verb", [
   z.strictObject({
     verb: z.literal("add"),
     target: StoreTargetSchema,
     /** What the product should do, as one sentence a later brief reads. */
-    text: z.string().trim().min(1, "principle add needs the principle's text as its one argument"),
+    text: z.string({ error: TEXT_REQUIRED }).trim().min(1, TEXT_REQUIRED),
   }),
   z.strictObject({ verb: z.literal("list"), target: StoreTargetSchema }),
 ]);
@@ -81,22 +84,26 @@ const FLAGS = {
   "--store": valueFlag(),
 } satisfies FlagTable;
 
+/**
+ * `add`'s line: one sentence, given as one argument.
+ *
+ * Text beginning with a dash is given after `--` instead, where nothing is
+ * read as a flag, and the words after it are joined back into the sentence the
+ * shell split them out of. The desktop cannot reach that form — it builds
+ * `principle add <answer>` and the host appends `--repo`, so dash-leading text
+ * arrives in flag position and is refused as a flag nothing offers (SCP-091).
+ */
 const ADD_GRAMMAR: Grammar<typeof FLAGS> = {
   command: "principle add",
   flags: FLAGS,
   positionals: {
-    min: 1,
+    min: 0,
     max: 1,
-    /**
-     * One argument, because the text is one sentence. Text beginning with a
-     * dash goes after `--`, which the desktop cannot reach: it appends
-     * `--repo` last, so what it records can never start with one (SCP-091).
-     */
     refusal:
-      'principle add needs the principle\'s text as its one argument, e.g. perbo principle add ' +
-      '"perbo list shows open tickets; finished ones need --all."',
+      'principle add takes the principle\'s text as one argument: quote it, e.g. perbo principle ' +
+      'add "perbo list shows open tickets; finished ones need --all."',
   },
-  afterDoubleDash: "positionals",
+  afterDoubleDash: "passthrough",
 };
 
 const LIST_GRAMMAR: Grammar<typeof FLAGS> = {
@@ -138,10 +145,14 @@ export const principleCommandLine: ReportCommand<
     if (verb !== "add" && verb !== "list") throw new UsageError(VERB_USAGE);
     const line = parseArgv(verb === "list" ? LIST_GRAMMAR : ADD_GRAMMAR, argv.slice(1));
     const target = { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null };
+    // The one argument, or the words after `--` as the sentence they spell.
+    // Absent either, the schema says what `add` needs.
+    const text =
+      line.positionals[0] ?? (line.passthrough.length === 0 ? undefined : line.passthrough.join(" "));
     return {
       input: readInput(
         PrincipleInputSchema,
-        verb === "list" ? { verb, target } : { verb, target, text: line.positionals[0] },
+        verb === "list" ? { verb, target } : { verb, target, text },
       ),
       output: { json: false },
     };

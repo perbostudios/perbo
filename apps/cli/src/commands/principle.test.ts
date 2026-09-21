@@ -56,14 +56,38 @@ describe("perbo principle (D-065's ratchet)", () => {
   });
 
   it("takes the text as one argument, after -- where it starts with a dash", () => {
-    expect(principleCommandLine.read(["add", "--", "--all is how settled work is listed."]).input).toEqual({
+    const recorded = {
       verb: "add",
       target: { repo: ".", store: null },
       text: "--all is how settled work is listed.",
-    });
-    // Two words after `--` are two arguments, and the text is one.
-    expect(() => principleCommandLine.read(["add", "--", "--all", "is one flag"])).toThrow(
+    };
+    expect(
+      principleCommandLine.read(["add", "--", "--all is how settled work is listed."]).input,
+    ).toEqual(recorded);
+    // A sentence typed unquoted after `--` reaches the command as words. They
+    // are the one sentence again, so `--` is the whole of the rule: nothing
+    // after it is read as a flag, and nothing after it has to be quoted.
+    expect(
+      principleCommandLine.read([
+        "add",
+        "--",
+        "--all",
+        "is",
+        "how",
+        "settled",
+        "work",
+        "is",
+        "listed.",
+      ]).input,
+    ).toEqual(recorded);
+    expect(() => principleCommandLine.read(["add", "--"])).toThrow(
       /principle add needs the principle's text as its one argument/,
+    );
+  });
+
+  it("refuses two arguments before --, because the text is one sentence", () => {
+    expect(() => principleCommandLine.read(["add", "a refusal", "is better"])).toThrow(
+      /principle add takes the principle's text as one argument: quote it/,
     );
   });
 
