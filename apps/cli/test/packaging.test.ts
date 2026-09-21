@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildCli, removeStagedBundles } from "../src/test-support/open-build.js";
+import { buildCli, removeStagedBundles } from "../src/test-support/built-cli.js";
 import { PACKAGE_ROOT, REPO_ROOT } from "../src/test-support/paths.js";
 
 /**

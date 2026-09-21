@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { COMMAND_NAMES } from "../src/command-line/names.js";
-import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/open-build.js";
+import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/built-cli.js";
 
 /**
  * The CLI's command table, run as a program and asked rather than read off the
@@ -11,10 +11,10 @@ import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/o
  */
 
 /** The six commands that work against a repository with nothing admitted, named here rather than imported from the code under test. */
-const OPEN = ["doctor", "baseline", "review", "inspect", "verdict", "run"] as const;
+const WITHOUT_ADMISSION = ["doctor", "baseline", "review", "inspect", "verdict", "run"] as const;
 
 /** The twelve that build history across machines, and `index`, likewise. */
-const CLOSED = [
+const WITH_HISTORY = [
   "admit",
   "approve",
   "edit",
@@ -69,7 +69,7 @@ function offered(help: string): string[] {
 // whatever vitest's default would do to a describe block that shares it.
 describe.sequential("the entry point", () => {
   it("names the same commands the code's full set carries, so neither drifts alone", () => {
-    expect([...COMMAND_NAMES].sort()).toEqual([...OPEN, ...CLOSED].sort());
+    expect([...COMMAND_NAMES].sort()).toEqual([...WITHOUT_ADMISSION, ...WITH_HISTORY].sort());
   });
 
 
@@ -79,7 +79,7 @@ describe.sequential("the entry point", () => {
   // take about a minute on the loaded machine SCP-191 measures against, so the
   // budget is that with room, and it grows as the table does.
   it("carries all nineteen commands", () => {
-    for (const command of [...OPEN, ...CLOSED]) {
+    for (const command of [...WITHOUT_ADMISSION, ...WITH_HISTORY]) {
       const help = invoke("main.js", [command, "--help"]);
       expect(help.code, `${command} --help`).toBe(0);
       expect(help.stderr).not.toMatch(/unknown command/);
@@ -89,6 +89,6 @@ describe.sequential("the entry point", () => {
   it("offers the thirteen in its help", () => {
     const help = invoke("main.js", ["--help"]);
     expect(help.code).toBe(0);
-    expect(offered(help.stderr)).toEqual(expect.arrayContaining([...CLOSED]));
+    expect(offered(help.stderr)).toEqual(expect.arrayContaining([...WITH_HISTORY]));
   }, 60_000);
 });

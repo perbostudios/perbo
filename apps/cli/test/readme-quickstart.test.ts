@@ -17,7 +17,7 @@ import { preflight, type PreflightRequest } from "@perbo/runner";
 import { parseReviewArgs } from "../src/commands/review/index.js";
 import { doctorCommandLine, executeCommandLine } from "../src/commands/run/index.js";
 import { COMMAND_NAMES } from "../src/command-line/names.js";
-import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/open-build.js";
+import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/built-cli.js";
 import { REPO_ROOT } from "../src/test-support/paths.js";
 import { runCommandLine } from "../src/command-line/terminal.js";
 
@@ -46,7 +46,7 @@ import { runCommandLine } from "../src/command-line/terminal.js";
  * build. This suite is already running inside an installed workspace, and a
  * second install would need the network. They are checked instead — the scripts
  * they name must exist in the manifests this tree ships — and the build they ask
- * for is done by `buildCli()`, the same compile every other open-build suite
+ * for is done by `buildCli()`, the same compile every other built-CLI suite
  * uses, whose output the README's `node apps/cli/dist/<file>.js` path is
  * resolved against. A README naming a built file that compile does not produce
  * fails here too.
@@ -529,7 +529,7 @@ beforeAll(() => {
   cliReadmeSection = quickStart(readFileSync(join(REPO_ROOT, "apps", "cli", "README.md"), "utf8"));
   quickStartSteps = steps(section);
   // The build the quick start's second step asks for, done the way every other
-  // open-build suite does it (see open-build.ts on why never `apps/cli/dist`).
+  // built-CLI suite does it (see built-cli.ts on why never `apps/cli/dist`).
   compiled = buildCli();
   repo = repository("checkout");
   home = mkdtempSync(join(scratch, "home-"));

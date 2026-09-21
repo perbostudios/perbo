@@ -43,7 +43,7 @@ that approved contract. Everything below is the detail.
 One source tree, one entry point ([`src/main.ts`](src/main.ts)), open (D-075):
 `apps/cli`'s own `build` bundles it into `dist/perbo.js`
 ([`tooling/package/bundle.mjs`](../../tooling/package/bundle.mjs)), and
-[`test/open-bundle.test.ts`](test/open-bundle.test.ts) reads the shipped bundle's own module graph to
+[`test/bundle-hosts.test.ts`](test/bundle-hosts.test.ts) reads the shipped bundle's own module graph to
 check it talks to the model provider the user pays for and to nothing of ours.
 `pnpm release:pack` stages the same bundle into the design-partner tarball
 ([`tooling/package/pack.mjs`](../../tooling/package/pack.mjs)).

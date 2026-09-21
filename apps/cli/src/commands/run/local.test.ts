@@ -48,7 +48,7 @@ import {
   writeTicket,
 } from "../../store/tickets.js";
 import { makeAttempt } from "../../test-support/attempt-fixture.js";
-import { buildCli, removeStagedBundles, spawnBuilt } from "../../test-support/open-build.js";
+import { buildCli, removeStagedBundles, spawnBuilt } from "../../test-support/built-cli.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 
@@ -1105,7 +1105,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
   /**
    * A `tsc` compile of the package plus one spawn of what it produced, on a
-   * machine also running a loop attempt — the 180s `full-entry.test.ts`
+   * machine also running a loop attempt — the 180s `entry-point.test.ts`
    * measured for the same build, plus the spawn deadline `spawnBuilt` already
    * enforces.
    */
