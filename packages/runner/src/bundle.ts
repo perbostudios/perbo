@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+  BUNDLE_MANIFESTS_DIR,
+  BUNDLE_OBJECTS_DIR,
   BundleIdSchema,
   RunBundleSchema,
   bundleId,
@@ -66,22 +68,22 @@ export class BundleStore {
   constructor(options: BundleStoreOptions) {
     this.root = resolve(options.root);
     this.retainContext = options.retainContext;
-    mkdirSync(join(this.root, "objects"), { recursive: true });
-    mkdirSync(join(this.root, "bundles"), { recursive: true });
+    mkdirSync(join(this.root, BUNDLE_OBJECTS_DIR), { recursive: true });
+    mkdirSync(join(this.root, BUNDLE_MANIFESTS_DIR), { recursive: true });
   }
 
   private putObject(body: string): { sha256: string; bytes: number } {
     const buffer = Buffer.from(body, "utf8");
     const sha256 = createHash("sha256").update(buffer).digest("hex");
     if (this.retainContext) {
-      const path = join(this.root, "objects", sha256);
+      const path = join(this.root, BUNDLE_OBJECTS_DIR, sha256);
       if (!existsSync(path)) writeFileSync(path, buffer);
     }
     return { sha256, bytes: buffer.length };
   }
 
   readObject(sha256: string): string | null {
-    const path = join(this.root, "objects", sha256);
+    const path = join(this.root, BUNDLE_OBJECTS_DIR, sha256);
     return existsSync(path) ? readFileSync(path, "utf8") : null;
   }
 
@@ -136,7 +138,7 @@ export class BundleStore {
       replayability_reason: replay.reason,
     } satisfies RunBundle);
 
-    const path = join(this.root, "bundles", `${bundle.bundle_id}.json`);
+    const path = join(this.root, BUNDLE_MANIFESTS_DIR, `${bundle.bundle_id}.json`);
     if (existsSync(path)) {
       // Immutable: a bundle id is a hash of what produced it, so a collision is
       // the same run written twice and rewriting it would be the one edit this
@@ -156,13 +158,13 @@ export class BundleStore {
    */
   read(bundleId: string): RunBundle | null {
     if (!BundleIdSchema.safeParse(bundleId).success) return null;
-    const path = join(this.root, "bundles", `${bundleId}.json`);
+    const path = join(this.root, BUNDLE_MANIFESTS_DIR, `${bundleId}.json`);
     if (!existsSync(path)) return null;
     return RunBundleSchema.parse(JSON.parse(readFileSync(path, "utf8")));
   }
 
   list(): RunBundle[] {
-    const dir = join(this.root, "bundles");
+    const dir = join(this.root, BUNDLE_MANIFESTS_DIR);
     if (!existsSync(dir)) return [];
     return readdirSync(dir)
       .filter((name) => name.endsWith(".json"))

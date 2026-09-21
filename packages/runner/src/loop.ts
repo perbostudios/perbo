@@ -1,8 +1,10 @@
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import {
+  configPath,
   limitFor,
   limitsForCredential,
+  STORE_DIRNAME,
   type GithubCredential,
   type IncompleteReviewPath,
   type NodeReview,
@@ -181,7 +183,7 @@ export function runLimits(config: TicketRunConfig): RunLimits {
     maxRounds,
     roundCeiling: 2 * maxRounds + 2,
     waitBoundMs: limitFor(config.limits, "wait_for_provider_ms"),
-    configPath: join(config.repository_root, ".perbo", "config.json"),
+    configPath: join(config.repository_root, STORE_DIRNAME, ...configPath()),
     ticketBudgetMicros: (credential) =>
       limitFor(limitsForCredential(config.limits, credential), "ticket_cost_micros"),
   };

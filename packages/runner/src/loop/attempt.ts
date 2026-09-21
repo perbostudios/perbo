@@ -1,8 +1,10 @@
 import { join } from "node:path";
 import {
+  configPath,
   EXECUTION_ATTEMPT_SCHEMA_VERSION,
   ExecutionAttemptSchema,
   limitFor,
+  STORE_DIRNAME,
   type AttemptWait,
   type CheckResult,
   type ExecutionAttempt,
@@ -67,7 +69,7 @@ export function withCeilingGuidance(
     reason: termination.reason,
     detail:
       `${termination.detail} — raise limits.limits.${resource} in ` +
-      `${join(config.repository_root, ".perbo", "config.json")}` +
+      `${join(config.repository_root, STORE_DIRNAME, ...configPath())}` +
       (current === null ? "" : ` (currently ${current})`),
   };
 }

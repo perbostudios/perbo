@@ -98,6 +98,7 @@ A `StopVerdicts` record per ticket carries the change's `blocks`/`escalates`/dec
     PRB-118.json                 the Ticket: state, history, delivery, scheduling
     PRB-118.contract.json        the PlanContract — immutable once approved
     PRB-118.draft.json           the draft: proposal, model provenance, edit history
+    PRB-118.approach.json        the approach: the order between the plan's nodes and the spec's No-Gos
   state/
     <ticket_id>.attempts.json    ExecutionAttempt[], appended on every run
     <ticket_id>.stops.json       StopVerdicts
@@ -108,4 +109,6 @@ A `StopVerdicts` record per ticket carries the change's `blocks`/`escalates`/dec
     <review_id>.review.json      a review with no admitted ticket behind it
 ```
 
-`admit` writes a ticket's three files together. `edit` rewrites `.contract.json` and `.draft.json` as a pair; `approve` seals the contract and sets `approved_at`. `run` appends to `attempts.json`, writes a bundle per planning, execution, review and delivery step under `bundles/`, and seals the change set and check results onto the attempt that produced them. `sync` rewrites the ticket's `delivery` record and `stops.json` from what `gh` reports, and walks the ticket's state from that evidence. `verdict` appends to `verdicts.json`; `principle add` appends to `principles.md`. `review` run against a change nobody admitted writes only under `reviews/`, keyed by its own review id rather than a ticket.
+`packages/contracts/src/store-layout.ts` is the code's one declaration of these paths: what a second process reads out of the store is named there and nowhere else.
+
+`admit` writes the ticket, its contract and its draft together, and the approach beside them where the plan has nodes or the spec states a No-Go. `edit` rewrites `.contract.json` and `.draft.json` as a pair; `approve` seals the contract and sets `approved_at`. `run` appends to `attempts.json`, writes a bundle per planning, execution, review and delivery step under `bundles/`, and seals the change set and check results onto the attempt that produced them. `sync` rewrites the ticket's `delivery` record and `stops.json` from what `gh` reports, and walks the ticket's state from that evidence. `verdict` appends to `verdicts.json`; `principle add` appends to `principles.md`. `review` run against a change nobody admitted writes only under `reviews/`, keyed by its own review id rather than a ticket.

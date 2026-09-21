@@ -1,37 +1,67 @@
+import {
+  STORE_DIRNAME,
+  approachPath,
+  attemptsPath as attemptsSegments,
+  bundleManifestsDir,
+  bundleObjectPath,
+  bundleObjectsDir,
+  configPath as configSegments,
+  contractPath,
+  draftPath,
+  principlesPath as principlesSegments,
+  ticketFilePath,
+  type StorePath,
+} from "@perbo/contracts";
 import { safePath } from "./paths.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
 /**
- * How the desktop spells the store the CLI keeps in a repository. One home, so
- * a surface that reads a record and a surface that writes one are reading and
- * writing the same file, and every one of them is resolved through `safePath`.
+ * How the desktop reaches the store the CLI keeps in a repository. One home,
+ * so a surface that reads a record and a surface that writes one are reading
+ * and writing the same file.
+ *
+ * `@perbo/contracts` names each record, which is what keeps the three
+ * processes over one store agreeing; what is here is the desktop's half —
+ * resolving one against the registered repository through `safePath`, which
+ * refuses a path that leaves the checkout or reaches its place through a link.
  */
+function storePath(repo: RegisteredRepository, segments: StorePath): string {
+  return safePath(repo, STORE_DIRNAME, ...segments);
+}
+
+const TICKET_FILE = {
+  ".json": ticketFilePath,
+  ".contract.json": contractPath,
+  ".draft.json": draftPath,
+  ".approach.json": approachPath,
+} as const;
+
 export function perboPath(repo: RegisteredRepository): string {
-  return safePath(repo, ".perbo");
+  return safePath(repo, STORE_DIRNAME);
 }
 export function configPath(repo: RegisteredRepository): string {
-  return safePath(repo, ".perbo", "config.json");
+  return storePath(repo, configSegments());
 }
 export function ticketPath(
   repo: RegisteredRepository,
   key: string,
-  suffix: ".json" | ".contract.json" | ".draft.json" | ".approach.json",
+  suffix: keyof typeof TICKET_FILE,
 ): string {
-  return safePath(repo, ".perbo", "tickets", `${key}${suffix}`);
+  return storePath(repo, TICKET_FILE[suffix](key));
 }
 /** Keyed by ticket id rather than key, as the runner writes it. */
 export function attemptsPath(repo: RegisteredRepository, ticketId: string): string {
-  return safePath(repo, ".perbo", "state", `${ticketId}.attempts.json`);
+  return storePath(repo, attemptsSegments(ticketId));
 }
 export function bundlesPath(repo: RegisteredRepository): string {
-  return safePath(repo, ".perbo", "bundles", "bundles");
+  return storePath(repo, bundleManifestsDir());
 }
 export function objectsPath(repo: RegisteredRepository): string {
-  return safePath(repo, ".perbo", "bundles", "objects");
+  return storePath(repo, bundleObjectsDir());
 }
 export function objectPath(repo: RegisteredRepository, sha256: string): string {
-  return safePath(repo, ".perbo", "bundles", "objects", sha256);
+  return storePath(repo, bundleObjectPath(sha256));
 }
 export function principlesPath(repo: RegisteredRepository): string {
-  return safePath(repo, ".perbo", "principles.md");
+  return storePath(repo, principlesSegments());
 }
