@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { scratchDirectories } from "@perbo/test-support";
+import { gitEnvironment, scratchDirectories } from "@perbo/test-support";
 import { judgeCommand } from "../src/admission.js";
 import { inspectCommand, inspectCommandWithCwd } from "../src/prohibited.js";
 import { UNKNOWN_CWD } from "../src/shell/index.js";
@@ -24,7 +24,7 @@ const git = (dir: string, ...args: string[]): string =>
   execFileSync("git", ["-C", dir, ...args], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+    env: gitEnvironment(),
   });
 
 const base = realpathSync(temporary("perbo-push-"));
