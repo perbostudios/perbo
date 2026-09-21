@@ -19,7 +19,7 @@ import { mcpCommandLine } from "./commands/mcp.js";
 import { runServeCommand } from "./commands/serve/index.js";
 import { syncCommandLine } from "./commands/sync.js";
 import { USAGE } from "./command-line/usage.js";
-import { runVerdictCommand } from "./commands/verdict/index.js";
+import { verdictCommandLine } from "./commands/verdict/index.js";
 
 /**
  * `perbo` (docs/04, "Review CLI contract", SCP-091).
@@ -52,7 +52,7 @@ export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
       case "inspect":
         return runCommandLine(inspectCommandLine, { argv: rest, streams, cwd });
       case "verdict":
-        return runVerdictCommand({ argv: rest, streams, cwd });
+        return runCommandLine(verdictCommandLine, { argv: rest, streams, cwd });
       case "run":
         return runExecuteCommand({ args: parseExecuteArgs(rest), streams, cwd });
       case "admit":

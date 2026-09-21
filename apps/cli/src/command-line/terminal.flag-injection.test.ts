@@ -9,7 +9,7 @@ import { mcpCommandLine } from "../commands/mcp.js";
 import { parseServeArgs } from "../commands/serve/index.js";
 import { stopsCommandLine } from "../commands/stops.js";
 import { syncCommandLine } from "../commands/sync.js";
-import { parseVerdictArgs } from "../commands/verdict/index.js";
+import { verdictCommandLine } from "../commands/verdict/index.js";
 
 /**
  * One home for every case where a value shaped like a flag becomes one.
@@ -104,7 +104,7 @@ describe("verdict and baseline", () => {
   it("does not let a note take a decision", () => {
     // Two positionals once the note is one value: the reference and `abc`,
     // which is the refusal a person needs rather than a recorded decision.
-    expect(() => parseVerdictArgs(["PRB-1", "--note", "--x=--endorse", "abc"])).toThrow(
+    expect(() => verdictCommandLine.read(["PRB-1", "--note", "--x=--endorse", "abc"]).input).toThrow(
       /exactly one review/,
     );
   });

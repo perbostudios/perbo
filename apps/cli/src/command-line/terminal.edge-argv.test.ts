@@ -8,7 +8,7 @@ import { principleCommandLine } from "../commands/principle.js";
 import { parseReviewArgs } from "../commands/review/index.js";
 import { parseExecuteArgs } from "../commands/run/index.js";
 import { indexCommandLine } from "../commands/symbol-index.js";
-import { parseVerdictArgs } from "../commands/verdict/index.js";
+import { verdictCommandLine } from "../commands/verdict/index.js";
 
 /**
  * Every command line built outside this package, and the input each one means.
@@ -202,7 +202,7 @@ describe("the desktop host", () => {
   });
 
   it("reads a verdict's decision, finding, note and author", () => {
-    const args = parseVerdictArgs([
+    const { input: args, output } = verdictCommandLine.read([
       KEY,
       "--endorse",
       "src/search/page.ts#paginate",
@@ -215,7 +215,8 @@ describe("the desktop host", () => {
       REPO,
     ]);
     expect(args.list).toBe(false);
-    expect(args).toMatchObject({ reference: KEY, json: true, repo: REPO });
+    expect(output.json).toBe(true);
+    expect(args).toMatchObject({ reference: KEY, target: { repo: REPO, store: null } });
     if (args.list) throw new Error("unreachable");
     expect(args).toMatchObject({
       decision: "endorse",
