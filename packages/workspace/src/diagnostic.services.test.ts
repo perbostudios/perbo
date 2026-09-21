@@ -2,7 +2,10 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { diagnose, verificationServiceNeed } from "./diagnostic.js";
-import { makeRepo } from "./test-support/repository.js";
+import { scratchDirectories } from "@perbo/test-support";
+import { workspaceRepository } from "./test-support/repository.js";
+
+const scratch = scratchDirectories("perbo-ws-");
 
 /**
  * Materialization copies files. It cannot start a database.
@@ -14,7 +17,7 @@ import { makeRepo } from "./test-support/repository.js";
  */
 
 function repoWith(scripts: Record<string, string>, extra: Record<string, unknown> = {}) {
-  const repo = makeRepo();
+  const repo = workspaceRepository(scratch);
   writeFileSync(
     join(repo.dir, "package.json"),
     JSON.stringify({ name: "x", scripts, ...extra }),
@@ -24,10 +27,10 @@ function repoWith(scripts: Record<string, string>, extra: Record<string, unknown
 
 describe("verificationServiceNeed", () => {
   it("names a verification command that itself starts a service", () => {
-    // One repository, rewritten per case. `makeRepo` runs git, and four of them
-    // for four readings of one `package.json` is four times the wall clock for
-    // no more evidence — which is how a case like this comes to sit against the
-    // default timeout on a loaded machine.
+    // One repository, rewritten per case. `workspaceRepository` runs git, and
+    // four of them for four readings of one `package.json` is four times the
+    // wall clock for no more evidence — which is how a case like this comes to
+    // sit against the default timeout on a loaded machine.
     const dir = repoWith({ test: "vitest run" }).dir;
     for (const script of [
       "docker compose up -d && vitest run",

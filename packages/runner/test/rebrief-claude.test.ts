@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import {
   attemptSettings,
   discardPreToolGuard,
@@ -10,7 +11,9 @@ import {
 } from "../src/pretool.js";
 import { briefStateBlock, readReinjections, reinjectedBrief } from "../src/brief.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { briefRecords, scratch } from "./support.js";
+import { briefRecords } from "../src/test-support/records.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * D-096 on Claude: after a compaction the executor, and each subagent, gets

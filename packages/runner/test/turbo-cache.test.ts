@@ -1,11 +1,13 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SecretIndex } from "@perbo/contracts";
 import { runPinnedChecks } from "../src/checks.js";
-import { scratch } from "./support.js";
+import { scratchDirectories } from "@perbo/test-support";
+import { initRepository } from "@perbo/test-support";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * A check runs on the attempt's tree, never on turbo's cache.
@@ -52,10 +54,6 @@ function turboBinary(): string {
   }
 }
 
-const git = (cwd: string, ...args: string[]): void => {
-  execFileSync("git", args, { cwd, stdio: "ignore" });
-};
-
 const write = (root: string, path: string, contents: string): void => {
   const file = join(root, ...path.split("/"));
   mkdirSync(join(file, ".."), { recursive: true });
@@ -95,12 +93,7 @@ function turboRepository(prefix: string): { dir: string; shared: string } {
     ].join("\n"),
   );
   write(dir, "shared/value.txt", "ok\n");
-  git(dir, "init", "-q", "-b", "main");
-  git(dir, "config", "user.name", "test");
-  git(dir, "config", "user.email", "test@example.com");
-  git(dir, "config", "commit.gpgsign", "false");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "first");
+  initRepository(dir, { message: "first" });
   return { dir, shared: join(dir, "shared", "value.txt") };
 }
 

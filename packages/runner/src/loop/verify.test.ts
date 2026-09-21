@@ -9,7 +9,8 @@ import type { SealResult } from "../seal.js";
 import { TicketRunConfigSchema } from "./config.js";
 import { Ledger } from "./ledger.js";
 import { refuseWidening, routeVerification, verifyRound } from "./verify.js";
-import { attempt, contract, finding, review, roundState } from "./test-support/fakes.js";
+import { finding, makeReview } from "../test-support/records.js";
+import { attempt, contract, roundState } from "./test-support/fakes.js";
 
 const verification = (overrides: Partial<ClosureVerification> = {}): ClosureVerification => ({
   all_closed: true,
@@ -300,7 +301,7 @@ describe("the bundle a closure verification leaves", () => {
         round: 1,
         remediationRound: 1,
         openFindings: [open, closedOne],
-        finalReview: review(),
+        finalReview: makeReview(),
       }),
       ledger,
       bundles,

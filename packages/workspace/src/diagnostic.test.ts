@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { diagnose, enclosingWorkspaceRoot } from "./diagnostic.js";
-import { makeRepo } from "./test-support/repository.js";
+import { workspaceRepository } from "./test-support/repository.js";
 
-const scratch = () => mkdtempSync(join(tmpdir(), "perbo-nest-"));
+const scratch = scratchDirectories("perbo-nest-");
 
 /** A directory tree `a/b/c` under `root`, returning the deepest directory. */
 function nest(root: string): string {
@@ -78,7 +78,7 @@ describe("enclosingWorkspaceRoot", () => {
 
 describe("diagnose with a worktree root", () => {
   it("names the workspace that would capture a nested worktree root, and what it costs", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const workspace = scratch();
     writeFileSync(join(workspace, "pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n");
     const root = join(workspace, "worktrees");
@@ -99,7 +99,7 @@ describe("diagnose with a worktree root", () => {
   });
 
   it("reports the nesting without refusing a repository that is otherwise well formed", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const workspace = scratch();
     writeFileSync(join(workspace, "pnpm-workspace.yaml"), "packages: []\n");
     const root = join(workspace, "worktrees");
@@ -137,7 +137,7 @@ describe("diagnose with a worktree root", () => {
   });
 
   it("says nothing about a worktree root it was not given", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const result = await diagnose({ checkout: repo.dir, repository_id: "repo_fixture" });
     expect(result.findings).toEqual([]);
     expect(result.materializable).toBe(true);

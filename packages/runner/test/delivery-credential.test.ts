@@ -3,7 +3,10 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { pushAttemptBranch } from "../src/delivery.js";
-import { SPAWN_TEST_TIMEOUT_MS, git, scratch } from "./support.js";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
+import { initBareRepository, initRepository } from "@perbo/test-support";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * What the runner's own push presents to GitHub (SCP-020, SCP-200).
@@ -40,23 +43,16 @@ afterEach(() => {
 
 /** A worktree on `BRANCH` with one commit, and a bare `origin` without it. */
 function fixture(): { work: string } {
-  const origin = scratch("perbo-credential-origin-");
-  git(origin, "init", "-q", "--bare", "-b", "main");
-  const work = scratch("perbo-credential-work-");
-  git(work, "init", "-q", "-b", "main");
-  git(work, "config", "user.name", "test");
-  git(work, "config", "user.email", "test@example.com");
-  git(work, "config", "commit.gpgsign", "false");
-  writeFileSync(join(work, "first.txt"), "first\n");
-  git(work, "add", "-A");
-  git(work, "commit", "-qm", "first");
-  git(work, "remote", "add", "origin", origin);
-  git(work, "push", "-q", "origin", "main");
-  git(work, "checkout", "-q", "-b", BRANCH);
-  writeFileSync(join(work, "mine.txt"), "mine\n");
-  git(work, "add", "-A");
-  git(work, "commit", "-qm", "mine");
-  return { work };
+  const origin = initBareRepository(scratch("perbo-credential-origin-"));
+  const repository = initRepository(scratch("perbo-credential-work-"), {
+    files: { "first.txt": "first\n" },
+    message: "first",
+  });
+  repository.git("remote", "add", "origin", origin);
+  repository.git("push", "-q", "origin", "main");
+  repository.git("checkout", "-q", "-b", BRANCH);
+  repository.commit({ "mine.txt": "mine\n" }, "mine");
+  return { work: repository.dir };
 }
 
 const quoted = (value: string) => JSON.stringify(value);

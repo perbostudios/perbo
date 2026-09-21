@@ -7,6 +7,7 @@ import {
   LimitsTableSchema,
   type PlanContractWithCriteria,
 } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import { runAgent, type AgentResult } from "../src/adapter.js";
 import { EXECUTOR_ACCOUNT_HEADING, executorAccount } from "../src/account.js";
 import { AttemptCeilings } from "../src/ceilings.js";
@@ -14,7 +15,11 @@ import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { buildPermissionProfile } from "../src/profile.js";
 import { executorPrompt, remediationPrompt } from "../src/prompt.js";
-import { fakeAgent, finding, makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { fakeAgent } from "../src/test-support/fake-agent.js";
+import { finding, makeContract, makeReview } from "../src/test-support/records.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * D-092: a remediation round is briefed with its predecessor's own account,
@@ -146,7 +151,7 @@ describe("the account is read from the executor's final message (D-092)", () => 
 describe("the adapter carries the executor's final message (D-092)", () => {
   const runScripted = async (steps: ReadonlyArray<Record<string, unknown>>) => {
     const worktree = scratch("perbo-account-");
-    const agent = fakeAgent([{ kind: "scripted", steps } as never]);
+    const agent = fakeAgent(scratch, [{ kind: "scripted", steps } as never]);
     return runAgent({
       binary: agent.binary,
       worktree,
@@ -302,7 +307,7 @@ const closingVerifier = (async (input: Record<string, unknown>) => {
 
 describe("the account is sealed with the change set and briefs the next round (D-092)", () => {
   it("lands on the attempt record and reaches the executor's own next round", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const plan = makeContract();
     plan.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, {});
@@ -368,7 +373,7 @@ const iterationDouble = (iterations: number) => {
 
 describe("a remediation round is bounded by round_iterations (D-092)", () => {
   it("cuts the round on the round ceiling and names it on the record", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const plan = makeContract();
     plan.base.base_commit = repo.head;
     // Five turns is inside the attempt ceiling and outside the round's, so the
@@ -393,7 +398,7 @@ describe("a remediation round is bounded by round_iterations (D-092)", () => {
   }, 60_000);
 
   it("leaves the initial attempt bound by attempt_iterations", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const plan = makeContract();
     plan.base.base_commit = repo.head;
     // SCP-193 would follow a cut attempt with another over the sealed branch,

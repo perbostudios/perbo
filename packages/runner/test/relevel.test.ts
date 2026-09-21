@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LimitsTableSchema, type ChangeSet } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "../src/loop.js";
@@ -13,7 +14,10 @@ import {
   conflictPrompt,
   conflictPromptVersion,
 } from "../src/prompt.js";
-import { git, makeContract, makeRepo, makeReview, scratch, withoutInstall } from "./support.js";
+import { makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
+import { git, runnerRepository } from "../src/test-support/repository.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * SCP-227: a re-level run keeps an open branch level with its base without an
@@ -203,7 +207,7 @@ function advanceMain(dir: string, path: string, content: string): string {
 
 describe("a re-level run", () => {
   it("says the branch is level and pays for nothing when the base has not moved", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, config } = await firstRun(repo);
     const gh = github();
     const result = await runTicket({
@@ -218,7 +222,7 @@ describe("a re-level run", () => {
   }, RUN_TIMEOUT_MS);
 
   it("merges the base in, runs no executor and no review when the base touched nothing in scope, and pushes", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, config, branch } = await firstRun(repo);
     const tip = advanceMain(repo.dir, "docs/notes.md", "unrelated\n");
     const gh = github();
@@ -240,14 +244,14 @@ describe("a re-level run", () => {
     expect(gh.merges[0]!["pull_request_number"]).toBe(7);
     expect(gh.merges[0]!["paths_allowed"]).toEqual(contract.scope.paths_allowed);
     // The branch carries the merge commit, with the attempt chain's trailer.
-    const message = git(repo.dir, "log", "-1", "--format=%B", branch);
+    const message = repo.git("log", "-1", "--format=%B", branch);
     expect(message).toMatch(/^AYO7: merge main into the attempt branch/);
     expect(message).toMatch(/Attempt: att_/);
-    expect(git(repo.dir, "merge-base", "--is-ancestor", tip, branch)).toBe("");
+    expect(repo.git("merge-base", "--is-ancestor", tip, branch)).toBe("");
   }, RUN_TIMEOUT_MS);
 
   it("reviews the merged change set afresh when the base touched the scope, and no executor runs", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, config } = await firstRun(repo);
     advanceMain(repo.dir, "src/other.ts", "export const other = 2;\n");
     const gh = github();
@@ -270,7 +274,7 @@ describe("a re-level run", () => {
       ["measured", ["node", "-e", "process.exit(0)"]],
       ["unmeasured", ["git", "status", "--porcelain"]],
     ] as const) {
-      const repo = makeRepo();
+      const repo = runnerRepository(scratch);
       const { contract, config } = await firstRun(repo);
       advanceMain(repo.dir, "src/other.ts", "export const other = 2;\n");
       const gh = github();
@@ -300,9 +304,9 @@ describe("a re-level run", () => {
   }, RUN_TIMEOUT_MS);
 
   it("pushes nothing when the fresh review does not approve, and leaves the merge commit local", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, config, branch } = await firstRun(repo);
-    const pushedBefore = git(repo.dir, "rev-parse", branch);
+    const pushedBefore = repo.git("rev-parse", branch);
     advanceMain(repo.dir, "src/other.ts", "export const other = 2;\n");
     const gh = github();
     const escalating = (async (input: { changeset?: ChangeSet }) => ({
@@ -323,11 +327,11 @@ describe("a re-level run", () => {
     expect(gh.pushes).toEqual([]);
     expect(gh.merges).toEqual([]);
     // The branch carries the merge commit locally; nothing published it.
-    expect(git(repo.dir, "rev-parse", branch)).not.toBe(pushedBefore);
+    expect(repo.git("rev-parse", branch)).not.toBe(pushedBefore);
   }, RUN_TIMEOUT_MS);
 
   it("mints its attempt ids after every recorded run, so a re-level never collides with the last run's root", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, config } = await firstRun(repo);
     advanceMain(repo.dir, "src/index.ts", "export const version = 3;\n");
     const gh = github();
@@ -346,7 +350,7 @@ describe("a re-level run", () => {
   }, RUN_TIMEOUT_MS);
 
   it("hands a conflict to a round briefed with what merged, then reviews and publishes the resolution", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, config } = await firstRun(repo);
     // The base changed the line the branch changed: a conflict whose
     // resolution takes the base's text, the ticket's own file untouched.
@@ -384,16 +388,16 @@ describe("a re-level run", () => {
     expect(gh.merges).toHaveLength(1);
     // The branch carries the resolution and is level with the base.
     const branch = result.workspace.branch;
-    expect(git(repo.dir, "show", `${branch}:src/index.ts`)).toBe(theirs);
-    expect(git(repo.dir, "show", `${branch}:src/feature.ts`)).toBe("export const branchOnly = 1;\n");
-    expect(git(repo.dir, "merge-base", "--is-ancestor", "main", branch)).toBe("");
+    expect(repo.git("show", `${branch}:src/index.ts`)).toBe(theirs);
+    expect(repo.git("show", `${branch}:src/feature.ts`)).toBe("export const branchOnly = 1;\n");
+    expect(repo.git("merge-base", "--is-ancestor", "main", branch)).toBe("");
     expect(readFileSync(join(repo.dir, "src", "index.ts"), "utf8")).toBe(theirs);
   }, RUN_TIMEOUT_MS);
 });
 
 describe("a re-level beside the runs around it", () => {
   it("does not let a run after a conflict re-level mint the re-level's run number again", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -429,11 +433,11 @@ describe("a re-level beside the runs around it", () => {
   }, RUN_TIMEOUT_MS * 2);
 
   it("re-levels from what the pull request has, not from a rejected merge left on the local branch", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, config, branch } = await firstRun(repo);
     // What the pull request has: the branch as it was pushed.
-    const pushedHead = git(repo.dir, "rev-parse", branch).trim();
-    git(repo.dir, "update-ref", `refs/remotes/origin/${branch}`, pushedHead);
+    const pushedHead = repo.git("rev-parse", branch).trim();
+    repo.git("update-ref", `refs/remotes/origin/${branch}`, pushedHead);
     advanceMain(repo.dir, "src/other.ts", "export const other = 2;\n");
     const escalating = (async (input: { changeset?: ChangeSet }) => ({
       artifact: makeReview({ review_id: "rev_0000000000000011", decision: "escalate" as const, changeset_id: input.changeset?.changeset_id ?? "cs_0000000000000001" }),
@@ -445,7 +449,7 @@ describe("a re-level beside the runs around it", () => {
       hooks: { agent: neverAgent.run as never, review: escalating, ...github().hooks },
     });
     expect(rejected.outcome).toBe("escalated");
-    expect(git(repo.dir, "rev-parse", branch).trim()).not.toBe(pushedHead);
+    expect(repo.git("rev-parse", branch).trim()).not.toBe(pushedHead);
     // By hand, again: the review now approves, and the run starts from the
     // pushed ref rather than calling the local merge commit level.
     const gh = github();
@@ -461,7 +465,7 @@ describe("a re-level beside the runs around it", () => {
   }, RUN_TIMEOUT_MS * 2);
 
   it("re-levels a ticket whose history holds a run refused after its number was minted", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -515,10 +519,10 @@ describe("a re-level beside the runs around it", () => {
   }, RUN_TIMEOUT_MS * 3);
 
   it("resets past a rejected conflict resolution the loop sealed, and re-levels from the pull request", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, config, branch } = await firstRun(repo);
-    const pushedHead = git(repo.dir, "rev-parse", branch).trim();
-    git(repo.dir, "update-ref", `refs/remotes/origin/${branch}`, pushedHead);
+    const pushedHead = repo.git("rev-parse", branch).trim();
+    repo.git("update-ref", `refs/remotes/origin/${branch}`, pushedHead);
     // A conflict, resolved by the loop's round and then rejected by the
     // review: the sealed resolution and the merge stay on the local branch,
     // unpushed, and the record's head is the merge.
@@ -539,7 +543,7 @@ describe("a re-level beside the runs around it", () => {
     });
     expect(rejected.outcome).toBe("changes_requested");
     expect(rejectedGh.pushes).toEqual([]);
-    expect(Number(git(repo.dir, "rev-list", "--count", `${pushedHead}..${branch}`).trim())).toBeGreaterThanOrEqual(2);
+    expect(Number(repo.git("rev-list", "--count", `${pushedHead}..${branch}`).trim())).toBeGreaterThanOrEqual(2);
     // The next re-level starts from the pull request again: both commits are
     // the loop's own, so nothing here is a person's to keep.
     const gh = github();
@@ -550,21 +554,21 @@ describe("a re-level beside the runs around it", () => {
     });
     expect(again.outcome, again.detail).toBe("approved");
     expect(gh.pushes).toEqual([branch]);
-    expect(git(repo.dir, "show", `${branch}:src/index.ts`)).toBe(theirs);
+    expect(repo.git("show", `${branch}:src/index.ts`)).toBe(theirs);
   }, RUN_TIMEOUT_MS * 2);
 
   it("refuses to re-level past a commit the loop did not make, and a branch that diverged from its pull request", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const { contract, config, branch } = await firstRun(repo);
-    const pushedHead = git(repo.dir, "rev-parse", branch).trim();
-    git(repo.dir, "update-ref", `refs/remotes/origin/${branch}`, pushedHead);
+    const pushedHead = repo.git("rev-parse", branch).trim();
+    repo.git("update-ref", `refs/remotes/origin/${branch}`, pushedHead);
     // A person's commit on the branch, not yet pushed: theirs to keep.
-    git(repo.dir, "checkout", "-q", branch);
+    repo.git("checkout", "-q", branch);
     writeFileSync(join(repo.dir, "src", "fix.ts"), "export const fix = 1;\n");
-    git(repo.dir, "add", "-A");
-    git(repo.dir, "commit", "-qm", "a person's fix, not yet pushed");
-    const personal = git(repo.dir, "rev-parse", "HEAD").trim();
-    git(repo.dir, "checkout", "-q", "main");
+    repo.git("add", "-A");
+    repo.git("commit", "-qm", "a person's fix, not yet pushed");
+    const personal = repo.git("rev-parse", "HEAD").trim();
+    repo.git("checkout", "-q", "main");
     advanceMain(repo.dir, "src/other.ts", "export const other = 2;\n");
     const gh = github();
     await expect(
@@ -574,10 +578,10 @@ describe("a re-level beside the runs around it", () => {
         hooks: { agent: neverAgent.run as never, review: approving().review, ...gh.hooks },
       }),
     ).rejects.toThrow(/carries 1 commit the loop did not make .*a person's fix, not yet pushed/);
-    expect(git(repo.dir, "rev-parse", branch).trim()).toBe(personal);
+    expect(repo.git("rev-parse", branch).trim()).toBe(personal);
     expect(gh.pushes).toEqual([]);
     // Diverged: the pull request is at a commit the checkout does not have.
-    git(repo.dir, "update-ref", `refs/remotes/origin/${branch}`, git(repo.dir, "rev-parse", "main").trim());
+    repo.git("update-ref", `refs/remotes/origin/${branch}`, repo.git("rev-parse", "main").trim());
     await expect(
       runTicket({
         config: TicketRunConfigSchema.parse({ ...config, relevel: true }),
@@ -585,24 +589,24 @@ describe("a re-level beside the runs around it", () => {
         hooks: { agent: neverAgent.run as never, review: approving().review, ...gh.hooks },
       }),
     ).rejects.toThrow(/has diverged from its pull request/);
-    expect(git(repo.dir, "rev-parse", branch).trim()).toBe(personal);
+    expect(repo.git("rev-parse", branch).trim()).toBe(personal);
     expect(gh.pushes).toEqual([]);
   }, RUN_TIMEOUT_MS * 2);
 });
 
 describe("carried approvals", () => {
   it("carries across a clean re-level that touched nothing in scope, and not otherwise", async () => {
-    const repo = makeRepo();
-    git(repo.dir, "checkout", "-q", "-b", "feature");
+    const repo = runnerRepository(scratch);
+    repo.git("checkout", "-q", "-b", "feature");
     writeFeature(repo.dir);
-    git(repo.dir, "add", "-A");
-    git(repo.dir, "commit", "-qm", "seal\n\nAttempt: att_0000000000000001");
-    const approved = git(repo.dir, "rev-parse", "HEAD").trim();
-    git(repo.dir, "checkout", "-q", "main");
+    repo.git("add", "-A");
+    repo.git("commit", "-qm", "seal\n\nAttempt: att_0000000000000001");
+    const approved = repo.git("rev-parse", "HEAD").trim();
+    repo.git("checkout", "-q", "main");
     advanceMain(repo.dir, "docs/notes.md", "unrelated\n");
-    git(repo.dir, "checkout", "-q", "feature");
-    git(repo.dir, "merge", "-q", "--no-edit", "main");
-    const head = git(repo.dir, "rev-parse", "HEAD").trim();
+    repo.git("checkout", "-q", "feature");
+    repo.git("merge", "-q", "--no-edit", "main");
+    const head = repo.git("rev-parse", "HEAD").trim();
 
     const carried = await carriedApprovals({
       repository_root: repo.dir,
@@ -614,11 +618,11 @@ describe("carried approvals", () => {
     expect(carried, JSON.stringify(carried)).toEqual([{ head: approved, content_equal: true, scope_touched: [] }]);
 
     // The base now touches the scope: named, so the gate stops.
-    git(repo.dir, "checkout", "-q", "main");
+    repo.git("checkout", "-q", "main");
     advanceMain(repo.dir, "src/other.ts", "export const other = 2;\n");
-    git(repo.dir, "checkout", "-q", "feature");
-    git(repo.dir, "merge", "-q", "--no-edit", "main");
-    const moved = git(repo.dir, "rev-parse", "HEAD").trim();
+    repo.git("checkout", "-q", "feature");
+    repo.git("merge", "-q", "--no-edit", "main");
+    const moved = repo.git("rev-parse", "HEAD").trim();
     const touched = await carriedApprovals({
       repository_root: repo.dir,
       base_ref: "main",
@@ -633,8 +637,8 @@ describe("carried approvals", () => {
 
     // A commit that changed the branch's own content does not carry.
     writeFileSync(join(repo.dir, "src", "feature.ts"), "export const total = () => 0;\n");
-    git(repo.dir, "commit", "-qam", "change\n\nAttempt: att_0000000000000002");
-    const changed = git(repo.dir, "rev-parse", "HEAD").trim();
+    repo.git("commit", "-qam", "change\n\nAttempt: att_0000000000000002");
+    const changed = repo.git("rev-parse", "HEAD").trim();
     const differs = await carriedApprovals({
       repository_root: repo.dir,
       base_ref: "main",
@@ -655,7 +659,7 @@ describe("carried approvals", () => {
     expect(foreign).toEqual([]);
     // The base's own tip is on the branch after a merge, and its content —
     // nothing, against itself — is not the branch's, so it never carries.
-    const baseTip = git(repo.dir, "rev-parse", "main").trim();
+    const baseTip = repo.git("rev-parse", "main").trim();
     const onBase = await carriedApprovals({
       repository_root: repo.dir,
       base_ref: "main",

@@ -2,12 +2,15 @@ import { mkdirSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema, type CommandRecord } from "@perbo/contracts";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
 import { runAgent, type AgentResult } from "../src/adapter.js";
 import { SUBAGENT_TOOL_NAMES } from "../src/agents.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { EXECUTOR_ACCOUNT_HEADING, executorAccount } from "../src/account.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { fakeAgent, scratch, SPAWN_TEST_TIMEOUT_MS, type ScriptedStep } from "./support.js";
+import { fakeAgent, type ScriptedStep } from "../src/test-support/fake-agent.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * D-106 criterion 3: every command a subagent runs is recorded against it, and
@@ -29,7 +32,7 @@ async function run(steps: readonly ScriptedStep[]): Promise<AgentResult> {
   const worktree = realpathSync(resolve(scratch("perbo-subagent-records-")));
   for (const each of ["src", "docs"]) mkdirSync(join(worktree, each), { recursive: true });
   const profile = buildPermissionProfile({ worktree });
-  const { binary } = fakeAgent([{ kind: "scripted", steps }]);
+  const { binary } = fakeAgent(scratch, [{ kind: "scripted", steps }]);
   return runAgent({
     binary,
     worktree,

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewArtifact } from "@perbo/contracts";
 import { incompleteReviewCauses, routeReview } from "./review.js";
-import { finding, review } from "./test-support/fakes.js";
+import { finding, makeReview } from "../test-support/records.js";
 
 describe("what made an incomplete review incomplete", () => {
   it("lists the criteria the review could not resolve, in the order it listed them", () => {
     const causes = incompleteReviewCauses(
-      review({
+      makeReview({
         coverage: [
           { criterion_id: "ac_2", status: "cannot_determine" },
           { criterion_id: "ac_1", status: "met" },
@@ -21,7 +21,7 @@ describe("what made an incomplete review incomplete", () => {
   it("takes a finding that names no criterion as a cause of every unresolved one", () => {
     const whole = finding({ key: "a".repeat(64), criterion_id: null });
     const causes = incompleteReviewCauses(
-      review({
+      makeReview({
         findings: [whole],
         coverage: [
           { criterion_id: "ac_1", status: "cannot_determine" },
@@ -37,7 +37,7 @@ describe("what made an incomplete review incomplete", () => {
   it("calls a criterion unexplained when no remediable finding cites it", () => {
     const cited = finding({ key: "b".repeat(64), criterion_id: "ac_1" });
     const causes = incompleteReviewCauses(
-      review({
+      makeReview({
         findings: [cited],
         coverage: [
           { criterion_id: "ac_1", status: "cannot_determine" },
@@ -53,7 +53,7 @@ describe("what made an incomplete review incomplete", () => {
   it("files each citing finding once, however many criteria it explains", () => {
     const whole = finding({ key: "c".repeat(64), criterion_id: null });
     const causes = incompleteReviewCauses(
-      review({
+      makeReview({
         findings: [whole],
         coverage: [
           { criterion_id: "ac_1", status: "cannot_determine" },
@@ -81,7 +81,7 @@ const route = (
 
 describe("where a round's verdict sends the run", () => {
   it("opens the gate on an approval", () => {
-    expect(route({ review: review({ decision: "approve" }) })).toMatchObject({
+    expect(route({ review: makeReview({ decision: "approve" }) })).toMatchObject({
       next: "stop",
       end: { outcome: "approved", detail: "the gate is open" },
     });
@@ -89,7 +89,7 @@ describe("where a round's verdict sends the run", () => {
 
   it("names what a failed review was reading, and says so when it had read nothing", () => {
     const failed = (reading: string[]) =>
-      review({
+      makeReview({
         decision: "error",
         error: { kind: "provider_unavailable", message: "the transport is down", reading },
       });
@@ -104,7 +104,7 @@ describe("where a round's verdict sends the run", () => {
   });
 
   it("names no file for a verdict the plan could not accept, which implicates none", () => {
-    const rejected = review({
+    const rejected = makeReview({
       decision: "error",
       error: {
         kind: "verdict_rejected",
@@ -121,7 +121,7 @@ describe("where a round's verdict sends the run", () => {
 
   it("asks a person at once when a criterion rests on nothing the executor may be handed", () => {
     const step = route({
-      review: review({
+      review: makeReview({
         decision: "incomplete",
         findings: [finding({ criterion_id: "ac_1" })],
         coverage: [
@@ -141,7 +141,7 @@ describe("where a round's verdict sends the run", () => {
 
   it("asks a person for a change set too large to review, whatever else it filed", () => {
     const step = route({
-      review: review({
+      review: makeReview({
         decision: "incomplete",
         findings: [
           finding({ rule_id: "changeset.too_large_to_review", statement: "412 files", criterion_id: null }),
@@ -161,7 +161,7 @@ describe("where a round's verdict sends the run", () => {
   it("buys one remediation round for an incomplete verdict every cause of which is routable", () => {
     const cause = finding({ criterion_id: null });
     const step = route({
-      review: review({
+      review: makeReview({
         decision: "incomplete",
         findings: [cause],
         coverage: [{ criterion_id: "ac_1", status: "cannot_determine" }],
@@ -184,7 +184,7 @@ describe("where a round's verdict sends the run", () => {
     const step = route({
       answeringIncomplete: true,
       remediationRound: 1,
-      review: review({
+      review: makeReview({
         decision: "incomplete",
         findings: [finding({ criterion_id: null })],
         coverage: [{ criterion_id: "ac_1", status: "cannot_determine" }],
@@ -199,7 +199,7 @@ describe("where a round's verdict sends the run", () => {
   it("asks a person for an incomplete verdict with no remediation round left, naming the cap", () => {
     const step = route({
       remediationRound: 2,
-      review: review({
+      review: makeReview({
         decision: "incomplete",
         findings: [finding({ criterion_id: null })],
         coverage: [{ criterion_id: "ac_1", status: "cannot_determine" }],
@@ -218,7 +218,7 @@ describe("where a round's verdict sends the run", () => {
 
   it("sends a remediable verdict the executor may not be handed to a person", () => {
     const step = route({
-      review: review({
+      review: makeReview({
         decision: "remediable",
         findings: [finding({ rule_id: "security.injection", routing: "remediable", blocking: true })],
       }),
@@ -235,7 +235,7 @@ describe("where a round's verdict sends the run", () => {
 
   it("routes a remediable verdict to a remediation round while one is left", () => {
     const routable = finding({ rule_id: "test.missing_for_criterion", routing: "remediable", blocking: true });
-    expect(route({ review: review({ decision: "remediable", findings: [routable] }) })).toMatchObject({
+    expect(route({ review: makeReview({ decision: "remediable", findings: [routable] }) })).toMatchObject({
       next: "advance",
       kind: "remediate",
       remediation: true,
@@ -248,7 +248,7 @@ describe("where a round's verdict sends the run", () => {
     const step = route({
       round: 2,
       remediationRound: 2,
-      review: review({ decision: "remediable", findings: [routable] }),
+      review: makeReview({ decision: "remediable", findings: [routable] }),
     });
 
     expect(step).toMatchObject({
@@ -259,7 +259,7 @@ describe("where a round's verdict sends the run", () => {
 
   it("gives each remaining verdict its own outcome", () => {
     const outcomeOf = (decision: ReviewArtifact["decision"]) => {
-      const step = route({ review: review({ decision }) });
+      const step = route({ review: makeReview({ decision }) });
       return step.next === "stop" ? step.end.outcome : step.next;
     };
 

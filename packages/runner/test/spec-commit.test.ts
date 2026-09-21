@@ -3,11 +3,15 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, sy
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LimitsTableSchema, type ChangeSet, type SpecFile } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "../src/loop.js";
 import { RunRefusedError } from "../src/refusal.js";
-import { finding, git, makeContract, makeRepo, makeReview, scratch, withoutInstall } from "./support.js";
+import { finding, makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
+import { git, runnerRepository } from "../src/test-support/repository.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * SCP-314: the spec the change is judged against is the branch's first commit,
@@ -180,7 +184,7 @@ const RUN_TIMEOUT_MS = 90_000;
 
 describe("the branch's first commit", () => {
   it("holds exactly the recorded spec files, with their contents and nothing else", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -199,7 +203,7 @@ describe("the branch's first commit", () => {
     const spec = commits[0]!;
     expect(spec.paths).toEqual(files.map((file) => file.path).sort());
     for (const file of files) {
-      expect(git(repo.dir, "show", `${spec.sha}:${file.path}`)).toBe(
+      expect(repo.git("show", `${spec.sha}:${file.path}`)).toBe(
         {
           "specs/activation-email/spec.md": SPEC_MD,
           "specs/activation-email/nodes/node_1.md": NODE_1,
@@ -217,7 +221,7 @@ describe("the branch's first commit", () => {
   }, RUN_TIMEOUT_MS);
 
   it("prohibits every recorded file to the executor, since the change set no longer carries them", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -236,7 +240,7 @@ describe("the branch's first commit", () => {
   }, RUN_TIMEOUT_MS);
 
   it("refuses a recorded file whose folder in the worktree leaves it, writing nothing there", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -251,9 +255,9 @@ describe("the branch's first commit", () => {
       writeFileSync(join(outside, "nodes", name), "not the spec\n");
     rmSync(nodes, { recursive: true, force: true });
     symlinkSync(join(outside, "nodes"), nodes);
-    git(repo.dir, "add", "-A");
-    git(repo.dir, "commit", "-m", "a folder that is a link");
-    contract.base.base_commit = git(repo.dir, "rev-parse", "HEAD").trim();
+    repo.git("add", "-A");
+    repo.git("commit", "-m", "a folder that is a link");
+    contract.base.base_commit = repo.git("rev-parse", "HEAD").trim();
     rmSync(nodes, { force: true });
     mkdirSync(join(nodes, "deep"), { recursive: true });
     writeFileSync(join(nodes, "node_1.md"), NODE_1);
@@ -286,7 +290,7 @@ describe("the branch's first commit", () => {
   }, RUN_TIMEOUT_MS);
 
   it("refuses a recorded path the worktree has as a directory, writing none of the record", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -296,9 +300,9 @@ describe("the branch's first commit", () => {
     rmSync(recorded, { force: true });
     mkdirSync(recorded, { recursive: true });
     writeFileSync(join(recorded, "inner.md"), "# Not the node\n");
-    git(repo.dir, "add", "-A");
-    git(repo.dir, "commit", "-m", "a directory where a spec file goes");
-    contract.base.base_commit = git(repo.dir, "rev-parse", "HEAD").trim();
+    repo.git("add", "-A");
+    repo.git("commit", "-m", "a directory where a spec file goes");
+    contract.base.base_commit = repo.git("rev-parse", "HEAD").trim();
     rmSync(recorded, { recursive: true, force: true });
     writeFileSync(recorded, NODE_1);
 
@@ -314,7 +318,7 @@ describe("the branch's first commit", () => {
   }, RUN_TIMEOUT_MS);
 
   it("refuses a recorded path that is not a file inside the repository, before anything is read", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = [
@@ -334,7 +338,7 @@ describe("the branch's first commit", () => {
   }, RUN_TIMEOUT_MS);
 
   it("refuses a recorded file the checkout reads from outside itself", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -360,7 +364,7 @@ describe("the branch's first commit", () => {
   }, RUN_TIMEOUT_MS);
 
   it("refuses a recorded file that the branch carries as a link, writing nothing through it", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -374,9 +378,9 @@ describe("the branch's first commit", () => {
     const recorded = join(repo.dir, "specs", "activation-email", "nodes", "node_1.md");
     rmSync(recorded, { force: true });
     symlinkSync(target, recorded);
-    git(repo.dir, "add", "-A");
-    git(repo.dir, "commit", "-m", "a spec file that is a link");
-    contract.base.base_commit = git(repo.dir, "rev-parse", "HEAD").trim();
+    repo.git("add", "-A");
+    repo.git("commit", "-m", "a spec file that is a link");
+    contract.base.base_commit = repo.git("rev-parse", "HEAD").trim();
     rmSync(recorded, { force: true });
     writeFileSync(recorded, NODE_1);
 
@@ -393,7 +397,7 @@ describe("the branch's first commit", () => {
   }, RUN_TIMEOUT_MS);
 
   it("refuses the run, naming the file, when a recorded file's content has changed, and no executor runs", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -411,7 +415,7 @@ describe("the branch's first commit", () => {
   }, RUN_TIMEOUT_MS);
 
   it("refuses a recorded file the checkout no longer has", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = [
@@ -430,14 +434,14 @@ describe("the branch's first commit", () => {
   }, RUN_TIMEOUT_MS);
 
   it("makes no commit where the base already holds the spec, and still keeps it out", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     const files = writeSpec(repo.dir);
     // The spec is already on the base: the interview wrote it and somebody
     // committed it before the ticket ran.
-    git(repo.dir, "add", "-A");
-    git(repo.dir, "commit", "-m", "the spec, before the loop");
-    contract.base.base_commit = git(repo.dir, "rev-parse", "HEAD").trim();
+    repo.git("add", "-A");
+    repo.git("commit", "-m", "the spec, before the loop");
+    contract.base.base_commit = repo.git("rev-parse", "HEAD").trim();
 
     const reviewer = approving();
     const said: string[] = [];
@@ -460,7 +464,7 @@ describe("the branch's first commit", () => {
   }, RUN_TIMEOUT_MS);
 
   it("is the executor's own seal for a ticket admitted without a spec", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const result = await runTicket({
@@ -478,7 +482,7 @@ describe("the branch's first commit", () => {
 
 describe("the reviewed diff", () => {
   it("lists no spec file while the branch's own range does, and the pull request carries the commit", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -525,7 +529,7 @@ describe("the reviewed diff", () => {
 
 describe("a later round", () => {
   it("keeps the spec commit first and the exclusion in force through a remediation round", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -617,7 +621,7 @@ function silentGh(): string {
 
 describe("a re-level", () => {
   it("does not mistake the spec commit for a person's, and keeps it first", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -646,8 +650,8 @@ describe("a re-level", () => {
     // The base moves inside the contract's scope, so the re-level reviews the
     // merged change set afresh rather than carrying the first review.
     writeFileSync(join(repo.dir, "src", "other.ts"), "export const other = 2;\n");
-    git(repo.dir, "add", "-A");
-    git(repo.dir, "commit", "-qm", "main moves");
+    repo.git("add", "-A");
+    repo.git("commit", "-qm", "main moves");
 
     const reviewer = approving();
     const relevelled = await runTicket({
@@ -670,7 +674,7 @@ describe("a re-level", () => {
   }, RUN_TIMEOUT_MS);
 
   it("counts the spec commit as the loop's own when it reads the branch against the pull request", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -699,10 +703,10 @@ describe("a re-level", () => {
     // committed anything, so everything past it — the spec commit and the
     // seal — has to read as the loop's own. A spec commit taken for a
     // person's would refuse the re-level and name it.
-    git(repo.dir, "update-ref", `refs/remotes/origin/${first.workspace.branch}`, repo.head);
+    repo.git("update-ref", `refs/remotes/origin/${first.workspace.branch}`, repo.head);
     writeFileSync(join(repo.dir, "notes.md"), "unrelated\n");
-    git(repo.dir, "add", "-A");
-    git(repo.dir, "commit", "-qm", "main moves outside the scope");
+    repo.git("add", "-A");
+    repo.git("commit", "-qm", "main moves outside the scope");
 
     const outcome = await runTicket({
       config: TicketRunConfigSchema.parse({ ...config, relevel: true }),
@@ -722,7 +726,7 @@ describe("a re-level", () => {
 
 describe("a branch that already has commits", () => {
   it("keeps nothing out of the change set for a branch built before the loop committed specs", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -735,15 +739,15 @@ describe("a branch that already has commits", () => {
 
     // The branch a ticket admitted before the loop committed specs carries: a
     // person's commit first, one of whose files the spec's record also names.
-    git(repo.dir, "update-ref", `refs/heads/${first.workspace.branch}`, repo.head);
+    repo.git("update-ref", `refs/heads/${first.workspace.branch}`, repo.head);
     const byHand = join(repo.dir, ".perbo-before-specs");
     mkdirSync(byHand, { recursive: true });
-    git(repo.dir, "worktree", "add", "-q", byHand, first.workspace.branch);
+    repo.git("worktree", "add", "-q", byHand, first.workspace.branch);
     writeFileSync(join(byHand, "CONTEXT.md"), "# Terms\n\nAn activation email is the address.\n");
     writeFileSync(join(byHand, "src", "feature.ts"), "export const total = (n) => n.length;\n");
     git(byHand, "add", "-A");
     git(byHand, "commit", "-qm", "by hand, before the loop committed specs");
-    git(repo.dir, "worktree", "remove", "--force", byHand);
+    repo.git("worktree", "remove", "--force", byHand);
 
     // A store of its own, so no attempts record names a spec commit for it.
     const reviewer = approving();
@@ -765,7 +769,7 @@ describe("a branch that already has commits", () => {
   }, RUN_TIMEOUT_MS);
 
   it("refuses a rebuilt branch whose first commit touches only the spec's own files", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -780,15 +784,15 @@ describe("a branch that already has commits", () => {
     // A person rebuilds the branch and writes the spec themselves. It changes
     // recorded files and nothing else, which is the shape of the loop's own
     // commit, and it holds whatever they wrote.
-    git(repo.dir, "update-ref", `refs/heads/${first.workspace.branch}`, repo.head);
+    repo.git("update-ref", `refs/heads/${first.workspace.branch}`, repo.head);
     const byHand = join(repo.dir, ".perbo-hand-spec");
     mkdirSync(byHand, { recursive: true });
-    git(repo.dir, "worktree", "add", "-q", byHand, first.workspace.branch);
+    repo.git("worktree", "add", "-q", byHand, first.workspace.branch);
     mkdirSync(join(byHand, "specs", "activation-email"), { recursive: true });
     writeFileSync(join(byHand, "specs", "activation-email", "spec.md"), "# Something else\n");
     git(byHand, "add", "-A");
     git(byHand, "commit", "-qm", "the spec, by hand");
-    git(repo.dir, "worktree", "remove", "--force", byHand);
+    repo.git("worktree", "remove", "--force", byHand);
 
     const agent = agentDouble(writeFeature);
     const refused = await runTicket({
@@ -802,7 +806,7 @@ describe("a branch that already has commits", () => {
   }, RUN_TIMEOUT_MS);
 
   it("refuses the run, naming what it found, when its first commit is not the spec", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const files = writeSpec(repo.dir);
@@ -816,16 +820,16 @@ describe("a branch that already has commits", () => {
 
     // A person rebuilds the branch by hand and leaves their own commit where
     // the spec's was.
-    git(repo.dir, "update-ref", `refs/heads/${first.workspace.branch}`, repo.head);
+    repo.git("update-ref", `refs/heads/${first.workspace.branch}`, repo.head);
     const byHand = join(repo.dir, ".perbo-hand");
     mkdirSync(byHand, { recursive: true });
-    git(repo.dir, "worktree", "add", "-q", byHand, first.workspace.branch);
+    repo.git("worktree", "add", "-q", byHand, first.workspace.branch);
     writeFileSync(join(byHand, "src", "feature.ts"), "export const total = (n) => n.length + 1;\n");
     git(byHand, "add", "-A");
     // With the loop's own trailer on it, so what refuses this commit is what it
     // changes rather than who made it.
     git(byHand, "commit", "-qm", "by hand\n\nAttempt: att_by_hand\n");
-    git(repo.dir, "worktree", "remove", "--force", byHand);
+    repo.git("worktree", "remove", "--force", byHand);
 
     const agent = agentDouble(writeFeature);
     const refused = await runTicket({

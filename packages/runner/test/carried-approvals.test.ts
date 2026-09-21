@@ -1,8 +1,11 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
 import { carriedApprovals } from "../src/merge.js";
-import { SPAWN_TEST_TIMEOUT_MS, git, makeRepo } from "./support.js";
+import { git, runnerRepository } from "../src/test-support/repository.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * SCP-227: whether an approval of an earlier head still describes the head
@@ -47,7 +50,7 @@ describe("an approval carried across a re-level", () => {
   it(
     "reports content that differs before the last bytes of the diff as different",
     async () => {
-      const repo = makeRepo();
+      const repo = runnerRepository(scratch);
       const { approved, head } = branchWithTwoHeads(repo.dir);
 
       const carried = await carriedApprovals({
@@ -66,7 +69,7 @@ describe("an approval carried across a re-level", () => {
   it(
     "carries nothing where the diff is larger than the ceiling",
     async () => {
-      const repo = makeRepo();
+      const repo = runnerRepository(scratch);
       const { approved, head } = branchWithTwoHeads(repo.dir);
 
       const carried = await carriedApprovals({
@@ -85,14 +88,14 @@ describe("an approval carried across a re-level", () => {
   it(
     "reports an unchanged head as the same content",
     async () => {
-      const repo = makeRepo();
-      git(repo.dir, "checkout", "-q", "-b", "prb/SCP227/same");
+      const repo = runnerRepository(scratch);
+      repo.git("checkout", "-q", "-b", "prb/SCP227/same");
       writeFileSync(join(repo.dir, "aaa.txt"), "one\n");
-      git(repo.dir, "add", "-A");
-      git(repo.dir, "commit", "-qm", "the only commit");
-      const approved = git(repo.dir, "rev-parse", "HEAD").trim();
-      git(repo.dir, "commit", "-q", "--allow-empty", "-m", "a commit that changes nothing");
-      const head = git(repo.dir, "rev-parse", "HEAD").trim();
+      repo.git("add", "-A");
+      repo.git("commit", "-qm", "the only commit");
+      const approved = repo.git("rev-parse", "HEAD").trim();
+      repo.git("commit", "-q", "--allow-empty", "-m", "a commit that changes nothing");
+      const head = repo.git("rev-parse", "HEAD").trim();
 
       const carried = await carriedApprovals({
         repository_root: repo.dir,

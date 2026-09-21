@@ -2,10 +2,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema, type ReviewArtifact } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
-import { finding, makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { finding, makeContract, makeReview } from "../src/test-support/records.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * An `incomplete` verdict whose unjudgeable criteria hang on a finding the
@@ -132,12 +136,12 @@ const incomplete = (review_id: string, findings: ReturnType<typeof finding>[]) =
   makeReview({
     review_id,
     decision: "incomplete",
-    coverage_status: "cannot_determine",
+    coverage: [{ criterion_id: "ac_1", status: "cannot_determine" }],
     findings,
   });
 
 const setUp = () => {
-  const repo = makeRepo();
+  const repo = runnerRepository(scratch);
   const contract = makeContract();
   contract.base.base_commit = repo.head;
   return { contract, config: makeConfig(repo.dir), agent: agentDouble() };

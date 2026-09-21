@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { SecretIndex, type ReviewArtifact } from "@perbo/contracts";
 import { BundleStore } from "../bundle.js";
 import { remediationToContinue } from "./continuation.js";
-import { finding, review } from "./test-support/fakes.js";
+import { finding, makeReview } from "../test-support/records.js";
 
 const TICKET = "tkt_scp194";
 const scratch: string[] = [];
@@ -79,7 +79,7 @@ describe("the remediation a re-run continues", () => {
     const closed = finding({ key: "b".repeat(64) });
     writeReview(
       bundles,
-      review({ decision: "changes_requested", findings: [open, closed] }),
+      makeReview({ decision: "changes_requested", findings: [open, closed] }),
       "2026-08-27T00:00:00.000Z",
     );
     writeVerification(
@@ -98,7 +98,7 @@ describe("the remediation a re-run continues", () => {
     const bundles = store();
     writeReview(
       bundles,
-      review({ decision: "changes_requested", findings: [finding()], head_commit: "def5678" }),
+      makeReview({ decision: "changes_requested", findings: [finding()], head_commit: "def5678" }),
       "2026-08-27T00:00:00.000Z",
     );
 
@@ -109,7 +109,7 @@ describe("the remediation a re-run continues", () => {
     const bundles = store();
     writeReview(
       bundles,
-      review({ decision: "changes_requested", findings: [finding()] }),
+      makeReview({ decision: "changes_requested", findings: [finding()] }),
       "2026-08-27T00:00:00.000Z",
     );
     writeVerification(bundles, { head_commit: "fed4321" }, "2026-08-27T01:00:00.000Z");

@@ -1,17 +1,19 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { readPrinciples, PRINCIPLES_MAX_BYTES } from "../src/principles.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 describe("readPrinciples", () => {
   it("returns null when nothing is recorded", () => {
-    const root = mkdtempSync(join(tmpdir(), "perbo-pr-"));
+    const root = scratch("perbo-pr-");
     expect(readPrinciples(root)).toBeNull();
   });
 
   it("caps an oversized file rather than inflating every brief", () => {
-    const root = mkdtempSync(join(tmpdir(), "perbo-pr-"));
+    const root = scratch("perbo-pr-");
     mkdirSync(join(root, ".perbo"));
     writeFileSync(join(root, ".perbo", "principles.md"), "x".repeat(PRINCIPLES_MAX_BYTES * 2));
     const text = readPrinciples(root)!;
@@ -20,7 +22,7 @@ describe("readPrinciples", () => {
   });
 
   it("caps by bytes, not by UTF-16 code units", () => {
-    const root = mkdtempSync(join(tmpdir(), "perbo-pr-"));
+    const root = scratch("perbo-pr-");
     mkdirSync(join(root, ".perbo"));
     // One code unit each, two bytes each: exactly at the cap by length and
     // twice over it by size.

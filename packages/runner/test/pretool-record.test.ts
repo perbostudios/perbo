@@ -1,13 +1,16 @@
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES } from "../src/admission.js";
 import { runAgent } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { fakeAgent, scratch } from "./support.js";
+import { fakeAgent } from "../src/test-support/fake-agent.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * SCP-177, at the seam: what the hook decided is what the record says, and what
@@ -26,7 +29,7 @@ const run = async (
   extra: { reported_denials?: readonly string[]; hookProgram?: readonly string[] } = {},
 ) => {
   const worktree = scratch("perbo-scp177-record-");
-  const agent = fakeAgent([
+  const agent = fakeAgent(scratch, [
     {
       kind: "guarded",
       calls,
@@ -121,7 +124,7 @@ describe("the runner's two readings of one call", () => {
     // after the fact differ on a write the resolver puts outside the worktree.
     // The record has to say which one happened — the call ran — and that the
     // other reading refused it.
-    const stubDir = mkdtempSync(join(tmpdir(), "perbo-scp177-stub-"));
+    const stubDir = scratch("perbo-scp177-stub-");
     const stub = join(stubDir, "always-allow.cjs");
     writeFileSync(
       stub,

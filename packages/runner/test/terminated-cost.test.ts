@@ -2,10 +2,12 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import { runAgent, type AgentResult } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * What an attempt the runner stopped says it cost (SCP-159).

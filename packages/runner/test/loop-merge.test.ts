@@ -2,11 +2,15 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LimitsTableSchema, type ChangeSet } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import type { LoopMergeOutcome } from "../src/merge.js";
-import { makeContract, makeRepo, makeReview, scratch, withoutInstall } from "./support.js";
+import { makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * SCP-202: the loop's own post-approval merge step.
@@ -147,7 +151,7 @@ const LOOP_MERGE_TIMEOUT_MS = 60_000;
 
 describe("the loop's post-approval merge step", () => {
   it("never merges on the default switch, and says the merge is a person's", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     // No `merge` key at all: the run configuration's own default is `person`.
@@ -177,7 +181,7 @@ describe("the loop's post-approval merge step", () => {
   }, LOOP_MERGE_TIMEOUT_MS);
 
   it("hands the pull request it just opened to the merge step when the switch is the loop's", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, { merge: "loop" });

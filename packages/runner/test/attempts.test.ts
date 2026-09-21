@@ -2,6 +2,7 @@ import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSyn
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema, type TerminationReason } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import {
   AttemptIdCollisionError,
@@ -18,7 +19,10 @@ import {
 import { BundleStore } from "../src/bundle.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
-import { makeAttempt, makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { makeAttempt, makeContract, makeReview } from "../src/test-support/records.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * Re-running one approved contract.
@@ -104,7 +108,11 @@ function executorDouble(behaviour: {
 
 const approves = (review_id: string) =>
   async () => ({
-    artifact: makeReview({ review_id, decision: "approve", verification_strength: "directly_verified" }),
+    artifact: makeReview({
+      review_id,
+      decision: "approve",
+      coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
+    }),
     bundle: {
       prompt_version: "reviewer_v2",
       system_prompt: "s",
@@ -341,7 +349,7 @@ describe("replacing the attempts record", () => {
 
 describe("a re-run of the same ticket", () => {
   it("keeps the ceiling-stopped run on the record and chains the new one to it", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const root = scratch("perbo-rerun-");
@@ -417,7 +425,7 @@ describe("a re-run of the same ticket", () => {
   }, 120_000);
 
   it("counts the runs on its own record when nothing tracks the ticket", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const root = scratch("perbo-rerun-bare-");

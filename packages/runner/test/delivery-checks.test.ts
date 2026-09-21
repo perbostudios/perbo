@@ -2,10 +2,14 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DeliveredCheckSchema, LimitsTableSchema, type ChangeSet } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
-import { makeContract, makeRepo, makeReview, scratch, withoutInstall } from "./support.js";
+import { makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The loop reads the checks on the head it pushed before it records a delivery.
@@ -235,7 +239,7 @@ const viewsOfTheRollup = (calls: string[][]): string[][] =>
 
 describe("the checks on the head the loop published", () => {
   it("records a failing check with its conclusion, and the delivery is not green", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -269,7 +273,7 @@ describe("the checks on the head the loop published", () => {
   }, RUN_TIMEOUT_MS);
 
   it("records the conclusions of a head whose checks are green", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -299,7 +303,7 @@ describe("the checks on the head the loop published", () => {
   }, RUN_TIMEOUT_MS);
 
   it("records a head with no check runs by the bound as unchecked, and the bound counts in the run's clock", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     // A minute, spent in the run's own clock rather than in a timer's.
@@ -332,7 +336,7 @@ describe("the checks on the head the loop published", () => {
   }, RUN_TIMEOUT_MS);
 
   it("waits out a check that has not concluded, and records it once it has", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, { delivery_checks_bound_ms: 600_000 });
@@ -362,7 +366,7 @@ describe("the checks on the head the loop published", () => {
   }, RUN_TIMEOUT_MS);
 
   it("states the checks it read in the pull request's body, below what was already there", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -393,7 +397,7 @@ describe("the checks on the head the loop published", () => {
   }, RUN_TIMEOUT_MS);
 
   it("reads a check run still in progress as pending, and records it unchecked at the bound", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, { delivery_checks_bound_ms: 60_000 });
@@ -429,7 +433,7 @@ describe("the checks on the head the loop published", () => {
   }, RUN_TIMEOUT_MS);
 
   it("reads a rollup whose every entry has completed on the first poll", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir);
@@ -462,7 +466,7 @@ describe("the checks on the head the loop published", () => {
   }, RUN_TIMEOUT_MS);
 
   it("reads a legacy status context still pending as pending", async () => {
-    const repo = makeRepo();
+    const repo = runnerRepository(scratch);
     const contract = makeContract();
     contract.base.base_commit = repo.head;
     const config = makeConfig(repo.dir, { delivery_checks_bound_ms: 60_000 });

@@ -3,16 +3,15 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { delimiter, join, resolve, toNamespacedPath } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_LIMITS_TABLE, LimitExceededError, LimitsTableSchema } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import {
   WorkspaceError,
   cleanup,
@@ -21,9 +20,9 @@ import {
   provision,
   reclaimStaleWorktrees,
 } from "./worktree.js";
-import { makeRepo } from "./test-support/repository.js";
+import { workspaceRepository } from "./test-support/repository.js";
 
-const scratch = () => mkdtempSync(join(tmpdir(), "perbo-wt-"));
+const scratch = scratchDirectories("perbo-wt-");
 
 const base = (dir: string, head: string, root: string) => ({
   repository_root: dir,
@@ -38,7 +37,7 @@ const base = (dir: string, head: string, root: string) => ({
 
 describe("provision", () => {
   it("creates from the exact base commit on the prb/<ticket id>/<slug> branch", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     const workspace = await provision({ ...base(repo.dir, repo.first, root), attempt_id: "att_1" });
 
@@ -50,7 +49,7 @@ describe("provision", () => {
   });
 
   it("refuses a base commit that does not resolve, before creating anything", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     await expect(
       provision({ ...base(repo.dir, "0".repeat(40), root), attempt_id: "att_1" }),
@@ -66,7 +65,7 @@ describe("provision", () => {
   });
 
   it("rejects a second worktree on the same branch", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
     const limits = LimitsTableSchema.parse({
@@ -79,7 +78,7 @@ describe("provision", () => {
   });
 
   it("stops at concurrent_local_attempts rather than filling the laptop", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
     await expect(
@@ -92,7 +91,7 @@ describe("provision", () => {
   });
 
   it("lets a continuation take over its predecessor's worktree and lease", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     const first = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
     const second = await provision({
@@ -108,7 +107,7 @@ describe("provision", () => {
   });
 
   it("keeps the branch the ticket already has, whatever its key would derive now", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     const recorded = "ayo/scp016/provision-an-isolated-worktree";
     const workspace = await provision({
@@ -121,7 +120,7 @@ describe("provision", () => {
   });
 
   it("continues on the branch its lease holds, whatever its outcome would derive now", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     // A chain begun under another outcome, whose slug the current one does not derive.
     const first = await provision({ ...base(repo.dir, repo.head, root), outcome: "an earlier outcome", attempt_id: "att_1" });
@@ -136,7 +135,7 @@ describe("provision", () => {
   });
 
   it("derives a new name where the branch on record is not one the loop minted", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     const workspace = await provision({
       ...base(repo.dir, repo.head, root),
@@ -147,7 +146,7 @@ describe("provision", () => {
   });
 
   it("refuses a worktree path that would land outside the workspace root", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     // A traversing attempt id is the only route to a path outside the root.
     await expect(
@@ -177,7 +176,7 @@ describe("leases", () => {
   });
 
   it("reclaims a stale worktree so its branch can be provisioned again", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     const workspace = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
 
@@ -200,7 +199,7 @@ describe("leases", () => {
 describe("cleanup", () => {
   for (const outcome of ["success", "failure", "cancelled"] as const) {
     it(`removes the worktree after ${outcome} and keeps the branch`, async () => {
-      const repo = makeRepo();
+      const repo = workspaceRepository(scratch);
       const root = scratch();
       const workspace = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
       const result = await cleanup({ workspace, root, outcome });
@@ -217,7 +216,7 @@ describe("cleanup", () => {
   }
 
   it("removes a worktree Git cannot delete: a link whose target is longer than MAX_PATH", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     const workspace = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
 
@@ -265,7 +264,7 @@ describe("cleanup", () => {
   it.skipIf(process.platform === "win32")(
     "finishes a removal Git accepted and could not complete",
     async () => {
-      const repo = makeRepo();
+      const repo = workspaceRepository(scratch);
       const root = scratch();
       const workspace = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
 
@@ -281,7 +280,7 @@ describe("cleanup", () => {
   );
 
   it("leaves a worktree Git refused to remove, and says it could not remove it", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     const workspace = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
     // A lock is one refusal. Git refuses before it touches the tree or its
@@ -297,7 +296,7 @@ describe("cleanup", () => {
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     "says both failed where neither Git nor the direct removal can delete the tree",
     async () => {
-      const repo = makeRepo();
+      const repo = workspaceRepository(scratch);
       const root = scratch();
       const workspace = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
       // A directory whose entries this user may not unlink. Git accepts the
@@ -318,7 +317,7 @@ describe("cleanup", () => {
   );
 
   it("removes a tree whose registration an earlier cleanup's removal already dropped", async () => {
-    const repo = makeRepo();
+    const repo = workspaceRepository(scratch);
     const root = scratch();
     const workspace = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
     // What a removal Git accepted and could not finish leaves behind: the tree,
@@ -335,7 +334,7 @@ describe("cleanup", () => {
   it.skipIf(process.platform === "win32")(
     "does not say the tree was removed directly when Git removed it",
     async () => {
-      const repo = makeRepo();
+      const repo = workspaceRepository(scratch);
       const root = scratch();
       const workspace = await provision({ ...base(repo.dir, repo.head, root), attempt_id: "att_1" });
 

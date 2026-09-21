@@ -2,8 +2,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import { TicketRunConfigSchema, runTicket, type TicketRunResult } from "../src/loop.js";
-import { makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { makeContract, makeReview } from "../src/test-support/records.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * What an attempt leaves running when it ends.
@@ -130,7 +134,7 @@ const approve = (async () => ({
   artifact: makeReview({
     review_id: "rev_0000000000000263",
     decision: "approve",
-    verification_strength: "directly_verified",
+    coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
   }),
   bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
 })) as never;
@@ -192,7 +196,7 @@ async function runWith(input: {
   config: { state_root: string };
   ticket_id: string;
 }> {
-  const repo = makeRepo();
+  const repo = runnerRepository(scratch);
   const contract = makeContract();
   contract.base.base_commit = repo.head;
   const config = configFor(repo.dir, input.checkCommand);

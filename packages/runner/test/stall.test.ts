@@ -2,10 +2,13 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
 import { runAgent } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { SPAWN_TEST_TIMEOUT_MS, fakeAgent, scratch } from "./support.js";
+import { fakeAgent } from "../src/test-support/fake-agent.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The stall detector, and the cost cap that outlived the other ceilings
@@ -100,7 +103,7 @@ describe("an attempt that keeps working is never stopped", () => {
     "runs for hours of tool calls under a stall window of one",
     async () => {
       const worktree = scratch("perbo-stall-steady-");
-      const agent = fakeAgent([
+      const agent = fakeAgent(scratch, [
         { kind: "shell", commands: Array.from({ length: 60 }, () => "git status") },
       ]);
       /**

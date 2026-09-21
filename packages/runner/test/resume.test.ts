@@ -14,7 +14,12 @@ import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "../src/loop.js";
 import { resolveResumeSource, sameCommit } from "../src/resume.js";
 import { TRANSPORT_RETRY_DELAY_MS } from "../src/transport.js";
-import { git, makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { makeContract, makeReview } from "../src/test-support/records.js";
+import { runnerRepository } from "../src/test-support/repository.js";
+import { scratchDirectories } from "@perbo/test-support";
+import type { Repository } from "@perbo/test-support";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * Resuming an attempt a ceiling cut (SCP-154).
@@ -226,7 +231,7 @@ const executionBundles = (store: string) =>
  * run needs to resume it: the store, the cut attempt and its bundle.
  */
 async function runCutByCostCeiling(): Promise<{
-  repo: { dir: string; head: string };
+  repo: Repository;
   contract: PlanContract;
   store: string;
   branch: string;
@@ -234,7 +239,7 @@ async function runCutByCostCeiling(): Promise<{
   bundle_id: string;
   diff: string;
 }> {
-  const repo = makeRepo();
+  const repo = runnerRepository(scratch);
   const contract = makeContract();
   contract.base.base_commit = repo.head;
   const store = scratch("perbo-resume-store-");
@@ -280,7 +285,7 @@ describe("a resume starts the next attempt from the cut attempt's retained diff"
     // branch deleted after the ceiling ended the attempt. The retained
     // change.diff is the only surviving copy of the work, which is the state
     // this resume exists for.
-    git(cut.repo.dir, "branch", "-D", "--", cut.branch);
+    cut.repo.git("branch", "-D", "--", cut.branch);
     const before = bundleBytes(cut.store);
 
     const executor = watchingExecutor();
@@ -392,7 +397,7 @@ describe("a resumed round 0 whose model transport gives up", () => {
     const cut = await runCutByCostCeiling();
     // As in the first resume case: the branch the cut attempt sealed onto is
     // gone, so the retained diff is the only surviving copy of the work.
-    git(cut.repo.dir, "branch", "-D", "--", cut.branch);
+    cut.repo.git("branch", "-D", "--", cut.branch);
 
     const executor = watchingExecutor([
       { reason: "transport_unavailable", detail: "API Error (529 Overloaded)" },
@@ -452,9 +457,9 @@ describe("a resume refuses rather than applying a diff to the wrong tree", () =>
     // pinned to that commit. The retained diff describes the tree at the older
     // one, so it is no longer a statement about what this run would start from.
     writeFileSync(join(cut.repo.dir, "src", "other.ts"), "export const other = 2;\n");
-    git(cut.repo.dir, "add", "-A");
-    git(cut.repo.dir, "commit", "-qm", "second");
-    const moved = git(cut.repo.dir, "rev-parse", "HEAD").trim();
+    cut.repo.git("add", "-A");
+    cut.repo.git("commit", "-qm", "second");
+    const moved = cut.repo.git("rev-parse", "HEAD").trim();
     expect(moved).not.toBe(cut.repo.head);
     const onMoved: PlanContract = {
       ...cut.contract,
@@ -488,14 +493,14 @@ describe("a resume refuses rather than applying a diff to the wrong tree", () =>
     // ended the attempt. The retained diff still says that file is added with
     // the bytes the cut attempt wrote, and the two cannot both be true: this is
     // the conflict `git apply --3way` refuses rather than guesses at.
-    git(cut.repo.dir, "checkout", "-q", cut.branch);
+    cut.repo.git("checkout", "-q", cut.branch);
     writeFileSync(
       join(cut.repo.dir, CARRIED_FILE),
       "export const carried = 'a person changed this by hand';\n",
     );
-    git(cut.repo.dir, "add", "-A");
-    git(cut.repo.dir, "commit", "-qm", "hand edit on the attempt branch");
-    git(cut.repo.dir, "checkout", "-q", "main");
+    cut.repo.git("add", "-A");
+    cut.repo.git("commit", "-qm", "hand edit on the attempt branch");
+    cut.repo.git("checkout", "-q", "main");
 
     const executor = watchingExecutor();
     await expect(

@@ -4,7 +4,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { scratch, SPAWN_TEST_TIMEOUT_MS } from "./support.js";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 const PidsSchema = z.object({ agent: z.number().int(), child: z.number().int() });
 const ResultSchema = z.object({
@@ -62,6 +64,7 @@ setInterval(() => {}, 1000);
 import { runAgent } from ${JSON.stringify(new URL("../dist/adapter.js", import.meta.url).href)};
 import { AttemptCeilings } from ${JSON.stringify(new URL("../dist/ceilings.js", import.meta.url).href)};
 import { buildPermissionProfile } from ${JSON.stringify(new URL("../dist/profile.js", import.meta.url).href)};
+
 const worktree = ${JSON.stringify(root)};
 const before = ['SIGTERM', 'SIGINT'].map(signal => process.listenerCount(signal));
 const result = await runAgent({

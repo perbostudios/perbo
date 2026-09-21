@@ -3,10 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LimitsTableSchema } from "@perbo/contracts";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCodexAgent } from "../src/adapter-codex.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { briefRecords, SPAWN_TEST_TIMEOUT_MS } from "./support.js";
+import { briefRecords } from "../src/test-support/records.js";
 
 /**
  * D-106, through `runCodexAgent` itself, against a fake app-server that

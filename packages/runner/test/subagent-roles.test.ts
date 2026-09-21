@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES } from "../src/admission.js";
 import { PERBO_AGENT_ROLES, SUBAGENT_TOOL_NAMES } from "../src/agents.js";
 import { buildArgv } from "../src/adapter.js";
@@ -19,7 +20,8 @@ import {
   DEFAULT_COMMAND_ALLOW_LIST,
   DEFAULT_COMMAND_DENY_LIST,
 } from "../src/profile.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * D-106 criterion 1: the executor may start only Perbo's roles.

@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { commandSegments, inspectCommand, inspectCommandWithCwd } from "../src/prohibited.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * A heredoc body is the command's input, not more of the command line (SCP-174).
@@ -27,7 +28,7 @@ const AYO26 = readFileSync(
  * root is the resolved spelling, which is what the guard reports.
  */
 function worktree(prefix: string): { root: string; home: string } {
-  return { root: realpathSync(mkdtempSync(join(tmpdir(), prefix))), home: HOME };
+  return { root: realpathSync(scratch(prefix)), home: HOME };
 }
 
 const outsideHits = (command: string, scope: { root: string; home: string; cwd?: string }) =>

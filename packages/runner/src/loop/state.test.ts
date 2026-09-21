@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { attemptId } from "@perbo/contracts";
 import { applyStep, attemptIdFor } from "./state.js";
-import { attempt, finding, roundState } from "./test-support/fakes.js";
+import { finding } from "../test-support/records.js";
+import { attempt, roundState } from "./test-support/fakes.js";
 
 const ROOT = "att_0000000000000001";
 

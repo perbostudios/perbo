@@ -1,12 +1,11 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { initRepository, scratchDirectories, type Repository } from "@perbo/test-support";
 import { DEFAULT_LIMITS_TABLE } from "@perbo/contracts";
 import { diagnose, unpinnedInstallEnv } from "./diagnostic.js";
 import { materialize } from "./materialize.js";
 import { provision } from "./worktree.js";
-import { git } from "./test-support/repository.js";
 
 /**
  * A checkout that has no lockfile yet.
@@ -22,22 +21,12 @@ import { git } from "./test-support/repository.js";
  * commit before it and each test fails on the behaviour it is about.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "perbo-nolock-"));
+const scratch = scratchDirectories("perbo-nolock-");
+const scratchRoot = scratch();
 
 /** A one-commit checkout holding exactly the files it is given. */
-function checkout(name: string, files: Record<string, string>): string {
-  const dir = mkdtempSync(join(scratch, `${name}-`));
-  git(dir, "init", "-q", "-b", "main");
-  git(dir, "config", "user.name", "test");
-  git(dir, "config", "user.email", "test@example.com");
-  git(dir, "config", "commit.gpgsign", "false");
-  for (const [path, body] of Object.entries(files)) {
-    mkdirSync(dirname(join(dir, path)), { recursive: true });
-    writeFileSync(join(dir, path), body);
-  }
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
-  return dir;
+function checkout(name: string, files: Record<string, string>): Repository {
+  return initRepository(mkdtempSync(join(scratchRoot, `${name}-`)), { files, message: "base" });
 }
 
 const manifest = (extra: Record<string, unknown> = {}): string =>
@@ -48,7 +37,7 @@ const reasons = (result: { findings: Array<{ reason: string }> }): string[] =>
 
 describe("a checkout with no lockfile", () => {
   it("reads the manifest for the manager, and proposes an install that manager can run", async () => {
-    const dir = checkout("npm", {
+    const { dir } = checkout("npm", {
       "package.json": manifest(),
       "src/index.js": "module.exports = 1;\n",
     });
@@ -83,7 +72,7 @@ describe("a checkout with no lockfile", () => {
   });
 
   it("takes the manager the packageManager field names", async () => {
-    const dir = checkout("corepack", {
+    const { dir } = checkout("corepack", {
       "package.json": manifest({ packageManager: "pnpm@9.1.0" }),
     });
 
@@ -114,7 +103,7 @@ describe("a checkout with no lockfile", () => {
   });
 
   it("reproduces the lockfile's own install where the checkout has one", async () => {
-    const dir = checkout("locked", {
+    const { dir } = checkout("locked", {
       "package.json": manifest(),
       "package-lock.json": `${JSON.stringify({ name: "fixture", lockfileVersion: 3, packages: {} })}\n`,
     });
@@ -137,7 +126,8 @@ describe("a checkout with no lockfile", () => {
   });
 
   it("materializes a checkout that names no package manager, installing nothing", async () => {
-    const dir = checkout("bare", { "src/index.js": "module.exports = 1;\n" });
+    const repository = checkout("bare", { "src/index.js": "module.exports = 1;\n" });
+    const dir = repository.dir;
 
     const result = await diagnose({ checkout: dir, repository_id: "repo_fixture" });
 
@@ -170,9 +160,9 @@ describe("a checkout with no lockfile", () => {
       ticket_key: "PRB-1",
       ticket_id: "ticket_1",
       outcome: "materialize an empty repository",
-      base_commit: git(dir, "rev-parse", "HEAD").trim(),
+      base_commit: repository.head,
       attempt_id: "att_1",
-      root: mkdtempSync(join(scratch, "worktrees-")),
+      root: mkdtempSync(join(scratchRoot, "worktrees-")),
       limits: DEFAULT_LIMITS_TABLE,
     });
     const materialized = await materialize({
@@ -186,7 +176,7 @@ describe("a checkout with no lockfile", () => {
   });
 
   it("verifies such a checkout with the command it is given, and says nothing of the default", async () => {
-    const dir = checkout("bare-verified", { "src/index.js": "module.exports = 1;\n" });
+    const { dir } = checkout("bare-verified", { "src/index.js": "module.exports = 1;\n" });
 
     const result = await diagnose({
       checkout: dir,
@@ -202,7 +192,7 @@ describe("a checkout with no lockfile", () => {
   });
 
   it("materializes a checkout in an ecosystem this build does not read, judged by the review", async () => {
-    const dir = checkout("cargo", {
+    const { dir } = checkout("cargo", {
       "Cargo.toml": '[package]\nname = "fixture"\nversion = "0.1.0"\nedition = "2021"\n',
       "src/main.rs": "fn main() {}\n",
     });

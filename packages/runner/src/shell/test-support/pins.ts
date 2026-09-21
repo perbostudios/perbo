@@ -1,7 +1,9 @@
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { scratchDirectories } from "@perbo/test-support";
 import { inspectCommand } from "../../prohibited.js";
-import { scratch } from "../../../test/support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * SCP-190: every entry of every table the guard reads a command against is

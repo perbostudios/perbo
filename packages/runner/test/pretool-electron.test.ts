@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { preparePreToolGuard } from "../src/pretool.js";
 import { buildPermissionProfile } from "../src/profile.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The hook command when the runner runs on Electron's Node, as it does under
@@ -17,7 +18,7 @@ import { buildPermissionProfile } from "../src/profile.js";
 const PRINT = "process.stdout.write(String(process.env.ELECTRON_RUN_AS_NODE))";
 
 function hookCommand(electron: boolean): string {
-  const worktree = mkdtempSync(join(tmpdir(), "perbo-electron-hook-"));
+  const worktree = scratch("perbo-electron-hook-");
   const guard = preparePreToolGuard({
     worktree,
     tmpdir: null,

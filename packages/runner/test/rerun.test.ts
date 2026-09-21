@@ -2,9 +2,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SecretIndex } from "@perbo/contracts";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
 import { CHECK_DETAIL_MAX_CHARS, runPinnedChecks } from "../src/checks.js";
 import { parseTestOutput, planRerun, resolveFailures } from "../src/rerun.js";
-import { scratch, SPAWN_TEST_TIMEOUT_MS } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 const ESC = String.fromCharCode(27);
 const red = (text: string) => `${ESC}[31m${text}${ESC}[39m`;
