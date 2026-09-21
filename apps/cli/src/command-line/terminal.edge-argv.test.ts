@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { approveCommandLine, listCommandLine, parseAdmitArgs, parseListArgs } from "../commands/admit.js";
 import { parseEditArgs } from "../commands/edit/index.js";
-import { parseInspectArgs } from "../commands/inspect.js";
+import { inspectCommandLine } from "../commands/inspect.js";
 import { parseInterviewArgs } from "../commands/interview/index.js";
 import { parsePrincipleArgs } from "../commands/principle.js";
 import { parseReviewArgs } from "../commands/review/index.js";
@@ -216,13 +216,9 @@ describe("the desktop host", () => {
       input: { target: { repo: REPO, store: null }, all: true },
       output: { json: true },
     });
-    expect(parseInspectArgs([KEY, "--json", "--repo", REPO])).toEqual({
-      key: KEY,
-      attempt: null,
-      verify: null,
-      json: true,
-      repo: REPO,
-      store: null,
+    expect(inspectCommandLine.read([KEY, "--json", "--repo", REPO])).toEqual({
+      input: { target: { repo: REPO, store: null }, key: KEY, attempt: null, verify: null },
+      output: { json: true },
     });
   });
 

@@ -7,8 +7,9 @@ import { EXIT_CODES } from "@perbo/contracts";
 import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { runEditCommand } from "./edit/index.js";
-import { runInspectCommand, type InspectReport } from "./inspect.js";
+import { inspectCommandLine, type InspectReport } from "./inspect.js";
 import { storeDir } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-graph-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -82,14 +83,14 @@ const graphEdit = (repo: string, edit: unknown) =>
 /** The rendering as a person reads it at 80 columns: colour stripped. */
 async function inspectText(repo: string): Promise<string> {
   const streams = capture(true);
-  expect(await runInspectCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
+  expect(await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
   // eslint-disable-next-line no-control-regex
   return streams.out.join("").replace(/\u001b\[[0-9;]*m/g, "");
 }
 
 async function inspectJson(repo: string): Promise<InspectReport> {
   const streams = capture(false);
-  expect(await runInspectCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
+  expect(await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
   return JSON.parse(streams.out.join("")) as never;
 }
 

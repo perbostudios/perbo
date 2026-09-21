@@ -21,8 +21,8 @@ import {
   runExecuteCommand,
   type ExecuteOptions,
 } from "./index.js";
-import { attemptsRecordSubject, runInspectCommand } from "../inspect.js";
-import { exitForThrown } from "../../command-line/terminal.js";
+import { attemptsRecordSubject, inspectCommandLine } from "../inspect.js";
+import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import { storeDir } from "../../store/index.js";
 
 /**
@@ -871,11 +871,11 @@ describe("what says where a run publishes", () => {
 
     const asJson = capture();
     expect(
-      await runInspectCommand({
+      await runCommandLine(inspectCommandLine, {
         argv: [reported.ticket_id, "--repo", repo],
         streams: asJson.streams,
         cwd: repo,
-        subject: attemptsRecordSubject,
+        deps: { subject: attemptsRecordSubject },
       }),
     ).toBe(0);
     const report = JSON.parse(asJson.out.join("")) as { base: { ref: string; from: string } | null };
@@ -884,11 +884,11 @@ describe("what says where a run publishes", () => {
     // And in the reading a person gets on a terminal, beside the pull request.
     const onTty = capture(true);
     expect(
-      await runInspectCommand({
+      await runCommandLine(inspectCommandLine, {
         argv: [reported.ticket_id, "--repo", repo],
         streams: onTty.streams,
         cwd: repo,
-        subject: attemptsRecordSubject,
+        deps: { subject: attemptsRecordSubject },
       }),
     ).toBe(0);
     const shown = uncoloured(onTty.out.join(""));

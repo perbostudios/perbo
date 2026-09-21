@@ -12,7 +12,7 @@ import { runEditCommand } from "./commands/edit/index.js";
 import { escapesCommandLine } from "./commands/escapes/index.js";
 import { parseExecuteArgs, runDoctorCommand, runExecuteCommand } from "./commands/run/index.js";
 import { COMMAND_NAMES, type CommandName } from "./command-line/names.js";
-import { runInspectCommand } from "./commands/inspect.js";
+import { inspectCommandLine } from "./commands/inspect.js";
 import { parsePrincipleArgs, runPrincipleCommand } from "./commands/principle.js";
 import { runReviewCommand } from "./commands/review/index.js";
 import { VERSION } from "./version.js";
@@ -55,7 +55,7 @@ export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
       case "review":
         return runReviewCommand({ args: parseReviewArgs(rest), streams, cwd, now: new Date() });
       case "inspect":
-        return runInspectCommand({ argv: rest, streams, cwd });
+        return runCommandLine(inspectCommandLine, { argv: rest, streams, cwd });
       case "verdict":
         return runVerdictCommand({ argv: rest, streams, cwd });
       case "run":

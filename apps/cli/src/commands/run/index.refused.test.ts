@@ -13,9 +13,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
-import { exitForThrown } from "../../command-line/terminal.js";
+import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "./index.js";
-import { attemptsRecordSubject, runInspectCommand } from "../inspect.js";
+import { attemptsRecordSubject, inspectCommandLine } from "../inspect.js";
 import { storeDir } from "../../store/index.js";
 
 /**
@@ -285,11 +285,11 @@ describe("a repository the diagnostic refuses", () => {
     // report a script parses, field for field, and in the one a person reads.
     const inspected = async (isTTY: boolean): Promise<string> => {
       const read = capture(isTTY);
-      await runInspectCommand({
+      await runCommandLine(inspectCommandLine, {
         argv: [runId, "--repo", repo],
         streams: read.streams,
         cwd: repo,
-        subject: attemptsRecordSubject,
+        deps: { subject: attemptsRecordSubject },
       });
       return read.out.join("");
     };

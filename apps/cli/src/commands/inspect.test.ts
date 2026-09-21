@@ -12,14 +12,9 @@ import {
 } from "@perbo/contracts";
 import { BundleStore } from "@perbo/runner";
 import { UsageError } from "../usage-error.js";
-import {
-  buildInspectReport,
-  formatHumanElapsed,
-  parseInspectArgs,
-  renderInspect,
-  runInspectCommand,
-} from "./inspect.js";
+import { buildInspectReport, formatHumanElapsed, inspectCommandLine, renderInspect } from "./inspect.js";
 import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "../test-support/attempt-fixture.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -467,25 +462,26 @@ describe("perbo inspect argument parsing", () => {
   });
 
   it("takes exactly one key and rejects flags it does not know", () => {
-    expect(parseInspectArgs(["AYO-1", "--attempt=att_x", "--json"])).toEqual({
-      key: "AYO-1",
-      attempt: "att_x",
-      verify: null,
-      json: true,
-      repo: ".",
-      store: null,
+    expect(inspectCommandLine.read(["AYO-1", "--attempt=att_x", "--json"])).toEqual({
+      input: {
+        target: { repo: ".", store: null },
+        key: "AYO-1",
+        attempt: "att_x",
+        verify: null,
+      },
+      output: { json: true },
     });
     // The check names its own attempt, and reading is what happens without it.
-    expect(parseInspectArgs(["AYO-1", "--verify", "att_x"]).verify).toBe("att_x");
-    expect(parseInspectArgs(["AYO-1", "--verify=att_x"]).verify).toBe("att_x");
-    expect(() => parseInspectArgs(["AYO-1", "--verify"])).toThrow(/--verify requires a value/);
+    expect(inspectCommandLine.read(["AYO-1", "--verify", "att_x"]).input.verify).toBe("att_x");
+    expect(inspectCommandLine.read(["AYO-1", "--verify=att_x"]).input.verify).toBe("att_x");
+    expect(() => inspectCommandLine.read(["AYO-1", "--verify"]).input).toThrow(/--verify requires a value/);
     // Two answers to "which attempt": refused rather than one of them ignored.
-    expect(() => parseInspectArgs(["AYO-1", "--verify", "att_x", "--attempt", "att_y"])).toThrow(
+    expect(() => inspectCommandLine.read(["AYO-1", "--verify", "att_x", "--attempt", "att_y"]).input).toThrow(
       /cannot be given with --attempt/,
     );
-    expect(() => parseInspectArgs([])).toThrow(UsageError);
-    expect(() => parseInspectArgs(["AYO-1", "AYO-2"])).toThrow(UsageError);
-    expect(() => parseInspectArgs(["AYO-1", "--bundle"])).toThrow(/unknown flag/);
+    expect(() => inspectCommandLine.read([]).input).toThrow(UsageError);
+    expect(() => inspectCommandLine.read(["AYO-1", "AYO-2"]).input).toThrow(UsageError);
+    expect(() => inspectCommandLine.read(["AYO-1", "--bundle"]).input).toThrow(/unknown flag/);
   });
 });
 
@@ -776,7 +772,7 @@ describe("perbo inspect", () => {
       JSON.stringify(makeTicket({ key: "AYO-2", ticket_id: "ticket_neverran001", repository_root: repo, state: "ready" })),
     );
     const { out, streams } = capture(true);
-    expect(await runInspectCommand({ argv: ["AYO-2", "--repo", repo], streams, cwd: repo })).toBe(0);
+    expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-2", "--repo", repo], streams, cwd: repo })).toBe(0);
     expect(out.join("")).toContain("AYO-2 has no attempts on record: nothing has run against it yet.");
     expect(out.join("").split("\n").filter((line) => line.includes("AYO-2 has no"))).toHaveLength(1);
   });
@@ -792,7 +788,7 @@ describe("perbo inspect", () => {
       ),
     );
     const { out, streams } = capture(true);
-    expect(await runInspectCommand({ argv: ["AYO-1", "--repo", repo], streams, cwd: repo })).toBe(0);
+    expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-1", "--repo", repo], streams, cwd: repo })).toBe(0);
     const rendered = out.join("");
     expect(rendered).toContain("history shows 3 run(s) started");
     expect(rendered).toContain(join(store, "state", "ticket_elsewhere01.attempts.json"));
@@ -929,7 +925,7 @@ describe("perbo inspect", () => {
     vi.stubEnv("NO_COLOR", "1");
     const { out, streams } = capture(true);
     try {
-      expect(await runInspectCommand({ argv: ["AYO-4", "--repo", repo, "--store", store], streams, cwd: repo })).toBe(0);
+      expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-4", "--repo", repo, "--store", store], streams, cwd: repo })).toBe(0);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -952,7 +948,7 @@ describe("perbo inspect", () => {
     const future = { ...DRAFTED_ADMISSION, criteria_source: "attached", level_source: "inherited", derived_level: "P1" };
     const { repo, store } = storeWithAdmission("admission-future", future);
     const { out, streams } = capture(false);
-    expect(await runInspectCommand({ argv: ["AYO-4", "--repo", repo, "--store", store, "--json"], streams, cwd: repo })).toBe(0);
+    expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-4", "--repo", repo, "--store", store, "--json"], streams, cwd: repo })).toBe(0);
     expect(JSON.parse(out.join("")).admission).toEqual(future);
     const report = buildInspectReport({ storeDirectory: store, key: "AYO-4", attempt: null });
     const rendered = renderInspect(report, { color: false, detail: false, version: "test" });
@@ -982,7 +978,7 @@ describe("perbo inspect", () => {
     ] as const) {
       const { repo, store } = storeWithAdmission(name, admission);
       const { out, streams } = capture(false);
-      expect(await runInspectCommand({ argv: ["AYO-4", "--repo", repo, "--store", store], streams, cwd: repo })).toBe(0);
+      expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-4", "--repo", repo, "--store", store], streams, cwd: repo })).toBe(0);
       const report = JSON.parse(out.join("")) as { admission: unknown };
       const stored = JSON.parse(readFileSync(join(store, "tickets", "AYO-4.json"), "utf8")) as {
         admission: unknown;
@@ -996,7 +992,7 @@ describe("perbo inspect", () => {
   it("adds the admission and source keys to the JSON report and changes nothing else", async () => {
     const { repo } = storeWithAttempts("json-shape");
     const { out, streams } = capture(false);
-    expect(await runInspectCommand({ argv: ["AYO-7", "--repo", repo], streams, cwd: repo })).toBe(0);
+    expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-7", "--repo", repo], streams, cwd: repo })).toBe(0);
     const report = JSON.parse(out.join("")) as Record<string, unknown> & {
       attempts: Array<Record<string, unknown>>;
     };
@@ -1073,7 +1069,7 @@ describe("perbo inspect", () => {
   it("emits the report as JSON when piped", async () => {
     const { repo } = storeWithAttempts("json");
     const { out, streams } = capture(false);
-    expect(await runInspectCommand({ argv: ["AYO-7", "--repo", repo], streams, cwd: repo })).toBe(0);
+    expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-7", "--repo", repo], streams, cwd: repo })).toBe(0);
     const report = JSON.parse(out.join("")) as {
       ticket: string;
       pull_request_url: string;
@@ -1568,7 +1564,7 @@ describe("what an attempt leads with, and what a script gets", () => {
   it("emits each attempt record under --json in its own shape, unchanged", async () => {
     const { repo, store } = storeWithAttempts("json-attempt-record");
     const { out, streams } = capture(true);
-    expect(await runInspectCommand({ argv: ["AYO-7", "--repo", repo, "--json"], streams, cwd: repo })).toBe(0);
+    expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-7", "--repo", repo, "--json"], streams, cwd: repo })).toBe(0);
     const emitted = JSON.parse(out.join("")) as { attempts: Array<{ record: unknown }> };
     const stored = JSON.parse(
       readFileSync(join(store, "state", `${TICKET_ID}.attempts.json`), "utf8"),
@@ -1597,7 +1593,7 @@ describe("what an attempt leads with, and what a script gets", () => {
     // What a script reads: no figure at all, the basis intact, and the record
     // itself carrying the `cost_micros: 0` the reading refuses to price.
     const { out, streams } = capture(true);
-    expect(await runInspectCommand({ argv: ["AYO-16", "--repo", repo, "--json"], streams, cwd: repo })).toBe(0);
+    expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-16", "--repo", repo, "--json"], streams, cwd: repo })).toBe(0);
     const emitted = JSON.parse(out.join("")) as {
       attempts: Array<{ cost: unknown; record: unknown }>;
       total_cost: unknown;

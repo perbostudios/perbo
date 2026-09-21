@@ -9,7 +9,8 @@ import {
   type PreflightResult,
 } from "@perbo/runner";
 import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "./run/index.js";
-import { attemptsRecordSubject, runInspectCommand } from "./inspect.js";
+import { attemptsRecordSubject, inspectCommandLine } from "./inspect.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * What `perbo inspect` says about the checks on the head a run published.
@@ -507,18 +508,18 @@ async function inspect(
   shown: string;
 }> {
   const asJson = capture(false);
-  await runInspectCommand({
+  await runCommandLine(inspectCommandLine, {
     argv: [runId, "--repo", repo],
     streams: asJson.streams,
     cwd: repo,
-    subject: attemptsRecordSubject,
+    deps: { subject: attemptsRecordSubject },
   });
   const onTty = capture(true);
-  await runInspectCommand({
+  await runCommandLine(inspectCommandLine, {
     argv: [runId, "--repo", repo],
     streams: onTty.streams,
     cwd: repo,
-    subject: attemptsRecordSubject,
+    deps: { subject: attemptsRecordSubject },
   });
   return {
     report: JSON.parse(asJson.out.join("")) as { delivery_checks: RunReport["delivery_checks"] },

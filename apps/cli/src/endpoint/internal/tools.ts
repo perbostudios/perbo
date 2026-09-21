@@ -7,7 +7,7 @@ import { collectOutput } from "../../diagnostics.js";
 import type { CommandContext, ReportCommand } from "../../command-line/terminal.js";
 import { runEdit, type EditArgs } from "../../commands/edit/index.js";
 import { escapesCommandLine } from "../../commands/escapes/index.js";
-import { runInspectCommand } from "../../commands/inspect.js";
+import { AttemptIdSchema, inspectCommandLine } from "../../commands/inspect.js";
 import type { ServeTick } from "../../commands/serve/index.js";
 import { stopsCommandLine, IsoInstantSchema } from "../../commands/stops.js";
 import type { Streams } from "../../streams.js";
@@ -177,7 +177,6 @@ const KeySchema = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/).descr
  * take free text get their arguments built as objects, and everything that
  * does travel as argv is shaped by a schema that admits no leading dash.
  */
-const AttemptIdSchema = z.string().regex(/^att_[0-9a-f]+$/).describe("An attempt id, e.g. att_0000000000000001.");
 const IssueReferenceSchema = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*#[1-9][0-9]*$/)
@@ -207,15 +206,18 @@ const inspectTicket = tool({
   role: "read",
   input: z.object({
     key: KeySchema,
-    attempt: AttemptIdSchema.optional().describe("One attempt id, for that attempt alone."),
+    attempt: AttemptIdSchema.optional().describe("An attempt id, e.g. att_0000000000000001; for that attempt alone."),
   }),
   run: (input, context) =>
-    captured(true, (streams) =>
-      runInspectCommand({
-        argv: [input.key, ...repoArgs(context), "--json", ...(input.attempt ? ["--attempt", input.attempt] : [])],
-        streams,
-        cwd: context.cwd,
-      }),
+    reported(
+      inspectCommandLine,
+      {
+        target: targetOf(context),
+        key: input.key,
+        attempt: input.attempt ?? null,
+        verify: null,
+      },
+      context,
     ),
 });
 

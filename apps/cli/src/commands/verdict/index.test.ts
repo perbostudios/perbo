@@ -20,7 +20,7 @@ import {
 import { BundleStore, parseStopAnswers, pullRequestBody } from "@perbo/runner";
 import { UsageError } from "../../usage-error.js";
 import { escapesCommandLine } from "../escapes/index.js";
-import { runInspectCommand } from "../inspect.js";
+import { inspectCommandLine } from "../inspect.js";
 import { stopsCommandLine } from "../stops.js";
 import { parseVerdictArgs, runVerdictCommand } from "./index.js";
 import { LocalVerdictSchema, LocalVerdictsSchema } from "./record.js";
@@ -561,7 +561,7 @@ describe("stops and inspect read the decisions back", () => {
     ).toBe(0);
 
     const streams = capture(true);
-    expect(await runInspectCommand({ argv: ["AYO-7", "--repo", repo], streams, cwd: repo })).toBe(0);
+    expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-7", "--repo", repo], streams, cwd: repo })).toBe(0);
     const printed = streams.out.join("");
     const findingLine = printed.indexOf("auth.token_never_expires");
     const decisionLine = printed.indexOf("decision override");
@@ -587,7 +587,7 @@ describe("stops and inspect read the decisions back", () => {
     ).toBe(0);
 
     const streams = capture(true);
-    expect(await runInspectCommand({ argv: ["AYO-7", "--repo", repo], streams, cwd: repo })).toBe(0);
+    expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-7", "--repo", repo], streams, cwd: repo })).toBe(0);
     const printed = streams.out.join("");
     expect(printed).toContain("DECISIONS");
     expect(printed).toContain(STOP_TWO!.slice(0, 12));
@@ -608,7 +608,7 @@ describe("stops and inspect read the decisions back", () => {
     expect(await decide("--reject", ["--replace"])).toBe(0);
 
     const streams = capture();
-    await runInspectCommand({ argv: ["AYO-7", "--repo", repo, "--json"], streams, cwd: repo });
+    await runCommandLine(inspectCommandLine, { argv: ["AYO-7", "--repo", repo, "--json"], streams, cwd: repo });
     const report = JSON.parse(streams.out.join("")) as {
       verdicts: Array<{ decision: string; superseded_at: string | null }>;
     };

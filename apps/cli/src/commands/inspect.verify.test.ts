@@ -14,8 +14,9 @@ import { join, relative } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { SecretIndex, type RunBundle, type RunBundleKind } from "@perbo/contracts";
 import { BundleStore } from "@perbo/runner";
-import { runInspectCommand } from "./inspect.js";
+import { inspectCommandLine } from "./inspect.js";
 import { makeAttempt, makeReview, makeTicket } from "../test-support/attempt-fixture.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * `perbo inspect <ticket> --verify <attempt>` (AYO-69).
@@ -195,7 +196,7 @@ async function verify(
   argv: string[] = [],
 ): Promise<{ code: number; out: string; err: string }> {
   const { out, err, streams } = capture();
-  const code = await runInspectCommand({
+  const code = await runCommandLine(inspectCommandLine, {
     argv: ["AYO-8", "--verify", ATTEMPT, "--repo", fixture.repo, ...argv],
     streams,
     cwd: fixture.repo,
@@ -344,7 +345,7 @@ describe("perbo inspect --verify", () => {
     });
 
     const { out, streams } = capture();
-    const code = await runInspectCommand({
+    const code = await runCommandLine(inspectCommandLine, {
       argv: ["AYO-8", "--verify", ATTEMPT, "--repo", repo],
       streams,
       cwd: repo,
@@ -417,7 +418,7 @@ describe("perbo inspect --verify", () => {
     const before = snapshot(store);
 
     const { out, streams } = capture();
-    const code = await runInspectCommand({
+    const code = await runCommandLine(inspectCommandLine, {
       argv: ["AYO-8", "--verify", ATTEMPT, "--repo", repo],
       streams,
       cwd: repo,
@@ -430,15 +431,15 @@ describe("perbo inspect --verify", () => {
     expect(snapshot(store)).toEqual(before);
   });
 
-  it("refuses an attempt the record does not hold rather than verifying nothing", async () => {
+  it("refuses an attempt the record does not hold rather than verifying nothing", () => {
     const fixture = storeWithBundle("verify-unknown-attempt");
     const { streams } = capture();
-    await expect(
-      runInspectCommand({
+    expect(() =>
+      runCommandLine(inspectCommandLine, {
         argv: ["AYO-8", "--verify", "att_nope", "--repo", fixture.repo],
         streams,
         cwd: fixture.repo,
       }),
-    ).rejects.toThrow(/has no attempt att_nope/);
+    ).toThrow(/has no attempt att_nope/);
   });
 });

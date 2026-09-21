@@ -3,7 +3,7 @@ import { listCommandLine, parseAdmitArgs } from "../commands/admit.js";
 import { parseBaselineArgs } from "../commands/baseline/index.js";
 import { parseEditArgs } from "../commands/edit/index.js";
 import { escapesCommandLine } from "../commands/escapes/index.js";
-import { parseInspectArgs } from "../commands/inspect.js";
+import { inspectCommandLine } from "../commands/inspect.js";
 import { parseInterviewArgs } from "../commands/interview/index.js";
 import { mcpCommandLine } from "../commands/mcp.js";
 import { parseServeArgs } from "../commands/serve/index.js";
@@ -53,14 +53,16 @@ describe("stops and escapes", () => {
 });
 
 describe("inspect", () => {
-  it.fails("keeps an attempt id that looks like a flag as the id", () => {
-    const args = parseInspectArgs(["PRB-1", "--attempt", "--x=--json"]);
-    expect(args.attempt).toBe("--x=--json");
-    expect(args.json).toBe(false);
+  it("keeps an attempt id that looks like a flag as the id", () => {
+    const line = inspectCommandLine.read(["PRB-1", "--attempt", "--x=--json"]);
+    expect(line.input.attempt).toBe("--x=--json");
+    expect(line.output.json).toBe(false);
   });
 
-  it.fails("refuses a value on --json rather than inspecting it", () => {
-    expect(() => parseInspectArgs(["--json=PRB-9"])).toThrow(/--json does not take a value/);
+  it("refuses a value on --json rather than inspecting it", () => {
+    expect(() => inspectCommandLine.read(["--json=PRB-9"])).toThrow(
+      /--json does not take a value/,
+    );
   });
 });
 

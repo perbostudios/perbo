@@ -20,7 +20,7 @@ import {
 } from "@perbo/model";
 import { UsageError } from "../usage-error.js";
 import { runEditCommand } from "./edit/index.js";
-import { buildInspectReport, renderInspect, runInspectCommand } from "./inspect.js";
+import { buildInspectReport, inspectCommandLine, renderInspect } from "./inspect.js";
 import { LIST_JSON_SCHEMA_VERSION, ListJsonSchema, applyObservedPath, approveCommandLine, listCommandLine, loadAdmitted, parseAdmitArgs, runAdmitCommand, statesObserved } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { PACKAGE_ROOT, REPO_ROOT } from "../test-support/paths.js";
@@ -607,7 +607,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
 
     // ...and through the command a person actually runs.
     const streams = capture();
-    await runInspectCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo });
+    await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo });
     expect(unwrapped(streams.out.join(""))).toContain(path);
   });
 
@@ -670,7 +670,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     // ...and through the command a person actually runs, which carries the
     // kind and the reference into the report it prints.
     const inspected = capture();
-    await runInspectCommand({ argv: ["PRB-1", "--repo", repo], streams: inspected, cwd: repo });
+    await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams: inspected, cwd: repo });
     const printed = JSON.parse(inspected.out.join("")) as { source: unknown };
     expect(printed.source).toMatchObject({ kind: "file", reference: path });
 
@@ -779,7 +779,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     // because a path too long for the column is wrapped across lines rather
     // than clipped — half a path names nothing a person can open.
     const streams = capture();
-    await runInspectCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo });
+    await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo });
     const squeeze = (text: string) => text.replace(/\s+/g, "");
     expect(squeeze(streams.out.join(""))).toContain(squeeze(join(nested, "issue.md")));
   });
