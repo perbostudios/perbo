@@ -10,11 +10,11 @@ import {
   type RunBundle,
 } from "@perbo/contracts";
 import { scratchDirectories, watchOutbound } from "@perbo/test-support";
-import { BundleStore } from "../src/bundle.js";
-import { TicketRunConfigSchema, runTicket } from "../src/loop/index.js";
-import { fakeAgent } from "../src/test-support/fake-agent.js";
-import { finding, makeReview, withoutInstall } from "../src/test-support/records.js";
-import { runnerRepository } from "../src/test-support/repository.js";
+import { BundleStore } from "../bundle.js";
+import { TicketRunConfigSchema, runTicket } from "./index.js";
+import { fakeAgent } from "../test-support/fake-agent.js";
+import { finding, makeReview, withoutInstall } from "../test-support/records.js";
+import { runnerRepository } from "../test-support/repository.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

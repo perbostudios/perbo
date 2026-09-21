@@ -2,10 +2,10 @@ import { mkdirSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { ADMISSION_RULES } from "../src/admission.js";
-import { TicketRunConfigSchema, guardProhibitedPaths } from "../src/loop/index.js";
-import { judgePreToolCall, type PreToolGuardState } from "../src/pretool.js";
-import { buildPermissionProfile } from "../src/profile.js";
+import { ADMISSION_RULES } from "../admission.js";
+import { TicketRunConfigSchema, guardProhibitedPaths } from "./index.js";
+import { judgePreToolCall, type PreToolGuardState } from "../pretool.js";
+import { buildPermissionProfile } from "../profile.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

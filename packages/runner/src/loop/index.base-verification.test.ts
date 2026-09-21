@@ -10,11 +10,11 @@ import type { Model } from "@perbo/model";
 import { runReview } from "@perbo/review";
 import { branchName } from "@perbo/workspace";
 import { scratchDirectories } from "@perbo/test-support";
-import type { AgentResult } from "../src/adapter.js";
-import { EgressLog } from "../src/egress.js";
-import { TicketRunConfigSchema, runTicket } from "../src/loop/index.js";
-import { makeAttempt, makeContract, withoutInstall } from "../src/test-support/records.js";
-import { runnerRepository } from "../src/test-support/repository.js";
+import type { AgentResult } from "../adapter.js";
+import { EgressLog } from "../egress.js";
+import { TicketRunConfigSchema, runTicket } from "./index.js";
+import { makeAttempt, makeContract, withoutInstall } from "../test-support/records.js";
+import { runnerRepository } from "../test-support/repository.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

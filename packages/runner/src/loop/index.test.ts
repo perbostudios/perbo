@@ -13,21 +13,21 @@ import {
 import type { Model } from "@perbo/model";
 import { runReview } from "@perbo/review";
 import { branchName } from "@perbo/workspace";
-import type { AgentResult } from "../src/adapter.js";
-import { EgressLog } from "../src/egress.js";
-import { BundleStore } from "../src/bundle.js";
-import { RunLockedError, acquireRunLock } from "../src/lock.js";
-import { TicketRunConfigSchema, runTicket } from "../src/loop/index.js";
-import { TRANSPORT_RETRY_DELAY_MS } from "../src/transport.js";
-import { fakeAgent } from "../src/test-support/fake-agent.js";
+import type { AgentResult } from "../adapter.js";
+import { EgressLog } from "../egress.js";
+import { BundleStore } from "../bundle.js";
+import { RunLockedError, acquireRunLock } from "../lock.js";
+import { TicketRunConfigSchema, runTicket } from "./index.js";
+import { TRANSPORT_RETRY_DELAY_MS } from "../transport.js";
+import { fakeAgent } from "../test-support/fake-agent.js";
 import {
   finding,
   makeAttempt,
   makeContract,
   makeReview,
   withoutInstall,
-} from "../src/test-support/records.js";
-import { git, runnerRepository } from "../src/test-support/repository.js";
+} from "../test-support/records.js";
+import { git, runnerRepository } from "../test-support/repository.js";
 import { scratchDirectories } from "@perbo/test-support";
 import type { Repository } from "@perbo/test-support";
 

@@ -1,9 +1,9 @@
 // A test sits beside the module it covers, and `test/` holds only what cannot:
 // a test a pull request may not edit, a suite whose subject is the repository
 // rather than one module, and data a test reads (docs/07 Package layout). This
-// holds four packages to that rule and names what is still under their `test/`
-// as a list that only shrinks, so the next test lands beside its module rather
-// than by habit where the last one was.
+// holds four packages to that rule, naming every file their `test/` may keep
+// and the reason for each, so the next test lands beside its module rather than
+// by habit where the last one was.
 //
 // It reads the files from `git ls-files`, so scratch a checkout happens to hold
 // does not count and a file staged for commit does.
@@ -56,28 +56,6 @@ const STAYS = [
     path: "packages/runner/test/support.ts",
     why: "security.test.ts imports it by this path and may not be edited to import it from another",
   },
-];
-
-/**
- * The files still under a guarded package's `test/` that belong beside a
- * module. A burn-down list: a path may only leave it, and the list goes away
- * with its last entry. A path here that names no file fails, so a move that
- * leaves the list behind is caught rather than silently widening what `test/`
- * may hold.
- */
-const PENDING = [
-  "packages/runner/test/base-ref-origin.test.ts",
-  "packages/runner/test/base-verification.test.ts",
-  "packages/runner/test/briefed-round.test.ts",
-  "packages/runner/test/delivery-checks.test.ts",
-  "packages/runner/test/loop-incomplete-review.test.ts",
-  "packages/runner/test/loop-merge.test.ts",
-  "packages/runner/test/loop.test.ts",
-  "packages/runner/test/orphans.test.ts",
-  "packages/runner/test/rebrief-round.test.ts",
-  "packages/runner/test/relevel.test.ts",
-  "packages/runner/test/standing-prohibited.test.ts",
-  "packages/runner/test/ticketless-run.test.ts",
 ];
 
 /** Every tracked file under `packages/`, as git lists them. */
@@ -133,13 +111,13 @@ function orphans(files) {
 }
 
 const FILES = trackedFiles();
-const LISTED = [...STAYS.map((entry) => entry.path), ...PENDING];
+const LISTED = STAYS.map((entry) => entry.path);
 
 test("every file under a guarded package's test/ is listed", () => {
   assert.deepEqual(
     unlisted(FILES, LISTED),
     [],
-    "a test belongs beside the module it covers; add it to PENDING only with the change that will move it",
+    "a test belongs beside the module it covers; `test/` holds only what STAYS names",
   );
 });
 
@@ -147,7 +125,7 @@ test("every listed path names a file that is there", () => {
   assert.deepEqual(
     stale(LISTED, FILES),
     [],
-    "a path in STAYS or PENDING names no file: drop it in the change that moved or deleted it",
+    "a path in STAYS names no file: drop it in the change that moved or deleted it",
   );
 });
 

@@ -3,12 +3,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LimitsTableSchema, type ChangeSet } from "@perbo/contracts";
 import { scratchDirectories } from "@perbo/test-support";
-import type { AgentResult } from "../src/adapter.js";
-import { EgressLog } from "../src/egress.js";
-import { TicketRunConfigSchema, runTicket } from "../src/loop/index.js";
-import type { LoopMergeOutcome } from "../src/merge.js";
-import { makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
-import { runnerRepository } from "../src/test-support/repository.js";
+import type { AgentResult } from "../adapter.js";
+import { EgressLog } from "../egress.js";
+import { TicketRunConfigSchema, runTicket } from "./index.js";
+import type { LoopMergeOutcome } from "../merge.js";
+import { makeContract, makeReview, withoutInstall } from "../test-support/records.js";
+import { runnerRepository } from "../test-support/repository.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 
