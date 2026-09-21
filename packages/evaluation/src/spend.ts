@@ -8,12 +8,7 @@
  * ceiling it is checked against.
  */
 
-export const MICROS_PER_DOLLAR = 1_000_000;
-
-/** `$2.50`. Two decimals, because a ceiling is quoted to a person. */
-export function formatUsd(micros: number): string {
-  return `$${(micros / MICROS_PER_DOLLAR).toFixed(2)}`;
-}
+import { formatUsd, MICROS_PER_DOLLAR } from "@perbo/contracts";
 
 /** A written amount: `2`, `2.50`, `1,600.00`. Thousands separators optional. */
 const AMOUNT = String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?`;
@@ -222,17 +217,17 @@ export class SpendLedger {
       return {
         verdict: "stop",
         reason:
-          `the ${formatUsd(this.ceilingMicros)} spend ceiling cannot be enforced: ` +
+          `the ${formatUsd(this.ceilingMicros, 2)} spend ceiling cannot be enforced: ` +
           `${this.#unobserved.length} launched review(s) reported no usable dollar cost ` +
           `(${this.#unobserved.slice(0, 3).join(", ")}${this.#unobserved.length > 3 ? ", …" : ""}), ` +
-          `so the ${formatUsd(this.#total)} total is not a bound on what this run has spent`,
+          `so the ${formatUsd(this.#total, 2)} total is not a bound on what this run has spent`,
       };
     }
     if (this.reviewPriceMicros === null && this.#inFlight > 0) {
       return {
         verdict: "wait",
         reason:
-          `no review has reported a price yet, so the ${formatUsd(this.ceilingMicros)} spend ` +
+          `no review has reported a price yet, so the ${formatUsd(this.ceilingMicros, 2)} spend ` +
           `ceiling has nothing to reserve the ${this.#inFlight} review(s) in flight at; ` +
           "waiting for the first of them to report",
       };
@@ -241,11 +236,11 @@ export class SpendLedger {
       return {
         verdict: "stop",
         reason:
-          `the ${formatUsd(this.ceilingMicros)} spend ceiling was reached: ` +
-          `${formatUsd(this.#total)} settled across ${this.#priced} review(s) with ` +
+          `the ${formatUsd(this.ceilingMicros, 2)} spend ceiling was reached: ` +
+          `${formatUsd(this.#total, 2)} settled across ${this.#priced} review(s) with ` +
           `${this.#inFlight} in flight, and one more projects ` +
-          `${formatUsd(this.projectedMicros)} at the most recent review's ` +
-          `${formatUsd(this.reviewPriceMicros ?? 0)}`,
+          `${formatUsd(this.projectedMicros, 2)} at the most recent review's ` +
+          `${formatUsd(this.reviewPriceMicros ?? 0, 2)}`,
       };
     }
     return ADMIT;

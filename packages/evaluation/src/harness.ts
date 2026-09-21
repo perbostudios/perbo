@@ -3,13 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { ReviewArtifactSchema, type ReviewArtifact } from "@perbo/contracts";
+import { formatUsd, ReviewArtifactSchema, type ReviewArtifact } from "@perbo/contracts";
 import { captureExecutedBundle, type ExecutedBundle } from "./bundle.js";
 import { loadCorpus, type LoadedFixture } from "./corpus.js";
 import { scoreRun, type RunScore } from "./score.js";
 import {
   ADMIT,
-  formatUsd,
   NO_ARTIFACT,
   SpendLedger,
   type Admission,
@@ -626,9 +625,9 @@ export async function runCorpus(options: HarnessOptions): Promise<HarnessResult>
           partial: true,
           reason: pool.stopped,
           ceiling_micros: ledger.ceilingMicros,
-          ceiling: formatUsd(ledger.ceilingMicros),
+          ceiling: formatUsd(ledger.ceilingMicros, 2),
           spent_micros: ledger.totalMicros,
-          spent: formatUsd(ledger.totalMicros),
+          spent: formatUsd(ledger.totalMicros, 2),
           completed: runs.length,
           planned: tasks.length,
           not_run: fixtures
