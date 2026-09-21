@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { MaterializationEntrySchema } from "./materialisation-entry.js";
 import {
   MATERIALIZATION_MANIFEST_VERSION,
-  MaterializationEntrySchema,
   MaterializationManifestSchema,
   LifecycleScriptPolicySchema,
   manifestHash,
