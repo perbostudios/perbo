@@ -1,5 +1,5 @@
 import { runAgent } from "../adapter.js";
-import { runCodexAgent } from "../adapter-codex.js";
+import { runCodexAgent } from "../codex/index.js";
 import { runPinnedChecks } from "../checks.js";
 import { createPullRequest, existingPullRequest, pushAttemptBranch } from "../delivery.js";
 import { mergeLoopPullRequest } from "../merge.js";

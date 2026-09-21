@@ -3,10 +3,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LimitsTableSchema } from "@perbo/contracts";
-import { codexNotificationHandler, type CodexItem } from "../src/adapter-codex.js";
+import { codexNotificationHandler, type CodexItem } from "../src/codex/index.js";
 import { reinjectedBrief } from "../src/brief.js";
 import { AttemptCeilings } from "../src/ceilings.js";
-import { CodexExecutorSession } from "../src/codex-rpc.js";
+import { CodexExecutorSession } from "../src/codex/internal/rpc.js";
 import { EgressLog } from "../src/egress.js";
 import { briefRecords } from "../src/test-support/records.js";
 

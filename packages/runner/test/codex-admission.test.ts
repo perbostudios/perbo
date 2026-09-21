@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   codexCommandDecision,
   codexFileDecision,
-} from "../src/adapter-codex.js";
+} from "../src/codex/index.js";
 import { buildPermissionProfile } from "../src/profile.js";
 import { TicketRunConfigSchema } from "../src/loop.js";
 import type { PreToolGuardState } from "../src/pretool.js";

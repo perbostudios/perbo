@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { PERBO_AGENT_ROLE_NAMES } from "../src/agents.js";
-import { writeAgentRoleFiles } from "../src/codex-rpc.js";
+import { writeAgentRoleFiles } from "../src/codex/internal/rpc.js";
 
 /**
  * AC2: Perbo's role definitions replace the built-in roles in the runner's

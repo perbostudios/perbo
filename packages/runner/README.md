@@ -4,9 +4,12 @@ The half of execution that is not the agent.
 
 - `profile.ts` — the A2b permission profile: the command allow-list, the deny list, the environment
   built from an allow-list rather than scrubbed by a deny-list, and the pinned provider base URL.
-- `adapter.ts` — the Claude Code adapter (`adapter-codex.ts` is the Codex one). It builds an argv rather than assembling one,
+- `adapter.ts` — the Claude Code adapter (`codex/` is the Codex one). It builds an argv rather than assembling one,
   records it on the attempt with the prompt removed from the hash, and **asserts** that the agent
   loaded nothing originating in the repository (ADR-0030).
+- `codex/` — the Codex adapter: `index.ts` is the surface (`runCodexAgent` and the three decisions
+  the thread's items are answered with); `internal/rpc.ts` holds the thread session, its argv and
+  the agent role files it writes.
 - `quarantine.ts` — the other half of ADR-0030: every known agent-configuration path moved out of
   the worktree before handover and restored afterwards, journalled before the first move so an
   interrupted attempt is recoverable.

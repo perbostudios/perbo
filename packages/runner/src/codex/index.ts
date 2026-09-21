@@ -14,15 +14,15 @@ import {
   DEFAULT_SUSPEND_THRESHOLD_MS,
   SuspendDetector,
 } from "@perbo/workspace";
-import type { AgentRequest, AgentResult } from "./adapter.js";
-import type { AttemptCeilings } from "./ceilings.js";
-import { reinjectedBrief } from "./brief.js";
-import { CodexExecutorSession, CODEX_EXECUTOR_ARGV, type Usage } from "./codex-rpc.js";
-import { EgressLog } from "./egress.js";
-import { judgeCommand, matchesListEntry } from "./admission.js";
-import { EFFECT_FREE_VERBS, judgePreToolCall, type PreToolGuardState } from "./pretool.js";
-import type { ProhibitedHit } from "./prohibited.js";
-import { prepareScratchDirectory } from "./scratch.js";
+import type { AgentRequest, AgentResult } from "../adapter.js";
+import type { AttemptCeilings } from "../ceilings.js";
+import { reinjectedBrief } from "../brief.js";
+import { CodexExecutorSession, CODEX_EXECUTOR_ARGV, type Usage } from "./internal/rpc.js";
+import { EgressLog } from "../egress.js";
+import { judgeCommand, matchesListEntry } from "../admission.js";
+import { EFFECT_FREE_VERBS, judgePreToolCall, type PreToolGuardState } from "../pretool.js";
+import type { ProhibitedHit } from "../prohibited.js";
+import { prepareScratchDirectory } from "../scratch.js";
 
 const ChangeSchema = z
   .object({

@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
 import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
-import { PERBO_AGENT_ROLES, type AgentRole } from "./agents.js";
+import { PERBO_AGENT_ROLES, type AgentRole } from "../../agents.js";
 
 export const CODEX_EXECUTOR_ARGV = [
   "-c",

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LimitsTableSchema } from "@perbo/contracts";
 import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
-import { runCodexAgent } from "../src/adapter-codex.js";
+import { runCodexAgent } from "../src/codex/index.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
 import { briefRecords } from "../src/test-support/records.js";

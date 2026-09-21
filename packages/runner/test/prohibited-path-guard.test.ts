@@ -7,7 +7,7 @@ import { assessScope } from "@perbo/review";
 import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES, judgeCommand } from "../src/admission.js";
 import { runAgent } from "../src/adapter.js";
-import { codexCommandDecision, codexFileDecision } from "../src/adapter-codex.js";
+import { codexCommandDecision, codexFileDecision } from "../src/codex/index.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import {
   discardPreToolGuard,
