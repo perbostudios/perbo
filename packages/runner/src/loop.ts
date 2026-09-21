@@ -1,49 +1,31 @@
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { z } from "zod";
 import {
-  assertProviderEnabled,
-  hasAcceptanceCriteria,
-  isRefusal,
   limitFor,
   limitsForCredential,
-  type CredentialClass,
   type GithubCredential,
   type IncompleteReviewPath,
   type NodeReview,
   type PlanContract,
-  type PlanContractWithCriteria,
   type ReviewArtifact,
   type SecretIndex,
   type VerifiedCommit,
 } from "@perbo/contracts";
 import {
   cleanup,
-  diagnose,
-  isGreenfieldVerify,
   materialize,
   provision,
-  signableCommit,
-  validateManifest,
   git,
   type MaterializedWorkspace,
   type Workspace,
 } from "@perbo/workspace";
 import { PROMPT_VERSION } from "@perbo/review";
 import {
-  lastAttemptBranch,
-  lastAttemptId,
-  lastExecutorAccount,
-  parkedWait,
-  readAttemptsRecord,
   recordedBaseVerification,
-  rootAttemptId as mintRootAttemptId,
-  runsOnRecord,
   specCommitOnRecord,
 } from "./attempts.js";
 import { Ledger } from "./loop/ledger.js";
 import { acquireRunLock, type HeldRunLock } from "./lock.js";
-import { BundleStore } from "./bundle.js";
 import { pathsWithConflictMarkers } from "./merge-up.js";
 import { sweepWorktree } from "./orphans.js";
 import type { DeliveredChecksReading } from "./delivery.js";
@@ -52,18 +34,16 @@ import { buildPermissionProfile } from "./profile.js";
 import {
   RETAINED_DIFF_ARTIFACT,
   ResumeRefusedError,
-  resolveResumeSource,
   sameCommit,
-  type ResumeSource,
 } from "./resume.js";
 import { RunRefusedError } from "./refusal.js";
 import { commitSpec } from "./spec-commit.js";
 import { readPrinciples, readPrinciplesFile } from "./principles.js";
-import { restoreAny } from "./quarantine.js";
 import { headCommit } from "./seal.js";
 import { type TicketRunConfig } from "./loop/config.js";
 import { recordAttempt } from "./loop/attempt.js";
 import { briefRound } from "./loop/brief.js";
+import { start } from "./loop/start.js";
 import { confirmContinuation, remediationToContinue } from "./loop/continuation.js";
 import { checkRound } from "./loop/check.js";
 import { publish, publishRelevel, type Delivery } from "./loop/deliver.js";
@@ -71,7 +51,7 @@ import { execute } from "./loop/execute.js";
 import { sealRound } from "./loop/seal.js";
 import { levelBeforeExecutor, levelBeforePublish } from "./loop/level.js";
 import { reviewRound } from "./loop/review.js";
-import { resolvePorts, type LoopPorts } from "./loop/context.js";
+import { resolvePorts, type LoopPorts, type RunLimits } from "./loop/context.js";
 import {
   applyStep,
   initialRoundState,
@@ -123,7 +103,7 @@ import { verifyRound } from "./loop/verify.js";
  * merging the base in before anything else could be done with the branch.
  */
 
-export { resolvePorts, type LoopPorts } from "./loop/context.js";
+export { resolvePorts, type LoopPorts, type RunLimits } from "./loop/context.js";
 export { incompleteReviewCauses } from "./loop/review.js";
 export { type RoundKind, type RoundRecord, type RunOutcome } from "./loop/state.js";
 
@@ -223,44 +203,6 @@ export interface TicketRunRequest {
   hooks?: Partial<LoopPorts>;
 }
 
-/**
- * What a run is bounded by, from its configuration and the limits table.
- *
- * Read once, at the start, so that every ceiling a round is judged against and
- * every sentence that names where to raise one read the same values — a run
- * whose limits changed under it would stop for a reason its own record could
- * not explain.
- */
-export interface RunLimits {
-  /** The remediation cap: the configured rounds, or the table's, whichever is lower. */
-  maxRounds: number;
-  /**
-   * The loop's own backstop, above every rule inside it.
-   *
-   * Nothing should reach it: every path through the body breaks or advances,
-   * and the rules below — the progress rule, the ticket budget, the round cap —
-   * end a run long before this. It is here because a conflict round no longer
-   * counts against the remediation cap (SCP-194), so `round` is no longer
-   * bounded by `maxRounds` and a `while` that said so would be stating
-   * something untrue. A conflict can interrupt each remediation round at most
-   * once, plus once before the executor, which is what the arithmetic is.
-   */
-  roundCeiling: number;
-  /** The longest the loop will sit out one provider wait (SCP-193). */
-  waitBoundMs: number;
-  /** Where a ceiling, a budget or a wait bound is raised. */
-  configPath: string;
-  /**
-   * What one ticket may spend before the loop stops restarting itself, which is
-   * nothing unless the executor is billed per token (D-096).
-   *
-   * The credential is the attempt's own, read from the invocation it recorded:
-   * on a subscription the dollar figure is a measure of work and not a bill, so
-   * no number of them adds up to a budget.
-   */
-  ticketBudgetMicros: (credential: CredentialClass) => number | null;
-}
-
 export function runLimits(config: TicketRunConfig): RunLimits {
   const maxRounds = Math.min(
     config.max_remediation_rounds,
@@ -317,198 +259,30 @@ async function runLockedTicket(
   const mergePullRequest = ports.merge;
   const findPullRequest = ports.existing;
 
-  if (!hasAcceptanceCriteria(args.contract)) {
-    throw new Error(
-      `plan ${args.contract.plan_id} is ${args.contract.level}, which has no acceptance criteria: ` +
-        "there is nothing for an independent review to judge",
-    );
-  }
-  const contract: PlanContractWithCriteria = args.contract;
-
-  assertProviderEnabled(config.limits, "claude-code", config.model);
-  // The reviewer's transport is a provider too. Checked here, before any
-  // attempt is paid for, so a disabled reviewer stops the run rather than
-  // discovering the switch after the executor has spent its budget.
-  assertProviderEnabled(
-    config.limits,
-    config.reviewer_provider,
-    config.reviewer_model ?? config.model,
-  );
-  // Crash recovery before anything else: a journal on disk means some worktree
-  // is currently missing the configuration this runner moved out of it.
-  for (const restored of restoreAny(config.quarantine_root)) {
-    progress(`restored quarantined configuration from ${restored.attempt_id}`);
-  }
-
-  const bundles = new BundleStore({ root: config.bundle_root, retainContext: config.retain_context });
-  const attemptsPath = join(config.state_root, `${contract.ticket_id}.attempts.json`);
-  /**
-   * Every attempt of every earlier run, read before this one starts: what this
-   * run's attempts are appended to, what attributes the commits already on the
-   * branch, and — where nothing else counts the runs — how many there have been.
-   */
-  const priorAttempts = readAttemptsRecord(attemptsPath);
-  // The larger of what the caller counted and what the record holds, then the
-  // first number whose root is not on the record. A re-level records its
-  // attempts under the number after the record's last run without adding to
-  // the caller's count, and a counted run refused after its root was minted
-  // leaves a gap the record's count does not see: either way the number the
-  // count arrives at can already be taken (SCP-227). Settled before the
-  // worktree, the materialization and the agent, so nothing is paid for first.
-  const onRecord = new Set(
-    (priorAttempts?.attempts ?? []).flatMap((attempt) => {
-      const ids = z.object({ attempt_id: z.string(), root_attempt_id: z.string().optional() }).safeParse(attempt);
-      return ids.success ? [ids.data.attempt_id, ...(ids.data.root_attempt_id ? [ids.data.root_attempt_id] : [])] : [];
-    }),
-  );
-  const mintRoot = (run: number) =>
-    mintRootAttemptId({
-      plan_id: contract.plan_id,
-      plan_version: contract.version,
-      ticket_key: config.ticket_key,
-      runs_started: run,
-    });
-  let runNumber = Math.max(config.runs_started ?? 0, runsOnRecord(priorAttempts) + 1);
-  while (onRecord.has(mintRoot(runNumber))) runNumber += 1;
-  const rootAttemptId = mintRoot(runNumber);
-  /**
-   * The previous run's last attempt, which this run's first attempt continues
-   * from — the same relation a remediation round has to the round before it.
-   */
-  const continuesPreviousRun = lastAttemptId(priorAttempts);
-  /**
-   * D-092: and its account, for a remediation round this run opens with — a
-   * re-run of a ticket whose last review left findings open starts one, and
-   * its predecessor is on the record rather than in `attempts`.
-   */
-  const previousRunAccount = lastExecutorAccount(priorAttempts);
+  const limits = runLimits(config);
+  const { configPath, waitBoundMs, ticketBudgetMicros, maxRounds, roundCeiling } = limits;
+  const started = await start({
+    config,
+    contract: args.contract,
+    lock,
+    limits,
+    clock,
+    wait,
+    progress,
+  });
+  const { contract, bundles, resumeSource, manifest, verifyMeasures } = started;
+  const {
+    attemptsPath,
+    prior: priorAttempts,
+    runNumber,
+    rootAttemptId,
+    continuesPreviousRun,
+    previousRunAccount,
+    onRecord,
+    branchesOnRecord,
+  } = started.record;
   const ledger = new Ledger({ path: attemptsPath, prior: priorAttempts, ticketId: contract.ticket_id });
-  if (priorAttempts !== null) {
-    progress(
-      `run ${runNumber} of ${config.ticket_key}; ${priorAttempts.attempts.length} attempt(s) ` +
-        `already on record, continuing ${continuesPreviousRun}`,
-    );
-  }
 
-  const { configPath, waitBoundMs, ticketBudgetMicros, maxRounds, roundCeiling } = runLimits(config);
-
-  /**
-   * SCP-193: a wait a previous process was killed in the middle of.
-   *
-   * The park is written to the attempts record before the run sleeps, so a
-   * `run` typed after that process died reads the instant the provider named
-   * and waits out what is left of it. Without this the restart is the thing the
-   * park exists to prevent: an attempt started against a session limit that is
-   * still in force, which the provider refuses and the run pays for.
-   */
-  const parked = parkedWait(priorAttempts);
-  if (parked !== null) {
-    const remaining = Date.parse(parked.until) - clock().getTime();
-    if (remaining > waitBoundMs) {
-      // The park was recorded under a bound this run no longer has, which only
-      // happens when somebody lowered it. Said out loud rather than silently
-      // waiting past the new bound or silently ignoring the record.
-      progress(
-        `${config.ticket_key} is parked until ${parked.until} (${parked.zone}), which is beyond ` +
-          `limits.limits.wait_for_provider_ms in ${configPath}; starting now rather than waiting ` +
-          "past a bound this configuration does not allow",
-      );
-    } else if (remaining > 0) {
-      progress(
-        `${config.ticket_key} was parked on ${parked.reason.replace(/_/g, " ")} until ` +
-          `${parked.until} (${parked.zone}); honouring the ${Math.round(remaining / 60_000)} ` +
-          "minute(s) still to run",
-      );
-      lock.parked(parked);
-      await wait(remaining);
-      lock.parked(null);
-    }
-  }
-
-  /**
-   * SCP-154: the cut attempt this run continues, read before anything is
-   * provisioned. A `--resume-from` that cannot be honoured stops the run here,
-   * where it has cost nothing, rather than after a worktree and an install.
-   */
-  const resumeSource: ResumeSource | null =
-    config.resume_from === null
-      ? null
-      : resolveResumeSource({
-          bundle_root: config.bundle_root,
-          bundle_id: config.resume_from,
-          ticket_id: contract.ticket_id,
-          base_commit: contract.base.base_commit,
-        });
-
-  const checkout = resolve(config.repository_root);
-  /**
-   * ADR-0025: whether this repository can be materialized at all, answered
-   * from the checkout and the contract before anything is provisioned, so a
-   * refusal cuts no branch and no worktree.
-   *
-   * The whole diagnostic, not just the manifest it proposed: where it proposed
-   * none, its findings are the only thing that says why, and they are what the
-   * refusal carries out to the person.
-   */
-  const diagnostic =
-    config.materialization_manifest === null
-      ? await diagnose({ checkout, repository_id: contract.scope.repository_id })
-      : null;
-  /**
-   * Whether the key this checkout signs its commits with can sign one, asked
-   * here as well because signing is a property of the checkout rather than of
-   * the manifest: a configured manifest skips the diagnostic that would
-   * otherwise have asked, and the seal would then be the first thing to find out.
-   */
-  const signing = config.materialization_manifest === null ? null : await signableCommit(checkout);
-  const manifest = config.materialization_manifest ?? diagnostic?.proposed ?? null;
-  // The advisories are dropped: what stopped the run is what a person needs to
-  // fix, and a report that mixes the two reads as one long complaint.
-  const refused = [
-    ...(diagnostic?.findings ?? []).filter(isRefusal),
-    ...(signing === null ? [] : [signing]),
-  ];
-  if (!manifest) {
-    throw new RunRefusedError({
-      message: "this repository cannot be materialized, so no attempt was started",
-      findings: refused,
-      repository_root: checkout,
-    });
-  }
-  // A refusal the manifest did not depend on. The diagnostic answers a wider
-  // question than "is there a manifest" — a repository it refuses is one an
-  // attempt cannot finish, whether or not there is something to materialize.
-  if (refused.length > 0) {
-    throw new RunRefusedError({
-      message: "this repository was refused before an attempt started",
-      findings: refused,
-      repository_root: checkout,
-    });
-  }
-  const invalid = validateManifest(manifest);
-  if (invalid.length > 0) {
-    throw new RunRefusedError({
-      message:
-        "the materialization manifest does not describe this checkout, so no attempt was started",
-      findings: invalid,
-      repository_root: checkout,
-    });
-  }
-
-  /**
-   * Whether the manifest's verify command measures anything. `git status
-   * --porcelain` passes on any checkout Git can read, so what it says of a base
-   * is no measurement: the base is left unmeasured, the review is told nothing
-   * about it, no attempt records an answer, and no answer on record is read
-   * back while the verification measures nothing.
-   */
-  const verifyMeasures = !isGreenfieldVerify(manifest.verify.command);
-
-  /**
-   * The branch this ticket already has, which every worktree this run
-   * provisions keeps: its delivery record's, then its latest attempt's (D-098).
-   */
-  const branchesOnRecord = { delivery: config.delivery_branch, attempt: lastAttemptBranch(priorAttempts) };
   const workspace = await provision({
     repository_root: config.repository_root,
     repository_id: contract.scope.repository_id,

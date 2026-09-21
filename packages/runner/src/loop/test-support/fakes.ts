@@ -1,4 +1,6 @@
 import type { Workspace } from "@perbo/workspace";
+import type { AttemptWait } from "@perbo/contracts";
+import type { HeldRunLock } from "../../lock.js";
 import type { AgentResult } from "../../adapter.js";
 import { EgressLog } from "../../egress.js";
 import { initialRoundState, type RoundState } from "../state.js";
@@ -321,3 +323,16 @@ export const agentResult = (
   final_message: null,
   transcript: [],
 });
+
+/** A run lock that records the parks written to it rather than a file. */
+export function fakeLock(): HeldRunLock & { parks: (AttemptWait | null)[] } {
+  const parks: (AttemptWait | null)[] = [];
+  return {
+    path: "/nowhere/run.lock",
+    parks,
+    parked: (wait) => {
+      parks.push(wait);
+    },
+    release: () => undefined,
+  };
+}
