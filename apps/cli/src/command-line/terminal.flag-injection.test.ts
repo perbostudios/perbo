@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseAdmitArgs, parseListArgs } from "../commands/admit.js";
+import { listCommandLine, parseAdmitArgs } from "../commands/admit.js";
 import { parseBaselineArgs } from "../commands/baseline/index.js";
 import { parseEditArgs } from "../commands/edit/index.js";
 import { parseEscapesArgs } from "../commands/escapes/index.js";
 import { parseInspectArgs } from "../commands/inspect.js";
 import { parseInterviewArgs } from "../commands/interview/index.js";
-import { parseMcpArgs } from "../commands/mcp.js";
+import { mcpCommandLine } from "../commands/mcp.js";
 import { parseServeArgs } from "../commands/serve/index.js";
 import { parseStopsArgs } from "../commands/stops.js";
 import { parseSyncAllMergedArgs } from "../commands/sync.js";
@@ -27,14 +27,14 @@ import { parseVerdictArgs } from "../commands/verdict/index.js";
  */
 
 describe("list, approve and mcp", () => {
-  it.fails("keeps a repository path that looks like a flag as the path", () => {
-    const args = parseListArgs(["--repo", "--x=--all"]);
-    expect(args.repo).toBe("--x=--all");
-    expect(args.all).toBe(false);
+  it("keeps a repository path that looks like a flag as the path", () => {
+    const { input } = listCommandLine.read(["--repo", "--x=--all"]);
+    expect(input.target.repo).toBe("--x=--all");
+    expect(input.all).toBe(false);
   });
 
-  it.fails("keeps mcp's repository path whole", () => {
-    expect(parseMcpArgs(["--repo", "--x=--json"]).repo).toBe("--x=--json");
+  it("keeps mcp's repository path whole", () => {
+    expect(mcpCommandLine.read(["--repo", "--x=--json"]).input.target.repo).toBe("--x=--json");
   });
 });
 

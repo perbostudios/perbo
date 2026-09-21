@@ -1,10 +1,16 @@
-import { resolve } from "node:path";
+import { z } from "zod";
 import { EXIT_CODES } from "@perbo/contracts";
-import { parseListArgs } from "./admit.js";
-import { UsageError } from "../usage-error.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../command-line/grammar.js";
+import type { CommandContext, ReportCommand, Rendered } from "../command-line/terminal.js";
+import { readInput } from "../usage-error.js";
 import { readEndpoint, type EndpointRecord } from "../endpoint/index.js";
-import type { Streams } from "../streams.js";
-import { storeDir } from "../store/tickets.js";
+import { storeFor, StoreTargetSchema } from "../store/index.js";
 
 /**
  * `perbo mcp` — how a session of the person's own finds the endpoint.
@@ -15,23 +21,31 @@ import { storeDir } from "../store/tickets.js";
  * `perbo agent` is the one that spawns.
  */
 
-export interface McpArgs {
-  repo: string;
-  store: string | null;
-  role: "person" | "drafter";
-  json: boolean;
+/** Whose token the block carries: the person's own session, or the drafter's read-only one. */
+export const MCP_ROLES = ["person", "drafter"] as const;
+export type McpRole = (typeof MCP_ROLES)[number];
+
+export const HandoverInputSchema = z.strictObject({
+  target: StoreTargetSchema,
+  role: z.enum(MCP_ROLES),
+});
+export type HandoverInput = z.infer<typeof HandoverInputSchema>;
+
+/** Where the queue's endpoint is, or null where nothing is serving this store. */
+export interface HandoverReport {
+  /** The store asked about, absolute, for the refusal that names it. */
+  dir: string;
+  record: EndpointRecord | null;
+  role: McpRole;
 }
 
-export function parseMcpArgs(argv: readonly string[]): McpArgs {
-  const role = argv.includes("--drafter") ? "drafter" : "person";
-  const rest = argv.filter((token) => token !== "--drafter");
-  const list = parseListArgs(rest.filter((token) => token !== "--json"));
-  if (list.all) throw new UsageError("unknown option '--all' for mcp");
-  return { repo: list.repo, store: list.store, role, json: rest.includes("--json") };
+export function endpointHandover(input: HandoverInput, context: CommandContext): HandoverReport {
+  const dir = storeFor(context.cwd, input.target);
+  return { dir, record: readEndpoint(dir), role: input.role };
 }
 
 /** The `.mcp.json` entry a Claude Code project file or `--mcp-config` file carries. */
-export function mcpConfig(record: EndpointRecord, role: McpArgs["role"]): { mcpServers: Record<string, unknown> } {
+export function mcpConfig(record: EndpointRecord, role: McpRole): { mcpServers: Record<string, unknown> } {
   return {
     mcpServers: {
       perbo: {
@@ -43,7 +57,7 @@ export function mcpConfig(record: EndpointRecord, role: McpArgs["role"]): { mcpS
   };
 }
 
-export function renderMcp(record: EndpointRecord, role: McpArgs["role"]): string {
+export function renderMcp(record: EndpointRecord, role: McpRole): string {
   const token = record.tokens[role];
   return [
     `The queue's endpoint is ${record.url} (pid ${record.pid}, since ${record.started_at}); this is the ${role}'s token.`,
@@ -64,21 +78,58 @@ export function renderMcp(record: EndpointRecord, role: McpArgs["role"]): string
   ].join("\n");
 }
 
-export function runMcpCommand(input: { argv: string[]; streams: Streams; cwd: string }): number {
-  const args = parseMcpArgs(input.argv);
-  const dir = storeDir(resolve(input.cwd, args.repo), args.store);
-  const record = readEndpoint(dir);
-  if (record === null) {
-    input.streams.stderr(
-      `no queue is serving ${dir}: start one with \`perbo serve\`, which hosts the endpoint and writes ` +
-        "its record, and run this again\n",
-    );
-    return EXIT_CODES.did_not_complete;
-  }
-  if (args.json) {
-    input.streams.stdout(`${JSON.stringify(mcpConfig(record, args.role), null, 2)}\n`);
-  } else {
-    input.streams.stdout(renderMcp(record, args.role));
-  }
-  return EXIT_CODES.approve;
-}
+const FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--drafter": switchFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const GRAMMAR: Grammar<typeof FLAGS> = {
+  command: "mcp",
+  flags: FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal: "mcp takes no argument: it prints the block for this store, e.g. perbo mcp --drafter",
+  },
+  afterDoubleDash: "positionals",
+};
+
+export const mcpCommandLine: ReportCommand<HandoverInput, { json: boolean }, HandoverReport> = {
+  kind: "report",
+  name: "mcp",
+  grammars: [GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor: () => GRAMMAR,
+  read(argv) {
+    const line = parseArgv(GRAMMAR, argv);
+    return {
+      input: readInput(HandoverInputSchema, {
+        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+        role: line.flags["--drafter"] === true ? "drafter" : "person",
+      }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  run: endpointHandover,
+  toJson: (report) => (report.record === null ? null : mcpConfig(report.record, report.role)),
+  render(report, _output, target): Rendered {
+    if (report.record === null) {
+      return {
+        stdout: "",
+        stderr:
+          `no queue is serving ${report.dir}: start one with \`perbo serve\`, which hosts the endpoint and writes ` +
+          "its record, and run this again\n",
+        exitCode: EXIT_CODES.did_not_complete,
+      };
+    }
+    return {
+      stdout: target.json
+        ? `${JSON.stringify(mcpConfig(report.record, report.role), null, 2)}\n`
+        : renderMcp(report.record, report.role),
+      stderr: "",
+      exitCode: EXIT_CODES.approve,
+    };
+  },
+};

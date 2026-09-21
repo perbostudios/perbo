@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { UsageError } from "../usage-error.js";
-import { loadAdmitted, parseAdmitArgs, runAdmitCommand, runApproveCommand } from "./admit.js";
+import { approveCommandLine, loadAdmitted, parseAdmitArgs, runAdmitCommand } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { runEditCommand } from "./edit/index.js";
 import { parseExecuteArgs, runExecuteCommand } from "./run/index.js";
 import { readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * The two contracts a ticket carries, and what happens when they part company.
@@ -147,7 +148,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
     const before = storeContents(dir);
 
     const streams = capture();
-    expect(() => runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toThrow(
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toThrow(
       UsageError,
     );
 
@@ -179,7 +180,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
 
     let message = "";
     try {
-      runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo });
+      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo });
       expect.unreachable("approve accepted a hand-edited draft");
     } catch (error) {
       expect(error).toBeInstanceOf(UsageError);
@@ -204,7 +205,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
     writeFileSync(path, `${JSON.stringify(contract, null, 2)}\n`);
 
     expect(() =>
-      runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }),
+      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }),
     ).toThrow(/scope\.paths_allowed\[0\]/);
     expect(readTicket(dir, "PRB-1").approved_at).toBeNull();
   });
@@ -217,7 +218,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
 
     const refused = capture();
     expect(() =>
-      runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: refused, cwd: repo }),
+      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: refused, cwd: repo }),
     ).toThrow(UsageError);
     // No approval summary at all, so no line in one calling that difference an
     // edit, and nothing recorded against the ticket either.
@@ -241,7 +242,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
     // The approval summary carries those edits and nothing about the hand edit:
     // the outcome a text editor changed was never applied to either file.
     const approve = capture();
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: approve, cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: approve, cwd: repo })).toBe(0);
     const summary = approve.err.join("");
     expect(summary).toContain("2 edits");
     expect(summary).toContain("scope +packages/search/api/**");
@@ -261,7 +262,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
     });
 
     const approve = capture();
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: approve, cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: approve, cwd: repo })).toBe(0);
 
     const ticket = readTicket(dir, "PRB-1");
     expect(ticket.state).toBe("ready");
@@ -298,7 +299,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
     const approve = capture();
     let message = "";
     try {
-      runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: approve, cwd: repo });
+      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: approve, cwd: repo });
       expect.unreachable("approve accepted a contract with no counter-seal");
     } catch (error) {
       expect(error).toBeInstanceOf(UsageError);
@@ -329,7 +330,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
 
     let message = "";
     try {
-      runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo });
+      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo });
       expect.unreachable("approve accepted an unreadable counter-seal");
     } catch (error) {
       expect(error).toBeInstanceOf(UsageError);
@@ -349,14 +350,14 @@ describe("a contract is refused when it does not match the counter-seal beside i
       cwd: repo,
     });
     expect(edited.err.join("")).toContain("PRB-1.draft.json cannot be read");
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
     expect(readContract(dir, "PRB-1").scope.paths_allowed).toEqual(["packages/search/**"]);
     expect(readDraftSnapshot(dir, "PRB-1")?.contract).toEqual(readContract(dir, "PRB-1"));
   });
 
   it("refuses to bind an attempt to a contract hand-edited after it was approved", async () => {
     const { repo, dir } = admitted("seal-after-approval");
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
     handEditContract(dir, "PRB-1", (contract) => {
       contract.scope.paths_allowed = ["**"];
     });
@@ -389,7 +390,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
     // the difference between the two files is that version's own edit, and it
     // is measured the way that version measured it.
     const approve = capture();
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: approve, cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: approve, cwd: repo })).toBe(0);
     expect(approve.err.join("")).toContain("2 edits");
     expect(approve.err.join("")).toContain("scope +packages/search/api/**");
     expect(readTicket(dir, "PRB-1").admission.edit_count).toBe(2);
@@ -423,7 +424,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
       contract.outcome = "Search results are paginated at 10 per page.";
     });
     expect(() =>
-      runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }),
+      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }),
     ).toThrow(/differ at 1 field — outcome/);
   });
 }, SPAWN_TEST_TIMEOUT_MS);

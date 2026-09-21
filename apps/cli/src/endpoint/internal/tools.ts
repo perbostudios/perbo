@@ -2,7 +2,9 @@ import { z } from "zod";
 import { EXIT_CODES } from "@perbo/contracts";
 import { MODEL_PROVIDERS } from "@perbo/model";
 import { isAbsolute } from "node:path";
-import { parseAdmitArgs, parseListArgs, runAdmitCommand, runListCommand, type AdmitArgs } from "../../commands/admit.js";
+import { listCommandLine, parseAdmitArgs, runAdmitCommand, type AdmitArgs } from "../../commands/admit.js";
+import { collectOutput } from "../../diagnostics.js";
+import type { CommandContext, ReportCommand } from "../../command-line/terminal.js";
 import { runEdit, type EditArgs } from "../../commands/edit/index.js";
 import { runEscapesCommand } from "../../commands/escapes/index.js";
 import { runInspectCommand } from "../../commands/inspect.js";
@@ -119,6 +121,52 @@ async function captured(
   };
 }
 
+/** The store this endpoint's commands work against, as their input names it. */
+const targetOf = (context: ToolContext): { repo: string; store: string | null } => ({
+  repo: context.repo,
+  store: context.store,
+});
+
+/**
+ * One command run over typed input, and what it answered as a tool result.
+ *
+ * Nothing is parsed on the way in and nothing is parsed on the way out: the
+ * command is given the object it would have been given by a line, and its own
+ * record is the structured content. What it said while it worked goes in the
+ * text beside the record, which is the join a session has always read.
+ */
+async function reported<Input, Report>(
+  command: ReportCommand<Input, { json: boolean }, Report>,
+  input: Input,
+  context: ToolContext,
+): Promise<ToolResult> {
+  const collected = collectOutput();
+  const commandContext: CommandContext = {
+    cwd: context.cwd,
+    now: new Date(),
+    diagnostics: collected.streams,
+  };
+  let report: Report;
+  try {
+    report = await command.run(input, commandContext);
+  } catch (error) {
+    return {
+      content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+      isError: true,
+    };
+  }
+  const rendered = command.render(report, { json: true }, { isTTY: false, color: false, json: true });
+  const structuredContent = command.toJson === undefined ? undefined : command.toJson(report);
+  const stdout = `${rendered.stdout}`.trim();
+  const stderr = `${collected.stderr()}${rendered.stderr}`.trim();
+  const text = [stdout, stderr].filter((part) => part.length > 0).join("\n");
+  return {
+    content: [{ type: "text", text: text.length === 0 ? `exit ${rendered.exitCode}` : text }],
+    ...(structuredContent === undefined ? {} : { structuredContent }),
+    ...(rendered.exitCode === EXIT_CODES.approve ? {} : { isError: true }),
+  };
+}
+
 const KeySchema = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/).describe("A ticket key, e.g. PRB-118.");
 
 /**
@@ -149,13 +197,7 @@ const listTickets = tool({
   role: "read",
   input: z.object({ all: z.boolean().optional().describe("Include settled tickets.") }),
   run: (input, context) =>
-    captured(true, (streams) =>
-      runListCommand({
-        args: parseListArgs([...repoArgs(context), "--json", ...(input.all ? ["--all"] : [])]),
-        streams,
-        cwd: context.cwd,
-      }),
-    ),
+    reported(listCommandLine, { target: targetOf(context), all: input.all ?? false }, context),
 });
 
 const inspectTicket = tool({

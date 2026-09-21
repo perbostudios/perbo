@@ -56,7 +56,20 @@ import {
 import { ProviderError, createModel, type Model, type ModelProvider } from "@perbo/model";
 import { RepoReader } from "@perbo/review";
 import { QUEUE_HOLDING_STATES } from "../scheduling.js";
-import { UsageError } from "../usage-error.js";
+import { UsageError, readInput } from "../usage-error.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../command-line/grammar.js";
+import type {
+  CommandContext,
+  NarratedCommand,
+  Rendered,
+  ReportCommand,
+} from "../command-line/terminal.js";
 import type { Streams } from "../streams.js";
 import { prohibitedSpecPaths, regenerateNodePages, specCommitFiles } from "../spec/pages.js";
 import { specBaseline } from "../spec/staleness.js";
@@ -66,7 +79,7 @@ import {
   contextManifestHash,
   headCommit,
   idsFor,
-  listTickets,
+  listTickets as storedTickets,
   nextKey,
   readContract,
   readJudgingPaths,
@@ -85,7 +98,7 @@ import {
   type DraftSnapshotFile,
   type JudgingRule,
 } from "../store/tickets.js";
-import { specFolder } from "../store/index.js";
+import { specFolder, storeFor, StoreTargetSchema } from "../store/index.js";
 import { describeScheduling } from "./serve/waits.js";
 
 /**
@@ -1024,7 +1037,7 @@ function resolveTyped(input: AdmitInput): Resolved {
  */
 function board(dir: string, leftOff: (key: string) => void): BoardEntry[] {
   const inFlight = new Set<string>(["plan_review", ...QUEUE_HOLDING_STATES]);
-  return listTickets(dir)
+  return storedTickets(dir)
     .filter((ticket) => inFlight.has(ticket.state))
     .flatMap((ticket) => {
       // A ticket whose contract cannot be read is stepped over, as `list`
@@ -1923,21 +1936,26 @@ export function recordedEdits(snapshot: DraftSnapshot): { count: number; changes
   return { count: changes.length, changes };
 }
 
-export function runApproveCommand(input: {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  now?: Date;
-}): number {
-  const now = input.now ?? new Date();
-  const [key, ...rest] = input.argv;
-  if (!key || key.startsWith("--")) throw new UsageError("approve requires a ticket key, e.g. PRB-1");
-  const args = parseListArgs(rest);
-  const dir = storeDir(resolve(input.cwd, args.repo), args.store);
+/**
+ * What approving asks for: which store, and which ticket in it.
+ *
+ * `--json` is not part of it. The desktop passes the flag and this command has
+ * no JSON form; taking it as input would say it had one.
+ */
+export const ApprovalInputSchema = z.strictObject({
+  target: StoreTargetSchema,
+  key: z.string().min(1, "approve requires a ticket key, e.g. PRB-1"),
+});
+export type ApprovalInput = z.infer<typeof ApprovalInputSchema>;
+
+export function approve(input: ApprovalInput, context: CommandContext): number {
+  const now = context.now;
+  const { key } = input;
+  const dir = storeFor(context.cwd, input.target);
 
   const existing = readTicket(dir, key);
   if (existing.approved_at !== null) {
-    input.streams.stderr(`${key} was already approved at ${existing.approved_at}\n`);
+    context.diagnostics.stderr(`${key} was already approved at ${existing.approved_at}\n`);
     return EXIT_CODES.approve;
   }
   const contract = readContract(dir, key);
@@ -1982,7 +2000,7 @@ export function runApproveCommand(input: {
     }),
   });
   writeTicket(dir, approved);
-  input.streams.stderr(
+  context.diagnostics.stderr(
     `${key} approved. ${contract.plan_id} v${contract.version} is immutable from here.\n` +
       `  ${duration(human_elapsed_ms)} from first rendering to approval, ` +
       (edits
@@ -2059,30 +2077,35 @@ export function listJson(input: {
   });
 }
 
-export function runListCommand(input: { args: ListArgs; streams: Streams; cwd: string }): number {
-  const { args, streams } = input;
-  const dir = storeDir(resolve(input.cwd, args.repo), args.store);
-  const all = listTickets(dir);
-  const shown = args.all ? all : all.filter(isActive);
+/** What one listing read: the store it came from, the filter, and the tickets. */
+export interface ListReport {
+  store: string;
+  all: boolean;
+  shown: readonly Ticket[];
+  total: number;
+}
 
-  // Before every other branch, including the empty-store one: in this mode
-  // stdout carries one JSON document and nothing else, and an empty store is a
-  // listing of no tickets rather than an occasion for advice. The advice is
-  // still worth giving, so it goes to stderr where a pipe does not see it.
-  if (args.json) {
-    const document = listJson({ store: dir, all: args.all, shown, total: all.length });
-    streams.stdout(`${JSON.stringify(document, null, 2)}\n`);
-    if (all.length === 0) streams.stderr(EMPTY_STORE_HINT);
-    return EXIT_CODES.approve;
-  }
+export const ListInputSchema = z.strictObject({
+  target: StoreTargetSchema,
+  /** Settled tickets too, rather than the active ones alone. */
+  all: z.boolean(),
+});
+export type ListInput = z.infer<typeof ListInputSchema>;
 
-  if (all.length === 0) {
-    streams.stdout("No admitted work.\n");
-    streams.stderr(EMPTY_STORE_HINT);
-    return EXIT_CODES.approve;
-  }
+export function listTickets(input: ListInput, context: CommandContext): ListReport {
+  const dir = storeFor(context.cwd, input.target);
+  const all = storedTickets(dir);
+  return {
+    store: dir,
+    all: input.all,
+    shown: input.all ? all : all.filter(isActive),
+    total: all.length,
+  };
+}
 
-  const rows = shown.map((ticket) => ({
+/** The listing as a person reads it: two lines a ticket, at a fixed width. */
+function renderListing(report: ListReport): string {
+  const rows = report.shown.map((ticket) => ({
     key: ticket.key,
     state: ticket.state,
     title: ticket.title,
@@ -2096,24 +2119,117 @@ export function runListCommand(input: { args: ListArgs; streams: Streams; cwd: s
     waits: describeScheduling(ticket.scheduling, ticket.state),
   }));
   const keyWidth = Math.max(6, ...rows.map((row) => row.key.length));
-
-  streams.stdout(
+  return (
     `${"TICKET".padEnd(keyWidth)}  ${"STATE".padEnd(STATE_WIDTH)}  OUTCOME\n` +
-      rows
-        .map(
-          (row) =>
-            `${row.key.padEnd(keyWidth)}  ${row.state.padEnd(STATE_WIDTH)}  ${row.title}\n` +
-            `${" ".repeat(keyWidth)}  ${" ".repeat(STATE_WIDTH)}  ${row.priority}${
-              row.source === "—" ? "" : ` · ${row.source}`
-            }${row.waits === null ? "" : ` · ${row.waits}`}\n`,
-        )
-        .join(""),
+    rows
+      .map(
+        (row) =>
+          `${row.key.padEnd(keyWidth)}  ${row.state.padEnd(STATE_WIDTH)}  ${row.title}\n` +
+          `${" ".repeat(keyWidth)}  ${" ".repeat(STATE_WIDTH)}  ${row.priority}${
+            row.source === "—" ? "" : ` · ${row.source}`
+          }${row.waits === null ? "" : ` · ${row.waits}`}\n`,
+      )
+      .join("")
   );
-  streams.stderr(
-    `\n${shown.length} of ${all.length} shown${args.all ? "" : " (active only; --all for the rest)"}\n`,
-  );
-  return EXIT_CODES.approve;
 }
+
+const LIST_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--all": switchFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const LIST_GRAMMAR: Grammar<typeof LIST_FLAGS> = {
+  command: "list",
+  flags: LIST_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal: "list takes no ticket key: it prints the admitted work, e.g. perbo list --all",
+  },
+  afterDoubleDash: "positionals",
+};
+
+export const listCommandLine: ReportCommand<ListInput, { json: boolean }, ListReport> = {
+  kind: "report",
+  name: "list",
+  grammars: [LIST_GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor: () => LIST_GRAMMAR,
+  read(argv) {
+    const line = parseArgv(LIST_GRAMMAR, argv);
+    return {
+      input: readInput(ListInputSchema, {
+        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+        all: line.flags["--all"] === true,
+      }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  run: listTickets,
+  toJson: (report) => listJson(report),
+  render(report, _output, target): Rendered {
+    // Before every other branch, including the empty-store one: in this mode
+    // stdout carries one JSON document and nothing else, and an empty store is
+    // a listing of no tickets rather than an occasion for advice. The advice is
+    // still worth giving, so it goes to stderr where a pipe does not see it.
+    if (target.json) {
+      return {
+        stdout: `${JSON.stringify(listJson(report), null, 2)}\n`,
+        stderr: report.total === 0 ? EMPTY_STORE_HINT : "",
+        exitCode: EXIT_CODES.approve,
+      };
+    }
+    if (report.total === 0) {
+      return {
+        stdout: "No admitted work.\n",
+        stderr: EMPTY_STORE_HINT,
+        exitCode: EXIT_CODES.approve,
+      };
+    }
+    return {
+      stdout: renderListing(report),
+      stderr: `\n${report.shown.length} of ${report.total} shown${
+        report.all ? "" : " (active only; --all for the rest)"
+      }\n`,
+      exitCode: EXIT_CODES.approve,
+    };
+  },
+};
+
+const APPROVE_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  // Accepted because the desktop passes it on every approval. Approving
+  // writes no record to stdout, so it selects nothing.
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const APPROVE_GRAMMAR: Grammar<typeof APPROVE_FLAGS> = {
+  command: "approve",
+  flags: APPROVE_FLAGS,
+  positionals: { min: 1, max: 1, refusal: "approve requires a ticket key, e.g. PRB-1" },
+  afterDoubleDash: "positionals",
+};
+
+export const approveCommandLine: NarratedCommand<ApprovalInput, { json: boolean }> = {
+  kind: "narrated",
+  name: "approve",
+  grammars: [APPROVE_GRAMMAR],
+  grammarFor: () => APPROVE_GRAMMAR,
+  read(argv) {
+    const line = parseArgv(APPROVE_GRAMMAR, argv);
+    return {
+      input: readInput(ApprovalInputSchema, {
+        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+        key: line.positionals[0],
+      }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  run: (input, _output, context) => approve(input, context),
+};
 
 export { TicketStoreError };
 

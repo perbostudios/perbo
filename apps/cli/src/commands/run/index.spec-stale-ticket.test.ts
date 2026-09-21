@@ -13,12 +13,13 @@ import {
 } from "@perbo/model";
 import { commitSpec } from "@perbo/runner";
 import { UsageError } from "../../usage-error.js";
-import { parseAdmitArgs, runAdmitCommand, runApproveCommand } from "../admit.js";
+import { approveCommandLine, parseAdmitArgs, runAdmitCommand } from "../admit.js";
 import type { Streams } from "../../streams.js";
 import { TICKET_RUNS } from "./index.js";
 import { buildInspectReport, renderInspect, type InspectReport } from "../inspect.js";
 import { runIndexCommand } from "../symbol-index.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * What a stale spec does to the ticket it was drafted for (D-103), over a real
@@ -168,7 +169,7 @@ async function admitted(spec = SPEC): Promise<{ repo: string; specPath: string; 
 /** A repository with `PRB-1` admitted from its spec and approved: a ticket at `ready`. */
 async function approved(spec = SPEC): Promise<{ repo: string; specPath: string; dir: string }> {
   const { repo, specPath, dir } = await admitted(spec);
-  expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+  expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
   expect(readTicket(dir, "PRB-1").state).toBe("ready");
   return { repo, specPath, dir };
 }
@@ -192,7 +193,7 @@ async function ticketless(): Promise<{ repo: string; dir: string }> {
     model: scripted(DRAFT),
   });
   expect(code).toBe(0);
-  expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+  expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
   return { repo, dir: storeDir(repo, null) };
 }
 
@@ -263,7 +264,7 @@ describe("a run starting a ticket that has not started", () => {
     expect(readTicket(dir, "PRB-1").state).toBe("plan_review");
 
     writeFileSync(specPath, SPEC.replace("60 seconds", "45 seconds"));
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
     expect(readTicket(dir, "PRB-1").state).toBe("ready");
 
     // The run starts, and the record says the spec it was approved from.
@@ -297,7 +298,7 @@ describe("a run starting a ticket that has not started", () => {
       execFileSync("git", ["-C", repo, "config", "commit.gpgsign", "false"], { env: gitIdentity });
 
       writeFileSync(specPath, SPEC.replace("60 seconds", "45 seconds"));
-      expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+      expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
 
       const spec = readTicket(dir, "PRB-1").admission.spec;
       if (spec === null) throw new Error("PRB-1 was admitted from a spec and should carry one");
@@ -508,7 +509,7 @@ describe("what approval records about the spec", () => {
     // would print "every name in it is still here" over a name that had gone.
     const { repo, specPath, dir } = await admitted();
     writeFileSync(specPath, SPEC.replace("60 seconds", "45 seconds"));
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
     const spec = readTicket(dir, "PRB-1").admission.spec;
     expect(spec?.names_that_resolved).toEqual([]);
     expect(spec?.symbols_judged_at_approval).toBe(false);
@@ -572,7 +573,7 @@ describe("what approval records about the spec", () => {
     // and `readFileSync` throws, which is the shape approval has to survive.
     rmSync(specPath);
     mkdirSync(specPath);
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
     rmSync(specPath, { recursive: true });
     writeFileSync(specPath, SPEC);
 

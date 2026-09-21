@@ -5,11 +5,12 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { hasAcceptanceCriteria, planNodes } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
-import { parseAdmitArgs, runAdmitCommand, runApproveCommand } from "../admit.js";
+import { approveCommandLine, parseAdmitArgs, runAdmitCommand } from "../admit.js";
 import type { Streams } from "../../streams.js";
 import { runEditCommand } from "./index.js";
 import { contractPathFor, readContract, readDraftSnapshot, readTicket, storeDir } from "../../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-edit-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -228,14 +229,14 @@ describe("perbo edit", () => {
 
   it("lets a person state a P3's decisions in the editor, after which approve signs it", async () => {
     const { repo, dir } = admitted("edit-p3", ".github/workflows/**");
-    expect(() => runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
       .toThrow(/not yet stated/);
     const editor = rewrite(
       "state-p3",
       'c.named_approver = "lian"; c.alternatives = ["leave CI as it is"]; c.contingency = "revert the workflow change";',
     );
     expect(await edit(repo, editor)).toBe(0);
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
     const contract = readContract(dir, "PRB-1");
     if (contract.level !== "P3") throw new Error(`expected P3, got ${contract.level}`);
     expect(contract.named_approver).toBe("lian");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAdmitArgs, parseListArgs } from "../commands/admit.js";
+import { approveCommandLine, listCommandLine, parseAdmitArgs, parseListArgs } from "../commands/admit.js";
 import { parseEditArgs } from "../commands/edit/index.js";
 import { parseInspectArgs } from "../commands/inspect.js";
 import { parseInterviewArgs } from "../commands/interview/index.js";
@@ -165,9 +165,10 @@ describe("the desktop host", () => {
   });
 
   it("reads an approval as the key and the flags after it", () => {
-    // ["approve", <key>, "--json"] + --repo: the runner takes argv[0] as the
-    // key and reads the rest.
-    expect(parseListArgs(["--json", "--repo", REPO])).toMatchObject({ json: true, repo: REPO });
+    expect(approveCommandLine.read([KEY, "--json", "--repo", REPO])).toEqual({
+      input: { target: { repo: REPO, store: null }, key: KEY },
+      output: { json: true },
+    });
   });
 
   it("reads a recorded principle as its one argument", () => {
@@ -211,11 +212,9 @@ describe("the desktop host", () => {
 
   it("reads the symbol index, the listing and one ticket", () => {
     expect(parseIndexArgs(["--json", "--repo", REPO])).toEqual({ json: true, repo: REPO });
-    expect(parseListArgs(["--all", "--json", "--repo", REPO])).toEqual({
-      all: true,
-      json: true,
-      repo: REPO,
-      store: null,
+    expect(listCommandLine.read(["--all", "--json", "--repo", REPO])).toEqual({
+      input: { target: { repo: REPO, store: null }, all: true },
+      output: { json: true },
     });
     expect(parseInspectArgs([KEY, "--json", "--repo", REPO])).toEqual({
       key: KEY,

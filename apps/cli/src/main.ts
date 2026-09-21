@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 import { parseReviewArgs } from "./commands/review/index.js";
 import {
+  approveCommandLine,
+  listCommandLine,
   parseAdmitArgs,
-  parseListArgs,
   runAdmitCommand,
-  runApproveCommand,
-  runListCommand,
 } from "./commands/admit.js";
 import { runBaselineCommand } from "./commands/baseline/index.js";
-import { startEntryPoint, type EntryPoint } from "./command-line/terminal.js";
+import { runCommandLine, startEntryPoint, type EntryPoint } from "./command-line/terminal.js";
 import { runEditCommand } from "./commands/edit/index.js";
 import { runEscapesCommand } from "./commands/escapes/index.js";
 import { parseExecuteArgs, runDoctorCommand, runExecuteCommand } from "./commands/run/index.js";
@@ -21,7 +20,7 @@ import { runStopsCommand } from "./commands/stops.js";
 import { runIndexCommand } from "./commands/symbol-index.js";
 import { runAgentCommand } from "./commands/agent.js";
 import { runInterviewCommand } from "./commands/interview/index.js";
-import { runMcpCommand } from "./commands/mcp.js";
+import { mcpCommandLine } from "./commands/mcp.js";
 import { runServeCommand } from "./commands/serve/index.js";
 import { runSyncCommand } from "./commands/sync.js";
 import { USAGE } from "./command-line/usage.js";
@@ -64,17 +63,17 @@ export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
       case "admit":
         return runAdmitCommand({ args: parseAdmitArgs(rest), streams, cwd });
       case "approve":
-        return runApproveCommand({ argv: rest, streams, cwd });
+        return runCommandLine(approveCommandLine, { argv: rest, streams, cwd });
       case "edit":
         return runEditCommand({ argv: rest, streams, cwd });
       case "list":
-        return runListCommand({ args: parseListArgs(rest), streams, cwd });
+        return runCommandLine(listCommandLine, { argv: rest, streams, cwd });
       case "sync":
         return runSyncCommand({ argv: rest, streams, cwd });
       case "serve":
         return runServeCommand({ argv: rest, streams, cwd });
       case "mcp":
-        return runMcpCommand({ argv: rest, streams, cwd });
+        return runCommandLine(mcpCommandLine, { argv: rest, streams, cwd });
       case "agent":
         return runAgentCommand({ argv: rest, streams, cwd });
       case "interview":

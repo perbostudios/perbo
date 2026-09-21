@@ -21,7 +21,7 @@ import {
 import { UsageError } from "../usage-error.js";
 import { runEditCommand } from "./edit/index.js";
 import { buildInspectReport, renderInspect, runInspectCommand } from "./inspect.js";
-import { LIST_JSON_SCHEMA_VERSION, ListJsonSchema, applyObservedPath, loadAdmitted, parseAdmitArgs, parseListArgs, runAdmitCommand, runApproveCommand, runListCommand, statesObserved } from "./admit.js";
+import { LIST_JSON_SCHEMA_VERSION, ListJsonSchema, applyObservedPath, approveCommandLine, listCommandLine, loadAdmitted, parseAdmitArgs, runAdmitCommand, statesObserved } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { PACKAGE_ROOT, REPO_ROOT } from "../test-support/paths.js";
 import { recordDelivery, runSyncCommand } from "./sync.js";
@@ -58,6 +58,7 @@ import {
   storeDir,
   writeTicket,
 } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -222,7 +223,7 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
     // ...and is not mistaken for a ticket by the store.
     expect(nextKey(dir, "PRB")).toBe("PRB-2");
     const list = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo, "--json"]), streams: list, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo, "--json"], streams: list, cwd: repo });
     expect(ListJsonSchema.parse(JSON.parse(list.out.join(""))).tickets).toHaveLength(1);
 
     const err = streams.err.join("");
@@ -675,14 +676,14 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
 
     // `list --json`: the kind and the reference, for whatever reads the listing.
     const listed = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo, "--json"]), streams: listed, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo, "--json"], streams: listed, cwd: repo });
     const document = ListJsonSchema.parse(JSON.parse(listed.out.join("")));
     expect(document.tickets[0]!.source).toMatchObject({ kind: "file", reference: path });
 
     // The table a person reads says which kind it is too, rather than leaving
     // an absolute path and a Jira key to be told apart by eye.
     const table = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo]), streams: table, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo], streams: table, cwd: repo });
     expect(table.out.join("")).toContain(`file ${path}`);
 
     // And the pull request, built by the runner from this ticket's own source.
@@ -854,7 +855,7 @@ describe("level is derived, not chosen", () => {
     if (contract.level !== "P3") throw new Error(`expected P3, got ${contract.level}`);
     expect(contract.decision_record).toContain(".github/workflows/**");
     expect(contract.named_approver).toBe("not yet stated");
-    expect(() => runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
       .toThrow(/not yet stated.*perbo edit PRB-1/s);
     expect(readTicket(dir, "PRB-1").approved_at).toBeNull();
 
@@ -913,7 +914,7 @@ describe("level is derived, not chosen", () => {
       streams: capture(),
       cwd: repo,
     });
-    expect(() => runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
       .toThrow(/reaches what judges the attempt.*packages\/review\/src\/closure-verify\.ts overlaps protected packages\/review\/\*\*.*perbo edit PRB-1/s);
     expect(readTicket(storeDir(repo, null), "PRB-1").approved_at).toBeNull();
 
@@ -967,7 +968,7 @@ describe("level is derived, not chosen", () => {
       streams: capture(),
       cwd: repo,
     });
-    expect(() => runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
       .toThrow(/reaches what judges the attempt.*scripts\/\*\* overlaps protected scripts\/validate_docs\.py \(checks\[check_docs\]\.definition_path\).*perbo edit PRB-1/s);
     expect(readTicket(storeDir(repo, null), "PRB-1").approved_at).toBeNull();
 
@@ -1066,7 +1067,7 @@ describe("the admission-friction instrument (D-003, ADR-0027)", () => {
       now: new Date("2026-09-02T10:00:30.000Z"),
     });
     const approve = capture();
-    runApproveCommand({
+    runCommandLine(approveCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams: approve,
       cwd: repo,
@@ -1207,7 +1208,7 @@ describe("perbo admit", () => {
     runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
     expect(existsSync(join(storeDir(repo, null), "tickets", "sequence.json"))).toBe(true);
     const streams = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo, "--json"]), streams, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
     expect(ListJsonSchema.parse(JSON.parse(streams.out.join(""))).tickets).toHaveLength(1);
   });
 }, SPAWN_TEST_TIMEOUT_MS);
@@ -1217,7 +1218,7 @@ describe("perbo approve", () => {
     const repo = repository("approve-basic");
     runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
     const streams = capture();
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
 
     const ticket = readTicket(storeDir(repo, null), "PRB-1");
     expect(ticket.state).toBe("ready");
@@ -1228,7 +1229,7 @@ describe("perbo approve", () => {
   it("names the tickets that do exist when asked for one that does not", () => {
     const repo = repository("approve-missing");
     runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
-    expect(() => runApproveCommand({ argv: ["PRB-7", "--repo", repo], streams: capture(), cwd: repo }))
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-7", "--repo", repo], streams: capture(), cwd: repo }))
       .toThrow(TicketStoreError);
   });
 
@@ -1262,7 +1263,7 @@ describe("perbo list", () => {
   it("says what to do when there is nothing admitted", () => {
     const repo = repository("list-empty");
     const streams = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo]), streams, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(streams.out.join("")).toContain("No admitted work");
     expect(streams.err.join("")).toContain("backlog stays where it is");
   });
@@ -1282,12 +1283,12 @@ describe("perbo list", () => {
     ]);
 
     const active = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo]), streams: active, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo], streams: active, cwd: repo });
     expect(active.out.join("")).toContain("PRB-1");
     expect(active.out.join("")).not.toContain("PRB-2");
 
     const all = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo, "--all"]), streams: all, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo, "--all"], streams: all, cwd: repo });
     expect(all.out.join("")).toContain("PRB-2");
   }, LIST_REWRITE_TIMEOUT_MS);
 
@@ -1295,7 +1296,7 @@ describe("perbo list", () => {
     const repo = repository("list-json");
     runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
     const streams = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo, "--json"]), streams, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
     const parsed = ListJsonSchema.parse(JSON.parse(streams.out.join("")));
     expect(parsed.tickets).toHaveLength(1);
     expect(() => TicketSchema.parse(parsed.tickets[0])).not.toThrow();
@@ -1342,8 +1343,8 @@ describe("perbo list --json", () => {
 
   const listed = (repo: string, ...extra: string[]) => {
     const streams = capture();
-    const code = runListCommand({
-      args: parseListArgs(["--repo", repo, ...extra]),
+    const code = runCommandLine(listCommandLine, {
+      argv: ["--repo", repo, ...extra],
       streams,
       cwd: repo,
     });

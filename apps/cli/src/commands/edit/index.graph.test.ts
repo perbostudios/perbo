@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES, hasAcceptanceCriteria, planNodes } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
-import { parseAdmitArgs, runAdmitCommand, runApproveCommand } from "../admit.js";
+import { approveCommandLine, parseAdmitArgs, runAdmitCommand } from "../admit.js";
 import type { Streams } from "../../streams.js";
 import { runEditCommand } from "./index.js";
-import { exitForThrown } from "../../command-line/terminal.js";
+import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import {
   approachPathFor,
   contractPathFor,
@@ -136,7 +136,7 @@ describe("perbo edit --graph-edit", () => {
     // re-seal the altered contract and run would then bind an attempt to it.
     const { repo, dir } = await withTwoNodes();
     expect(
-      runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }),
+      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }),
     ).toBe(EXIT_CODES.approve);
     const path = contractPathFor(dir, "PRB-1");
     const onDisk = JSON.parse(readFileSync(path, "utf8")) as { outcome: string; scope: { paths_allowed: string[] } };
@@ -510,7 +510,7 @@ describe("an approved plan", () => {
     const { repo, dir } = await withTwoNodes();
     await graphEdit(repo, { op: "add_edge", from: "node_1", to: "node_2" });
     expect(
-      runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }),
+      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }),
     ).toBe(EXIT_CODES.approve);
 
     // Edges are approach: they may change while the work runs (ADR-0016).

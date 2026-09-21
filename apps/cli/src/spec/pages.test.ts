@@ -11,12 +11,13 @@ import {
   type ModelTurn,
 } from "@perbo/model";
 import { UsageError } from "../usage-error.js";
-import { parseAdmitArgs, runAdmitCommand, runApproveCommand } from "../commands/admit.js";
+import { approveCommandLine, parseAdmitArgs, runAdmitCommand } from "../commands/admit.js";
 import type { Streams } from "../streams.js";
 import { runEditCommand } from "../commands/edit/index.js";
 import { TICKET_RUNS } from "../commands/run/index.js";
 import { listTickets, readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
 import { specFolder } from "../store/index.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-336: the spec folder the plan is kept beside — the page per node, its
@@ -512,7 +513,7 @@ describe("perbo admit --from-spec --start-over", () => {
     const { repo, specPath } = repository();
     await admitFromSpec(repo, specPath);
     // Approved, and the contract is immutable from then on (ADR-0016).
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(
       EXIT_CODES.approve,
     );
     // Refused before a model is asked anything, as a spec outside the

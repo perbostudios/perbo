@@ -6,7 +6,8 @@ import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "../usage-error.js";
 import { agentLaunch, parseAgentArgs, runAgentCommand, sweepStaleLaunchFiles, type AgentLaunch } from "./agent.js";
 import { ENDPOINT_FILE, type EndpointRecord } from "../endpoint/index.js";
-import { parseMcpArgs, runMcpCommand } from "./mcp.js";
+import { mcpCommandLine } from "./mcp.js";
+import { runCommandLine } from "../command-line/terminal.js";
 import type { Streams } from "../streams.js";
 
 /**
@@ -181,8 +182,11 @@ describe("perbo mcp", () => {
   it("prints the person's block, or the drafter's, and writes nothing", () => {
     const repo = repository(true);
     const streams = capture();
-    expect(parseMcpArgs(["--drafter", "--json"])).toMatchObject({ role: "drafter", json: true });
-    expect(runMcpCommand({ argv: ["--repo", repo], streams, cwd: repo })).toBe(EXIT_CODES.approve);
+    expect(mcpCommandLine.read(["--drafter", "--json"])).toMatchObject({
+      input: { role: "drafter" },
+      output: { json: true },
+    });
+    expect(runCommandLine(mcpCommandLine, { argv: ["--repo", repo], streams, cwd: repo })).toBe(EXIT_CODES.approve);
     const text = streams.out.join("");
     expect(text).toContain(record.url);
     expect(text).toContain(record.tokens.person);
@@ -192,7 +196,7 @@ describe("perbo mcp", () => {
     expect(text).toContain("bearer_token_env_var");
 
     const json = capture();
-    runMcpCommand({ argv: ["--repo", repo, "--drafter", "--json"], streams: json, cwd: repo });
+    runCommandLine(mcpCommandLine, { argv: ["--repo", repo, "--drafter", "--json"], streams: json, cwd: repo });
     expect(JSON.parse(json.out.join(""))).toEqual({
       mcpServers: { perbo: { type: "http", url: record.url, headers: { Authorization: `Bearer ${record.tokens.drafter}` } } },
     });
@@ -201,7 +205,7 @@ describe("perbo mcp", () => {
   it("says which command to start when no queue is serving", () => {
     const repo = repository(false);
     const streams = capture();
-    expect(runMcpCommand({ argv: ["--repo", repo], streams, cwd: repo })).toBe(EXIT_CODES.did_not_complete);
+    expect(runCommandLine(mcpCommandLine, { argv: ["--repo", repo], streams, cwd: repo })).toBe(EXIT_CODES.did_not_complete);
     expect(streams.err.join("")).toContain("perbo serve");
     expect(streams.out).toEqual([]);
   });

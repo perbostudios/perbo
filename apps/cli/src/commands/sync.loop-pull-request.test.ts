@@ -5,11 +5,12 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, HAND_OFF_NOTE, OPENER_UNKNOWN_NOTE, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import { ListJsonSchema, parseAdmitArgs, parseListArgs, runAdmitCommand, runListCommand } from "./admit.js";
+import { ListJsonSchema, listCommandLine, parseAdmitArgs, runAdmitCommand } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { buildInspectReport } from "./inspect.js";
 import { recordDelivery, runSyncCommand } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-173: `perbo sync` on a `failed` ticket whose branch carries a pull
@@ -382,7 +383,7 @@ describe("what a failed ticket whose latest run produced nothing shows a reader"
     // is visible: open, at the number the loop opened, dated at the round that
     // observed it and not at the run that failed afterwards.
     const streams = capture();
-    const code = runListCommand({ args: parseListArgs(["--repo", repo, "--all", "--json"]), streams, cwd: repo });
+    const code = runCommandLine(listCommandLine, { argv: ["--repo", repo, "--all", "--json"], streams, cwd: repo });
     expect(code).toBe(EXIT_CODES.approve);
     const listed = ListJsonSchema.parse(JSON.parse(streams.out.join("")));
     expect(listed.tickets).toHaveLength(1);
