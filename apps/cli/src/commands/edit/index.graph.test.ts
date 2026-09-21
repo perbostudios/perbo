@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES, hasAcceptanceCriteria, planNodes } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
-import { approveCommandLine, parseAdmitArgs, runAdmitCommand } from "../admit.js";
+import { admitCommandLine, approveCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
 import { editCommandLine } from "./index.js";
 import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
@@ -52,8 +52,8 @@ function admitted(): { repo: string; dir: string } {
   execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], {
     env: gitIdentity,
   });
-  const code = runAdmitCommand({
-    args: parseAdmitArgs([
+  const code = runCommandLine(admitCommandLine, {
+    argv: [
       "--repo", repo,
       "--outcome", "New users receive an activation email.",
       "--criterion", "one email is queued :: a single signup queues one message",
@@ -62,7 +62,7 @@ function admitted(): { repo: string; dir: string } {
       "--criterion", "the report counts activations :: the daily report shows the count",
       "--path", "packages/queue/**",
       "--path", "packages/reports/**",
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });

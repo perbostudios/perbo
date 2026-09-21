@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approveCommandLine, listCommandLine, parseAdmitArgs, parseListArgs } from "../commands/admit.js";
+import { admitCommandLine, approveCommandLine, listCommandLine, parseListArgs } from "../commands/admit.js";
 import { editCommandLine } from "../commands/edit/index.js";
 import { inspectCommandLine } from "../commands/inspect.js";
 import { parseInterviewArgs } from "../commands/interview/index.js";
@@ -58,7 +58,7 @@ describe("the desktop host", () => {
   });
 
   it("reads a typed admission, criteria and scope in the order they were given", () => {
-    const args = parseAdmitArgs([
+    const { input: args, output } = admitCommandLine.read([
       "--prefix",
       "PRB",
       "--outcome",
@@ -75,7 +75,12 @@ describe("the desktop host", () => {
       "--repo",
       REPO,
     ]);
-    expect(args).toMatchObject({ prefix: "PRB", title: "Search results paginate", json: true, repo: REPO });
+    expect(args).toMatchObject({
+      prefix: "PRB",
+      title: "Search results paginate",
+      target: { repo: REPO, store: null },
+    });
+    expect(output.json).toBe(true);
     expect(args.criteria).toEqual([
       "a page holds 20 :: a unit test asserts it :: test",
       "the last page is short :: a unit test asserts it :: test",
@@ -87,7 +92,7 @@ describe("the desktop host", () => {
 
   it("reads a drafting admission from a spec and from a file", () => {
     expect(
-      parseAdmitArgs([
+      admitCommandLine.read([
         "--prefix",
         "PRB",
         "--from-spec",
@@ -101,7 +106,7 @@ describe("the desktop host", () => {
         "--json",
         "--repo",
         REPO,
-      ]),
+      ]).input,
     ).toMatchObject({
       fromSpec: "specs/paginate-search/spec.md",
       startOver: KEY,
@@ -110,7 +115,7 @@ describe("the desktop host", () => {
       approve: false,
     });
     expect(
-      parseAdmitArgs([
+      admitCommandLine.read([
         "--prefix",
         "PRB",
         "--from-file",
@@ -122,7 +127,7 @@ describe("the desktop host", () => {
         "--json",
         "--repo",
         REPO,
-      ]),
+      ]).input,
     ).toMatchObject({ fromFile: "/tmp/issue.md", provider: "codex-cli", approve: false });
   });
 

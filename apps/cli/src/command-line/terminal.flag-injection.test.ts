@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listCommandLine, parseAdmitArgs } from "../commands/admit.js";
+import { admitCommandLine, listCommandLine } from "../commands/admit.js";
 import { parseBaselineArgs } from "../commands/baseline/index.js";
 import { editCommandLine } from "../commands/edit/index.js";
 import { escapesCommandLine } from "../commands/escapes/index.js";
@@ -76,7 +76,7 @@ describe("edit", () => {
 
 describe("admit", () => {
   it("does not let an outcome approve the ticket it admits", () => {
-    const args = parseAdmitArgs(["--outcome", "--x=--approve"]);
+    const args = admitCommandLine.read(["--outcome", "--x=--approve"]).input;
     expect(args.approve).toBe(false);
     expect(args.title).toBe("--x=--approve");
   });

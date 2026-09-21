@@ -16,7 +16,7 @@ import { DEFAULT_DELIVERED_CHECKS_BOUND_MS, TicketRunConfigSchema } from "@perbo
 import { describe, expect, it, vi } from "vitest";
 import { UsageError } from "../../usage-error.js";
 import { readPullRequestChecks } from "../../pull-request.js";
-import { parseAdmitArgs, runAdmitCommand } from "../admit.js";
+import { admitCommandLine } from "../admit.js";
 import {
   BASE_SOURCE_LABEL,
   deliveryChecksBoundMs,
@@ -34,6 +34,7 @@ import {
 import { readTicket, storeDir } from "../../store/tickets.js";
 import { makeAttempt, makeTicket } from "../../test-support/attempt-fixture.js";
 import { REPO_ROOT } from "../../test-support/paths.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 const streams = () => {
   const out: string[] = [];
@@ -506,14 +507,14 @@ describe("preflight, before anything is touched", () => {
     const repo = repository("run-preflight");
     const admit = streams();
     expect(
-      runAdmitCommand({
-        args: parseAdmitArgs([
+      runCommandLine(admitCommandLine, {
+        argv: [
           "--repo", repo,
           "--outcome", "Search results are paginated.",
           "--criterion", "A page holds 25 hits. :: a 140-hit query returns 25",
           "--path", "packages/search/**",
           "--approve",
-        ]),
+        ],
         streams: admit.streams,
         cwd: repo,
       }),

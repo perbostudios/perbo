@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { editCommandLine } from "./edit/index.js";
 import { inspectCommandLine, type InspectReport } from "./inspect.js";
@@ -56,8 +56,8 @@ function repository(): string {
 
 function admitted(criteria: number, paths: string[]): string {
   const repo = repository();
-  const code = runAdmitCommand({
-    args: parseAdmitArgs([
+  const code = runCommandLine(admitCommandLine, {
+    argv: [
       "--repo", repo,
       "--outcome", "New users receive an activation email.",
       ...Array.from({ length: criteria }, (_, i) => [
@@ -65,7 +65,7 @@ function admitted(criteria: number, paths: string[]): string {
         `criterion ${i + 1} holds :: assertion ${i + 1}`,
       ]).flat(),
       ...paths.flatMap((path) => ["--path", path]),
-    ]),
+    ],
     streams: capture(false),
     cwd: repo,
   });

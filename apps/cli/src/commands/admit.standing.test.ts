@@ -3,9 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { readContract, storeDir } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * D-105: the standing prohibited list is a repository agreement, so every
@@ -43,8 +44,8 @@ const streams = (): Streams => ({
 });
 
 const admit = (repo: string, ...extra: string[]): number | Promise<number> =>
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo",
       repo,
       "--outcome",
@@ -54,7 +55,7 @@ const admit = (repo: string, ...extra: string[]): number | Promise<number> =>
       "--path",
       "packages/auth/**",
       ...extra,
-    ]),
+    ],
     streams: streams(),
     cwd: repo,
   });

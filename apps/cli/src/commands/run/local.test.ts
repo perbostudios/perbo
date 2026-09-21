@@ -24,7 +24,7 @@ import {
 } from "@perbo/contracts";
 import { pollPullRequest, type PreflightRequest, type PreflightResult } from "@perbo/runner";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "../admit.js";
+import { admitCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
 import { escapesCommandLine } from "../escapes/index.js";
 import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "./index.js";
@@ -814,14 +814,14 @@ describe("the write guard a run with nothing admitted enforces", () => {
       agent_binary: guardedAgent("guard-parity-ticket", callsFor(ticketOutside)),
       materialization_manifest: noInstall(ticketed),
     });
-    await runAdmitCommand({
-      args: parseAdmitArgs([
+    await runCommandLine(admitCommandLine, {
+      argv: [
         "--repo", ticketed,
         "--outcome", OUTCOME,
         "--criterion", CRITERION,
         "--path", "src/**",
         "--approve",
-      ]),
+      ],
       streams: capture().streams,
       cwd: ticketed,
     });
@@ -859,14 +859,14 @@ describe("the branch a ticket-backed run works on", () => {
     });
     const other = "Totals are rounded to whole cents";
     for (const outcome of [OUTCOME, other]) {
-      await runAdmitCommand({
-        args: parseAdmitArgs([
+      await runCommandLine(admitCommandLine, {
+        argv: [
           "--repo", repo,
           "--outcome", outcome,
           "--criterion", CRITERION,
           "--path", "src/**",
           "--approve",
-        ]),
+        ],
         streams: capture().streams,
         cwd: repo,
       });

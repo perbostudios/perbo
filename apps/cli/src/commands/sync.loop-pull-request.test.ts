@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, HAND_OFF_NOTE, OPENER_UNKNOWN_NOTE, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import { ListJsonSchema, listCommandLine, parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { ListJsonSchema, admitCommandLine, listCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { buildInspectReport } from "./inspect.js";
 import { recordDelivery, runSyncCommand } from "./sync.js";
@@ -141,7 +141,7 @@ const LOOP_PR = 41;
  */
 function publishedTicket(name: string): { repo: string; dir: string; ticket: Ticket; branch: string } {
   const repo = repository(name);
-  runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
   const dir = storeDir(repo, null);
   const branch = branchName({
     ticket_key: "PRB-1",

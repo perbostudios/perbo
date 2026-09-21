@@ -10,10 +10,11 @@ import {
   unattendedMergeStatus,
   type Ticket,
 } from "@perbo/contracts";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { runSyncCommand } from "./sync.js";
 import { readTicket, storeDir, writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-206 criterion 3: which arm produced a delivery record survives the sync
@@ -116,8 +117,8 @@ function directArmTicket(
   execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], {
     env: gitIdentity,
   });
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo",
       repo,
       "--outcome",
@@ -127,7 +128,7 @@ function directArmTicket(
       "--path",
       "packages/search/**",
       "--approve",
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });

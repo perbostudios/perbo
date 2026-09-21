@@ -36,7 +36,13 @@ import {
   type PreToolGuardState,
   type WorktreeScope,
 } from "@perbo/runner";
-import { parseAdmitArgs, runAdmitCommand, type AdmitArgs } from "../admit.js";
+import { collectOutput } from "../../diagnostics.js";
+import {
+  admitDraft,
+  admitDraftReport,
+  defaultAdmission,
+  type AdmissionReport,
+} from "../admit.js";
 import { UsageError } from "../../usage-error.js";
 import {
   parseArgv,
@@ -1307,24 +1313,25 @@ export interface InterviewTool<Input extends z.ZodType = z.ZodType> {
 const tool = <Input extends z.ZodType>(definition: InterviewTool<Input>): InterviewTool =>
   definition as unknown as InterviewTool;
 
-/** Run one command with its streams captured, and say what it wrote. */
+/** Run one command with its writes collected, and say what it wrote. */
 async function captured(
   command: (streams: Streams) => number | Promise<number>,
 ): Promise<{ code: number; text: string }> {
-  const out: string[] = [];
-  const err: string[] = [];
-  const streams: Streams = {
-    stdout: (chunk) => out.push(chunk),
-    stderr: (chunk) => err.push(chunk),
-    isTTY: false,
-  };
+  const collected = collectOutput();
   try {
-    const code = await command(streams);
-    return { code, text: [out.join("").trim(), err.join("").trim()].filter(Boolean).join("\n") };
+    const code = await command(collected.streams);
+    return { code, text: wrote(collected.stdout(), collected.stderr()) };
   } catch (error) {
-    return { code: EXIT_CODES.did_not_complete, text: error instanceof Error ? error.message : String(error) };
+    return {
+      code: EXIT_CODES.did_not_complete,
+      text: error instanceof Error ? error.message : String(error),
+    };
   }
 }
+
+/** What a command wrote, as a session reads it: the record, then what was said beside it. */
+const wrote = (stdout: string, stderr: string): string =>
+  [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
 
 /** The ticket this spec was last drafted into, if one is still open to re-drafting. */
 function ticketFromSpec(context: InterviewContext): string | null {
@@ -1393,34 +1400,42 @@ const generatePlan = tool({
       );
     }
     const startOver = drafted?.open ?? null;
-    // Built as values: nothing a model returned is parsed as a flag (ADR-0023).
-    const defaults = parseAdmitArgs([
-      "--repo",
-      context.repo,
-      ...(context.store === null ? [] : ["--store", context.store]),
-    ]);
-    const args: AdmitArgs = {
-      ...defaults,
-      fromSpec: join(context.repositoryRoot, context.spec),
-      startOver,
-      approve: false,
-      json: false,
-    };
-    if (args.approve) throw new Error("the interview cannot approve");
-    const ran = await captured((streams) =>
-      runAdmitCommand({
-        args,
-        streams,
-        cwd: context.cwd,
-        ...(context.model === undefined ? {} : { model: context.model }),
-      }),
+    // Built as values: nothing a model returned is parsed as a flag (ADR-0023
+    // §4). A draft has no `approve` among its fields, so there is no approving
+    // to reach from here — this session prepares, the person approves (D-072).
+    const collected = collectOutput();
+    let report: AdmissionReport;
+    try {
+      report = await admitDraft(
+        {
+          ...defaultAdmission({ repo: context.repo, store: context.store }),
+          fromSpec: join(context.repositoryRoot, context.spec),
+          startOver,
+        },
+        {
+          cwd: context.cwd,
+          now: new Date(),
+          diagnostics: collected.streams,
+          ...(context.model === undefined ? {} : { model: context.model }),
+        },
+      );
+    } catch (error) {
+      return said(error instanceof Error ? error.message : String(error), true);
+    }
+    const rendered = admitDraftReport.render(
+      report,
+      { json: false },
+      { isTTY: false, color: false, json: false },
     );
-    if (ran.code !== EXIT_CODES.approve) return said(ran.text, true);
+    const text = wrote(
+      collected.stdout() + rendered.stdout,
+      collected.stderr() + rendered.stderr,
+    );
     context.specTaken();
     const key = startOver ?? ticketFromSpec(context) ?? "the ticket";
     return said(
       `${startOver === null ? "admitted" : "re-drafted"} ${key} in plan_review from ${context.spec}. ` +
-        `A person reads and approves it; this session cannot.\n${ran.text}`,
+        `A person reads and approves it; this session cannot.\n${text}`,
     );
   },
 });

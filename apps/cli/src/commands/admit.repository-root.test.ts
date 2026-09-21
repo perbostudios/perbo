@@ -6,10 +6,11 @@ import { win32 } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { StoredTicketSchema, type Ticket } from "@perbo/contracts";
 import { TicketRunConfigSchema } from "@perbo/runner";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { TICKET_RUNS } from "./run/index.js";
 import { TicketStoreError, listTickets, readTicket, storeDir, writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * A ticket file names no machine.
@@ -78,8 +79,8 @@ function capture(): Streams {
 
 /** Admit and approve one ticket in `repo`, then commit the store it wrote. */
 function admitted(repo: string): void {
-  const code = runAdmitCommand({
-    args: parseAdmitArgs([
+  const code = runCommandLine(admitCommandLine, {
+    argv: [
       "--repo",
       repo,
       "--outcome",
@@ -89,7 +90,7 @@ function admitted(repo: string): void {
       "--path",
       "packages/auth/**",
       "--approve",
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });
@@ -186,8 +187,8 @@ describe("a ticket admission writes", () => {
     const repo = repository("elsewhere");
     const store = join(scratch, "elsewhere-store");
     mkdirSync(store, { recursive: true });
-    const code = runAdmitCommand({
-      args: parseAdmitArgs([
+    const code = runCommandLine(admitCommandLine, {
+      argv: [
         "--repo",
         repo,
         "--store",
@@ -198,7 +199,7 @@ describe("a ticket admission writes", () => {
         "A signup queues exactly one email. :: one message on the queue",
         "--path",
         "packages/auth/**",
-      ]),
+      ],
       streams: capture(),
       cwd: repo,
     });

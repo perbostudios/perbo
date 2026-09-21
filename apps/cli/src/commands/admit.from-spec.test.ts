@@ -12,7 +12,7 @@ import {
   type ModelTurn,
 } from "@perbo/model";
 import { UsageError } from "../usage-error.js";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { editCommandLine } from "./edit/index.js";
 import { INTERVIEW_SESSION_FILE } from "./interview/index.js";
@@ -164,12 +164,7 @@ async function admitFromSpec(
   extra: string[] = [],
 ) {
   const streams = capture();
-  const code = await runAdmitCommand({
-    args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath, ...extra]),
-    streams,
-    cwd: repo,
-    model,
-  });
+  const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, ...extra], streams, cwd: repo, deps: { model } });
   return { code, streams };
 }
 
@@ -380,12 +375,12 @@ describe("perbo admit --from-spec", () => {
   it("carries no spec record for a ticket admitted from anything else", async () => {
     const { repo } = repository();
     const streams = capture();
-    const code = runAdmitCommand({
-      args: parseAdmitArgs([
+    const code = runCommandLine(admitCommandLine, {
+      argv: [
         "--repo", repo, "--outcome", "Docs say what is true.",
         "--criterion", "the page exists :: a test reads it",
         "--path", "docs/**",
-      ]),
+      ],
       streams,
       cwd: repo,
     });
@@ -417,12 +412,12 @@ describe("perbo admit --from-spec", () => {
   it("writes no approach for a flat plan drafted from an issue", async () => {
     const { repo } = repository();
     const streams = capture();
-    runAdmitCommand({
-      args: parseAdmitArgs([
+    runCommandLine(admitCommandLine, {
+      argv: [
         "--repo", repo, "--outcome", "Docs say what is true.",
         "--criterion", "the page exists :: a test reads it",
         "--path", "docs/**",
-      ]),
+      ],
       streams,
       cwd: repo,
     });
@@ -502,8 +497,8 @@ describe("perbo admit --from-spec", () => {
   });
 
   it("cannot be given with --from or --from-file, and cannot approve in the same command", () => {
-    expect(() => parseAdmitArgs(["--from-spec", "a.md", "--from", "o/r#1"])).toThrow(UsageError);
-    expect(() => parseAdmitArgs(["--from-spec", "a.md", "--from-file", "b.md"])).toThrow(UsageError);
+    expect(() => admitCommandLine.read(["--from-spec", "a.md", "--from", "o/r#1"]).input).toThrow(UsageError);
+    expect(() => admitCommandLine.read(["--from-spec", "a.md", "--from-file", "b.md"]).input).toThrow(UsageError);
   });
 
   it("lets --outcome override the drafted one, and drops the graph when the criteria are typed", async () => {

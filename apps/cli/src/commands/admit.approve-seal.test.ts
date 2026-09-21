@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { UsageError } from "../usage-error.js";
-import { approveCommandLine, loadAdmitted, parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine, approveCommandLine, loadAdmitted } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { editCommandLine } from "./edit/index.js";
 import { parseExecuteArgs, runExecuteCommand } from "./run/index.js";
@@ -58,13 +58,13 @@ function capture(): Streams & { out: string[]; err: string[] } {
 /** One admitted, unapproved ticket over `packages/search/**`, which derives P1. */
 function admitted(name: string): { repo: string; dir: string } {
   const repo = repository(name);
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo", repo,
       "--outcome", "Search results are paginated.",
       "--criterion", "A search returns at most 25 hits per page. :: a 140-hit query returns 25",
       "--path", "packages/search/**",
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });

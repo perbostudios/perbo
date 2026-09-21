@@ -5,10 +5,11 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, TicketSchema, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { runSyncCommand } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-157: `perbo sync` on a `failed` ticket whose branch a person delivered
@@ -153,7 +154,7 @@ const ghAnswer = (state: "OPEN" | "CLOSED" | "MERGED"): string =>
  */
 function failedTicket(name: string): { repo: string; dir: string; ticket: Ticket; branch: string } {
   const repo = repository(name);
-  runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-01T09:00:00.000Z");
   const branch = branchName({

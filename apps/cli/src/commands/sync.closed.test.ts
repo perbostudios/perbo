@@ -6,11 +6,12 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
 import { pollPullRequest, type TicketDeliveryState } from "@perbo/runner";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { recordDelivery, runSyncCommand } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-235/SCP-252 — a closed, unmerged pull request is read as closed, not as
@@ -114,8 +115,8 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
   const repo = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo",
       repo,
       "--outcome",
@@ -125,7 +126,7 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
       "--path",
       "packages/search/**",
       "--approve",
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });

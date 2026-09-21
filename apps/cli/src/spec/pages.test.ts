@@ -11,7 +11,12 @@ import {
   type ModelTurn,
 } from "@perbo/model";
 import { UsageError } from "../usage-error.js";
-import { approveCommandLine, parseAdmitArgs, runAdmitCommand } from "../commands/admit.js";
+import {
+  admitCommandLine,
+  admitDraft,
+  approveCommandLine,
+  defaultAdmission,
+} from "../commands/admit.js";
 import type { Streams } from "../streams.js";
 import { editCommandLine } from "../commands/edit/index.js";
 import { TICKET_RUNS } from "../commands/run/index.js";
@@ -141,21 +146,11 @@ const drafted = {
 };
 
 const redraftFrom = (repo: string, specPath: string, key: string) =>
-  runAdmitCommand({
-    args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath, "--start-over", key]),
-    streams: capture(),
-    cwd: repo,
-    model: scripted([submits(drafted)]),
-  });
+  runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", key], streams: capture(), cwd: repo, deps: { model: scripted([submits(drafted)]) } });
 
 const admitFromSpec = async (repo: string, specPath: string, extra: string[] = [], draft = drafted) => {
   const streams = capture();
-  const code = await runAdmitCommand({
-    args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath, ...extra]),
-    streams,
-    cwd: repo,
-    model: scripted([submits(draft)]),
-  });
+  const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, ...extra], streams, cwd: repo, deps: { model: scripted([submits(draft)]) } });
   return { code, streams };
 };
 
@@ -261,12 +256,7 @@ describe("the page per node beside the spec", () => {
     rmSync(folder, { recursive: true, force: true });
     symlinkSync(elsewhere, folder);
     await expect(
-      runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath]),
-        streams: capture(),
-        cwd: repo,
-        model: scripted([]),
-      }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath], streams: capture(), cwd: repo, deps: { model: scripted([]) } }),
     ).rejects.toThrow(/symlink/);
     expect(existsSync(join(elsewhere, "nodes"))).toBe(false);
     expect(listTickets(storeDir(repo, null))).toEqual([]);
@@ -405,12 +395,7 @@ describe("the No-Gos a run's brief carries (D-096, D-100)", () => {
 describe("perbo admit --from-spec --start-over", () => {
   const redraft = async (repo: string, specPath: string, extra: string[] = [], draft = drafted) => {
     const streams = capture();
-    const code = await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-1", ...extra]),
-      streams,
-      cwd: repo,
-      model: scripted([submits(draft)]),
-    });
+    const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-1", ...extra], streams, cwd: repo, deps: { model: scripted([submits(draft)]) } });
     return { code, streams };
   };
 
@@ -520,22 +505,12 @@ describe("perbo admit --from-spec --start-over", () => {
     // repository is: the draft would have been paid for either way.
     const untouched = scriptedWithCount([submits(drafted)]);
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-1"]),
-        streams: capture(),
-        cwd: repo,
-        model: untouched.model,
-      }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-1"], streams: capture(), cwd: repo, deps: { model: untouched.model } }),
     ).toThrow(/immutable/);
     expect(untouched.turns()).toBe(0);
 
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-9"]),
-        streams: capture(),
-        cwd: repo,
-        model: scripted([submits(drafted)]),
-      }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-9"], streams: capture(), cwd: repo, deps: { model: scripted([submits(drafted)]) } }),
     ).toThrow(/PRB-9/);
   });
 
@@ -554,41 +529,39 @@ describe("perbo admit --from-spec --start-over", () => {
     expect(readTicket(dir, "PRB-1").plan_version).toBe(before.plan_version);
     expect(readdirSync(other)).toEqual(["spec.md"]);
 
-    runAdmitCommand({
-      args: parseAdmitArgs([
+    runCommandLine(admitCommandLine, {
+      argv: [
         "--repo", repo, "--outcome", "Docs say what is true.",
         "--criterion", "the page exists :: a test reads it", "--path", "docs/**",
-      ]),
+      ],
       streams: capture(),
       cwd: repo,
     });
     // Refused before the model is asked, so the refusal is immediate.
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-2"]),
-        streams: capture(),
-        cwd: repo,
-        model: scripted([submits(drafted)]),
-      }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-2"], streams: capture(), cwd: repo, deps: { model: scripted([submits(drafted)]) } }),
     ).toThrow(/PRB-2 was not drafted from a spec/);
     expect(readTicket(dir, "PRB-2").admission.spec).toBeNull();
     expect(readTicket(dir, "PRB-2").plan_version).toBe(1);
   });
 
   it("needs a spec to start over from, and cannot approve in the same command", () => {
-    expect(() => parseAdmitArgs(["--start-over", "PRB-1"])).toThrow(UsageError);
+    expect(() => admitCommandLine.read(["--start-over", "PRB-1"]).input).toThrow(UsageError);
     // And the same for a caller that built the flags rather than parsing them.
     expect(() =>
-      runAdmitCommand({
-        args: { ...parseAdmitArgs(["--from-file", "issue.md"]), startOver: "PRB-1" },
-        streams: capture(),
-        cwd: scratch,
-        model: scripted([submits(drafted)]),
-      }),
+      admitDraft(
+        { ...defaultAdmission({ repo: ".", store: null }), fromFile: "issue.md", startOver: "PRB-1" },
+        {
+          cwd: scratch,
+          now: new Date(),
+          diagnostics: capture(),
+          model: scripted([submits(drafted)]),
+        },
+      ),
     ).toThrow(/--from-spec/);
-    expect(() => parseAdmitArgs(["--from-spec", "a.md", "--start-over", "prb-1"])).toThrow(UsageError);
+    expect(() => admitCommandLine.read(["--from-spec", "a.md", "--start-over", "prb-1"]).input).toThrow(UsageError);
     expect(() =>
-      parseAdmitArgs(["--from-spec", "a.md", "--start-over", "PRB-1", "--approve"]),
+      admitCommandLine.read(["--from-spec", "a.md", "--start-over", "PRB-1", "--approve"]).input,
     ).toThrow(UsageError);
   });
 });
@@ -627,11 +600,11 @@ describe("the spec folder a repository configures", () => {
     await admitFromSpec(repo, specPath);
     expect(readContract(storeDir(repo, null), "PRB-1").scope.paths_prohibited).toContain("specs/**");
     const streams = capture();
-    runAdmitCommand({
-      args: parseAdmitArgs([
+    runCommandLine(admitCommandLine, {
+      argv: [
         "--repo", repo, "--outcome", "Docs say what is true.",
         "--criterion", "the page exists :: a test reads it", "--path", "docs/**",
-      ]),
+      ],
       streams,
       cwd: repo,
     });

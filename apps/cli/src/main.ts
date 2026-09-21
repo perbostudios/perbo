@@ -1,11 +1,6 @@
 #!/usr/bin/env node
 import { parseReviewArgs } from "./commands/review/index.js";
-import {
-  approveCommandLine,
-  listCommandLine,
-  parseAdmitArgs,
-  runAdmitCommand,
-} from "./commands/admit.js";
+import { admitCommandLine, approveCommandLine, listCommandLine } from "./commands/admit.js";
 import { runBaselineCommand } from "./commands/baseline/index.js";
 import { runCommandLine, startEntryPoint, type EntryPoint } from "./command-line/terminal.js";
 import { editCommandLine } from "./commands/edit/index.js";
@@ -61,7 +56,7 @@ export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
       case "run":
         return runExecuteCommand({ args: parseExecuteArgs(rest), streams, cwd });
       case "admit":
-        return runAdmitCommand({ args: parseAdmitArgs(rest), streams, cwd });
+        return runCommandLine(admitCommandLine, { argv: rest, streams, cwd });
       case "approve":
         return runCommandLine(approveCommandLine, { argv: rest, streams, cwd });
       case "edit":

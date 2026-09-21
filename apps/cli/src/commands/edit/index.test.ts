@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { hasAcceptanceCriteria, planNodes } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
-import { approveCommandLine, parseAdmitArgs, runAdmitCommand } from "../admit.js";
+import { admitCommandLine, approveCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
 import { editCommandLine } from "./index.js";
 import { contractPathFor, readContract, readDraftSnapshot, readTicket, storeDir } from "../../store/tickets.js";
@@ -40,14 +40,14 @@ function capture(): Streams & { out: string[]; err: string[] } {
 
 function admitted(name: string, path = "packages/search/**", ...extra: string[]): { repo: string; dir: string } {
   const repo = repository(name);
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo", repo,
       "--outcome", "Search results are paginated.",
       "--criterion", "A search returns at most 25 hits per page. :: a 140-hit query returns 25",
       "--path", path,
       ...extra,
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });

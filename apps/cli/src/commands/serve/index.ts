@@ -30,7 +30,7 @@ import {
 } from "../../scheduling.js";
 import { startEndpoint, type RunningEndpoint } from "../../endpoint/index.js";
 import { CommandFailedError, gh, git } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand, type DraftProvider } from "../admit.js";
+import { admitDraft, defaultAdmission, type DraftProvider } from "../admit.js";
 import { UsageError } from "../../usage-error.js";
 import {
   parseArgv,
@@ -312,25 +312,26 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
   },
 
   async draft({ reference, provider, model, onLine }) {
-    const out: string[] = [];
     const lines = lineStreams(onLine);
-    const streams: Streams = { stdout: (chunk) => out.push(chunk), stderr: lines.stderr, isTTY: false };
-    // Built as values, as the endpoint builds them: the reference is an argument, never a line.
-    const args = {
-      ...parseAdmitArgs(["--repo", target.repo, ...(target.store ? ["--store", target.store] : []), "--json"]),
-      from: reference,
-      ...(provider === null ? {} : { provider }),
-      model,
-    };
-    let code: number;
+    // Built as values, as the endpoint builds them: the reference is an
+    // argument, never a line, and a draft has no approval to set (D-072).
+    const defaults = defaultAdmission({ repo: target.repo, store: target.store });
     try {
-      code = await runAdmitCommand({ args, streams, cwd: target.cwd });
+      const report = await admitDraft(
+        {
+          ...defaults,
+          from: reference,
+          ...(provider === null ? {} : { provider }),
+          model,
+        },
+        { cwd: target.cwd, now: new Date(), diagnostics: lines },
+      );
+      return { code: EXIT_CODES.approve, key: report.key };
     } catch (error) {
       if (!(error instanceof UsageError)) throw error;
       onLine(`draft refused: ${error.message}`);
       return { code: EXIT_CODES.usage_or_input_error, key: null };
     }
-    return { code, key: keyFromAdmitJson(out.join("")) };
   },
 
   sleep(ms, signal) {
@@ -377,18 +378,6 @@ const oneLine = (text: string): string =>
     .replace(/ {2,}/g, " ")
     .trim()
     .slice(0, 120);
-
-/** The key of the ticket `admit --json` wrote. Null where the output is not admit's. */
-export function keyFromAdmitJson(stdout: string): string | null {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(stdout);
-  } catch {
-    return null;
-  }
-  const parsed = z.object({ ticket: z.object({ key: TicketKeySchema }) }).safeParse(raw);
-  return parsed.success ? parsed.data.ticket.key : null;
-}
 
 /**
  * `.perbo/config.json`'s `tracker`: the repository whose open issues carrying

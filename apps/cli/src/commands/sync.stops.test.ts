@@ -20,12 +20,13 @@ import {
   pullRequestBody,
   type TicketDeliveryState,
 } from "@perbo/runner";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { recordDelivery, runSyncCommand } from "./sync.js";
 import { readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { makeAttempt, makeReview } from "../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * `perbo sync` reads the answers ticked against each stop off the pull
@@ -102,7 +103,7 @@ const observed = (
 
 function delivered(name: string): { repo: string; dir: string; ticket_id: string } {
   const repo = repository(name);
-  runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-02T01:00:00.000Z");
   let ticket = recordDelivery(

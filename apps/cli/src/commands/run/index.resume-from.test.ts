@@ -5,12 +5,13 @@ import { join } from "node:path";
 import { SecretIndex } from "@perbo/contracts";
 import { BundleStore } from "@perbo/runner";
 import { afterAll, describe, expect, it } from "vitest";
-import { parseAdmitArgs, runAdmitCommand } from "../admit.js";
+import { admitCommandLine } from "../admit.js";
 import { parseExecuteArgs, runExecuteCommand } from "./index.js";
 import { buildInspectReport, renderInspect } from "../inspect.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
 import { makeAttempt, makeTicket } from "../../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * `perbo run --ticket <id> --resume-from <bundle_id>` at the command line
@@ -123,14 +124,14 @@ function retainedDiff(dir: string): string {
 function admit(repo: string): { ticket_id: string; base_commit: string } {
   const admitted = streams();
   expect(
-    runAdmitCommand({
-      args: parseAdmitArgs([
+    runCommandLine(admitCommandLine, {
+      argv: [
         "--repo", repo,
         "--outcome", "Search results are paginated.",
         "--criterion", "A page holds 25 hits. :: a 140-hit query returns 25",
         "--path", "packages/search/**",
         "--approve",
-      ]),
+      ],
       streams: admitted.streams,
       cwd: repo,
     }),

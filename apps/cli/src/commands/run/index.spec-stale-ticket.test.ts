@@ -13,7 +13,7 @@ import {
 } from "@perbo/model";
 import { commitSpec } from "@perbo/runner";
 import { UsageError } from "../../usage-error.js";
-import { approveCommandLine, parseAdmitArgs, runAdmitCommand } from "../admit.js";
+import { admitCommandLine, approveCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
 import { TICKET_RUNS } from "./index.js";
 import { buildInspectReport, renderInspect, type InspectReport } from "../inspect.js";
@@ -154,12 +154,7 @@ const hashOf = (path: string): string =>
 /** A repository with `PRB-1` admitted from its spec and nothing more: a ticket at `plan_review`. */
 async function admitted(spec = SPEC): Promise<{ repo: string; specPath: string; dir: string }> {
   const { repo, specPath } = repository(spec);
-  const code = await runAdmitCommand({
-    args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath]),
-    streams: capture(),
-    cwd: repo,
-    model: scripted(DRAFT),
-  });
+  const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath], streams: capture(), cwd: repo, deps: { model: scripted(DRAFT) } });
   expect(code).toBe(0);
   const dir = storeDir(repo, null);
   expect(readTicket(dir, "PRB-1").state).toBe("plan_review");
@@ -177,8 +172,7 @@ async function approved(spec = SPEC): Promise<{ repo: string; specPath: string; 
 /** The same, for work admitted from the command line: a ticket at `ready` with no spec. */
 async function ticketless(): Promise<{ repo: string; dir: string }> {
   const { repo } = repository();
-  const code = await runAdmitCommand({
-    args: parseAdmitArgs([
+  const code = await runCommandLine(admitCommandLine, { argv: [
       "--repo",
       repo,
       "--outcome",
@@ -187,11 +181,7 @@ async function ticketless(): Promise<{ repo: string; dir: string }> {
       "A signup queues one email :: one message is on the queue",
       "--path",
       "packages/queue/**",
-    ]),
-    streams: capture(),
-    cwd: repo,
-    model: scripted(DRAFT),
-  });
+    ], streams: capture(), cwd: repo, deps: { model: scripted(DRAFT) } });
   expect(code).toBe(0);
   expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
   return { repo, dir: storeDir(repo, null) };
@@ -253,12 +243,7 @@ describe("a run starting a ticket that has not started", () => {
   it("starts where the spec was edited while the draft was being read, before approval", async () => {
     const { repo, specPath } = repository(SPEC);
     expect(
-      await runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath]),
-        streams: capture(),
-        cwd: repo,
-        model: scripted(DRAFT),
-      }),
+      await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath], streams: capture(), cwd: repo, deps: { model: scripted(DRAFT) } }),
     ).toBe(0);
     const dir = storeDir(repo, null);
     expect(readTicket(dir, "PRB-1").state).toBe("plan_review");

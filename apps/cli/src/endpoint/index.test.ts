@@ -4,11 +4,12 @@ import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
-import { parseAdmitArgs, runAdmitCommand } from "../commands/admit.js";
+import { admitCommandLine } from "../commands/admit.js";
 import type { Streams } from "../streams.js";
 import { ENDPOINT_FILE, readEndpoint, startEndpoint, type RunningEndpoint } from "./index.js";
 import { ENDPOINT_TOOLS, PERSON_ONLY_ACTS } from "./internal/tools.js";
 import { storeDir } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * The tool endpoint the queue hosts: paseo's mechanism, Perbo's authority.
@@ -51,8 +52,8 @@ function repository(): string {
 
 function admitted(repo: string, outcome: string, path: string): string {
   const streams = capture();
-  const code = runAdmitCommand({
-    args: parseAdmitArgs(["--repo", repo, "--outcome", outcome, "--criterion", `${outcome} :: a test asserts it`, "--path", path, "--json"]),
+  const code = runCommandLine(admitCommandLine, {
+    argv: ["--repo", repo, "--outcome", outcome, "--criterion", `${outcome} :: a test asserts it`, "--path", path, "--json"],
     streams,
     cwd: repo,
   });

@@ -1,8 +1,15 @@
 import { z } from "zod";
-import { EXIT_CODES } from "@perbo/contracts";
+import { EXIT_CODES, TicketKeySchema } from "@perbo/contracts";
 import { MODEL_PROVIDERS } from "@perbo/model";
 import { isAbsolute } from "node:path";
-import { defaultAdmission, listReport, runAdmitCommand, type AdmitArgs } from "../../commands/admit.js";
+import {
+  IssueReferenceSchema,
+  ModelIdSchema,
+  admitDraftReport,
+  defaultAdmission,
+  listReport,
+  type DraftAdmission,
+} from "../../commands/admit.js";
 import { collectOutput } from "../../diagnostics.js";
 import type { CommandContext, CommandReport } from "../../command.js";
 import { edit } from "../../commands/edit/index.js";
@@ -212,7 +219,7 @@ async function narrated(
   };
 }
 
-const KeySchema = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/).describe("A ticket key, e.g. PRB-118.");
+const KeySchema = TicketKeySchema.describe("A ticket key, e.g. PRB-118.");
 
 /**
  * Every string a session supplies is a value and only ever a value: a command
@@ -225,11 +232,6 @@ const KeySchema = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/).descr
  * `sync_ticket` is the one tool that still hands a command a line, built from
  * a key this schema has already read and the store `serve` was pointed at.
  */
-const IssueReferenceSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*#[1-9][0-9]*$/)
-  .describe("owner/repo#N.");
-const ModelIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).describe("A model id, e.g. claude-opus-5.");
 const AbsoluteFileSchema = z
   .string()
   .refine((path) => isAbsolute(path) && !path.startsWith("-"), "an absolute path")
@@ -351,8 +353,10 @@ const admitTicket = tool({
       });
     }
     // Built as values, never parsed from a line: see the note above the schemas.
-    const defaults = defaultAdmission({ target: targetOf(context), json: true });
-    const args: AdmitArgs = {
+    // `admitDraft` has no `approve` among its fields at all, so there is no
+    // approving to reach from here whatever this object carries (D-072).
+    const defaults = defaultAdmission(targetOf(context));
+    const admission: DraftAdmission = {
       ...defaults,
       title: input.outcome ?? null,
       criteria: [...(input.criteria ?? [])],
@@ -369,11 +373,8 @@ const admitTicket = tool({
       priority: input.priority ?? defaults.priority,
       labels: [...(input.labels ?? [])],
       dependsOn: [...(input.depends_on ?? [])],
-      approve: false,
-      json: true,
     };
-    if (args.approve) throw new Error("the endpoint cannot approve");
-    return captured(true, (streams) => runAdmitCommand({ args, streams, cwd: context.cwd }));
+    return reported(admitDraftReport, admission, context);
   },
 });
 

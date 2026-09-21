@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import { TicketRunConfigSchema } from "@perbo/runner";
 import { UsageError } from "../../../usage-error.js";
-import { listCommandLine, parseAdmitArgs, runAdmitCommand } from "../../admit.js";
+import { admitCommandLine, listCommandLine } from "../../admit.js";
 import type { Streams } from "../../../streams.js";
 import { TICKET_RUNS, parseExecuteArgs } from "../index.js";
 import { processDeps } from "../../serve/index.js";
@@ -45,15 +45,15 @@ function capture(): Streams & { out: string[]; err: string[] } {
 
 function admitted(repo: string, outcome: string, path: string): string {
   const streams = capture();
-  const code = runAdmitCommand({
-    args: parseAdmitArgs([
+  const code = runCommandLine(admitCommandLine, {
+    argv: [
       "--repo", repo,
       "--outcome", outcome,
       "--criterion", `${outcome} :: a test asserts it`,
       "--path", path,
       "--approve",
       "--json",
-    ]),
+    ],
     streams,
     cwd: repo,
   });
