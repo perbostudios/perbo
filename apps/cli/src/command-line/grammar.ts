@@ -33,12 +33,12 @@ export interface ValueSpec<Repeat extends "last" | "append" = "last" | "append">
    */
   readonly repeat: Repeat;
   /**
-   * Refuse a value that is missing, or that is a separate token starting with
-   * `--`, saying this. For the few flags where the next token is far more
-   * likely to be another flag whose own value was forgotten than a value of
-   * this one, and where taking it would be reported later as something else
-   * entirely (SCP-189). One message covers both, because both are the same
-   * thing to the person reading it: what this flag needed is not there.
+   * Refuse a value that is missing or that starts with `--`, saying this. For
+   * the few flags where such a token is far more likely to be another flag
+   * whose own value was forgotten than a value of this one, and where taking
+   * it would be reported later as something else entirely (SCP-189). One
+   * message covers every form, because they are the same thing to the person
+   * reading it: what this flag needed is not there.
    */
   readonly refuseFlagShaped: string | null;
   /**
@@ -225,18 +225,20 @@ export function parseArgv<F extends FlagTable>(
       continue;
     }
 
-    let value: string;
-    if (inline !== null) {
-      value = inline;
-    } else {
-      const next = argv[index + 1];
-      if (spec.refuseFlagShaped !== null && (next === undefined || next.startsWith("--"))) {
-        throw new UsageError(spec.refuseFlagShaped);
-      }
-      if (next === undefined) throw new UsageError(`${name} requires a value`);
-      value = next;
-      index += 1;
+    // The value is the inline one, or else the next token verbatim, whatever
+    // it looks like — a dash, a flag, `--`. A flag that asked to refuse a
+    // flag-shaped value refuses it written either way: `--endorse=--note` and
+    // `--endorse --note` are one typo in two spellings.
+    const candidate = inline ?? argv[index + 1];
+    if (
+      spec.refuseFlagShaped !== null &&
+      (candidate === undefined || candidate.startsWith("--"))
+    ) {
+      throw new UsageError(spec.refuseFlagShaped);
     }
+    if (candidate === undefined) throw new UsageError(`${name} requires a value`);
+    const value = candidate;
+    if (inline === null) index += 1;
 
     given.push(name);
     const field = spec.aliasOf ?? name;

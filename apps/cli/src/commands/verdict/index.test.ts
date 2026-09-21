@@ -433,8 +433,12 @@ describe("perbo verdict records the decision locally", () => {
     expect(() => parseVerdictArgs(["AYO-7", "--endorse", "--note", "x"])).toThrow(/missing key after --endorse/);
     expect(() => parseVerdictArgs(["AYO-7", "--override", "--author", "a"])).toThrow(/missing key after --override/);
     expect(() => parseVerdictArgs(["AYO-7", "--accept", "--reject", STOP_ONE!])).toThrow(/missing key after --accept/);
-    // The flag itself with nothing after it at all is the same refusal.
+    // The flag itself with nothing after it at all is the same refusal, and so
+    // is the inline form: `--endorse=--note` is the same typo written closer up.
     expect(() => parseVerdictArgs(["AYO-7", "--endorse"])).toThrow(/missing key after --endorse/);
+    expect(() => parseVerdictArgs(["AYO-7", "--endorse=--note", "x"])).toThrow(
+      /missing key after --endorse/,
+    );
     // A key that merely starts with a hex digit and is not a flag still works.
     expect(parseVerdictArgs(["AYO-7", "--endorse", STOP_ONE!])).toMatchObject({
       list: false,

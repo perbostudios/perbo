@@ -139,11 +139,18 @@ describe("rule 7: a value flag takes the next token verbatim", () => {
     expect(() => parseArgv(GRAMMAR, ["--repo"])).toThrow(/--repo requires a value/);
   });
 
-  it("refuses a flag-shaped separate value where the flag asked for that", () => {
+  it("refuses a flag-shaped value where the flag asked for that, written either way", () => {
     expect(() => parseArgv(GRAMMAR, ["--endorse", "--json"])).toThrow(
       /missing key after --endorse/,
     );
-    expect(parseArgv(GRAMMAR, ["--endorse=--json"]).flags["--endorse"]).toBe("--json");
+    // The inline form is the same line: what `--endorse` needed is a key, and
+    // `--json` is not one however it was attached.
+    expect(() => parseArgv(GRAMMAR, ["--endorse=--json"])).toThrow(/missing key after --endorse/);
+    expect(() => parseArgv(GRAMMAR, ["--endorse=--"])).toThrow(/missing key after --endorse/);
+  });
+
+  it("leaves a value that only looks like a flag to the flags that did not ask", () => {
+    expect(parseArgv(GRAMMAR, ["--repo=--json"]).flags["--repo"]).toBe("--json");
   });
 
   it("says the same thing where that flag ends the line", () => {
