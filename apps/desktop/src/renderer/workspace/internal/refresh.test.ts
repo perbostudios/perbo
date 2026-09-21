@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type PropsWithChildren } from "react";
-import { sizeEstimate } from "@perbo/contracts/size";
+import { sizeEstimate } from "@perbo/contracts/browser";
 import { WorkspaceRefresh } from "./refresh.js";
 import { WorkspaceReads } from "../../../host/workspace-reads.js";
 import { sampleBridge } from "../../../sample-host/bridge.js";

@@ -1,20 +1,19 @@
 import {
-  APPROACH_SCHEMA_VERSION,
-  ApproachRecordSchema,
-  approachProblems,
-  type ApproachRecord,
-  type GraphEdge,
-} from "@perbo/contracts/approach";
-import { GraphEditSchema, type GraphEdit } from "@perbo/contracts/graph-edit";
-import {
   AcceptanceCriterionSchema,
-  PlanContractSchema,
+  APPROACH_SCHEMA_VERSION,
+  approachProblems,
+  ApproachRecordSchema,
+  GraphEditSchema,
   hasAcceptanceCriteria,
+  PlanContractSchema,
   planNodes,
   type AcceptanceCriterion,
+  type ApproachRecord,
+  type GraphEdge,
+  type GraphEdit,
   type PlanContract,
   type PlanNode,
-} from "@perbo/contracts/plan";
+} from "@perbo/contracts/browser";
 import { PlanningError } from "./errors.js";
 
 /**

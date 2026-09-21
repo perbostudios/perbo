@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
-import { interviewSaidMessage } from "@perbo/contracts/interview-protocol";
+import { interviewSaidMessage } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
 import {
   INTERVIEW_SERVER_NAME,

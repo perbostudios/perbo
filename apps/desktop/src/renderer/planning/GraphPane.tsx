@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, Notice, cx } from "../ui/index.js";
-import { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS } from "@perbo/contracts/size";
-import type { GraphEdit } from "@perbo/contracts/graph-edit";
+import { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS, type GraphEdit } from "@perbo/contracts/browser";
 import { bridge, errorMessage, useAction, useGraph } from "../workspace/index.js";
 import { isLive } from "../../shared/jobs.js";
 import { useShortcut } from "../shell/shortcuts.js";

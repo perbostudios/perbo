@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, Dialog, LineIcon, cx } from "../ui/index.js";
-import { VERIFICATION_KINDS } from "@perbo/contracts/plan";
-import type { GraphEdit } from "@perbo/contracts/graph-edit";
+import { VERIFICATION_KINDS, type GraphEdit } from "@perbo/contracts/browser";
 import type {
   GraphCriterionState,
   GraphCriterionView,

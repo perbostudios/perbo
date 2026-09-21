@@ -7,8 +7,8 @@ import {
   renderSpec,
   specSlug,
 } from "@perbo/planning/browser";
-import { isNeverReadPath } from "@perbo/contracts/paths";
-import type { GraphEdit } from "@perbo/contracts/graph-edit";
+import { isNeverReadPath } from "@perbo/contracts/browser";
+import type { GraphEdit } from "@perbo/contracts/browser";
 import { openDrafts } from "../shared/contract-editing.js";
 import type { EditingOwner } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows } from "../shared/archive.js";

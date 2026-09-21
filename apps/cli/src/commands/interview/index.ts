@@ -19,7 +19,7 @@ import {
   encodeInterviewEvent,
   type InterviewEvent,
   type InterviewQuestionGroup,
-} from "@perbo/contracts/interview-protocol";
+} from "@perbo/contracts";
 import {
   ADMISSION_RULES,
   DEFAULT_COMMAND_DENY_LIST,

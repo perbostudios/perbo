@@ -1,4 +1,4 @@
-import { standingGlob, type StandingProhibitedEntry } from "@perbo/contracts/standing";
+import { standingGlob, type StandingProhibitedEntry } from "@perbo/contracts/browser";
 import {
   DraftSchema,
   EditingFormSchema,

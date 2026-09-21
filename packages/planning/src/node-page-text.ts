@@ -1,4 +1,4 @@
-import { hasAcceptanceCriteria, type PlanContract, type PlanNode } from "@perbo/contracts/plan";
+import { hasAcceptanceCriteria, type PlanContract, type PlanNode } from "@perbo/contracts/browser";
 import type { Spec } from "./spec-text.js";
 
 /**

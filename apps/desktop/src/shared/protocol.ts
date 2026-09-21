@@ -1,13 +1,17 @@
 import { z } from "zod";
-import { ExecutorSkillsSchema } from "@perbo/contracts/executor-skills";
-import { GraphEditSchema } from "@perbo/contracts/graph-edit";
-import { StandingProhibitedEntrySchema } from "@perbo/contracts/standing";
-import { MaterializationEntrySchema } from "@perbo/contracts/materialisation-entry";
 import {
+  ExecutorSkillsSchema,
+  GraphEditSchema,
+  MaterializationEntrySchema,
   MAX_QUESTION_GROUPS,
   MAX_QUESTION_OPTIONS,
   MAX_QUESTION_PARTS,
-} from "@perbo/contracts/interview-protocol";
+  StandingProhibitedEntrySchema,
+  type GraphEdge,
+  type SizeEstimate,
+  type StandingProhibitedEntry,
+  type VerificationKind,
+} from "@perbo/contracts/browser";
 import type {
   CoverageStatus,
   ExportKind,
@@ -17,10 +21,6 @@ import type {
   Ticket,
   VerificationStrength,
 } from "@perbo/contracts";
-import type { GraphEdge } from "@perbo/contracts/approach";
-import type { VerificationKind } from "@perbo/contracts/plan";
-import type { SizeEstimate } from "@perbo/contracts/size";
-import type { StandingProhibitedEntry } from "@perbo/contracts/standing";
 import type { ImpactReport, SpecField } from "@perbo/planning/browser";
 import { BindingSchema, ShortcutActionSchema } from "./shortcuts.js";
 

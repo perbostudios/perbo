@@ -26,7 +26,7 @@ import type {
   SpecView,
 } from "../shared/protocol.js";
 import { CriterionEvidenceBindingSchema } from "@perbo/contracts";
-import type { GraphEdit } from "@perbo/contracts/graph-edit";
+import type { GraphEdit } from "@perbo/contracts";
 import { disposeFixtures, fixture, scratchDirectory, trackService } from "./test-support/host-fixture.js";
 
 afterEach(disposeFixtures);

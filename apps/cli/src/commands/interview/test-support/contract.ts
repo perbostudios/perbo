@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { InterviewEventSchema, type InterviewEvent } from "@perbo/contracts/interview-protocol";
+import { InterviewEventSchema, type InterviewEvent } from "@perbo/contracts";
 import {
   SUBMIT_REVIEW_TOOL,
   type Model,

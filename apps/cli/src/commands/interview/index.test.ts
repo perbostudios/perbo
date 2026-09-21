@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { InterviewEventSchema, InterviewTurnSchema } from "@perbo/contracts/interview-protocol";
+import { InterviewEventSchema, InterviewTurnSchema } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
 import { claudeInterviewTransport } from "./claude.js";
 

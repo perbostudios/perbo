@@ -1,4 +1,4 @@
-import { matchesAny } from "@perbo/contracts/paths";
+import { matchesAny } from "@perbo/contracts/browser";
 import type { VerificationStrength } from "@perbo/contracts";
 import type {
   GraphCriterionState,
