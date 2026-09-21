@@ -89,9 +89,7 @@ import { parseDeclines } from "./declines.js";
 import { readPrinciples, readPrinciplesFile } from "./principles.js";
 import { restoreAny } from "./quarantine.js";
 import {
-  describeRange,
   headCommit,
-  sealChangeSet,
   untrackedAfterChecks,
 } from "./seal.js";
 import { resetInText } from "./transport.js";
@@ -100,7 +98,8 @@ import { withCeilingGuidance } from "./loop/attempt.js";
 import { briefRound } from "./loop/brief.js";
 import { confirmContinuation, remediationToContinue } from "./loop/continuation.js";
 import { execute } from "./loop/execute.js";
-import { levelBeforeExecutor, mergeFailedDetail, takeMergeUp } from "./loop/level.js";
+import { sealRound } from "./loop/seal.js";
+import { levelBeforeExecutor, mergeFailedDetail } from "./loop/level.js";
 import {
   contractWithCriteria,
   countDirectlyVerified,
@@ -942,81 +941,21 @@ async function runLockedTicket(
       }
       const { result: agentResult, ceilings, environment } = executed.executed;
 
-      const judging = {
-        pinned_checks: config.checks.map((check) => check.definition_path ?? "").filter(Boolean),
-        protected_tests: config.protected_tests,
-        protected_paths: config.protected_paths,
-      };
-      const rawSeal = await sealChangeSet({
-        worktree: state.workspace.path,
-        base_commit: state.baseCommit,
-        ticket_key: config.ticket_key,
-        attempt_id,
-        outcome: contract.outcome,
+      const round = await sealRound({
+        config,
+        contract,
+        state,
+        mergedBase,
+        brief: briefed.brief,
+        attemptId: attempt_id,
+        completed: agentResult.termination.reason === "completed",
         secrets,
-        judging,
-        exclude_paths: state.checkArtifacts,
-        paths_allowed: pathsAllowed,
-        ...sealExclusions,
+        sealExclusions,
+        progress,
       });
-
-      // The attempt left the branch head where it found it: whatever the change
-      // set contains, this attempt did not write any of it. Read from the seal
-      // rather than from the merged-up change set below, because a merge commit
-      // the loop makes is not the executor having written something.
-      const carriedForward =
-        rawSeal.changeset !== null && rawSeal.head_commit === (inherited[inherited.length - 1] ?? null);
-
-      /**
-       * SCP-192: the branch is brought level with the base here, after the seal
-       * and before anything judges what it holds — the checks, the review, the
-       * verification and the pull request all read one change set, and it is
-       * the branch against the base a person would merge it into.
-       *
-       * It runs only for a round that produced something: a ceiling that cut
-       * the attempt, or a branch that adds nothing to its base, is answered
-       * without a merge commit being made for it.
-       */
-      let sealed = rawSeal;
-      let conflictNow: { tip: string; paths: string[]; detail: string } | null = null;
-      if (agentResult.termination.reason === "completed" && rawSeal.changeset !== null) {
-        const before = state.baseCommit;
-        const up = await mergeUp({
-          worktree: state.workspace.path,
-          repository_root: config.repository_root,
-          base_ref: config.base_ref,
-          base_commit: state.baseCommit,
-          ticket_key: config.ticket_key,
-          attempt_id,
-        });
-        if (up.status === "conflict") {
-          conflictNow = { tip: up.tip, paths: up.paths, detail: up.detail };
-        } else {
-          const taken = takeMergeUp({ state, mergedBase, up, baseRef: config.base_ref, progress });
-          state = taken.state;
-          mergedBase = taken.mergedBase;
-          if (state.baseCommit !== before) {
-            // Both ends of the range moved, so the change set is re-read rather
-            // than re-sealed: re-running the seal here would stage and commit
-            // whatever the round has since left in the worktree.
-            //
-            // The scope assertion is re-read with it (SCP-195). It has to be
-            // about the change set the checks and the review are handed, and
-            // after a merge-up that is this one and not the seal's.
-            sealed = {
-              ...rawSeal,
-              ...(await describeRange({
-                worktree: state.workspace.path,
-                base_commit: state.baseCommit,
-                judging,
-                paths_allowed: pathsAllowed,
-                fallback_paths: rawSeal.changed_paths,
-                ...sealExclusions,
-              })),
-            };
-          }
-        }
-      }
+      state = round.state;
+      mergedBase = round.mergedBase;
+      const { sealed, carriedForward, conflictNow } = round;
 
       // D-107: the pinned set runs over the whole change and then once per
       // node of the execution graph, narrowed to that node's paths. A flat

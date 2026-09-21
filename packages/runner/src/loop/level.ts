@@ -1,4 +1,7 @@
 import { mergeUp, type MergeUpResult } from "../merge-up.js";
+import { describeRange, type SealResult } from "../seal.js";
+import type { JudgingArtifacts } from "../prohibited.js";
+import type { TicketRunConfig } from "./config.js";
 import { judgeRelevel, type RelevelContext } from "./relevel.js";
 import type { RoundState, Step } from "./state.js";
 
@@ -176,4 +179,89 @@ export async function levelBeforeExecutor(
         : {}),
     },
   };
+}
+
+/** What the branch holds once the base's tip is merged into it after the seal. */
+export interface LevelledSeal {
+  state: RoundState;
+  mergedBase: string | null;
+  /** The change set every later step reads: re-read where the base moved. */
+  sealed: SealResult;
+  /** The conflict the merge stopped on, which the next round resolves. */
+  conflictNow: { tip: string; paths: string[]; detail: string } | null;
+}
+
+/**
+ * SCP-192: the branch is brought level with the base here, after the seal
+ * and before anything judges what it holds — the checks, the review, the
+ * verification and the pull request all read one change set, and it is
+ * the branch against the base a person would merge it into.
+ *
+ * It runs only for a round that produced something: a ceiling that cut
+ * the attempt, or a branch that adds nothing to its base, is answered
+ * without a merge commit being made for it.
+ */
+export async function levelAfterSeal(args: {
+  config: TicketRunConfig;
+  state: RoundState;
+  mergedBase: string | null;
+  attemptId: string;
+  raw: SealResult;
+  /** Whether the executor finished: a cut attempt is answered without a merge. */
+  completed: boolean;
+  judging: JudgingArtifacts;
+  pathsAllowed: string[];
+  sealExclusions: { spec_paths?: string[] };
+  progress: (message: string) => void;
+}): Promise<LevelledSeal> {
+  const { config, raw } = args;
+  let state = args.state;
+  let mergedBase = args.mergedBase;
+  let sealed = raw;
+  let conflictNow: { tip: string; paths: string[]; detail: string } | null = null;
+  if (args.completed && raw.changeset !== null) {
+    const before = state.baseCommit;
+    const up = await mergeUp({
+      worktree: state.workspace.path,
+      repository_root: config.repository_root,
+      base_ref: config.base_ref,
+      base_commit: state.baseCommit,
+      ticket_key: config.ticket_key,
+      attempt_id: args.attemptId,
+    });
+    if (up.status === "conflict") {
+      conflictNow = { tip: up.tip, paths: up.paths, detail: up.detail };
+    } else {
+      const taken = takeMergeUp({
+        state,
+        mergedBase,
+        up,
+        baseRef: config.base_ref,
+        progress: args.progress,
+      });
+      state = taken.state;
+      mergedBase = taken.mergedBase;
+      if (state.baseCommit !== before) {
+        // Both ends of the range moved, so the change set is re-read rather
+        // than re-sealed: re-running the seal here would stage and commit
+        // whatever the round has since left in the worktree.
+        //
+        // The scope assertion is re-read with it (SCP-195). It has to be
+        // about the change set the checks and the review are handed, and
+        // after a merge-up that is this one and not the seal's.
+        sealed = {
+          ...raw,
+          ...(await describeRange({
+            worktree: state.workspace.path,
+            base_commit: state.baseCommit,
+            judging: args.judging,
+            paths_allowed: args.pathsAllowed,
+            fallback_paths: raw.changed_paths,
+            ...args.sealExclusions,
+          })),
+        };
+      }
+    }
+  }
+  return { state, mergedBase, sealed, conflictNow };
 }
