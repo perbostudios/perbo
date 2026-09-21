@@ -66,12 +66,8 @@ import {
   type FlagTable,
   type Grammar,
 } from "../command-line/grammar.js";
-import type {
-  CommandContext,
-  NarratedCommand,
-  Rendered,
-  ReportCommand,
-} from "../command-line/terminal.js";
+import type { CommandContext, CommandReport, Rendered } from "../command.js";
+import type { NarratedCommand, ReportCommand } from "../command-line/terminal.js";
 import type { Streams } from "../streams.js";
 import { prohibitedSpecPaths, regenerateNodePages, specCommitFiles } from "../spec/pages.js";
 import { specBaseline } from "../spec/staleness.js";
@@ -100,7 +96,7 @@ import {
   type DraftSnapshotFile,
   type JudgingRule,
 } from "../store/tickets.js";
-import { specFolder, storeFor, StoreTargetSchema } from "../store/index.js";
+import { specFolder, storeFor, StoreTargetSchema, type StoreTarget } from "../store/index.js";
 import { describeScheduling } from "./serve/waits.js";
 
 /**
@@ -2088,22 +2084,13 @@ const LIST_GRAMMAR: Grammar<typeof LIST_FLAGS> = {
   afterDoubleDash: "positionals",
 };
 
-export const listCommandLine: ReportCommand<ListInput, { json: boolean }, ListReport> = {
-  kind: "report",
-  name: "list",
-  grammars: [LIST_GRAMMAR],
-  jsonWhenPiped: false,
-  grammarFor: () => LIST_GRAMMAR,
-  read(argv) {
-    const line = parseArgv(LIST_GRAMMAR, argv);
-    return {
-      input: readInput(ListInputSchema, {
-        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
-        all: line.flags["--all"] === true,
-      }),
-      output: { json: line.flags["--json"] === true },
-    };
-  },
+/**
+ * Every admitted ticket, as the listing's record and as the table a person reads.
+ *
+ * Reached by the terminal through its line below, and by a caller in this
+ * process — the queue's endpoint — over the same typed input.
+ */
+export const listReport: CommandReport<ListInput, { json: boolean }, ListReport> = {
   run: listTickets,
   toJson: (report) => listJson(report),
   render(report, _output, target): Rendered {
@@ -2133,6 +2120,25 @@ export const listCommandLine: ReportCommand<ListInput, { json: boolean }, ListRe
       exitCode: EXIT_CODES.approve,
     };
   },
+};
+
+export const listCommandLine: ReportCommand<ListInput, { json: boolean }, ListReport> = {
+  kind: "report",
+  name: "list",
+  grammars: [LIST_GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor: () => LIST_GRAMMAR,
+  read(argv) {
+    const line = parseArgv(LIST_GRAMMAR, argv);
+    return {
+      input: readInput(ListInputSchema, {
+        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+        all: line.flags["--all"] === true,
+      }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  ...listReport,
 };
 
 const APPROVE_FLAGS = {

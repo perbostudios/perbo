@@ -2,7 +2,12 @@ import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "../usage-error.js";
 import { describeFailure } from "../failure.js";
 import { StoreError } from "../store/index.js";
-import type { Diagnostics } from "../diagnostics.js";
+import type {
+  CommandContext,
+  CommandOutput,
+  CommandReport,
+  RenderTarget,
+} from "../command.js";
 import type { Streams } from "../streams.js";
 import { asksForHelp, type Grammar } from "./grammar.js";
 import type { CommandName } from "./names.js";
@@ -109,50 +114,20 @@ export function startEntryPoint(argv: string[], entry: EntryPoint): void {
  * One command, and the terminal adapter that runs it.
  * ------------------------------------------------------------------ */
 
-/** What every command is given, whichever kind it is. */
-export interface CommandContext {
-  readonly cwd: string;
-  readonly now: Date;
-  /** Progress and warnings, as they happen. */
-  readonly diagnostics: Diagnostics;
-}
-
-/** What the answer is being written to, read once at the edge. */
-export interface RenderTarget {
-  readonly isTTY: boolean;
-  /** `NO_COLOR` is unset. Whether a rendering uses it is still the rendering's. */
-  readonly color: boolean;
-  /** This answer is the JSON record rather than a reading for a person. */
-  readonly json: boolean;
-}
-
-/** What one command wrote, and what it exits as. */
-export interface Rendered {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number;
-}
-
-/** The part of a command's own options the adapter reads: whether JSON was asked for. */
-export interface CommandOutput {
-  readonly json: boolean;
-}
-
 /**
- * A command whose answer is a record: read the line, run it, render once.
+ * A command whose answer is a record, with the line it is asked for by: read,
+ * run, render once.
  *
- * `run` takes the typed input, so an in-process caller reaches the same
- * function with an object and never builds a line. `toJson` is the documented
- * record; `render` is what a person reads, and it owns the exit code, because
- * what a reading means — a gate closed, a verification that failed — is the
- * command's rather than the adapter's.
+ * The run and the rendering are {@link CommandReport}, which a caller in this
+ * process reaches without a line; what is here is the reading of argv, which
+ * is the terminal's alone.
  */
 export interface ReportCommand<
   Input,
   Output extends CommandOutput,
   Report,
   Deps extends object = object,
-> {
+> extends CommandReport<Input, Output, Report, Deps> {
   readonly kind: "report";
   readonly name: CommandName;
   /** Every grammar it reads a line by, for the usage-consistency test. */
@@ -163,10 +138,6 @@ export interface ReportCommand<
   grammarFor(argv: readonly string[]): Grammar;
   /** Throws {@link UsageError} for a line this command cannot act on. */
   read(argv: readonly string[]): { input: Input; output: Output };
-  run(input: Input, context: CommandContext & Partial<Deps>): Report | Promise<Report>;
-  /** The documented JSON record. Absent where the command has no JSON form. */
-  toJson?(report: Report): unknown;
-  render(report: Report, output: Output, target: RenderTarget): Rendered;
 }
 
 /**

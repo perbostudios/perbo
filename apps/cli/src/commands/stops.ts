@@ -27,7 +27,8 @@ import {
   type FlagTable,
   type Grammar,
 } from "../command-line/grammar.js";
-import type { CommandContext, Rendered, ReportCommand } from "../command-line/terminal.js";
+import type { CommandContext, CommandReport, Rendered } from "../command.js";
+import type { ReportCommand } from "../command-line/terminal.js";
 import type { Diagnostics } from "../diagnostics.js";
 import {
   attemptsRecordSubject,
@@ -921,32 +922,13 @@ const GRAMMAR: Grammar<typeof FLAGS> = {
   afterDoubleDash: "positionals",
 };
 
-export const stopsCommandLine: ReportCommand<StopsInput, { json: boolean }, StopsReport> = {
-  kind: "report",
-  name: "stops",
-  grammars: [GRAMMAR],
-  jsonWhenPiped: false,
-  grammarFor: () => GRAMMAR,
-  read(argv) {
-    const line = parseArgv(GRAMMAR, argv);
-    const arm = line.flags["--arm"];
-    if (arm !== undefined && !(DELIVERY_ARMS as readonly string[]).includes(arm)) {
-      throw new UsageError(`--arm requires one of ${DELIVERY_ARMS.join(", ")}, got '${arm}'`);
-    }
-    const input = readInput(StopsInputSchema, {
-      target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
-      since: line.flags["--since"] ?? null,
-      byWeek: line.flags["--by-week"] === true,
-      arm: arm ?? null,
-    });
-    return {
-      // Spelled in full here as well as in the command: the day a person types
-      // is a fact about a line, and an instant is what the window is read
-      // against.
-      input: { ...input, since: input.since === null ? null : toInstant(input.since) },
-      output: { json: line.flags["--json"] === true },
-    };
-  },
+/**
+ * What reached a person and why, as the document and as the tables.
+ *
+ * Reached by the terminal through its line below, and by a caller in this
+ * process — the queue's endpoint — over the same typed input.
+ */
+export const stopsReport: CommandReport<StopsInput, { json: boolean }, StopsReport> = {
   run: stops,
   toJson: (report) => report.document,
   render(report, _output, target): Rendered {
@@ -991,4 +973,33 @@ export const stopsCommandLine: ReportCommand<StopsInput, { json: boolean }, Stop
       exitCode: EXIT_CODES.approve,
     };
   },
+};
+
+export const stopsCommandLine: ReportCommand<StopsInput, { json: boolean }, StopsReport> = {
+  kind: "report",
+  name: "stops",
+  grammars: [GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor: () => GRAMMAR,
+  read(argv) {
+    const line = parseArgv(GRAMMAR, argv);
+    const arm = line.flags["--arm"];
+    if (arm !== undefined && !(DELIVERY_ARMS as readonly string[]).includes(arm)) {
+      throw new UsageError(`--arm requires one of ${DELIVERY_ARMS.join(", ")}, got '${arm}'`);
+    }
+    const input = readInput(StopsInputSchema, {
+      target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+      since: line.flags["--since"] ?? null,
+      byWeek: line.flags["--by-week"] === true,
+      arm: arm ?? null,
+    });
+    return {
+      // Spelled in full here as well as in the command: the day a person types
+      // is a fact about a line, and an instant is what the window is read
+      // against.
+      input: { ...input, since: input.since === null ? null : toInstant(input.since) },
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  ...stopsReport,
 };

@@ -7,7 +7,8 @@ import {
   type FlagTable,
   type Grammar,
 } from "../command-line/grammar.js";
-import type { CommandContext, ReportCommand, Rendered } from "../command-line/terminal.js";
+import type { CommandContext, Rendered } from "../command.js";
+import type { ReportCommand } from "../command-line/terminal.js";
 import { readInput } from "../usage-error.js";
 import { readEndpoint, type EndpointRecord } from "../endpoint/index.js";
 import { storeFor, StoreTargetSchema } from "../store/index.js";

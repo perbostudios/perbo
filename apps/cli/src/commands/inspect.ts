@@ -69,7 +69,8 @@ import {
   type FlagTable,
   type Grammar,
 } from "../command-line/grammar.js";
-import type { CommandContext, Rendered, ReportCommand } from "../command-line/terminal.js";
+import type { CommandContext, CommandReport, Rendered } from "../command.js";
+import type { ReportCommand } from "../command-line/terminal.js";
 import { readInput } from "../usage-error.js";
 import { storeFor, StoreTargetSchema } from "../store/index.js";
 import {
@@ -2416,29 +2417,13 @@ const GRAMMAR: Grammar<typeof FLAGS> = {
   afterDoubleDash: "positionals",
 };
 
-export const inspectCommandLine: ReportCommand<
-  InspectInput,
-  { json: boolean },
-  InspectOutcome,
-  InspectDeps
-> = {
-  kind: "report",
-  name: "inspect",
-  grammars: [GRAMMAR],
-  jsonWhenPiped: true,
-  grammarFor: () => GRAMMAR,
-  read(argv) {
-    const line = parseArgv(GRAMMAR, argv);
-    return {
-      input: readInput(InspectInputSchema, {
-        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
-        key: line.positionals[0],
-        attempt: line.flags["--attempt"] ?? null,
-        verify: line.flags["--verify"] ?? null,
-      }),
-      output: { json: line.flags["--json"] === true },
-    };
-  },
+/**
+ * One ticket in full, as its record and as the reading a person gets.
+ *
+ * Reached by the terminal through its line below, and by a caller in this
+ * process — the queue's endpoint — over the same typed input.
+ */
+export const inspectReport: CommandReport<InspectInput, { json: boolean }, InspectOutcome, InspectDeps> = {
   run: inspect,
   toJson: (outcome) =>
     outcome.kind === "verification" ? outcome.verification : outcome.report,
@@ -2472,6 +2457,32 @@ export const inspectCommandLine: ReportCommand<
       exitCode: 0,
     };
   },
+};
+
+export const inspectCommandLine: ReportCommand<
+  InspectInput,
+  { json: boolean },
+  InspectOutcome,
+  InspectDeps
+> = {
+  kind: "report",
+  name: "inspect",
+  grammars: [GRAMMAR],
+  jsonWhenPiped: true,
+  grammarFor: () => GRAMMAR,
+  read(argv) {
+    const line = parseArgv(GRAMMAR, argv);
+    return {
+      input: readInput(InspectInputSchema, {
+        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+        key: line.positionals[0],
+        attempt: line.flags["--attempt"] ?? null,
+        verify: line.flags["--verify"] ?? null,
+      }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  ...inspectReport,
 };
 
 /** Exposed for the tests, which build a store by hand and read it back. */

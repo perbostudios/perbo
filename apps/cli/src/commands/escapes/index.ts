@@ -28,7 +28,8 @@ import {
   type FlagTable,
   type Grammar,
 } from "../../command-line/grammar.js";
-import type { CommandContext, Rendered, ReportCommand } from "../../command-line/terminal.js";
+import type { CommandContext, CommandReport, Rendered } from "../../command.js";
+import type { ReportCommand } from "../../command-line/terminal.js";
 import type { Diagnostics } from "../../diagnostics.js";
 import type { Streams } from "../../streams.js";
 import type { LocalVerdict } from "../verdict/record.js";
@@ -699,21 +700,13 @@ const GRAMMAR: Grammar<typeof FLAGS> = {
   afterDoubleDash: "positionals",
 };
 
-export const escapesCommandLine: ReportCommand<EscapesInput, { json: boolean }, EscapesReport> = {
-  kind: "report",
-  name: "escapes",
-  grammars: [GRAMMAR],
-  jsonWhenPiped: false,
-  grammarFor: () => GRAMMAR,
-  read(argv) {
-    const line = parseArgv(GRAMMAR, argv);
-    return {
-      input: readInput(EscapesInputSchema, {
-        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
-      }),
-      output: { json: line.flags["--json"] === true },
-    };
-  },
+/**
+ * What escaped review in what merged, as the document and as the tables.
+ *
+ * Reached by the terminal through its line below, and by a caller in this
+ * process — the queue's endpoint — over the same typed input.
+ */
+export const escapesReport: CommandReport<EscapesInput, { json: boolean }, EscapesReport> = {
   run: escapes,
   toJson: (report) => report.document,
   render(report, _output, target): Rendered {
@@ -762,6 +755,24 @@ export const escapesCommandLine: ReportCommand<EscapesInput, { json: boolean }, 
     }
     return { stdout: out.join(""), stderr: said.join(""), exitCode: EXIT_CODES.approve };
   },
+};
+
+export const escapesCommandLine: ReportCommand<EscapesInput, { json: boolean }, EscapesReport> = {
+  kind: "report",
+  name: "escapes",
+  grammars: [GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor: () => GRAMMAR,
+  read(argv) {
+    const line = parseArgv(GRAMMAR, argv);
+    return {
+      input: readInput(EscapesInputSchema, {
+        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+      }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  ...escapesReport,
 };
 
 /**
