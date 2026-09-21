@@ -8,6 +8,9 @@ import {
 } from "@perbo/contracts";
 import { isRemediableFamily, remediableFindings } from "@perbo/review";
 import type { BundleStore } from "../bundle.js";
+import { sameCommit } from "../resume.js";
+import { commitsSince } from "../seal.js";
+import type { RoundState } from "./state.js";
 
 /**
  * Whether a re-run continues a remediation already under way (SCP-194).
@@ -107,4 +110,47 @@ export function readNodeReviews(bundles: BundleStore, bundle: RunBundle): NodeRe
   } catch {
     return [];
   }
+}
+
+/**
+ * SCP-194: is the branch still the one the last review judged?
+ *
+ * Asked of the branch rather than of the record, and before the merge-up, so
+ * what is compared is the work on the branch and not the base moving under it.
+ * A branch that has moved carries commits no review has seen, and a
+ * verification against it would grade a change nobody judged — so the run
+ * drops back to a fresh review of what is there.
+ *
+ * Asked before the attempt id is minted, because the answer decides the round
+ * this attempt is in. Answered once per run: the state it returns carries no
+ * continuation.
+ */
+export async function confirmContinuation(
+  state: RoundState,
+  progress: (message: string) => void,
+): Promise<RoundState> {
+  if (state.continuing === null) return state;
+  const onBranch = await commitsSince({
+    worktree: state.workspace.path,
+    base_commit: state.baseCommit,
+  });
+  const head = onBranch[onBranch.length - 1] ?? null;
+  if (head !== null && sameCommit(head, state.continuing.head_commit)) {
+    return { ...state, continuing: null };
+  }
+  progress(
+    `the branch is at ${head ?? "its base"} and the last review judged ` +
+      `${state.continuing.head_commit}: it has moved, so this run reviews it afresh rather ` +
+      "than verifying closures against a change set nobody judged",
+  );
+  return {
+    ...state,
+    kind: "execute",
+    round: 0,
+    remediationRound: 0,
+    openFindings: [],
+    finalReview: null,
+    nodeReviews: [],
+    continuing: null,
+  };
 }

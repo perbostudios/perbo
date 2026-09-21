@@ -8,7 +8,6 @@ import {
   admittedWriteGlobs,
   matchesAny,
   assertProviderEnabled,
-  assertWithinLimits,
   failedChecks,
   hasAcceptanceCriteria,
   isRefusal,
@@ -112,7 +111,7 @@ import {
 import { resetInText } from "./transport.js";
 import { guardProhibitedPaths, type TicketRunConfig } from "./loop/config.js";
 import { withCeilingGuidance } from "./loop/attempt.js";
-import { remediationToContinue } from "./loop/continuation.js";
+import { confirmContinuation, remediationToContinue } from "./loop/continuation.js";
 import { mergeFailedDetail } from "./loop/level.js";
 import {
   contractWithCriteria,
@@ -125,13 +124,13 @@ import {
 import { resolvePorts, type LoopPorts } from "./loop/context.js";
 import {
   applyStep,
-  attemptIdFor,
   initialRoundState,
   type RoundRecord,
   type Retry,
   type RunOutcome,
 } from "./loop/state.js";
 import { routeConflict, routeResolution, routeStopped } from "./loop/route.js";
+import { provisionRound } from "./loop/provision.js";
 import { refuseWidening, routeVerification, verifierModel } from "./loop/verify.js";
 
 /**
@@ -1018,59 +1017,19 @@ async function runLockedTicket(
 
   try {
     while (state.round <= roundCeiling) {
-      /**
-       * SCP-194: is the branch still the one the last review judged?
-       *
-       * Asked of the branch rather than of the record, and before the merge-up,
-       * so what is compared is the work on the branch and not the base moving
-       * under it. A branch that has moved carries commits no review has seen,
-       * and a verification against it would grade a change nobody judged — so
-       * the run drops back to a fresh review of what is there.
-       *
-       * Before the attempt id is minted, because the answer decides the round
-       * this attempt is in.
-       */
-      if (state.continuing !== null) {
-        const onBranch = await commitsSince({
-          worktree: state.workspace.path,
-          base_commit: state.baseCommit,
-        });
-        const head = onBranch[onBranch.length - 1] ?? null;
-        if (head === null || !sameCommit(head, state.continuing.head_commit)) {
-          progress(
-            `the branch is at ${head ?? "its base"} and the last review judged ` +
-              `${state.continuing.head_commit}: it has moved, so this run reviews it afresh rather ` +
-              "than verifying closures against a change set nobody judged",
-          );
-          state = {
-            ...state,
-            kind: "execute",
-            round: 0,
-            remediationRound: 0,
-            openFindings: [],
-            finalReview: null,
-            nodeReviews: [],
-          };
-        }
-        state = { ...state, continuing: null };
-      }
+      state = await confirmContinuation(state, progress);
 
-      // Every attempt the run starts passes the run's ceilings — the retry
-      // included, so a kill switch flipped or a budget spent between the
-      // failure and the retry stops it as it would stop a round.
-      assertWithinLimits(config.limits, "remediation_rounds", state.remediationRound);
-      const at = clock();
-      const attempt_id = attemptIdFor({
-        root: rootAttemptId,
-        round: state.round,
-        transport_retry: state.transportRetry,
-        ceiling_continuation: state.ceilingContinuation,
+      const entered = await provisionRound({
+        config,
+        contract,
+        ledger,
+        state,
+        rootAttemptId,
+        branchesOnRecord,
+        clock,
       });
-      // The attempt this one continues: the last one this run recorded,
-      // whether that is the previous round's or the transport failure this one
-      // answers. Read from the attempts themselves rather than from `rounds`,
-      // which holds one entry per round and so cannot name a retried attempt.
-      const previous = ledger.last();
+      state = entered.state;
+      const { attemptId: attempt_id, at, previous } = entered;
       /** The base tip this attempt's own branch was merged with, if any. */
       let mergedBase: string | null = null;
       /**
@@ -1086,31 +1045,6 @@ async function runLockedTicket(
         state = { ...state, baseCommit: up.base_commit };
         mergedBase = up.base_commit;
       };
-
-      // A worktree per round after the first this run runs. `ledger.attempts.length`
-      // rather than `round > 0`, because a run that continues a remediation
-      // starts at round 1 in the worktree already provisioned for it.
-      if (
-        ledger.attempts.length > 0 &&
-        state.transportRetry === 0 &&
-        state.ceilingContinuation === 0
-      ) {
-        const provisioned = await provision({
-          repository_root: config.repository_root,
-          repository_id: contract.scope.repository_id,
-          ticket_key: config.ticket_key,
-          ticket_id: contract.ticket_id,
-          outcome: contract.outcome,
-          recorded: branchesOnRecord,
-          base_commit: contract.base.base_commit,
-          attempt_id,
-          root: config.worktree_root,
-          limits: config.limits,
-          continues: { root_attempt_id: rootAttemptId },
-          now: at,
-        });
-        state = { ...state, workspace: provisioned };
-      }
 
       // SCP-192: before the executor, on this run's first round and only
       // there. A re-run's branch carries commits an earlier run sealed against
