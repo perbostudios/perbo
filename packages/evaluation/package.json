@@ -4,16 +4,8 @@
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "bin": {
     "perbo-corpus": "./dist/main.js"
-  },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
   },
   "files": [
     "dist",
@@ -32,7 +24,6 @@
     "@perbo/cli": "workspace:*",
     "@perbo/contracts": "workspace:*",
     "@perbo/review": "workspace:*",
-    "@perbo/runner": "workspace:*",
     "@perbo/workspace": "workspace:*",
     "zod": "catalog:"
   },

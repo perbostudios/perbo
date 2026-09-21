@@ -37,9 +37,6 @@ import { createScratch } from "@perbo/test-support";
 const TEST_DIR = import.meta.dirname;
 const SRC_DIR = resolve(TEST_DIR, "..", "src");
 
-/** This package's own name, since `src/index.ts` re-exports the loader too. */
-const PACKAGE_NAME = "@perbo/evaluation";
-
 /** The single file allowed to leave the corpus directory to the loader. */
 const GATE = "corpus-present.ts";
 
@@ -108,7 +105,6 @@ function tsFilesUnder(dir: string): string[] {
  * `.js` is how an ESM source spells a `.ts` file here.
  */
 function resolveModule(fromFile: string, specifier: string): string | null {
-  if (specifier === PACKAGE_NAME) return join(SRC_DIR, "index.ts");
   if (!specifier.startsWith(".")) return null;
   const base = resolve(dirname(fromFile), specifier);
   const candidates = [base.replace(/\.js$/, ".ts"), base, `${base}.ts`, join(base, "index.ts")];
@@ -177,10 +173,9 @@ function srcFacts(path: string): SrcFacts {
  * Every module under `src/` the loader can be imported from, and the names it
  * arrives under there.
  *
- * `src/corpus.ts` declares it and `src/index.ts` re-exports that whole file, so
- * a suite could reach the loader from either — a scan that knew only the first
- * path would not see the second. Re-export edges are followed to a fixpoint, so
- * a chain of them is one too.
+ * `src/corpus.ts` declares it, and a module that re-exported it would be a
+ * second path to it that a scan knowing only the first would not see. Re-export
+ * edges are followed to a fixpoint, so a chain of them is one too.
  */
 function loaderModules(srcDir: string): Map<string, Exposure> {
   const facts = new Map(tsFilesUnder(srcDir).map((path) => [path, srcFacts(path)] as const));
@@ -593,9 +588,31 @@ describe("no suite reads the corpus outside the gate", () => {
   it("knows every module the loader can be imported from", () => {
     const found = [...modules.keys()].map((path) => relative(SRC_DIR, path)).sort();
 
-    expect(found, "the module that declares it").toContain("corpus.ts");
-    expect(found, "and the barrel that re-exports that file").toContain("index.ts");
-    expect(modules.get(join(SRC_DIR, "index.ts"))?.names).toContain(LOADER);
+    expect(found, "the one module that declares it, and no other path to it").toEqual([
+      "corpus.ts",
+    ]);
+    expect(modules.get(join(SRC_DIR, "corpus.ts"))?.names).toContain(LOADER);
+  });
+
+  /**
+   * The re-export walk, over a source tree planted for it. `src/` hands the
+   * loader out of the one module that declares it, so nothing there exercises
+   * the edge the walk follows; a tree that does keeps that code under a test
+   * that can fail, and the name a re-export gives the loader is the name a
+   * suite would reach it under.
+   */
+  it("follows the loader into a module that re-exports it under another name", () => {
+    const dir = scratchDir();
+    plant(dir, "corpus.ts", `export function ${LOADER}(directory?: string) {\n  return directory;\n}\n`);
+    plant(dir, "barrel.ts", `export { ${LOADER} as load } from "./corpus.js";\n`);
+
+    const planted = loaderModules(dir);
+
+    expect([...planted.keys()].map((path) => relative(dir, path)).sort()).toEqual([
+      "barrel.ts",
+      "corpus.ts",
+    ]);
+    expect(planted.get(join(dir, "barrel.ts"))?.names).toEqual(new Set(["load"]));
   });
 
   it("scans every test file in this package", () => {
@@ -650,12 +667,6 @@ describe("no suite reads the corpus outside the gate", () => {
       "planted-dynamic.test.ts",
       `const { ${LOADER}: load } = await import("${from}");\nexport const planted = load();\n`,
     );
-    const barrel = plant(
-      dir,
-      "planted-barrel.test.ts",
-      `import { ${LOADER} as load } from "${corpusSpecifier(dir).replace("corpus.js", "index.js")}";\n` +
-        `export const planted = load();\n`,
-    );
     const clean = plant(
       dir,
       "planted-clean.test.ts",
@@ -665,7 +676,7 @@ describe("no suite reads the corpus outside the gate", () => {
     const offences = unguardedCorpusReads(dir, { modules });
 
     expect(offences.map((offence) => offence.file).sort()).toEqual(
-      [alias, barrel, direct, dynamic, namespaced].sort(),
+      [alias, direct, dynamic, namespaced].sort(),
     );
     expect(
       offences.map((offence) => offence.file),

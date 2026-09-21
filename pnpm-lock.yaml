@@ -217,9 +217,6 @@ importers:
       '@perbo/review':
         specifier: workspace:*
         version: link:../review
-      '@perbo/runner':
-        specifier: workspace:*
-        version: link:../runner
       '@perbo/workspace':
         specifier: workspace:*
         version: link:../workspace
