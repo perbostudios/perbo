@@ -4,13 +4,12 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { SecretIndex, type PermissionProfile } from "@perbo/contracts";
 import type { MaterializedWorkspace } from "@perbo/workspace";
-import { AgentConfigurationPresentError, type AgentResult } from "../adapter.js";
-import { EgressLog } from "../egress.js";
+import { AgentConfigurationPresentError } from "../adapter.js";
 import { buildPermissionProfile } from "../profile.js";
 import { TicketRunConfigSchema } from "./config.js";
 import type { LoopPorts } from "./context.js";
 import { execute } from "./execute.js";
-import { roundState, workspace } from "./test-support/fakes.js";
+import { agentResult, roundState, workspace } from "./test-support/fakes.js";
 
 const scratch: string[] = [];
 afterAll(() => {
@@ -30,40 +29,6 @@ function worktreeWithConfiguration(): string {
   writeFileSync(join(dir, ".claude", "settings.json"), '{"hooks":{}}');
   return dir;
 }
-
-const agentResult = (): AgentResult => ({
-  invocation: {
-    adapter: "double",
-    binary_path: "/bin/true",
-    binary_version: "0.0.0",
-    binary_sha256: "0".repeat(64),
-    model: "double",
-    credential_class: "user_api_key",
-    argv: ["-p", "<prompt>"],
-    shape_sha256: "1".repeat(64),
-    neutralisation: {
-      suppressed_at_invocation: ["double"],
-      withheld_from_worktree: [],
-      asserted_empty: ["mcp_servers"],
-      reported: { mcp_servers: [], plugins: [], skills: [], subagents: [], memory_paths: [] },
-    },
-  },
-  commands: [],
-  egress: new EgressLog([]),
-  prohibited: [],
-  usage: {
-    input_tokens: 0,
-    cache_read_input_tokens: 0,
-    output_tokens: 0,
-    cost_micros: 0,
-    cost_basis: "transport_reported",
-    cost_partial: false,
-    iterations: 0,
-  },
-  termination: { reason: "completed", detail: "" },
-  final_message: null,
-  transcript: [],
-});
 
 function run(agent: LoopPorts["agent"], worktreePath: string, quarantineRoot: string) {
   const profile: PermissionProfile = buildPermissionProfile({ worktree: worktreePath });

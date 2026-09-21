@@ -2,17 +2,13 @@ import { join, resolve } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { z } from "zod";
 import {
-  EXECUTION_ATTEMPT_SCHEMA_VERSION,
-  ExecutionAttemptSchema,
   assertProviderEnabled,
   failedChecks,
   hasAcceptanceCriteria,
   isRefusal,
   limitFor,
   limitsForCredential,
-  type AttemptWait,
   type CredentialClass,
-  type ExecutionAttempt,
   type GithubCredential,
   type IncompleteReviewPath,
   type NodeReview,
@@ -52,7 +48,6 @@ import {
 } from "./attempts.js";
 import { Ledger } from "./loop/ledger.js";
 import { acquireRunLock, type HeldRunLock } from "./lock.js";
-import { executorAccount } from "./account.js";
 import { BundleStore } from "./bundle.js";
 import {
   deliveredChecksSection,
@@ -67,28 +62,19 @@ import { sweepWorktree } from "./orphans.js";
 import type { LoopMergeOutcome } from "./merge.js";
 import { buildPermissionProfile } from "./profile.js";
 import {
-  EXECUTOR_PROMPT_VERSION,
-  RESUMED_EXECUTOR_PROMPT_VERSION,
-  conflictPromptVersion,
-} from "./prompt.js";
-import {
   RETAINED_DIFF_ARTIFACT,
   ResumeRefusedError,
   resolveResumeSource,
-  resumedFromRecord,
   sameCommit,
   type ResumeSource,
 } from "./resume.js";
 import { RunRefusedError } from "./refusal.js";
 import { commitSpec } from "./spec-commit.js";
-import { allowedPathsSentence } from "./shell/index.js";
-import { parseDeclines } from "./declines.js";
 import { readPrinciples, readPrinciplesFile } from "./principles.js";
 import { restoreAny } from "./quarantine.js";
 import { headCommit } from "./seal.js";
-import { resetInText } from "./transport.js";
 import { type TicketRunConfig } from "./loop/config.js";
-import { withCeilingGuidance } from "./loop/attempt.js";
+import { recordAttempt } from "./loop/attempt.js";
 import { briefRound } from "./loop/brief.js";
 import { confirmContinuation, remediationToContinue } from "./loop/continuation.js";
 import { checkRound } from "./loop/check.js";
@@ -906,15 +892,7 @@ async function runLockedTicket(
         detail = briefed.end.detail;
         break;
       }
-      const {
-        inherited,
-        prior_commits,
-        toClose,
-        resumedHere,
-        pathsAllowed,
-              prompt,
-        executorSkills,
-            } = briefed.brief;
+      const { prior_commits, toClose, pathsAllowed } = briefed.brief;
 
       const executed = await execute({
         config,
@@ -965,313 +943,39 @@ async function runLockedTicket(
       state = measured.state;
       const { checks, gating, swept } = measured;
 
-      /**
-       * The commands the attempt asked for and did not get (SCP-163).
-       *
-       * An attempt that ends with nothing changed reads two ways, and the
-       * difference is this list: an executor that judged the work already done
-       * changed nothing by choice, and one whose clean-up and whose type-check
-       * were refused changed nothing because it could not.
-       */
-      const denied = agentResult.commands.filter((command) => command.decision === "denied");
-      const deniedSummary = denied
-        .slice(0, 5)
-        .map(
-          (command) =>
-            `${command.denial_rule ?? "unknown"} on ` +
-            `${command.denial_target ?? command.detail.slice(0, 80)}`,
-        )
-        .join("; ");
-
-      const termination =
-        agentResult.termination.reason !== "completed"
-          ? withCeilingGuidance(agentResult.termination, config)
-          : sealed.prohibited.length > 0
-            ? {
-                reason: "prohibited_action" as const,
-                detail: sealed.prohibited.map((hit) => `${hit.action}: ${hit.detail}`).join("; "),
-              }
-            : // SCP-195: the guard refuses a write outside the contract's globs
-              // before it happens, so a path here that is still outside them is
-              // one the guard never saw. That is a hole in the runner, and the
-              // record says so rather than passing the change on to a review
-              // that would spend a round finding it.
-              sealed.outside_allowed_paths.length > 0
-              ? {
-                  reason: "runner_defect" as const,
-                  detail:
-                    `the sealed change set carries ${sealed.outside_allowed_paths.length} path(s) ` +
-                    `outside what the contract admits a write under, which the pre-execution ` +
-                    `guard should have refused: ` +
-                    `${sealed.outside_allowed_paths.slice(0, 5).join(", ")} — ` +
-                    `${allowedPathsSentence(pathsAllowed)}`,
-                }
-            : sealed.changeset === null
-              ? denied.length > 0
-                ? {
-                    reason: "no_changes_after_denials" as const,
-                    detail:
-                      `the branch adds no change to its base, and ${denied.length} command(s) ` +
-                      `the executor asked for were refused: ${deniedSummary}`,
-                  }
-                : {
-                    reason: "no_changes" as const,
-                    detail: "the branch adds no change to its base",
-                  }
-              : carriedForward
-                ? {
-                    reason: "completed" as const,
-                    detail:
-                      `the executor added nothing to the ${inherited.length} commit(s) already ` +
-                      "on the branch; that change set is what was checked and reviewed",
-                  }
-                : { reason: "completed" as const, detail: "" };
-
-      /**
-       * SCP-194: a round given a scope escape that grew the change set.
-       *
-       * The brief quotes the contract's globs and asks for the change set to
-       * come back inside them. A round that answered by adding files went the
-       * other way, and the next round would be asked to undo more than the one
-       * before it. Measured against the previous round's own change set rather
-       * than against the globs, because a path inside the globs is still a path
-       * the round was not asked to add.
-       */
-      const scopeGiven = toClose.filter((finding) => finding.rule_id.startsWith("scope."));
-      const widened =
-        state.kind === "remediate" && scopeGiven.length > 0 && termination.reason === "completed"
-          ? sealed.changed_paths.filter((path) => !state.previousChangedPaths.includes(path))
-          : [];
-      if (termination.reason === "completed") {
-        state = { ...state, previousChangedPaths: [...sealed.changed_paths] };
-      }
-
-      /**
-       * SCP-193: the reset a provider named on its way out, and the wait it
-       * buys.
-       *
-       * A 529 clears on its own in a minute and is answered by the fixed retry
-       * below. A session limit does not: `429 … resets 4:30am (Europe/London)`
-       * says when the provider will serve again, and an attempt started before
-       * then meets the same refusal and is paid for. So the reset is read out
-       * of the sentence the runner already wrote onto the termination — built
-       * from an anchored transport reading and from nothing else — and turned
-       * into an instant.
-       *
-       * A reset further out than `wait_for_provider_ms` is not waited for at
-       * all. The bound is a refusal to wait that long rather than an
-       * instruction to wait less: waking before the provider's own reset
-       * spends an attempt against a limit still in force, which is the thing
-       * the wait exists to avoid.
-       */
-      const reset =
-        termination.reason === "transport_unavailable" && state.transportRetry === 0
-          ? resetInText(termination.detail, clock())
-          : null;
-      const parkMs = reset === null ? 0 : reset.until.getTime() - clock().getTime();
-      const park: AttemptWait | null =
-        reset !== null && parkMs > 0 && parkMs <= waitBoundMs
-          ? {
-              reason: "provider_reset",
-              started_at: clock().toISOString(),
-              until: reset.until.toISOString(),
-              waited_ms: parkMs,
-              zone: reset.zone,
-              quoted: reset.quoted,
-            }
-          : null;
-
-      const attempt = ExecutionAttemptSchema.parse({
-        schema_version: EXECUTION_ATTEMPT_SCHEMA_VERSION,
-        attempt_id,
-        root_attempt_id: rootAttemptId,
-        // Round 0 of a re-run continues the previous run's last attempt, so the
-        // chain a reader follows crosses runs rather than restarting at each —
-        // and a resumed round 0 continues the cut attempt whose diff it holds,
-        // which is the more specific answer to the same question.
-        continues_attempt_id:
-          previous?.attempt_id ?? resumedHere?.attempt_id ?? continuesPreviousRun,
-        remediation_round: state.round,
-        created_at: at.toISOString(),
-        ticket_id: contract.ticket_id,
-        plan_id: contract.plan_id,
-        plan_version: contract.version,
-        planned_risk: contract.level,
-        repository_id: contract.scope.repository_id,
-        base_ref: config.base_ref,
-        base_commit: state.baseCommit,
-        provider: "local_worktree",
-        branch: state.workspace.branch,
-        worktree_path: state.workspace.path,
-        autonomy_class: profile.autonomy_class,
-        permission_profile: profile,
-        agent: agentResult.invocation,
-        executor_skills: executorSkills,
-        environment: {
-          manifest_hash: materialized.manifest_hash,
-          install_pinned: manifest.install.pinned,
-          materialized_paths: materialized.materialized_paths,
-          secret_content_sha256: secrets.entries.map((entry) => entry.content_sha256),
-          port_range_start: materialized.ports.start,
-          port_range_end: materialized.ports.end,
-          database_schema: materialized.database_schema,
-          env_names_passed: environment.passed,
-          env_names_dropped: environment.dropped.length,
-        },
-        commands: agentResult.commands,
-        egress: agentResult.egress.all(),
-        prohibited_action_hits: [
-          ...agentResult.prohibited.map((hit) => ({
-            action: hit.action,
-            detail: hit.detail,
-            at: hit.at,
-          })),
-          ...sealed.prohibited.map((hit) => ({
-            action: hit.action,
-            detail: hit.detail,
-            at: at.toISOString(),
-          })),
-        ],
-        user_instructions: [],
-        usage: {
-          input_tokens: agentResult.usage.input_tokens,
-          cache_creation_input_tokens:
-            agentResult.usage.cache_creation_input_tokens ?? 0,
-          cache_read_input_tokens: agentResult.usage.cache_read_input_tokens,
-          output_tokens: agentResult.usage.output_tokens,
-          cost_micros: agentResult.usage.cost_micros,
-          cost_basis: agentResult.usage.cost_basis,
-          // Written only where it is true, so a completed attempt's record is
-          // shaped exactly as it always was.
-          ...(agentResult.usage.cost_partial ? { cost_partial: true } : {}),
-          // Unlike billed usage, this deliberately retains repeated stream
-          // envelopes because it is the counter the existing token guard ran.
-          token_ceiling_tokens: ceilings.counts().tokens,
-          wall_clock_ms: ceilings.counts().wall_clock_ms,
-          commands: agentResult.commands.length,
-          iterations: agentResult.usage.iterations,
-        },
-        termination,
-        changeset_id: sealed.changeset?.changeset_id ?? null,
-        head_commit: sealed.head_commit,
-        prior_commits,
-        change_set_origin: carriedForward ? "carried_forward" : "attempt",
-        // D-092: the executor's own account, read from its final message and
-        // already redacted by the adapter. Null where it wrote none.
-        executor_account: executorAccount(agentResult.final_message),
-        // D-096: every time this round's brief went back after a compaction,
-        // as the mechanism that carried it recorded them.
-        brief_reinjections: agentResult.reinjections ?? [],
-        resumed_from: resumedHere === null ? null : resumedFromRecord(resumedHere),
-        merged_base: mergedBase,
-        spec_commit: specCommit,
-        // What the check attribution above rests on, and — separately — what
-        // this attempt's own worktree started from.
-        base_verification: baseVerification,
-        provisioning_verify: provisioningVerify,
-        swept_processes: swept,
-        // Written before the loop sleeps, not after: a process killed while it
-        // is parked has to leave the instant behind for the next run to honour.
-        wait: park,
-      } satisfies ExecutionAttempt);
-      // The next round inherits this one's commit and can name the attempt
-      // that sealed it.
-      ledger.addAttempt(attempt, !carriedForward ? sealed.head_commit : null);
-
-      bundles.write({
-        kind: "execution",
-        subject_id: attempt_id,
-        ticket_id: contract.ticket_id,
-        inputs: {
-          plan_id: contract.plan_id,
-          plan_version: contract.version,
-          base_commit: state.baseCommit,
-          merged_base: mergedBase,
-          round_kind: state.kind,
-          branch: state.workspace.branch,
-          remediation_round: state.round,
-          // SCP-194: what this round was handed, so the ladder a reader builds
-          // from the bundles is the executor's own brief rather than an
-          // inference from what changed. Empty for a round that was given no
-          // findings — an execute round, or a conflict round.
-          findings_given: toClose.map((finding) => finding.key).join(","),
-          findings_given_count: toClose.length,
-          invocation_shape: attempt.agent.shape_sha256,
-          binary_version: attempt.agent.binary_version,
-          termination: termination.reason,
-          // The cut attempt's bundle is referenced here and left exactly as it
-          // was: this is a new record beside it, never a replacement for it.
-          resumed_from_bundle: resumedHere?.bundle_id ?? null,
-          resumed_from_attempt: resumedHere?.attempt_id ?? null,
-          resumed_diff_sha256: resumedHere?.diff_sha256 ?? null,
-        },
-        context_manifest: [],
-        versions: {
-          code: "stage-2",
-          prompt:
-            state.kind === "resolve_conflict"
-              ? conflictPromptVersion(config.relevel_context)
-              : state.kind === "execute"
-                ? resumedHere === null
-                  ? EXECUTOR_PROMPT_VERSION
-                  : RESUMED_EXECUTOR_PROMPT_VERSION
-                : "executor_remediation_v7",
-          policy: profile.autonomy_class,
-          model: attempt.agent.model,
-          tool: attempt.agent.binary_version,
-        },
-        usage: {
-          input_tokens: attempt.usage.input_tokens,
-          output_tokens: attempt.usage.output_tokens,
-          cost_micros: attempt.usage.cost_micros,
-          cost_basis: attempt.usage.cost_basis,
-          ...(attempt.usage.cost_partial ? { cost_partial: true } : {}),
-          wall_clock_ms: attempt.usage.wall_clock_ms,
-        },
-        artifacts: [
-          { name: "attempt.json", media_type: "application/json", body: JSON.stringify(attempt, null, 2) },
-          { name: "transcript.jsonl", media_type: "application/x-ndjson", body: agentResult.transcript.join("\n") },
-          { name: "prompt.txt", media_type: "text/plain", body: prompt },
-          // The deterministic half of the judgement, beside the attempt it
-          // judged (D-045). The reviewer echoes the same results into its own
-          // artifact, but only for the round it reviews and only when it is
-          // reached: a remediation round is verified rather than reviewed, and
-          // an attempt a ceiling cut has no review at all — so without this the
-          // measurement that outranks the reviewer existed nowhere on disk.
-          // Written even when it is empty, because "nothing was measured"
-          // is a fact about the round and not an absence of one.
-          {
-            name: "checks.json",
-            media_type: "application/json",
-            body: JSON.stringify(checks, null, 2),
-          },
-          ...(sealed.diff ? [{ name: "change.diff", media_type: "text/x-diff", body: sealed.diff }] : []),
-        ],
-        errors: termination.reason === "completed" ? [] : [{ kind: termination.reason, message: termination.detail }],
-        transitions: [
-          { at: at.toISOString(), from: "PROVISIONING", to: "EXECUTING", reason: "worktree materialized" },
-          { at: clock().toISOString(), from: "EXECUTING", to: "VERIFYING", reason: termination.reason },
-        ],
-        retention: { class: "raw_transcript", expires_at: null },
+      const recorded = recordAttempt({
+        config,
+        contract,
+        state,
+        brief: briefed.brief,
+        bundles,
+        ledger,
+        attemptId: attempt_id,
+        rootAttemptId,
+        previous,
+        continuesPreviousRun,
+        at,
+        agentResult,
+        ceilings,
+        environment,
+        profile,
+        materialized,
+        manifest,
         secrets,
-        excluded_paths: sealed.excluded_paths,
-        deterministic: false,
-        model_version_pinned: true,
-        now: clock(),
+        sealed,
+        carriedForward,
+        mergedBase,
+        specCommit,
+        baseVerification,
+        provisioningVerify,
+        swept,
+        checks,
+        waitBoundMs,
+        clock,
+        progress,
       });
-
-      // D-065: declines are parsed from the model's own decoded text before any
-      // termination handling — an executor that declines everything and,
-      // correctly, changes nothing must end as an escalation with its reasons,
-      // not as `no_changes`.
-      const declines =
-        state.kind === "remediate"
-          ? parseDeclines(agentResult.transcript, toClose.map((finding) => finding.key))
-          : [];
-      if (declines.length > 0) {
-        progress(`${declines.length} finding(s) declared no-determinable-practice`);
-        ledger.addDeclines(declines);
-      }
+      state = recorded.state;
+      const { attempt, termination, declines, widened, scopeGiven, reset, park, parkMs } = recorded;
 
       /** This round's record where no review and no verification judged it. */
       const record = (): RoundRecord => ({

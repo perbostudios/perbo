@@ -1,11 +1,15 @@
 import type { Workspace } from "@perbo/workspace";
+import type { AgentResult } from "../../adapter.js";
+import { EgressLog } from "../../egress.js";
 import { initialRoundState, type RoundState } from "../state.js";
 import {
   EXECUTION_ATTEMPT_SCHEMA_VERSION,
+  planContractFromSource,
   ExecutionAttemptSchema,
   ReviewArtifactSchema,
   type ExecutionAttempt,
   type Finding,
+  type PlanContractWithCriteria,
   type ReviewArtifact,
 } from "@perbo/contracts";
 
@@ -259,4 +263,61 @@ export const workspace = (overrides: Partial<Workspace> = {}): Workspace => ({
 export const roundState = (overrides: Partial<RoundState> = {}): RoundState => ({
   ...initialRoundState(WORKSPACE, null),
   ...overrides,
+});
+
+/** A plan contract with one criterion, minted the way a source's is. */
+export const contract = (
+  overrides: { outcome?: string; paths_allowed?: readonly string[] } = {},
+): PlanContractWithCriteria =>
+  planContractFromSource({
+    contract: {
+      source: "arguments",
+      reference: null,
+      url: null,
+      title: null,
+      outcome: overrides.outcome ?? "the feature works",
+      outcome_from: "stated",
+      criteria: [{ id: "ac_1", text: "total() is exercised", assertion: "a test calls total()", kind: "test" }],
+    },
+    base_commit: "a1b2c3d",
+    repository_id: "repo_fixture",
+    paths_allowed: overrides.paths_allowed ?? ["src/**"],
+    captured_at: new Date("2026-08-27T00:00:00.000Z"),
+  });
+
+/** What an executor that finished and wrote nothing surprising returns. */
+export const agentResult = (
+  overrides: { termination?: AgentResult["termination"]; commands?: AgentResult["commands"] } = {},
+): AgentResult => ({
+  invocation: {
+    adapter: "double",
+    binary_path: "/bin/true",
+    binary_version: "0.0.0",
+    binary_sha256: "0".repeat(64),
+    model: "double",
+    credential_class: "user_api_key",
+    argv: ["-p", "<prompt>"],
+    shape_sha256: "1".repeat(64),
+    neutralisation: {
+      suppressed_at_invocation: ["double"],
+      withheld_from_worktree: [],
+      asserted_empty: ["mcp_servers"],
+      reported: { mcp_servers: [], plugins: [], skills: [], subagents: [], memory_paths: [] },
+    },
+  },
+  commands: overrides.commands ?? [],
+  egress: new EgressLog([]),
+  prohibited: [],
+  usage: {
+    input_tokens: 0,
+    cache_read_input_tokens: 0,
+    output_tokens: 0,
+    cost_micros: 0,
+    cost_basis: "transport_reported",
+    cost_partial: false,
+    iterations: 0,
+  },
+  termination: overrides.termination ?? { reason: "completed", detail: "" },
+  final_message: null,
+  transcript: [],
 });
