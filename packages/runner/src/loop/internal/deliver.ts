@@ -11,9 +11,9 @@ import {
   readDeliveredChecks,
   type DeliveredChecksReading,
   type createPullRequest,
-} from "../delivery.js";
-import { githubCredential } from "../github-credential.js";
-import type { LoopMergeOutcome } from "../merge.js";
+} from "../../delivery.js";
+import { githubCredential } from "../../github-credential.js";
+import type { LoopMergeOutcome } from "../../merge.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
 import type { Ledger } from "./ledger.js";

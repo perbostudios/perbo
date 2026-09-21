@@ -18,7 +18,7 @@ import {
 } from "./attempts.js";
 import { BundleStore } from "./bundle.js";
 import { EgressLog } from "./egress.js";
-import { TicketRunConfigSchema, runTicket } from "./loop.js";
+import { TicketRunConfigSchema, runTicket } from "./loop/index.js";
 import { makeAttempt, makeContract, makeReview } from "./test-support/records.js";
 import { runnerRepository } from "./test-support/repository.js";
 

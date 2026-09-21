@@ -5,7 +5,7 @@ import { LimitsTableSchema, type ChangeSet } from "@perbo/contracts";
 import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
-import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "../src/loop.js";
+import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "../src/loop/index.js";
 import { carriedApprovals } from "../src/merge.js";
 import { RunRefusedError } from "../src/refusal.js";
 import {

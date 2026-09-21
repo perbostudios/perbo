@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { readAttemptsRecord, type AttemptsRecord } from "../attempts.js";
+import { readAttemptsRecord, type AttemptsRecord } from "../../attempts.js";
 import { Ledger } from "./ledger.js";
 import { attempt } from "./test-support/fakes.js";
 

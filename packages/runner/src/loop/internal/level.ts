@@ -1,6 +1,6 @@
-import { mergeUp, type MergeUpResult } from "../merge-up.js";
-import { describeRange, type SealResult } from "../seal.js";
-import type { JudgingArtifacts } from "../prohibited.js";
+import { mergeUp, type MergeUpResult } from "./merge-up.js";
+import { describeRange, type SealResult } from "../../seal.js";
+import type { JudgingArtifacts } from "../../prohibited.js";
 import type { TicketRunConfig } from "./config.js";
 import type { ReviewArtifact } from "@perbo/contracts";
 import type { Ledger } from "./ledger.js";

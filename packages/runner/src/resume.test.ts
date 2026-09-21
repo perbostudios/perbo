@@ -11,7 +11,7 @@ import {
 import type { AgentResult } from "./adapter.js";
 import { BundleStore } from "./bundle.js";
 import { EgressLog } from "./egress.js";
-import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "./loop.js";
+import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "./loop/index.js";
 import { resolveResumeSource, sameCommit } from "./resume.js";
 import { TRANSPORT_RETRY_DELAY_MS } from "./transport.js";
 import { makeContract, makeReview } from "./test-support/records.js";

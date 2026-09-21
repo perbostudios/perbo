@@ -1,9 +1,9 @@
 import type { PermissionProfile, SecretIndex } from "@perbo/contracts";
 import type { MaterializedWorkspace } from "@perbo/workspace";
-import { AgentConfigurationPresentError, type AgentResult } from "../adapter.js";
-import { AttemptCeilings } from "../ceilings.js";
-import { buildAgentEnvironment } from "../profile.js";
-import { quarantine, release } from "../quarantine.js";
+import { AgentConfigurationPresentError, type AgentResult } from "../../adapter.js";
+import { AttemptCeilings } from "../../ceilings.js";
+import { buildAgentEnvironment } from "../../profile.js";
+import { quarantine, release } from "../../quarantine.js";
 import type { Brief } from "./brief.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";

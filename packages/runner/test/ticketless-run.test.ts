@@ -11,7 +11,7 @@ import {
 } from "@perbo/contracts";
 import { scratchDirectories, watchOutbound } from "@perbo/test-support";
 import { BundleStore } from "../src/bundle.js";
-import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
+import { TicketRunConfigSchema, runTicket } from "../src/loop/index.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
 import { finding, makeReview, withoutInstall } from "../src/test-support/records.js";
 import { runnerRepository } from "../src/test-support/repository.js";

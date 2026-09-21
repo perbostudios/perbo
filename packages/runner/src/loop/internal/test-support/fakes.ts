@@ -1,9 +1,9 @@
 import type { Workspace } from "@perbo/workspace";
 import type { AttemptWait } from "@perbo/contracts";
-import type { HeldRunLock } from "../../lock.js";
-import type { AgentResult } from "../../adapter.js";
-import { EgressLog } from "../../egress.js";
-import { makeAttempt } from "../../test-support/records.js";
+import type { HeldRunLock } from "../../../lock.js";
+import type { AgentResult } from "../../../adapter.js";
+import { EgressLog } from "../../../egress.js";
+import { makeAttempt } from "../../../test-support/records.js";
 import { initialRoundState, type RoundState } from "../state.js";
 import {
   planContractFromSource,

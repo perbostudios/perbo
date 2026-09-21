@@ -1,8 +1,8 @@
 import { z } from "zod";
-import type { Decline } from "../declines.js";
+import type { Decline } from "../../declines.js";
 import { CostBasisSchema, costOf, rollCosts } from "@perbo/contracts";
 import type { Cost, ExecutionAttempt } from "@perbo/contracts";
-import { appendAttempts, sealedByAttempt, type AttemptsRecord } from "../attempts.js";
+import { appendAttempts, sealedByAttempt, type AttemptsRecord } from "../../attempts.js";
 import type { RoundRecord } from "./state.js";
 
 /**

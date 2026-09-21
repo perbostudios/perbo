@@ -73,7 +73,6 @@ const PENDING = [
   "packages/runner/test/loop-incomplete-review.test.ts",
   "packages/runner/test/loop-merge.test.ts",
   "packages/runner/test/loop.test.ts",
-  "packages/runner/test/merge-up.test.ts",
   "packages/runner/test/orphans.test.ts",
   "packages/runner/test/rebrief-round.test.ts",
   "packages/runner/test/relevel.test.ts",

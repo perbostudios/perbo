@@ -12,7 +12,7 @@ import { branchName } from "@perbo/workspace";
 import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
-import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
+import { TicketRunConfigSchema, runTicket } from "../src/loop/index.js";
 import { makeAttempt, makeContract, withoutInstall } from "../src/test-support/records.js";
 import { runnerRepository } from "../src/test-support/repository.js";
 

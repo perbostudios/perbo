@@ -10,15 +10,15 @@ import {
   type TerminationReason,
 } from "@perbo/contracts";
 import type { MaterializedWorkspace } from "@perbo/workspace";
-import type { AgentResult } from "../adapter.js";
-import { BundleStore } from "../bundle.js";
-import { AttemptCeilings } from "../ceilings.js";
-import { buildPermissionProfile } from "../profile.js";
-import type { SealResult } from "../seal.js";
+import type { AgentResult } from "../../adapter.js";
+import { BundleStore } from "../../bundle.js";
+import { AttemptCeilings } from "../../ceilings.js";
+import { buildPermissionProfile } from "../../profile.js";
+import type { SealResult } from "../../seal.js";
 import { classifyTermination, providerPark, recordAttempt, withCeilingGuidance } from "./attempt.js";
 import { TicketRunConfigSchema } from "./config.js";
 import { Ledger } from "./ledger.js";
-import { finding } from "../test-support/records.js";
+import { finding } from "../../test-support/records.js";
 import { agentResult, contract, roundState } from "./test-support/fakes.js";
 
 const manifest = (): MaterializationManifest =>

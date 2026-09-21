@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { ClosureRow, ClosureVerification } from "@perbo/review";
 import { SecretIndex } from "@perbo/contracts";
-import { BundleStore } from "../bundle.js";
-import type { SealResult } from "../seal.js";
+import { BundleStore } from "../../bundle.js";
+import type { SealResult } from "../../seal.js";
 import { TicketRunConfigSchema } from "./config.js";
 import { Ledger } from "./ledger.js";
 import { refuseWidening, routeVerification, verifyRound } from "./verify.js";
-import { finding, makeReview } from "../test-support/records.js";
+import { finding, makeReview } from "../../test-support/records.js";
 import { attempt, contract, roundState } from "./test-support/fakes.js";
 
 const verification = (overrides: Partial<ClosureVerification> = {}): ClosureVerification => ({

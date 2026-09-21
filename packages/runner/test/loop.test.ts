@@ -17,7 +17,7 @@ import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { BundleStore } from "../src/bundle.js";
 import { RunLockedError, acquireRunLock } from "../src/lock.js";
-import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
+import { TicketRunConfigSchema, runTicket } from "../src/loop/index.js";
 import { TRANSPORT_RETRY_DELAY_MS } from "../src/transport.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
 import {

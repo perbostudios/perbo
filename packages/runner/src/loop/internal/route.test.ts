@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AttemptWait, TerminationReason } from "@perbo/contracts";
-import { TRANSPORT_RETRY_DELAY_MS } from "../transport.js";
+import { TRANSPORT_RETRY_DELAY_MS } from "../../transport.js";
 import { routeConflict, routeResolution, routeStopped } from "./route.js";
 import { attempt } from "./test-support/fakes.js";
 

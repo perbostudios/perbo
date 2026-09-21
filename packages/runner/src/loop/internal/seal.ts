@@ -1,6 +1,6 @@
 import type { PlanContractWithCriteria, SecretIndex } from "@perbo/contracts";
-import type { JudgingArtifacts } from "../prohibited.js";
-import { sealChangeSet, type SealResult } from "../seal.js";
+import type { JudgingArtifacts } from "../../prohibited.js";
+import { sealChangeSet, type SealResult } from "../../seal.js";
 import type { Brief } from "./brief.js";
 import type { TicketRunConfig } from "./config.js";
 import { levelAfterSeal } from "./level.js";

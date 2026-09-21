@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { TicketRunConfigSchema } from "./loop.js";
+import { TicketRunConfigSchema } from "./loop/index.js";
 import { LimitsTableSchema, changeSetFromDiff, type Scope } from "@perbo/contracts";
 import { assessScope } from "@perbo/review";
 import { scratchDirectories } from "@perbo/test-support";

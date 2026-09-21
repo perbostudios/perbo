@@ -12,7 +12,7 @@ import { runAgent, type AgentResult } from "../src/adapter.js";
 import { EXECUTOR_ACCOUNT_HEADING, executorAccount } from "../src/account.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { EgressLog } from "../src/egress.js";
-import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
+import { TicketRunConfigSchema, runTicket } from "../src/loop/index.js";
 import { buildPermissionProfile } from "../src/profile.js";
 import { executorPrompt, remediationPrompt } from "../src/prompt.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";

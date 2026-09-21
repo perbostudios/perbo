@@ -22,8 +22,8 @@ import {
   type runReview,
 } from "@perbo/review";
 import { createModel, type Model } from "@perbo/model";
-import type { BundleStore } from "../bundle.js";
-import type { SealResult } from "../seal.js";
+import type { BundleStore } from "../../bundle.js";
+import type { SealResult } from "../../seal.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
 import type { Ledger } from "./ledger.js";

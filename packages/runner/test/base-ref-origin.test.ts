@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TicketRunConfigSchema } from "../src/loop.js";
+import { TicketRunConfigSchema } from "../src/loop/index.js";
 
 /**
  * Which of the three sources named the base a run publishes against.

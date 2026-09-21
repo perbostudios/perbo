@@ -5,9 +5,9 @@ import {
   type PlanContractWithCriteria,
   type SecretIndex,
 } from "@perbo/contracts";
-import type { PinnedCheck } from "../checks/index.js";
-import { sweepWorktree, type SweptProcess } from "../orphans.js";
-import { untrackedAfterChecks, type SealResult } from "../seal.js";
+import type { PinnedCheck } from "../../checks/index.js";
+import { sweepWorktree, type SweptProcess } from "./orphans.js";
+import { untrackedAfterChecks, type SealResult } from "../../seal.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
 import type { RoundState } from "./state.js";

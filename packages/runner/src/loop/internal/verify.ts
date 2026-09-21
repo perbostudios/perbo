@@ -8,10 +8,10 @@ import type {
   PlanContractWithCriteria,
   SecretIndex,
 } from "@perbo/contracts";
-import type { BundleStore } from "../bundle.js";
-import type { Decline } from "../declines.js";
-import type { SealResult } from "../seal.js";
-import { allowedPathsSentence } from "../shell/index.js";
+import type { BundleStore } from "../../bundle.js";
+import type { Decline } from "../../declines.js";
+import type { SealResult } from "../../seal.js";
+import { allowedPathsSentence } from "../../shell/index.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
 import type { Ledger } from "./ledger.js";

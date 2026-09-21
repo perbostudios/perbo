@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { SecretIndex, type ReviewArtifact } from "@perbo/contracts";
-import { BundleStore } from "../bundle.js";
+import { BundleStore } from "../../bundle.js";
 import { remediationToContinue } from "./continuation.js";
-import { finding, makeReview } from "../test-support/records.js";
+import { finding, makeReview } from "../../test-support/records.js";
 
 const TICKET = "tkt_scp194";
 const scratch: string[] = [];

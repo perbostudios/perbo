@@ -14,8 +14,8 @@ import {
   type StandingProhibitedEntry,
 } from "@perbo/contracts";
 import { MODEL_PROVIDERS } from "@perbo/model";
-import { PinnedCheckSchema } from "../checks/index.js";
-import { DEFAULT_DELIVERED_CHECKS_BOUND_MS } from "../delivery.js";
+import { PinnedCheckSchema } from "../../checks/index.js";
+import { DEFAULT_DELIVERED_CHECKS_BOUND_MS } from "../../delivery.js";
 
 /**
  * What a run is configured with, and what the write guard refuses.

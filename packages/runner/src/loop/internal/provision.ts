@@ -13,13 +13,13 @@ import {
   type MaterializedWorkspace,
   type Workspace,
 } from "@perbo/workspace";
-import { recordedBaseVerification, specCommitOnRecord } from "../attempts.js";
-import { sweepWorktree } from "../orphans.js";
-import { readPrinciples, readPrinciplesFile } from "../principles.js";
-import { buildPermissionProfile } from "../profile.js";
-import { RETAINED_DIFF_ARTIFACT, ResumeRefusedError, sameCommit } from "../resume.js";
-import { headCommit } from "../seal.js";
-import { commitSpec } from "../spec-commit.js";
+import { recordedBaseVerification, specCommitOnRecord } from "../../attempts.js";
+import { sweepWorktree } from "./orphans.js";
+import { readPrinciples, readPrinciplesFile } from "../../principles.js";
+import { buildPermissionProfile } from "../../profile.js";
+import { RETAINED_DIFF_ARTIFACT, ResumeRefusedError, sameCommit } from "../../resume.js";
+import { headCommit } from "../../seal.js";
+import { commitSpec } from "../../spec-commit.js";
 import type { TicketRunConfig } from "./config.js";
 import { resetToPullRequest } from "./relevel.js";
 import type { StartedRun } from "./start.js";

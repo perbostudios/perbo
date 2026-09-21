@@ -26,8 +26,8 @@ export type { DeliveredChecksReading, TicketDeliveryState } from "./delivery.js"
 export { GithubCredentialError, requireGithubCredential } from "./github-credential.js";
 export type { GithubCredentialReading } from "./github-credential.js";
 export { acquireServeLock, liveRunLocks, ServeLockedError } from "./lock.js";
-export { BaseSourceSchema, runTicket, TicketRunConfigSchema } from "./loop.js";
-export type { BaseSource, TicketRunResult } from "./loop.js";
+export { BaseSourceSchema, runTicket, TicketRunConfigSchema } from "./loop/index.js";
+export type { BaseSource, TicketRunResult } from "./loop/index.js";
 export { mergeLoopPullRequest } from "./merge.js";
 export type { LoopMergeOutcome } from "./merge.js";
 export { preflight, renderPreflight } from "./preflight.js";

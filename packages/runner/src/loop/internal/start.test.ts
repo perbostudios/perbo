@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
-import { RunRefusedError } from "../refusal.js";
+import { RunRefusedError } from "../../refusal.js";
 import { TicketRunConfigSchema } from "./config.js";
 import type { RunLimits } from "./context.js";
 import { start } from "./start.js";

@@ -13,35 +13,35 @@ import {
 } from "@perbo/contracts";
 import { cleanup, type Workspace } from "@perbo/workspace";
 import { PROMPT_VERSION } from "@perbo/review";
-import { Ledger } from "./loop/ledger.js";
-import { acquireRunLock, type HeldRunLock } from "./lock.js";
-import { pathsWithConflictMarkers } from "./merge-up.js";
-import { sweepWorktree } from "./orphans.js";
-import type { DeliveredChecksReading } from "./delivery.js";
-import type { LoopMergeOutcome } from "./merge.js";
-import { type TicketRunConfig } from "./loop/config.js";
-import { recordAttempt } from "./loop/attempt.js";
-import { briefRound } from "./loop/brief.js";
-import { start } from "./loop/start.js";
-import { confirmContinuation, remediationToContinue } from "./loop/continuation.js";
-import { checkRound } from "./loop/check.js";
-import { publish, publishRelevel, type Delivery } from "./loop/deliver.js";
-import { execute } from "./loop/execute.js";
-import { sealRound } from "./loop/seal.js";
-import { levelBeforeExecutor, levelBeforePublish } from "./loop/level.js";
-import { reviewRound } from "./loop/review.js";
-import { resolvePorts, type LoopPorts, type RunLimits } from "./loop/context.js";
+import { Ledger } from "./internal/ledger.js";
+import { acquireRunLock, type HeldRunLock } from "../lock.js";
+import { pathsWithConflictMarkers } from "./internal/merge-up.js";
+import { sweepWorktree } from "./internal/orphans.js";
+import type { DeliveredChecksReading } from "../delivery.js";
+import type { LoopMergeOutcome } from "../merge.js";
+import { type TicketRunConfig } from "./internal/config.js";
+import { recordAttempt } from "./internal/attempt.js";
+import { briefRound } from "./internal/brief.js";
+import { start } from "./internal/start.js";
+import { confirmContinuation, remediationToContinue } from "./internal/continuation.js";
+import { checkRound } from "./internal/check.js";
+import { publish, publishRelevel, type Delivery } from "./internal/deliver.js";
+import { execute } from "./internal/execute.js";
+import { sealRound } from "./internal/seal.js";
+import { levelBeforeExecutor, levelBeforePublish } from "./internal/level.js";
+import { reviewRound } from "./internal/review.js";
+import { resolvePorts, type LoopPorts, type RunLimits } from "./internal/context.js";
 import {
   applyStep,
   initialRoundState,
   type RoundRecord,
   type Retry,
   type RunOutcome,
-} from "./loop/state.js";
-import { routeConflict, routeResolution, routeStopped } from "./loop/route.js";
-import { provisionRound, provisionRun } from "./loop/provision.js";
-import type { RelevelContext } from "./loop/relevel.js";
-import { verifyRound } from "./loop/verify.js";
+} from "./internal/state.js";
+import { routeConflict, routeResolution, routeStopped } from "./internal/route.js";
+import { provisionRound, provisionRun } from "./internal/provision.js";
+import type { RelevelContext } from "./internal/relevel.js";
+import { verifyRound } from "./internal/verify.js";
 
 /**
  * Contract → worktree → one agent → sealed change set → deterministic checks →
@@ -82,9 +82,9 @@ import { verifyRound } from "./loop/verify.js";
  * merging the base in before anything else could be done with the branch.
  */
 
-export { resolvePorts, type LoopPorts, type RunLimits } from "./loop/context.js";
-export { incompleteReviewCauses } from "./loop/review.js";
-export { type RoundKind, type RoundRecord, type RunOutcome } from "./loop/state.js";
+export { resolvePorts, type LoopPorts, type RunLimits } from "./internal/context.js";
+export { incompleteReviewCauses } from "./internal/review.js";
+export { type RoundKind, type RoundRecord, type RunOutcome } from "./internal/state.js";
 
 export {
   BaseSourceSchema,
@@ -93,7 +93,7 @@ export {
   guardProhibitedPaths,
   type BaseSource,
   type TicketRunConfig,
-} from "./loop/config.js";
+} from "./internal/config.js";
 
 
 export interface TicketRunResult {

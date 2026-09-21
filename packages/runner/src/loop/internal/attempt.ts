@@ -18,22 +18,22 @@ import {
   type TerminationReason,
 } from "@perbo/contracts";
 import type { MaterializedWorkspace } from "@perbo/workspace";
-import type { AgentResult } from "../adapter.js";
-import { executorAccount } from "../account.js";
-import type { BundleStore } from "../bundle.js";
-import type { AttemptCeilings } from "../ceilings.js";
-import { parseDeclines, type Decline } from "../declines.js";
-import type { SweptProcess } from "../orphans.js";
-import type { buildAgentEnvironment } from "../profile.js";
+import type { AgentResult } from "../../adapter.js";
+import { executorAccount } from "../../account.js";
+import type { BundleStore } from "../../bundle.js";
+import type { AttemptCeilings } from "../../ceilings.js";
+import { parseDeclines, type Decline } from "../../declines.js";
+import type { SweptProcess } from "./orphans.js";
+import type { buildAgentEnvironment } from "../../profile.js";
 import {
   EXECUTOR_PROMPT_VERSION,
   RESUMED_EXECUTOR_PROMPT_VERSION,
   conflictPromptVersion,
-} from "../prompt.js";
-import { resumedFromRecord } from "../resume.js";
-import type { SealResult } from "../seal.js";
-import { allowedPathsSentence } from "../shell/index.js";
-import { resetInText, type ProviderReset } from "../transport.js";
+} from "../../prompt.js";
+import { resumedFromRecord } from "../../resume.js";
+import type { SealResult } from "../../seal.js";
+import { allowedPathsSentence } from "../../shell/index.js";
+import { resetInText, type ProviderReset } from "../../transport.js";
 import type { Brief } from "./brief.js";
 import type { TicketRunConfig } from "./config.js";
 import type { Ledger } from "./ledger.js";

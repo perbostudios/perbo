@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewArtifact } from "@perbo/contracts";
 import { incompleteReviewCauses, routeReview } from "./review.js";
-import { finding, makeReview } from "../test-support/records.js";
+import { finding, makeReview } from "../../test-support/records.js";
 
 describe("what made an incomplete review incomplete", () => {
   it("lists the criteria the review could not resolve, in the order it listed them", () => {

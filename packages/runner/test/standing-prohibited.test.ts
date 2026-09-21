@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES } from "../src/admission.js";
-import { TicketRunConfigSchema, guardProhibitedPaths } from "../src/loop.js";
+import { TicketRunConfigSchema, guardProhibitedPaths } from "../src/loop/index.js";
 import { judgePreToolCall, type PreToolGuardState } from "../src/pretool.js";
 import { buildPermissionProfile } from "../src/profile.js";
 

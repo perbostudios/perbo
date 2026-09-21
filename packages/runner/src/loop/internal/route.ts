@@ -1,6 +1,6 @@
 import { formatUsd } from "@perbo/contracts";
 import type { AttemptWait, ExecutionAttempt, TerminationReason } from "@perbo/contracts";
-import { TRANSPORT_RETRY_DELAY_MS, type ProviderReset } from "../transport.js";
+import { TRANSPORT_RETRY_DELAY_MS, type ProviderReset } from "../../transport.js";
 import type { Advance, Retry, RoundKind, Stop } from "./state.js";
 import { mergeFailedDetail } from "./level.js";
 

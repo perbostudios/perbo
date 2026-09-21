@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
 import { scratchDirectories } from "@perbo/test-support";
-import { TicketRunConfigSchema, runTicket, type TicketRunResult } from "../src/loop.js";
+import { TicketRunConfigSchema, runTicket, type TicketRunResult } from "../src/loop/index.js";
 import { makeContract, makeReview } from "../src/test-support/records.js";
 import { runnerRepository } from "../src/test-support/repository.js";
 

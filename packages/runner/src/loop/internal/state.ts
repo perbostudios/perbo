@@ -10,7 +10,7 @@ import type {
 import { attemptId as makeAttemptId } from "@perbo/contracts";
 import type { ClosureVerification } from "@perbo/review";
 import type { Workspace } from "@perbo/workspace";
-import type { Decline } from "../declines.js";
+import type { Decline } from "../../declines.js";
 import type { remediationToContinue } from "./continuation.js";
 
 /**
