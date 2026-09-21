@@ -5,12 +5,17 @@ import {
   StopAnswererSchema,
   StopRoutingSchema,
   UNCHECKED,
+  addRolls,
   commitCarriesArm,
+  costOf,
   deliveryChecksState,
+  dollarAmount,
   failedChecks,
   readD073Verdicts,
   redactCredentials,
+  rollCosts,
   ticketSourceLabel,
+  type CostBasis,
   type DeliveredCheck,
   type DeliveryArm,
   type DeliveryChecksState,
@@ -261,7 +266,7 @@ export function pullRequestBody(args: {
   /** Every closure-verification cost, so the total counts each round's rather than one. */
   verification_costs?: ReadonlyArray<{
     cost_micros: number;
-    cost_basis: ReviewArtifact["model"]["cost_basis"] | "not_incurred";
+    cost_basis: CostBasis;
   }>;
   /**
    * D-065: findings the executor declared no-determinable-practice for. They
@@ -385,45 +390,31 @@ export function pullRequestBody(args: {
     "rollout" in contract ? contract.rollout : "reversible change; rollback is `git revert`";
   const carried = attempt.prior_commits ?? [];
 
-  const costComponents = [
-    ...args.attempts.map((one) => ({
-      kind: "execution" as const,
-      cost_micros: one.usage.cost_micros,
-      cost_basis: one.usage.cost_basis ?? "transport_reported",
-      // An attempt the runner stopped carries the transport total or list-rate
-      // estimate available by the stop, so the sum below is a floor rather
-      // than a total.
-      partial: one.usage.cost_partial === true,
-    })),
-    {
-      kind: "review" as const,
-      cost_micros: review.cost_micros,
-      cost_basis: review.model.cost_basis ?? "provider_list_estimate",
-      partial: false,
-    },
-    ...(args.verification_costs ?? []).map((cost) => ({
-      kind: "verification" as const,
-      ...cost,
-      partial: false,
-    })),
-  ].filter((component) => component.cost_basis !== "not_incurred");
-  const known = costComponents.filter((component) => component.cost_basis !== "unavailable");
-  const unavailableCosts = costComponents.length - known.length;
-  const knownCost = (kind: (typeof costComponents)[number]["kind"]): number =>
-    known
-      .filter((component) => component.kind === kind)
-      .reduce((total, component) => total + component.cost_micros, 0);
-  const executionCost = knownCost("execution");
-  const reviewCost = knownCost("review");
-  const verificationCost = knownCost("verification");
-  const totalCost = executionCost + reviewCost + verificationCost;
-  const reportedCosts = costComponents.filter(
-    (component) => component.cost_basis === "transport_reported",
-  ).length;
-  const estimatedCosts = costComponents.filter(
-    (component) => component.cost_basis === "provider_list_estimate",
-  ).length;
-  const partialCosts = known.filter((component) => component.partial).length;
+  const executionRoll = rollCosts(
+    args.attempts.map((one) =>
+      costOf({
+        micros: one.usage.cost_micros,
+        basis: one.usage.cost_basis,
+        // An attempt the runner stopped carries the transport total or list-rate
+        // estimate available by the stop, so the sum below is a floor rather
+        // than a total.
+        partial: one.usage.cost_partial === true,
+      }),
+    ),
+  );
+  const reviewRoll = rollCosts([
+    costOf({ micros: review.cost_micros, basis: review.model.cost_basis }),
+  ]);
+  const verificationRoll = rollCosts(
+    (args.verification_costs ?? []).map((one) =>
+      costOf({ micros: one.cost_micros, basis: one.cost_basis }),
+    ),
+  );
+  const cost = [executionRoll, reviewRoll, verificationRoll].reduce(addRolls);
+  const unavailableCosts = cost.unavailable;
+  const reportedCosts = cost.reported;
+  const estimatedCosts = cost.estimated;
+  const partialCosts = cost.partial;
   const partialNote =
     partialCosts === 0
       ? ""
@@ -438,24 +429,23 @@ export function pullRequestBody(args: {
    * the contradiction a person merging cannot check.
    */
   const rounds = attempt.remediation_round;
-  const dollars = (micros: number) => (micros / 1_000_000).toFixed(4);
   const costLines =
     unavailableCosts === 0
       ? [
-          `Execution ${dollars(executionCost)} USD across ${args.attempts.length} attempt${args.attempts.length === 1 ? "" : "s"}; ` +
-            `review ${dollars(reviewCost)} USD; ` +
-            `closure verification ${dollars(verificationCost)} USD; ` +
-            `total ${dollars(totalCost)} USD.`,
+          `Execution ${dollarAmount(executionRoll.micros, 4)} USD across ${args.attempts.length} attempt${args.attempts.length === 1 ? "" : "s"}; ` +
+            `review ${dollarAmount(reviewRoll.micros, 4)} USD; ` +
+            `closure verification ${dollarAmount(verificationRoll.micros, 4)} USD; ` +
+            `total ${dollarAmount(cost.micros, 4)} USD.`,
           `Cost coverage complete: ${reportedCosts} transport-reported and ${estimatedCosts} ` +
             `provider-list-estimated component(s).${partialNote}`,
         ]
       : [
-          `Known priced subtotal ${dollars(totalCost)} USD ` +
-            `(execution ${dollars(executionCost)} + review ${dollars(reviewCost)} + ` +
-            `closure verification ${dollars(verificationCost)}).`,
+          `Known priced subtotal ${dollarAmount(cost.micros, 4)} USD ` +
+            `(execution ${dollarAmount(executionRoll.micros, 4)} + review ${dollarAmount(reviewRoll.micros, 4)} + ` +
+            `closure verification ${dollarAmount(verificationRoll.micros, 4)}).`,
           `Known priced components: ${reportedCosts} transport-reported and ${estimatedCosts} ` +
             "provider-list-estimated component(s).",
-          `Full all-in cost unavailable: ${unavailableCosts} of ${costComponents.length} ` +
+          `Full all-in cost unavailable: ${unavailableCosts} of ${cost.components} ` +
             `model-cost component(s) have no defensible dollar basis.${partialNote}`,
         ];
 

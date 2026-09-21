@@ -12,7 +12,6 @@ export {
 } from "./attempt.js";
 export type {
   AgentInvocation,
-  AttemptCostBasis,
   AttemptWait,
   BriefReinjection,
   CommandRecord,
@@ -45,6 +44,30 @@ export {
 export type { CheckKind, CheckNode, CheckResult, CheckStatus } from "./check.js";
 export { assertReviewerContextKind, mayOccupyInstructionPosition } from "./context.js";
 export type { ContextItem, ContextItemKind, TrustTier } from "./context.js";
+export {
+  addRolls,
+  CostBasisSchema,
+  costLabel,
+  costOf,
+  costPhrase,
+  CostRollSchema,
+  CostSchema,
+  dollarAmount,
+  formatUsd,
+  MICROS_PER_DOLLAR,
+  ReviewCostBasisSchema,
+  rollCosts,
+  rollLabel,
+} from "./cost.js";
+export type {
+  Cost,
+  CostBasis,
+  CostInput,
+  CostRoll,
+  PhraseOptions,
+  ReviewCostBasis,
+  UsdDigits,
+} from "./cost.js";
 export { findCredentials, redactCredentials } from "./credential.js";
 export {
   EXECUTOR_SKILL_REVISION,
@@ -205,7 +228,6 @@ export {
   NodeReviewsSchema,
   REVIEW_ARTIFACT_SCHEMA_VERSION,
   ReviewArtifactSchema,
-  ReviewCostBasisSchema,
   ReviewDecisionSchema,
   ReviewRouteSchema,
   routeForReview,
@@ -227,7 +249,6 @@ export type {
   NodeReview,
   RejectedVerdict,
   ReviewArtifact,
-  ReviewCostBasis,
   ReviewDecision,
   ReviewError,
   ReviewRouting,

@@ -1,5 +1,6 @@
 import { closureVerifySchema, type ClosureVerification } from "@perbo/review";
 import { createModel, type Model } from "@perbo/model";
+import { formatUsd } from "@perbo/contracts";
 import type {
   CheckResult,
   ExecutionAttempt,
@@ -189,8 +190,8 @@ export function routeVerification(facts: VerificationFacts): Step {
         detail:
           closedAndRemaining +
           `the ticket has spent ` +
-          `$${(facts.spend.micros / 1_000_000).toFixed(2)} of the ` +
-          `$${(facts.budget / 1_000_000).toFixed(2)} in ` +
+          `${formatUsd(facts.spend.micros, 2)} of the ` +
+          `${formatUsd(facts.budget, 2)} in ` +
           `limits.limits.ticket_cost_micros (${configPath}). Still open: ` +
           `${openKeys.join(", ")}` +
           declinedNote,

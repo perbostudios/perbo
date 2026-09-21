@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { ContextItemSchema } from "./context.js";
-import { ReviewCostBasisSchema } from "./review.js";
+import { CostBasisSchema } from "./cost.js";
 
 /**
  * The immutable run bundle (ADR-0013 as amended, ADR-0026, SCP-048).
@@ -66,12 +66,6 @@ export type RedactionRecord = z.infer<typeof RedactionRecordSchema>;
 
 export const RUN_BUNDLE_SCHEMA_VERSION = 1;
 
-export const RunCostBasisSchema = z.union([
-  ReviewCostBasisSchema,
-  z.literal("not_incurred"),
-]);
-export type RunCostBasis = z.infer<typeof RunCostBasisSchema>;
-
 /** `bundle_` and sixteen hex digits, as `bundleId` mints it. */
 export const BundleIdSchema = z
   .string()
@@ -103,7 +97,7 @@ export const RunBundleSchema = z.strictObject({
     output_tokens: z.number().int().min(0),
     cost_micros: z.number().int().min(0),
     /** A v1 bundle can represent execution, review or verification, so its old basis is unknowable. */
-    cost_basis: RunCostBasisSchema.default("unavailable"),
+    cost_basis: CostBasisSchema.default("unavailable"),
     /**
      * The subject was stopped before its transport wrote a final accounting
      * line, so cost is either its last running transport total or a list-rate

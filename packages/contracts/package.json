@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    },
     "./executor-skills": {
       "types": "./dist/executor-skills.d.ts",
       "default": "./dist/executor-skills.js"
@@ -72,6 +76,7 @@
     "@perbo/tsconfig": "workspace:*",
     "@eslint/js": "catalog:",
     "@types/node": "catalog:",
+    "esbuild": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",
     "typescript-eslint": "catalog:",

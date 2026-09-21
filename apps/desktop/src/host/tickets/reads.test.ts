@@ -55,7 +55,15 @@ const ticket = (over: Record<string, unknown> = {}): Record<string, unknown> => 
 });
 const report = {
   attempts: [],
-  total_cost: { micros: 0, partial: 0, unavailable: 0 },
+  total_cost: {
+    micros: 0,
+    components: 0,
+    priced: 0,
+    reported: 0,
+    estimated: 0,
+    unavailable: 0,
+    partial: 0,
+  },
   verdicts: [],
 };
 const ok = (stdout: string): ProcessResult => ({ code: 0, stdout, stderr: "", cancelled: false });

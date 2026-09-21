@@ -47,7 +47,7 @@ describe("usageReport", () => {
           {
             attempt_id: "att_1",
             created_at: new Date().toISOString(),
-            usage: { cost_micros: 1_500_000, cost_basis: "metered" },
+            usage: { cost_micros: 1_500_000, cost_basis: "transport_reported" },
           },
         ],
       }),

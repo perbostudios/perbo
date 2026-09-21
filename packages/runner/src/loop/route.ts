@@ -1,3 +1,4 @@
+import { formatUsd } from "@perbo/contracts";
 import type { AttemptWait, ExecutionAttempt, TerminationReason } from "@perbo/contracts";
 import { TRANSPORT_RETRY_DELAY_MS, type ProviderReset } from "../transport.js";
 import type { Advance, Retry, RoundKind, Stop } from "./state.js";
@@ -134,8 +135,8 @@ export function routeStopped(facts: StoppedFacts): Stop | Retry {
         say:
           `${termination.reason} on ${facts.attempt.attempt_id}; its work is sealed on ` +
           `${facts.branch}, and run ${facts.runNumber} attempt ${facts.attemptsSoFar + 1} ` +
-          `continues over it — $${(spend.micros / 1_000_000).toFixed(2)} of the ` +
-          `$${((budget ?? 0) / 1_000_000).toFixed(2)} ticket budget is spent`,
+          `continues over it — ${formatUsd(spend.micros, 2)} of the ` +
+          `${formatUsd(budget ?? 0, 2)} ticket budget is spent`,
       };
     }
     return {
@@ -155,8 +156,8 @@ export function routeStopped(facts: StoppedFacts): Stop | Retry {
               ? `No attempt of ${facts.ticketKey} carries a dollar figure, so the ` +
                 "limits.limits.ticket_cost_micros budget cannot be measured and the run does not " +
                 "start another attempt."
-              : `The ticket has spent $${(spend.micros / 1_000_000).toFixed(2)} of the ` +
-                `$${(budget / 1_000_000).toFixed(2)} in ` +
+              : `The ticket has spent ${formatUsd(spend.micros, 2)} of the ` +
+                `${formatUsd(budget, 2)} in ` +
                 `limits.limits.ticket_cost_micros (${configPath}), so no further attempt ` +
                 `continues it` +
                 (spend.unpriced > 0

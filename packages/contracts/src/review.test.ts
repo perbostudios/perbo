@@ -8,7 +8,8 @@ import {
   exitCodeForDecision,
   findingKey,
 } from "./review.js";
-import { RunBundleSchema, RunCostBasisSchema } from "./runbundle.js";
+import { CostBasisSchema } from "./cost.js";
+import { RunBundleSchema } from "./runbundle.js";
 
 describe("finding identity", () => {
   const parts = { rule_id: "criterion.unverified", criterion_id: "ac_2", file: "a.ts", symbol: "f" };
@@ -92,8 +93,8 @@ describe("cost basis on durable usage records", () => {
   });
 
   it("distinguishes a run with no model call from an unknown model charge", () => {
-    expect(RunCostBasisSchema.parse("not_incurred")).toBe("not_incurred");
-    expect(RunCostBasisSchema.parse("unavailable")).toBe("unavailable");
+    expect(CostBasisSchema.parse("not_incurred")).toBe("not_incurred");
+    expect(CostBasisSchema.parse("unavailable")).toBe("unavailable");
     const historical = RunBundleSchema.pick({ usage: true }).parse({
       usage: {
         input_tokens: 1,
