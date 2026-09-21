@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "../usage-error.js";
 import type { Streams } from "../streams.js";
 import { parseArgv, switchFlag, valueFlag, type FlagTable, type Grammar } from "./grammar.js";
 import { USAGE } from "./usage.js";
-import { runCommandLine } from "./terminal.js";
+import { runCommandLine, runEntryPoint, type EntryPoint } from "./terminal.js";
+import { VERSION } from "../version.js";
 import type { NarratedCommand, ReportCommand, TerminalCommand } from "./table.js";
 
 /**
@@ -170,5 +172,99 @@ describe("whatever the command is", () => {
   it("is held by the table whichever kind it is", () => {
     const table: readonly TerminalCommand[] = [reporting, narrating];
     expect(table.map((command) => command.name)).toEqual(["list", "sync"]);
+  });
+});
+
+describe("the shell around the table", () => {
+  /** What the program writes, captured: the shell writes to this process's own streams. */
+  function written(): { out: string[]; err: string[]; restore: () => void } {
+    const out: string[] = [];
+    const err: string[] = [];
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      out.push(String(chunk));
+      return true;
+    });
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      err.push(String(chunk));
+      return true;
+    });
+    return {
+      out,
+      err,
+      restore: () => {
+        stdout.mockRestore();
+        stderr.mockRestore();
+      },
+    };
+  }
+
+  /** A table of one, whose command records the repository it was run with. */
+  function table(): { entry: EntryPoint; ran: string[] } {
+    const ran: string[] = [];
+    const recording: ReportCommand<DemoInput, DemoOutput, DemoReport, DemoDeps> = {
+      ...reporting,
+      run(input) {
+        ran.push(input.repo);
+        return { repo: input.repo, seen: "nothing" };
+      },
+    };
+    return { entry: { demo: recording as TerminalCommand }, ran };
+  }
+
+  it("answers for itself before any command: help, version and a word it does not carry", async () => {
+    const { entry, ran } = table();
+    const { out, err, restore } = written();
+    try {
+      expect(await runEntryPoint([], entry)).toBe(EXIT_CODES.usage_or_input_error);
+      expect(await runEntryPoint(["--help"], entry)).toBe(0);
+      expect(await runEntryPoint(["--version"], entry)).toBe(0);
+      expect(await runEntryPoint(["nope"], entry)).toBe(EXIT_CODES.usage_or_input_error);
+    } finally {
+      restore();
+    }
+    expect(err.join("")).toContain(`perbo ${VERSION}\n`);
+    expect(err.join("")).toContain("unknown command 'nope'");
+    expect(out).toEqual([]);
+    expect(ran).toEqual([]);
+  });
+
+  it("gives a line that asks for help to the command, which prints it and runs nothing", async () => {
+    const { entry, ran } = table();
+    const { err, restore } = written();
+    try {
+      expect(await runEntryPoint(["demo", "--help"], entry)).toBe(0);
+    } finally {
+      restore();
+    }
+    expect(err.join("")).toBe(USAGE);
+    expect(ran).toEqual([]);
+  });
+
+  it("hands a refused line back as a rejection, never as a throw out of the call", async () => {
+    // What a refusal exits as is `startEntryPoint`'s one answer and it reads
+    // it from the promise, so a command that refuses its line before it runs
+    // anything has to arrive there rather than past it.
+    const { entry } = table();
+    const { restore } = written();
+    try {
+      await expect(runEntryPoint(["demo", "--nope"], entry)).rejects.toThrow(UsageError);
+    } finally {
+      restore();
+    }
+  });
+
+  it("leaves a `--help` a flag took as its value to that flag, and runs the command", async () => {
+    // The shell reads no flag of its own past the command name: which tokens
+    // are flags is the command's grammar's answer, so a value is a value
+    // (D-NEW-cli-grammar).
+    const { entry, ran } = table();
+    const { err, restore } = written();
+    try {
+      expect(await runEntryPoint(["demo", "--repo", "--help"], entry)).toBe(2);
+    } finally {
+      restore();
+    }
+    expect(ran).toEqual(["--help"]);
+    expect(err.join("")).not.toContain(USAGE);
   });
 });

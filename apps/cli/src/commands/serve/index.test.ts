@@ -8,7 +8,7 @@ import { acquireServeLock } from "@perbo/runner";
 import { UsageError } from "../../usage-error.js";
 import { admitCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
-import { ServeTickSchema, parseServeArgs, processDeps, serveCommandLine, type ServeDeps } from "./index.js";
+import { ServeTickSchema, processDeps, serveCommandLine, type ServeDeps } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { readEndpoint } from "../../endpoint/index.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
@@ -140,6 +140,9 @@ function fakes(overrides: Partial<ServeDeps> = {}): Fakes {
   return { spawned, fetched, synced, listed, drafted, deps };
 }
 
+/** The input one line means, which is what the assertions below are about. */
+const serveLine = (argv: readonly string[]) => serveCommandLine.read(argv).input;
+
 /** The one moment every queue here is asked to run at, so a record's dates are the test's. */
 const AT = new Date("2026-09-10T12:00:00.000Z");
 
@@ -155,15 +158,15 @@ async function serveOnce(repo: string, deps: ServeDeps, extra: string[] = [], pa
   return { code, streams };
 }
 
-describe("parseServeArgs", () => {
+describe("the line a queue is asked for by", () => {
   it("refuses an unknown flag and a non-numeric interval", () => {
-    expect(() => parseServeArgs(["--repo", ".", "--forever"])).toThrow(UsageError);
-    expect(() => parseServeArgs(["--interval", "soon"])).toThrow(UsageError);
-    expect(() => parseServeArgs(["--interval", "0"])).toThrow(UsageError);
+    expect(() => serveLine(["--repo", ".", "--forever"])).toThrow(UsageError);
+    expect(() => serveLine(["--interval", "soon"])).toThrow(UsageError);
+    expect(() => serveLine(["--interval", "0"])).toThrow(UsageError);
   });
 
   it("defaults to a minute between ticks, no publish, and running until stopped", () => {
-    expect(parseServeArgs([])).toEqual({
+    expect(serveLine([])).toEqual({
       repo: ".",
       store: null,
       publish: false,
@@ -172,14 +175,14 @@ describe("parseServeArgs", () => {
       json: false,
       noEndpoint: false,
     });
-    expect(parseServeArgs(["--interval", "5s", "--publish", "--once", "--json"])).toMatchObject({
+    expect(serveLine(["--interval", "5s", "--publish", "--once", "--json"])).toMatchObject({
       publish: true,
       once: true,
       intervalMs: 5_000,
       json: true,
     });
-    expect(parseServeArgs(["--interval", "2m"]).intervalMs).toBe(120_000);
-    expect(parseServeArgs(["--interval", "1500"]).intervalMs).toBe(1500);
+    expect(serveLine(["--interval", "2m"]).intervalMs).toBe(120_000);
+    expect(serveLine(["--interval", "1500"]).intervalMs).toBe(1500);
   });
 });
 

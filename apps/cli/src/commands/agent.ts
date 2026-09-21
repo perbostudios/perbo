@@ -68,20 +68,6 @@ const AGENT_GRAMMAR: Grammar<typeof AGENT_FLAGS> = {
   unknownFlagHint: "arguments for the provider go after --",
 };
 
-export function parseAgentArgs(argv: readonly string[]): AgentArgs {
-  const line = parseArgv(AGENT_GRAMMAR, argv);
-  const provider = line.flags["--provider"] ?? "claude";
-  if (!(AGENT_PROVIDERS as readonly string[]).includes(provider)) {
-    throw new UsageError(`--provider takes ${AGENT_PROVIDERS.join(" or ")} (got '${provider}')`);
-  }
-  return {
-    repo: line.flags["--repo"] ?? ".",
-    store: line.flags["--store"] ?? null,
-    provider: provider as AgentProvider,
-    passthrough: [...line.passthrough],
-  };
-}
-
 export interface AgentLaunch {
   command: string;
   argv: string[];
@@ -258,6 +244,21 @@ export const agentCommandLine: NarratedCommand<AgentArgs, Record<string, never>,
   name: "agent",
   grammars: [AGENT_GRAMMAR],
   grammarFor: () => AGENT_GRAMMAR,
-  read: (argv) => ({ input: parseAgentArgs(argv), output: {} }),
+  read(argv) {
+    const line = parseArgv(AGENT_GRAMMAR, argv);
+    const provider = line.flags["--provider"] ?? "claude";
+    if (!(AGENT_PROVIDERS as readonly string[]).includes(provider)) {
+      throw new UsageError(`--provider takes ${AGENT_PROVIDERS.join(" or ")} (got '${provider}')`);
+    }
+    return {
+      input: {
+        repo: line.flags["--repo"] ?? ".",
+        store: line.flags["--store"] ?? null,
+        provider: provider as AgentProvider,
+        passthrough: [...line.passthrough],
+      },
+      output: {},
+    };
+  },
   run: (input, _output, context) => agent(input, context),
 };

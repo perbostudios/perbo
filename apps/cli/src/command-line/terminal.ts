@@ -7,6 +7,7 @@ import type { NarratedCommand, ReportCommand, TerminalCommand } from "./table.js
 import type { Streams } from "../streams.js";
 import { asksForHelp } from "./grammar.js";
 import { USAGE } from "./usage.js";
+import { VERSION } from "../version.js";
 
 /**
  * The shell the entry point runs inside: help, version, an unknown command,
@@ -14,22 +15,8 @@ import { USAGE } from "./usage.js";
  * line into one command's typed input and its answer back into bytes.
  */
 
-/**
- * What `perbo` can be asked to do.
- *
- * Named by their union rather than as strings, so a table that lists a command
- * its dispatch does not answer fails to compile instead of at the user.
- */
-export interface EntryPoint<Command extends string = string> {
-  /** The help, which names the commands and nothing else. */
-  usage: string;
-  /** The commands it carries. */
-  commands: readonly Command[];
-  /** The version reported by `--version`. */
-  version: string;
-  /** Run one of {@link EntryPoint.commands}. */
-  dispatch(command: Command, rest: string[], streams: Streams): Promise<number> | number;
-}
+/** The commands an entry point carries, by the name each is typed as. */
+export type EntryPoint = Readonly<Record<string, TerminalCommand>>;
 
 /** The three writes a command is given, over this process's own streams. */
 export function processStreams(): Streams {
@@ -47,27 +34,33 @@ export function processStreams(): Streams {
  * is piped and a human rendering when it is a terminal; progress, warnings and
  * diagnostics always go to stderr. `perbo review … > review.json` therefore
  * yields a valid artifact under every outcome, including `error`.
+ *
+ * `async`, so that a command that refuses its line synchronously refuses as a
+ * rejected promise rather than as a throw out of this call: what a refusal
+ * exits as is {@link startEntryPoint}'s one answer, and it reads it from the
+ * promise.
  */
 export async function runEntryPoint(argv: string[], entry: EntryPoint): Promise<number> {
   const [command, ...rest] = argv;
 
   if (command === undefined || command === "--help" || command === "-h" || command === "help") {
-    process.stderr.write(entry.usage);
+    process.stderr.write(USAGE);
     return command === undefined ? EXIT_CODES.usage_or_input_error : 0;
   }
   if (command === "--version" || command === "-v") {
-    process.stderr.write(`perbo ${entry.version}\n`);
+    process.stderr.write(`perbo ${VERSION}\n`);
     return 0;
   }
-  if (!entry.commands.includes(command)) {
-    process.stderr.write(`error: unknown command '${command}'\n\n${entry.usage}`);
+  const carried = Object.hasOwn(entry, command) ? entry[command] : undefined;
+  if (carried === undefined) {
+    process.stderr.write(`error: unknown command '${command}'\n\n${USAGE}`);
     return EXIT_CODES.usage_or_input_error;
   }
-  if (rest.includes("--help") || rest.includes("-h")) {
-    process.stderr.write(entry.usage);
-    return 0;
-  }
-  return entry.dispatch(command, rest, processStreams());
+  // `--help` past here is the command's own grammar's answer, so a token
+  // consumed as a value is that value and one after `--` belongs to whatever
+  // `--` introduced: `perbo admit --outcome --help` admits and
+  // `perbo agent -- --help` asks the provider.
+  return runCommandLine(carried, { argv: rest, streams: processStreams(), cwd: process.cwd() });
 }
 
 /**

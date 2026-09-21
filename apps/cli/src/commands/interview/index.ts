@@ -843,22 +843,6 @@ const INTERVIEW_GRAMMAR: Grammar<typeof INTERVIEW_FLAGS> = {
   afterDoubleDash: "positionals",
 };
 
-export function parseInterviewArgs(argv: readonly string[]): InterviewArgs {
-  const line = parseArgv(INTERVIEW_GRAMMAR, argv);
-  const provider = line.flags["--provider"] ?? "claude";
-  if (!(INTERVIEW_PROVIDERS as readonly string[]).includes(provider)) {
-    throw new UsageError(`--provider takes ${INTERVIEW_PROVIDERS.join(" or ")} (got '${provider}')`);
-  }
-  return {
-    repo: line.flags["--repo"] ?? ".",
-    store: line.flags["--store"] ?? null,
-    spec: line.flags["--spec"] ?? null,
-    session: line.flags["--session"] ?? null,
-    model: line.flags["--model"] ?? null,
-    provider: provider as InterviewProvider,
-  };
-}
-
 /**
  * The three places this session may write, as globs relative to the repository.
  *
@@ -2136,6 +2120,25 @@ export const interviewCommandLine: NarratedCommand<
   name: "interview",
   grammars: [INTERVIEW_GRAMMAR],
   grammarFor: () => INTERVIEW_GRAMMAR,
-  read: (argv) => ({ input: parseInterviewArgs(argv), output: {} }),
+  read(argv) {
+    const line = parseArgv(INTERVIEW_GRAMMAR, argv);
+    const provider = line.flags["--provider"] ?? "claude";
+    if (!(INTERVIEW_PROVIDERS as readonly string[]).includes(provider)) {
+      throw new UsageError(
+        `--provider takes ${INTERVIEW_PROVIDERS.join(" or ")} (got '${provider}')`,
+      );
+    }
+    return {
+      input: {
+        repo: line.flags["--repo"] ?? ".",
+        store: line.flags["--store"] ?? null,
+        spec: line.flags["--spec"] ?? null,
+        session: line.flags["--session"] ?? null,
+        model: line.flags["--model"] ?? null,
+        provider: provider as InterviewProvider,
+      },
+      output: {},
+    };
+  },
   run: (input, _output, context) => interview(input, context),
 };

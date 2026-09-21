@@ -157,8 +157,9 @@ export const USAGE = `perbo — contract to pull request, locally
       never lower it. Admitting takes ownership of this one thing; a backlog
       is never migrated.
 
-  perbo approve PRB-1
-      Approve the contract. It is immutable from that moment. Records the
+  perbo approve PRB-1 [--repo .] [--store <dir>] [--json]
+      Approve the contract; --json writes it on stdout and nothing else.
+      It is immutable from that moment. Records the
       person's time from first rendering to approval and how many fields they
       changed, which is the admission-friction instrument. For work admitted
       from a spec it also records what that spec said at this moment: its bytes'
@@ -172,12 +173,12 @@ export const USAGE = `perbo — contract to pull request, locally
       that has gone. Commit what you are carrying and rebuild the index before
       you approve; nothing after approval can take that half of the baseline.
 
-  perbo list [--all] [--json]
+  perbo list [--all] [--json] [--repo .] [--store <dir>]
       The admitted work, and where each piece is. --json writes the same
       listing as one JSON document on stdout and nothing else; its shape is
       docs/design/list-json.md.
 
-  perbo principle add "perbo list shows open tickets; finished ones need --all." [--repo .]
+  perbo principle add "perbo list shows open tickets; finished ones need --all." [--repo .] [--store <dir>]
       Record a product answer no determinable practice could settle;
       every later executor brief consults it. \`perbo principle list\` prints them.
 
@@ -296,7 +297,7 @@ export const USAGE = `perbo — contract to pull request, locally
       session holds no loop authority. Arguments after -- go to the provider.
 
   perbo interview --repo . --spec specs/<slug> [--session <id>] [--model <id>]
-                   [--provider claude|codex]
+                   [--provider claude|codex] [--store <dir>]
       Interview yourself about a piece of work with your own session — Claude
       Code through the Claude Agent SDK, or Codex through codex app-server —
       and write the spec. It reads anything and runs read-only commands; it
@@ -322,6 +323,8 @@ export const USAGE = `perbo — contract to pull request, locally
       --force re-reads it anyway. A one-time backfill, not a standing sync.
 
   perbo edit PRB-1 [--outcome "..."] [--criterion "..."] [--path "..."]
+                   [--prohibit "..."] [--manual-reviewer <name>]
+                   [--manual-reason <why>] [--repo .] [--store <dir>] [--json]
   perbo edit PRB-1 --graph-edit '<json>' [--author you|interview]
   perbo edit PRB-1 --undo <n>
       Open the contract in $VISUAL or $EDITOR before approval and re-validate
@@ -345,7 +348,7 @@ export const USAGE = `perbo — contract to pull request, locally
       One edit at a time: --graph-edit, --undo and the flag edits are separate
       paths and cannot be combined.
 
-  perbo inspect PRB-1 [--attempt <id>] [--json]
+  perbo inspect PRB-1 [--attempt <id>] [--json] [--repo .] [--store <dir>]
   perbo inspect <local run id> [--attempt <id>] [--json]
   perbo inspect PRB-1 --verify <attempt id> [--json]
       Read a ticket's — or a local run's — attempts back from the store: how
@@ -381,7 +384,7 @@ export const USAGE = `perbo — contract to pull request, locally
 
   perbo baseline start "<title>" [--ref owner/repo#N]
   perbo baseline pause | resume | stop [--pr <url>] [--note "..."]
-  perbo baseline abandon [--reason "..."] | list [--json]
+  perbo baseline abandon [--reason "..."] | list [--json] [--repo .] [--store <dir>]
       The direct-agent wall clock to compare against: "start work" to
       "pull request opened", pauses excluded, in <repo>/.perbo/baseline.json.
       Capture it before the first ticket runs — the file records whether that
@@ -529,6 +532,8 @@ Optional for admit
   --source owner/repo#412 where the work was before admission
   --source-url <url>      its link
   --approve               approve the contract as part of admitting it
+  --json                  write the ticket, its contract and the draft as one
+                          JSON document on stdout
 
 Required for review
   --contract <file>       the approved PlanContract
@@ -571,6 +576,7 @@ Optional for review
                           from nothing else — never the diff or the plan's text
   --json                  emit JSON on stdout even when it is a terminal
   --no-color              never emit ANSI colour
+  --color                 emit it even where it would be suppressed
   --quiet                 suppress progress on stderr
 
 Streams

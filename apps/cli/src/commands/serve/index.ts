@@ -131,23 +131,6 @@ const SERVE_GRAMMAR: Grammar<typeof SERVE_FLAGS> = {
   afterDoubleDash: "positionals",
 };
 
-export function parseServeArgs(argv: readonly string[]): ServeArgs {
-  const line = parseArgv(SERVE_GRAMMAR, argv);
-  const interval = line.flags["--interval"];
-  return {
-    repo: line.flags["--repo"] ?? ".",
-    store: line.flags["--store"] ?? null,
-    // Publication authority is a person's own flag, typed here and carried on
-    // every run this queue starts (D-079). Nothing else on the line can set
-    // it: a value is a value, whatever it is shaped like.
-    publish: line.flags["--publish"] === true,
-    once: line.flags["--once"] === true,
-    intervalMs: interval === undefined ? DEFAULT_INTERVAL_MS : parseInterval(interval),
-    json: line.flags["--json"] === true,
-    noEndpoint: line.flags["--no-endpoint"] === true,
-  };
-}
-
 /**
  * Every process the queue would start, as functions, so a test can hand in
  * fakes that record what they were asked and the queue's decisions can be read
@@ -1040,6 +1023,24 @@ export const serveCommandLine: NarratedCommand<
   name: "serve",
   grammars: [SERVE_GRAMMAR],
   grammarFor: () => SERVE_GRAMMAR,
-  read: (argv) => ({ input: parseServeArgs(argv), output: {} }),
+  read(argv) {
+    const line = parseArgv(SERVE_GRAMMAR, argv);
+    const interval = line.flags["--interval"];
+    return {
+      input: {
+        repo: line.flags["--repo"] ?? ".",
+        store: line.flags["--store"] ?? null,
+        // Publication authority is a person's own flag, typed here and carried
+        // on every run this queue starts (D-079). Nothing else on the line can
+        // set it: a value is a value, whatever it is shaped like.
+        publish: line.flags["--publish"] === true,
+        once: line.flags["--once"] === true,
+        intervalMs: interval === undefined ? DEFAULT_INTERVAL_MS : parseInterval(interval),
+        json: line.flags["--json"] === true,
+        noEndpoint: line.flags["--no-endpoint"] === true,
+      },
+      output: {},
+    };
+  },
   run: (input, _output, context) => serve(input, context),
 };

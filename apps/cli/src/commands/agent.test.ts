@@ -7,7 +7,6 @@ import { UsageError } from "../usage-error.js";
 import {
   agentCommandLine,
   agentLaunch,
-  parseAgentArgs,
   sweepStaleLaunchFiles,
   type AgentLaunch,
 } from "./agent.js";
@@ -46,17 +45,20 @@ function repository(served: boolean): string {
   return dir;
 }
 
-describe("parseAgentArgs", () => {
+/** The input one line means, which is what the assertions below are about. */
+const agentLine = (argv: readonly string[]) => agentCommandLine.read(argv).input;
+
+describe("the line a session is asked for by", () => {
   it("takes a provider and passes everything after -- through", () => {
-    expect(parseAgentArgs([])).toEqual({ repo: ".", store: null, provider: "claude", passthrough: [] });
-    expect(parseAgentArgs(["--provider", "codex", "--", "--model", "gpt-5.4", "-a"])).toEqual({
+    expect(agentLine([])).toEqual({ repo: ".", store: null, provider: "claude", passthrough: [] });
+    expect(agentLine(["--provider", "codex", "--", "--model", "gpt-5.4", "-a"])).toEqual({
       repo: ".",
       store: null,
       provider: "codex",
       passthrough: ["--model", "gpt-5.4", "-a"],
     });
-    expect(() => parseAgentArgs(["--provider", "cursor"])).toThrow(UsageError);
-    expect(() => parseAgentArgs(["--model", "x"])).toThrow(/after --/);
+    expect(() => agentLine(["--provider", "cursor"])).toThrow(UsageError);
+    expect(() => agentLine(["--model", "x"])).toThrow(/after --/);
   });
 });
 

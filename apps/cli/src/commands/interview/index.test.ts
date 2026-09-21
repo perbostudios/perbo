@@ -16,7 +16,6 @@ import {
   INTERVIEW_SESSION_FILE,
   INTERVIEW_TOOL_NAMES,
   interviewOrientation,
-  parseInterviewArgs,
   interviewCommandLine,
   type InterviewSession,
 } from "./index.js";
@@ -110,9 +109,12 @@ async function interview(
   return { code, streams, sdk };
 }
 
-describe("parseInterviewArgs", () => {
+/** The input one line means, which is what the assertions below are about. */
+const interviewLine = (argv: readonly string[]) => interviewCommandLine.read(argv).input;
+
+describe("the line an interview is asked for by", () => {
   it("takes the repository, the spec, a session to resume, a model and a provider", () => {
-    expect(parseInterviewArgs(["--repo", "..", "--spec", "specs/x", "--session", "s1", "--model", "claude-opus-5"])).toEqual({
+    expect(interviewLine(["--repo", "..", "--spec", "specs/x", "--session", "s1", "--model", "claude-opus-5"])).toEqual({
       repo: "..",
       store: null,
       spec: "specs/x",
@@ -120,10 +122,10 @@ describe("parseInterviewArgs", () => {
       model: "claude-opus-5",
       provider: "claude",
     });
-    expect(parseInterviewArgs(["--provider", "codex"]).provider).toBe("codex");
-    expect(() => parseInterviewArgs(["--provider", "gemini"])).toThrow(/claude or codex/);
-    expect(() => parseInterviewArgs(["--approve"])).toThrow(UsageError);
-    expect(() => parseInterviewArgs(["--spec"])).toThrow(/requires a value/);
+    expect(interviewLine(["--provider", "codex"]).provider).toBe("codex");
+    expect(() => interviewLine(["--provider", "gemini"])).toThrow(/claude or codex/);
+    expect(() => interviewLine(["--approve"])).toThrow(UsageError);
+    expect(() => interviewLine(["--spec"])).toThrow(/requires a value/);
     // The two the interview runs on, spelled as `perbo agent` spells them.
     expect([...INTERVIEW_PROVIDERS]).toEqual(["claude", "codex"]);
   });

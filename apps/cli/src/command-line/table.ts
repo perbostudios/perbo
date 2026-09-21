@@ -1,6 +1,22 @@
 import type { CommandContext, CommandOutput, CommandReport } from "../command.js";
 import type { Grammar } from "./grammar.js";
 import type { CommandName } from "./names.js";
+import { admitCommandLine, approveCommandLine, listCommandLine } from "../commands/admit.js";
+import { agentCommandLine } from "../commands/agent.js";
+import { baselineCommandLine } from "../commands/baseline/index.js";
+import { editCommandLine } from "../commands/edit/index.js";
+import { escapesCommandLine } from "../commands/escapes/index.js";
+import { indexCommandLine } from "../commands/symbol-index.js";
+import { inspectCommandLine } from "../commands/inspect.js";
+import { interviewCommandLine } from "../commands/interview/index.js";
+import { mcpCommandLine } from "../commands/mcp.js";
+import { principleCommandLine } from "../commands/principle.js";
+import { reviewCommandLine } from "../commands/review/index.js";
+import { doctorCommandLine, executeCommandLine } from "../commands/run/index.js";
+import { serveCommandLine } from "../commands/serve/index.js";
+import { stopsCommandLine } from "../commands/stops.js";
+import { syncCommandLine } from "../commands/sync.js";
+import { verdictCommandLine } from "../commands/verdict/index.js";
 
 /**
  * What a command is, as the table holds it: a name, the grammars it reads a
@@ -60,3 +76,43 @@ export interface NarratedCommand<Input, Output, Deps extends object = object> {
 export type TerminalCommand =
   | ReportCommand<unknown, CommandOutput, unknown>
   | NarratedCommand<unknown, unknown>;
+
+/**
+ * Every command `perbo` carries, by the name it is typed as.
+ *
+ * The six that work against a repository with nothing admitted — doctor,
+ * baseline, review, inspect, verdict, run — the twelve that build history
+ * across machines — admission, its edits and approval, the work on record, the
+ * pull-request read-back, the queue over the store, its endpoint, the session
+ * that reads it and the interview that writes the spec, and the two measures
+ * over it — and `index`, which reads the repository's own code and writes only
+ * the symbol and import index built from it.
+ *
+ * A `Record` over the union rather than a list, so a name in
+ * {@link CommandName} with no command here fails to compile instead of at the
+ * person who typed it.
+ *
+ * The shell around the table — help, version, an unknown command, and what a
+ * thrown error exits as — is `terminal.js`.
+ */
+export const COMMANDS: { readonly [Name in CommandName]: TerminalCommand } = {
+  doctor: doctorCommandLine,
+  baseline: baselineCommandLine,
+  review: reviewCommandLine,
+  inspect: inspectCommandLine,
+  verdict: verdictCommandLine,
+  run: executeCommandLine,
+  admit: admitCommandLine,
+  approve: approveCommandLine,
+  edit: editCommandLine,
+  list: listCommandLine,
+  sync: syncCommandLine,
+  serve: serveCommandLine,
+  mcp: mcpCommandLine,
+  agent: agentCommandLine,
+  interview: interviewCommandLine,
+  stops: stopsCommandLine,
+  escapes: escapesCommandLine,
+  principle: principleCommandLine,
+  index: indexCommandLine,
+};
