@@ -12,8 +12,10 @@ import {
 } from "../src/delivery.js";
 import { finding, makeContract, makeReview } from "../src/test-support/records.js";
 import { runnerRepository } from "../src/test-support/repository.js";
-import { scratch } from "./support.js";
 import { readFileSync as read } from "node:fs";
+import { scratchDirectories } from "@perbo/test-support";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 async function worktreeFor(repo: { dir: string; head: string }, attempt = "att_seal") {
   const root = scratch("perbo-seal-");

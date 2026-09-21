@@ -2,8 +2,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SecretIndex } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import { runPinnedChecks } from "../src/checks.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The quarantine list `runPinnedChecks` reads (SCP-246).

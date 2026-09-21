@@ -27,9 +27,11 @@ import {
   makeReview,
   withoutInstall,
 } from "../src/test-support/records.js";
-import type { Repository } from "@perbo/test-support";
 import { git, runnerRepository } from "../src/test-support/repository.js";
-import { scratch } from "./support.js";
+import { scratchDirectories } from "@perbo/test-support";
+import type { Repository } from "@perbo/test-support";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The loop, with the agent and the reviewer replaced by doubles.

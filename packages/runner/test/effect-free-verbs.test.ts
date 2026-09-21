@@ -1,9 +1,11 @@
 import { mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { codexCommandDecision } from "../src/adapter-codex.js";
 import { EFFECT_FREE_VERBS, judgePreToolCall, type PreToolGuardState } from "../src/pretool.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The verbs the guard treats as having no effect it has not already judged are

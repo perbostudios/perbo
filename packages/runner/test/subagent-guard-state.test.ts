@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES } from "../src/admission.js";
 import {
   discardPreToolGuard,
@@ -13,7 +14,8 @@ import {
 } from "../src/pretool.js";
 import { UNKNOWN_CWD } from "../src/shell/index.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { SPAWN_TEST_TIMEOUT_MS, scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * D-106 criterion 2: the guard keeps its state per agent, and loses nothing

@@ -3,9 +3,11 @@ import { chmodSync, existsSync, readFileSync, symlinkSync, writeFileSync } from 
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { pushAttemptBranch } from "../src/delivery.js";
-import { initBareRepository, initRepository } from "@perbo/test-support";
 import { git } from "../src/test-support/repository.js";
-import { scratch } from "./support.js";
+import { scratchDirectories } from "@perbo/test-support";
+import { initBareRepository, initRepository } from "@perbo/test-support";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * A remote attempt branch, `prb/…` or `ayo/…`, a failed publish left behind

@@ -2,12 +2,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema, type ReviewArtifact } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { finding, makeContract, makeReview } from "../src/test-support/records.js";
 import { runnerRepository } from "../src/test-support/repository.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * An `incomplete` verdict whose unjudgeable criteria hang on a finding the

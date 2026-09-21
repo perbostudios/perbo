@@ -3,8 +3,10 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { pushAttemptBranch } from "../src/delivery.js";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
 import { initBareRepository, initRepository } from "@perbo/test-support";
-import { SPAWN_TEST_TIMEOUT_MS, scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * What the runner's own push presents to GitHub (SCP-020, SCP-200).

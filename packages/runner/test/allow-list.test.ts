@@ -1,9 +1,11 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES, judgeCommand, matchesListEntry } from "../src/admission.js";
 import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "../src/profile.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * SCP-163: a command's admission is decided by where its writes land.
@@ -25,7 +27,7 @@ import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "../src/pr
  * resolver walks real directories and real symlinks rather than a string.
  */
 
-const worktree = mkdtempSync(join(tmpdir(), "perbo-scp163-"));
+const worktree = scratch("perbo-scp163-");
 mkdirSync(join(worktree, "sub"), { recursive: true });
 writeFileSync(join(worktree, "a"), "contents\n");
 

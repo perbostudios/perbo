@@ -2,6 +2,7 @@ import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSyn
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema, type TerminationReason } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import {
   AttemptIdCollisionError,
@@ -20,7 +21,8 @@ import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { makeAttempt, makeContract, makeReview } from "../src/test-support/records.js";
 import { runnerRepository } from "../src/test-support/repository.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * Re-running one approved contract.

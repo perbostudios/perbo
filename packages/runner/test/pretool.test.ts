@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES, judgeCommand } from "../src/admission.js";
 import {
   PRE_TOOL_JUDGED_TOOLS,
@@ -15,7 +16,8 @@ import {
 import { inspectToolWrite } from "../src/prohibited.js";
 import { UNKNOWN_CWD } from "../src/shell/index.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * SCP-177: the judgement that runs before the tool.

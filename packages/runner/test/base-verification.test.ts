@@ -9,12 +9,14 @@ import {
 import type { Model } from "@perbo/model";
 import { runReview } from "@perbo/review";
 import { branchName } from "@perbo/workspace";
+import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { makeAttempt, makeContract, withoutInstall } from "../src/test-support/records.js";
 import { runnerRepository } from "../src/test-support/repository.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * Which commit's verification a check failure is attributed to.

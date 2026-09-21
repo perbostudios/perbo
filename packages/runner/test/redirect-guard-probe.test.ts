@@ -1,8 +1,10 @@
-import { mkdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { inspectCommand } from "../src/prohibited.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The command lines each review round probed, with the decision each must get.
@@ -406,7 +408,7 @@ const WITHOUT_SCRATCH: Array<[string, Decision]> = [
 ];
 
 describe("the probe lists, by round", () => {
-  const root = mkdtempSync(join(tmpdir(), "perbo-scp156-probe-"));
+  const root = scratch("perbo-scp156-probe-");
   mkdirSync(join(root, "sub"), { recursive: true });
   mkdirSync(join(root, "packages", "runner"), { recursive: true });
   const scope = { root, home: "/Users/nobody" };
@@ -423,7 +425,7 @@ describe("the probe lists, by round", () => {
 });
 
 describe("the probe list for the runner's scratch directory", () => {
-  const root = mkdtempSync(join(tmpdir(), "perbo-scp166-probe-"));
+  const root = scratch("perbo-scp166-probe-");
   const tmp = join(root, ".perbo-tmp");
   mkdirSync(tmp, { recursive: true });
   const scope = { root, tmpdir: tmp, home: "/Users/nobody" };
@@ -490,7 +492,7 @@ const SCOPE_ROWS: Array<[string, Action, Action]> = [
 ];
 
 describe("the probe list for the contract's allowed paths", () => {
-  const root = mkdtempSync(join(tmpdir(), "perbo-scp195-probe-"));
+  const root = scratch("perbo-scp195-probe-");
   const tmp = join(root, ".perbo-tmp");
   mkdirSync(tmp, { recursive: true });
   mkdirSync(join(root, "apps", "cli"), { recursive: true });

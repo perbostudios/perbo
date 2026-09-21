@@ -1,12 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { judgeCommand } from "../src/admission.js";
 import { inspectCommand, inspectCommandWithCwd } from "../src/prohibited.js";
 import { UNKNOWN_CWD } from "../src/shell/index.js";
 import { scratchPath } from "../src/scratch.js";
+
+const temporary = scratchDirectories("perbo-runner-");
 
 /**
  * A push is judged by where its remote goes, not by the word `push`.
@@ -25,7 +27,7 @@ const git = (dir: string, ...args: string[]): string =>
     env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
   });
 
-const base = realpathSync(mkdtempSync(join(tmpdir(), "perbo-push-")));
+const base = realpathSync(temporary("perbo-push-"));
 const root = join(base, "wt");
 const scratch = scratchPath(root);
 const elsewhere = join(base, "elsewhere");

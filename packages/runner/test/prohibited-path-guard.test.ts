@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { TicketRunConfigSchema } from "../src/loop.js";
 import { LimitsTableSchema, changeSetFromDiff, type Scope } from "@perbo/contracts";
 import { assessScope } from "@perbo/review";
+import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES, judgeCommand } from "../src/admission.js";
 import { runAgent } from "../src/adapter.js";
 import { codexCommandDecision, codexFileDecision } from "../src/adapter-codex.js";
@@ -20,7 +21,8 @@ import { buildPermissionProfile } from "../src/profile.js";
 import { inspectCommand, inspectToolWrite } from "../src/prohibited.js";
 import { inspectWritePath, resolveScope } from "../src/shell/index.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * D-105: a path the contract prohibits is refused at write time, not at review.

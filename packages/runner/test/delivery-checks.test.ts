@@ -2,12 +2,14 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DeliveredCheckSchema, LimitsTableSchema, type ChangeSet } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
 import { runnerRepository } from "../src/test-support/repository.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The loop reads the checks on the head it pushed before it records a delivery.

@@ -4,8 +4,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SecretIndex } from "@perbo/contracts";
 import { runPinnedChecks } from "../src/checks.js";
+import { scratchDirectories } from "@perbo/test-support";
 import { initRepository } from "@perbo/test-support";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * A check runs on the attempt's tree, never on turbo's cache.

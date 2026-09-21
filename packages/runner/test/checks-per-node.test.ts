@@ -2,8 +2,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SecretIndex, type CheckResult, type PlanNode } from "@perbo/contracts";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
 import { runPinnedChecks, type PinnedCheck } from "../src/checks.js";
-import { scratch, SPAWN_TEST_TIMEOUT_MS } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The pinned checks run once per node of an execution graph (D-107, SCP-352),

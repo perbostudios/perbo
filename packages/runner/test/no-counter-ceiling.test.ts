@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
 import { runAgent } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
-import { SPAWN_TEST_TIMEOUT_MS, scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * D-096: an attempt is stopped by the stall detector, by a cost cap where the

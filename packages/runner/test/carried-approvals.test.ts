@@ -1,9 +1,11 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
 import { carriedApprovals } from "../src/merge.js";
 import { git, runnerRepository } from "../src/test-support/repository.js";
-import { SPAWN_TEST_TIMEOUT_MS, scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * SCP-227: whether an approval of an earlier head still describes the head

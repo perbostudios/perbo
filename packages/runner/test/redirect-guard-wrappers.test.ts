@@ -1,9 +1,11 @@
-import { mkdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { inspectCommandWithCwd } from "../src/prohibited.js";
 import { UNKNOWN_CWD } from "../src/shell/index.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * An option a wrapper's table does not know is an option, not a missing
@@ -27,7 +29,7 @@ import { UNKNOWN_CWD } from "../src/shell/index.js";
 /** AYO-31's first command, as the executor sent it. Its 23rd, and the attempt died on it. */
 const AYO31 = "ls node_modules/.bin | head && pnpm -v && node -v";
 
-const root = mkdtempSync(join(tmpdir(), "perbo-scp186-"));
+const root = scratch("perbo-scp186-");
 mkdirSync(join(root, "sub"), { recursive: true });
 
 /** Every directory the executor's shell could be standing in when the line runs. */

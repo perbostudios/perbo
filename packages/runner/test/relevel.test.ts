@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LimitsTableSchema, type ChangeSet } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "../src/loop.js";
@@ -15,7 +16,8 @@ import {
 } from "../src/prompt.js";
 import { makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
 import { git, runnerRepository } from "../src/test-support/repository.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * SCP-227: a re-level run keeps an open branch level with its base without an

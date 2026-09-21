@@ -1,8 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema, invocationShapeHash } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES } from "../src/admission.js";
 import {
   AgentConfigurationPresentError,
@@ -15,9 +16,10 @@ import {
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile, PINNED_PROVIDER_BASE_URL } from "../src/profile.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
-import { scratch } from "./support.js";
 
-const worktree = mkdtempSync(join(tmpdir(), "perbo-adapter-"));
+const scratch = scratchDirectories("perbo-runner-");
+
+const worktree = scratch("perbo-adapter-");
 const profile = buildPermissionProfile({ worktree });
 
 const argvFor = (prompt = "do the thing") =>

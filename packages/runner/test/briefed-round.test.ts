@@ -7,6 +7,7 @@ import {
   LimitsTableSchema,
   type PlanContractWithCriteria,
 } from "@perbo/contracts";
+import { scratchDirectories } from "@perbo/test-support";
 import { runAgent, type AgentResult } from "../src/adapter.js";
 import { EXECUTOR_ACCOUNT_HEADING, executorAccount } from "../src/account.js";
 import { AttemptCeilings } from "../src/ceilings.js";
@@ -17,7 +18,8 @@ import { executorPrompt, remediationPrompt } from "../src/prompt.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
 import { finding, makeContract, makeReview } from "../src/test-support/records.js";
 import { runnerRepository } from "../src/test-support/repository.js";
-import { scratch } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * D-092: a remediation round is briefed with its predecessor's own account,

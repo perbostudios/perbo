@@ -9,12 +9,14 @@ import {
   type PlanContractWithCriteria,
   type RunBundle,
 } from "@perbo/contracts";
+import { scratchDirectories, watchOutbound } from "@perbo/test-support";
 import { BundleStore } from "../src/bundle.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
 import { finding, makeReview, withoutInstall } from "../src/test-support/records.js";
 import { runnerRepository } from "../src/test-support/repository.js";
-import { scratch, watchOutbound } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * The loop on a contract nobody admitted (AYO-32).

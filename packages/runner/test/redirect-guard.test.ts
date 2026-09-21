@@ -1,8 +1,10 @@
-import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { commandSegments, inspectCommand, inspectPaths } from "../src/prohibited.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * `write_outside_worktree` judges where a write lands, not how its path is
@@ -99,8 +101,8 @@ describe("a redirect target the guard cannot resolve", () => {
 
 describe("a symlink inside the worktree that points out of it", () => {
   it("is refused, because the destination is what counts", () => {
-    const root = mkdtempSync(join(tmpdir(), "perbo-scp156-root-"));
-    const elsewhere = mkdtempSync(join(tmpdir(), "perbo-scp156-out-"));
+    const root = scratch("perbo-scp156-root-");
+    const elsewhere = scratch("perbo-scp156-out-");
     symlinkSync(elsewhere, join(root, "escape-hatch"));
 
     outside(`git show HEAD > ${root}/escape-hatch/r1.diff`, root);
@@ -229,8 +231,8 @@ describe("a file-touching verb that is not the first word", () => {
 
 describe("a symlink met part way along a path", () => {
   it("is followed before `..` climbs, and a dangling link resolves to its target", () => {
-    const root = mkdtempSync(join(tmpdir(), "perbo-scp156-walk-"));
-    const elsewhere = mkdtempSync(join(tmpdir(), "perbo-scp156-away-"));
+    const root = scratch("perbo-scp156-walk-");
+    const elsewhere = scratch("perbo-scp156-away-");
     symlinkSync(elsewhere, join(root, "escape-hatch"));
     symlinkSync(`${HOME}/.ssh/config`, join(root, "dangling"));
     writeFileSync(join(root, "real.txt"), "x");

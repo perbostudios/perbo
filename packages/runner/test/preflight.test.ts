@@ -1,18 +1,19 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
 import { preflight } from "../src/preflight.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "./support.js";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /** An environment whose PATH holds nothing, so every binary check fails. */
 function bare(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return { PATH: mkdtempSync(join(tmpdir(), "perbo-preflight-empty-")), ...extra };
+  return { PATH: scratch("perbo-preflight-empty-"), ...extra };
 }
 
 /** A binary whose `--version` prints the `codex-cli X.Y.Z` line the real one does, at a chosen version. */
 function fakeCodex(version: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "perbo-preflight-codex-"));
+  const dir = scratch("perbo-preflight-codex-");
   const binary = join(dir, "codex");
   writeFileSync(binary, `#!/bin/sh\necho "codex-cli ${version}"\n`, { mode: 0o755 });
   return binary;
@@ -20,7 +21,7 @@ function fakeCodex(version: string): string {
 
 /** A binary whose `--version` prints exactly this line — no `codex-cli ` prefix implied. */
 function fakeVersionLine(line: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "perbo-preflight-version-"));
+  const dir = scratch("perbo-preflight-version-");
   const binary = join(dir, "codex");
   writeFileSync(binary, `#!/bin/sh\necho "${line}"\n`, { mode: 0o755 });
   return binary;
@@ -319,7 +320,7 @@ describe("preflight", () => {
   });
 
   it("does not ask separately whether claude is on PATH once the agent binary already is literally `claude`", () => {
-    const dir = mkdtempSync(join(tmpdir(), "perbo-preflight-claude-literal-"));
+    const dir = scratch("perbo-preflight-claude-literal-");
     writeFileSync(join(dir, "claude"), `#!/bin/sh\necho "1.2.3 (Claude Code)"\n`, { mode: 0o755 });
     const result = preflight({
       agentBinary: "claude",

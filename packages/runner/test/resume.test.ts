@@ -15,9 +15,11 @@ import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "../src/l
 import { resolveResumeSource, sameCommit } from "../src/resume.js";
 import { TRANSPORT_RETRY_DELAY_MS } from "../src/transport.js";
 import { makeContract, makeReview } from "../src/test-support/records.js";
-import type { Repository } from "@perbo/test-support";
 import { runnerRepository } from "../src/test-support/repository.js";
-import { scratch } from "./support.js";
+import { scratchDirectories } from "@perbo/test-support";
+import type { Repository } from "@perbo/test-support";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * Resuming an attempt a ceiling cut (SCP-154).
