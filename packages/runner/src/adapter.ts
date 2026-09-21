@@ -6,7 +6,7 @@ import { resolve, sep } from "node:path";
 import {
   invocationShapeHash,
   type AgentInvocation,
-  type AttemptCostBasis,
+  type CostBasis,
   type BriefReinjection,
   type CommandRecord,
   type NeutralisationRecord,
@@ -201,7 +201,7 @@ export interface AgentResult {
     cache_read_input_tokens: number;
     output_tokens: number;
     cost_micros: number;
-    cost_basis: AttemptCostBasis;
+    cost_basis: CostBasis;
     /**
      * The attempt was stopped before the transport wrote its final accounting
      * line, so these are the running sums from the messages already read.
@@ -655,7 +655,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
   let cacheReadTokens = 0;
   let outputTokens = 0;
   let costMicros = 0;
-  let costBasis: AttemptCostBasis = "unavailable";
+  let costBasis: CostBasis = "unavailable";
   /**
    * The pinned transport can emit several content blocks for one model
    * request, each repeating that request's usage. The latest reading for each

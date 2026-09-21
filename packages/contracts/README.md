@@ -29,6 +29,12 @@ derivation, would drift. It is also the single home for what a path glob *means*
 is the interface, and `test/glob-conformance.json` states the semantics as cases, so a matcher
 written elsewhere to them answers that table rather than a reading of its own.
 
+`cost.ts` is the single home for a dollar figure and what it is: the bases a cost can have, the
+rule that an unpriced component is counted and never summed as zero ([D-070](../../docs/11-open-decisions.md)),
+the roll arithmetic that adds components up while keeping what is missing from them, and how an
+amount and a subtotal read. It imports zod alone, so the desktop's renderer takes its names from
+`@perbo/contracts/browser`.
+
 `credential.ts` is the single home for "what counts as credential-shaped" ([D-063](../../docs/11-open-decisions.md)):
 `findCredentials` and `redactCredentials`, deliberately narrow, each rule requiring a positive
 signal of secrecy rather than entropy alone. It sits here beside the two neighbouring facts —
