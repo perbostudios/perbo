@@ -1,6 +1,6 @@
 /**
  * The dirty-generation rule, which is how a read stays an account of the
- * records as they are ([ADR-0034](../../../../docs/adr/0034-desktop-read-model.md)).
+ * records as they are ([ADR-0034](../../../../docs/adr/0034-desktop-editing-and-workspace-projection.md)).
  *
  * A read walks a repository's records over many turns of the loop, and a
  * mutation that lands part way through leaves the result an account of neither
