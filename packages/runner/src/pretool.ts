@@ -5,7 +5,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -13,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PermissionProfile } from "@perbo/contracts";
+import { replaceFile } from "@perbo/workspace";
 import {
   ADMISSION_RULES,
   judgeCommand,
@@ -940,9 +940,7 @@ export function runPreToolHook(
     try {
       const path = agentStateFile(directory, call.agent_id);
       const next: PreToolAgentState = { agent: agent.agent, cwd: judged.next_cwd };
-      const pending = `${path}.pending`;
-      writeFileSync(pending, JSON.stringify(next), "utf8");
-      renameSync(pending, path);
+      replaceFile(path, JSON.stringify(next));
     } catch (error) {
       // The write door says the other true thing, and neither sentence is the
       // other's: here the guard knows exactly where this agent stands — it is

@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { replaceFile } from "@perbo/workspace";
 import { EditingSessionSchema, SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
 
 /** A repository the person connected, as the profile records it. */
@@ -123,14 +123,9 @@ export class Profile {
     return new Profile(path, state);
   }
 
-  /** Replaced whole, through a temporary file in the same directory so a crash leaves the old one. */
+  /** Replaced whole, so a crash leaves the record as it was rather than half of it. */
   save(): void {
-    const temporary = `${this.path}.${randomUUID()}.tmp`;
-    writeFileSync(temporary, JSON.stringify(this.state, null, 2), {
-      mode: 0o600,
-      flag: "wx",
-    });
-    renameSync(temporary, this.path);
+    replaceFile(this.path, JSON.stringify(this.state, null, 2), { mode: 0o600 });
     this.lastSave = Date.now();
   }
 }

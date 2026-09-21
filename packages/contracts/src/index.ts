@@ -159,6 +159,7 @@ export {
   standingProhibitedPaths,
 } from "./paths.js";
 export {
+  credentialValuesOf,
   DEFAULT_ENV_ALLOW_LIST,
   isCredentialEnvName,
   PermissionProfileSchema,
@@ -240,7 +241,7 @@ export { compareLevels, deriveActualRisk, derivePlannedRisk, maxLevel } from "./
 export type { RiskDerivation } from "./risk.js";
 export { bundleId, BundleIdSchema, computeReplayability, RunBundleSchema } from "./runbundle.js";
 export type { ArtifactRef, RunBundle, RunBundleKind } from "./runbundle.js";
-export { isSecretPath, SecretIndex } from "./secrets.js";
+export { isSecretPath, replaceValues, SecretIndex } from "./secrets.js";
 export { planSizeCounts, sizeEstimate } from "./size.js";
 export type { SizeCount, SizeEstimate } from "./size.js";
 export {

@@ -69,6 +69,32 @@ export function secretValuesOf(content: string): string[] {
   return [...values];
 }
 
+/**
+ * Replace every value in `text` with `marker`, longest first.
+ *
+ * The order is the whole point: a value that is a prefix of another one, put
+ * back first, consumes the prefix and leaves the longer value's tail standing
+ * in the text — which is the half of a credential that is still a credential.
+ */
+export function replaceValues(
+  text: string,
+  values: readonly string[],
+  marker: string,
+): { text: string; count: number } {
+  let out = text;
+  let count = 0;
+  for (const value of [...values].sort((a, b) => b.length - a.length)) {
+    if (value.length === 0) continue;
+    let index = out.indexOf(value);
+    while (index !== -1) {
+      out = out.slice(0, index) + marker + out.slice(index + value.length);
+      count += 1;
+      index = out.indexOf(value, index + marker.length);
+    }
+  }
+  return { text: out, count };
+}
+
 export interface SecretIndexEntry {
   /** Where it was materialized. Recorded so a report can name the file, not its bytes. */
   path: string;
@@ -123,21 +149,10 @@ export class SecretIndex {
     return false;
   }
 
-  /** Replace every indexed value, longest first so a prefix cannot leave a tail. */
+  /** Replace every indexed value. */
   redact(text: string): { text: string; redactions: number } {
-    let out = text;
-    let redactions = 0;
-    const values = [...this.byHash.values()].sort((a, b) => b.length - a.length);
-    for (const value of values) {
-      if (value.length === 0) continue;
-      let index = out.indexOf(value);
-      while (index !== -1) {
-        out = out.slice(0, index) + REDACTION + out.slice(index + value.length);
-        redactions += 1;
-        index = out.indexOf(value, index + REDACTION.length);
-      }
-    }
-    return { text: out, redactions };
+    const replaced = replaceValues(text, [...this.byHash.values()], REDACTION);
+    return { text: replaced.text, redactions: replaced.count };
   }
 
   /** The serialisable half: hashes and paths, never plaintext. */

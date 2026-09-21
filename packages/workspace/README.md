@@ -25,6 +25,10 @@ the worktree **runnable**.
 - `naming.ts` — `prb/<ticket id>/<short-slug>`, derived from the id and the
   approved outcome through an allow-list,
   and never from anything a model said during execution.
+- `replace-file.ts` — a record replaced whole, through a temporary beside it
+  and a rename, so a reader gets either the old bytes or the new ones and a
+  write that does not land leaves neither the half-written file nor its
+  temporary behind. Every record the tools rewrite whole goes through it.
 - `ports.ts` — a contiguous port range per attempt, checked by binding.
 - `disk.ts` — what a worktree costs, as a free-space delta and as a directory
   size, because hardlinks and copy-on-write make those different numbers.

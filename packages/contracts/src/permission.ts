@@ -191,6 +191,35 @@ export function isCredentialEnvName(name: string): boolean {
 }
 
 /**
+ * Names whose values authenticate something. `isCredentialEnvName` is the list
+ * of what may never be forwarded to a child; this widens it by shape for the
+ * *reading* side, because a value that must not be forwarded must also not be
+ * printed.
+ */
+const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL/i;
+
+/** Below this a value is a setting, not a credential, and matching it would mangle prose. */
+const MIN_SECRET_LENGTH = 8;
+
+/**
+ * The values of this environment that authenticate something, longest first:
+ * every variable `isCredentialEnvName` refuses to forward, plus any whose name
+ * says KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL, at eight characters
+ * or more.
+ *
+ * Longest first because a key and a prefix of it are both here, and taking the
+ * prefix out first leaves the longer one's tail behind.
+ */
+export function credentialValuesOf(env: NodeJS.ProcessEnv): string[] {
+  const values = new Set<string>();
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined || value.length < MIN_SECRET_LENGTH) continue;
+    if (isCredentialEnvName(name) || SECRET_NAME.test(name)) values.add(value);
+  }
+  return [...values].sort((a, b) => b.length - a.length);
+}
+
+/**
  * Build the agent's environment from an allow-list, dropping anything that
  * looks like a credential even if it was allow-listed by mistake.
  */

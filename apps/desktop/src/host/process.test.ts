@@ -288,6 +288,44 @@ describe("desktop process supervision", () => {
       }),
     ).toBe("[redacted] [redacted]");
   });
+  it("redacts the longer environment value first, so a shorter one leaves no tail", () => {
+    // Two bindings where one value is a prefix of the other. Replaced in the
+    // order the environment happens to list them, the prefix goes first and
+    // the rest of the longer value stands in the log.
+    expect(
+      redact("x=ghp_prefixed_value_long", {
+        GH_TOKEN: "ghp_prefix",
+        MY_SECRET: "ghp_prefixed_value_long",
+      }),
+    ).not.toContain("ed_value_long");
+  });
+
+  it("redacts a value bound to any credential-shaped name", () => {
+    const cleaned = redact("key=openai-value-not-vendor-shaped db=hunter2-pricing-value", {
+      OPENAI_KEY: "openai-value-not-vendor-shaped",
+      DB_PASSWD: "hunter2-pricing-value",
+    });
+    expect(cleaned).not.toContain("openai-value-not-vendor-shaped");
+    expect(cleaned).not.toContain("hunter2-pricing-value");
+  });
+
+  it("redacts the credential forms the shared detector knows", () => {
+    // Nothing from this machine's environment: these four are recognised by
+    // their own shape, which is the half a list of variable names cannot reach.
+    const pem =
+      "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----";
+    const jwt =
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const cleaned = redact(
+      `${pem}\n${jwt}\npostgres://u:s3cr3tpass@db/x\nAKIAIOSFODNN7EXAMPLE\n`,
+      {},
+    );
+    expect(cleaned).not.toContain("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC");
+    expect(cleaned).not.toContain(jwt);
+    expect(cleaned).not.toContain("s3cr3tpass");
+    expect(cleaned).not.toContain("AKIAIOSFODNN7EXAMPLE");
+  });
+
   it("does not stream a partial credential split across stderr chunks", async () => {
     const observed: string[] = [];
     const result = await runProcess(
