@@ -10,8 +10,6 @@ import {
   isRefusal,
   limitFor,
   limitsForCredential,
-  planNodes,
-  wholeChangeChecks,
   type AttemptWait,
   type CredentialClass,
   type ExecutionAttempt,
@@ -56,7 +54,6 @@ import { Ledger } from "./loop/ledger.js";
 import { acquireRunLock, type HeldRunLock } from "./lock.js";
 import { executorAccount } from "./account.js";
 import { BundleStore } from "./bundle.js";
-import type { PinnedCheck } from "./checks.js";
 import {
   deliveredChecksSection,
   editPullRequestBody,
@@ -88,15 +85,13 @@ import { allowedPathsSentence } from "./shell/index.js";
 import { parseDeclines } from "./declines.js";
 import { readPrinciples, readPrinciplesFile } from "./principles.js";
 import { restoreAny } from "./quarantine.js";
-import {
-  headCommit,
-  untrackedAfterChecks,
-} from "./seal.js";
+import { headCommit } from "./seal.js";
 import { resetInText } from "./transport.js";
 import { type TicketRunConfig } from "./loop/config.js";
 import { withCeilingGuidance } from "./loop/attempt.js";
 import { briefRound } from "./loop/brief.js";
 import { confirmContinuation, remediationToContinue } from "./loop/continuation.js";
+import { checkRound } from "./loop/check.js";
 import { execute } from "./loop/execute.js";
 import { sealRound } from "./loop/seal.js";
 import { levelBeforeExecutor, mergeFailedDetail } from "./loop/level.js";
@@ -957,55 +952,18 @@ async function runLockedTicket(
       mergedBase = round.mergedBase;
       const { sealed, carriedForward, conflictNow } = round;
 
-      // D-107: the pinned set runs over the whole change and then once per
-      // node of the execution graph, narrowed to that node's paths. A flat
-      // plan has no nodes and runs exactly what it ran before.
-      const checks =
-        sealed.changeset === null
-          ? []
-          : await checkRunner({
-              checks: config.checks as PinnedCheck[],
-              worktree: state.workspace.path,
-              env: environment.env,
-              secrets,
-              onProgress: progress,
-              nodes: planNodes(contract),
-              changed_files: sealed.changed_paths,
-            });
-
-      /**
-       * What judges the whole change this round.
-       *
-       * The node results are recorded with the round and reach that node's
-       * own review (`reviewGraph`), never this list. `gating` is what the
-       * overall review, the closure verification and the reviewer's own check
-       * schema are given — exactly the list a flat plan produces, since a flat
-       * plan tags none. A node's own check result gates nothing on its own;
-       * the review it feeds can, once the gate reads the combination.
-       */
-      const gating = wholeChangeChecks(checks);
-
-      if (sealed.changeset !== null) {
-        state = {
-          ...state,
-          checkArtifacts: await untrackedAfterChecks({ worktree: state.workspace.path }),
-        };
-      }
-
-      /**
-       * SCP-263: the attempt is over, so nothing may still be running from its
-       * worktree.
-       *
-       * The executor and every check run in process groups the runner signals,
-       * and a process that put itself in a session of its own is in none of
-       * them. Swept here rather than at cleanup so the round that produced it
-       * is the round that records it, and so the next round starts in a
-       * worktree with nothing of the last one's left in it.
-       */
-      const swept = await sweepWorktree({
-        worktree: state.workspace.path,
-        onProgress: progress,
+      const measured = await checkRound({
+        config,
+        contract,
+        state,
+        sealed,
+        env: environment.env,
+        secrets,
+        checks: checkRunner,
+        progress,
       });
+      state = measured.state;
+      const { checks, gating, swept } = measured;
 
       /**
        * The commands the attempt asked for and did not get (SCP-163).
