@@ -3,6 +3,7 @@ import { admitCommandLine, approveCommandLine, listCommandLine } from "../comman
 import { editCommandLine } from "../commands/edit/index.js";
 import { inspectCommandLine } from "../commands/inspect.js";
 import { mcpCommandLine } from "../commands/mcp.js";
+import { principleCommandLine } from "../commands/principle.js";
 import { doctorCommandLine, executeCommandLine } from "../commands/run/index.js";
 
 /**
@@ -31,6 +32,11 @@ describe("a word the command has no room for", () => {
     );
     expect(() => admitCommandLine.read(["Search results paginate"])).toThrow(
       /^admit takes no positional argument: what is admitted is given as flags/,
+    );
+    // The verb's own grammar answers, so the count a verb has room for is the
+    // verb's: `add` takes one word and `list` takes none.
+    expect(() => principleCommandLine.read(["list", "extra"])).toThrow(
+      /^principle list takes no argument: it prints what is recorded/,
     );
   });
 });
