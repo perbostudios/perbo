@@ -24,7 +24,7 @@ const createBody = source.slice(
 
 describe("createPullRequest", () => {
   it("looks for an existing pull request on the branch before creating one", () => {
-    expect(createBody).toMatch(/"pr",\s*\n?\s*"view"/);
+    expect(createBody).toMatch(/viewPullRequest\(/);
   });
 
   it("returns the existing one rather than throwing", () => {

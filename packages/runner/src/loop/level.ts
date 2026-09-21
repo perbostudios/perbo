@@ -1,0 +1,329 @@
+import { mergeUp, type MergeUpResult } from "../merge-up.js";
+import { describeRange, type SealResult } from "../seal.js";
+import type { JudgingArtifacts } from "../prohibited.js";
+import type { TicketRunConfig } from "./config.js";
+import type { ReviewArtifact } from "@perbo/contracts";
+import type { Ledger } from "./ledger.js";
+import { judgeRelevel, type RelevelContext } from "./relevel.js";
+import type { RoundState, RunEnd, Step } from "./state.js";
+
+/**
+ * Keeping the attempt's branch level with the base branch (SCP-192).
+ */
+
+/**
+ * A merge-up that stopped without naming an unmerged path (SCP-192).
+ *
+ * `git merge` reports a conflict and a refusal the same way — a non-zero exit —
+ * and only the first has files a round could reconcile. The second is an
+ * untracked file in the way, a signing key the process cannot reach, a
+ * repository state the runner put it in: nobody's round to spend, so the stop
+ * quotes what git said rather than handing an executor an empty list.
+ */
+export function mergeFailedDetail(base_ref: string, tip: string, branch: string, said: string): string {
+  return (
+    `merging ${base_ref} at ${tip} into ${branch} failed and git named no conflicting file, ` +
+    `so it is not a conflict a round can resolve: ${said || "no output"}`
+  );
+}
+
+/** What a round holds of the base branch: where it is, and what it merged. */
+export interface Levelled {
+  state: RoundState;
+  /** The base tip this attempt's own branch was merged with, if any. */
+  mergedBase: string | null;
+  /** Set where the level answered the round; null where the round goes on. */
+  step: Step | null;
+}
+
+/**
+ * Take a merge-up's answer: the base moves where the branch now carries it,
+ * and the round records the tip it merged.
+ */
+export function takeMergeUp(input: {
+  state: RoundState;
+  mergedBase: string | null;
+  up: MergeUpResult;
+  baseRef: string;
+  progress: (message: string) => void;
+}): { state: RoundState; mergedBase: string | null } {
+  const { state, up } = input;
+  if (up.status === "conflict" || up.base_commit === state.baseCommit) {
+    return { state, mergedBase: input.mergedBase };
+  }
+  input.progress(
+    `merged ${input.baseRef} at ${up.base_commit.slice(0, 12)} into ` +
+      `${state.workspace.branch}; the change set is the branch against it`,
+  );
+  return { state: { ...state, baseCommit: up.base_commit }, mergedBase: up.base_commit };
+}
+
+/**
+ * SCP-192: the merge-up before the executor, on this run's first round and only
+ * there.
+ *
+ * A re-run's branch carries commits an earlier run sealed against a base that
+ * has since moved, and an executor handed that tree rebuilds what the base
+ * already has. Later rounds start from the previous round's merge-up, and a
+ * conflict round starts from a branch that is deliberately not merged.
+ *
+ * SCP-227: a re-level run stops here. Nothing it does needs an executor — what
+ * the branch holds is what a review already judged plus the base's own commits
+ * — so a branch already level is `level` and a merged one is judged and the
+ * verdict stands.
+ */
+export async function levelBeforeExecutor(
+  context: RelevelContext & {
+    state: RoundState;
+    /** This run's attempts so far: the merge-up is the first round's. */
+    attemptsSoFar: number;
+    attemptId: string;
+    /** The attempt a re-level's merge commit belongs to, where the record names one. */
+    continuesPreviousRun: string | null;
+  },
+): Promise<Levelled> {
+  const { config, progress, attemptId } = context;
+  let state = context.state;
+  if (
+    context.attemptsSoFar > 0 ||
+    state.transportRetry > 0 ||
+    state.ceilingContinuation > 0 ||
+    state.kind === "resolve_conflict"
+  ) {
+    return { state, mergedBase: null, step: null };
+  }
+  const baseBefore = state.baseCommit;
+  const up = await mergeUp({
+    worktree: state.workspace.path,
+    repository_root: config.repository_root,
+    base_ref: config.base_ref,
+    base_commit: state.baseCommit,
+    ticket_key: config.ticket_key,
+    // A re-level's merge commit belongs to the attempt chain already on
+    // the branch: this run may record no attempt of its own.
+    attempt_id: config.relevel ? (context.continuesPreviousRun ?? attemptId) : attemptId,
+  });
+  if (up.status === "conflict") {
+    // A merge that stopped without naming an unmerged path did not stop
+    // on a conflict — an untracked file in the way, a signing key the
+    // process cannot reach — and there is nothing for a round to resolve.
+    if (up.paths.length === 0) {
+      return {
+        state,
+        mergedBase: null,
+        step: {
+          next: "stop",
+          end: {
+            outcome: "base_conflict",
+            detail: mergeFailedDetail(config.base_ref, up.tip, state.workspace.branch, up.detail),
+          },
+        },
+      };
+    }
+    // Nothing this run produced is at stake yet, and the round is spent
+    // on the resolution: the ticket's own brief follows it.
+    progress(
+      `${config.base_ref} conflicts with the branch on ${up.paths.length} file(s); ` +
+        "the round resolves that first",
+    );
+    return {
+      state,
+      mergedBase: null,
+      step: {
+        next: "reenter",
+        conflict: {
+          tip: up.tip,
+          paths: up.paths,
+          before_executor: true,
+          resume_kind: state.kind,
+        },
+      },
+    };
+  }
+  const taken = takeMergeUp({
+    state,
+    mergedBase: null,
+    up,
+    baseRef: config.base_ref,
+    progress,
+  });
+  state = taken.state;
+  if (!config.relevel) return { state, mergedBase: taken.mergedBase, step: null };
+  if (up.status === "current") {
+    return {
+      state,
+      mergedBase: taken.mergedBase,
+      step: {
+        next: "stop",
+        end: {
+          outcome: "level",
+          detail:
+            `${state.workspace.branch} is level with ${config.base_ref} at ` +
+            `${state.baseCommit.slice(0, 12)}; nothing to re-level`,
+        },
+      },
+    };
+  }
+  const levelled = await judgeRelevel(context, {
+    branch: state.workspace.branch,
+    worktree: state.workspace.path,
+    base_commit: state.baseCommit,
+    base_before: baseBefore,
+  });
+  return {
+    state,
+    mergedBase: taken.mergedBase,
+    step: {
+      next: "stop",
+      end: { outcome: levelled.outcome, detail: levelled.detail },
+      ...(levelled.review !== null
+        ? { carry: { finalReview: levelled.review, nodeReviews: levelled.node_reviews } }
+        : {}),
+    },
+  };
+}
+
+/** What the branch holds once the base's tip is merged into it after the seal. */
+export interface LevelledSeal {
+  state: RoundState;
+  mergedBase: string | null;
+  /** The change set every later step reads: re-read where the base moved. */
+  sealed: SealResult;
+  /** The conflict the merge stopped on, which the next round resolves. */
+  conflictNow: { tip: string; paths: string[]; detail: string } | null;
+}
+
+/**
+ * SCP-192: the branch is brought level with the base here, after the seal
+ * and before anything judges what it holds — the checks, the review, the
+ * verification and the pull request all read one change set, and it is
+ * the branch against the base a person would merge it into.
+ *
+ * It runs only for a round that produced something: a ceiling that cut
+ * the attempt, or a branch that adds nothing to its base, is answered
+ * without a merge commit being made for it.
+ */
+export async function levelAfterSeal(args: {
+  config: TicketRunConfig;
+  state: RoundState;
+  mergedBase: string | null;
+  attemptId: string;
+  raw: SealResult;
+  /** Whether the executor finished: a cut attempt is answered without a merge. */
+  completed: boolean;
+  judging: JudgingArtifacts;
+  pathsAllowed: string[];
+  sealExclusions: { spec_paths?: string[] };
+  progress: (message: string) => void;
+}): Promise<LevelledSeal> {
+  const { config, raw } = args;
+  let state = args.state;
+  let mergedBase = args.mergedBase;
+  let sealed = raw;
+  let conflictNow: { tip: string; paths: string[]; detail: string } | null = null;
+  if (args.completed && raw.changeset !== null) {
+    const before = state.baseCommit;
+    const up = await mergeUp({
+      worktree: state.workspace.path,
+      repository_root: config.repository_root,
+      base_ref: config.base_ref,
+      base_commit: state.baseCommit,
+      ticket_key: config.ticket_key,
+      attempt_id: args.attemptId,
+    });
+    if (up.status === "conflict") {
+      conflictNow = { tip: up.tip, paths: up.paths, detail: up.detail };
+    } else {
+      const taken = takeMergeUp({
+        state,
+        mergedBase,
+        up,
+        baseRef: config.base_ref,
+        progress: args.progress,
+      });
+      state = taken.state;
+      mergedBase = taken.mergedBase;
+      if (state.baseCommit !== before) {
+        // Both ends of the range moved, so the change set is re-read rather
+        // than re-sealed: re-running the seal here would stage and commit
+        // whatever the round has since left in the worktree.
+        //
+        // The scope assertion is re-read with it (SCP-195). It has to be
+        // about the change set the checks and the review are handed, and
+        // after a merge-up that is this one and not the seal's.
+        sealed = {
+          ...raw,
+          ...(await describeRange({
+            worktree: state.workspace.path,
+            base_commit: state.baseCommit,
+            judging: args.judging,
+            paths_allowed: args.pathsAllowed,
+            fallback_paths: raw.changed_paths,
+            ...args.sealExclusions,
+          })),
+        };
+      }
+    }
+  }
+  return { state, mergedBase, sealed, conflictNow };
+}
+
+/** Where a run's branch and its base stand when the run ends. */
+export interface LevelledPublish {
+  state: RoundState;
+  end: RunEnd;
+}
+
+/**
+ * SCP-192, the merge-up before publishing: the base can move between the
+ * review and the publish, and a pull request that is behind at the moment it
+ * opens is the pull request a person spent day four merging by hand. Nothing
+ * unreviewed enters the branch by it — what a clean merge brings in is the
+ * base's own commits, which are already on the base branch.
+ *
+ * A conflict here has no round left to hand it to, so it turns an approved run
+ * into `base_conflict` and nothing is opened.
+ */
+export async function levelBeforePublish(args: {
+  config: TicketRunConfig;
+  state: RoundState;
+  end: RunEnd;
+  ledger: Ledger;
+  rootAttemptId: string;
+  /** The review that judged the change, which the conflict's detail names. */
+  finalReview: ReviewArtifact;
+  progress: (message: string) => void;
+}): Promise<LevelledPublish> {
+  const { config, progress } = args;
+  let state = args.state;
+  let end = args.end;
+  const up = await mergeUp({
+    worktree: state.workspace.path,
+    repository_root: config.repository_root,
+    base_ref: config.base_ref,
+    base_commit: state.baseCommit,
+    ticket_key: config.ticket_key,
+    attempt_id: args.ledger.last()?.attempt_id ?? args.rootAttemptId,
+  });
+  if (up.status === "conflict") {
+    // There is no round left to hand this to — the loop is past its rounds
+    // — and opening a pull request that cannot be merged is the thing this
+    // ticket exists to stop. The change set stays on its branch, and the
+    // attempts are still recorded below.
+    end = {
+      outcome: "base_conflict",
+      detail:
+        `the change was ${args.finalReview.decision === "approve" ? "approved" : "escalated"} and then ` +
+        (up.paths.length > 0
+          ? `${config.base_ref} moved to ${up.tip}, which will not merge into ` +
+            `${state.workspace.branch}: ${up.paths.join(", ")}`
+          : mergeFailedDetail(config.base_ref, up.tip, state.workspace.branch, up.detail)) +
+        ". No pull request was opened; a re-run merges the base up again.",
+    };
+    progress(end.detail);
+  } else if (up.base_commit !== state.baseCommit) {
+    state = { ...state, baseCommit: up.base_commit };
+    progress(`merged ${config.base_ref} at ${state.baseCommit.slice(0, 12)} before publishing`);
+  }
+  return { state, end };
+}

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import type { SpecFile } from "@perbo/contracts";
-import { gitEnv, run, runOrThrow } from "@perbo/workspace";
+import { git } from "@perbo/workspace";
 import { RunRefusedError } from "./refusal.js";
 
 /**
@@ -31,6 +31,15 @@ import { RunRefusedError } from "./refusal.js";
  */
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+
+/**
+ * What a listing of the branch may say, past which only its tail arrives.
+ *
+ * The commits past the base and the message of the first one are read to decide
+ * whether the branch's spec is where the record says, so a cut answer is one
+ * this would act on as if it were complete.
+ */
+const MAX_LISTING_BYTES = 64 * 1024 * 1024;
 
 /** What a run did about the spec commit, and the commit where there is one. */
 export interface SpecCommitResult {
@@ -227,17 +236,9 @@ export async function commitSpec(args: {
   }
   // Forced, because an ignore rule must not silently drop a recorded file: the
   // commit either holds what approval recorded or the run does not start.
-  await runOrThrow(["git", "add", "--force", "--", ...paths], {
-    cwd: args.worktree,
-    env: gitEnv(),
-    timeoutMs,
-  });
-  const staged = await runOrThrow(["git", "diff", "--cached", "--name-only", "--", ...paths], {
-    cwd: args.worktree,
-    env: gitEnv(),
-    timeoutMs,
-  });
-  if (staged.stdout.trim().length === 0) {
+  await git.stage(args.worktree, paths, { force: true, timeoutMs });
+  const staged = await git.stagedPaths(args.worktree, paths, { timeoutMs });
+  if (staged.length === 0) {
     // The base already holds every recorded file, so there is nothing for a
     // commit to add and nothing below the review to exclude that the base does
     // not already have.
@@ -247,17 +248,7 @@ export async function commitSpec(args: {
   const message =
     `${args.ticket_key}: the spec this change is judged against\n\n` +
     `Attempt: ${args.attempt_id}\nBase: ${args.base_commit}\n`;
-  await runOrThrow(["git", "commit", "-q", "-m", message], {
-    cwd: args.worktree,
-    env: gitEnv(),
-    timeoutMs,
-  });
-  const head = await runOrThrow(["git", "rev-parse", "HEAD"], {
-    cwd: args.worktree,
-    env: gitEnv(),
-    timeoutMs,
-  });
-  const commit = head.stdout.trim();
+  const commit = await git.commit(args.worktree, message, { timeoutMs });
   progress(
     `committed ${paths.length} spec file(s) as ${commit.slice(0, 12)}, the branch's first commit; ` +
       "the review reads the diff after it",
@@ -300,10 +291,9 @@ async function confirmOnBranch(args: {
 }): Promise<SpecCommitResult> {
   const recordedPaths = new Set(args.paths);
   const changed = await changedPaths(args.worktree, args.base_commit, args.first, args.timeoutMs);
-  const said = await run(["git", "log", "-1", "--format=%B", args.first], {
-    cwd: args.worktree,
-    env: gitEnv(),
+  const said = await git.run(args.worktree, ["log", "-1", "--format=%B", args.first], {
     timeoutMs: args.timeoutMs,
+    maxOutputBytes: MAX_LISTING_BYTES,
   });
   const loops = /^Attempt: \S+$/m.test(said.stdout);
   const holdsTheSpec =
@@ -335,15 +325,9 @@ async function changedPaths(
   commit: string,
   timeoutMs: number,
 ): Promise<string[]> {
-  const listed = await runOrThrow(["git", "diff", "--name-only", base_commit, commit], {
-    cwd: worktree,
-    env: gitEnv(),
-    timeoutMs,
-  });
-  return listed.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((path) => path.length > 0);
+  const listed = await git.changedPaths(worktree, base_commit, commit, { timeoutMs });
+  if (listed === null) throw new Error(`git could not list what ${commit} changed against ${base_commit}`);
+  return listed.map((path) => path.trim()).filter((path) => path.length > 0);
 }
 
 /** The commits of `base_commit..HEAD` on the branch's own line, oldest first. */
@@ -352,10 +336,14 @@ async function firstParentCommits(
   base_commit: string,
   timeoutMs: number,
 ): Promise<string[]> {
-  const listed = await runOrThrow(
-    ["git", "rev-list", "--reverse", "--first-parent", `${base_commit}..HEAD`],
-    { cwd: worktree, env: gitEnv(), timeoutMs },
+  const listed = await git.runOrThrow(
+    worktree,
+    ["rev-list", "--reverse", "--first-parent", `${base_commit}..HEAD`],
+    { timeoutMs, maxOutputBytes: MAX_LISTING_BYTES },
   );
+  if (listed.truncated) {
+    throw new Error(`${base_commit}..HEAD lists more than ${MAX_LISTING_BYTES} bytes of commits`);
+  }
   return listed.stdout
     .split("\n")
     .map((line) => line.trim())

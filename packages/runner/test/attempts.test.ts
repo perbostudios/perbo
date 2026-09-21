@@ -12,6 +12,8 @@ import {
   rootAttemptId,
   runNumbers,
   runsOnRecord,
+  sealedByAttempt,
+  specCommitOnRecord,
 } from "../src/attempts.js";
 import { BundleStore } from "../src/bundle.js";
 import { EgressLog } from "../src/egress.js";
@@ -440,4 +442,51 @@ describe("a re-run of the same ticket", () => {
     expect(runNumbers(record.attempts)).toEqual([1, 2]);
     expect(record.attempts[1]!.attempt_id).not.toBe(record.attempts[0]!.attempt_id);
   }, 120_000);
+});
+
+describe("what the record on disk says about the commits earlier runs made", () => {
+  const record = (attempts: unknown[]) => ({ attempts }) as never;
+
+  it("names the attempt that sealed each commit, across every run of the ticket", () => {
+    const sealed = sealedByAttempt(
+      record([
+        { attempt_id: "att_00000000000000a1", head_commit: "aaa1111" },
+        { attempt_id: "att_00000000000000a2", head_commit: null },
+        { attempt_id: "att_00000000000000a3", head_commit: "ccc3333" },
+      ]),
+    );
+
+    expect([...sealed]).toEqual([
+      ["aaa1111", "att_00000000000000a1"],
+      ["ccc3333", "att_00000000000000a3"],
+    ]);
+  });
+
+  it("knows nothing where there is no record to read", () => {
+    expect(sealedByAttempt(null).size).toBe(0);
+  });
+
+  it("skips an attempt it cannot read rather than refusing the whole record", () => {
+    expect([...sealedByAttempt(record([{ nothing: true }, { attempt_id: "att_00000000000000a1", head_commit: "aaa1111" }]))]).toEqual([
+      ["aaa1111", "att_00000000000000a1"],
+    ]);
+  });
+
+  it("takes the spec commit from the last attempt that recorded one", () => {
+    expect(
+      specCommitOnRecord(
+        record([
+          { spec_commit: "spec111" },
+          { spec_commit: null },
+          { spec_commit: "spec333" },
+          { spec_commit: null },
+        ]),
+      ),
+    ).toBe("spec333");
+  });
+
+  it("says no run has made one where nothing on the record names it", () => {
+    expect(specCommitOnRecord(record([{ spec_commit: null }, {}]))).toBeNull();
+    expect(specCommitOnRecord(null)).toBeNull();
+  });
 });

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { ADMISSION_RULES, judgeCommand } from "../src/admission.js";
-import { githubCredential } from "../src/github-credential.js";
+import { githubCredential, readGithubCredential } from "../src/github-credential.js";
 import { preflight, renderPreflight } from "../src/preflight.js";
 import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "../src/profile.js";
 
@@ -70,6 +70,8 @@ const request = (env: NodeJS.ProcessEnv, needsGh: boolean, probeGithub?: boolean
 });
 
 const SENTINEL = "ghp_scp200sentineltokenvalue";
+/** A name nothing git or `gh` reads, so a child that has it was handed this process's own. */
+const SENTINEL_NAME = "PERBO_SENTINEL_TOKEN";
 
 describe("the credential path GitHub is read through", () => {
   it(
@@ -132,6 +134,71 @@ describe("the credential path GitHub is read through", () => {
 
       expect(gh.calls()).toEqual(["--version", "auth status"]);
       expect(result.github).toEqual({ credential: "gh_login", answers: true });
+    },
+    SPAWN_DEADLINE_MS,
+  );
+});
+
+/**
+ * A `gh` that writes the environment it was given to a file and answers `auth
+ * status`. What is under test is what reaches the child, so it reports rather
+ * than decides.
+ */
+function recordingGh(name: string): { binary: string; environment: () => Record<string, string> } {
+  const bin = join(scratch, `record-${name}`);
+  mkdirSync(bin, { recursive: true });
+  const log = join(bin, "env");
+  const script = join(bin, "gh");
+  writeFileSync(
+    script,
+    ["#!/bin/sh", `/usr/bin/env > ${JSON.stringify(log)}`, "exit 0", ""].join("\n"),
+  );
+  chmodSync(script, 0o755);
+  return {
+    binary: script,
+    environment: () =>
+      Object.fromEntries(
+        readFileSync(log, "utf8")
+          .split("\n")
+          .filter((line) => line.includes("="))
+          .map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]),
+      ),
+  };
+}
+
+const POSIX = process.platform !== "win32";
+
+describe("the environment the credential is asked in", () => {
+  it.skipIf(!POSIX)(
+    "asks `gh` in the runner's environment, not in whatever the caller holds",
+    () => {
+      const recorder = recordingGh("environment");
+      const reading = readGithubCredential({
+        binary: recorder.binary,
+        env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", [SENTINEL_NAME]: SENTINEL },
+      });
+
+      expect(reading.answers).toBe(true);
+      const seen = recorder.environment();
+      // A prompt is a failure rather than a wait nobody is there to answer.
+      expect(seen.GH_PROMPT_DISABLED).toBe("1");
+      expect(seen.GIT_TERMINAL_PROMPT).toBe("0");
+      // Everything else the caller happened to hold stays with the caller.
+      expect(seen[SENTINEL_NAME]).toBeUndefined();
+    },
+    SPAWN_DEADLINE_MS,
+  );
+
+  it.skipIf(!POSIX)(
+    "carries the token where the environment holds one, because that is what `gh` reads",
+    () => {
+      const recorder = recordingGh("token");
+      readGithubCredential({
+        binary: recorder.binary,
+        env: { PATH: process.env.PATH ?? "", GH_TOKEN: SENTINEL },
+      });
+
+      expect(recorder.environment().GH_TOKEN).toBe(SENTINEL);
     },
     SPAWN_DEADLINE_MS,
   );
