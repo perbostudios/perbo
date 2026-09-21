@@ -7,7 +7,7 @@ import { UsageError } from "../usage-error.js";
 import { admitCommandLine, approveCommandLine, loadAdmitted } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { editCommandLine } from "./edit/index.js";
-import { parseExecuteArgs, runExecuteCommand } from "./run/index.js";
+import { executeCommandLine } from "./run/index.js";
 import { readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
 import { runCommandLine } from "../command-line/terminal.js";
@@ -162,8 +162,8 @@ describe("a contract is refused when it does not match the counter-seal beside i
     // And the one command that starts an attempt still cannot take it: an
     // attempt binds to an approved contract, and this ticket has none.
     await expect(
-      runExecuteCommand({
-        args: parseExecuteArgs(["--ticket", "PRB-1", "--repo", repo]),
+      runCommandLine(executeCommandLine, {
+        argv: ["--ticket", "PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
       }),
@@ -311,8 +311,8 @@ describe("a contract is refused when it does not match the counter-seal beside i
     expect(readTicket(dir, "PRB-1").approved_at).toBeNull();
 
     await expect(
-      runExecuteCommand({
-        args: parseExecuteArgs(["--ticket", "PRB-1", "--repo", repo]),
+      runCommandLine(executeCommandLine, {
+        argv: ["--ticket", "PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
       }),
@@ -363,11 +363,13 @@ describe("a contract is refused when it does not match the counter-seal beside i
     });
     const before = storeContents(dir);
 
-    const failure: unknown = await runExecuteCommand({
-      args: parseExecuteArgs(["--ticket", "PRB-1", "--repo", repo]),
-      streams: capture(),
-      cwd: repo,
-    }).catch((error: unknown) => error);
+    const failure: unknown = await Promise.resolve(
+      runCommandLine(executeCommandLine, {
+        argv: ["--ticket", "PRB-1", "--repo", repo],
+        streams: capture(),
+        cwd: repo,
+      }),
+    ).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(UsageError);
     const message = (failure as Error).message;

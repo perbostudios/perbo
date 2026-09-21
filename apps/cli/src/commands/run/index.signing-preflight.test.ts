@@ -7,13 +7,9 @@ import { EXIT_CODES } from "@perbo/contracts";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { runOrThrow } from "@perbo/workspace";
 import { exitForThrown } from "../../command-line/terminal.js";
-import {
-  parseExecuteArgs,
-  runDoctorCommand,
-  runExecuteCommand,
-  type ExecuteOptions,
-} from "./index.js";
+import { type ExecuteDeps, doctorCommandLine, executeCommandLine } from "./index.js";
 import { storeDir } from "../../store/index.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * What a person reads about a repository whose configuration signs commits with
@@ -147,16 +143,15 @@ const capture = () => {
 async function program(
   repo: string,
   argv: readonly string[],
-  options: Omit<ExecuteOptions, "args" | "streams" | "cwd"> = {},
+  options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string }> {
   const streams = capture();
   try {
-    const code = await runExecuteCommand({
-      args: parseExecuteArgs(["--repo", repo, ...argv]),
+    const code = await runCommandLine(executeCommandLine, {
+      argv: ["--repo", repo, ...argv],
       streams: streams.streams,
       cwd: repo,
-      preflight: okPreflight,
-      ...options,
+      deps: { preflight: okPreflight, ...options },
     });
     return { code, err: streams.err.join("") };
   } catch (error) {
@@ -230,11 +225,11 @@ describe("a repository whose configuration signs commits with a key nothing can 
     const repo = repository("locked-doctor", key.pub);
     const read = capture();
 
-    const code = await runDoctorCommand({
-      args: parseExecuteArgs(["--repo", repo, "--json", "--quiet"]),
+    const code = await runCommandLine(doctorCommandLine, {
+      argv: ["--repo", repo, "--json"],
       streams: read.streams,
       cwd: repo,
-      preflight: okPreflight,
+      deps: { preflight: okPreflight },
     });
 
     expect(code).toBe(1);
@@ -254,11 +249,11 @@ describe("a repository whose configuration signs commits with a key nothing can 
     const repo = repository("open-doctor", key.pub);
     const read = capture();
 
-    const code = await runDoctorCommand({
-      args: parseExecuteArgs(["--repo", repo, "--json", "--quiet"]),
+    const code = await runCommandLine(doctorCommandLine, {
+      argv: ["--repo", repo, "--json"],
       streams: read.streams,
       cwd: repo,
-      preflight: okPreflight,
+      deps: { preflight: okPreflight },
     });
 
     expect(code).toBe(0);

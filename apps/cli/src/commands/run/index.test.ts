@@ -22,13 +22,12 @@ import {
   deliveryChecksBoundMs,
   deliveryChecksMessage,
   deliveryChecksReason,
+  doctorCommandLine,
+  executeCommandLine,
   exitCodeForRun,
   mergeRunConfig,
-  parseExecuteArgs,
   renderCeilingsLine,
   renderRun,
-  runDoctorCommand,
-  runExecuteCommand,
   usageOf,
 } from "./index.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
@@ -52,14 +51,16 @@ const streams = () => {
 
 describe("perbo run / doctor argument parsing", () => {
   it("rejects an unknown flag rather than reviewing something else", () => {
-    expect(() => parseExecuteArgs(["--contarct", "c.json"])).toThrow(UsageError);
-    expect(() => parseExecuteArgs(["positional"])).toThrow(UsageError);
-    expect(() => parseExecuteArgs(["--publish=yes"])).toThrow(/does not take a value/);
+    expect(() => executeCommandLine.read(["--contarct", "c.json"])).toThrow(UsageError);
+    expect(() => executeCommandLine.read(["positional"])).toThrow(UsageError);
+    expect(() => executeCommandLine.read(["--publish=yes"])).toThrow(/does not take a value/);
   });
 
   it("takes publish as an explicit flag, never as a default", () => {
-    expect(parseExecuteArgs(["--contract", "c.json", "--config", "r.json"]).publish).toBe(false);
-    expect(parseExecuteArgs(["--publish"]).publish).toBe(true);
+    expect(
+      executeCommandLine.read(["--contract", "c.json", "--config", "r.json"]).input.publish,
+    ).toBe(false);
+    expect(executeCommandLine.read(["--publish"]).input.publish).toBe(true);
   });
 });
 
@@ -412,26 +413,18 @@ describe("what the run says when no check reported on the head", () => {
   );
 });
 
-const doctorArgs = (repo: string, extra: Partial<Parameters<typeof runDoctorCommand>[0]["args"]> = {}) => ({
-  ticket: null,
-  store: null,
-  contract: null,
-  config: null,
+/** The line this diagnostic is asked for by: a repository, the record, and what else was asked. */
+const doctorArgs = (
+  repo: string,
+  extra: { json?: boolean; config?: string; probe?: boolean; writeConfig?: boolean } = {},
+): string[] => [
+  "--repo",
   repo,
-  worktreeRoot: null,
-  publish: false,
-  json: true,
-  quiet: true,
-  writeConfig: false,
-  probe: false,
-  resumeFrom: null,
-  outcome: null,
-  criteria: [],
-  paths: [],
-  pr: null,
-  relevel: false,
-  ...extra,
-});
+  ...((extra.json ?? true) ? ["--json"] : []),
+  ...(extra.config === undefined ? [] : ["--config", extra.config]),
+  ...(extra.writeConfig === true ? ["--write-config"] : []),
+  ...(extra.probe === true ? ["--probe"] : []),
+];
 
 function repository(name: string): string {
   const dir = mkdtempSync(join(tmpdir(), `perbo-execute-${name}-`));
@@ -480,7 +473,11 @@ describe("preflight, before anything is touched", () => {
     const restore = withoutClaudeOnPath();
     try {
       const json = streams();
-      expect(await runDoctorCommand({ args: doctorArgs(dir), streams: json.streams, cwd: process.cwd() })).toBe(1);
+      expect(await runCommandLine(doctorCommandLine, {
+        argv: doctorArgs(dir),
+        streams: json.streams,
+        cwd: process.cwd(),
+      })).toBe(1);
       const result = JSON.parse(json.out.join("")) as {
         preflight: { ok: boolean; findings: Array<{ reason: string; fix: string; severity: string }> };
       };
@@ -491,7 +488,11 @@ describe("preflight, before anything is touched", () => {
 
       const text = streams();
       text.streams.isTTY = true;
-      await runDoctorCommand({ args: doctorArgs(dir, { json: false }), streams: text.streams, cwd: process.cwd() });
+      await runCommandLine(doctorCommandLine, {
+        argv: doctorArgs(dir, { json: false }),
+        streams: text.streams,
+        cwd: process.cwd(),
+      });
       const rendered = text.out.join("");
       expect(rendered).toContain("PREFLIGHT");
       expect(rendered).toContain("✗ claude   not found");
@@ -525,8 +526,8 @@ describe("preflight, before anything is touched", () => {
     const restore = withoutClaudeOnPath();
     try {
       const run = streams();
-      const code = await runExecuteCommand({
-        args: doctorArgs(repo, { ticket: "PRB-1", json: false }),
+      const code = await runCommandLine(executeCommandLine, {
+        argv: ["--repo", repo, "--ticket", "PRB-1"],
         streams: run.streams,
         cwd: repo,
       });
@@ -581,7 +582,11 @@ describe("ceilings surfaced", () => {
 
     const text = streams();
     text.streams.isTTY = true;
-    await runDoctorCommand({ args: doctorArgs(repo, { json: false }), streams: text.streams, cwd: repo });
+    await runCommandLine(doctorCommandLine, {
+      argv: doctorArgs(repo, { json: false }),
+      streams: text.streams,
+      cwd: repo,
+    });
     const rendered = text.out.join("");
     expect(rendered).toMatch(/attempt_iterations\s+200\s+200\s+config \(no default\)/);
     // D-096: nothing raised it and nothing defaults it, so there is no ceiling
@@ -603,7 +608,11 @@ describe("ceilings surfaced", () => {
     expect(rendered).toContain("(now 200)");
 
     const json = streams();
-    await runDoctorCommand({ args: doctorArgs(repo), streams: json.streams, cwd: repo });
+    await runCommandLine(doctorCommandLine, {
+      argv: doctorArgs(repo),
+      streams: json.streams,
+      cwd: repo,
+    });
     const result = JSON.parse(json.out.join("")) as {
       limits: {
         effective: Record<string, number | null>;
@@ -720,11 +729,11 @@ describe("a partner's first hour", () => {
       const configPath = join(repo, ".perbo", "config.json");
       const preflight = readyPreflight();
       const proposed = streams();
-      const proposedCode = await runDoctorCommand({
-        args: doctorArgs(repo, { config: "desktop-selection.json", probe: false }),
+      const proposedCode = await runCommandLine(doctorCommandLine, {
+        argv: doctorArgs(repo, { config: "desktop-selection.json", probe: false }),
         streams: proposed.streams,
         cwd: repo,
-        preflight,
+        deps: { preflight },
       });
       expect(proposedCode).toBe(0);
       expect(preflight).toHaveBeenCalledWith({
@@ -765,21 +774,21 @@ describe("a partner's first hour", () => {
 
       const text = streams();
       text.streams.isTTY = true;
-      await runDoctorCommand({
-        args: doctorArgs(repo, { config: overridePath, json: false, probe: false }),
+      await runCommandLine(doctorCommandLine, {
+        argv: doctorArgs(repo, { config: overridePath, json: false, probe: false }),
         streams: text.streams,
         cwd: repo,
-        preflight,
+        deps: { preflight },
       });
       expect(text.out.join("")).toContain(`--config ${overridePath} --write-config`);
       expect(text.out.join("")).toContain("check_lint, check_unit (proposed)");
 
       const written = streams();
-      expect(await runDoctorCommand({
-        args: doctorArgs(repo, { config: overridePath, writeConfig: true, probe: false }),
+      expect(await runCommandLine(doctorCommandLine, {
+        argv: doctorArgs(repo, { config: overridePath, writeConfig: true, probe: false }),
         streams: written.streams,
         cwd: repo,
-        preflight,
+        deps: { preflight },
       })).toBe(0);
       expect(JSON.parse(written.out.join(""))).toMatchObject({
         config: { present: false, written: true, proposed: codexSelection },
@@ -825,11 +834,11 @@ describe("a partner's first hour", () => {
       writeFileSync(overridePath, JSON.stringify(codexSelection));
       const preflight = readyPreflight();
       const report = streams();
-      await runDoctorCommand({
-        args: doctorArgs(repo, { config: overridePath, probe: false }),
+      await runCommandLine(doctorCommandLine, {
+        argv: doctorArgs(repo, { config: overridePath, probe: false }),
         streams: report.streams,
         cwd: repo,
-        preflight,
+        deps: { preflight },
       });
       expect(preflight).toHaveBeenCalledWith(expect.objectContaining({
         agentBinary: "codex",
@@ -845,11 +854,11 @@ describe("a partner's first hour", () => {
         config: { present: true, proposed: null, written: false, override_path: overridePath },
       });
       expect(readFileSync(configPath, "utf8")).toBe(stored);
-      await expect(runDoctorCommand({
-        args: doctorArgs(repo, { config: overridePath, writeConfig: true, probe: false }),
+      await expect(runCommandLine(doctorCommandLine, {
+        argv: doctorArgs(repo, { config: overridePath, writeConfig: true, probe: false }),
         streams: streams().streams,
         cwd: repo,
-        preflight,
+        deps: { preflight },
       })).rejects.toThrow(/already exists; doctor never overwrites it/);
       expect(readFileSync(configPath, "utf8")).toBe(stored);
     } finally {
@@ -863,11 +872,11 @@ describe("a partner's first hour", () => {
       const overridePath = join(repo, "selection.json");
       writeFileSync(overridePath, JSON.stringify(value));
       const preflight = readyPreflight();
-      await expect(runDoctorCommand({
-        args: doctorArgs(repo, { config: overridePath, writeConfig: true }),
+      await expect(runCommandLine(doctorCommandLine, {
+        argv: doctorArgs(repo, { config: overridePath, writeConfig: true }),
         streams: streams().streams,
         cwd: repo,
-        preflight,
+        deps: { preflight },
       })).rejects.toThrow(`${overridePath} is not a JSON object`);
       expect(preflight).not.toHaveBeenCalled();
       expect(existsSync(join(repo, ".perbo", "config.json"))).toBe(false);
@@ -886,7 +895,11 @@ describe("a partner's first hour", () => {
     const configPath = join(repo, ".perbo", "config.json");
 
     const proposed = streams();
-    await runDoctorCommand({ args: doctorArgs(repo), streams: proposed.streams, cwd: repo });
+    await runCommandLine(doctorCommandLine, {
+      argv: doctorArgs(repo),
+      streams: proposed.streams,
+      cwd: repo,
+    });
     const first = JSON.parse(proposed.out.join("")) as {
       config: { present: boolean; written: boolean; proposed: { checks: Array<Record<string, unknown>>; limits: { limits: Record<string, number> }; materialization_manifest: { source_checkout: string } } };
     };
@@ -901,12 +914,20 @@ describe("a partner's first hour", () => {
 
     const text = streams();
     text.streams.isTTY = true;
-    await runDoctorCommand({ args: doctorArgs(repo, { json: false }), streams: text.streams, cwd: repo });
+    await runCommandLine(doctorCommandLine, {
+      argv: doctorArgs(repo, { json: false }),
+      streams: text.streams,
+      cwd: repo,
+    });
     expect(text.out.join("")).toContain("does not exist. Proposed:");
     expect(text.out.join("")).toContain("--write-config");
 
     const written = streams();
-    await runDoctorCommand({ args: doctorArgs(repo, { writeConfig: true }), streams: written.streams, cwd: repo });
+    await runCommandLine(doctorCommandLine, {
+      argv: doctorArgs(repo, { writeConfig: true }),
+      streams: written.streams,
+      cwd: repo,
+    });
     expect(existsSync(configPath)).toBe(true);
     expect((JSON.parse(written.out.join("")) as { config: { written: boolean } }).config.written).toBe(true);
 
@@ -919,7 +940,11 @@ describe("a partner's first hour", () => {
 
     const untouched = readFileSync(configPath, "utf8");
     await expect(
-      runDoctorCommand({ args: doctorArgs(repo, { writeConfig: true }), streams: streams().streams, cwd: repo }),
+      runCommandLine(doctorCommandLine, {
+        argv: doctorArgs(repo, { writeConfig: true }),
+        streams: streams().streams,
+        cwd: repo,
+      }),
     ).rejects.toThrow(/already exists; doctor never overwrites it/);
     expect(readFileSync(configPath, "utf8")).toBe(untouched);
   }, DOCTOR_RUN_TIMEOUT_MS);

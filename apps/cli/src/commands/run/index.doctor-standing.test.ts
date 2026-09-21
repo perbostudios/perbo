@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { DiagnosticResultSchema, type DiagnosticResult, type StandingProhibitedEntry } from "@perbo/contracts";
 import type { PreflightResult } from "@perbo/runner";
 import { afterEach, describe, expect, it } from "vitest";
-import { runDoctorCommand, type DoctorOptions } from "./index.js";
+import { doctorCommandLine } from "./index.js";
+import { runCommandLine } from "../../command-line/terminal.js";
+import type { Streams } from "../../streams.js";
 
 /**
  * The PROHIBITED block: the standing list this repository refuses a write to
@@ -21,31 +23,18 @@ const streams = () => {
   return { out, err, human: sink(out, err, true), machine: sink(out, err, false) };
 };
 
-const sink = (out: string[], err: string[], isTTY: boolean): DoctorOptions["streams"] => ({
+const sink = (out: string[], err: string[], isTTY: boolean): Streams => ({
   stdout: (chunk: string) => out.push(chunk),
   stderr: (chunk: string) => err.push(chunk),
   isTTY,
 });
 
-const doctorArgs = (repo: string, json: boolean): DoctorOptions["args"] => ({
-  ticket: null,
-  store: null,
-  contract: null,
-  config: null,
+/** The line this diagnostic is asked for by: a repository, and the record or the reading. */
+const doctorArgs = (repo: string, json: boolean): string[] => [
+  "--repo",
   repo,
-  worktreeRoot: null,
-  publish: false,
-  json,
-  quiet: true,
-  writeConfig: false,
-  probe: false,
-  resumeFrom: null,
-  outcome: null,
-  criteria: [],
-  paths: [],
-  pr: null,
-  relevel: false,
-});
+  ...(json ? ["--json"] : []),
+];
 
 const machineReady: PreflightResult = {
   ok: true,
@@ -77,12 +66,11 @@ function repository(name: string, config: Record<string, unknown> | null): strin
 
 async function doctor(repo: string, json: boolean): Promise<string> {
   const sinks = streams();
-  await runDoctorCommand({
-    args: doctorArgs(repo, json),
+  await runCommandLine(doctorCommandLine, {
+    argv: doctorArgs(repo, json),
     streams: json ? sinks.machine : sinks.human,
     cwd: process.cwd(),
-    preflight: () => machineReady,
-    diagnose: () => Promise.resolve(materializable),
+    deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
   });
   return sinks.out.join("");
 }

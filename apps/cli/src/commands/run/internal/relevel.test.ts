@@ -8,7 +8,7 @@ import { TicketRunConfigSchema } from "@perbo/runner";
 import { UsageError } from "../../../usage-error.js";
 import { admitCommandLine, listCommandLine } from "../../admit.js";
 import type { Streams } from "../../../streams.js";
-import { TICKET_RUNS, parseExecuteArgs } from "../index.js";
+import { TICKET_RUNS, executeCommandLine } from "../index.js";
 import { processDeps } from "../../serve/index.js";
 import { readTicket, storeDir as storeDirOf, writeTicket } from "../../../store/tickets.js";
 import { TicketSchema, transition, withReconciliation } from "@perbo/contracts";
@@ -324,8 +324,8 @@ describe("the queue's reading of a branch", () => {
 
 describe("run --relevel", () => {
   it("is a flag and takes no value", () => {
-    expect(parseExecuteArgs(["--ticket", "AYO-1", "--relevel"]).relevel).toBe(true);
-    expect(parseExecuteArgs(["--ticket", "AYO-1"]).relevel).toBe(false);
-    expect(() => parseExecuteArgs(["--relevel=yes"])).toThrow(UsageError);
+    expect(executeCommandLine.read(["--ticket", "AYO-1", "--relevel"]).input.relevel).toBe(true);
+    expect(executeCommandLine.read(["--ticket", "AYO-1"]).input.relevel).toBe(false);
+    expect(() => executeCommandLine.read(["--relevel=yes"])).toThrow(UsageError);
   });
 });

@@ -27,7 +27,7 @@ import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
 import { escapesCommandLine } from "../escapes/index.js";
-import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "./index.js";
+import { type ExecuteDeps, executeCommandLine } from "./index.js";
 import { buildInspectReport } from "../inspect.js";
 import {
   LOCAL_RUN_SCHEMA_VERSION,
@@ -552,15 +552,14 @@ function filesUnder(dir: string): string[] {
 async function run(
   repo: string,
   argv: readonly string[],
-  options: Omit<ExecuteOptions, "args" | "streams" | "cwd"> = {},
+  options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; out: string; err: string; json: RunJson }> {
   const streams = capture();
-  const code = await runExecuteCommand({
-    args: parseExecuteArgs(["--repo", repo, ...argv]),
+  const code = await runCommandLine(executeCommandLine, {
+    argv: ["--repo", repo, ...argv],
     streams: streams.streams,
     cwd: repo,
-    preflight: okPreflight,
-    ...options,
+    deps: { preflight: okPreflight, ...options },
   });
   const out = streams.out.join("");
   return { code, out, err: streams.err.join(""), json: JSON.parse(out) as RunJson };

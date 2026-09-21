@@ -4,13 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
-import {
-  parseExecuteArgs,
-  proposedChecks,
-  runExecuteCommand,
-  type ExecuteOptions,
-} from "./index.js";
+import { type ExecuteDeps, executeCommandLine, proposedChecks } from "./index.js";
 import { storeDir } from "../../store/index.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * A first run on a repository that has no `.perbo/config.json` (SCP-259).
@@ -312,30 +308,28 @@ const CRITERION = "total() returns the sum of its inputs :: total([1,2]) is 3 ::
 async function loop(
   repo: string,
   argv: readonly string[],
-  options: Omit<ExecuteOptions, "args" | "streams" | "cwd"> = {},
+  options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string; json: RunJson }> {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await runExecuteCommand({
-    args: parseExecuteArgs([
-      "--repo",
-      repo,
-      "--outcome",
-      OUTCOME,
-      "--criterion",
-      CRITERION,
-      "--json",
-      ...argv,
-    ]),
+  const code = await runCommandLine(executeCommandLine, {
+    argv: [
+        "--repo",
+        repo,
+        "--outcome",
+        OUTCOME,
+        "--criterion",
+        CRITERION,
+        "--json",
+        ...argv,
+      ],
     streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY: false,
-    },
+        stdout: (chunk: string) => out.push(chunk),
+        stderr: (chunk: string) => err.push(chunk),
+        isTTY: false,
+      },
     cwd: repo,
-    preflight: okPreflight,
-    hooks: { review: reviewer() as never },
-    ...options,
+    deps: { preflight: okPreflight, hooks: { review: reviewer() as never }, ...options },
   });
   return { code, err: err.join(""), json: JSON.parse(out.join("")) as RunJson };
 }

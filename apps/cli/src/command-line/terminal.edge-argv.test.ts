@@ -6,7 +6,7 @@ import { inspectCommandLine } from "../commands/inspect.js";
 import { parseInterviewArgs } from "../commands/interview/index.js";
 import { principleCommandLine } from "../commands/principle.js";
 import { parseReviewArgs } from "../commands/review/index.js";
-import { parseExecuteArgs } from "../commands/run/index.js";
+import { doctorCommandLine, executeCommandLine } from "../commands/run/index.js";
 import { indexCommandLine } from "../commands/symbol-index.js";
 import { verdictCommandLine } from "../commands/verdict/index.js";
 
@@ -31,20 +31,21 @@ const KEY = "PRB-7";
 describe("the desktop host", () => {
   it("reads doctor's configuration and the write it may ask for", () => {
     // ["doctor", "--json", "--config", <path>] + --write-config, then --repo.
-    const args = parseExecuteArgs(["--json", "--config", "/tmp/c.json", "--repo", REPO]);
-    expect(args).toMatchObject({ json: true, config: "/tmp/c.json", repo: REPO, writeConfig: false });
+    const { input } = doctorCommandLine.read(["--json", "--config", "/tmp/c.json", "--repo", REPO]);
+    expect(input).toMatchObject({ json: true, config: "/tmp/c.json", repo: REPO, writeConfig: false });
     expect(
-      parseExecuteArgs(["--json", "--config", "/tmp/c.json", "--write-config", "--repo", REPO])
-        .writeConfig,
+      doctorCommandLine.read(["--json", "--config", "/tmp/c.json", "--write-config", "--repo", REPO])
+        .input.writeConfig,
     ).toBe(true);
   });
 
   it("reads a run, with and without the bundle it resumes from", () => {
     expect(
-      parseExecuteArgs(["--ticket", KEY, "--config", "/tmp/c.json", "--json", "--repo", REPO]),
+      executeCommandLine.read(["--ticket", KEY, "--config", "/tmp/c.json", "--json", "--repo", REPO])
+        .input,
     ).toMatchObject({ ticket: KEY, config: "/tmp/c.json", json: true, repo: REPO, resumeFrom: null });
     expect(
-      parseExecuteArgs([
+      executeCommandLine.read([
         "--ticket",
         KEY,
         "--config",
@@ -54,7 +55,7 @@ describe("the desktop host", () => {
         "bun_01",
         "--repo",
         REPO,
-      ]).resumeFrom,
+      ]).input.resumeFrom,
     ).toBe("bun_01");
   });
 
@@ -281,10 +282,11 @@ describe("the desktop host", () => {
 describe("the queue", () => {
   it("reads the run it starts and the re-level it asks for", () => {
     expect(
-      parseExecuteArgs(["--ticket", KEY, "--repo", ".", "--store", "/tmp/.perbo", "--publish"]),
+      executeCommandLine.read(["--ticket", KEY, "--repo", ".", "--store", "/tmp/.perbo", "--publish"])
+        .input,
     ).toMatchObject({ ticket: KEY, repo: ".", store: "/tmp/.perbo", publish: true, relevel: false });
     expect(
-      parseExecuteArgs([
+      executeCommandLine.read([
         "--ticket",
         KEY,
         "--relevel",
@@ -293,7 +295,7 @@ describe("the queue", () => {
         "--store",
         "/tmp/.perbo",
         "--publish",
-      ]),
+      ]).input,
     ).toMatchObject({ relevel: true, publish: true });
   });
 

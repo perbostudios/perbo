@@ -14,13 +14,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
-import {
-  parseExecuteArgs,
-  resolveBase,
-  runDoctorCommand,
-  runExecuteCommand,
-  type ExecuteOptions,
-} from "./index.js";
+import { type ExecuteDeps, doctorCommandLine, executeCommandLine, resolveBase } from "./index.js";
 import { attemptsRecordSubject, inspectCommandLine } from "../inspect.js";
 import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import { storeDir } from "../../store/index.js";
@@ -403,20 +397,18 @@ interface RunReport {
 async function run(
   repo: string,
   argv: readonly string[],
-  options: Omit<ExecuteOptions, "args" | "streams" | "cwd"> = {},
+  options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string; out: string }> {
   const streams = capture();
   try {
-    const code = await runExecuteCommand({
-      args: parseExecuteArgs(["--repo", repo, "--outcome", OUTCOME, "--criterion", CRITERION, "--json", ...argv]),
+    const code = await runCommandLine(executeCommandLine, {
+      argv: ["--repo", repo, "--outcome", OUTCOME, "--criterion", CRITERION, "--json", ...argv],
       streams: streams.streams,
       cwd: repo,
-      preflight: okPreflight,
-      hooks: {
-        review: reviewer() as never,
-        push: (async () => ({ pushed: true, detail: "hooked" })) as never,
-      },
-      ...options,
+      deps: { preflight: okPreflight, hooks: {
+          review: reviewer() as never,
+          push: (async () => ({ pushed: true, detail: "hooked" })) as never,
+        }, ...options },
     });
     return { code, err: streams.err.join(""), out: streams.out.join("") };
   } catch (error) {
@@ -490,15 +482,14 @@ async function runContract(
   );
   const streams = capture();
   try {
-    const code = await runExecuteCommand({
-      args: parseExecuteArgs(["--repo", repo, "--contract", contractPath, "--config", configPath, "--json", ...argv]),
+    const code = await runCommandLine(executeCommandLine, {
+      argv: ["--repo", repo, "--contract", contractPath, "--config", configPath, "--json", ...argv],
       streams: streams.streams,
       cwd: repo,
-      preflight: okPreflight,
-      hooks: {
-        review: reviewer() as never,
-        push: (async () => ({ pushed: true, detail: "hooked" })) as never,
-      },
+      deps: { preflight: okPreflight, hooks: {
+          review: reviewer() as never,
+          push: (async () => ({ pushed: true, detail: "hooked" })) as never,
+        } },
     });
     return { code, err: streams.err.join(""), out: streams.out.join("") };
   } catch (error) {
@@ -756,11 +747,11 @@ describe("a base_ref that is not a branch name", () => {
     repoConfig(repo, { base_ref: "" });
 
     const reported = capture(true);
-    await runDoctorCommand({
-      args: parseExecuteArgs(["--repo", repo]),
+    await runCommandLine(doctorCommandLine, {
+      argv: ["--repo", repo],
       streams: reported.streams,
       cwd: repo,
-      preflight: okPreflight,
+      deps: { preflight: okPreflight },
     });
 
     const shown = uncoloured(reported.out.join(""));
@@ -904,11 +895,11 @@ describe("what says where a run publishes", () => {
 
     const report = async (repo: string): Promise<string> => {
       const reported = capture(true);
-      await runDoctorCommand({
-        args: parseExecuteArgs(["--repo", repo]),
+      await runCommandLine(doctorCommandLine, {
+        argv: ["--repo", repo],
         streams: reported.streams,
         cwd: repo,
-        preflight: okPreflight,
+        deps: { preflight: okPreflight },
       });
       return uncoloured(reported.out.join(""));
     };
@@ -923,15 +914,19 @@ describe("what says where a run publishes", () => {
 
   it("doctor pins the base it named in the config it writes", async () => {
     const repo = repository("doctor-base");
-    const doctorArgs = (writeConfig: boolean) =>
-      parseExecuteArgs(["--repo", repo, "--json", ...(writeConfig ? ["--write-config"] : [])]);
+    const doctorArgs = (writeConfig: boolean) => [
+      "--repo",
+      repo,
+      "--json",
+      ...(writeConfig ? ["--write-config"] : []),
+    ];
 
     const reported = capture();
-    await runDoctorCommand({
-      args: doctorArgs(false),
+    await runCommandLine(doctorCommandLine, {
+      argv: doctorArgs(false),
       streams: reported.streams,
       cwd: repo,
-      preflight: okPreflight,
+      deps: { preflight: okPreflight },
     });
     const report = JSON.parse(reported.out.join("")) as {
       base: { ref: string | null; from: string | null };
@@ -942,11 +937,11 @@ describe("what says where a run publishes", () => {
     expect(report.config.proposed.base_ref).toBe("main");
 
     const written = capture();
-    await runDoctorCommand({
-      args: doctorArgs(true),
+    await runCommandLine(doctorCommandLine, {
+      argv: doctorArgs(true),
       streams: written.streams,
       cwd: repo,
-      preflight: okPreflight,
+      deps: { preflight: okPreflight },
     });
     const onDisk = JSON.parse(readFileSync(join(storeDir(repo, null), "config.json"), "utf8")) as {
       base_ref?: string;
