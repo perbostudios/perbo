@@ -27,10 +27,10 @@ function repoWith(scripts: Record<string, string>, extra: Record<string, unknown
 
 describe("verificationServiceNeed", () => {
   it("names a verification command that itself starts a service", () => {
-    // One repository, rewritten per case. `makeRepo` runs git, and four of them
-    // for four readings of one `package.json` is four times the wall clock for
-    // no more evidence — which is how a case like this comes to sit against the
-    // default timeout on a loaded machine.
+    // One repository, rewritten per case. `workspaceRepository` runs git, and
+    // four of them for four readings of one `package.json` is four times the
+    // wall clock for no more evidence — which is how a case like this comes to
+    // sit against the default timeout on a loaded machine.
     const dir = repoWith({ test: "vitest run" }).dir;
     for (const script of [
       "docker compose up -d && vitest run",
