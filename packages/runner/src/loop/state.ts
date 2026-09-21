@@ -350,6 +350,9 @@ export type Stop = Extract<Step, { next: "stop" }>;
 /** The step that buys one more attempt of the round, with the wait it sits out. */
 export type Retry = Extract<Step, { next: "retry" }>;
 
+/** The step that moves the run on to the next round. */
+export type Advance = Extract<Step, { next: "advance" }>;
+
 /** The state the first round of a run enters with. */
 export function initialRoundState(workspace: Workspace, continuing: Continuation | null): RoundState {
   return {

@@ -131,7 +131,7 @@ import {
   type Retry,
   type RunOutcome,
 } from "./loop/state.js";
-import { routeStopped } from "./loop/route.js";
+import { routeConflict, routeResolution, routeStopped } from "./loop/route.js";
 import { refuseWidening, routeVerification, verifierModel } from "./loop/verify.js";
 
 /**
@@ -1873,88 +1873,43 @@ async function runLockedTicket(
       // whose only task is the resolution.
       if (conflictNow !== null) {
         ledger.addRound(record());
-        // A merge that stopped without naming an unmerged path did not stop on
-        // a conflict, and there is nothing for a round to resolve. One
-        // resolution attempt per real conflict, too: a round that *was* the
-        // resolution and came back to the same conflict has answered the
-        // question, and asking the same model the same thing again is not a
-        // second answer, it is the same one paid for twice.
-        if (conflictNow.paths.length === 0) {
-          outcome = "base_conflict";
-          detail = mergeFailedDetail(
-            config.base_ref,
-            conflictNow.tip,
-            state.workspace.branch,
-            conflictNow.detail,
-          );
-          break;
-        }
-        // SCP-194: only a resolution that came back to the same conflict stops
-        // here. The remediation cap is not consulted, because a conflict round
-        // is not remediation and refusing one on the strength of the rounds
-        // spent answering findings would leave a branch nobody can merge.
-        if (state.kind === "resolve_conflict") {
-          outcome = "base_conflict";
-          detail =
-            `${config.base_ref} at ${conflictNow.tip} will not merge into ` +
-            `${state.workspace.branch}: ${conflictNow.paths.join(", ")}. ` +
-            "The round given the conflict did not resolve it, so a person reconciles those files.";
-          break;
-        }
-        state = applyStep(state, {
-          next: "advance",
-          kind: "resolve_conflict",
-          remediation: false,
-          carry: {
-            conflict: {
-              tip: conflictNow.tip,
-              paths: conflictNow.paths,
-              before_executor: false,
-              resume_kind: state.kind,
-            },
-          },
+        const conflictStep = routeConflict({
+          conflict: conflictNow,
+          kind: state.kind,
+          baseRef: config.base_ref,
+          branch: state.workspace.branch,
         });
+        state = applyStep(state, conflictStep);
+        if (conflictStep.next === "stop") {
+          outcome = conflictStep.end.outcome;
+          detail = conflictStep.end.detail;
+          break;
+        }
         continue;
       }
 
       // SCP-192: the resolution landed and the branch is level with the base
       // again. What follows is whatever the conflict interrupted.
       if (state.kind === "resolve_conflict") {
-        // A round that committed the markers rather than resolving them leaves
-        // a branch that merges cleanly and builds nothing, and `git` cannot
-        // tell: as far as it is concerned the conflict is resolved.
-        const markers = pathsWithConflictMarkers(state.workspace.path, sealed.changed_paths);
-        if (markers.length > 0) {
+        const resolution = routeResolution({
+          markers: pathsWithConflictMarkers(state.workspace.path, sealed.changed_paths),
+          changedPaths: sealed.changed_paths.length,
+          beforeExecutor: state.conflict!.before_executor,
+          resumeKind: state.conflict!.resume_kind,
+          relevel: config.relevel,
+          round: state.round,
+        });
+        if (resolution.say !== null) progress(resolution.say);
+        if (resolution.step !== null) {
           ledger.addRound(record());
-          outcome = "base_conflict";
-          detail =
-            `the round given the base conflict left a conflict marker in ${markers.join(", ")}, ` +
-            "so the merge is not resolved whatever git reports; a person reconciles those files";
-          break;
-        }
-        progress(`the base conflict is resolved on ${sealed.changed_paths.length} file(s)`);
-        // SCP-227: a re-level has no brief of its own to return to. The
-        // resolution changed the change set, so what follows is the fresh
-        // review below, and its verdict is the run's.
-        if (state.conflict!.before_executor && !config.relevel) {
-          // The round's own brief has not run yet: it is the next round's, and
-          // it is whichever brief the conflict interrupted (SCP-194).
-          ledger.addRound(record());
-          const resume = state.conflict!.resume_kind;
-          state = applyStep(state, {
-            next: "advance",
-            kind: resume,
-            remediation: false,
-            carry: {
-              conflict: null,
-              ...(resume === "execute" ? { executeRound: state.round + 1 } : {}),
-            },
-          });
+          state = applyStep(state, resolution.step);
+          if (resolution.step.next === "stop") {
+            outcome = resolution.step.end.outcome;
+            detail = resolution.step.end.detail;
+            break;
+          }
           continue;
         }
-        // The round it interrupted had already done its work, so the judgement
-        // that round was heading for is what happens next — over this round's
-        // change set, which is that work merged with the base.
         state = { ...state, conflict: null };
       }
 

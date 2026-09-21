@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AttemptWait, TerminationReason } from "@perbo/contracts";
 import { TRANSPORT_RETRY_DELAY_MS } from "../transport.js";
-import { routeStopped } from "./route.js";
+import { routeConflict, routeResolution, routeStopped } from "./route.js";
 import { attempt } from "./test-support/fakes.js";
 
 const CUT = attempt({ attempt_id: "att_0000000000000002", head_commit: "cafe1234" });
@@ -193,5 +193,101 @@ describe("where an attempt that stopped short of the work sends the run", () => 
       next: "stop",
       end: { outcome: "terminated", detail: "agent_error: the agent exited 1" },
     });
+  });
+});
+
+const conflict = (overrides: Partial<Parameters<typeof routeConflict>[0]> = {}) =>
+  routeConflict({
+    conflict: { tip: "f00ba412", paths: ["src/feature.ts"], detail: "Automatic merge failed" },
+    kind: "execute",
+    baseRef: "main",
+    branch: "prb/scp094/the-feature-module",
+    ...overrides,
+  });
+
+describe("where a change set the base will not merge into sends the run", () => {
+  it("gives a round to the resolution, naming what it is resuming afterwards", () => {
+    expect(conflict({ kind: "remediate" })).toMatchObject({
+      next: "advance",
+      kind: "resolve_conflict",
+      remediation: false,
+      carry: {
+        conflict: {
+          tip: "f00ba412",
+          paths: ["src/feature.ts"],
+          before_executor: false,
+          resume_kind: "remediate",
+        },
+      },
+    });
+  });
+
+  it("stops on a merge that named no unmerged file, because no round can resolve one", () => {
+    const step = conflict({
+      conflict: { tip: "f00ba412", paths: [], detail: "error: your local changes" },
+    });
+
+    expect(step).toMatchObject({ next: "stop", end: { outcome: "base_conflict" } });
+    expect(step.next === "stop" && step.end.detail).toContain("git named no conflicting file");
+    expect(step.next === "stop" && step.end.detail).toContain("error: your local changes");
+  });
+
+  it("stops rather than paying twice for the answer a resolution round already gave", () => {
+    const step = conflict({ kind: "resolve_conflict" });
+
+    expect(step).toMatchObject({ next: "stop", end: { outcome: "base_conflict" } });
+    expect(step.next === "stop" && step.end.detail).toBe(
+      "main at f00ba412 will not merge into prb/scp094/the-feature-module: src/feature.ts. " +
+        "The round given the conflict did not resolve it, so a person reconciles those files.",
+    );
+  });
+});
+
+const resolution = (overrides: Partial<Parameters<typeof routeResolution>[0]> = {}) =>
+  routeResolution({
+    markers: [],
+    changedPaths: 3,
+    beforeExecutor: true,
+    resumeKind: "execute",
+    relevel: false,
+    round: 0,
+    ...overrides,
+  });
+
+describe("where a round given a base conflict sends the run once it is sealed", () => {
+  it("stops on a resolution that committed the markers, whatever git reports", () => {
+    const routed = resolution({ markers: ["src/feature.ts", "src/other.ts"] });
+
+    expect(routed.say).toBeNull();
+    expect(routed.step).toMatchObject({ next: "stop", end: { outcome: "base_conflict" } });
+    expect(routed.step?.next === "stop" && routed.step.end.detail).toContain(
+      "left a conflict marker in src/feature.ts, src/other.ts",
+    );
+  });
+
+  it("returns a conflict found before the executor to the brief it interrupted", () => {
+    const toTheTicket = resolution({ resumeKind: "execute", round: 0 });
+    const toARemediation = resolution({ resumeKind: "remediate", round: 2 });
+
+    expect(toTheTicket.say).toBe("the base conflict is resolved on 3 file(s)");
+    expect(toTheTicket.step).toMatchObject({
+      next: "advance",
+      kind: "execute",
+      remediation: false,
+      carry: { conflict: null, executeRound: 1 },
+    });
+    expect(toARemediation.step).toMatchObject({ next: "advance", kind: "remediate" });
+    expect(
+      toARemediation.step?.next === "advance" && toARemediation.step.carry?.executeRound,
+    ).toBeUndefined();
+  });
+
+  it("judges a resolution that interrupted a round which had already done its work", () => {
+    const afterTheSeal = resolution({ beforeExecutor: false });
+    const forARelevel = resolution({ relevel: true });
+
+    expect(afterTheSeal.step).toBeNull();
+    expect(afterTheSeal.say).toBe("the base conflict is resolved on 3 file(s)");
+    expect(forARelevel.step).toBeNull();
   });
 });
