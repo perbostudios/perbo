@@ -134,10 +134,15 @@ export const AttemptIdSchema = z
 export const InspectInputSchema = z
   .strictObject({
     target: StoreTargetSchema,
-    /** A ticket key, or the name of a run nothing admitted (SCP-284). */
-    key: z.string().min(1),
+    /**
+     * A ticket key, or the name of a run nothing admitted (SCP-284).
+     *
+     * Any name at all, including none: what a store holds is the store's
+     * answer, and it gives it naming the name it was asked for.
+     */
+    key: z.string(),
     /** One attempt, for that attempt alone. */
-    attempt: z.string().min(1).nullable(),
+    attempt: z.string().nullable(),
     /**
      * The attempt whose bundle objects are to be re-hashed, or null for a
      * reading rather than a check. Its own field and not a boolean beside
@@ -145,7 +150,7 @@ export const InspectInputSchema = z
      * narrows what is printed, `verify` prints nothing about the attempt at
      * all and returns a verdict on the bytes.
      */
-    verify: z.string().min(1).nullable(),
+    verify: z.string().nullable(),
   })
   // Refused rather than resolved in favour of one of them: `verify` names the
   // attempt it checks, so the two would be two answers to the same question

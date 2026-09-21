@@ -43,10 +43,16 @@ export function storeDir(repositoryRoot: string, override?: string | null): stri
  * One field of every command's input, so a caller that has the two paths has
  * the whole of the answer to "where does this read and write" without
  * spelling `--repo` and `--store` again.
+ *
+ * Either path may be empty, and an empty one is not a missing one: `--repo ""`
+ * is the directory the command was run in and `--store ""` is the store that
+ * directory holds, which is where the command works with neither flag given.
+ * `perbo list --repo "$REPO"` with `REPO` unset therefore lists the store it
+ * is standing in rather than refusing a line it can act on.
  */
 export const StoreTargetSchema = z.strictObject({
-  repo: z.string().min(1),
-  store: z.string().min(1).nullable(),
+  repo: z.string(),
+  store: z.string().nullable(),
 });
 export type StoreTarget = z.infer<typeof StoreTargetSchema>;
 
