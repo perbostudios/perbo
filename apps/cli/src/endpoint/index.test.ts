@@ -223,6 +223,28 @@ describe("the endpoint", () => {
     expect(denied.json?.error?.message).toContain("not for this role");
   });
 
+  it("refuses two sources for one draft rather than preferring one of them", async () => {
+    const repo = repository();
+    const endpoint = await serve(repo);
+    const token = readEndpoint(storeDir(repo))!.tokens.person;
+    const both = await rpc(
+      endpoint.url,
+      token,
+      call("admit_ticket", { from: "o/r#412", from_file: "/tmp/issue.md" }),
+    );
+    const result = both.json?.result as { isError?: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toMatch(
+      /--from and --from-file are mutually exclusive: one contract is drafted from one document/,
+    );
+    // Nothing was admitted from either of them.
+    const listed = await rpc(endpoint.url, token, call("list_tickets", { all: true }));
+    expect(
+      (listed.json?.result as { structuredContent: { tickets: unknown[] } }).structuredContent
+        .tickets,
+    ).toEqual([]);
+  });
+
   it("never lets a session string become a flag: a value shaped like --x=--approve stays a value", async () => {
     const repo = repository();
     const endpoint = await serve(repo);

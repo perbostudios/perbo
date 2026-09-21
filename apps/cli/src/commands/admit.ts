@@ -1325,7 +1325,10 @@ export function admitDraft(
   input: DraftAdmission,
   context: CommandContext & Partial<AdmitDeps>,
 ): AdmissionReport | Promise<AdmissionReport> {
-  return admit(readInput(AdmissionInputSchema, { ...input, approve: false }), context);
+  // Read as a draft, which is strict and has no `approve` among its fields:
+  // an object carrying one is refused here rather than quietly stripped, so a
+  // caller that believed it could approve is told that it cannot.
+  return admit({ ...readInput(DraftAdmissionSchema, input), approve: false }, context);
 }
 
 function admitting(input: Admitting, started: number): AdmissionReport | Promise<AdmissionReport> {
