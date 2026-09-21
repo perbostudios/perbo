@@ -4,7 +4,7 @@ import {
   ExecutorSkillsSchema,
   type ExecutorSkillId,
 } from "@perbo/contracts";
-import { skillContent } from "./skill-content.js";
+import { skillContent } from "./internal/content.js";
 
 /** Fixed, user-selected text only. Never reads a repository or the operator's skill directories. */
 export function withExecutorSkills(

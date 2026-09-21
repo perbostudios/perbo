@@ -42,5 +42,5 @@ export { RunRefusedError } from "./refusal.js";
 export { resolveResumeSource, resumeNote, ResumeRefusedError } from "./resume.js";
 export { expandableHeredocBodies, UNKNOWN_CWD } from "./shell/index.js";
 export type { CommandSegment, WorktreeScope } from "./shell/index.js";
-export { withExecutorSkills } from "./skills.js";
+export { withExecutorSkills } from "./skills/index.js";
 export { commitSpec } from "./spec-commit.js";

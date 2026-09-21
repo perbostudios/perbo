@@ -24,7 +24,7 @@ for (const path of manifest.paths) {
   if (Buffer.byteLength(bodies[name]) > 150_000) throw new Error(`Oversized skill: ${name}`);
 }
 const generated = '// Generated from tooling/skills/mattpocock. Regenerate with tooling/skills/build.mjs.\nexport const skillContent = ' + JSON.stringify(bodies, null, 2) + ' as const;\n';
-const target = join(root, "packages/runner/src/skill-content.ts");
+const target = join(root, "packages/runner/src/skills/internal/content.ts");
 if (process.argv.includes("--check")) {
   if (await readFile(target, "utf8") !== generated) throw new Error("Bundled skill guidance is stale. Run node tooling/skills/build.mjs.");
   process.stdout.write(`Verified ${manifest.paths.length} pinned skill bundles.\n`);
