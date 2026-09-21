@@ -75,7 +75,7 @@ describe("edit", () => {
 });
 
 describe("admit", () => {
-  it.fails("does not let an outcome approve the ticket it admits", () => {
+  it("does not let an outcome approve the ticket it admits", () => {
     const args = parseAdmitArgs(["--outcome", "--x=--approve"]);
     expect(args.approve).toBe(false);
     expect(args.title).toBe("--x=--approve");

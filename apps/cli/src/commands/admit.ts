@@ -58,6 +58,8 @@ import { RepoReader } from "@perbo/review";
 import { QUEUE_HOLDING_STATES } from "../scheduling.js";
 import { UsageError, readInput } from "../usage-error.js";
 import {
+  aliasFlag,
+  listFlag,
   parseArgv,
   switchFlag,
   valueFlag,
@@ -187,201 +189,147 @@ export interface ListArgs {
   json: boolean;
 }
 
-const takeValue = (rest: string[], index: number, token: string): string => {
-  const next = rest[index];
-  if (next === undefined) throw new UsageError(`${token} requires a value`);
-  return next;
+const ADMIT_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--prefix": valueFlag(),
+  "--outcome": valueFlag(),
+  // The spelling `perbo admit --title` has always taken, recorded as the
+  // outcome it is: one field, so the last of the two given wins.
+  "--title": aliasFlag("--outcome"),
+  "--criterion": listFlag(),
+  "--criteria-file": valueFlag(),
+  "--path": listFlag(),
+  "--prohibit": listFlag(),
+  "--generated": listFlag(),
+  "--expansion-budget": valueFlag(),
+  "--level": valueFlag(),
+  "--priority": valueFlag(),
+  "--label": listFlag(),
+  "--depends-on": listFlag(),
+  "--source": valueFlag(),
+  "--source-url": valueFlag(),
+  "--from": valueFlag(),
+  "--from-file": valueFlag(),
+  "--from-spec": valueFlag(),
+  "--start-over": valueFlag(),
+  "--provider": valueFlag(),
+  "--model": valueFlag(),
+  "--manual-reviewer": valueFlag(),
+  "--manual-reason": valueFlag(),
+  "--approve": switchFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const ADMIT_GRAMMAR: Grammar<typeof ADMIT_FLAGS> = {
+  command: "admit",
+  flags: ADMIT_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal:
+      'admit takes no positional argument: what is admitted is given as flags, e.g. perbo admit ' +
+      '--outcome "..." --criterion "what :: how it is proven" --path "src/**"',
+  },
+  afterDoubleDash: "positionals",
 };
 
-/**
- * Split `--name=value` into `["--name", "value"]`, leaving everything else
- * alone, so `--outcome=x` and `--outcome x` mean the same thing.
- *
- * `parseReviewArgs` has always accepted both forms. These commands did not, so
- * one binary rejected `--outcome=x` and accepted `--contract=x` — a difference
- * nobody chose and nothing documented.
- */
-function splitInlineValues(argv: readonly string[]): string[] {
-  return argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
-}
+const TICKET_KEY = /^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/;
 
 export function parseAdmitArgs(argv: readonly string[]): AdmitArgs {
-  const args: AdmitArgs = {
-    repo: ".",
-    store: null,
-    prefix: DEFAULT_PREFIX,
-    title: null,
-    criteria: [],
-    criteriaFile: null,
-    paths: [],
-    prohibited: [...DEFAULT_PROHIBITED],
-    generated: [...DEFAULT_GENERATED],
-    expansionBudget: DEFAULT_EXPANSION_BUDGET,
-    level: null,
-    priority: "normal",
-    labels: [],
-    dependsOn: [],
-    source: null,
-    sourceUrl: null,
-    from: null,
-    fromFile: null,
-    fromSpec: null,
-    startOver: null,
-    provider: "claude-cli",
-    model: null,
-    manualReviewer: null,
-    manualReason: null,
-    approve: false,
-    json: false,
-  };
-  const tokens = splitInlineValues(argv);
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = takeValue(tokens, ++i, token);
-        break;
-      case "--store":
-        args.store = takeValue(tokens, ++i, token);
-        break;
-      case "--prefix": {
-        const prefix = takeValue(tokens, ++i, token);
-        // Checked here rather than reaching TicketKeySchema, where the failure
-        // arrived as `error: the review did not complete: ZodError…` with a
-        // stack trace and exit 3 — for a command that is not a review.
-        if (!/^[A-Z][A-Z0-9]{1,9}$/.test(prefix)) {
-          throw new UsageError(
-            `--prefix must be 2 to 10 uppercase letters or digits starting with a letter, so a ` +
-              `key reads like PRB-118. Got '${prefix}'`,
-          );
-        }
-        args.prefix = prefix;
-        break;
-      }
-      case "--outcome":
-      case "--title":
-        args.title = takeValue(tokens, ++i, token);
-        break;
-      case "--criterion":
-        args.criteria.push(takeValue(tokens, ++i, token));
-        break;
-      case "--criteria-file":
-        args.criteriaFile = takeValue(tokens, ++i, token);
-        break;
-      case "--path":
-        args.paths.push(takeValue(tokens, ++i, token));
-        break;
-      case "--prohibit":
-        args.prohibited.push(takeValue(tokens, ++i, token));
-        break;
-      case "--generated":
-        args.generated.push(takeValue(tokens, ++i, token));
-        break;
-      case "--expansion-budget": {
-        const raw = takeValue(tokens, ++i, token);
-        const budget = Number(raw);
-        if (!Number.isInteger(budget) || budget < 0) {
-          throw new UsageError(`--expansion-budget must be a whole number of files. Got '${raw}'`);
-        }
-        args.expansionBudget = budget;
-        break;
-      }
-      case "--level": {
-        const level = takeValue(tokens, ++i, token);
-        if (level !== "P1" && level !== "P2" && level !== "P3") {
-          throw new UsageError(
-            `--level must be P1, P2 or P3; P0 carries no acceptance criteria, so nothing could ` +
-              "review it",
-          );
-        }
-        args.level = level;
-        break;
-      }
-      case "--priority": {
-        const priority = takeValue(tokens, ++i, token);
-        if (!["urgent", "high", "normal", "low"].includes(priority)) {
-          throw new UsageError(`--priority must be urgent, high, normal or low`);
-        }
-        args.priority = priority as TicketPriority;
-        break;
-      }
-      case "--label":
-        args.labels.push(takeValue(tokens, ++i, token));
-        break;
-      case "--depends-on": {
-        const key = takeValue(tokens, ++i, token);
-        if (!/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/.test(key)) {
-          throw new UsageError(`--depends-on must be a ticket key like PRB-2. Got '${key}'`);
-        }
-        args.dependsOn.push(key);
-        break;
-      }
-      case "--source":
-        args.source = takeValue(tokens, ++i, token);
-        break;
-      case "--source-url": {
-        const url = takeValue(tokens, ++i, token);
-        try {
-          new URL(url);
-        } catch {
-          throw new UsageError(`--source-url must be a URL. Got '${url}'`);
-        }
-        args.sourceUrl = url;
-        break;
-      }
-      case "--from": {
-        const reference = takeValue(tokens, ++i, token);
-        if (!/^[\w.-]+\/[\w.-]+#[1-9]\d*$/.test(reference)) {
-          throw new UsageError(`--from must be a GitHub issue like owner/repo#412. Got '${reference}'`);
-        }
-        args.from = reference;
-        break;
-      }
-      case "--from-file":
-        args.fromFile = takeValue(tokens, ++i, token);
-        break;
-      case "--from-spec":
-        args.fromSpec = takeValue(tokens, ++i, token);
-        break;
-      case "--start-over": {
-        const key = takeValue(tokens, ++i, token);
-        if (!/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/.test(key)) {
-          throw new UsageError(`--start-over must be a ticket key like PRB-2. Got '${key}'`);
-        }
-        args.startOver = key;
-        break;
-      }
-      case "--provider": {
-        const provider = takeValue(tokens, ++i, token);
-        if (provider !== "anthropic" && provider !== "claude-cli" && provider !== "codex-cli") {
-          throw new UsageError("--provider must be 'anthropic', 'claude-cli' or 'codex-cli'");
-        }
-        args.provider = provider;
-        break;
-      }
-      case "--model":
-        args.model = takeValue(tokens, ++i, token);
-        break;
-      case "--manual-reviewer":
-        args.manualReviewer = takeValue(tokens, ++i, token);
-        break;
-      case "--manual-reason":
-        args.manualReason = takeValue(tokens, ++i, token);
-        break;
-      case "--approve":
-        args.approve = true;
-        break;
-      case "--json":
-        args.json = true;
-        break;
-      default:
-        throw new UsageError(`unknown option '${token}' for admit`);
+  const line = parseArgv(ADMIT_GRAMMAR, argv);
+  const flags = line.flags;
+
+  const prefix = flags["--prefix"] ?? DEFAULT_PREFIX;
+  // Checked here rather than reaching TicketKeySchema, where the failure
+  // arrived as `error: the review did not complete: ZodError…` with a stack
+  // trace and exit 3 — for a command that is not a review.
+  if (!/^[A-Z][A-Z0-9]{1,9}$/.test(prefix)) {
+    throw new UsageError(
+      `--prefix must be 2 to 10 uppercase letters or digits starting with a letter, so a ` +
+        `key reads like PRB-118. Got '${prefix}'`,
+    );
+  }
+
+  const rawBudget = flags["--expansion-budget"];
+  const expansionBudget = rawBudget === undefined ? DEFAULT_EXPANSION_BUDGET : Number(rawBudget);
+  if (!Number.isInteger(expansionBudget) || expansionBudget < 0) {
+    throw new UsageError(`--expansion-budget must be a whole number of files. Got '${rawBudget}'`);
+  }
+
+  const level = flags["--level"] ?? null;
+  if (level !== null && level !== "P1" && level !== "P2" && level !== "P3") {
+    throw new UsageError(
+      `--level must be P1, P2 or P3; P0 carries no acceptance criteria, so nothing could ` +
+        "review it",
+    );
+  }
+
+  const priority = flags["--priority"] ?? "normal";
+  if (!["urgent", "high", "normal", "low"].includes(priority)) {
+    throw new UsageError(`--priority must be urgent, high, normal or low`);
+  }
+
+  const dependsOn = [...(flags["--depends-on"] ?? [])];
+  for (const key of dependsOn) {
+    if (!TICKET_KEY.test(key)) {
+      throw new UsageError(`--depends-on must be a ticket key like PRB-2. Got '${key}'`);
     }
   }
+
+  const sourceUrl = flags["--source-url"] ?? null;
+  if (sourceUrl !== null) {
+    try {
+      new URL(sourceUrl);
+    } catch {
+      throw new UsageError(`--source-url must be a URL. Got '${sourceUrl}'`);
+    }
+  }
+
+  const from = flags["--from"] ?? null;
+  if (from !== null && !/^[\w.-]+\/[\w.-]+#[1-9]\d*$/.test(from)) {
+    throw new UsageError(`--from must be a GitHub issue like owner/repo#412. Got '${from}'`);
+  }
+
+  const startOver = flags["--start-over"] ?? null;
+  if (startOver !== null && !TICKET_KEY.test(startOver)) {
+    throw new UsageError(`--start-over must be a ticket key like PRB-2. Got '${startOver}'`);
+  }
+
+  const provider = flags["--provider"] ?? "claude-cli";
+  if (provider !== "anthropic" && provider !== "claude-cli" && provider !== "codex-cli") {
+    throw new UsageError("--provider must be 'anthropic', 'claude-cli' or 'codex-cli'");
+  }
+
+  const args: AdmitArgs = {
+    repo: flags["--repo"] ?? ".",
+    store: flags["--store"] ?? null,
+    prefix,
+    title: flags["--outcome"] ?? null,
+    criteria: [...(flags["--criterion"] ?? [])],
+    criteriaFile: flags["--criteria-file"] ?? null,
+    paths: [...(flags["--path"] ?? [])],
+    prohibited: [...DEFAULT_PROHIBITED, ...(flags["--prohibit"] ?? [])],
+    generated: [...DEFAULT_GENERATED, ...(flags["--generated"] ?? [])],
+    expansionBudget,
+    level,
+    priority: priority as TicketPriority,
+    labels: [...(flags["--label"] ?? [])],
+    dependsOn,
+    source: flags["--source"] ?? null,
+    sourceUrl,
+    from,
+    fromFile: flags["--from-file"] ?? null,
+    fromSpec: flags["--from-spec"] ?? null,
+    startOver,
+    provider,
+    model: flags["--model"] ?? null,
+    manualReviewer: flags["--manual-reviewer"] ?? null,
+    manualReason: flags["--manual-reason"] ?? null,
+    approve: flags["--approve"] === true,
+    json: flags["--json"] === true,
+  };
+
   // Two sources for one draft is not a preference to resolve by picking one:
   // whichever lost would have been read as the thing being admitted, and the
   // ticket would carry the provenance of the other.
@@ -418,29 +366,18 @@ export function parseAdmitArgs(argv: readonly string[]): AdmitArgs {
   return args;
 }
 
+/**
+ * The flags `perbo sync <key>` reads for the store it works against, which are
+ * the listing's own.
+ */
 export function parseListArgs(argv: readonly string[]): ListArgs {
-  const args: ListArgs = { repo: ".", store: null, all: false, json: false };
-  const tokens = splitInlineValues(argv);
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = takeValue(tokens, ++i, token);
-        break;
-      case "--store":
-        args.store = takeValue(tokens, ++i, token);
-        break;
-      case "--all":
-        args.all = true;
-        break;
-      case "--json":
-        args.json = true;
-        break;
-      default:
-        throw new UsageError(`unknown option '${token}' for list`);
-    }
-  }
-  return args;
+  const line = parseArgv(LIST_GRAMMAR, argv);
+  return {
+    repo: line.flags["--repo"] ?? ".",
+    store: line.flags["--store"] ?? null,
+    all: line.flags["--all"] === true,
+    json: line.flags["--json"] === true,
+  };
 }
 
 /**
