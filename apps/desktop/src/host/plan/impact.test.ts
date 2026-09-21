@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createScratch } from "@perbo/test-support";
 import { impactView, type ImpactDeps } from "./impact.js";
 import { EditingSessionSchema, SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
 import { editingForm } from "../../shared/contract-editing.js";
@@ -9,15 +9,14 @@ import type { EditingSession } from "../../shared/protocol.js";
 import type { Execute } from "../repository/git.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
-const temporary: string[] = [];
+const scratchDirectory = createScratch("perbo-impact-");
 afterEach(() => {
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 });
 const repoId = "80000000-0000-4000-8000-000000000001";
 const sessionId = "80000000-0000-4000-8000-000000000002";
 function repository(): RegisteredRepository {
-  const root = mkdtempSync(join(tmpdir(), "perbo-impact-"));
-  temporary.push(root);
+  const root = scratchDirectory();
   const path = join(root, "checkout");
   mkdirSync(path, { recursive: true });
   return { id: repoId, name: "checkout", path };

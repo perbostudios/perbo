@@ -1,18 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createScratch } from "@perbo/test-support";
 import { Profile, ProfileStateSchema } from "./store.js";
 import { SettingsSchema } from "../../shared/protocol.js";
 
-const temporary: string[] = [];
+const scratchDirectory = createScratch("perbo-profile-");
 afterEach(() => {
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 });
 /** A profile directory the app has not opened yet, optionally holding a record. */
 function directory(written?: unknown): string {
-  const root = mkdtempSync(join(tmpdir(), "perbo-profile-"));
-  temporary.push(root);
+  const root = scratchDirectory();
   const path = join(root, "profile");
   if (written !== undefined) {
     rmSync(path, { recursive: true, force: true });

@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
-  mkdtempSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -12,7 +11,6 @@ import {
   writeFileSync,
   existsSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { DesktopService, type ServiceOptions } from "./service.js";
@@ -29,7 +27,7 @@ import type {
 } from "../shared/protocol.js";
 import { CriterionEvidenceBindingSchema } from "@perbo/contracts";
 import type { GraphEdit } from "@perbo/contracts/graph-edit";
-import { disposeFixtures, fixture, trackDirectory, trackService } from "./test-support/host-fixture.js";
+import { disposeFixtures, fixture, scratchDirectory, trackService } from "./test-support/host-fixture.js";
 
 afterEach(disposeFixtures);
 
@@ -1664,7 +1662,7 @@ readline.createInterface({ input: process.stdin })
     changes: Change[];
     options: ServiceOptions;
   }> {
-    const root = trackDirectory(mkdtempSync(join(tmpdir(), "perbo-interview-")));
+    const root = scratchDirectory("perbo-interview-");
     const fake = fakeInterview(root);
     const spawns: typeof startLineProcess = (binary, args, options) =>
       startLineProcess(

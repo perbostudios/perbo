@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createScratch } from "@perbo/test-support";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./open.js";
 import { attemptsPath } from "../repository/layout.js";
 import type { Execute } from "../repository/git.js";
@@ -9,13 +9,12 @@ import type { RegisteredRepository } from "../profile/store.js";
 import type { Ticket } from "@perbo/contracts";
 import type { Detail } from "../../shared/protocol.js";
 
-const temporary: string[] = [];
+const scratchDirectory = createScratch("perbo-open-");
 afterEach(() => {
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 });
 function repository(): RegisteredRepository {
-  const root = mkdtempSync(join(tmpdir(), "perbo-open-"));
-  temporary.push(root);
+  const root = scratchDirectory();
   mkdirSync(join(root, "checkout"), { recursive: true });
   // The host registers a canonical path, and refusing its own checkout is a comparison against it.
   return {

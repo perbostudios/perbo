@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createScratch } from "@perbo/test-support";
 import { InterviewHost, type InterviewDeps } from "./host.js";
 import { ContractEditing } from "../../shared/contract-editing.js";
 import { SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
@@ -9,14 +9,13 @@ import type { Change, EditingSession, InterviewEntry } from "../../shared/protoc
 import type { LineProcess, LineProcessOptions } from "../process.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
-const temporary: string[] = [];
+const scratchDirectory = createScratch("perbo-interview-");
 afterEach(() => {
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 });
 const repoId = "80000000-0000-4000-8000-000000000001";
 function repository(): RegisteredRepository {
-  const root = mkdtempSync(join(tmpdir(), "perbo-interview-"));
-  temporary.push(root);
+  const root = scratchDirectory();
   const path = join(root, "checkout");
   mkdirSync(join(path, ".perbo", "tickets"), { recursive: true });
   return { id: repoId, name: "checkout", path };
