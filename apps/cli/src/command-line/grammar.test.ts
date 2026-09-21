@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { UsageError } from "../usage-error.js";
 import {
+  aliasFlag,
   listFlag,
   parseArgv,
   switchFlag,
@@ -18,6 +19,7 @@ import {
 const FLAGS = {
   "--json": switchFlag(),
   "--repo": valueFlag(),
+  "--directory": aliasFlag("--repo"),
   "--criterion": listFlag(),
   "--endorse": valueFlag({ refuseFlagShaped: "missing key after --endorse" }),
   "--raw-artifact": valueFlag({ hidden: true }),
@@ -143,6 +145,19 @@ describe("rule 7: a value flag takes the next token verbatim", () => {
     );
     expect(parseArgv(GRAMMAR, ["--endorse=--json"]).flags["--endorse"]).toBe("--json");
   });
+
+  it("says the same thing where that flag ends the line", () => {
+    expect(() => parseArgv(GRAMMAR, ["--endorse"])).toThrow(/missing key after --endorse/);
+  });
+});
+
+describe("a line records the flags in the order they were written", () => {
+  it("keeps a repeat and says which of a group came first", () => {
+    const line = parseArgv(GRAMMAR, ["--repo", "a", "--json", "--repo=b"]);
+    expect(line.given).toEqual(["--repo", "--json", "--repo"]);
+    expect(parseArgv(GRAMMAR, ["--directory", "a"]).given).toEqual(["--directory"]);
+    expect(parseArgv(GRAMMAR, ["--help"]).given).toEqual([]);
+  });
 });
 
 describe("rule 8: a repeat takes the last value, or accumulates", () => {
@@ -153,6 +168,13 @@ describe("rule 8: a repeat takes the last value, or accumulates", () => {
   it("accumulates a repeating flag in the order it was given", () => {
     const line = parseArgv(GRAMMAR, ["--criterion", "one", "--criterion=two", "--criterion", "三"]);
     expect(line.flags["--criterion"]).toEqual(["one", "two", "三"]);
+  });
+
+  it("counts another spelling of a flag as that flag, so the last of them wins", () => {
+    expect(parseArgv(GRAMMAR, ["--directory", "a"]).flags["--repo"]).toBe("a");
+    expect(parseArgv(GRAMMAR, ["--repo", "a", "--directory", "b"]).flags["--repo"]).toBe("b");
+    expect(parseArgv(GRAMMAR, ["--directory", "a", "--repo=b"]).flags["--repo"]).toBe("b");
+    expect(parseArgv(GRAMMAR, ["--directory", "a"]).flags["--directory"]).toBeUndefined();
   });
 });
 

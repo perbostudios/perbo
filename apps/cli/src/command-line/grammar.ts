@@ -33,12 +33,20 @@ export interface ValueSpec<Repeat extends "last" | "append" = "last" | "append">
    */
   readonly repeat: Repeat;
   /**
-   * Refuse a separate-token value starting with `--`, saying this. For the few
-   * flags where the next token is far more likely to be another flag whose own
-   * value was forgotten than a value of this one, and where taking it would be
-   * reported later as something else entirely (SCP-189).
+   * Refuse a value that is missing, or that is a separate token starting with
+   * `--`, saying this. For the few flags where the next token is far more
+   * likely to be another flag whose own value was forgotten than a value of
+   * this one, and where taking it would be reported later as something else
+   * entirely (SCP-189). One message covers both, because both are the same
+   * thing to the person reading it: what this flag needed is not there.
    */
   readonly refuseFlagShaped: string | null;
+  /**
+   * The flag this one is another spelling of. Its value is recorded under that
+   * name, so two spellings of one flag are one flag: the last of them given
+   * wins, whichever was written.
+   */
+  readonly aliasOf: `--${string}` | null;
   readonly hidden: boolean;
 }
 
@@ -59,7 +67,21 @@ export const valueFlag = (
   kind: "value",
   repeat: "last",
   refuseFlagShaped: options.refuseFlagShaped ?? null,
+  aliasOf: null,
   hidden: options.hidden ?? false,
+});
+
+/**
+ * Another spelling of a value flag, recorded under the name it spells: the
+ * command reads one field, and `--title x --outcome y` means what the last of
+ * them says.
+ */
+export const aliasFlag = (canonical: `--${string}`): ValueSpec<"last"> => ({
+  kind: "value",
+  repeat: "last",
+  refuseFlagShaped: null,
+  aliasOf: canonical,
+  hidden: true,
 });
 
 /** A flag taking one value each time it is given; the values accumulate in order. */
@@ -67,6 +89,7 @@ export const listFlag = (options: { hidden?: boolean } = {}): ValueSpec<"append"
   kind: "value",
   repeat: "append",
   refuseFlagShaped: null,
+  aliasOf: null,
   hidden: options.hidden ?? false,
 });
 
@@ -103,6 +126,12 @@ export interface Grammar<F extends FlagTable = FlagTable> {
 
 export interface ParsedLine<F extends FlagTable> {
   readonly flags: FlagValues<F>;
+  /**
+   * Every flag in the order it was written, repeats included and spelled as
+   * the person spelled it — for a command whose refusal names which two of a
+   * group were given, which {@link ParsedLine.flags} cannot say.
+   */
+  readonly given: readonly string[];
   readonly positionals: readonly string[];
   /** Everything after `--` for a command that passes it on; empty otherwise. */
   readonly passthrough: readonly string[];
@@ -152,10 +181,11 @@ export function parseArgv<F extends FlagTable>(
   argv: readonly string[],
 ): ParsedLine<F> {
   if (asksForHelp(grammar, argv)) {
-    return { flags: {} as FlagValues<F>, positionals: [], passthrough: [], help: true };
+    return { flags: {} as FlagValues<F>, given: [], positionals: [], passthrough: [], help: true };
   }
 
   const flags: Record<string, true | string | string[]> = {};
+  const given: string[] = [];
   const positionals: string[] = [];
   const passthrough: string[] = [];
 
@@ -191,6 +221,7 @@ export function parseArgv<F extends FlagTable>(
       // flag to carry something it has no way to mean.
       if (inline !== null) throw new UsageError(`${name} does not take a value`);
       flags[name] = true;
+      given.push(name);
       continue;
     }
 
@@ -199,20 +230,22 @@ export function parseArgv<F extends FlagTable>(
       value = inline;
     } else {
       const next = argv[index + 1];
-      if (next === undefined) throw new UsageError(`${name} requires a value`);
-      if (spec.refuseFlagShaped !== null && next.startsWith("--")) {
+      if (spec.refuseFlagShaped !== null && (next === undefined || next.startsWith("--"))) {
         throw new UsageError(spec.refuseFlagShaped);
       }
+      if (next === undefined) throw new UsageError(`${name} requires a value`);
       value = next;
       index += 1;
     }
 
+    given.push(name);
+    const field = spec.aliasOf ?? name;
     if (spec.repeat === "append") {
-      const collected = flags[name];
+      const collected = flags[field];
       if (Array.isArray(collected)) collected.push(value);
-      else flags[name] = [value];
+      else flags[field] = [value];
     } else {
-      flags[name] = value;
+      flags[field] = value;
     }
   }
 
@@ -222,6 +255,7 @@ export function parseArgv<F extends FlagTable>(
 
   return {
     flags: flags as FlagValues<F>,
+    given,
     positionals,
     passthrough,
     help: false,
