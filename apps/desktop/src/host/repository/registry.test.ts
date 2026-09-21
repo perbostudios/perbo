@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { initRepository } from "@perbo/test-support";
 import { RepositoryRegistry } from "./registry.js";
 import { Changes } from "../changes.js";
 import { WorkspaceReads } from "../workspace-reads.js";
@@ -19,19 +19,11 @@ afterEach(() => {
 function checkout(name = "checkout"): string {
   const root = mkdtempSync(join(tmpdir(), "perbo-registry-"));
   temporary.push(root);
-  const path = join(root, name);
-  mkdirSync(path, { recursive: true });
-  for (const args of [
-    ["init", "--initial-branch=main"],
-    ["config", "user.name", "Desktop Test"],
-    ["config", "user.email", "desktop@example.invalid"],
-    ["config", "commit.gpgsign", "false"],
-  ])
-    execFileSync("git", args, { cwd: path, stdio: "ignore" });
-  writeFileSync(join(path, "README.md"), "# Test repository\n");
-  execFileSync("git", ["add", "README.md"], { cwd: path });
-  execFileSync("git", ["commit", "-m", "Initial test state"], { cwd: path, stdio: "ignore" });
-  return realpathSync(path);
+  const { dir } = initRepository(join(root, name), {
+    files: { "README.md": "# Test repository\n" },
+    message: "Initial test state",
+  });
+  return realpathSync(dir);
 }
 function registry(jobs: Job[] = []): {
   registry: RepositoryRegistry;

@@ -1,7 +1,7 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { initRepository } from "@perbo/test-support";
 import { DesktopService, type ServiceOptions } from "../service.js";
 import type { runProcess, startLineProcess } from "../process.js";
 import type { Change } from "../../shared/protocol.js";
@@ -38,21 +38,10 @@ export function fixture(process?: typeof runProcess, startProcess?: typeof start
   const root = trackDirectory(mkdtempSync(join(tmpdir(), "perbo-desktop-")));
   // The folder name holds a space, because a path this host hands to a command
   // is one argument whatever it holds.
-  const repo = join(root, "repository with spaces");
-  mkdirSync(repo);
-  for (const args of [
-    ["init", "--initial-branch=main"],
-    ["config", "user.name", "Desktop Test"],
-    ["config", "user.email", "desktop@example.invalid"],
-    ["config", "commit.gpgsign", "false"],
-  ])
-    execFileSync("git", args, { cwd: repo, stdio: "ignore" });
-  writeFileSync(join(repo, "README.md"), "# Test repository\n");
-  execFileSync("git", ["add", "README.md"], { cwd: repo });
-  execFileSync("git", ["commit", "-m", "Initial test state"], {
-    cwd: repo,
-    stdio: "ignore",
-  });
+  const repo = initRepository(join(root, "repository with spaces"), {
+    files: { "README.md": "# Test repository\n" },
+    message: "Initial test state",
+  }).dir;
   const notifications: { title: string; body: string; silent: boolean | undefined }[] = [];
   const holds: { hold: boolean; displaySleep: boolean }[] = [];
   const themes: string[] = [];
