@@ -399,7 +399,9 @@ No tool approves, publishes, runs or merges, and no input makes one ([D-072](11-
 
 ## The CLI's output contract
 
-Every command writes its record to stdout and everything a person reads while waiting (progress, warnings, diagnostics) to stderr. On a terminal stdout carries a human rendering, readable at 80 columns without colour, every mark textual; piped, or with `--json`, it carries the JSON record, so `perbo review … > review.json` holds a valid artifact under every outcome, `error` included.
+Every command writes its record to stdout and everything a person reads while waiting (progress, warnings, diagnostics) to stderr. On a terminal stdout carries a human rendering, readable at 80 columns without colour, every mark textual; `--json` carries the JSON record instead, for every command that has one. `perbo review`, `perbo run`, `perbo doctor`, `perbo inspect`, `perbo baseline list` and `perbo baseline result` also carry it whenever stdout is piped, so `perbo review … > review.json` holds a valid artifact under every outcome, `error` included; the rest keep their human rendering in a pipe, so `perbo list | grep` reads what a person reads.
+
+Every command reads its line by one grammar ([D-NEW-cli-grammar](11-open-decisions.md)): `--name=value` is split only in flag position, a value flag takes the next token verbatim, a switch given a value is refused, `--` ends the options, a repeated single-value flag takes the last of them, and help is honoured in flag position alone. So an outcome, a note or a path a person typed reaches the command as the text they typed, whatever it is shaped like, and a caller that appends `--repo <path>` last is the one that decides the repository.
 
 | Code | `perbo review` | `perbo run` |
 |---|---|---|

@@ -638,3 +638,10 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: a schema or rule lives in `@perbo/contracts` when two or more packages, the desktop included, read or write it; a record only one package reads and writes lives in that package beside its code. The CLI's baseline stopwatch and E1 ledger, its local verdicts record, its escapes record and the queue's ordering are its own.
 - Why: the dependency floor rebuilds every package on each change, and a module with one consumer is read more easily beside its caller.
 - Changes if: a second package reads one of those records.
+
+### D-NEW-cli-grammar — `perbo` reads every command line by one set of rules
+
+- Owner: Founder
+- Decision: one grammar reads argv for every command. `--name=value` is split only in flag position, so a value is never read again as a flag; a value flag takes the next token verbatim, whatever it is shaped like; a switch given a value is refused; `--` ends the options; a repeated single-value flag takes the last of them, which the desktop's trailing `--repo` relies on; and `-h` or `--help` is honoured in flag position and nowhere else. A command declares which flags it has, what each takes and how many positionals it accepts; what a value has to be — an enum, a number, a key, a URL, a date — is the command's input schema, which every caller reaches. This is the CLI's contract: a person's text, and the desktop's, reaches a command as the text it is.
+- Why: seventeen hand-rolled parsers answered the same line four different ways, and the family that split `--name=value` before it decided whether a token was a flag let a typed outcome approve the ticket it admitted, a note record a decision and a repository path turn publication on. One rule set is the only way a caller can know what a line means, and the split-in-flag-position rule is what makes text stay text.
+- Built: `apps/cli/src/command-line/grammar.ts` with a test per rule, each command's grammar beside the command, and `terminal.flag-injection.test.ts` holding one case per value that used to become a flag.
