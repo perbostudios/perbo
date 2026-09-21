@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { wilsonInterval } from "@perbo/contracts";
 import {
   ESCAPE_WINDOW_DAYS,
   TICKET_ESCAPES_SCHEMA_VERSION,
@@ -7,10 +8,9 @@ import {
   escapeStatus,
   revertedCommits,
   summariseEscapes,
-  wilsonInterval,
   type ObservedCommit,
   type TicketEscapes,
-} from "../src/index.js";
+} from "./record.js";
 
 /**
  * The arithmetic behind `perbo escapes` (SCP-145): which later commit counts,

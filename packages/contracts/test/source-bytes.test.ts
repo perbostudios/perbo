@@ -21,11 +21,13 @@ import { describe, expect, it } from "vitest";
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const packages = join(root, "packages");
+
+/** The workspace roots that hold first-party source, in the order they are walked. */
+const workspaces = ["apps", "packages"];
 
 const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
 
-/** Every file under every package's `src`, as repository-relative paths. */
+/** Every file under every app's and every package's `src`, as repository-relative paths. */
 function sources(): string[] {
   const found: string[] = [];
   const walk = (dir: string, relative: string) => {
@@ -33,7 +35,7 @@ function sources(): string[] {
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
-      // A package with no `src` at all: nothing to read, and not a failure.
+      // A workspace with no `src` at all: nothing to read, and not a failure.
       return;
     }
     for (const entry of entries.sort(byName)) {
@@ -46,21 +48,29 @@ function sources(): string[] {
       }
     }
   };
-  for (const entry of readdirSync(packages, { withFileTypes: true }).sort(byName)) {
-    if (!entry.isDirectory()) continue;
-    walk(join(packages, entry.name, "src"), `packages/${entry.name}/src`);
+  for (const workspace of workspaces) {
+    const at = join(root, workspace);
+    for (const entry of readdirSync(at, { withFileTypes: true }).sort(byName)) {
+      if (!entry.isDirectory()) continue;
+      walk(join(at, entry.name, "src"), `${workspace}/${entry.name}/src`);
+    }
   }
   return found;
 }
 
-describe("every file under packages/*/src", () => {
+describe("every file under apps/*/src and packages/*/src", () => {
   const files = sources();
 
   it("is a set of files this test actually read", () => {
     // A walk that found nothing would pass the assertion below for the wrong
     // reason, which is the failure mode this whole file exists to prevent.
     expect(files.length).toBeGreaterThan(50);
+    // One entry point per workspace root: a walk that reached `packages` and
+    // silently skipped `apps` clears the count above on `packages` alone, and
+    // would leave every file the CLI and the desktop own unread.
     expect(files).toContain("packages/review/src/legibility.ts");
+    expect(files).toContain("apps/cli/src/main.ts");
+    expect(files).toContain("apps/desktop/src/host/main.ts");
   });
 
   it("carries no NUL byte (0x00)", () => {

@@ -6,17 +6,14 @@ import {
   CheckResultsFileSchema,
   EXIT_CODES,
   NodeReviewsSchema,
-  QUEUE_HOLDING_STATES,
   ReviewArtifactSchema,
   RunBundleSchema,
-  activeVerdicts,
   limitFor,
   limitsForCredential,
   parseUnifiedDiff,
   planNodes,
   planSizeCounts,
   pullRequestAttribution,
-  queueOrder,
   sizeEstimate,
   ticketSourceLabel,
   wholeChangeChecks,
@@ -27,7 +24,6 @@ import {
   type DeliveryChecksState,
   type ExecutionAttempt,
   type Finding,
-  type LocalVerdict,
   type LimitedResource,
   type LimitsTable,
   type GraphEdge,
@@ -41,6 +37,7 @@ import {
   type TicketSource,
 } from "@perbo/contracts";
 import { BundleStore, parseDeclines, runNumbers, type Decline } from "@perbo/runner";
+import { QUEUE_HOLDING_STATES, queueOrder } from "../scheduling.js";
 import { UsageError } from "../usage-error.js";
 import {
   BASE_SOURCE_LABEL,
@@ -65,7 +62,11 @@ import { WIDTH, clip, pad, painter, spread, wrap, type Paint } from "../text.js"
 import { specStaleness } from "../spec/staleness.js";
 import { storeDir } from "../store/index.js";
 import type { Streams } from "../streams.js";
-import { readLocalVerdictsOrWarn } from "./verdict/record.js";
+import {
+  activeVerdicts,
+  readLocalVerdictsOrWarn,
+  type LocalVerdict,
+} from "./verdict/record.js";
 // `admission.js` and not `tickets.js`: a leaner reading of the same file,
 // which stays loose about everything the store's own writer already checked.
 import type { StoredAdmission } from "../store/admission.js";

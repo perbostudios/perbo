@@ -1,6 +1,6 @@
 # `@perbo/contracts`
 
-Versioned schemas for every record the loop writes and reads.
+Versioned schemas for the records two or more packages write or read.
 
 Implemented as Zod schemas with inferred types — **files, not tables**:
 

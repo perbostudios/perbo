@@ -9,11 +9,11 @@ import {
   smallestResolvingSample,
   summariseStops,
   widenedByHiding,
-  wilsonInterval,
   type StopAnswer,
   type StopVerdict,
   type StopVerdicts,
 } from "../src/stops.js";
+import { wilsonInterval } from "../src/wilson.js";
 
 /**
  * D-060, measured live: what one `perbo sync` writes per ticket, and what
@@ -48,22 +48,6 @@ const stop = (c: string, answer: StopAnswer | null): StopVerdict => ({
   answered_at: answer === null ? null : AT,
   answered_by: answer === null ? null : "person",
   first_seen_at: AT,
-});
-
-describe("the Wilson interval copied for the CLI", () => {
-  it("matches the evaluation package's numbers at the sizes stops files have", () => {
-    const one = wilsonInterval(1, 2);
-    expect(one.point).toBe(0.5);
-    expect(one.low).toBeCloseTo(0.0945, 3);
-    expect(one.high).toBeCloseTo(0.9055, 3);
-    const all = wilsonInterval(3, 3);
-    expect(all.high).toBe(1);
-    expect(all.low).toBeCloseTo(0.4385, 3);
-  });
-
-  it("has no value at n = 0 rather than a fabricated one", () => {
-    expect(Number.isNaN(wilsonInterval(0, 0).point)).toBe(true);
-  });
 });
 
 describe("reconciling what gh reported with the previous file", () => {

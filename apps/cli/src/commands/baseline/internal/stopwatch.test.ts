@@ -13,7 +13,7 @@ import {
   stopBaseline,
   summarizeBaseline,
   type BaselineFile,
-} from "../src/baseline.js";
+} from "./stopwatch.js";
 
 const T0 = Date.parse("2026-09-01T09:00:00.000Z");
 const at = (minutes: number) => new Date(T0 + minutes * 60_000);

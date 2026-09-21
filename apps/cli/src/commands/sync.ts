@@ -15,9 +15,7 @@ import {
   parsePullRequestReference,
   attributionOnRecord,
   deliveryChecksState,
-  escapeStatus,
   handOff,
-  observedThrough,
   reconcileStopVerdicts,
   resumeAtPullRequest,
   resumeWithUnrecordedOpener,
@@ -33,7 +31,6 @@ import {
   type StopVerdicts,
   type Ticket,
   type TicketState,
-  type TicketEscapes,
 } from "@perbo/contracts";
 import {
   GithubCredentialError,
@@ -65,7 +62,14 @@ import {
   writeTicket,
   type SyncedChange,
 } from "../store/tickets.js";
-import { EscapeCollectionError, readMergeFacts, writeTicketEscapes } from "./escapes/index.js";
+import {
+  EscapeCollectionError,
+  escapeStatus,
+  observedThrough,
+  readMergeFacts,
+  writeTicketEscapes,
+  type TicketEscapes,
+} from "./escapes/index.js";
 
 /**
  * `perbo sync` — read delivery state through local `git`/`gh` and write it onto

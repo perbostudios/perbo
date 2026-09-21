@@ -1,7 +1,10 @@
 import { z } from "zod";
-import { TicketIdSchema } from "./ids.js";
-import { TicketKeySchema } from "./ticket.js";
-import { wilsonInterval, type WilsonInterval } from "./stops.js";
+import {
+  TicketIdSchema,
+  TicketKeySchema,
+  wilsonInterval,
+  type WilsonInterval,
+} from "@perbo/contracts";
 
 /**
  * Post-merge escapes: what merged and was then undone or reworked within
@@ -10,7 +13,7 @@ import { wilsonInterval, type WilsonInterval } from "./stops.js";
  * On a repository where the reviewer stops nothing there is no precision-of-
  * stopping reading at all, and the weekly read still needs a headline. This is
  * it, and it is the nearest local proxy for the E3 outcome
- * [D-038](../../../docs/11-open-decisions.md) asks for: of the tickets whose
+ * [D-038](../../../../../../docs/11-open-decisions.md) asks for: of the tickets whose
  * change merged, how many were reverted, and how many had one of their paths
  * touched again, inside fourteen days of the merge.
  *

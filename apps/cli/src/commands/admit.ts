@@ -9,7 +9,6 @@ import {
   IllegalTransitionError,
   PlanContractSchema,
   PlanNodeSchema,
-  QUEUE_HOLDING_STATES,
   TICKET_SCHEMA_VERSION,
   TicketSchema,
   VERIFICATION_KINDS,
@@ -56,6 +55,7 @@ import {
 } from "@perbo/planning";
 import { ProviderError, createModel, type Model, type ModelProvider } from "@perbo/model";
 import { RepoReader } from "@perbo/review";
+import { QUEUE_HOLDING_STATES } from "../scheduling.js";
 import { UsageError } from "../usage-error.js";
 import type { Streams } from "../streams.js";
 import { prohibitedSpecPaths, regenerateNodePages, specCommitFiles } from "../spec/pages.js";

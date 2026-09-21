@@ -6,8 +6,8 @@ import {
   scopeOverlap,
   waitsFor,
   type Scheduled,
-} from "../src/scheduling.js";
-import { TicketSchema, type Ticket, type TicketState } from "../src/ticket.js";
+} from "./scheduling.js";
+import { TicketSchema, type Ticket, type TicketState } from "@perbo/contracts";
 
 /**
  * The queue's decisions are set arithmetic over records a person approved:

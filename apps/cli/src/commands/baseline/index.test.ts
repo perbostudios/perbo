@@ -2,9 +2,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { BaselineFileSchema, type BaselineFile } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
-import { parseBaselineArgs, runBaselineCommand } from "./index.js";
+import {
+  BaselineFileSchema,
+  parseBaselineArgs,
+  runBaselineCommand,
+  type BaselineFile,
+} from "./index.js";
 import { makeTicket } from "../../test-support/attempt-fixture.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-baseline-test-"));

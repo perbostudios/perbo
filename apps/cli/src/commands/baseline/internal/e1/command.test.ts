@@ -2,10 +2,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { E1LedgerSchema, type E1Ledger } from "@perbo/contracts";
-import { UsageError } from "../../../usage-error.js";
-import { runBaselineCommand } from "../index.js";
-import { parseE1Args } from "./e1.js";
+import { UsageError } from "../../../../usage-error.js";
+import { runBaselineCommand } from "../../index.js";
+import { parseE1Args } from "./command.js";
+import { E1LedgerSchema, type E1Ledger } from "./ledger.js";
 
 /**
  * `perbo baseline open | time | seal | run | routing | result` end to end
@@ -17,10 +17,7 @@ import { parseE1Args } from "./e1.js";
  * partner's rather than inside it. So these run the commands in the order a
  * partner's month actually goes, and assert on what the file holds and what
  * the person is told — a unit test of the rules is in
- * `packages/contracts/test/e1.test.ts`.
- *
- * Fail-first, measured 2026-09-05: with `apps/cli/src/commands/baseline/internal/e1.ts` moved out of
- * tree this file does not collect.
+ * `./ledger.test.ts`.
  */
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-e1-test-"));

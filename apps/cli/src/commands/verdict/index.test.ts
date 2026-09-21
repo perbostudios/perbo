@@ -6,8 +6,6 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   EXIT_CODES,
-  LocalVerdictSchema,
-  LocalVerdictsSchema,
   ReviewArtifactSchema,
   SecretIndex,
   findingKey,
@@ -25,6 +23,7 @@ import { runEscapesCommand } from "../escapes/index.js";
 import { runInspectCommand } from "../inspect.js";
 import { runStopsCommand } from "../stops.js";
 import { parseVerdictArgs, runVerdictCommand } from "./index.js";
+import { LocalVerdictSchema, LocalVerdictsSchema } from "./record.js";
 import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "../../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
 
