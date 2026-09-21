@@ -1,20 +1,35 @@
-export * from "./diagnostic.js";
-export * from "./disk.js";
-export * from "./exec.js";
-export * from "./materialize.js";
-export * from "./naming.js";
-export * from "./ports.js";
-export * from "./suspend.js";
-export * from "./worktree.js";
+export {
+  declaredVerifyCommand,
+  detectPackageManager,
+  diagnose,
+  GREENFIELD_VERIFY,
+  isGreenfieldVerify,
+  pinInstallCommand,
+  proposedInstall,
+  proposedInstallStep,
+  signableCommit,
+  validateManifest,
+  verificationServiceNeed,
+  workspaceMembership,
+} from "./diagnostic.js";
+export type { DiagnoseRequest } from "./diagnostic.js";
+export { CommandFailedError, run, runOrThrow } from "./exec.js";
+export type { RunResult } from "./exec.js";
+export { materialize } from "./materialize.js";
+export type { MaterializedWorkspace } from "./materialize.js";
+export {
+  AYO_BRANCH_PREFIX,
+  BRANCH_PREFIX,
+  branchName,
+  isAttemptBranch,
+  recordedBranch,
+} from "./naming.js";
 export { createGh, createGit, gh, git, gitEnv } from "./repository/index.js";
-export type {
-  AddWorktree,
-  CallOptions,
-  Gh,
-  GhCallOptions,
-  Git,
-  GitProcess,
-  ProcessOptions,
-  RepositoryOptions,
-  WorktreeEntry,
-} from "./repository/index.js";
+export type { Git, GitProcess, ProcessOptions } from "./repository/index.js";
+export {
+  DEFAULT_SUSPEND_INTERVAL_MS,
+  DEFAULT_SUSPEND_THRESHOLD_MS,
+  SuspendDetector,
+} from "./suspend.js";
+export { cleanup, provision, WorkspaceError } from "./worktree.js";
+export type { Workspace } from "./worktree.js";

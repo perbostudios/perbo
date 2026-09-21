@@ -87,7 +87,6 @@ export const EXPORT_ALL_BURN_DOWN = [
   "packages/planning/src/index.ts",
   "packages/review/src/index.ts",
   "packages/runner/src/index.ts",
-  "packages/workspace/src/index.ts",
 ];
 
 export default tseslint.config(
