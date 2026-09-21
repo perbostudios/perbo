@@ -3,15 +3,15 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_LIMITS_TABLE, SecretIndex } from "@perbo/contracts";
 import { provision } from "@perbo/workspace";
-import { sealChangeSet, untrackedAfterChecks } from "../src/seal.js";
+import { sealChangeSet, untrackedAfterChecks } from "./seal.js";
 import {
   createPullRequest,
   pullRequestBody,
   pushAttemptBranch,
   TicketDeliveryStateSchema,
-} from "../src/delivery.js";
-import { finding, makeContract, makeReview } from "../src/test-support/records.js";
-import { runnerRepository } from "../src/test-support/repository.js";
+} from "./delivery.js";
+import { finding, makeContract, makeReview } from "./test-support/records.js";
+import { runnerRepository } from "./test-support/repository.js";
 import { readFileSync as read } from "node:fs";
 import { scratchDirectories } from "@perbo/test-support";
 
@@ -213,7 +213,7 @@ describe("delivery", () => {
   });
 
   it("never merges: there is no call to do it", () => {
-    const source = read(new URL("../src/delivery.ts", import.meta.url), "utf8");
+    const source = read(new URL("./delivery.ts", import.meta.url), "utf8");
     expect(source).not.toContain("pr\", \"merge");
     expect(source).not.toMatch(/"merge"/);
   });

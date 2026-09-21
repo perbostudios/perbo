@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
-import { preflight } from "../src/preflight.js";
+import { preflight } from "./preflight.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

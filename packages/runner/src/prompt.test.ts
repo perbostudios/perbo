@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { PlanContractWithCriteria } from "@perbo/contracts";
 import { admittedWriteGlobs } from "@perbo/contracts";
-import { EXECUTOR_PROMPT_VERSION, executorPrompt, remediationPrompt } from "../src/prompt.js";
-import { allowedPathsSentence, prohibitedPathsSentence } from "../src/shell/index.js";
+import { EXECUTOR_PROMPT_VERSION, executorPrompt, remediationPrompt } from "./prompt.js";
+import { allowedPathsSentence, prohibitedPathsSentence } from "./shell/index.js";
 
 /**
  * The build-practice section (D-065, adopted 2026-08-31): the executor

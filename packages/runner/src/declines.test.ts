@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDeclines } from "../src/declines.js";
+import { parseDeclines } from "./declines.js";
 
 /**
  * The executor's decline protocol (D-065): `NO_PRACTICE <finding_key>: reason`

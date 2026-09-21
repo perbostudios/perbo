@@ -2,10 +2,10 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { ADMISSION_RULES, judgeCommand } from "../src/admission.js";
-import { githubCredential, readGithubCredential } from "../src/github-credential.js";
-import { preflight, renderPreflight } from "../src/preflight.js";
-import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "../src/profile.js";
+import { ADMISSION_RULES, judgeCommand } from "./admission.js";
+import { githubCredential, readGithubCredential } from "./github-credential.js";
+import { preflight, renderPreflight } from "./preflight.js";
+import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "./profile.js";
 
 /**
  * SCP-200: which credential path GitHub is read through, decided once.

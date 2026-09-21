@@ -2,8 +2,8 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
-import { carriedApprovals } from "../src/merge.js";
-import { git, runnerRepository } from "../src/test-support/repository.js";
+import { carriedApprovals } from "./merge.js";
+import { git, runnerRepository } from "./test-support/repository.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

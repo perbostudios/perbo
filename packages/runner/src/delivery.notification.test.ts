@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Finding, PlanContractWithCriteria, ReviewArtifact } from "@perbo/contracts";
-import { parseStopAnswers, pullRequestBody } from "../src/delivery.js";
-import { makeContract, makeReview } from "../src/test-support/records.js";
+import { parseStopAnswers, pullRequestBody } from "./delivery.js";
+import { makeContract, makeReview } from "./test-support/records.js";
 
 /**
  * What a person is told about the findings that are waiting on them.

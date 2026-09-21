@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema, type TerminationReason } from "@perbo/contracts";
 import { scratchDirectories } from "@perbo/test-support";
-import type { AgentResult } from "../src/adapter.js";
+import type { AgentResult } from "./adapter.js";
 import {
   AttemptIdCollisionError,
   AttemptsRecordError,
@@ -15,12 +15,12 @@ import {
   runsOnRecord,
   sealedByAttempt,
   specCommitOnRecord,
-} from "../src/attempts.js";
-import { BundleStore } from "../src/bundle.js";
-import { EgressLog } from "../src/egress.js";
-import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
-import { makeAttempt, makeContract, makeReview } from "../src/test-support/records.js";
-import { runnerRepository } from "../src/test-support/repository.js";
+} from "./attempts.js";
+import { BundleStore } from "./bundle.js";
+import { EgressLog } from "./egress.js";
+import { TicketRunConfigSchema, runTicket } from "./loop.js";
+import { makeAttempt, makeContract, makeReview } from "./test-support/records.js";
+import { runnerRepository } from "./test-support/repository.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

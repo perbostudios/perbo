@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
  * test here would be measuring GitHub rather than this code.
  */
 
-const source = readFileSync(new URL("../src/delivery.ts", import.meta.url), "utf8");
+const source = readFileSync(new URL("./delivery.ts", import.meta.url), "utf8");
 const createBody = source.slice(
   source.indexOf("export async function createPullRequest"),
   source.indexOf("export async function pollPullRequest"),

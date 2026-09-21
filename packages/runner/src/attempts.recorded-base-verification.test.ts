@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { recordedBaseVerification } from "../src/attempts.js";
+import { recordedBaseVerification } from "./attempts.js";
 
 /**
  * The ticket's answer about a base commit is an answer about that commit. A

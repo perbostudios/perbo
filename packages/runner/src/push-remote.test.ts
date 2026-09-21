@@ -3,10 +3,10 @@ import { mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { gitEnvironment, scratchDirectories } from "@perbo/test-support";
-import { judgeCommand } from "../src/admission.js";
-import { inspectCommand, inspectCommandWithCwd } from "../src/prohibited.js";
-import { UNKNOWN_CWD } from "../src/shell/index.js";
-import { scratchPath } from "../src/scratch.js";
+import { judgeCommand } from "./admission.js";
+import { inspectCommand, inspectCommandWithCwd } from "./prohibited.js";
+import { UNKNOWN_CWD } from "./shell/index.js";
+import { scratchPath } from "./scratch.js";
 
 const temporary = scratchDirectories("perbo-runner-");
 

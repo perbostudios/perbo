@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseStopAnswers } from "../src/delivery.js";
+import { parseStopAnswers } from "./delivery.js";
 
 /**
  * Who ticked, read off the body (D-058).

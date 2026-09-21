@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Finding, PlanContractWithCriteria, ReviewArtifact } from "@perbo/contracts";
 import { decideBlocking } from "@perbo/review";
-import { pullRequestBody } from "../src/delivery.js";
-import { finding, makeContract, makeReview } from "../src/test-support/records.js";
+import { pullRequestBody } from "./delivery.js";
+import { finding, makeContract, makeReview } from "./test-support/records.js";
 
 /**
  * What the pull request shows a person, and what it only counts.

@@ -10,7 +10,7 @@ import {
   readServeLock,
   runLockPath,
   serveLockPath,
-} from "../src/lock.js";
+} from "./lock.js";
 
 /**
  * SCP-227: one queue per store, and the queue's count of what is running

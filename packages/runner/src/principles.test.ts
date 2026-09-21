@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { readPrinciples, PRINCIPLES_MAX_BYTES } from "../src/principles.js";
+import { readPrinciples, PRINCIPLES_MAX_BYTES } from "./principles.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { pushAttemptBranch } from "../src/delivery.js";
-import { git } from "../src/test-support/repository.js";
+import { pushAttemptBranch } from "./delivery.js";
+import { git } from "./test-support/repository.js";
 import { scratchDirectories } from "@perbo/test-support";
 import { initBareRepository, initRepository } from "@perbo/test-support";
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { briefStateBlock, reinjectedBrief } from "../src/brief.js";
-import { briefRecords, finding } from "../src/test-support/records.js";
+import { briefStateBlock, reinjectedBrief } from "./brief.js";
+import { briefRecords, finding } from "./test-support/records.js";
 
 /**
  * D-096: what the state block says, composed from the round's records.

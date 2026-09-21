@@ -3,7 +3,7 @@ import {
   describeTransportFailure,
   isRetryableStatus,
   transportExhaustion,
-} from "../src/transport.js";
+} from "./transport.js";
 
 /**
  * Reading a transport failure out of a transcript (SCP-172).

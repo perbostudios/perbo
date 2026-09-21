@@ -8,14 +8,14 @@ import {
   type MaterializationManifest,
   type PlanContract,
 } from "@perbo/contracts";
-import type { AgentResult } from "../src/adapter.js";
-import { BundleStore } from "../src/bundle.js";
-import { EgressLog } from "../src/egress.js";
-import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "../src/loop.js";
-import { resolveResumeSource, sameCommit } from "../src/resume.js";
-import { TRANSPORT_RETRY_DELAY_MS } from "../src/transport.js";
-import { makeContract, makeReview } from "../src/test-support/records.js";
-import { runnerRepository } from "../src/test-support/repository.js";
+import type { AgentResult } from "./adapter.js";
+import { BundleStore } from "./bundle.js";
+import { EgressLog } from "./egress.js";
+import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "./loop.js";
+import { resolveResumeSource, sameCommit } from "./resume.js";
+import { TRANSPORT_RETRY_DELAY_MS } from "./transport.js";
+import { makeContract, makeReview } from "./test-support/records.js";
+import { runnerRepository } from "./test-support/repository.js";
 import { scratchDirectories } from "@perbo/test-support";
 import type { Repository } from "@perbo/test-support";
 
