@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { admitCommandLine, listCommandLine } from "../commands/admit.js";
-import { parseBaselineArgs } from "../commands/baseline/index.js";
+import { baselineCommandLine } from "../commands/baseline/index.js";
 import { editCommandLine } from "../commands/edit/index.js";
 import { escapesCommandLine } from "../commands/escapes/index.js";
 import { inspectCommandLine } from "../commands/inspect.js";
@@ -110,9 +110,11 @@ describe("verdict and baseline", () => {
   });
 
   it("keeps a baseline note whole", () => {
-    const args = parseBaselineArgs(["stop", "--note", "--x=--json"]);
-    expect(args.note).toBe("--x=--json");
-    expect(args.json).toBe(false);
+    const { input, output } = baselineCommandLine.read(["stop", "--note", "--x=--json"]);
+    expect(input.kind).toBe("stopwatch");
+    if (input.kind !== "stopwatch") throw new Error("unreachable");
+    expect(input.input.note).toBe("--x=--json");
+    expect(output.json).toBe(false);
   });
 });
 

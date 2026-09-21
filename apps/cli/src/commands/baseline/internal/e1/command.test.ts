@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { UsageError } from "../../../../usage-error.js";
-import { runBaselineCommand } from "../../index.js";
-import { parseE1Args } from "./command.js";
+import { baselineCommandLine } from "../../index.js";
+import { readE1 } from "./command.js";
+import { runCommandLine } from "../../../../command-line/terminal.js";
+import type { Streams } from "../../../../streams.js";
 import { E1LedgerSchema, type E1Ledger } from "./ledger.js";
 
 /**
@@ -36,11 +38,16 @@ function repo(name: string): string {
 async function cli(dir: string, argv: string[], when: Date = at(10_000), isTTY = false) {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await runBaselineCommand({
+  const streams: Streams = {
+    stdout: (chunk) => out.push(chunk),
+    stderr: (chunk) => err.push(chunk),
+    isTTY,
+  };
+  const code = await runCommandLine(baselineCommandLine, {
     argv: [...argv, "--repo", dir],
-    streams: { stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY },
+    streams,
     cwd: dir,
-    now: () => when,
+    now: when,
   });
   return { code, out: out.join(""), err: err.join("") };
 }
@@ -99,22 +106,25 @@ async function timedTen(name: string): Promise<string> {
 
 describe("baseline harness arguments", () => {
   it("takes flags only where they apply, and needs a partner everywhere but the result", () => {
-    expect(() => parseE1Args(["seal"])).toThrow(/needs --partner/);
-    expect(() => parseE1Args(["seal", "--partner", "acme", "--defect", "x"])).toThrow(
+    expect(() => readE1(["seal"])).toThrow(/needs --partner/);
+    expect(() => readE1(["seal", "--partner", "acme", "--defect", "x"])).toThrow(
       /--defect does not apply to baseline seal/,
     );
-    expect(() => parseE1Args(["time", "--partner", "acme", "--nope"])).toThrow(/unknown flag/);
+    expect(() => readE1(["time", "--partner", "acme", "--nope"])).toThrow(/unknown flag/);
     // The flag-injection cases for every other command are in
     // `command-line/terminal.flag-injection.test.ts`; this one is here because
     // only this module may import this module's interior. `result` is the verb
     // `--json` applies to, so a partner id shaped like it is a partner id.
-    expect(parseE1Args(["result", "--partner", "--x=--json"])).toMatchObject({
-      subject: "--x=--json",
-      json: false,
+    expect(readE1(["result", "--partner", "--x=--json"])).toMatchObject({
+      input: { subject: "--x=--json" },
+      output: { json: false },
     });
-    expect(() => parseE1Args(["run", "--partner", "acme", "extra"])).toThrow(/takes flags, not/);
-    expect(parseE1Args(["result", "--json"])).toMatchObject({ subject: null, json: true });
-    expect(parseE1Args(["open", "--partner=acme", "--agent"])).toMatchObject({
+    expect(() => readE1(["run", "--partner", "acme", "extra"])).toThrow(/takes flags, not/);
+    expect(readE1(["result", "--json"])).toMatchObject({
+      input: { subject: null },
+      output: { json: true },
+    });
+    expect(readE1(["open", "--partner=acme", "--agent"]).input).toMatchObject({
       subject: "acme",
       arm: "agent_direct",
     });
@@ -127,16 +137,16 @@ describe("baseline harness arguments", () => {
     // about the flag: the person typed one thing that is not a flag here, and
     // hearing about the minutes first would send them to the wrong end of it.
     expect(() =>
-      parseE1Args(["time", "--partner", "p", "--interruptions", "bad", "--nope", "1"]),
+      readE1(["time", "--partner", "p", "--interruptions", "bad", "--nope", "1"]),
     ).toThrow(/unknown flag '--nope' for baseline time/);
     // With every flag one this verb has, the value is what the refusal is about.
-    expect(() => parseE1Args(["time", "--partner", "p", "--interruptions", "bad"])).toThrow(
+    expect(() => readE1(["time", "--partner", "p", "--interruptions", "bad"])).toThrow(
       /--interruptions takes a number, not 'bad'/,
     );
     // A flag that exists on another verb is named as that rather than unknown,
     // and is still answered before any value is read.
     expect(() =>
-      parseE1Args(["time", "--partner", "p", "--interruptions", "bad", "--defect", "d"]),
+      readE1(["time", "--partner", "p", "--interruptions", "bad", "--defect", "d"]),
     ).toThrow(/--defect does not apply to baseline time/);
   });
 
