@@ -7,6 +7,9 @@ describe("formatDuration", () => {
     expect(formatDuration(999)).toBe("999ms");
     expect(formatDuration(1_000)).toBe("1s");
     expect(formatDuration(59_499)).toBe("59s");
+    // Rounded, not truncated: half a second short of two is two seconds.
+    expect(formatDuration(1_500)).toBe("2s");
+    expect(formatDuration(59_500)).toBe("1m");
   });
 
   it("drops a unit that is zero, so a round value reads as one number", () => {
