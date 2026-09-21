@@ -190,6 +190,7 @@ test("the endpoint imports nothing at the argv edge", async () => {
   await refuses(tools, USES("../../command-line/grammar.js"), READS_NO_LINE);
   await refuses(tools, USES("../../command-line/terminal.js"), READS_NO_LINE);
   await refuses("apps/cli/src/endpoint/index.ts", USES("../command-line/terminal.js"), READS_NO_LINE);
+  await refuses(tools, USES("../../command-line/table.js"), READS_NO_LINE);
   // What it does reach: the commands themselves, and what it gives them.
   await allows(tools, USES("../../commands/stops.js"));
   await allows(tools, USES("../../command.js"));
@@ -209,6 +210,9 @@ test("the queue and the interview read their own line and run no command from on
     RUNS_NO_LINE,
   );
   await allows(serve, USES("../../command-line/grammar.js"));
+  // And the table it declares itself in: saying what a command is is not
+  // running one from a line.
+  await allows(serve, USES("../../command-line/table.js"));
   await refuses(serve, USES("../run/internal/relevel.js"), OWN_INTERIOR);
   await refuses(serve, USES("../../test-support/paths.js"), "imports no test code");
   // Every file of either module, not the four that call a command today.

@@ -17,7 +17,7 @@ import {
   INTERVIEW_TOOL_NAMES,
   interviewOrientation,
   parseInterviewArgs,
-  runInterviewCommand,
+  interviewCommandLine,
   type InterviewSession,
 } from "./index.js";
 import { listTickets, readDraftSnapshot, storeDir } from "../../store/tickets.js";
@@ -33,6 +33,7 @@ import {
 import { claudeHarness, codexHarness } from "./test-support/harness.js";
 import { scriptedSdk, type ScriptStep } from "./test-support/fake-sdk.js";
 import { BUILT_ENTRY, REPO_ROOT } from "../../test-support/paths.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /** The built command, for the approval an interview cannot make. */
 const CLI = BUILT_ENTRY;
@@ -94,15 +95,17 @@ async function interview(
 ) {
   const streams = capture();
   const sdk = scriptedSdk({ steps, cwd: repo, ...(extra.sessionId ? { sessionId: extra.sessionId } : {}) });
-  const code = await runInterviewCommand({
+  const code = await runCommandLine(interviewCommandLine, {
     argv: ["--repo", repo, "--spec", extra.spec ?? SPEC_FOLDER, ...(extra.argv ?? [])],
     streams,
     cwd: repo,
-    transport: claudeInterviewTransport(sdk, CLAUDE),
-    model: drafter(),
-    turns: (async function* () {
-      yield JSON.stringify({ type: "turn", text: "let us write the spec" });
-    })(),
+    deps: {
+      transport: claudeInterviewTransport(sdk, CLAUDE),
+      model: drafter(),
+      turns: (async function* () {
+        yield JSON.stringify({ type: "turn", text: "let us write the spec" });
+      })(),
+    },
   });
   return { code, streams, sdk };
 }
@@ -133,15 +136,17 @@ describe("parseInterviewArgs", () => {
     const record = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
     writeFileSync(path, JSON.stringify({ ...record, spec: "specs/x/../../../pwned/spec.md" }));
     const streams = capture();
-    await runInterviewCommand({
+    await runCommandLine(interviewCommandLine, {
       argv: ["--repo", repo, "--session", "sess-xyz"],
       streams,
       cwd: repo,
-      transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo, sessionId: "sess-xyz" }), CLAUDE),
-      model: drafter(),
-      turns: (async function* () {
-        yield JSON.stringify({ type: "turn", text: "hello" });
-      })(),
+      deps: {
+        transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo, sessionId: "sess-xyz" }), CLAUDE),
+        model: drafter(),
+        turns: (async function* () {
+          yield JSON.stringify({ type: "turn", text: "hello" });
+        })(),
+      },
     });
     const started = events(streams)[0];
     expect(started?.type === "started" ? started.spec : null).toBe(`${SPEC_FOLDER}/spec.md`);
@@ -155,15 +160,17 @@ describe("parseInterviewArgs", () => {
     mkdirSync(join(repo, "specs"), { recursive: true });
     symlinkSync(elsewhere, join(repo, "specs", "linked"));
     const streams = capture();
-    await runInterviewCommand({
+    await runCommandLine(interviewCommandLine, {
       argv: ["--repo", repo, "--spec", "specs/linked"],
       streams,
       cwd: repo,
-      transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo }), CLAUDE),
-      model: drafter(),
-      turns: (async function* () {
-        yield JSON.stringify({ type: "turn", text: "hello" });
-      })(),
+      deps: {
+        transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo }), CLAUDE),
+        model: drafter(),
+        turns: (async function* () {
+          yield JSON.stringify({ type: "turn", text: "hello" });
+        })(),
+      },
     });
     expect(existsSync(join(elsewhere, INTERVIEW_SESSION_FILE))).toBe(false);
     expect(streams.err.join("")).toContain("outside");
@@ -176,15 +183,17 @@ describe("parseInterviewArgs", () => {
     mkdirSync(join(repo, SPEC_FOLDER), { recursive: true });
     symlinkSync(join(elsewhere, "taken.json"), join(repo, SPEC_FOLDER, INTERVIEW_SESSION_FILE));
     const streams = capture();
-    await runInterviewCommand({
+    await runCommandLine(interviewCommandLine, {
       argv: ["--repo", repo, "--spec", SPEC_FOLDER],
       streams,
       cwd: repo,
-      transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo }), CLAUDE),
-      model: drafter(),
-      turns: (async function* () {
-        yield JSON.stringify({ type: "turn", text: "hello" });
-      })(),
+      deps: {
+        transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo }), CLAUDE),
+        model: drafter(),
+        turns: (async function* () {
+          yield JSON.stringify({ type: "turn", text: "hello" });
+        })(),
+      },
     });
     expect(existsSync(join(elsewhere, "taken.json"))).toBe(false);
     expect(streams.err.join("")).toContain("symlink");
@@ -201,15 +210,17 @@ describe("parseInterviewArgs", () => {
       writeFileSync(join(repo, "specs", slug, INTERVIEW_SESSION_FILE), body);
     }
     const streams = capture();
-    await runInterviewCommand({
+    await runCommandLine(interviewCommandLine, {
       argv: ["--repo", repo, "--session", "sess-two"],
       streams,
       cwd: repo,
-      transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo, sessionId: "sess-two" }), CLAUDE),
-      model: drafter(),
-      turns: (async function* () {
-        yield JSON.stringify({ type: "turn", text: "hello" });
-      })(),
+      deps: {
+        transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo, sessionId: "sess-two" }), CLAUDE),
+        model: drafter(),
+        turns: (async function* () {
+          yield JSON.stringify({ type: "turn", text: "hello" });
+        })(),
+      },
     });
     const started = events(streams)[0];
     expect(started?.type === "started" ? started.spec : null).toBe("specs/other/spec.md");
@@ -219,15 +230,17 @@ describe("parseInterviewArgs", () => {
     const repo = repository();
     const streams = capture();
     await expect(
-      runInterviewCommand({
+      runCommandLine(interviewCommandLine, {
         argv: ["--repo", repo, "--spec", "docs/notes"],
         streams,
         cwd: repo,
-        transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo }), CLAUDE),
-        model: drafter(),
-        turns: (async function* () {
-          yield JSON.stringify({ type: "turn", text: "hello" });
-        })(),
+        deps: {
+          transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo }), CLAUDE),
+          model: drafter(),
+          turns: (async function* () {
+            yield JSON.stringify({ type: "turn", text: "hello" });
+          })(),
+        },
       }),
     ).rejects.toThrow(/specs/);
   });
@@ -240,27 +253,29 @@ describe("parseInterviewArgs", () => {
   it("never admits the folder every spec sits in, however the spec is spelled", async () => {
     const repo = repository();
     const run = (named: string) =>
-      runInterviewCommand({
+      runCommandLine(interviewCommandLine, {
         argv: ["--repo", repo, "--spec", named],
         streams: capture(),
         cwd: repo,
-        transport: claudeInterviewTransport(
-          scriptedSdk({
-            steps: [
-              {
-                kind: "tool",
-                tool: "Write",
-                input: { file_path: "specs/somebody-else/spec.md", content: "# theirs\n" },
-              },
-            ],
-            cwd: repo,
-          }),
-          CLAUDE,
-        ),
-        model: drafter(),
-        turns: (async function* () {
-          yield JSON.stringify({ type: "turn", text: "hello" });
-        })(),
+        deps: {
+          transport: claudeInterviewTransport(
+            scriptedSdk({
+              steps: [
+                {
+                  kind: "tool",
+                  tool: "Write",
+                  input: { file_path: "specs/somebody-else/spec.md", content: "# theirs\n" },
+                },
+              ],
+              cwd: repo,
+            }),
+            CLAUDE,
+          ),
+          model: drafter(),
+          turns: (async function* () {
+            yield JSON.stringify({ type: "turn", text: "hello" });
+          })(),
+        },
       });
     for (const named of ["specs", "specs/", "specs/spec.md", "specs/./spec.md", "specs/x/../spec.md", "specs/.", "docs/notes"]) {
       await expect(run(named), named).rejects.toThrow(/one piece of work/);
@@ -278,15 +293,17 @@ describe("parseInterviewArgs", () => {
         ],
         cwd: repo,
       });
-      await runInterviewCommand({
+      await runCommandLine(interviewCommandLine, {
         argv: ["--repo", repo, "--spec", named],
         streams,
         cwd: repo,
-        transport: claudeInterviewTransport(sdk, CLAUDE),
-        model: drafter(),
-        turns: (async function* () {
-          yield JSON.stringify({ type: "turn", text: "hello" });
-        })(),
+        deps: {
+          transport: claudeInterviewTransport(sdk, CLAUDE),
+          model: drafter(),
+          turns: (async function* () {
+            yield JSON.stringify({ type: "turn", text: "hello" });
+          })(),
+        },
       });
       expect(sdk.calls[0]?.behavior, named).toBe("deny");
       expect(existsSync(join(repo, "specs", "somebody-else")), named).toBe(false);
@@ -299,15 +316,17 @@ describe("parseInterviewArgs", () => {
     const repo = repository();
     const streams = capture();
     await expect(
-      runInterviewCommand({
+      runCommandLine(interviewCommandLine, {
         argv: ["--repo", repo],
         streams,
         cwd: repo,
-        transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo }), CLAUDE),
-        model: drafter(),
-        turns: (async function* () {
-          yield JSON.stringify({ type: "turn", text: "hello" });
-        })(),
+        deps: {
+          transport: claudeInterviewTransport(scriptedSdk({ steps: [], cwd: repo }), CLAUDE),
+          model: drafter(),
+          turns: (async function* () {
+            yield JSON.stringify({ type: "turn", text: "hello" });
+          })(),
+        },
       }),
     ).rejects.toThrow(/--spec/);
   });
@@ -620,22 +639,24 @@ describe("the directory a call is judged against", () => {
   ): Promise<string[]> => {
     const repo = repository();
     const behaviours: string[] = [];
-    await runInterviewCommand({
+    await runCommandLine(interviewCommandLine, {
       argv: ["--repo", repo, "--spec", SPEC_FOLDER],
       streams: { stdout: () => undefined, stderr: () => undefined, isTTY: false },
       cwd: repo,
-      model: drafter(),
-      turns: (async function* () {
-        yield JSON.stringify({ type: "turn", text: "hello" });
-      })(),
-      transport: {
-        run: async function* (session) {
-          await ask(async (tool, input, cwd) => {
-            const decided = await session.decide(tool, input, cwd);
-            behaviours.push(decided.behavior);
-            return decided;
-          });
-          yield { session_id: "stub-1" };
+      deps: {
+        model: drafter(),
+        turns: (async function* () {
+          yield JSON.stringify({ type: "turn", text: "hello" });
+        })(),
+        transport: {
+          run: async function* (session) {
+            await ask(async (tool, input, cwd) => {
+              const decided = await session.decide(tool, input, cwd);
+              behaviours.push(decided.behavior);
+              return decided;
+            });
+            yield { session_id: "stub-1" };
+          },
         },
       },
     });

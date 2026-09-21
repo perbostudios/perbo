@@ -30,7 +30,7 @@ import {
   type Grammar,
 } from "../../command-line/grammar.js";
 import type { CommandContext } from "../../command.js";
-import type { NarratedCommand } from "../../command-line/terminal.js";
+import type { NarratedCommand } from "../../command-line/table.js";
 import { readInput } from "../../usage-error.js";
 import { storeFor, StoreTargetSchema } from "../../store/index.js";
 import { UsageError } from "../../usage-error.js";

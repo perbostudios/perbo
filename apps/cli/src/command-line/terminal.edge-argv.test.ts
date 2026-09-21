@@ -3,7 +3,7 @@ import { admitCommandLine, approveCommandLine, listCommandLine } from "../comman
 import { editCommandLine } from "../commands/edit/index.js";
 import { syncCommandLine } from "../commands/sync.js";
 import { inspectCommandLine } from "../commands/inspect.js";
-import { parseInterviewArgs } from "../commands/interview/index.js";
+import { interviewCommandLine } from "../commands/interview/index.js";
 import { principleCommandLine } from "../commands/principle.js";
 import { parseReviewArgs } from "../commands/review/index.js";
 import { doctorCommandLine, executeCommandLine } from "../commands/run/index.js";
@@ -244,7 +244,7 @@ describe("the desktop host", () => {
 
   it("reads an interview, with and without the session it continues", () => {
     expect(
-      parseInterviewArgs([
+      interviewCommandLine.read([
         "--spec",
         "specs/paginate-search",
         "--model",
@@ -253,7 +253,7 @@ describe("the desktop host", () => {
         "claude",
         "--repo",
         REPO,
-      ]),
+      ]).input,
     ).toEqual({
       repo: REPO,
       store: null,
@@ -263,7 +263,7 @@ describe("the desktop host", () => {
       provider: "claude",
     });
     expect(
-      parseInterviewArgs([
+      interviewCommandLine.read([
         "--spec",
         "specs/paginate-search",
         "--session",
@@ -274,7 +274,7 @@ describe("the desktop host", () => {
         "codex",
         "--repo",
         REPO,
-      ]),
+      ]).input,
     ).toMatchObject({ session: "sess_01", provider: "codex" });
   });
 });

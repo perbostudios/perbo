@@ -4,9 +4,9 @@ import { baselineCommandLine } from "../commands/baseline/index.js";
 import { editCommandLine } from "../commands/edit/index.js";
 import { escapesCommandLine } from "../commands/escapes/index.js";
 import { inspectCommandLine } from "../commands/inspect.js";
-import { parseInterviewArgs } from "../commands/interview/index.js";
+import { interviewCommandLine } from "../commands/interview/index.js";
 import { mcpCommandLine } from "../commands/mcp.js";
-import { parseServeArgs } from "../commands/serve/index.js";
+import { serveCommandLine } from "../commands/serve/index.js";
 import { stopsCommandLine } from "../commands/stops.js";
 import { syncCommandLine } from "../commands/sync.js";
 import { verdictCommandLine } from "../commands/verdict/index.js";
@@ -120,14 +120,14 @@ describe("verdict and baseline", () => {
 
 describe("serve and interview", () => {
   it("does not let a repository path turn publication on", () => {
-    const args = parseServeArgs(["--repo", "--x=--publish"]);
-    expect(args.repo).toBe("--x=--publish");
-    expect(args.publish).toBe(false);
+    const { input } = serveCommandLine.read(["--repo", "--x=--publish"]);
+    expect(input.repo).toBe("--x=--publish");
+    expect(input.publish).toBe(false);
   });
 
   it("keeps an interview's spec folder whole", () => {
-    const args = parseInterviewArgs(["--spec", "--x=--session"]);
-    expect(args.spec).toBe("--x=--session");
-    expect(args.session).toBe(null);
+    const { input } = interviewCommandLine.read(["--spec", "--x=--session"]);
+    expect(input.spec).toBe("--x=--session");
+    expect(input.session).toBe(null);
   });
 });

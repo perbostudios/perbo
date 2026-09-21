@@ -50,7 +50,7 @@ import {
   type Grammar,
 } from "../command-line/grammar.js";
 import type { CommandContext } from "../command.js";
-import type { NarratedCommand } from "../command-line/terminal.js";
+import type { NarratedCommand } from "../command-line/table.js";
 import { StoreTargetSchema, storeFor } from "../store/index.js";
 import { applyObservedPath, UnreachableStateError } from "./admit.js";
 import type { Streams } from "../streams.js";

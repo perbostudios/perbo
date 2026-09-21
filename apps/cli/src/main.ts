@@ -12,10 +12,10 @@ import { reviewCommandLine } from "./commands/review/index.js";
 import { VERSION } from "./version.js";
 import { stopsCommandLine } from "./commands/stops.js";
 import { indexCommandLine } from "./commands/symbol-index.js";
-import { runAgentCommand } from "./commands/agent.js";
-import { runInterviewCommand } from "./commands/interview/index.js";
+import { agentCommandLine } from "./commands/agent.js";
+import { interviewCommandLine } from "./commands/interview/index.js";
 import { mcpCommandLine } from "./commands/mcp.js";
-import { runServeCommand } from "./commands/serve/index.js";
+import { serveCommandLine } from "./commands/serve/index.js";
 import { syncCommandLine } from "./commands/sync.js";
 import { USAGE } from "./command-line/usage.js";
 import { verdictCommandLine } from "./commands/verdict/index.js";
@@ -65,13 +65,13 @@ export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
       case "sync":
         return runCommandLine(syncCommandLine, { argv: rest, streams, cwd });
       case "serve":
-        return runServeCommand({ argv: rest, streams, cwd });
+        return runCommandLine(serveCommandLine, { argv: rest, streams, cwd });
       case "mcp":
         return runCommandLine(mcpCommandLine, { argv: rest, streams, cwd });
       case "agent":
-        return runAgentCommand({ argv: rest, streams, cwd });
+        return runCommandLine(agentCommandLine, { argv: rest, streams, cwd });
       case "interview":
-        return runInterviewCommand({ argv: rest, streams, cwd });
+        return runCommandLine(interviewCommandLine, { argv: rest, streams, cwd });
       case "stops":
         return runCommandLine(stopsCommandLine, { argv: rest, streams, cwd });
       case "escapes":

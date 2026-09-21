@@ -3,12 +3,8 @@ import { UsageError } from "../usage-error.js";
 import type { Streams } from "../streams.js";
 import { parseArgv, switchFlag, valueFlag, type FlagTable, type Grammar } from "./grammar.js";
 import { USAGE } from "./usage.js";
-import {
-  runCommandLine,
-  type NarratedCommand,
-  type ReportCommand,
-  type TerminalCommand,
-} from "./terminal.js";
+import { runCommandLine } from "./terminal.js";
+import type { NarratedCommand, ReportCommand, TerminalCommand } from "./table.js";
 
 /**
  * The adapter between a command line and a command, on two commands built for

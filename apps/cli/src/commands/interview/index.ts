@@ -53,6 +53,9 @@ import {
 import { edit, type EditInput } from "../edit/index.js";
 import { adrFolder, specFolder, storeDir, trackedFiles } from "../../store/index.js";
 import type { Streams } from "../../streams.js";
+import type { NarratedCommand } from "../../command-line/table.js";
+import { narratedStreams } from "../../streams.js";
+import type { CommandContext } from "../../command.js";
 import {
   listTickets,
   readApproachRecord,
@@ -1794,27 +1797,40 @@ export interface InterviewTransport {
   run(session: InterviewSession): AsyncIterable<InterviewStreamed>;
 }
 
-export interface InterviewInput {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  /** Injected by tests: the transport. Otherwise the one `--provider` names. */
-  transport?: InterviewTransport;
-  /** Injected by tests: the drafting model `generate_plan` runs the drafter with. */
-  model?: Model;
+/** The three parts of a session a test replaces; production uses the real thing. */
+export interface InterviewDeps {
+  /** The transport. Otherwise the one `--provider` names. */
+  transport: InterviewTransport;
+  /** The drafting model `generate_plan` runs the drafter with. */
+  model: Model;
   /** The person's turns, one JSON line each. Defaults to stdin. */
-  turns?: AsyncIterable<string>;
-  now?: Date;
+  turns: AsyncIterable<string>;
 }
 
-export async function runInterviewCommand(input: InterviewInput): Promise<number> {
-  const args = parseInterviewArgs(input.argv);
-  const repositoryRoot = resolve(input.cwd, args.repo);
+/** What a session is given: where it runs, what it says as it goes, and its three parts. */
+export type InterviewContextForRun = CommandContext & {
+  stdout(chunk: string): void;
+  isTTY: boolean;
+} & Partial<InterviewDeps>;
+
+/**
+ * `perbo interview`, over typed input.
+ *
+ * It answers while it works — one JSON event a line on stdout, the card and
+ * the warnings on stderr — and ends when the person's turns do, so there is no
+ * record to hand back.
+ */
+export async function interview(
+  args: InterviewArgs,
+  context: InterviewContextForRun,
+): Promise<number> {
+  const streams = narratedStreams(context);
+  const repositoryRoot = resolve(context.cwd, args.repo);
   const storeDirectory = storeDir(repositoryRoot, args.store);
   const specs = specFolder(storeDirectory);
   const adr = adrFolder(storeDirectory);
   const spec = resolveSpec(repositoryRoot, specs, args);
-  const emit = (event: InterviewEvent): void => input.streams.stdout(encodeInterviewEvent(event));
+  const emit = (event: InterviewEvent): void => streams.stdout(encodeInterviewEvent(event));
 
   const permission = interviewPermission({
     state: interviewGuardState({
@@ -1826,11 +1842,11 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     }),
     specPath: join(repositoryRoot, spec),
     emit,
-    say: (line) => input.streams.stderr(line),
+    say: (line) => streams.stderr(line),
   });
 
-  const context: InterviewContext = {
-    cwd: input.cwd,
+  const toolContext: InterviewContext = {
+    cwd: context.cwd,
     repo: args.repo,
     store: args.store,
     repositoryRoot,
@@ -1838,7 +1854,7 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     spec,
     specWritten: permission.specWritten,
     specTaken: permission.specTaken,
-    model: input.model,
+    model: context.model,
   };
 
   const tools: InterviewBoundTool[] = INTERVIEW_TOOLS.map((each) => ({
@@ -1854,7 +1870,7 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
         emit({ type: "tool", tool: each.name, ok: false, detail });
         return said(`${each.name} was called with input it does not take:\n${detail}`, true);
       }
-      const result = await each.run(parsed.data, context);
+      const result = await each.run(parsed.data, toolContext);
       const detail = result.content.map((part) => part.text).join("\n");
       emit({ type: "tool", tool: each.name, ok: result.isError !== true, detail });
       // The questions are their own line: the card says a tool ran, and what
@@ -1879,25 +1895,26 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
       model: args.model,
       tools: [...INTERVIEW_TOOL_NAMES],
     });
-    input.streams.stderr(
+    streams.stderr(
       `interview ${id} in ${repositoryRoot}, writing ${spec}, CONTEXT.md and ${adr}; anything else ` +
         "is refused rather than asked, and it cannot approve, publish or merge\n",
     );
     const unrecorded = recordSession(repositoryRoot, join(repositoryRoot, dirname(spec)), {
       session_id: id,
       spec,
-      started_at: (input.now ?? new Date()).toISOString(),
+      started_at: context.now.toISOString(),
       model: args.model,
       provider: args.provider,
     });
     if (unrecorded !== null) {
-      input.streams.stderr(
+      streams.stderr(
         `this session was not recorded beside its spec, so --session ${id} will not find it: ${unrecorded}\n`,
       );
     }
   };
 
-  const transport = input.transport ?? (await loadInterviewTransport(args.provider, repositoryRoot));
+  const transport =
+    context.transport ?? (await loadInterviewTransport(args.provider, repositoryRoot));
   const session: InterviewSession = {
     cwd: repositoryRoot,
     model: args.model,
@@ -1905,9 +1922,9 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     orientation: interviewOrientation({ repositoryRoot, spec, adr }),
     tools,
     decide: (tool, toolInput, where) => permission.canUseTool(tool, toolInput, where),
-    turns: turnsAsText(input),
+    turns: turnsAsText(context.turns),
     sessionId: () => sessionId,
-    stderr: (data) => input.streams.stderr(data),
+    stderr: (data) => streams.stderr(data),
   };
 
   let reason = "the session ended";
@@ -2096,8 +2113,8 @@ function isSymlink(path: string): boolean {
 }
 
 /** The person's turns, as text, one line of stdin each. */
-async function* turnsAsText(input: InterviewInput): AsyncGenerator<string> {
-  for await (const line of input.turns ?? linesOfStdin()) {
+async function* turnsAsText(turns: AsyncIterable<string> | undefined): AsyncGenerator<string> {
+  for await (const line of turns ?? linesOfStdin()) {
     const turn = decodeInterviewTurn(line);
     if (turn === null) continue;
     yield turn.text;
@@ -2108,3 +2125,17 @@ async function* turnsAsText(input: InterviewInput): AsyncGenerator<string> {
 async function* linesOfStdin(): AsyncGenerator<string> {
   for await (const line of createInterface({ input: process.stdin })) yield line;
 }
+
+/** `perbo interview`, over its own line. */
+export const interviewCommandLine: NarratedCommand<
+  InterviewArgs,
+  Record<string, never>,
+  InterviewDeps
+> = {
+  kind: "narrated",
+  name: "interview",
+  grammars: [INTERVIEW_GRAMMAR],
+  grammarFor: () => INTERVIEW_GRAMMAR,
+  read: (argv) => ({ input: parseInterviewArgs(argv), output: {} }),
+  run: (input, _output, context) => interview(input, context),
+};

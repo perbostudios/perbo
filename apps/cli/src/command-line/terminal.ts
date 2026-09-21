@@ -2,15 +2,10 @@ import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "../usage-error.js";
 import { describeFailure } from "../failure.js";
 import { StoreError } from "../store/index.js";
-import type {
-  CommandContext,
-  CommandOutput,
-  CommandReport,
-  RenderTarget,
-} from "../command.js";
+import type { CommandOutput, RenderTarget } from "../command.js";
+import type { NarratedCommand, ReportCommand, TerminalCommand } from "./table.js";
 import type { Streams } from "../streams.js";
-import { asksForHelp, type Grammar } from "./grammar.js";
-import type { CommandName } from "./names.js";
+import { asksForHelp } from "./grammar.js";
 import { USAGE } from "./usage.js";
 
 /**
@@ -113,71 +108,6 @@ export function startEntryPoint(argv: string[], entry: EntryPoint): void {
 /* ------------------------------------------------------------------ *
  * One command, and the terminal adapter that runs it.
  * ------------------------------------------------------------------ */
-
-/**
- * A command whose answer is a record, with the line it is asked for by: read,
- * run, render once.
- *
- * The run and the rendering are {@link CommandReport}, which a caller in this
- * process reaches without a line; what is here is the reading of argv, which
- * is the terminal's alone.
- */
-export interface ReportCommand<
-  Input,
-  Output extends CommandOutput,
-  Report,
-  Deps extends object = object,
-> extends CommandReport<Input, Output, Report, Deps> {
-  readonly kind: "report";
-  readonly name: CommandName;
-  /** Every grammar it reads a line by, for the usage-consistency test. */
-  readonly grammars: readonly Grammar[];
-  /** Whether a piped stdout carries the record without `--json`, per command. */
-  readonly jsonWhenPiped: boolean;
-  /** The grammar this line is read by: the verb's, where the command has verbs. */
-  grammarFor(argv: readonly string[]): Grammar;
-  /** Throws {@link UsageError} for a line this command cannot act on. */
-  read(argv: readonly string[]): { input: Input; output: Output };
-}
-
-/**
- * A command whose answer is what it says while it works: a sync, a run, a
- * review's progress, the queue, an interview, a session.
- */
-export interface NarratedCommand<Input, Output, Deps extends object = object> {
-  readonly kind: "narrated";
-  readonly name: CommandName;
-  readonly grammars: readonly Grammar[];
-  grammarFor(argv: readonly string[]): Grammar;
-  read(argv: readonly string[]): { input: Input; output: Output };
-  run(
-    input: Input,
-    output: Output,
-    context: CommandContext & { stdout(chunk: string): void; isTTY: boolean } & Partial<Deps>,
-  ): Promise<number> | number;
-}
-
-/** A command as the table holds it, with its own types behind it. */
-export type TerminalCommand =
-  | ReportCommand<unknown, CommandOutput, unknown>
-  | NarratedCommand<unknown, unknown>;
-
-/**
- * The three writes a narrated command's context holds, as one object.
- *
- * Everything below a command reads {@link Streams}; a narrated command is
- * handed its diagnostics and its stdout separately, because an in-process
- * caller collects the two apart.
- */
-export const narratedStreams = (context: {
-  stdout(chunk: string): void;
-  isTTY: boolean;
-  diagnostics: { stderr(chunk: string): void };
-}): Streams => ({
-  stdout: context.stdout,
-  stderr: (chunk) => context.diagnostics.stderr(chunk),
-  isTTY: context.isTTY,
-});
 
 /** What the terminal hands one command: its line, its streams and its injected parts. */
 export interface Invocation<Deps extends object = object> {

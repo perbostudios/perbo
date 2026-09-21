@@ -35,7 +35,7 @@ import {
   type Grammar,
 } from "../command-line/grammar.js";
 import type { CommandContext, Rendered } from "../command.js";
-import type { ReportCommand } from "../command-line/terminal.js";
+import type { ReportCommand } from "../command-line/table.js";
 import { StoreError, headCommit, storeDir } from "../store/index.js";
 
 /**

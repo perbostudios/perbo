@@ -28,7 +28,7 @@ import {
   type Grammar,
 } from "../command-line/grammar.js";
 import type { CommandContext, CommandReport, Rendered } from "../command.js";
-import type { ReportCommand } from "../command-line/terminal.js";
+import type { ReportCommand } from "../command-line/table.js";
 import type { Diagnostics } from "../diagnostics.js";
 import {
   attemptsRecordSubject,

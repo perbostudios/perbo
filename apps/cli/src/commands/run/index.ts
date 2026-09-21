@@ -88,7 +88,8 @@ import {
   type FlagTable,
   type Grammar,
 } from "../../command-line/grammar.js";
-import { narratedStreams, type NarratedCommand } from "../../command-line/terminal.js";
+import type { NarratedCommand } from "../../command-line/table.js";
+import { narratedStreams } from "../../streams.js";
 import type { CommandContext } from "../../command.js";
 import { UsageError } from "../../usage-error.js";
 import {

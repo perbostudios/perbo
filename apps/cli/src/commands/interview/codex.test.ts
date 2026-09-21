@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import { CODEX_INTERVIEW_ARGV, codexInterviewTransport } from "./codex.js";
-import { INTERVIEW_TOOL_NAMES, runInterviewCommand } from "./index.js";
+import { INTERVIEW_TOOL_NAMES, interviewCommandLine } from "./index.js";
 import type { Streams } from "../../streams.js";
 import { fakeAppServer, type ServerStep } from "./test-support/fake-app-server.js";
 import {
@@ -15,6 +15,7 @@ import {
   SPEC,
   SPEC_FOLDER,
 } from "./test-support/contract.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * The interview on Codex: what only this transport has (SCP-312, D-102).
@@ -46,17 +47,19 @@ async function interview(
     threadId: extra.threadId ?? "thread-0001",
   });
   const streams = capture();
-  const code = await runInterviewCommand({
+  const code = await runCommandLine(interviewCommandLine, {
     argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "codex", ...(extra.argv ?? [])],
     streams,
     cwd: extra.cwd ?? repo,
-    transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
-    model: drafter(),
-    turns: (async function* () {
-      for (let i = 0; i < (extra.turns ?? 1); i += 1) {
-        yield JSON.stringify({ type: "turn", text: `turn ${i}` });
-      }
-    })(),
+    deps: {
+      transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
+      model: drafter(),
+      turns: (async function* () {
+        for (let i = 0; i < (extra.turns ?? 1); i += 1) {
+          yield JSON.stringify({ type: "turn", text: `turn ${i}` });
+        }
+      })(),
+    },
   });
   return { code, repo, server, streams };
 }
@@ -235,25 +238,29 @@ describe("the interview's rules over the app server's approvals", () => {
     });
     // With `--spec` beside it, which is how planning mode always names one:
     // the session is judged whichever way the spec was named.
-    const refused = await runInterviewCommand({
-      argv: [
-        "--repo",
-        repo,
-        "--spec",
-        SPEC_FOLDER,
-        "--provider",
-        "codex",
-        "--session",
-        "sdk-session-1",
-      ],
-      streams: capture(),
-      cwd: repo,
-      transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
-      model: drafter(),
-      turns: (async function* () {
-        yield JSON.stringify({ type: "turn", text: "hello" });
-      })(),
-    }).catch((error: unknown) => error);
+    const refused = await Promise.resolve(
+      runCommandLine(interviewCommandLine, {
+        argv: [
+          "--repo",
+          repo,
+          "--spec",
+          SPEC_FOLDER,
+          "--provider",
+          "codex",
+          "--session",
+          "sdk-session-1",
+        ],
+        streams: capture(),
+        cwd: repo,
+        deps: {
+          transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
+          model: drafter(),
+          turns: (async function* () {
+            yield JSON.stringify({ type: "turn", text: "hello" });
+          })(),
+        },
+      }),
+    ).catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(Error);
     expect((refused as Error).message).toContain("claude");
     expect((refused as Error).message).toContain("codex");
@@ -288,19 +295,23 @@ describe("the interview's rules over the app server's approvals", () => {
         "});\n",
       { mode: 0o700 },
     );
-    const failed = await runInterviewCommand({
-      argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "codex"],
-      streams,
-      cwd: repo,
-      transport: codexInterviewTransport({
-        binary: refusing,
-        codexHome: server.codexHome,
+    const failed = await Promise.resolve(
+      runCommandLine(interviewCommandLine, {
+        argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "codex"],
+        streams,
+        cwd: repo,
+        deps: {
+          transport: codexInterviewTransport({
+            binary: refusing,
+            codexHome: server.codexHome,
+          }),
+          model: drafter(),
+          turns: (async function* () {
+            yield JSON.stringify({ type: "turn", text: "hello" });
+          })(),
+        },
       }),
-      model: drafter(),
-      turns: (async function* () {
-        yield JSON.stringify({ type: "turn", text: "hello" });
-      })(),
-    }).catch((error: unknown) => error);
+    ).catch((error: unknown) => error);
     expect(failed).toBeInstanceOf(Error);
     expect((failed as Error).message).toContain("this server serves no interview");
   });
@@ -338,13 +349,15 @@ describe("the interview's rules over the app server's approvals", () => {
         "});\n",
       { mode: 0o700 },
     );
-    const code = await runInterviewCommand({
+    const code = await runCommandLine(interviewCommandLine, {
       argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "codex"],
       streams,
       cwd: repo,
-      transport: codexInterviewTransport({ binary: lingering, codexHome: server.codexHome }),
-      model: drafter(),
-      turns: (async function* () {})(),
+      deps: {
+        transport: codexInterviewTransport({ binary: lingering, codexHome: server.codexHome }),
+        model: drafter(),
+        turns: (async function* () {})(),
+      },
     });
     expect(code).toBe(EXIT_CODES.approve);
     const pid = Number(readFileSync(pidFile, "utf8"));
@@ -407,16 +420,20 @@ describe("the interview's rules over the app server's approvals", () => {
       { mode: 0o700 },
     );
 
-    const failed = await runInterviewCommand({
-      argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "codex"],
-      streams,
-      cwd: repo,
-      transport: codexInterviewTransport({ binary: dying, codexHome: server.codexHome }),
-      model: drafter(),
-      turns: (async function* () {
-        yield JSON.stringify({ type: "turn", text: "hello" });
-      })(),
-    }).catch((error: unknown) => error);
+    const failed = await Promise.resolve(
+      runCommandLine(interviewCommandLine, {
+        argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "codex"],
+        streams,
+        cwd: repo,
+        deps: {
+          transport: codexInterviewTransport({ binary: dying, codexHome: server.codexHome }),
+          model: drafter(),
+          turns: (async function* () {
+            yield JSON.stringify({ type: "turn", text: "hello" });
+          })(),
+        },
+      }),
+    ).catch((error: unknown) => error);
 
     expect(failed).toBeInstanceOf(Error);
     expect((failed as Error).message).toContain("THE-REASON-IT-DIED");
@@ -458,16 +475,20 @@ describe("the interview's rules over the app server's approvals", () => {
         "});\n",
       { mode: 0o700 },
     );
-    const failed = await runInterviewCommand({
-      argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "codex"],
-      streams,
-      cwd: repo,
-      transport: codexInterviewTransport({ binary: noisy, codexHome: server.codexHome }),
-      model: drafter(),
-      turns: (async function* () {
-        yield JSON.stringify({ type: "turn", text: "hello" });
-      })(),
-    }).catch((error: unknown) => error);
+    const failed = await Promise.resolve(
+      runCommandLine(interviewCommandLine, {
+        argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "codex"],
+        streams,
+        cwd: repo,
+        deps: {
+          transport: codexInterviewTransport({ binary: noisy, codexHome: server.codexHome }),
+          model: drafter(),
+          turns: (async function* () {
+            yield JSON.stringify({ type: "turn", text: "hello" });
+          })(),
+        },
+      }),
+    ).catch((error: unknown) => error);
     expect(failed).toBeInstanceOf(Error);
     const said = (failed as Error).message;
     expect(said).toContain("LAST-THING-IT-SAID");
@@ -506,19 +527,23 @@ describe("the interview's rules over the app server's approvals", () => {
     const streams = capture();
     // A home with no `auth.json`: the session runs on the person's login and
     // there is none to run on.
-    const refused = await runInterviewCommand({
-      argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "codex"],
-      streams,
-      cwd: repo,
-      transport: codexInterviewTransport({
-        binary: join(scratch, "unused-binary"),
-        codexHome: mkdtempSync(join(scratch, "codex-home-empty-")),
+    const refused = await Promise.resolve(
+      runCommandLine(interviewCommandLine, {
+        argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "codex"],
+        streams,
+        cwd: repo,
+        deps: {
+          transport: codexInterviewTransport({
+            binary: join(scratch, "unused-binary"),
+            codexHome: mkdtempSync(join(scratch, "codex-home-empty-")),
+          }),
+          model: drafter(),
+          turns: (async function* () {
+            yield JSON.stringify({ type: "turn", text: "hello" });
+          })(),
+        },
       }),
-      model: drafter(),
-      turns: (async function* () {
-        yield JSON.stringify({ type: "turn", text: "hello" });
-      })(),
-    }).catch((error: unknown) => error);
+    ).catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(Error);
     expect((refused as Error).message).toContain("codex login");
   });
@@ -823,7 +848,7 @@ describe("resume (SCP-312 criterion 3)", () => {
       threadId: "a-different-thread",
     });
     const streams = capture();
-    await runInterviewCommand({
+    await runCommandLine(interviewCommandLine, {
       argv: [
         "--repo",
         first.repo,
@@ -836,11 +861,13 @@ describe("resume (SCP-312 criterion 3)", () => {
       ],
       streams,
       cwd: first.repo,
-      transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
-      model: drafter(),
-      turns: (async function* () {
-        yield JSON.stringify({ type: "turn", text: "carry on" });
-      })(),
+      deps: {
+        transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
+        model: drafter(),
+        turns: (async function* () {
+          yield JSON.stringify({ type: "turn", text: "carry on" });
+        })(),
+      },
     });
     const opened = server.opened();
     expect(opened.method).toBe("thread/resume");

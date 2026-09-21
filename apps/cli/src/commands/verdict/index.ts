@@ -27,7 +27,7 @@ import {
 import { pad } from "../../text.js";
 import { refuseUnknownReview, storedReviewSubject, storedReviewsFor } from "../review/stored.js";
 import type { CommandContext, Rendered } from "../../command.js";
-import type { ReportCommand } from "../../command-line/terminal.js";
+import type { ReportCommand } from "../../command-line/table.js";
 import { StoreTargetSchema, storeDir } from "../../store/index.js";
 import { listTickets } from "../../store/tickets.js";
 import {

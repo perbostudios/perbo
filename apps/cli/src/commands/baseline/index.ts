@@ -33,7 +33,7 @@ import {
 } from "./internal/e1/command.js";
 import { formatDuration } from "../run/index.js";
 import type { CommandContext, Rendered } from "../../command.js";
-import type { ReportCommand } from "../../command-line/terminal.js";
+import type { ReportCommand } from "../../command-line/table.js";
 import { storeFor, type StoreTarget } from "../../store/index.js";
 import { listTickets } from "../../store/tickets.js";
 

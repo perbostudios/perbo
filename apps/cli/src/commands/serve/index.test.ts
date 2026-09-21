@@ -8,11 +8,11 @@ import { acquireServeLock } from "@perbo/runner";
 import { UsageError } from "../../usage-error.js";
 import { admitCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
-import { ServeTickSchema, parseServeArgs, processDeps, runServeCommand, type ServeDeps } from "./index.js";
+import { ServeTickSchema, parseServeArgs, processDeps, serveCommandLine, type ServeDeps } from "./index.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 import { readEndpoint } from "../../endpoint/index.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
 import { readTicket, storeDir, writeTicket } from "../../store/tickets.js";
-import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * `perbo serve` (SCP-008 criterion 5, SCP-227): the queue over one store.
@@ -140,15 +140,17 @@ function fakes(overrides: Partial<ServeDeps> = {}): Fakes {
   return { spawned, fetched, synced, listed, drafted, deps };
 }
 
+/** The one moment every queue here is asked to run at, so a record's dates are the test's. */
+const AT = new Date("2026-09-10T12:00:00.000Z");
+
 async function serveOnce(repo: string, deps: ServeDeps, extra: string[] = [], paused = false) {
   const streams = capture();
-  const code = await runServeCommand({
+  const code = await runCommandLine(serveCommandLine, {
     argv: ["--repo", repo, "--once", ...extra],
     streams,
     cwd: repo,
-    now: new Date("2026-09-10T12:00:00.000Z"),
-    deps,
-    paused,
+    now: AT,
+    deps: { processes: deps, clock: () => AT, paused },
   });
   return { code, streams };
 }
@@ -769,13 +771,12 @@ describe("perbo serve drafts labelled tracker issues", () => {
       if (++ticks >= 2) controller.abort();
     };
     const streams = capture();
-    const code = await runServeCommand({
+    const code = await runCommandLine(serveCommandLine, {
       argv: ["--repo", repo, "--interval", "1s", "--json"],
       streams,
       cwd: repo,
-      now: new Date("2026-09-10T12:00:00.000Z"),
-      deps: f.deps,
-      signal: controller.signal,
+      now: AT,
+      deps: { processes: f.deps, clock: () => AT, signal: controller.signal },
     });
     expect(code).toBe(EXIT_CODES.approve);
     // #2 before #3, and #2 alone: one draft a tick, and the fake wrote no
@@ -813,13 +814,12 @@ describe("perbo serve drafts labelled tracker issues", () => {
       if (++ticks >= 2) controller.abort();
     };
     const streams = capture();
-    await runServeCommand({
+    await runCommandLine(serveCommandLine, {
       argv: ["--repo", repo, "--interval", "1s"],
       streams,
       cwd: repo,
-      now: new Date("2026-09-10T12:00:00.000Z"),
-      deps: f.deps,
-      signal: controller.signal,
+      now: AT,
+      deps: { processes: f.deps, clock: () => AT, signal: controller.signal },
     });
     expect(f.drafted).toEqual(["o/r#5"]);
     expect(streams.err.join("")).toContain("draft of o/r#5 exited 1; not tried again while this queue runs");

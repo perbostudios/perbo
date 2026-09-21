@@ -4,7 +4,13 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "../usage-error.js";
-import { agentLaunch, parseAgentArgs, runAgentCommand, sweepStaleLaunchFiles, type AgentLaunch } from "./agent.js";
+import {
+  agentCommandLine,
+  agentLaunch,
+  parseAgentArgs,
+  sweepStaleLaunchFiles,
+  type AgentLaunch,
+} from "./agent.js";
 import { ENDPOINT_FILE, type EndpointRecord } from "../endpoint/index.js";
 import { mcpCommandLine } from "./mcp.js";
 import { runCommandLine } from "../command-line/terminal.js";
@@ -94,13 +100,15 @@ describe("perbo agent", () => {
     const repo = repository(false);
     const streams = capture();
     const launches: AgentLaunch[] = [];
-    const code = await runAgentCommand({
+    const code = await runCommandLine(agentCommandLine, {
       argv: ["--repo", repo],
       streams,
       cwd: repo,
-      launch: async (launch) => {
-        launches.push(launch);
-        return 0;
+      deps: {
+        launch: async (launch) => {
+          launches.push(launch);
+          return 0;
+        },
       },
     });
     expect(code).toBe(EXIT_CODES.did_not_complete);
@@ -112,15 +120,17 @@ describe("perbo agent", () => {
     const repo = repository(true);
     const streams = capture();
     let seen: { exists: boolean; mode: number; body: string } | null = null;
-    const code = await runAgentCommand({
+    const code = await runCommandLine(agentCommandLine, {
       argv: ["--repo", repo],
       streams,
       cwd: repo,
-      launch: async (launch) => {
-        const file = launch.file!;
-        seen = { exists: existsSync(file), mode: statSync(file).mode & 0o777, body: readFileSync(file, "utf8") };
-        expect(launch.cwd).toBe(repo);
-        return 0;
+      deps: {
+        launch: async (launch) => {
+          const file = launch.file!;
+          seen = { exists: existsSync(file), mode: statSync(file).mode & 0o777, body: readFileSync(file, "utf8") };
+          expect(launch.cwd).toBe(repo);
+          return 0;
+        },
       },
     });
     expect(code).toBe(0);
@@ -153,13 +163,15 @@ describe("perbo agent", () => {
     try {
       const streams = capture();
       const launches: AgentLaunch[] = [];
-      const code = await runAgentCommand({
+      const code = await runCommandLine(agentCommandLine, {
         argv: ["--repo", repo],
         streams,
         cwd: repo,
-        launch: async (launch) => {
-          launches.push(launch);
-          return 0;
+        deps: {
+          launch: async (launch) => {
+            launches.push(launch);
+            return 0;
+          },
         },
       });
       expect(code).toBe(EXIT_CODES.did_not_complete);
@@ -173,7 +185,14 @@ describe("perbo agent", () => {
 
   it("returns the provider's own exit code", async () => {
     const repo = repository(true);
-    const code = await runAgentCommand({ argv: ["--repo", repo, "--provider", "codex"], streams: capture(), cwd: repo, launch: async () => 7 });
+    const code = await runCommandLine(agentCommandLine, {
+      argv: ["--repo", repo, "--provider", "codex"],
+      streams: capture(),
+      cwd: repo,
+      deps: {
+        launch: async () => 7,
+      },
+    });
     expect(code).toBe(7);
   });
 });

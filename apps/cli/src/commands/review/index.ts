@@ -39,7 +39,8 @@ import {
   parseReviewArgs,
   type ReviewArgs,
 } from "./internal/args.js";
-import { narratedStreams, type NarratedCommand } from "../../command-line/terminal.js";
+import type { NarratedCommand } from "../../command-line/table.js";
+import { narratedStreams } from "../../streams.js";
 import { UsageError } from "../../usage-error.js";
 import { renderReviewMarkdown } from "./internal/markdown.js";
 import { renderArtifact } from "./internal/card.js";

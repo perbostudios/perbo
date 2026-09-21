@@ -29,7 +29,7 @@ import {
   type Grammar,
 } from "../../command-line/grammar.js";
 import type { CommandContext, CommandReport, Rendered } from "../../command.js";
-import type { ReportCommand } from "../../command-line/terminal.js";
+import type { ReportCommand } from "../../command-line/table.js";
 import type { Diagnostics } from "../../diagnostics.js";
 import type { Streams } from "../../streams.js";
 import type { LocalVerdict } from "../verdict/record.js";

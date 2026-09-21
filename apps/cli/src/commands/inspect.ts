@@ -70,7 +70,7 @@ import {
   type Grammar,
 } from "../command-line/grammar.js";
 import type { CommandContext, CommandReport, Rendered } from "../command.js";
-import type { ReportCommand } from "../command-line/terminal.js";
+import type { ReportCommand } from "../command-line/table.js";
 import { readInput } from "../usage-error.js";
 import { storeFor, StoreTargetSchema } from "../store/index.js";
 import {

@@ -5,7 +5,15 @@ import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "../usage-error.js";
 import { agentOrientation, readEndpoint, type EndpointRecord } from "../endpoint/index.js";
 import { mcpConfig } from "./mcp.js";
-import type { Streams } from "../streams.js";
+import {
+  parseArgv,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../command-line/grammar.js";
+import type { NarratedCommand } from "../command-line/table.js";
+import { narratedStreams } from "../streams.js";
+import type { CommandContext } from "../command.js";
 import { repositoryRootOf, storeDir } from "../store/tickets.js";
 
 /**
@@ -37,41 +45,41 @@ export interface AgentArgs {
   passthrough: string[];
 }
 
+const AGENT_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--provider": valueFlag(),
+} satisfies FlagTable;
+
+const AGENT_GRAMMAR: Grammar<typeof AGENT_FLAGS> = {
+  command: "agent",
+  flags: AGENT_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal:
+      "agent takes no positional argument: what the provider's own CLI is given goes after --, " +
+      "e.g. perbo agent -- --model opus",
+  },
+  // What follows `--` is the provider's, verbatim: this command reads none of
+  // it, and `perbo agent -- --help` asks the provider rather than printing
+  // Perbo's help.
+  afterDoubleDash: "passthrough",
+  unknownFlagHint: "arguments for the provider go after --",
+};
+
 export function parseAgentArgs(argv: readonly string[]): AgentArgs {
-  const args: AgentArgs = { repo: ".", store: null, provider: "claude", passthrough: [] };
-  const tokens = [...argv];
-  const dash = tokens.indexOf("--");
-  if (dash !== -1) {
-    args.passthrough = tokens.splice(dash + 1);
-    tokens.pop();
+  const line = parseArgv(AGENT_GRAMMAR, argv);
+  const provider = line.flags["--provider"] ?? "claude";
+  if (!(AGENT_PROVIDERS as readonly string[]).includes(provider)) {
+    throw new UsageError(`--provider takes ${AGENT_PROVIDERS.join(" or ")} (got '${provider}')`);
   }
-  const value = (index: number, token: string): string => {
-    const next = tokens[index];
-    if (next === undefined) throw new UsageError(`${token} requires a value`);
-    return next;
+  return {
+    repo: line.flags["--repo"] ?? ".",
+    store: line.flags["--store"] ?? null,
+    provider: provider as AgentProvider,
+    passthrough: [...line.passthrough],
   };
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = value(++i, token);
-        break;
-      case "--store":
-        args.store = value(++i, token);
-        break;
-      case "--provider": {
-        const provider = value(++i, token);
-        if (!(AGENT_PROVIDERS as readonly string[]).includes(provider)) {
-          throw new UsageError(`--provider takes ${AGENT_PROVIDERS.join(" or ")} (got '${provider}')`);
-        }
-        args.provider = provider as AgentProvider;
-        break;
-      }
-      default:
-        throw new UsageError(`unknown option '${token}' for agent (arguments for the provider go after --)`);
-    }
-  }
-  return args;
 }
 
 export interface AgentLaunch {
@@ -126,19 +134,30 @@ export function agentLaunch(input: {
   };
 }
 
-export async function runAgentCommand(input: {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  /** Injected by tests: what starts the provider and waits for it. */
-  launch?: (launch: AgentLaunch) => Promise<number>;
-}): Promise<number> {
-  const args = parseAgentArgs(input.argv);
-  const repositoryRoot = resolve(input.cwd, args.repo);
+/** The one thing a test replaces in a session: what starts the provider and waits for it. */
+export interface AgentDeps {
+  launch: (launch: AgentLaunch) => Promise<number>;
+}
+
+/** What a session is given: where it runs, what it says while it starts, and its launch. */
+export type AgentContext = CommandContext & {
+  stdout(chunk: string): void;
+  isTTY: boolean;
+} & Partial<AgentDeps>;
+
+/**
+ * `perbo agent`, over typed input.
+ *
+ * It says what it is starting and then hands the terminal to the provider, so
+ * there is no record to hand back.
+ */
+export async function agent(args: AgentArgs, context: AgentContext): Promise<number> {
+  const streams = narratedStreams(context);
+  const repositoryRoot = resolve(context.cwd, args.repo);
   const dir = storeDir(repositoryRoot, args.store);
   const record = readEndpoint(dir);
   if (record === null) {
-    input.streams.stderr(
+    streams.stderr(
       `no queue is serving ${dir}: start \`perbo serve\` first, which hosts the endpoint this session ` +
         "would read, and run this again\n",
     );
@@ -161,19 +180,19 @@ export async function runAgentCommand(input: {
       chmodSync(launch.file, 0o600);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      input.streams.stderr(
+      streams.stderr(
         `error: cannot write the launch file ${launch.file}: ${reason}. The state directory ${stateRoot} ` +
           "has to be writable by you; nothing was started\n",
       );
       return EXIT_CODES.did_not_complete;
     }
   }
-  input.streams.stderr(
+  streams.stderr(
     `starting ${launch.command} in ${launch.cwd} with the queue's endpoint at ${record.url}; the ` +
       "session can read every ticket and admit, edit and sync, and cannot approve, publish or merge\n",
   );
   try {
-    return await (input.launch ?? startProvider)(launch);
+    return await (context.launch ?? startProvider)(launch);
   } finally {
     if (launch.file !== null) rmSync(launch.file, { force: true });
   }
@@ -232,3 +251,13 @@ function startProvider(launch: AgentLaunch): Promise<number> {
     child.on("close", (code) => resolveExit(code ?? EXIT_CODES.did_not_complete));
   });
 }
+
+/** `perbo agent`, over its own line. */
+export const agentCommandLine: NarratedCommand<AgentArgs, Record<string, never>, AgentDeps> = {
+  kind: "narrated",
+  name: "agent",
+  grammars: [AGENT_GRAMMAR],
+  grammarFor: () => AGENT_GRAMMAR,
+  read: (argv) => ({ input: parseAgentArgs(argv), output: {} }),
+  run: (input, _output, context) => agent(input, context),
+};
