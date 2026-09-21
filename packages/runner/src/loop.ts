@@ -55,8 +55,6 @@ import {
 import { Ledger } from "./loop/ledger.js";
 import { acquireRunLock, type HeldRunLock } from "./lock.js";
 import { executorAccount } from "./account.js";
-import { AttemptCeilings } from "./ceilings.js";
-import { AgentConfigurationPresentError } from "./adapter.js";
 import { BundleStore } from "./bundle.js";
 import type { PinnedCheck } from "./checks.js";
 import {
@@ -70,7 +68,7 @@ import { githubCredential } from "./github-credential.js";
 import { mergeUp, pathsWithConflictMarkers } from "./merge-up.js";
 import { sweepWorktree } from "./orphans.js";
 import type { LoopMergeOutcome } from "./merge.js";
-import { buildAgentEnvironment, buildPermissionProfile } from "./profile.js";
+import { buildPermissionProfile } from "./profile.js";
 import {
   EXECUTOR_PROMPT_VERSION,
   RESUMED_EXECUTOR_PROMPT_VERSION,
@@ -89,7 +87,7 @@ import { commitSpec } from "./spec-commit.js";
 import { allowedPathsSentence } from "./shell/index.js";
 import { parseDeclines } from "./declines.js";
 import { readPrinciples, readPrinciplesFile } from "./principles.js";
-import { quarantine, release, restoreAny } from "./quarantine.js";
+import { restoreAny } from "./quarantine.js";
 import {
   describeRange,
   headCommit,
@@ -101,6 +99,7 @@ import { type TicketRunConfig } from "./loop/config.js";
 import { withCeilingGuidance } from "./loop/attempt.js";
 import { briefRound } from "./loop/brief.js";
 import { confirmContinuation, remediationToContinue } from "./loop/continuation.js";
+import { execute } from "./loop/execute.js";
 import { levelBeforeExecutor, mergeFailedDetail, takeMergeUp } from "./loop/level.js";
 import {
   contractWithCriteria,
@@ -919,68 +918,29 @@ async function runLockedTicket(
         toClose,
         resumedHere,
         pathsAllowed,
-        pathsProhibited,
-        prompt,
+              prompt,
         executorSkills,
-        briefRecords,
-      } = briefed.brief;
+            } = briefed.brief;
 
-      // ADR-0030 requirement 2, around every handover including remediation.
-      const journal = quarantine({
-        worktree: state.workspace.path,
-        store: config.quarantine_root,
-        attempt_id,
-        now: at,
-      });
-      const environment = buildAgentEnvironment({
-        base: process.env,
+      const executed = await execute({
+        config,
+        state,
+        brief: briefed.brief,
+        attemptId: attempt_id,
+        at,
         profile,
-        worktree: state.workspace.path,
-        ports: materialized.ports,
-        database_schema: materialized.database_schema,
+        materialized,
+        secrets,
+        agent: agentRunner,
+        progress,
       });
-      const ceilings = new AttemptCeilings(config.limits, Date.now, {
-        // D-092: a remediation round closes findings that already name a file
-        // and a line, briefed with the previous attempt's account, so the
-        // counter it is tested against is `round_iterations` where an attempt
-        // building the ticket is tested against `attempt_iterations`. A
-        // conflict round is neither: it is not remediation, and it keeps the
-        // attempt's counter. Neither counter is set unless the repository sets
-        // it (D-096), and then this is which of the two it reads.
-        ...(state.kind === "remediate" ? { iterations: "round_iterations" as const } : {}),
-      });
-
-
-      let agentResult;
-      try {
-        agentResult = await agentRunner({
-          binary: config.agent_binary,
-          worktree: state.workspace.path,
-          prompt,
-          brief_records: briefRecords,
-          model: config.model,
-          profile,
-          ceilings,
-          env: environment.env,
-          paths_allowed: pathsAllowed,
-          paths_prohibited: pathsProhibited,
-          spec_folder: config.specs,
-          onProgress: progress,
-          redact: (text) => secrets.redact(text).text,
-        });
-      } catch (error) {
-        release(journal, config.quarantine_root);
-        if (error instanceof AgentConfigurationPresentError) {
-          outcome = "terminated";
-          detail = error.message;
-          break;
-        }
-        throw error;
+      if ("next" in executed) {
+        state = applyStep(state, executed);
+        outcome = executed.end.outcome;
+        detail = executed.end.detail;
+        break;
       }
-      release(journal, config.quarantine_root);
-      agentResult.invocation.neutralisation.withheld_from_worktree = journal.entries.map(
-        (entry) => entry.relative_path,
-      );
+      const { result: agentResult, ceilings, environment } = executed.executed;
 
       const judging = {
         pinned_checks: config.checks.map((check) => check.definition_path ?? "").filter(Boolean),
