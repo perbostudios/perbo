@@ -11,8 +11,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { parseUnifiedDiff } from "@perbo/contracts";
-import type { Ticket } from "@perbo/contracts";
+import { CostBasisSchema, costOf, parseUnifiedDiff, rollCosts } from "@perbo/contracts";
+import type { Cost, Ticket } from "@perbo/contracts";
 import { assembleLiveGraph } from "../shared/graph-live.js";
 import type { LiveCheck, LiveNodeInput, LiveReview } from "../shared/graph-live.js";
 import type {
@@ -92,12 +92,21 @@ const EARLY_STOP_REASONS = new Set([
 ]);
 export const isEarlyStop = (reason: string | undefined): boolean =>
   reason !== undefined && EARLY_STOP_REASONS.has(reason);
-/** A priced attempt reported a cost; `unavailable` and `not_incurred` are not zero dollars. */
-export const isPriced = (attempt: StoredAttempt): boolean =>
-  attempt.usage?.cost_micros !== undefined &&
-  !["unavailable", "not_incurred"].includes(
-    attempt.usage.cost_basis ?? "transport_reported",
-  );
+/** A record can name a basis this version cannot price, and an unpriced one is counted. */
+const BASIS = CostBasisSchema.catch("unavailable");
+/**
+ * What one attempt cost. A record carrying no figure at all, and one naming a
+ * basis this version cannot price, are both unpriced: `unavailable` and
+ * `not_incurred` are not zero dollars.
+ */
+const attemptCost = (attempt: StoredAttempt): Cost =>
+  costOf({
+    micros: attempt.usage?.cost_micros ?? 0,
+    basis:
+      attempt.usage?.cost_micros === undefined
+        ? "unavailable"
+        : BASIS.parse(attempt.usage.cost_basis ?? "transport_reported"),
+  });
 
 export function readAttempts(path: string): {
   attempts: StoredAttempt[];
@@ -316,7 +325,7 @@ export function summariseTicket(input: {
 }): TaskSummary {
   const { ticket, attempts, bundles } = input;
   const latest = attempts.at(-1);
-  const priced = attempts.filter(isPriced);
+  const cost = rollCosts(attempts.map(attemptCost));
   const notes: string[] = [];
   if (input.attemptsError) notes.push(input.attemptsError);
   let diff: TaskSummary["diff"] = null;
@@ -341,18 +350,9 @@ export function summariseTicket(input: {
     branch: ticket.delivery.branch ?? latest?.branch ?? null,
     attempts: attempts.length,
     latestAttemptAt: latest?.created_at ?? null,
-    costMicros: priced.length
-      ? priced.reduce(
-          (sum, attempt) => sum + (attempt.usage?.cost_micros ?? 0),
-          0,
-        )
-      : null,
+    costMicros: cost.priced ? cost.micros : null,
     costBasis:
-      attempts.length === 0
-        ? "none"
-        : priced.length === attempts.length
-          ? "priced"
-          : "unpriced",
+      cost.components === 0 ? "none" : cost.unavailable === 0 ? "priced" : "unpriced",
     diff,
     note: notes.length ? notes.join(" ") : null,
   };
@@ -394,21 +394,16 @@ export function ledgerFor(
     // A ticket, not an attempt: three early stops on one ticket read as one ticket stopped.
     if (inMonth.some((attempt) => isEarlyStop(attempt.termination?.reason)))
       ledger.stoppedShort++;
-    for (const attempt of inMonth) {
-      if (isPriced(attempt)) {
-        ledger.pricedAttempts++;
-        ledger.spentMicros += attempt.usage?.cost_micros ?? 0;
-      } else ledger.unpricedAttempts++;
-    }
+    const spent = rollCosts(inMonth.map(attemptCost));
+    ledger.pricedAttempts += spent.priced;
+    ledger.unpricedAttempts += spent.unavailable;
+    ledger.spentMicros += spent.micros;
     if (ticket.state === "merged" && monthOf(ticket.updated_at) === month) {
       ledger.ticketsMerged++;
-      const priced = attempts.filter(isPriced);
-      if (priced.length && priced.length === attempts.length) {
+      const cost = rollCosts(attempts.map(attemptCost));
+      if (cost.priced > 0 && cost.unavailable === 0) {
         mergedPriced++;
-        mergedSpend += priced.reduce(
-          (sum, attempt) => sum + (attempt.usage?.cost_micros ?? 0),
-          0,
-        );
+        mergedSpend += cost.micros;
       }
     }
   }

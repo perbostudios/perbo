@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import {
+  CostRollSchema,
+  CostSchema,
   PlanContractSchema,
   ReviewArtifactSchema,
   RunBundleSchema,
@@ -52,11 +54,7 @@ const ReportSchema = z
             .object({ reason: z.string(), detail: z.string() })
             .passthrough(),
           agent: z.object({ model: z.string() }).passthrough(),
-          cost: z.object({
-            micros: z.number().nullable(),
-            basis: z.string(),
-            partial: z.boolean(),
-          }),
+          cost: CostSchema,
           ceilings: z.array(
             z.object({
               resource: z.string(),
@@ -85,13 +83,7 @@ const ReportSchema = z
         })
         .passthrough(),
     ),
-    total_cost: z
-      .object({
-        micros: z.number(),
-        partial: z.number(),
-        unavailable: z.number(),
-      })
-      .passthrough(),
+    total_cost: CostRollSchema,
     verdicts: z.array(z.unknown()),
   })
   .passthrough();

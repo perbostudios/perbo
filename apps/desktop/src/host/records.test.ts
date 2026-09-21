@@ -119,6 +119,47 @@ describe("retained records the desktop reads directly", () => {
     });
   });
 
+  it("counts an attempt that called no model as neither priced nor unpriced", () => {
+    const attempts = [
+      attempt("att_1", "2026-09-03T10:00:00.000Z", { cost_micros: 1_000_000 }),
+      attempt("att_2", "2026-09-04T10:00:00.000Z", {
+        cost_micros: 0,
+        cost_basis: "not_incurred",
+      }),
+    ];
+    const merged = ticket("merged", "2026-09-05T10:00:00.000Z");
+    expect(ledgerFor([{ ticket: merged, attempts }], "2026-09")).toMatchObject({
+      spentMicros: 1_000_000,
+      pricedAttempts: 1,
+      unpricedAttempts: 0,
+      averageMergedMicros: 1_000_000,
+    });
+    expect(
+      summariseTicket({
+        ticket: merged,
+        attempts,
+        attemptsError: null,
+        bundles: [],
+        objectsDirectory: "objects-unread-without-a-bundle",
+      }),
+    ).toMatchObject({ costMicros: 1_000_000, costBasis: "priced" });
+  });
+
+  it("counts an attempt whose basis it cannot price as unpriced", () => {
+    const attempts = [
+      attempt("att_1", "2026-09-03T10:00:00.000Z", {
+        cost_micros: 1_500_000,
+        cost_basis: "metered",
+      }),
+    ];
+    expect(
+      ledgerFor(
+        [{ ticket: ticket("pr_open", "2026-09-03T10:00:00.000Z"), attempts }],
+        "2026-09",
+      ),
+    ).toMatchObject({ spentMicros: 0, pricedAttempts: 0, unpricedAttempts: 1 });
+  });
+
   it("reads a diff's totals through the same size and hash checks as retained output, and caches by hash", () => {
     const root = scratchDirectory();
     const objects = join(root, "objects");
