@@ -6,7 +6,6 @@ import {
   EXECUTION_ATTEMPT_SCHEMA_VERSION,
   ExecutionAttemptSchema,
   admittedWriteGlobs,
-  matchesAny,
   assertProviderEnabled,
   failedChecks,
   hasAcceptanceCriteria,
@@ -72,7 +71,7 @@ import {
   type DeliveredChecksReading,
 } from "./delivery.js";
 import { githubCredential } from "./github-credential.js";
-import { mergeUp, pathsWithConflictMarkers, type MergeUpResult } from "./merge-up.js";
+import { mergeUp, pathsWithConflictMarkers } from "./merge-up.js";
 import { sweepWorktree } from "./orphans.js";
 import type { LoopMergeOutcome } from "./merge.js";
 import type { BriefRecords } from "./brief.js";
@@ -112,7 +111,7 @@ import { resetInText } from "./transport.js";
 import { guardProhibitedPaths, type TicketRunConfig } from "./loop/config.js";
 import { withCeilingGuidance } from "./loop/attempt.js";
 import { confirmContinuation, remediationToContinue } from "./loop/continuation.js";
-import { mergeFailedDetail } from "./loop/level.js";
+import { levelBeforeExecutor, mergeFailedDetail, takeMergeUp } from "./loop/level.js";
 import {
   contractWithCriteria,
   countDirectlyVerified,
@@ -131,6 +130,7 @@ import {
 } from "./loop/state.js";
 import { routeConflict, routeResolution, routeStopped } from "./loop/route.js";
 import { provisionRound } from "./loop/provision.js";
+import type { RelevelContext } from "./loop/relevel.js";
 import { refuseWidening, routeVerification, verifierModel } from "./loop/verify.js";
 
 /**
@@ -826,169 +826,23 @@ async function runLockedTicket(
   let state = initialRoundState(workspace, continuing);
 
   /**
-   * SCP-227: the judgement of a clean re-level, where no executor ran.
+   * What keeps the branch level with its base, and what judges a re-level.
    *
-   * What the branch holds is what a review already judged plus the base's own
-   * commits. The pinned checks run on the result; where the base brought in
-   * nothing inside the contract's scope that is the whole judgement and the
-   * earlier review carries, and where it did the merged change set is
-   * reviewed afresh — what a person would do — and that verdict stands. No
-   * remediation follows a verdict here: the executor wrote nothing in this
-   * run, and a change the base has made unjudgeable is a person's.
+   * Read by the merge-up before the executor and by the judgement a re-level
+   * run ends in, neither of which the run changes between rounds.
    */
-  const judgeRelevel = async (input: {
-    branch: string;
-    worktree: string;
-    base_before: string;
-  }): Promise<{
-    outcome: TicketRunResult["outcome"];
-    detail: string;
-    review: ReviewArtifact | null;
-    node_reviews: NodeReview[];
-  }> => {
-    const merged =
-      `merged ${config.base_ref} at ${state.baseCommit.slice(0, 12)} into ${input.branch}`;
-    // What the base brought in, read in the repository where both commits are,
-    // against the contract's own globs rather than the wider write guard.
-    const moved = await git.changedPaths(
-      config.repository_root,
-      input.base_before,
-      state.baseCommit,
-      { timeoutMs: 120_000 },
-    );
-    const touched =
-      moved === null
-        ? null
-        : moved
-            .map((line) => line.trim())
-            .filter((line) => line.length > 0 && matchesAny(line, contract.scope.paths_allowed));
-    const pathsAllowed = admittedWriteGlobs(contract.scope);
-    const judging = {
-      pinned_checks: config.checks.map((check) => check.definition_path ?? "").filter(Boolean),
-      protected_tests: config.protected_tests,
-      protected_paths: config.protected_paths,
-    };
-    const sealed = await describeRange({
-      worktree: input.worktree,
-      base_commit: state.baseCommit,
-      judging,
-      paths_allowed: pathsAllowed,
-      ...sealExclusions,
-    });
-    const environment = buildAgentEnvironment({
-      base: process.env,
-      profile,
-      worktree: input.worktree,
-      ports: materialized.ports,
-      database_schema: materialized.database_schema,
-    });
-    const checks =
-      sealed.changeset === null
-        ? []
-        : await checkRunner({
-            checks: config.checks as PinnedCheck[],
-            worktree: input.worktree,
-            env: environment.env,
-            secrets,
-            onProgress: progress,
-            nodes: planNodes(contract),
-            changed_files: sealed.changed_paths,
-          });
-    // D-107: a node's results are evidence for that node's review and gate
-    // nothing. What decides the re-level is the whole-change result, which is
-    // the whole of what a flat plan measures.
-    const gating = wholeChangeChecks(checks);
-    const red = gating.filter((check) => check.status === "failed" || check.status === "errored");
-    if (red.length > 0) {
-      return {
-        outcome: "changes_requested",
-        detail:
-          `${merged}, and the pinned checks fail on the result: ` +
-          `${red.map((check) => `${check.check_id} ${check.status}`).join(", ")}; a person decides`,
-        review: null,
-        node_reviews: [],
-      };
-    }
-    if (touched !== null && touched.length === 0) {
-      return {
-        outcome: "relevelled",
-        detail:
-          `${merged}: the checks pass and the base brought in nothing inside the contract's scope, ` +
-          "so the review that approved this change set carries",
-        review: null,
-        node_reviews: [],
-      };
-    }
-    progress(
-      touched === null
-        ? "git could not list what the base brought in; reviewing the merged change set afresh"
-        : `the base brought in ${touched.length} path(s) inside the contract's scope ` +
-            `(${touched.slice(0, 5).join(", ")}); reviewing the merged change set afresh`,
-    );
-    const graphOutcome = await reviewGraph(
-      {
-        contract,
-        diff: sealed.diff,
-        changeset: sealed.changeset ?? undefined,
-        checks,
-        repoDir: input.worktree,
-        model: reviewerModel(config, contract, gating),
-        head_commit: sealed.head_commit ?? undefined,
-        remediationAvailable: false,
-        baseVerified:
-          materialized.verify === null || !verifyMeasures ? undefined : materialized.verify.code === 0,
-        onProgress: progress,
-      },
-      reviewRunner,
-      { modelFor: (nodeContract, nodeChecks) => reviewerModel(config, contractWithCriteria(nodeContract, contract), nodeChecks) },
-    );
-    const reviewOutcome = graphOutcome.overall;
-    const review: ReviewArtifact = {
-      ...graphOutcome.combined,
-      target: { ...graphOutcome.combined.target, prior_commits: [] },
-      findings: [...graphOutcome.combined.findings, ...flakyCheckFindings(gating)],
-    };
-    const node_reviews: NodeReview[] = graphOutcome.nodes.map((entry) => ({
-      node_id: entry.node_id,
-      review: entry.outcome?.artifact ?? null,
-    }));
-    writeReviewBundle({
-      bundles,
-      contract,
-      secrets,
-      clock,
-      review,
-      outcome: reviewOutcome,
-      node_reviews,
-      // Nothing was sealed by this run, so nothing was excluded from a seal.
-      sealed: { excluded_paths: [] },
-      round: 0,
-      remediation_available: false,
-    });
-    if (review.decision === "approve") {
-      return {
-        outcome: "relevelled",
-        detail: `${merged}, and a fresh review approved the merged change set`,
-        review,
-        node_reviews,
-      };
-    }
-    if (review.decision === "error") {
-      return {
-        outcome: "review_failed",
-        detail:
-          `${merged}, and the review of the result did not complete: ` +
-          `${review.error?.kind ?? "unknown"} — ${review.error?.message ?? "no reason recorded"}`,
-        review,
-        node_reviews,
-      };
-    }
-    return {
-      outcome: review.decision === "escalate" || review.decision === "incomplete" ? "escalated" : "changes_requested",
-      detail: `${merged}, and a fresh review of the merged change set decided ${review.decision}; a person decides`,
-      review,
-      node_reviews,
-    };
+  const levelling: RelevelContext = {
+    config,
+    contract,
+    bundles,
+    materialized,
+    profile,
+    secrets,
+    sealExclusions,
+    verifyMeasures,
+    ports,
+    clock,
+    progress,
   };
 
   /**
@@ -1030,108 +884,24 @@ async function runLockedTicket(
       });
       state = entered.state;
       const { attemptId: attempt_id, at, previous } = entered;
+      const levelled = await levelBeforeExecutor({
+        ...levelling,
+        state,
+        attemptsSoFar: ledger.attempts.length,
+        attemptId: attempt_id,
+        continuesPreviousRun,
+      });
+      state = levelled.state;
       /** The base tip this attempt's own branch was merged with, if any. */
-      let mergedBase: string | null = null;
-      /**
-       * Take a merge-up's answer: the base moves where the branch now carries
-       * it, and the round records the tip it merged.
-       */
-      const takeMergeUp = (up: MergeUpResult): void => {
-        if (up.status === "conflict" || up.base_commit === state.baseCommit) return;
-        progress(
-          `merged ${config.base_ref} at ${up.base_commit.slice(0, 12)} into ` +
-            `${state.workspace.branch}; the change set is the branch against it`,
-        );
-        state = { ...state, baseCommit: up.base_commit };
-        mergedBase = up.base_commit;
-      };
-
-      // SCP-192: before the executor, on this run's first round and only
-      // there. A re-run's branch carries commits an earlier run sealed against
-      // a base that has since moved, and an executor handed that tree rebuilds
-      // what the base already has. Later rounds start from the previous round's
-      // merge-up, and a conflict round starts from a branch that is
-      // deliberately not merged.
-      if (
-        ledger.attempts.length === 0 &&
-        state.transportRetry === 0 &&
-        state.ceilingContinuation === 0 &&
-        state.kind !== "resolve_conflict"
-      ) {
-        const baseBefore = state.baseCommit;
-        const up = await mergeUp({
-          worktree: state.workspace.path,
-          repository_root: config.repository_root,
-          base_ref: config.base_ref,
-          base_commit: state.baseCommit,
-          ticket_key: config.ticket_key,
-          // A re-level's merge commit belongs to the attempt chain already on
-          // the branch: this run may record no attempt of its own.
-          attempt_id: config.relevel ? (continuesPreviousRun ?? attempt_id) : attempt_id,
-        });
-        if (up.status === "conflict") {
-          // A merge that stopped without naming an unmerged path did not stop
-          // on a conflict — an untracked file in the way, a signing key the
-          // process cannot reach — and there is nothing for a round to resolve.
-          if (up.paths.length === 0) {
-            outcome = "base_conflict";
-            detail = mergeFailedDetail(config.base_ref, up.tip, state.workspace.branch, up.detail);
-            break;
-          }
-          // Nothing this run produced is at stake yet, and the round is spent
-          // on the resolution: the ticket's own brief follows it.
-          progress(
-            `${config.base_ref} conflicts with the branch on ${up.paths.length} file(s); ` +
-              "the round resolves that first",
-          );
-          state = applyStep(state, {
-            next: "reenter",
-            conflict: {
-              tip: up.tip,
-              paths: up.paths,
-              before_executor: true,
-              resume_kind: state.kind,
-            },
-          });
-          continue;
-        }
-        takeMergeUp(up);
-
-        /**
-         * SCP-227: a re-level judges the merged branch without an executor.
-         *
-         * Nothing here changed the change set: what the branch holds is what
-         * a review already judged, plus the base's own commits. So the checks
-         * are run on the result and, where the base brought in nothing inside
-         * the contract's scope, that is the whole judgement and the earlier
-         * review carries. Where it did, the merged change set is reviewed
-         * afresh — what a person would do — and its verdict stands. A round
-         * with an executor happens only where the merge stopped, above.
-         */
-        if (config.relevel) {
-          if (up.status === "current") {
-            outcome = "level";
-            detail =
-              `${state.workspace.branch} is level with ${config.base_ref} at ` +
-              `${state.baseCommit.slice(0, 12)}; nothing to re-level`;
-            break;
-          }
-          const levelled = await judgeRelevel({
-            branch: state.workspace.branch,
-            worktree: state.workspace.path,
-            base_before: baseBefore,
-          });
-          outcome = levelled.outcome;
-          detail = levelled.detail;
-          if (levelled.review !== null) {
-            state = {
-              ...state,
-              finalReview: levelled.review,
-              nodeReviews: levelled.node_reviews,
-            };
-          }
+      let mergedBase: string | null = levelled.mergedBase;
+      if (levelled.step !== null) {
+        state = applyStep(state, levelled.step);
+        if (levelled.step.next === "stop") {
+          outcome = levelled.step.end.outcome;
+          detail = levelled.step.end.detail;
           break;
         }
+        continue;
       }
 
       // Read before the executor runs, so a commit the executor makes itself is
@@ -1369,7 +1139,9 @@ async function runLockedTicket(
         if (up.status === "conflict") {
           conflictNow = { tip: up.tip, paths: up.paths, detail: up.detail };
         } else {
-          takeMergeUp(up);
+          const taken = takeMergeUp({ state, mergedBase, up, baseRef: config.base_ref, progress });
+          state = taken.state;
+          mergedBase = taken.mergedBase;
           if (state.baseCommit !== before) {
             // Both ends of the range moved, so the change set is re-read rather
             // than re-sealed: re-running the seal here would stage and commit
