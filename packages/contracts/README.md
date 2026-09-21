@@ -29,6 +29,12 @@ derivation, would drift. It is also the single home for what a path glob *means*
 is the interface, and `test/glob-conformance.json` states the semantics as cases, so a matcher
 written elsewhere to them answers that table rather than a reading of its own.
 
+`store-layout.ts` is the single home for the paths a repository's store holds: the store's own
+directory name, and every record inside it that more than one package reads, as segments a caller
+joins to the store it is holding. The CLI writes them, the runner appends to them and the desktop
+reads them, so a second spelling anywhere is a drift nobody notices until a record goes missing.
+`docs/03-domain-and-event-model.md` "Store layout" is the same tree in prose.
+
 `credential.ts` is the single home for "what counts as credential-shaped" ([D-063](../../docs/11-open-decisions.md)):
 `findCredentials` and `redactCredentials`, deliberately narrow, each rule requiring a positive
 signal of secrecy rather than entropy alone. It sits here beside the two neighbouring facts —
