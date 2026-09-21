@@ -15,7 +15,8 @@ import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { preflight, type PreflightRequest } from "@perbo/runner";
 import { parseReviewArgs } from "../src/commands/review/index.js";
-import { FULL_COMMAND_SET, parseExecuteArgs, runDoctorCommand } from "../src/commands/run/index.js";
+import { parseExecuteArgs, runDoctorCommand } from "../src/commands/run/index.js";
+import { COMMAND_NAMES } from "../src/command-line/names.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/open-build.js";
 import { REPO_ROOT } from "../src/test-support/paths.js";
 
@@ -168,9 +169,9 @@ function checkAgainstTheCli(step: Step): void {
   const command = rest[0] ?? "";
   const named = (why: string): Error =>
     new Error(`quick-start step ${step.position} — \`${step.text}\` — ${why}`);
-  if (!FULL_COMMAND_SET.includes(command as (typeof FULL_COMMAND_SET)[number])) {
+  if (!COMMAND_NAMES.includes(command as (typeof COMMAND_NAMES)[number])) {
     throw named(
-      `names \`${command}\`, which \`perbo\` does not dispatch (it has: ${FULL_COMMAND_SET.join(", ")})`,
+      `names \`${command}\`, which \`perbo\` does not dispatch (it has: ${COMMAND_NAMES.join(", ")})`,
     );
   }
   const parse = PARSERS[command];

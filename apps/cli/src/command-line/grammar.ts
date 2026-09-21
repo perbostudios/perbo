@@ -119,7 +119,7 @@ export interface ParsedLine<F extends FlagTable> {
  * (`perbo admit --outcome --help` admits), and one after `--` belongs to
  * whatever `--` introduced (`perbo agent -- --help` asks the provider).
  */
-function asksForHelp(grammar: Grammar, argv: readonly string[]): boolean {
+export function asksForHelp(grammar: Grammar, argv: readonly string[]): boolean {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]!;
     if (token === "--") return false;

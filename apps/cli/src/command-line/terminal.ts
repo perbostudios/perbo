@@ -2,11 +2,16 @@ import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "../usage-error.js";
 import { describeFailure } from "../failure.js";
 import { StoreError } from "../store/index.js";
+import type { Diagnostics } from "../diagnostics.js";
 import type { Streams } from "../streams.js";
+import { asksForHelp, type Grammar } from "./grammar.js";
+import type { CommandName } from "./names.js";
+import { USAGE } from "./usage.js";
 
 /**
  * The shell the entry point runs inside: help, version, an unknown command,
- * and what a thrown error exits as.
+ * and what a thrown error exits as — and the adapter that turns a command
+ * line into one command's typed input and its answer back into bytes.
  */
 
 /**
@@ -98,4 +103,154 @@ export function startEntryPoint(argv: string[], entry: EntryPoint): void {
       process.stderr.write(`error: ${failure.message}\n`);
       process.exitCode = failure.code;
     });
+}
+
+/* ------------------------------------------------------------------ *
+ * One command, and the terminal adapter that runs it.
+ * ------------------------------------------------------------------ */
+
+/** What every command is given, whichever kind it is. */
+export interface CommandContext {
+  readonly cwd: string;
+  readonly now: Date;
+  /** Progress and warnings, as they happen. */
+  readonly diagnostics: Diagnostics;
+}
+
+/** What the answer is being written to, read once at the edge. */
+export interface RenderTarget {
+  readonly isTTY: boolean;
+  /** `NO_COLOR` is unset. Whether a rendering uses it is still the rendering's. */
+  readonly color: boolean;
+  /** This answer is the JSON record rather than a reading for a person. */
+  readonly json: boolean;
+}
+
+/** What one command wrote, and what it exits as. */
+export interface Rendered {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+/** The part of a command's own options the adapter reads: whether JSON was asked for. */
+export interface CommandOutput {
+  readonly json: boolean;
+}
+
+/**
+ * A command whose answer is a record: read the line, run it, render once.
+ *
+ * `run` takes the typed input, so an in-process caller reaches the same
+ * function with an object and never builds a line. `toJson` is the documented
+ * record; `render` is what a person reads, and it owns the exit code, because
+ * what a reading means — a gate closed, a verification that failed — is the
+ * command's rather than the adapter's.
+ */
+export interface ReportCommand<
+  Input,
+  Output extends CommandOutput,
+  Report,
+  Deps extends object = object,
+> {
+  readonly kind: "report";
+  readonly name: CommandName;
+  /** Every grammar it reads a line by, for the usage-consistency test. */
+  readonly grammars: readonly Grammar[];
+  /** Whether a piped stdout carries the record without `--json`, per command. */
+  readonly jsonWhenPiped: boolean;
+  /** The grammar this line is read by: the verb's, where the command has verbs. */
+  grammarFor(argv: readonly string[]): Grammar;
+  /** Throws {@link UsageError} for a line this command cannot act on. */
+  read(argv: readonly string[]): { input: Input; output: Output };
+  run(input: Input, context: CommandContext & Partial<Deps>): Report | Promise<Report>;
+  /** The documented JSON record. Absent where the command has no JSON form. */
+  toJson?(report: Report): unknown;
+  render(report: Report, output: Output, target: RenderTarget): Rendered;
+}
+
+/**
+ * A command whose answer is what it says while it works: a sync, a run, a
+ * review's progress, the queue, an interview, a session.
+ */
+export interface NarratedCommand<Input, Output, Deps extends object = object> {
+  readonly kind: "narrated";
+  readonly name: CommandName;
+  readonly grammars: readonly Grammar[];
+  grammarFor(argv: readonly string[]): Grammar;
+  read(argv: readonly string[]): { input: Input; output: Output };
+  run(
+    input: Input,
+    output: Output,
+    context: CommandContext & { stdout(chunk: string): void; isTTY: boolean } & Partial<Deps>,
+  ): Promise<number> | number;
+}
+
+/** A command as the table holds it, with its own types behind it. */
+export type TerminalCommand =
+  | ReportCommand<unknown, CommandOutput, unknown>
+  | NarratedCommand<unknown, unknown>;
+
+/** What the terminal hands one command: its line, its streams and its injected parts. */
+export interface Invocation<Deps extends object = object> {
+  argv: readonly string[];
+  streams: Streams;
+  cwd: string;
+  now?: Date;
+  deps?: Partial<Deps>;
+}
+
+/**
+ * One command line, run and written out.
+ *
+ * Not `async`: a command that answers synchronously returns a number, so a
+ * caller that reads an exit code without waiting still reads one.
+ */
+export function runCommandLine<Input, Output extends CommandOutput, Report, Deps extends object>(
+  command: ReportCommand<Input, Output, Report, Deps>,
+  invocation: Invocation<Deps>,
+): number | Promise<number>;
+export function runCommandLine<Input, Output, Deps extends object>(
+  command: NarratedCommand<Input, Output, Deps>,
+  invocation: Invocation<Deps>,
+): number | Promise<number>;
+export function runCommandLine(
+  command: TerminalCommand,
+  invocation: Invocation<object>,
+): number | Promise<number> {
+  const { argv, streams, cwd } = invocation;
+  if (asksForHelp(command.grammarFor(argv), argv)) {
+    streams.stderr(USAGE);
+    return EXIT_CODES.approve;
+  }
+  const context = {
+    cwd,
+    now: invocation.now ?? new Date(),
+    diagnostics: streams,
+    ...invocation.deps,
+  };
+
+  if (command.kind === "narrated") {
+    const { input, output } = command.read(argv);
+    return command.run(input, output, {
+      ...context,
+      stdout: streams.stdout,
+      isTTY: streams.isTTY,
+    });
+  }
+
+  const { input, output } = command.read(argv);
+  const target: RenderTarget = {
+    isTTY: streams.isTTY,
+    color: process.env["NO_COLOR"] === undefined,
+    json: output.json || (command.jsonWhenPiped && !streams.isTTY),
+  };
+  const written = (report: unknown): number => {
+    const rendered = command.render(report, output, target);
+    if (rendered.stdout !== "") streams.stdout(rendered.stdout);
+    if (rendered.stderr !== "") streams.stderr(rendered.stderr);
+    return rendered.exitCode;
+  };
+  const report = command.run(input, context);
+  return report instanceof Promise ? report.then(written) : written(report);
 }

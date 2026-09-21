@@ -79,6 +79,7 @@ import {
   statesObserved,
   writeTicket,
 } from "../admit.js";
+import { COMMAND_NAMES } from "../../command-line/names.js";
 import { UsageError } from "../../usage-error.js";
 import {
   LOCAL_RUN_SCHEMA_VERSION,
@@ -127,31 +128,6 @@ import { listTickets, readApproachRecord } from "../../store/tickets.js";
  * moves through, the key a ceiling hit is reported under — is {@link TICKET_RUNS},
  * the one place here that reads and writes the ticket store.
  */
-
-/** Every command this binary carries. */
-export const FULL_COMMAND_SET = [
-  "doctor",
-  "baseline",
-  "review",
-  "inspect",
-  "verdict",
-  "run",
-  "admit",
-  "approve",
-  "edit",
-  "list",
-  "sync",
-  "serve",
-  "mcp",
-  "agent",
-  "interview",
-  "stops",
-  "escapes",
-  "principle",
-  "index",
-] as const;
-
-export type FullCommandName = (typeof FULL_COMMAND_SET)[number];
 
 /**
  * The spec's No-Gos, from the ticket's approach record (D-100).
@@ -1472,7 +1448,7 @@ export interface DoctorOptions {
    */
   diagnose?: (request: DiagnoseRequest) => Promise<DiagnosticResult>;
   baseRef?: (checkout: string, options: { publish: boolean }) => ProposedBase | null;
-  /** The commands reported as the COMMANDS block. {@link FULL_COMMAND_SET} unless a caller names another. */
+  /** The commands reported as the COMMANDS block. {@link COMMAND_NAMES} unless a caller names another. */
   commands?: readonly string[];
   /** A ticket key per ticket id, for the ceiling hits below. The ticket store answers unless a caller names another. */
   keyFor?: (store: string) => Map<string, string>;
@@ -1496,7 +1472,7 @@ export interface DoctorOptions {
 const DOCTOR_CHECKS_TIMEOUT_MS = 10_000;
 
 export async function runDoctorCommand(options: DoctorOptions): Promise<number> {
-  const commands = options.commands ?? FULL_COMMAND_SET;
+  const commands = options.commands ?? COMMAND_NAMES;
   const checkMachine = options.preflight ?? preflight;
   const materialise = options.diagnose ?? diagnose;
   const readBase = options.baseRef ?? proposedBase;

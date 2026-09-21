@@ -11,13 +11,8 @@ import { runBaselineCommand } from "./commands/baseline/index.js";
 import { startEntryPoint, type EntryPoint } from "./command-line/terminal.js";
 import { runEditCommand } from "./commands/edit/index.js";
 import { runEscapesCommand } from "./commands/escapes/index.js";
-import {
-  FULL_COMMAND_SET,
-  parseExecuteArgs,
-  runDoctorCommand,
-  runExecuteCommand,
-  type FullCommandName,
-} from "./commands/run/index.js";
+import { parseExecuteArgs, runDoctorCommand, runExecuteCommand } from "./commands/run/index.js";
+import { COMMAND_NAMES, type CommandName } from "./command-line/names.js";
 import { runInspectCommand } from "./commands/inspect.js";
 import { parsePrincipleArgs, runPrincipleCommand } from "./commands/principle.js";
 import { runReviewCommand } from "./commands/review/index.js";
@@ -47,9 +42,9 @@ import { runVerdictCommand } from "./commands/verdict/index.js";
  * The shell around the table — help, version, an unknown command, and what a
  * thrown error exits as — is `command-line/terminal.js`.
  */
-export const FULL_ENTRY_POINT: EntryPoint<FullCommandName> = {
+export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
   usage: USAGE,
-  commands: FULL_COMMAND_SET,
+  commands: COMMAND_NAMES,
   version: VERSION,
   dispatch(command, rest, streams) {
     const cwd = process.cwd();
