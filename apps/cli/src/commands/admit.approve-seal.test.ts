@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { UsageError } from "../usage-error.js";
 import { approveCommandLine, loadAdmitted, parseAdmitArgs, runAdmitCommand } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { runEditCommand } from "./edit/index.js";
+import { editCommandLine } from "./edit/index.js";
 import { parseExecuteArgs, runExecuteCommand } from "./run/index.js";
 import { readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
@@ -229,7 +229,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
     // The way out is the one the refusal names. `perbo edit` reports what it
     // applied — one glob for another — and rewrites both files, so they agree.
     const edited = capture();
-    await runEditCommand({
+    await runCommandLine(editCommandLine, {
       argv: ["PRB-1", "--repo", repo, "--path", "packages/search/api/**"],
       streams: edited,
       cwd: repo,
@@ -255,7 +255,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
     const { repo, dir } = admitted("seal-edited-approves");
     expect(readContract(dir, "PRB-1").level).toBe("P1");
 
-    await runEditCommand({
+    await runCommandLine(editCommandLine, {
       argv: ["PRB-1", "--repo", repo, "--path", "packages/auth/**"],
       streams: capture(),
       cwd: repo,
@@ -278,7 +278,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
 
     // And it is immutable from here: the way to change it is new work.
     await expect(
-      runEditCommand({
+      runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo, "--path", "packages/billing/**"],
         streams: capture(),
         cwd: repo,
@@ -344,7 +344,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
     // The remedy the refusal names has to work on the state it names it for:
     // the edit writes the pair again, saying what the broken file cost.
     const edited = capture();
-    await runEditCommand({
+    await runCommandLine(editCommandLine, {
       argv: ["PRB-1", "--repo", repo, "--path", "packages/search/**"],
       streams: edited,
       cwd: repo,
@@ -405,7 +405,7 @@ describe("a contract is refused when it does not match the counter-seal beside i
     const { repo, dir } = admitted("seal-legacy-edited");
     asEditedByThePreviousVersion(dir, "PRB-1");
 
-    await runEditCommand({
+    await runCommandLine(editCommandLine, {
       argv: ["PRB-1", "--repo", repo, "--outcome", "Search results are paginated at 25 per page."],
       streams: capture(),
       cwd: repo,

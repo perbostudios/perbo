@@ -19,7 +19,7 @@ import {
   type ModelTurn,
 } from "@perbo/model";
 import { UsageError } from "../usage-error.js";
-import { runEditCommand } from "./edit/index.js";
+import { editCommandLine } from "./edit/index.js";
 import { buildInspectReport, inspectCommandLine, renderInspect } from "./inspect.js";
 import { LIST_JSON_SCHEMA_VERSION, ListJsonSchema, applyObservedPath, approveCommandLine, listCommandLine, loadAdmitted, parseAdmitArgs, runAdmitCommand, statesObserved } from "./admit.js";
 import type { Streams } from "../streams.js";
@@ -1056,7 +1056,7 @@ describe("the admission-friction instrument (D-003, ADR-0027)", () => {
       model: drafter(),
       fetchIssue,
     });
-    await runEditCommand({
+    await runCommandLine(editCommandLine, {
       argv: [
         "PRB-1", "--repo", repo,
         "--outcome", "New users get an activation email within a minute of signing up.",

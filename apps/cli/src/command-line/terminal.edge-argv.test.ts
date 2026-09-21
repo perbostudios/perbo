@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { approveCommandLine, listCommandLine, parseAdmitArgs, parseListArgs } from "../commands/admit.js";
-import { parseEditArgs } from "../commands/edit/index.js";
+import { editCommandLine } from "../commands/edit/index.js";
 import { inspectCommandLine } from "../commands/inspect.js";
 import { parseInterviewArgs } from "../commands/interview/index.js";
 import { parsePrincipleArgs } from "../commands/principle.js";
@@ -127,7 +127,7 @@ describe("the desktop host", () => {
   });
 
   it("reads an edit of the contract and of the graph, and an undo", () => {
-    const typed = parseEditArgs([
+    const typed = editCommandLine.read([
       KEY,
       "--outcome",
       "Search results paginate",
@@ -141,10 +141,14 @@ describe("the desktop host", () => {
       "--repo",
       REPO,
     ]);
-    expect(typed.key).toBe(KEY);
-    expect(typed.args).toMatchObject({ outcome: "Search results paginate", json: true, repo: REPO });
+    expect(typed.input.key).toBe(KEY);
+    expect(typed.input).toMatchObject({
+      outcome: "Search results paginate",
+      target: { repo: REPO, store: null },
+    });
+    expect(typed.output.json).toBe(true);
 
-    const graph = parseEditArgs([
+    const graph = editCommandLine.read([
       KEY,
       "--graph-edit",
       '{"kind":"add_node","node":{"id":"n1"}}',
@@ -154,13 +158,14 @@ describe("the desktop host", () => {
       "--repo",
       REPO,
     ]);
-    expect(graph.args).toMatchObject({
+    expect(graph.input).toMatchObject({
       graphEdit: '{"kind":"add_node","node":{"id":"n1"}}',
       author: "you",
-      json: true,
     });
+    expect(graph.output.json).toBe(true);
     expect(
-      parseEditArgs([KEY, "--undo", "2", "--author", "you", "--json", "--repo", REPO]).args.undo,
+      editCommandLine.read([KEY, "--undo", "2", "--author", "you", "--json", "--repo", REPO]).input
+        .undo,
     ).toBe(2);
   });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { listCommandLine, parseAdmitArgs } from "../commands/admit.js";
 import { parseBaselineArgs } from "../commands/baseline/index.js";
-import { parseEditArgs } from "../commands/edit/index.js";
+import { editCommandLine } from "../commands/edit/index.js";
 import { escapesCommandLine } from "../commands/escapes/index.js";
 import { inspectCommandLine } from "../commands/inspect.js";
 import { parseInterviewArgs } from "../commands/interview/index.js";
@@ -67,10 +67,10 @@ describe("inspect", () => {
 });
 
 describe("edit", () => {
-  it.fails("keeps an outcome that looks like a flag as the outcome", () => {
-    const { args } = parseEditArgs(["PRB-1", "--outcome", "--x=--json"]);
-    expect(args.outcome).toBe("--x=--json");
-    expect(args.json).toBe(false);
+  it("keeps an outcome that looks like a flag as the outcome", () => {
+    const line = editCommandLine.read(["PRB-1", "--outcome", "--x=--json"]);
+    expect(line.input.outcome).toBe("--x=--json");
+    expect(line.output.json).toBe(false);
   });
 });
 

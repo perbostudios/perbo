@@ -7,7 +7,7 @@ import { EXIT_CODES, hasAcceptanceCriteria, planNodes } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
 import { approveCommandLine, parseAdmitArgs, runAdmitCommand } from "../admit.js";
 import type { Streams } from "../../streams.js";
-import { runEditCommand } from "./index.js";
+import { editCommandLine } from "./index.js";
 import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import {
   approachPathFor,
@@ -70,11 +70,19 @@ function admitted(): { repo: string; dir: string } {
   return { repo, dir: storeDir(repo, null) };
 }
 
-const edit = (repo: string, argv: string[]) =>
-  runEditCommand({ argv: ["PRB-1", "--repo", repo, ...argv], streams: capture(), cwd: repo });
+const edit = async (repo: string, argv: string[]) =>
+  runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, ...argv], streams: capture(), cwd: repo });
 
-const graphEdit = (repo: string, edits: unknown, extra: string[] = []) =>
-  runEditCommand({
+/** One graph edit exactly as typed, for the lines that are not JSON at all. */
+const graphEditRaw = async (repo: string, edit: string) =>
+  runCommandLine(editCommandLine, {
+    argv: ["PRB-1", "--repo", repo, "--graph-edit", edit],
+    streams: capture(),
+    cwd: repo,
+  });
+
+const graphEdit = async (repo: string, edits: unknown, extra: string[] = []) =>
+  runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo, "--graph-edit", JSON.stringify(edits), ...extra],
     streams: capture(),
     cwd: repo,
@@ -153,7 +161,7 @@ describe("perbo edit --graph-edit", () => {
     const { repo, dir } = await withTwoNodes();
     const before = readContract(dir, "PRB-1");
     await expect(
-      runEditCommand({
+      runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo, "--criterion", "one thing is true :: it is checked"],
         streams: capture(),
         cwd: repo,
@@ -309,7 +317,7 @@ describe("perbo edit --graph-edit", () => {
     expect(readApproachRecord(dir, "PRB-1")).toBeNull();
     expect(existsSync(join(dir, "tickets", "PRB-1.approach.json"))).toBe(false);
     expect(
-      await runEditCommand({
+      await runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo, "--criterion", "one thing is true :: it is checked"],
         streams: capture(),
         cwd: repo,
@@ -329,7 +337,12 @@ describe("perbo edit --graph-edit", () => {
         `fs.writeFileSync(file, JSON.stringify(c, null, 2));\n`,
     );
     expect(
-      await runEditCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, env: { EDITOR: `node ${script}` } }),
+      await runCommandLine(editCommandLine, {
+        argv: ["PRB-1", "--repo", repo],
+        streams: capture(),
+        cwd: repo,
+        deps: { env: { EDITOR: `node ${script}` } },
+      }),
     ).toBe(EXIT_CODES.approve);
     expect(planNodes(readContract(dir, "PRB-1"))).toEqual([]);
     // No nodes and no No-Gos: nothing is left for the record to carry.
@@ -414,11 +427,7 @@ describe("perbo edit --graph-edit", () => {
     const { repo, dir } = await withTwoNodes();
     const before = readFileSync(contractPathFor(dir, "PRB-1"), "utf8");
     for (const bad of ['{"op":"rename_plan"}', "not json", '{"op":"add_edge","from":"node_1"}']) {
-      const refused: unknown = await runEditCommand({
-        argv: ["PRB-1", "--repo", repo, "--graph-edit", bad],
-        streams: capture(),
-        cwd: repo,
-      }).catch((error: unknown) => error);
+      const refused: unknown = await graphEditRaw(repo, bad).catch((error: unknown) => error);
       expect(refused).toBeInstanceOf(UsageError);
     }
     expect(readFileSync(contractPathFor(dir, "PRB-1"), "utf8")).toBe(before);

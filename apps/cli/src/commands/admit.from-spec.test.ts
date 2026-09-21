@@ -14,10 +14,11 @@ import {
 import { UsageError } from "../usage-error.js";
 import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { runEditCommand } from "./edit/index.js";
+import { editCommandLine } from "./edit/index.js";
 import { INTERVIEW_SESSION_FILE } from "./interview/index.js";
 import { specCommitFiles } from "../spec/pages.js";
 import { readApproachRecord, readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-spec-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -184,8 +185,13 @@ function citing(name: string, criterion: number, requirementId: string): string 
   );
   return `node ${script}`;
 }
-const editWith = (repo: string, editor: string) =>
-  runEditCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, env: { EDITOR: editor } });
+const editWith = async (repo: string, editor: string) =>
+  runCommandLine(editCommandLine, {
+    argv: ["PRB-1", "--repo", repo],
+    streams: capture(),
+    cwd: repo,
+    deps: { env: { EDITOR: editor } },
+  });
 
 describe("a citation on a spec-drafted contract is checked against the spec", () => {
   it("accepts an id the spec carries, refuses one it does not, and names a spec it cannot read", async () => {
@@ -214,7 +220,7 @@ describe("a citation an undo would put back is checked against the spec", () => 
     await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
     const dir = storeDir(repo, null);
     const graphEdit = (edits: unknown) =>
-      runEditCommand({
+      runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo, "--graph-edit", JSON.stringify(edits)],
         streams: capture(),
         cwd: repo,
@@ -247,7 +253,7 @@ describe("a citation an undo would put back is checked against the spec", () => 
     expect(cited()).toEqual([null, "R2", "R4"]);
 
     const undo = () =>
-      runEditCommand({ argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: capture(), cwd: repo });
+      runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: capture(), cwd: repo });
     await expect(undo()).rejects.toThrow(/R1/);
     expect(cited()).toEqual([null, "R2", "R4"]);
     expect(readDraftSnapshot(dir, "PRB-1")?.edits.map((edit) => edit.undone)).toEqual([false, false]);

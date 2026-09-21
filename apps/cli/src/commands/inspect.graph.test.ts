@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { runEditCommand } from "./edit/index.js";
+import { editCommandLine } from "./edit/index.js";
 import { inspectCommandLine, type InspectReport } from "./inspect.js";
 import { storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
@@ -74,7 +74,7 @@ function admitted(criteria: number, paths: string[]): string {
 }
 
 const graphEdit = (repo: string, edit: unknown) =>
-  runEditCommand({
+  runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo, "--graph-edit", JSON.stringify(edit)],
     streams: capture(false),
     cwd: repo,
@@ -174,7 +174,7 @@ describe("perbo inspect on a plan with a graph", () => {
 
   it("leaves a prohibited path out of the files in scope", async () => {
     const repo = admitted(2, ["packages/queue/**"]);
-    await runEditCommand({
+    await runCommandLine(editCommandLine, {
       argv: ["PRB-1", "--repo", repo, "--path", "packages/queue/src/**"],
       streams: capture(false),
       cwd: repo,

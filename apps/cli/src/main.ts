@@ -8,7 +8,7 @@ import {
 } from "./commands/admit.js";
 import { runBaselineCommand } from "./commands/baseline/index.js";
 import { runCommandLine, startEntryPoint, type EntryPoint } from "./command-line/terminal.js";
-import { runEditCommand } from "./commands/edit/index.js";
+import { editCommandLine } from "./commands/edit/index.js";
 import { escapesCommandLine } from "./commands/escapes/index.js";
 import { parseExecuteArgs, runDoctorCommand, runExecuteCommand } from "./commands/run/index.js";
 import { COMMAND_NAMES, type CommandName } from "./command-line/names.js";
@@ -65,7 +65,7 @@ export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
       case "approve":
         return runCommandLine(approveCommandLine, { argv: rest, streams, cwd });
       case "edit":
-        return runEditCommand({ argv: rest, streams, cwd });
+        return runCommandLine(editCommandLine, { argv: rest, streams, cwd });
       case "list":
         return runCommandLine(listCommandLine, { argv: rest, streams, cwd });
       case "sync":

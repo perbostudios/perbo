@@ -13,7 +13,7 @@ import {
 import { UsageError } from "../usage-error.js";
 import { approveCommandLine, parseAdmitArgs, runAdmitCommand } from "../commands/admit.js";
 import type { Streams } from "../streams.js";
-import { runEditCommand } from "../commands/edit/index.js";
+import { editCommandLine } from "../commands/edit/index.js";
 import { TICKET_RUNS } from "../commands/run/index.js";
 import { listTickets, readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
 import { specFolder } from "../store/index.js";
@@ -170,7 +170,7 @@ const page = (folder: string, node: string): string =>
   readFileSync(join(folder, "nodes", `${node}.md`), "utf8");
 
 const graphEdit = (repo: string, edit: unknown) =>
-  runEditCommand({
+  runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo, "--graph-edit", JSON.stringify(edit)],
     streams: capture(),
     cwd: repo,
@@ -211,7 +211,7 @@ describe("the page per node beside the spec", () => {
     await graphEdit(repo, { op: "delete_node", id: "node_2", move_criteria_to: "node_1" });
     expect(pagesIn(folder)).toEqual(["node_1.md"]);
     expect(
-      await runEditCommand({ argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: capture(), cwd: repo }),
+      await runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: capture(), cwd: repo }),
     ).toBe(EXIT_CODES.approve);
     expect(pagesIn(folder)).toEqual(["node_1.md", "node_2.md"]);
     expect(page(folder, "node_1")).not.toContain("R4:");
@@ -230,7 +230,7 @@ describe("the page per node beside the spec", () => {
     });
     expect(pagesIn(folder)).toEqual(["node_1.md"]);
     expect(
-      await runEditCommand({
+      await runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo, "--path", "packages/queue/**"],
         streams: capture(),
         cwd: repo,
@@ -299,7 +299,7 @@ describe("the page per node beside the spec", () => {
     rmSync(join(folder, "nodes", "node_1.md"));
     symlinkSync(join(elsewhere, "target.md"), join(folder, "nodes", "node_1.md"));
     await expect(
-      runEditCommand({
+      runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo, "--outcome", "Changed behind a linked page."],
         streams: capture(),
         cwd: repo,
@@ -505,7 +505,7 @@ describe("perbo admit --from-spec --start-over", () => {
     expect(readTicket(dir, "PRB-1").admission.edit_count).toBe(0);
 
     await expect(
-      runEditCommand({ argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: capture(), cwd: repo }),
+      runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: capture(), cwd: repo }),
     ).rejects.toThrow(/re-drafted/);
   });
 

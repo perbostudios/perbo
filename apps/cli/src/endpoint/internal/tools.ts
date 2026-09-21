@@ -5,7 +5,7 @@ import { isAbsolute } from "node:path";
 import { listCommandLine, parseAdmitArgs, runAdmitCommand, type AdmitArgs } from "../../commands/admit.js";
 import { collectOutput } from "../../diagnostics.js";
 import type { CommandContext, ReportCommand } from "../../command-line/terminal.js";
-import { runEdit, type EditArgs } from "../../commands/edit/index.js";
+import { edit } from "../../commands/edit/index.js";
 import { escapesCommandLine } from "../../commands/escapes/index.js";
 import { AttemptIdSchema, inspectCommandLine } from "../../commands/inspect.js";
 import type { ServeTick } from "../../commands/serve/index.js";
@@ -164,6 +164,48 @@ async function reported<Input, Report>(
     content: [{ type: "text", text: text.length === 0 ? `exit ${rendered.exitCode}` : text }],
     ...(structuredContent === undefined ? {} : { structuredContent }),
     ...(rendered.exitCode === EXIT_CODES.approve ? {} : { isError: true }),
+  };
+}
+
+/**
+ * One command that answers while it works, and what it said as a tool result.
+ *
+ * It writes text rather than a record, so there is no structured content to
+ * give back: its stdout and stderr are joined exactly as a session has always
+ * read them.
+ */
+async function narrated(
+  run: (
+    output: { json: boolean },
+    context: CommandContext & { stdout(chunk: string): void; isTTY: boolean },
+  ) => Promise<number> | number,
+  context: ToolContext,
+): Promise<ToolResult> {
+  const collected = collectOutput();
+  let code: number;
+  try {
+    code = await run(
+      { json: false },
+      {
+        cwd: context.cwd,
+        now: new Date(),
+        diagnostics: collected.streams,
+        stdout: collected.streams.stdout,
+        isTTY: false,
+      },
+    );
+  } catch (error) {
+    return {
+      content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+      isError: true,
+    };
+  }
+  const text = [collected.stdout().trim(), collected.stderr().trim()]
+    .filter((part) => part.length > 0)
+    .join("\n");
+  return {
+    content: [{ type: "text", text: text.length === 0 ? `exit ${code}` : text }],
+    ...(code === EXIT_CODES.approve ? {} : { isError: true }),
   };
 }
 
@@ -352,29 +394,36 @@ const editTicket = tool({
     ...z.toJSONSchema(EditTicketInputSchema),
     anyOf: [{ required: ["outcome"] }, { required: ["criteria"] }, { required: ["paths"] }],
   },
-  run: (input, context) => {
-    const args: EditArgs = {
-      repo: context.repo,
-      store: context.store,
-      outcome: input.outcome ?? null,
-      criteria: [...(input.criteria ?? [])],
-      paths: [...(input.paths ?? [])],
-      // The endpoint's tool names outcome, criteria and scope; a prohibited
-      // path is a person's mark in the explorer, not a field a session sets.
-      prohibited: [],
-      manualReviewer: null,
-      manualReason: null,
-      graphEdit: null,
-      undo: null,
-      // The endpoint is the person's own session: its edits are recorded as
-      // the interview's, so they do not raise the friction count (D-100).
-      author: "interview",
-      json: false,
-    };
-    // No editor can be reached: the fields above are required, and the
+  run: (input, context) =>
+    // No editor can be reached: the fields below are required, and the
     // environment handed in names none.
-    return captured(false, (streams) => runEdit({ key: input.key, args, streams, cwd: context.cwd, env: {} }));
-  },
+    narrated(
+      (output, commandContext) =>
+        edit(
+          {
+            target: targetOf(context),
+            key: input.key,
+            outcome: input.outcome ?? null,
+            criteria: [...(input.criteria ?? [])],
+            paths: [...(input.paths ?? [])],
+            // The endpoint's tool names outcome, criteria and scope; a
+            // prohibited path is a person's mark in the explorer, not a field
+            // a session sets.
+            prohibited: [],
+            manualReviewer: null,
+            manualReason: null,
+            graphEdit: null,
+            undo: null,
+            // The endpoint is the person's own session: its edits are recorded
+            // as the interview's, so they do not raise the friction count
+            // (D-100).
+            author: "interview",
+          },
+          output,
+          { ...commandContext, env: {} },
+        ),
+      context,
+    ),
 });
 
 const syncTicket = tool({

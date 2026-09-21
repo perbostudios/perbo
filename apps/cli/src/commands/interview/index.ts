@@ -38,7 +38,7 @@ import {
 } from "@perbo/runner";
 import { parseAdmitArgs, runAdmitCommand, type AdmitArgs } from "../admit.js";
 import { UsageError } from "../../usage-error.js";
-import { runEdit, type EditArgs } from "../edit/index.js";
+import { edit, type EditInput } from "../edit/index.js";
 import { adrFolder, specFolder, storeDir, trackedFiles } from "../../store/index.js";
 import type { Streams } from "../../streams.js";
 import {
@@ -1496,7 +1496,7 @@ const undoEdit = tool({
 });
 
 /**
- * One edit through `runEdit`, on the plan drafted from this interview's own
+ * One edit through `perbo edit`, on the plan drafted from this interview's own
  * spec, with the before and after it recorded.
  *
  * The ticket is derived rather than named: a key is a value a model returns,
@@ -1506,7 +1506,7 @@ const undoEdit = tool({
  */
 async function applyEdit(
   context: InterviewContext,
-  edit: Pick<EditArgs, "graphEdit" | "outcome" | "criteria" | "paths" | "undo">,
+  change: Partial<Pick<EditInput, "graphEdit" | "outcome" | "criteria" | "paths" | "undo">>,
 ): Promise<InterviewToolResult> {
   // Whatever state it is in: an approved plan's order may still change and its
   // contract may not, and `perbo edit` is what holds that line (ADR-0016).
@@ -1514,22 +1514,36 @@ async function applyEdit(
   // it runs, and would answer with a second account of the same rule.
   const key = draftedFromSpec(context)?.key ?? null;
   if (key === null) return said(noPlanToChange(context, "change"), true);
-  const args: EditArgs = {
-    repo: context.repo,
-    store: context.store,
-    ...edit,
+  const input: EditInput = {
+    target: { repo: context.repo, store: context.store },
+    key,
+    outcome: change.outcome ?? null,
+    criteria: change.criteria ?? [],
+    paths: change.paths ?? [],
+    graphEdit: change.graphEdit ?? null,
+    undo: change.undo ?? null,
     // A prohibited path is the person's own mark in the explorer (D-105), and
     // a manual reviewer is their own choice: neither is a field this sets.
     prohibited: [],
     manualReviewer: null,
     manualReason: null,
     author: INTERVIEW_AUTHOR,
-    json: false,
   };
   // No editor can be reached: every field the interactive path needs is given,
   // and the environment handed in names none.
   const ran = await captured((streams) =>
-    runEdit({ key, args, streams, cwd: context.cwd, env: {} }),
+    edit(
+      input,
+      { json: false },
+      {
+        cwd: context.cwd,
+        now: new Date(),
+        diagnostics: streams,
+        stdout: streams.stdout,
+        isTTY: streams.isTTY,
+        env: {},
+      },
+    ),
   );
   if (ran.code !== EXIT_CODES.approve) return said(ran.text, true);
   const snapshot = readDraftSnapshot(context.storeDirectory, key);

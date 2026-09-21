@@ -7,7 +7,7 @@ import { hasAcceptanceCriteria, planNodes } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
 import { approveCommandLine, parseAdmitArgs, runAdmitCommand } from "../admit.js";
 import type { Streams } from "../../streams.js";
-import { runEditCommand } from "./index.js";
+import { editCommandLine } from "./index.js";
 import { contractPathFor, readContract, readDraftSnapshot, readTicket, storeDir } from "../../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
 import { runCommandLine } from "../../command-line/terminal.js";
@@ -74,12 +74,12 @@ const rewrite = (name: string, mutate: string) =>
     `const c = JSON.parse(fs.readFileSync(file, "utf8"));\n${mutate}\nfs.writeFileSync(file, JSON.stringify(c, null, 2));`,
   );
 
-const edit = (repo: string, editor: string | null, ...argv: string[]) =>
-  runEditCommand({
+const edit = async (repo: string, editor: string | null, ...argv: string[]) =>
+  runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo, ...argv],
     streams: capture(),
     cwd: repo,
-    env: editor === null ? {} : { EDITOR: editor },
+    deps: { env: editor === null ? {} : { EDITOR: editor } },
   });
 
 describe("perbo edit", () => {
@@ -246,7 +246,7 @@ describe("perbo edit", () => {
   it("edits without an editor: --outcome, --criterion and --path each replace their part", async () => {
     const { repo, dir } = admitted("edit-flags");
     const streams = capture();
-    const code = await runEditCommand({
+    const code = await runCommandLine(editCommandLine, {
       argv: [
         "PRB-1", "--repo", repo,
         "--outcome", "Search is paginated and counted.",
@@ -256,7 +256,7 @@ describe("perbo edit", () => {
       ],
       streams,
       cwd: repo,
-      env: {},
+      deps: { env: {} },
     });
     expect(code).toBe(0);
     const contract = readContract(dir, "PRB-1");
@@ -273,7 +273,7 @@ describe("perbo edit", () => {
   it("edits the prohibited paths the explorer marks, replacing the list and leaving the scope alone", async () => {
     const { repo, dir } = admitted("edit-prohibit");
     const before = readContract(dir, "PRB-1").scope;
-    const code = await runEditCommand({
+    const code = await runCommandLine(editCommandLine, {
       argv: [
         "PRB-1", "--repo", repo,
         "--prohibit", "packages/search/src/generated/**",
@@ -281,7 +281,7 @@ describe("perbo edit", () => {
       ],
       streams: capture(),
       cwd: repo,
-      env: {},
+      deps: { env: {} },
     });
     expect(code).toBe(0);
     const after = readContract(dir, "PRB-1").scope;
