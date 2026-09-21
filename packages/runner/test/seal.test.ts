@@ -356,6 +356,18 @@ describe("check output from a previous round", () => {
     const seen = await untrackedAfterChecks({ worktree: workspace.path });
     expect(seen).toContain("coverage.json");
   }, 30_000);
+
+  it("refuses a listing it could not read whole, rather than seal what it lost", async () => {
+    const repo = makeRepo();
+    const workspace = await worktreeFor(repo, "att_untracked_cut");
+    writeFileSync(join(workspace.path, "coverage.json"), "{}");
+    writeFileSync(join(workspace.path, "profile.json"), "{}");
+
+    await expect(
+      // Smaller than the two paths the listing has, so it is cut.
+      untrackedAfterChecks({ worktree: workspace.path, maxOutputBytes: 8 }),
+    ).rejects.toThrow(/could not be read whole/);
+  }, 30_000);
 });
 
 describe("what counts as check output", () => {

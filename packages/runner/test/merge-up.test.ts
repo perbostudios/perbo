@@ -457,6 +457,30 @@ describe("mergeUp itself", () => {
     expect(result).toEqual({ status: "current", base_commit: repo.head });
   }, MERGE_UP_TIMEOUT_MS);
 
+  it("refuses a conflict whose unmerged paths do not fit in one listing", async () => {
+    const repo = makeRepo();
+    const worktree = branchWorktree(repo.dir, "cut-listing");
+    const conflicting = "src/index.ts";
+    writeFileSync(join(worktree, conflicting), "export const version = 2;\n");
+    git(worktree, "add", "-A");
+    git(worktree, "commit", "-qm", "the branch's own change");
+    const tip = landOnBase(repo.dir, conflicting, "export const version = 3;\n");
+    expect(tip).not.toBe(repo.head);
+
+    await expect(
+      mergeUp({
+        worktree,
+        repository_root: repo.dir,
+        base_ref: "main",
+        base_commit: repo.head,
+        ticket_key: "SCP192",
+        attempt_id: "att_0000000000000001",
+        // Smaller than the one path the conflict has, so the listing is cut.
+        maxOutputBytes: 4,
+      }),
+    ).rejects.toThrow(/could not be read whole/);
+  }, MERGE_UP_TIMEOUT_MS);
+
   it("names no path when the merge failed for a reason that is not a conflict", async () => {
     const repo = makeRepo();
     const worktree = branchWorktree(repo.dir, "blocked");

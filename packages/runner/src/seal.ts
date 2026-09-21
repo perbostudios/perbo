@@ -407,12 +407,25 @@ export async function headCommit(args: {
 export async function untrackedAfterChecks(args: {
   worktree: string;
   timeoutMs?: number;
+  /** What the listing may say; the default is the module's own ceiling. */
+  maxOutputBytes?: number;
 }): Promise<string[]> {
   const result = await git.run(
     args.worktree,
     ["status", "--porcelain", "--untracked-files=all", "--", ...SCRATCH_EXCLUDE_PATHSPEC],
-    { timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS, maxOutputBytes: MAX_LISTING_BYTES },
+    {
+      timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxOutputBytes: args.maxOutputBytes ?? MAX_LISTING_BYTES,
+    },
   );
+  // A listing held from its end has lost the paths it opens with, and the
+  // next round's seal would then commit a check artifact as the agent's work.
+  if (result.truncated) {
+    throw new Error(
+      `what the checks left untracked in ${args.worktree} could not be read whole within ` +
+        `${args.maxOutputBytes ?? MAX_LISTING_BYTES} bytes, so the next seal cannot leave it out`,
+    );
+  }
   return result.stdout
     .split("\n")
     .filter((line) => line.startsWith("?? "))

@@ -60,6 +60,8 @@ export interface MergeUpRequest {
   ticket_key: string;
   attempt_id: string;
   timeoutMs?: number;
+  /** What the unmerged-path listing may say; the default is the module's own ceiling. */
+  maxOutputBytes?: number;
 }
 
 /**
@@ -126,8 +128,20 @@ export async function mergeUp(request: MergeUpRequest): Promise<MergeUpResult> {
   // path, and the detail is what says why.
   const unmerged = await git.run(request.worktree, ["diff", "--name-only", "--diff-filter=U"], {
     timeoutMs,
-    maxOutputBytes: MAX_LISTING_BYTES,
+    maxOutputBytes: request.maxOutputBytes ?? MAX_LISTING_BYTES,
   });
+  // A listing held from its end has lost the paths it opens with, and a
+  // conflict round briefed with the rest would be asked to reconcile some of
+  // the files. Refused rather than described wrongly: the merge is aborted
+  // first, so the branch is left where it was.
+  if (unmerged.truncated) {
+    await git.run(request.worktree, ["merge", "--abort"], { timeoutMs });
+    throw new Error(
+      `the paths ${request.base_ref} conflicts with on ${request.worktree} could not be read ` +
+        `whole within ${request.maxOutputBytes ?? MAX_LISTING_BYTES} bytes, so no round can be ` +
+        "given them",
+    );
+  }
   const paths = unmerged.stdout
     .split("\n")
     .map((line) => line.trim())
