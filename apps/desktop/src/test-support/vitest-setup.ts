@@ -25,6 +25,6 @@ configure({ asyncUtilTimeout: 5_000 });
  * host reads `location` and `localStorage` when it loads.
  */
 if (typeof window !== "undefined") {
-  const { sampleBridge } = await import("../src/sample-host/bridge.js");
+  const { sampleBridge } = await import("../sample-host/bridge.js");
   window.perbo = sampleBridge;
 }
