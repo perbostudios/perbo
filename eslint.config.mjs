@@ -82,7 +82,6 @@ const PRODUCTION_SOURCE_ONLY = {
  * curates a package's entry into named exports takes that entry off this list.
  */
 export const EXPORT_ALL_BURN_DOWN = [
-  "packages/planning/src/index.ts",
   "packages/review/src/index.ts",
   "packages/runner/src/index.ts",
 ];

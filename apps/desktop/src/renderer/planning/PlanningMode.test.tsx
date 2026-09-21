@@ -13,7 +13,7 @@ import { withDraft } from "../shell/create.js";
 import { SpecSection } from "./SpecSection.js";
 import type { GraphEdit } from "@perbo/contracts/graph-edit";
 import type { ExportedName } from "../../shared/protocol.js";
-import * as specText from "@perbo/planning/spec-text";
+import * as planningBrowser from "@perbo/planning/browser";
 
 let client: QueryClient;
 beforeEach(() => {
@@ -635,7 +635,7 @@ describe("the Spec pane (SCP-336)", () => {
 
     it("measures the nearest names once per distinct unknown name, not once per keystroke", async () => {
       await ready();
-      const spy = vi.spyOn(specText, "nearestSymbolNames");
+      const spy = vi.spyOn(planningBrowser, "nearestSymbolNames");
       try {
         // Four edits that leave the same one name unresolved throughout:
         // one measurement per distinct name, where a memo keyed on the array

@@ -5,22 +5,20 @@ import {
   TaskModelsSchema,
 } from "../shared/protocol.js";
 import {
+  applyGraphEdit,
+  blockingEdit,
   EMPTY_SPEC_TEXT,
+  emptyApproach,
   readSpecSections,
+  renderNodePage,
   renderSpec,
   requirementNodes,
   specSlug,
   specTitleFromMessage,
-  type Spec,
-} from "@perbo/planning/spec-text";
-import {
-  applyGraphEdit,
-  blockingEdit,
-  emptyApproach,
   undoGraphEdit,
   type GraphEditOutcome,
-} from "@perbo/planning/graph-edit";
-import { renderNodePage } from "@perbo/planning/node-page-text";
+  type Spec,
+} from "@perbo/planning/browser";
 import { planNodes } from "@perbo/contracts/plan";
 import { planSizeCounts, sizeEstimate } from "@perbo/contracts/size";
 import { ContractEditing, interviewProviderFor, type EditingOwner } from "../shared/contract-editing.js";

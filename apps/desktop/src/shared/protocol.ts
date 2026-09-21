@@ -21,8 +21,7 @@ import type { GraphEdge } from "@perbo/contracts/approach";
 import type { VerificationKind } from "@perbo/contracts/plan";
 import type { SizeEstimate } from "@perbo/contracts/size";
 import type { StandingProhibitedEntry } from "@perbo/contracts/standing";
-import type { SpecField } from "@perbo/planning/spec-text";
-import type { ImpactReport } from "@perbo/planning/impact";
+import type { ImpactReport, SpecField } from "@perbo/planning/browser";
 import { BindingSchema, ShortcutActionSchema } from "./shortcuts.js";
 
 const identifier = z.string().uuid();

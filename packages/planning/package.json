@@ -11,21 +11,9 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./impact": {
-      "types": "./dist/impact.d.ts",
-      "default": "./dist/impact.js"
-    },
-    "./graph-edit": {
-      "types": "./dist/graph-edit.d.ts",
-      "default": "./dist/graph-edit.js"
-    },
-    "./node-page-text": {
-      "types": "./dist/node-page-text.d.ts",
-      "default": "./dist/node-page-text.js"
-    },
-    "./spec-text": {
-      "types": "./dist/spec-text.d.ts",
-      "default": "./dist/spec-text.js"
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
     }
   },
   "files": ["dist"],
@@ -45,6 +33,7 @@
     "@perbo/test-support": "workspace:*",
     "@perbo/tsconfig": "workspace:*",
     "@eslint/js": "catalog:",
+    "esbuild": "catalog:",
     "@types/node": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",
