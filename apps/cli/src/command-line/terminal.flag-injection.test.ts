@@ -107,13 +107,13 @@ describe("verdict and baseline", () => {
 });
 
 describe("serve and interview", () => {
-  it.fails("does not let a repository path turn publication on", () => {
+  it("does not let a repository path turn publication on", () => {
     const args = parseServeArgs(["--repo", "--x=--publish"]);
     expect(args.repo).toBe("--x=--publish");
     expect(args.publish).toBe(false);
   });
 
-  it.fails("keeps an interview's spec folder whole", () => {
+  it("keeps an interview's spec folder whole", () => {
     const args = parseInterviewArgs(["--spec", "--x=--session"]);
     expect(args.spec).toBe("--x=--session");
     expect(args.session).toBe(null);

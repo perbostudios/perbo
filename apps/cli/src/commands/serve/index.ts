@@ -32,6 +32,13 @@ import { startEndpoint, type RunningEndpoint } from "../../endpoint/index.js";
 import { CommandFailedError, gh, git } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand, type DraftProvider } from "../admit.js";
 import { UsageError } from "../../usage-error.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../command-line/grammar.js";
 import { effectiveLimits, readRepoConfig, requireBase, resolveBase } from "../run/index.js";
 import type { Streams } from "../../streams.js";
 import { derivedBranch, isStranded, runSyncCommand } from "../sync.js";
@@ -98,55 +105,44 @@ function parseInterval(raw: string): number {
   return ms;
 }
 
+const SERVE_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--publish": switchFlag(),
+  "--once": switchFlag(),
+  "--interval": valueFlag(),
+  "--json": switchFlag(),
+  "--no-endpoint": switchFlag(),
+} satisfies FlagTable;
+
+const SERVE_GRAMMAR: Grammar<typeof SERVE_FLAGS> = {
+  command: "serve",
+  flags: SERVE_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal:
+      "serve takes no ticket key: it runs the queue over the whole store, " +
+      "e.g. perbo serve --once --json",
+  },
+  afterDoubleDash: "positionals",
+};
+
 export function parseServeArgs(argv: readonly string[]): ServeArgs {
-  const args: ServeArgs = {
-    repo: ".",
-    store: null,
-    publish: false,
-    once: false,
-    intervalMs: DEFAULT_INTERVAL_MS,
-    json: false,
-    noEndpoint: false,
+  const line = parseArgv(SERVE_GRAMMAR, argv);
+  const interval = line.flags["--interval"];
+  return {
+    repo: line.flags["--repo"] ?? ".",
+    store: line.flags["--store"] ?? null,
+    // Publication authority is a person's own flag, typed here and carried on
+    // every run this queue starts (D-079). Nothing else on the line can set
+    // it: a value is a value, whatever it is shaped like.
+    publish: line.flags["--publish"] === true,
+    once: line.flags["--once"] === true,
+    intervalMs: interval === undefined ? DEFAULT_INTERVAL_MS : parseInterval(interval),
+    json: line.flags["--json"] === true,
+    noEndpoint: line.flags["--no-endpoint"] === true,
   };
-  const tokens = argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
-  const value = (index: number, token: string): string => {
-    const next = tokens[index];
-    if (next === undefined) throw new UsageError(`${token} requires a value`);
-    return next;
-  };
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = value(++i, token);
-        break;
-      case "--store":
-        args.store = value(++i, token);
-        break;
-      case "--publish":
-        args.publish = true;
-        break;
-      case "--once":
-        args.once = true;
-        break;
-      case "--interval":
-        args.intervalMs = parseInterval(value(++i, token));
-        break;
-      case "--json":
-        args.json = true;
-        break;
-      case "--no-endpoint":
-        args.noEndpoint = true;
-        break;
-      default:
-        throw new UsageError(`unknown option '${token}' for serve`);
-    }
-  }
-  return args;
 }
 
 /**

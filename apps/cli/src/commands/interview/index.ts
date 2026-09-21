@@ -38,6 +38,12 @@ import {
 } from "@perbo/runner";
 import { parseAdmitArgs, runAdmitCommand, type AdmitArgs } from "../admit.js";
 import { UsageError } from "../../usage-error.js";
+import {
+  parseArgv,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../command-line/grammar.js";
 import { edit, type EditInput } from "../edit/index.js";
 import { adrFolder, specFolder, storeDir, trackedFiles } from "../../store/index.js";
 import type { Streams } from "../../streams.js";
@@ -806,58 +812,42 @@ export interface InterviewArgs {
   provider: InterviewProvider;
 }
 
+const INTERVIEW_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--spec": valueFlag(),
+  "--session": valueFlag(),
+  "--model": valueFlag(),
+  "--provider": valueFlag(),
+} satisfies FlagTable;
+
+const INTERVIEW_GRAMMAR: Grammar<typeof INTERVIEW_FLAGS> = {
+  command: "interview",
+  flags: INTERVIEW_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal:
+      "interview takes no positional argument: the spec folder it writes is --spec, " +
+      "e.g. perbo interview --spec specs/<slug>",
+  },
+  afterDoubleDash: "positionals",
+};
+
 export function parseInterviewArgs(argv: readonly string[]): InterviewArgs {
-  const args: InterviewArgs = {
-    repo: ".",
-    store: null,
-    spec: null,
-    session: null,
-    model: null,
-    provider: "claude",
-  };
-  const tokens = argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
-  const value = (index: number, token: string): string => {
-    const next = tokens[index];
-    if (next === undefined) throw new UsageError(`${token} requires a value`);
-    return next;
-  };
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = value(++i, token);
-        break;
-      case "--store":
-        args.store = value(++i, token);
-        break;
-      case "--spec":
-        args.spec = value(++i, token);
-        break;
-      case "--session":
-        args.session = value(++i, token);
-        break;
-      case "--model":
-        args.model = value(++i, token);
-        break;
-      case "--provider": {
-        const provider = value(++i, token);
-        if (!(INTERVIEW_PROVIDERS as readonly string[]).includes(provider)) {
-          throw new UsageError(
-            `--provider takes ${INTERVIEW_PROVIDERS.join(" or ")} (got '${provider}')`,
-          );
-        }
-        args.provider = provider as InterviewProvider;
-        break;
-      }
-      default:
-        throw new UsageError(`unknown option '${token}' for interview`);
-    }
+  const line = parseArgv(INTERVIEW_GRAMMAR, argv);
+  const provider = line.flags["--provider"] ?? "claude";
+  if (!(INTERVIEW_PROVIDERS as readonly string[]).includes(provider)) {
+    throw new UsageError(`--provider takes ${INTERVIEW_PROVIDERS.join(" or ")} (got '${provider}')`);
   }
-  return args;
+  return {
+    repo: line.flags["--repo"] ?? ".",
+    store: line.flags["--store"] ?? null,
+    spec: line.flags["--spec"] ?? null,
+    session: line.flags["--session"] ?? null,
+    model: line.flags["--model"] ?? null,
+    provider: provider as InterviewProvider,
+  };
 }
 
 /**
