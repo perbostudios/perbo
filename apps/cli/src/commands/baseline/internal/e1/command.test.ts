@@ -104,6 +104,13 @@ describe("baseline harness arguments", () => {
       /--defect does not apply to baseline seal/,
     );
     expect(() => parseE1Args(["time", "--partner", "acme", "--nope"])).toThrow(/unknown flag/);
+    // The flag-injection cases for every other command are in
+    // `command-line/terminal.flag-injection.test.ts`; this one is here because
+    // only this module may import this module's interior.
+    expect(parseE1Args(["time", "--partner", "--x=--json"])).toMatchObject({
+      subject: "--x=--json",
+      json: false,
+    });
     expect(() => parseE1Args(["run", "--partner", "acme", "extra"])).toThrow(/takes flags, not/);
     expect(parseE1Args(["result", "--json"])).toMatchObject({ subject: null, json: true });
     expect(parseE1Args(["open", "--partner=acme", "--agent"])).toMatchObject({

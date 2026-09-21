@@ -22,8 +22,8 @@ import { parseVerdictArgs } from "../commands/verdict/index.js";
  * records a decision, `serve --repo "--x=--publish"` publishes.
  *
  * Each case names the value, the field it arrives in and what the command
- * must make of it. A case is `it.fails` until the command reads its line
- * through the grammar, and is flipped in the change that migrates it.
+ * must make of it. E1's case is beside E1, in `baseline/internal/e1/`, which
+ * only that module may import.
  */
 
 describe("list, approve and mcp", () => {
@@ -83,7 +83,7 @@ describe("admit", () => {
 });
 
 describe("sync --all-merged", () => {
-  it.fails("keeps a repository path whole rather than forcing a re-read", () => {
+  it("keeps a repository path whole rather than forcing a re-read", () => {
     const args = parseSyncAllMergedArgs(["--repo", "--x=--force"]);
     expect(args.repo).toBe("--x=--force");
     expect(args.force).toBe(false);
@@ -99,7 +99,7 @@ describe("verdict and baseline", () => {
     );
   });
 
-  it.fails("keeps a baseline note whole", () => {
+  it("keeps a baseline note whole", () => {
     const args = parseBaselineArgs(["stop", "--note", "--x=--json"]);
     expect(args.note).toBe("--x=--json");
     expect(args.json).toBe(false);

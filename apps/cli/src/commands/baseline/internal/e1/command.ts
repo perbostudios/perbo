@@ -25,6 +25,14 @@ import {
   type E1Thresholds,
 } from "./ledger.js";
 import { UsageError } from "../../../../usage-error.js";
+import {
+  listFlag,
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../../../command-line/grammar.js";
 import { baselinePath, readBaselineFile } from "../file.js";
 import { formatDuration } from "../../../run/index.js";
 import { storeDir } from "../../../../store/index.js";
@@ -80,32 +88,50 @@ export interface E1Args {
   store: string | null;
 }
 
-const VALUE_FLAGS = new Set([
-  "--partner",
-  "--item",
-  "--title",
-  "--from",
-  "--started",
-  "--opened",
-  "--interruptions",
-  "--friction",
-  "--abandoned",
-  "--defect",
-  "--period",
-  "--eligible",
-  "--voluntary",
-  "--on-request",
-  "--agreed-on",
-  "--agreed-with",
-  "--record",
-  "--ratio-ten",
-  "--ratio-five",
-  "--routing",
-  "--abandonment",
-  "--defects",
-  "--repo",
-  "--store",
-]);
+const E1_FLAGS = {
+  "--partner": valueFlag(),
+  "--item": valueFlag(),
+  "--title": valueFlag(),
+  "--from": valueFlag(),
+  "--started": valueFlag(),
+  "--opened": valueFlag(),
+  "--interruptions": valueFlag(),
+  "--friction": valueFlag(),
+  "--abandoned": valueFlag(),
+  "--defect": listFlag(),
+  "--period": valueFlag(),
+  "--eligible": valueFlag(),
+  "--voluntary": valueFlag(),
+  "--on-request": valueFlag(),
+  "--agreed-on": valueFlag(),
+  "--agreed-with": valueFlag(),
+  "--record": valueFlag(),
+  // What the harness is held to, agreed before anything was measured and
+  // named on the line only where a comparison sets its own (hidden: the
+  // product offers the agreed thresholds, not a way to pick them per run).
+  "--ratio-ten": valueFlag({ hidden: true }),
+  "--ratio-five": valueFlag({ hidden: true }),
+  "--routing": valueFlag({ hidden: true }),
+  "--abandonment": valueFlag({ hidden: true }),
+  "--defects": valueFlag({ hidden: true }),
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--agent": switchFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+type E1Flag = keyof typeof E1_FLAGS;
+
+const e1Grammar = (command: E1Command): Grammar<typeof E1_FLAGS> => ({
+  command: `baseline ${command}`,
+  flags: E1_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal: `baseline ${command} takes flags, not a positional argument`,
+  },
+  afterDoubleDash: "positionals",
+});
 
 /** Every subcommand answers to these; they say where the ledger is, not what is in it. */
 const WHERE = ["--repo", "--store"] as const;
@@ -189,139 +215,64 @@ export function parseWhen(flag: string, raw: string): Date {
 }
 
 export function parseE1Args(argv: readonly string[]): E1Args {
-  const tokens = argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
-  const [command, ...rest] = tokens;
+  const [command, ...rest] = argv;
   if (!isE1Command(command)) throw new UsageError(USAGE);
+  const line = parseArgv(e1Grammar(command), rest);
+  const flags = line.flags;
 
-  const args: E1Args = {
-    command,
-    subject: null,
-    arm: "partner",
-    title: null,
-    item: null,
-    from: null,
-    started: null,
-    opened: null,
-    interruptions: 0,
-    friction: 0,
-    abandoned: null,
-    defects: [],
-    period: null,
-    eligible: null,
-    voluntary: null,
-    onRequest: 0,
-    agreedOn: null,
-    agreedWith: null,
-    record: null,
-    thresholds: {},
-    json: false,
-    repo: ".",
-    store: null,
-  };
-
-  for (let i = 0; i < rest.length; i += 1) {
-    const token = rest[i]!;
-    if (!token.startsWith("--")) {
-      throw new UsageError(`baseline ${command} takes flags, not '${token}'`);
-    }
-    if (!ALLOWED[command].includes(token)) {
-      throw new UsageError(
-        VALUE_FLAGS.has(token) || token === "--json" || token === "--agent"
-          ? `${token} does not apply to baseline ${command}`
-          : `unknown flag '${token}'`,
-      );
-    }
-    if (token === "--json") {
-      args.json = true;
-      continue;
-    }
-    if (token === "--agent") {
-      args.arm = "agent_direct";
-      continue;
-    }
-    const value = rest[++i];
-    if (value === undefined) throw new UsageError(`${token} requires a value`);
-    switch (token) {
-      case "--partner":
-        args.subject = value;
-        break;
-      case "--item":
-        args.item = value;
-        break;
-      case "--title":
-        args.title = value;
-        break;
-      case "--from":
-        args.from = value;
-        break;
-      case "--started":
-        args.started = value;
-        break;
-      case "--opened":
-        args.opened = value;
-        break;
-      case "--interruptions":
-        args.interruptions = minutes(token, value);
-        break;
-      case "--friction":
-        args.friction = minutes(token, value);
-        break;
-      case "--abandoned":
-        args.abandoned = value;
-        break;
-      case "--defect":
-        args.defects.push(value);
-        break;
-      case "--period":
-        args.period = value;
-        break;
-      case "--eligible":
-        args.eligible = number(token, value);
-        break;
-      case "--voluntary":
-        args.voluntary = number(token, value);
-        break;
-      case "--on-request":
-        args.onRequest = number(token, value);
-        break;
-      case "--agreed-on":
-        args.agreedOn = value;
-        break;
-      case "--agreed-with":
-        args.agreedWith = value;
-        break;
-      case "--record":
-        args.record = value;
-        break;
-      case "--ratio-ten":
-        args.thresholds.ratio_by_ticket_10 = number(token, value);
-        break;
-      case "--ratio-five":
-        args.thresholds.ratio_through_ticket_5 = number(token, value);
-        break;
-      case "--routing":
-        args.thresholds.min_voluntary_routing_rate = number(token, value);
-        break;
-      case "--abandonment":
-        args.thresholds.max_mid_flow_abandonment_rate = number(token, value);
-        break;
-      case "--defects":
-        args.thresholds.min_defects_caught = number(token, value);
-        break;
-      case "--repo":
-        args.repo = value;
-        break;
-      case "--store":
-        args.store = value;
-        break;
-      default:
-        throw new UsageError(`unknown flag '${token}'`);
+  // A flag that exists but belongs to another subcommand is named rather than
+  // called unknown: the person wrote something real in the wrong place.
+  for (const flag of line.given) {
+    if (!ALLOWED[command].includes(flag)) {
+      throw new UsageError(`${flag} does not apply to baseline ${command}`);
     }
   }
+
+  const value = <Flag extends E1Flag>(flag: Flag): string | undefined =>
+    flags[flag] as string | undefined;
+  const optionalNumber = (flag: E1Flag): number | null => {
+    const raw = value(flag);
+    return raw === undefined ? null : number(flag, raw);
+  };
+  const thresholds: Partial<E1Thresholds> = {};
+  for (const [flag, field] of [
+    ["--ratio-ten", "ratio_by_ticket_10"],
+    ["--ratio-five", "ratio_through_ticket_5"],
+    ["--routing", "min_voluntary_routing_rate"],
+    ["--abandonment", "max_mid_flow_abandonment_rate"],
+    ["--defects", "min_defects_caught"],
+  ] as const) {
+    const raw = value(flag);
+    if (raw !== undefined) thresholds[field] = number(flag, raw);
+  }
+
+  const interruptions = value("--interruptions");
+  const friction = value("--friction");
+  const args: E1Args = {
+    command,
+    subject: value("--partner") ?? null,
+    arm: flags["--agent"] === true ? "agent_direct" : "partner",
+    title: value("--title") ?? null,
+    item: value("--item") ?? null,
+    from: value("--from") ?? null,
+    started: value("--started") ?? null,
+    opened: value("--opened") ?? null,
+    interruptions: interruptions === undefined ? 0 : minutes("--interruptions", interruptions),
+    friction: friction === undefined ? 0 : minutes("--friction", friction),
+    abandoned: value("--abandoned") ?? null,
+    defects: [...(flags["--defect"] ?? [])],
+    period: value("--period") ?? null,
+    eligible: optionalNumber("--eligible"),
+    voluntary: optionalNumber("--voluntary"),
+    onRequest: optionalNumber("--on-request") ?? 0,
+    agreedOn: value("--agreed-on") ?? null,
+    agreedWith: value("--agreed-with") ?? null,
+    record: value("--record") ?? null,
+    thresholds,
+    json: flags["--json"] === true,
+    repo: value("--repo") ?? ".",
+    store: value("--store") ?? null,
+  };
 
   if (args.command !== "result" && args.subject === null) {
     throw new UsageError(`baseline ${args.command} needs --partner <id>`);

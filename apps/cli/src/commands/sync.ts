@@ -41,6 +41,13 @@ import {
 } from "@perbo/runner";
 import { branchName, recordedBranch } from "@perbo/workspace";
 import { UsageError } from "../usage-error.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../command-line/grammar.js";
 import { applyObservedPath, parseListArgs, UnreachableStateError } from "./admit.js";
 import type { Streams } from "../streams.js";
 import {
@@ -942,40 +949,37 @@ export interface SyncAllMergedArgs {
   force: boolean;
 }
 
+const ALL_MERGED_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--force": switchFlag(),
+} satisfies FlagTable;
+
 /**
- * Its own small parser rather than `parseListArgs`: `--force` has no meaning
- * for any other list-shaped command, and giving every one of them a flag this
- * is the only user of would be a wider surface for no reader's benefit.
+ * Its own grammar rather than the listing's: `--force` has no meaning for any
+ * other list-shaped command, and giving every one of them a flag this is the
+ * only user of would be a wider surface for no reader's benefit.
  */
+const ALL_MERGED_GRAMMAR: Grammar<typeof ALL_MERGED_FLAGS> = {
+  command: "sync --all-merged",
+  flags: ALL_MERGED_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal:
+      "sync --all-merged takes no ticket key: it reads every merged ticket in the store, " +
+      "and one ticket is synced by name — perbo sync PRB-1",
+  },
+  afterDoubleDash: "positionals",
+};
+
 export function parseSyncAllMergedArgs(argv: readonly string[]): SyncAllMergedArgs {
-  const args: SyncAllMergedArgs = { repo: ".", store: null, force: false };
-  const tokens = argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
-  const value = (index: number, token: string): string => {
-    const next = tokens[index];
-    if (next === undefined) throw new UsageError(`${token} requires a value`);
-    return next;
+  const line = parseArgv(ALL_MERGED_GRAMMAR, argv);
+  return {
+    repo: line.flags["--repo"] ?? ".",
+    store: line.flags["--store"] ?? null,
+    force: line.flags["--force"] === true,
   };
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = value(++i, token);
-        break;
-      case "--store":
-        args.store = value(++i, token);
-        break;
-      case "--force":
-        args.force = true;
-        break;
-      default:
-        throw new UsageError(`unknown option '${token}' for sync --all-merged`);
-    }
-  }
-  return args;
 }
 
 /** How `commits_outside_loop` reads on one row of `sync --all-merged`'s output. */

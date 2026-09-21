@@ -1,5 +1,12 @@
 import { resolve } from "node:path";
 import { UsageError } from "../../usage-error.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../command-line/grammar.js";
 import { baselinePath, readBaselineFile, writeBaselineFile } from "./internal/file.js";
 import {
   BASELINE_COMPARISON_MINIMUM,
@@ -46,15 +53,39 @@ export interface BaselineArgs {
 const COMMANDS = new Set(["start", "pause", "resume", "stop", "abandon", "list"]);
 const harness = () =>
   `The E1 harness — a partner's ten, sealed, and the ratio against them — is baseline ${E1_COMMANDS.join(" | ")}.`;
-const TAKES_VALUE = new Set(["--ref", "--pr", "--note", "--reason", "--repo", "--store"]);
+
+/**
+ * One table for every verb, so a flag that belongs to another one parses and
+ * is then refused by name: `--pr does not apply to baseline start` says what
+ * `unknown flag` cannot.
+ */
+const BASELINE_FLAGS = {
+  "--ref": valueFlag(),
+  "--pr": valueFlag(),
+  "--note": valueFlag(),
+  "--reason": valueFlag(),
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+/** What each verb takes after itself: `start` its title, the rest nothing. */
+const baselineGrammar = (command: BaselineArgs["command"]): Grammar<typeof BASELINE_FLAGS> => ({
+  command: `baseline ${command}`,
+  flags: BASELINE_FLAGS,
+  positionals:
+    command === "start"
+      ? {
+          min: 1,
+          max: 1,
+          refusal: 'baseline start takes one title, e.g. perbo baseline start "Paginate search"',
+        }
+      : { min: 0, max: 0, refusal: `baseline ${command} takes no positional argument` },
+  afterDoubleDash: "positionals",
+});
 
 export function parseBaselineArgs(argv: readonly string[]): BaselineArgs {
-  const tokens = argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
-  const [command, ...rest] = tokens;
+  const [command, ...rest] = argv;
   if (command === undefined || !COMMANDS.has(command)) {
     throw new UsageError(
       `baseline needs one of: start "<title>" [--ref owner/repo#N], pause, resume, ` +
@@ -62,45 +93,25 @@ export function parseBaselineArgs(argv: readonly string[]): BaselineArgs {
         harness(),
     );
   }
+  const verb = command as BaselineArgs["command"];
+  const line = parseArgv(baselineGrammar(verb), rest);
   const args: BaselineArgs = {
-    command: command as BaselineArgs["command"],
+    command: verb,
     title: null,
-    ref: null,
-    pullRequest: null,
-    note: null,
-    reason: null,
-    json: false,
-    repo: ".",
-    store: null,
+    ref: line.flags["--ref"] ?? null,
+    pullRequest: line.flags["--pr"] ?? null,
+    note: line.flags["--note"] ?? null,
+    reason: line.flags["--reason"] ?? null,
+    json: line.flags["--json"] === true,
+    repo: line.flags["--repo"] ?? ".",
+    store: line.flags["--store"] ?? null,
   };
-  const positional: string[] = [];
-  for (let i = 0; i < rest.length; i += 1) {
-    const token = rest[i]!;
-    if (!token.startsWith("--")) {
-      positional.push(token);
-      continue;
-    }
-    if (token === "--json") {
-      args.json = true;
-      continue;
-    }
-    if (!TAKES_VALUE.has(token)) throw new UsageError(`unknown flag '${token}'`);
-    const value = rest[++i];
-    if (value === undefined) throw new UsageError(`${token} requires a value`);
-    if (token === "--ref") args.ref = value;
-    if (token === "--pr") args.pullRequest = value;
-    if (token === "--note") args.note = value;
-    if (token === "--reason") args.reason = value;
-    if (token === "--repo") args.repo = value;
-    if (token === "--store") args.store = value;
-  }
-  if (args.command === "start") {
-    if (positional.length !== 1 || positional[0]!.trim() === "") {
+  if (verb === "start") {
+    const title = line.positionals[0]!;
+    if (title.trim() === "") {
       throw new UsageError('baseline start takes one title, e.g. perbo baseline start "Paginate search"');
     }
-    args.title = positional[0]!;
-  } else if (positional.length > 0) {
-    throw new UsageError(`baseline ${args.command} takes no positional argument`);
+    args.title = title;
   }
   const allowed: Record<BaselineArgs["command"], Array<keyof BaselineArgs>> = {
     start: ["ref"],
