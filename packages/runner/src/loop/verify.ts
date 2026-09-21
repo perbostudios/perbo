@@ -1,9 +1,20 @@
 import { closureVerifySchema, type ClosureVerification } from "@perbo/review";
 import { createModel, type Model } from "@perbo/model";
-import type { Finding } from "@perbo/contracts";
+import type {
+  CheckResult,
+  ExecutionAttempt,
+  Finding,
+  PlanContractWithCriteria,
+  SecretIndex,
+} from "@perbo/contracts";
+import type { BundleStore } from "../bundle.js";
+import type { Decline } from "../declines.js";
+import type { SealResult } from "../seal.js";
 import { allowedPathsSentence } from "../shell/index.js";
 import type { TicketRunConfig } from "./config.js";
-import type { Step, Stop } from "./state.js";
+import type { LoopPorts } from "./context.js";
+import type { Ledger } from "./ledger.js";
+import type { RoundRecord, RoundState, Step, Stop } from "./state.js";
 
 /**
  * Verifying the closures a remediation round claims (D-061).
@@ -192,4 +203,170 @@ export function routeVerification(facts: VerificationFacts): Step {
     remediation: true,
     carry: { openFindings: stillOpen },
   };
+}
+
+/**
+ * Verify the closures a remediation round was asked for, and route what the
+ * verification says.
+ *
+ * A scope round that widened is refused before anything is paid to verify it,
+ * and a declined finding skips the model half and stays open: what the
+ * verifier is asked is only what the executor said it closed.
+ */
+export async function verifyRound(args: {
+  config: TicketRunConfig;
+  contract: PlanContractWithCriteria;
+  state: RoundState;
+  ledger: Ledger;
+  bundles: BundleStore;
+  attemptId: string;
+  attempt: ExecutionAttempt;
+  sealed: SealResult;
+  /** The whole-change check results the verification is gated on. */
+  gating: CheckResult[];
+  /** Every check result, recorded with the round. */
+  checks: CheckResult[];
+  declines: Decline[];
+  /** The findings this round was asked to close. */
+  toClose: Finding[];
+  widened: string[];
+  scopeGiven: Finding[];
+  pathsAllowed: string[];
+  /** The round's record where nothing has judged it, for a stop that refuses to verify. */
+  record: RoundRecord;
+  maxRounds: number;
+  /** The ticket's budget for this attempt's credential, null where it has none. */
+  budget: number | null;
+  configPath: string;
+  secrets: SecretIndex;
+  verify: LoopPorts["verify"];
+  clock: () => Date;
+  progress: (message: string) => void;
+}): Promise<Step> {
+  const { config, state, ledger, sealed, secrets, clock, progress } = args;
+  // D-065: declined findings are the person's now — they skip the model
+  // half of verification and leave the executor's open set. The
+  // deterministic half still applies to the round's tree: verifyClosures
+  // consults the pinned checks and the scope computation before asking
+  // anything, and with zero findings left it gates on those alone.
+  // SCP-194: a scope round that widened is refused before anything is
+  // paid to verify it. Nothing is lost — the change set stays on the
+  // branch and the finding stays open — and the stop says which paths
+  // arrived and what the contract admits.
+  const widenedStep = refuseWidening({
+    widened: args.widened,
+    scopeGiven: args.scopeGiven,
+    remediationRound: state.remediationRound,
+    pathsAllowed: args.pathsAllowed,
+  });
+  if (widenedStep !== null) {
+    ledger.addRound(args.record);
+    return widenedStep;
+  }
+  const declinedKeys = new Set(args.declines.map((decline) => decline.finding_key));
+  const toVerify = args.toClose.filter((finding) => !declinedKeys.has(finding.key));
+  progress(`verifying closures, round ${state.round}`);
+  const verification = await args.verify({
+    findings: toVerify,
+    diff: sealed.diff ?? "",
+    checks: args.gating,
+    scope: args.contract.scope,
+    changeset: sealed.changeset!,
+    model: verifierModel(
+      config,
+      toVerify.map((finding) => finding.key),
+    ),
+    onProgress: progress,
+  });
+
+  args.bundles.write({
+    kind: "review",
+    subject_id: `cv_${args.attemptId}`,
+    ticket_id: args.contract.ticket_id,
+    inputs: {
+      changeset_id: sealed.changeset?.changeset_id ?? null,
+      base_commit: state.baseCommit,
+      head_commit: sealed.head_commit,
+      remediation_round: state.round,
+      round_kind: state.kind,
+      verification: true,
+      all_closed: verification.all_closed,
+      deterministic_failure: verification.deterministic_failure,
+      // SCP-194: the other half of the round's record — what it was
+      // given, above, and which of those it closed. The ladder needs
+      // both, and a `per_finding` row is not readable without knowing
+      // the set it was drawn from.
+      findings_given: toVerify.map((finding) => finding.key).join(","),
+      findings_closed: verification.per_finding
+        .filter((row) => row.status === "closed")
+        .map((row) => row.finding_key)
+        .join(","),
+      findings_open: verification.open_keys.join(","),
+    },
+    context_manifest: [],
+    versions: {
+      code: "stage-3",
+      prompt: verification.prompt_version,
+      policy: "closure-verification",
+      model: config.reviewer_model ?? config.model,
+      tool: config.reviewer_provider,
+    },
+    usage: {
+      input_tokens: verification.usage.input_tokens,
+      output_tokens: verification.usage.output_tokens,
+      cost_micros: verification.cost_micros,
+      cost_basis: verification.cost_basis,
+      wall_clock_ms: 0,
+    },
+    artifacts: [
+      {
+        name: "verification.json",
+        media_type: "application/json",
+        body: JSON.stringify(verification, null, 2),
+      },
+    ],
+    errors: [],
+    transitions: [
+      {
+        at: clock().toISOString(),
+        from: "VERIFYING",
+        to: "INDEPENDENT_REVIEW",
+        reason: verification.all_closed ? "closures verified" : "closures still open",
+      },
+    ],
+    retention: { class: "replay_retained", expires_at: null },
+    secrets,
+    excluded_paths: sealed.excluded_paths,
+    deterministic: false,
+    model_version_pinned: true,
+    now: clock(),
+  });
+
+  ledger.addRound({
+    round: state.round,
+    kind: state.kind,
+    attempt: args.attempt,
+    superseded_attempts: state.superseded,
+    review: null,
+    node_reviews: [],
+    verification,
+    checks: args.checks,
+    // Open after verification plus declined: everything a person still
+    // has in front of them at the end of this round.
+    remediable_findings: verification.open_keys.length + args.declines.length,
+    directly_verified: 0,
+    declines: args.declines,
+  });
+
+  return routeVerification({
+    verification,
+    toVerify,
+    openFindings: state.openFindings,
+    declines: ledger.declines.length,
+    remediationRound: state.remediationRound,
+    maxRounds: args.maxRounds,
+    spend: ledger.spend(),
+    budget: args.budget,
+    configPath: args.configPath,
+  });
 }

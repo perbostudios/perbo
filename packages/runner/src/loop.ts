@@ -100,7 +100,7 @@ import {
 import { routeConflict, routeResolution, routeStopped } from "./loop/route.js";
 import { provisionRound } from "./loop/provision.js";
 import type { RelevelContext } from "./loop/relevel.js";
-import { refuseWidening, routeVerification, verifierModel } from "./loop/verify.js";
+import { verifyRound } from "./loop/verify.js";
 
 /**
  * Contract → worktree → one agent → sealed change set → deterministic checks →
@@ -978,7 +978,7 @@ async function runLockedTicket(
       const { attempt, termination, declines, widened, scopeGiven, reset, park, parkMs } = recorded;
 
       /** This round's record where no review and no verification judged it. */
-      const record = (): RoundRecord => ({
+      const record: RoundRecord = {
         round: state.round,
         kind: state.kind,
         attempt,
@@ -990,7 +990,7 @@ async function runLockedTicket(
         remediable_findings: 0,
         directly_verified: 0,
         declines,
-      });
+      };
 
       if (termination.reason !== "completed") {
         const stoppedStep = routeStopped({
@@ -1016,7 +1016,7 @@ async function runLockedTicket(
         // A round that stops here has been answered; one that buys another
         // attempt has not, and the attempt it replaces is named on the record
         // the round does get.
-        if (stoppedStep.next === "stop") ledger.addRound(record());
+        if (stoppedStep.next === "stop") ledger.addRound(record);
         state = applyStep(state, stoppedStep);
         if (stoppedStep.next === "stop") {
           outcome = stoppedStep.end.outcome;
@@ -1032,7 +1032,7 @@ async function runLockedTicket(
       // a review of a change nobody can take — and the executor gets one round
       // whose only task is the resolution.
       if (conflictNow !== null) {
-        ledger.addRound(record());
+        ledger.addRound(record);
         const conflictStep = routeConflict({
           conflict: conflictNow,
           kind: state.kind,
@@ -1061,7 +1061,7 @@ async function runLockedTicket(
         });
         if (resolution.say !== null) progress(resolution.say);
         if (resolution.step !== null) {
-          ledger.addRound(record());
+          ledger.addRound(record);
           state = applyStep(state, resolution.step);
           if (resolution.step.next === "stop") {
             outcome = resolution.step.end.outcome;
@@ -1087,133 +1087,30 @@ async function runLockedTicket(
       // only criteria to judge, so that round falls through to the review
       // below.
       if (state.finalReview !== null && !state.reviewingAgain) {
-        // D-065: declined findings are the person's now — they skip the model
-        // half of verification and leave the executor's open set. The
-        // deterministic half still applies to the round's tree: verifyClosures
-        // consults the pinned checks and the scope computation before asking
-        // anything, and with zero findings left it gates on those alone.
-        // SCP-194: a scope round that widened is refused before anything is
-        // paid to verify it. Nothing is lost — the change set stays on the
-        // branch and the finding stays open — and the stop says which paths
-        // arrived and what the contract admits.
-        const widenedStep = refuseWidening({
+        const verificationStep = await verifyRound({
+          config,
+          contract,
+          state,
+          ledger,
+          bundles,
+          attemptId: attempt_id,
+          attempt,
+          sealed,
+          gating,
+          checks,
+          declines,
+          toClose,
           widened,
           scopeGiven,
-          remediationRound: state.remediationRound,
           pathsAllowed,
-        });
-        if (widenedStep !== null) {
-          ledger.addRound(record());
-          state = applyStep(state, widenedStep);
-          outcome = widenedStep.end.outcome;
-          detail = widenedStep.end.detail;
-          break;
-        }
-        const declinedKeys = new Set(declines.map((decline) => decline.finding_key));
-        const toVerify = toClose.filter((finding) => !declinedKeys.has(finding.key));
-        progress(`verifying closures, round ${state.round}`);
-        const verification = await verifyRunner({
-          findings: toVerify,
-          diff: sealed.diff ?? "",
-          checks: gating,
-          scope: contract.scope,
-          changeset: sealed.changeset!,
-          model: verifierModel(
-            config,
-            toVerify.map((finding) => finding.key),
-          ),
-          onProgress: progress,
-        });
-
-        bundles.write({
-          kind: "review",
-          subject_id: `cv_${attempt_id}`,
-          ticket_id: contract.ticket_id,
-          inputs: {
-            changeset_id: sealed.changeset?.changeset_id ?? null,
-            base_commit: state.baseCommit,
-            head_commit: sealed.head_commit,
-            remediation_round: state.round,
-            round_kind: state.kind,
-            verification: true,
-            all_closed: verification.all_closed,
-            deterministic_failure: verification.deterministic_failure,
-            // SCP-194: the other half of the round's record — what it was
-            // given, above, and which of those it closed. The ladder needs
-            // both, and a `per_finding` row is not readable without knowing
-            // the set it was drawn from.
-            findings_given: toVerify.map((finding) => finding.key).join(","),
-            findings_closed: verification.per_finding
-              .filter((row) => row.status === "closed")
-              .map((row) => row.finding_key)
-              .join(","),
-            findings_open: verification.open_keys.join(","),
-          },
-          context_manifest: [],
-          versions: {
-            code: "stage-3",
-            prompt: verification.prompt_version,
-            policy: "closure-verification",
-            model: config.reviewer_model ?? config.model,
-            tool: config.reviewer_provider,
-          },
-          usage: {
-            input_tokens: verification.usage.input_tokens,
-            output_tokens: verification.usage.output_tokens,
-            cost_micros: verification.cost_micros,
-            cost_basis: verification.cost_basis,
-            wall_clock_ms: 0,
-          },
-          artifacts: [
-            {
-              name: "verification.json",
-              media_type: "application/json",
-              body: JSON.stringify(verification, null, 2),
-            },
-          ],
-          errors: [],
-          transitions: [
-            {
-              at: clock().toISOString(),
-              from: "VERIFYING",
-              to: "INDEPENDENT_REVIEW",
-              reason: verification.all_closed ? "closures verified" : "closures still open",
-            },
-          ],
-          retention: { class: "replay_retained", expires_at: null },
-          secrets,
-          excluded_paths: sealed.excluded_paths,
-          deterministic: false,
-          model_version_pinned: true,
-          now: clock(),
-        });
-
-        ledger.addRound({
-          round: state.round,
-          kind: state.kind,
-          attempt,
-          superseded_attempts: state.superseded,
-          review: null,
-          node_reviews: [],
-          verification,
-          checks,
-          // Open after verification plus declined: everything a person still
-          // has in front of them at the end of this round.
-          remediable_findings: verification.open_keys.length + declines.length,
-          directly_verified: 0,
-          declines,
-        });
-
-        const verificationStep = routeVerification({
-          verification,
-          toVerify,
-          openFindings: state.openFindings,
-          declines: ledger.declines.length,
-          remediationRound: state.remediationRound,
+          record,
           maxRounds,
-          spend: ledger.spend(),
           budget: ticketBudgetMicros(agentResult.invocation.credential_class),
           configPath,
+          secrets,
+          verify: verifyRunner,
+          clock,
+          progress,
         });
         state = applyStep(state, verificationStep);
         if (verificationStep.next === "stop") {

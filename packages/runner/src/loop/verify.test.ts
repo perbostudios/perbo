@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import type { ClosureRow, ClosureVerification } from "@perbo/review";
-import { refuseWidening, routeVerification } from "./verify.js";
-import { finding } from "./test-support/fakes.js";
+import { SecretIndex } from "@perbo/contracts";
+import { BundleStore } from "../bundle.js";
+import type { SealResult } from "../seal.js";
+import { TicketRunConfigSchema } from "./config.js";
+import { Ledger } from "./ledger.js";
+import { refuseWidening, routeVerification, verifyRound } from "./verify.js";
+import { attempt, contract, finding, review, roundState } from "./test-support/fakes.js";
 
 const verification = (overrides: Partial<ClosureVerification> = {}): ClosureVerification => ({
   all_closed: true,
@@ -28,7 +36,7 @@ const closed = (key: string): ClosureRow => ({
   idiomatic: "cannot_tell",
   practice: "",
 });
-const open = (key: string): ClosureRow => ({
+const openRow = (key: string): ClosureRow => ({
   finding_key: key,
   status: "not_closed",
   pointer: "",
@@ -143,7 +151,7 @@ describe("where a round's closure verification sends the run", () => {
       verification: verification({
         all_closed: false,
         open_keys: [one.key],
-        per_finding: [open(one.key)],
+        per_finding: [openRow(one.key)],
       }),
     });
 
@@ -165,7 +173,7 @@ describe("where a round's closure verification sends the run", () => {
       verification: verification({
         all_closed: false,
         open_keys: [left.key],
-        per_finding: [closed(shut.key), open(left.key)],
+        per_finding: [closed(shut.key), openRow(left.key)],
       }),
     });
 
@@ -186,7 +194,7 @@ describe("where a round's closure verification sends the run", () => {
       verification: verification({
         all_closed: false,
         open_keys: [left.key],
-        per_finding: [closed(shut.key), open(left.key)],
+        per_finding: [closed(shut.key), openRow(left.key)],
       }),
     };
     const atBoth = route({
@@ -221,7 +229,7 @@ describe("where a round's closure verification sends the run", () => {
       verification: verification({
         all_closed: false,
         open_keys: [left.key],
-        per_finding: [closed(shut.key), open(left.key)],
+        per_finding: [closed(shut.key), openRow(left.key)],
       }),
     });
 
@@ -239,10 +247,107 @@ describe("where a round's closure verification sends the run", () => {
       verification: verification({
         all_closed: false,
         open_keys: [left.key],
-        per_finding: [closed(shut.key), open(left.key)],
+        per_finding: [closed(shut.key), openRow(left.key)],
       }),
     });
 
     expect(step.next === "stop" && step.end.detail).toContain("(and 2 declined for a person)");
+  });
+});
+
+describe("the bundle a closure verification leaves", () => {
+  const scratch: string[] = [];
+  afterAll(() => {
+    for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("says which findings are still open, exactly as the verification counted them", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "perbo-verify-"));
+    scratch.push(dir);
+    const plan = contract();
+    const bundles = new BundleStore({ root: join(dir, "bundles"), retainContext: true });
+    const ledger = new Ledger({
+      path: join(dir, `${plan.ticket_id}.attempts.json`),
+      prior: null,
+      ticketId: plan.ticket_id,
+    });
+    const open = finding({ key: "a".repeat(64) });
+    const closedOne = finding({ key: "b".repeat(64) });
+    const recorded = attempt({ attempt_id: "att_0000000000000001" });
+    const sealed: SealResult = {
+      changeset: { changeset_id: "cs_0000000000000001" } as never,
+      head_commit: "ab12cd3",
+      diff: "diff --git a/src/feature.ts b/src/feature.ts",
+      changed_paths: ["src/feature.ts"],
+      excluded_paths: [],
+      excluded_check_artifacts: [],
+      prohibited: [],
+      outside_allowed_paths: [],
+    };
+
+    const step = await verifyRound({
+      config: TicketRunConfigSchema.parse({
+        ticket_key: "AYO-1",
+        repository_root: "/repo",
+        worktree_root: "/wt",
+        bundle_root: join(dir, "bundles"),
+        quarantine_root: "/quarantine",
+        state_root: "/state",
+      }),
+      contract: plan,
+      state: roundState({
+        kind: "remediate",
+        round: 1,
+        remediationRound: 1,
+        openFindings: [open, closedOne],
+        finalReview: review(),
+      }),
+      ledger,
+      bundles,
+      attemptId: "att_0000000000000001",
+      attempt: recorded,
+      sealed,
+      gating: [],
+      checks: [],
+      declines: [],
+      toClose: [open, closedOne],
+      widened: [],
+      scopeGiven: [],
+      pathsAllowed: ["src/**"],
+      record: {
+        round: 1,
+        kind: "remediate",
+        attempt: recorded,
+        superseded_attempts: [],
+        review: null,
+        node_reviews: [],
+        verification: null,
+        checks: [],
+        remediable_findings: 0,
+        directly_verified: 0,
+        declines: [],
+      },
+      maxRounds: 2,
+      budget: null,
+      configPath: "/repo/.perbo/config.json",
+      secrets: new SecretIndex(),
+      verify: async () =>
+        verification({
+          all_closed: false,
+          open_keys: [open.key],
+          per_finding: [closed(closedOne.key), openRow(open.key)],
+        }),
+      clock: () => new Date("2026-08-27T00:00:00.000Z"),
+      progress: () => undefined,
+    });
+
+    const written = bundles
+      .forTicket(plan.ticket_id)
+      .filter((bundle) => bundle.subject_id === "cv_att_0000000000000001");
+    expect(written).toHaveLength(1);
+    expect(written[0]!.inputs["findings_open"]).toBe(open.key);
+    expect(written[0]!.inputs["findings_closed"]).toBe(closedOne.key);
+    expect(written[0]!.inputs["head_commit"]).toBe("ab12cd3");
+    expect(step.next).toBe("advance");
   });
 });
