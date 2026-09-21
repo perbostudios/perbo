@@ -13,7 +13,7 @@ import {
 import { parseStopAnswers } from "@perbo/runner";
 import { UsageError } from "../usage-error.js";
 import type { Streams } from "../streams.js";
-import { HIDING_WARNING, stopsCommandLine } from "./stops.js";
+import { HIDING_WARNING, IsoInstantSchema, stopsCommandLine } from "./stops.js";
 import { runCommandLine } from "../command-line/terminal.js";
 
 /**
@@ -159,6 +159,20 @@ describe("perbo stops", () => {
     expect(() => stopsCommandLine.read(["--since", "yesterday"]).input).toThrow(UsageError);
     expect(() => stopsCommandLine.read(["--all"]).input).toThrow(UsageError);
     expect(stopsCommandLine.read(["--since", "2026-09-02"]).input.since).toBe("2026-09-02T00:00:00.000Z");
+  });
+
+  it("bounds the window by the same rule wherever the date came from", () => {
+    // The flag and the endpoint's `since` field are one schema, so a date one
+    // takes the other takes and the refusal is the same sentence — what the
+    // window is bounded by is a time rather than a spelling.
+    expect(IsoInstantSchema.safeParse("2026-09-02").success).toBe(true);
+    expect(IsoInstantSchema.safeParse("2026-09-02T11:30:00Z").success).toBe(true);
+    const refused = IsoInstantSchema.safeParse("yesterday");
+    expect(refused.success).toBe(false);
+    expect(refused.error?.issues[0]?.message).toBe("--since requires an ISO date, got 'yesterday'");
+    // And a value shaped like a flag is not a time, so it never reaches the
+    // window from either side.
+    expect(IsoInstantSchema.safeParse("--repo=/tmp").success).toBe(false);
   });
 });
 

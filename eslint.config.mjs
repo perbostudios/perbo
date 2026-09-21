@@ -81,14 +81,16 @@ const NO_TERMINAL_ADAPTER = {
     "Call the command, do not run it from a line: the terminal adapter is the entry point's (ADR-0023 §4).",
 };
 
-/** The files that call other commands in this process. */
+/**
+ * The modules that call other commands in this process, whole: a file added
+ * beside the ones that call them today is held to the same rule, which naming
+ * each file would have let it escape.
+ */
 const IN_PROCESS_CALLERS = {
   endpoint: ["apps/cli/src/endpoint/**"],
   queueAndInterview: [
-    "apps/cli/src/commands/serve/index.ts",
-    "apps/cli/src/commands/interview/index.ts",
-    "apps/cli/src/commands/interview/claude.ts",
-    "apps/cli/src/commands/interview/codex.ts",
+    "apps/cli/src/commands/serve/**",
+    "apps/cli/src/commands/interview/**",
   ],
 };
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approveCommandLine, listCommandLine } from "../commands/admit.js";
+import { admitCommandLine, approveCommandLine, listCommandLine } from "../commands/admit.js";
 import { editCommandLine } from "../commands/edit/index.js";
 import { inspectCommandLine } from "../commands/inspect.js";
 import { mcpCommandLine } from "../commands/mcp.js";
@@ -27,6 +27,9 @@ describe("a word the command has no room for", () => {
     );
     expect(() => listCommandLine.read(["extra"])).toThrow(
       /^list takes no ticket key: it prints the admitted work, e\.g\. perbo list --all$/,
+    );
+    expect(() => admitCommandLine.read(["Search results paginate"])).toThrow(
+      /^admit takes no positional argument: what is admitted is given as flags/,
     );
   });
 });

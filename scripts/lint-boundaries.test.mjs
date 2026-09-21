@@ -211,6 +211,17 @@ test("the queue and the interview read their own line and run no command from on
   await allows(serve, USES("../../command-line/grammar.js"));
   await refuses(serve, USES("../run/internal/relevel.js"), OWN_INTERIOR);
   await refuses(serve, USES("../../test-support/paths.js"), "imports no test code");
+  // Every file of either module, not the four that call a command today.
+  await refuses(
+    "apps/cli/src/commands/serve/waits.ts",
+    USES("../../command-line/terminal.js"),
+    RUNS_NO_LINE,
+  );
+  await refuses(
+    "apps/cli/src/commands/interview/claude.ts",
+    USES("../../command-line/terminal.js"),
+    RUNS_NO_LINE,
+  );
 });
 
 test("a command that is nobody's in-process callee is not this rule's business", async () => {
