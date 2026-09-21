@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { projectTicket } from "../src/renderer/tasks/ticket-workspace.js";
-import { sampleBridge } from "../src/sample-host/bridge.js";
-import type { Job } from "../src/shared/protocol.js";
+import { projectTicket } from "./ticket-workspace.js";
+import { sampleBridge } from "../../sample-host/bridge.js";
+import type { Job } from "../../shared/protocol.js";
 
 async function fixture() {
   const workspace = structuredClone(await sampleBridge.request({ kind: "snapshot" }));

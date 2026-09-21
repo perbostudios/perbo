@@ -10,14 +10,14 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { AcceptanceCriterion } from "@perbo/contracts";
-import { EditingSessionSchema } from "../src/shared/protocol.js";
-import type { ReplyMap, Request } from "../src/shared/protocol.js";
-import { editingForm } from "../src/shared/contract-editing.js";
-import { bridge } from "../src/renderer/workspace/index.js";
-import { sampleBridge } from "../src/sample-host/bridge.js";
-import { Composer } from "../src/renderer/tasks/Composer.js";
-import { ContractScreen } from "../src/renderer/tasks/ContractScreen.js";
-import type { TaskContext } from "../src/renderer/tasks/task-context.js";
+import { EditingSessionSchema } from "../../shared/protocol.js";
+import type { ReplyMap, Request } from "../../shared/protocol.js";
+import { editingForm } from "../../shared/contract-editing.js";
+import { bridge } from "../workspace/index.js";
+import { sampleBridge } from "../../sample-host/bridge.js";
+import { Composer } from "./Composer.js";
+import { ContractScreen } from "./ContractScreen.js";
+import type { TaskContext } from "./task-context.js";
 
 let client: QueryClient;
 beforeEach(() => {

@@ -11,14 +11,14 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { App } from "../src/renderer/shell/App.js";
-import type { Route, TaskView } from "../src/renderer/shell/route.js";
-import type { Detail, Snapshot } from "../src/shared/protocol.js";
-import { runnerProgress } from "../src/shared/runner-progress.js";
-import { HomePage } from "../src/renderer/tasks/HomePage.js";
-import { TaskPage } from "../src/renderer/tasks/TaskPage.js";
-import { sampleBridge } from "../src/sample-host/bridge.js";
-import { isLive } from "../src/shared/jobs.js";
+import { App } from "./App.js";
+import type { Route, TaskView } from "./route.js";
+import type { Detail, Snapshot } from "../../shared/protocol.js";
+import { runnerProgress } from "../../shared/runner-progress.js";
+import { HomePage } from "../tasks/HomePage.js";
+import { TaskPage } from "../tasks/TaskPage.js";
+import { sampleBridge } from "../../sample-host/bridge.js";
+import { isLive } from "../../shared/jobs.js";
 
 // A CI runner renders this app several times slower than a laptop, and the
 // library's default one-second `findBy` timeout reads as a missing button

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { StandingProhibitedEntry } from "@perbo/contracts";
-import { ContractEditing, markOf } from "../src/shared/contract-editing.js";
-import { TaskModelsSchema, type EditingSession } from "../src/shared/protocol.js";
+import { ContractEditing, markOf } from "./contract-editing.js";
+import { TaskModelsSchema, type EditingSession } from "./protocol.js";
 
 /**
  * The explorer's marks (SCP-318). A mark changes the draft's canonical scope —

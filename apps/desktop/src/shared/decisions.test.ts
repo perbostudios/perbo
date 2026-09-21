@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FINDING_ROUTINGS } from "@perbo/contracts";
-import { decisionQuestions } from "../src/shared/decisions.js";
+import { decisionQuestions } from "./decisions.js";
 
 /**
  * Which findings reach the person.

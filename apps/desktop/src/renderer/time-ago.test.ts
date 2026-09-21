@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { timeAgo } from "../src/renderer/time-ago.js";
+import { timeAgo } from "./time-ago.js";
 
 /**
  * How long ago a recorded moment was, for a person reading a list. The clock

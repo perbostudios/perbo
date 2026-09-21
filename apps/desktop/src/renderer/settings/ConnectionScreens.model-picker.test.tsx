@@ -9,10 +9,10 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
-import { ModelPicker } from "../src/renderer/settings/ConnectionScreens.js";
-import { bridge } from "../src/renderer/workspace/index.js";
-import { SettingsSchema } from "../src/shared/protocol.js";
-import type { ModelCatalog, ModelProvider } from "../src/shared/protocol.js";
+import { ModelPicker } from "./ConnectionScreens.js";
+import { bridge } from "../workspace/index.js";
+import { SettingsSchema } from "../../shared/protocol.js";
+import type { ModelCatalog, ModelProvider } from "../../shared/protocol.js";
 
 const clients: QueryClient[] = [];
 afterEach(() => {

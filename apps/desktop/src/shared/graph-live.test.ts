@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { assembleLiveGraph } from "../src/shared/graph-live.js";
-import type { LiveNodeInput, LiveRecords, LiveReview } from "../src/shared/graph-live.js";
+import { assembleLiveGraph } from "./graph-live.js";
+import type { LiveNodeInput, LiveRecords, LiveReview } from "./graph-live.js";
 
 const FINDING = "d".repeat(64);
 const REVIEWED_AT = "2026-01-02T00:00:00.000Z";

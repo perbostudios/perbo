@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EditingTargetSchema, GRAPH_NODE_STATES, RequestSchema } from "../src/shared/protocol.js";
+import { EditingTargetSchema, GRAPH_NODE_STATES, RequestSchema } from "./protocol.js";
 
 /**
  * The Graph pane's requests are closed (ADR-0023): a renderer names a

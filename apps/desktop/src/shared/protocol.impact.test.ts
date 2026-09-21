@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { RequestSchema } from "../src/shared/protocol.js";
-import { PLANNING_KINDS, lane } from "../src/shared/jobs.js";
+import { RequestSchema } from "./protocol.js";
+import { PLANNING_KINDS, lane } from "./jobs.js";
 
 /**
  * The Impact pane's one request (SCP-320, D-015). It names this planning
  * session and nothing else: the repository, the scope, the spec and the index
  * are all the host's to derive from the session's own records, so no field here
  * can become a filesystem target or a command
- * ([ADR-0023](../../../docs/adr/0023-untrusted-context-boundary.md) §4).
+ * ([ADR-0023](../../../../docs/adr/0023-untrusted-context-boundary.md) §4).
  */
 
 const session = "80000000-0000-4000-8000-000000000002";

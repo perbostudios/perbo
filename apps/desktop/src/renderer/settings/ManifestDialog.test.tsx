@@ -2,9 +2,9 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ManifestDialog } from "../src/renderer/settings/ManifestDialog.js";
-import { bridge } from "../src/renderer/workspace/index.js";
-import type { ManifestEditor, ReplyMap, Request } from "../src/shared/protocol.js";
+import { ManifestDialog } from "./ManifestDialog.js";
+import { bridge } from "../workspace/index.js";
+import type { ManifestEditor, ReplyMap, Request } from "../../shared/protocol.js";
 
 // jsdom has no modal dialog; the dialog's own open state is all these cases read.
 beforeAll(() => {

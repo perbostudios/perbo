@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import {
   ShortcutProvider,
   useShortcut,
-} from "../src/renderer/shell/shortcuts.js";
+} from "./shortcuts.js";
 
 function DecisionScreen({ onNext }: { onNext: () => void }) {
   useShortcut("decisionNext", onNext);

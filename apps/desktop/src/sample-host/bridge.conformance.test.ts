@@ -3,14 +3,14 @@ import { expect, expectTypeOf, it } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createRoutes, requestKinds } from "../src/host/routes.js";
-import type { HostModules } from "../src/host/routes.js";
-import { disposeFixtures, fixture } from "../src/host/test-support/host-fixture.js";
-import { handlers } from "../src/sample-host/handlers.js";
-import { sampleBridge } from "../src/sample-host/bridge.js";
-import { runProcess } from "../src/host/process.js";
-import type { Change, DesktopBridge, Draft, Job, ReplyMap, Request } from "../src/shared/protocol.js";
-import { describeBridgeContract } from "./support/bridge-contract.js";
+import { createRoutes, requestKinds } from "../host/routes.js";
+import type { HostModules } from "../host/routes.js";
+import { disposeFixtures, fixture } from "../host/test-support/host-fixture.js";
+import { handlers } from "./handlers.js";
+import { sampleBridge } from "./bridge.js";
+import { runProcess } from "../host/process.js";
+import type { Change, DesktopBridge, Draft, Job, ReplyMap, Request } from "../shared/protocol.js";
+import { describeBridgeContract } from "../test-support/bridge-contract.js";
 
 /**
  * Every reply the protocol declares belongs to a kind it declares, and every

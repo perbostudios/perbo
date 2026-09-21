@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PREVIEW_BYTE_CAP, RequestSchema } from "../src/shared/protocol.js";
+import { PREVIEW_BYTE_CAP, RequestSchema } from "./protocol.js";
 
 /**
  * The explorer's requests are closed (ADR-0023): a renderer names a repository

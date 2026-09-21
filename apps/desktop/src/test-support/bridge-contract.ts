@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { busyMessage, lane } from "../../src/shared/jobs.js";
-import { ChangeSchema, INTERVIEW_NEEDS_A_TITLE } from "../../src/shared/protocol.js";
-import type { Change, DesktopBridge, Job } from "../../src/shared/protocol.js";
+import { busyMessage, lane } from "../shared/jobs.js";
+import { ChangeSchema, INTERVIEW_NEEDS_A_TITLE } from "../shared/protocol.js";
+import type { Change, DesktopBridge, Job } from "../shared/protocol.js";
 
 /**
  * One adapter of the desktop's request protocol, set up far enough to be asked

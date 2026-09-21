@@ -2,17 +2,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { App } from "../src/renderer/shell/App.js";
-import { CreateContext } from "../src/renderer/shell/create.js";
-import { HomePage } from "../src/renderer/tasks/HomePage.js";
-import { sampleBridge } from "../src/sample-host/bridge.js";
-import { bridge } from "../src/renderer/workspace/index.js";
-import { resetRailSize } from "../src/renderer/shell/rail-size.js";
-import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests } from "../src/shared/shortcuts.js";
-import { withDraft } from "../src/renderer/shell/create.js";
-import { SpecSection } from "../src/renderer/planning/SpecSection.js";
+import { App } from "../shell/App.js";
+import { CreateContext } from "../shell/create.js";
+import { HomePage } from "../tasks/HomePage.js";
+import { sampleBridge } from "../../sample-host/bridge.js";
+import { bridge } from "../workspace/index.js";
+import { resetRailSize } from "../shell/rail-size.js";
+import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests } from "../../shared/shortcuts.js";
+import { withDraft } from "../shell/create.js";
+import { SpecSection } from "./SpecSection.js";
 import type { GraphEdit } from "@perbo/contracts/graph-edit";
-import type { ExportedName } from "../src/shared/protocol.js";
+import type { ExportedName } from "../../shared/protocol.js";
 import * as specText from "@perbo/planning/spec-text";
 
 let client: QueryClient;
@@ -1764,7 +1764,7 @@ describe("the Graph pane (SCP-316)", () => {
   it("shows the paths outside every node beside a note, not instead of them", async () => {
     // The two are not alternatives: a note says why part of the reading is
     // missing, and the outside paths are a reading that was not.
-    const { OutsidePathsForTests } = await import("../src/renderer/planning/GraphPane.js");
+    const { OutsidePathsForTests } = await import("./GraphPane.js");
     render(<OutsidePathsForTests outside={["docs/activation.md"]} note="Something could not be read." />);
     expect(screen.getByText("Something could not be read.")).toBeTruthy();
     expect(screen.getByText("docs/activation.md")).toBeTruthy();

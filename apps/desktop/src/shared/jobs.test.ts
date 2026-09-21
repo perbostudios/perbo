@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EXCLUSIVE_KINDS, PLANNING_KINDS, exclusiveJob, heldRepository, lane } from "../src/shared/jobs.js";
+import { EXCLUSIVE_KINDS, PLANNING_KINDS, exclusiveJob, heldRepository, lane } from "./jobs.js";
 
 /**
  * The two lanes (D-101), and the rule that every command the host starts has a

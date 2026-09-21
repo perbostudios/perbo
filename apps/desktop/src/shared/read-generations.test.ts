@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ALL_SCOPE, ReadGenerations, SNAPSHOT_SCOPE } from "../src/shared/read-generations.js";
+import { ALL_SCOPE, ReadGenerations, SNAPSHOT_SCOPE } from "./read-generations.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;

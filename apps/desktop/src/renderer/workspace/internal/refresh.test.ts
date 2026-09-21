@@ -4,12 +4,12 @@ import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type PropsWithChildren } from "react";
 import { sizeEstimate } from "@perbo/contracts/size";
-import { WorkspaceRefresh } from "../src/renderer/workspace/internal/refresh.js";
-import { WorkspaceReads } from "../src/host/workspace-reads.js";
-import { sampleBridge } from "../src/sample-host/bridge.js";
-import { bridge, useGraph, useTaskSummary } from "../src/renderer/workspace/index.js";
-import { TaskModelsSchema } from "../src/shared/protocol.js";
-import type { Change, DesktopBridge, Detail, GraphView, Job, ReplyMap, Request, Snapshot, TaskSummary } from "../src/shared/protocol.js";
+import { WorkspaceRefresh } from "./refresh.js";
+import { WorkspaceReads } from "../../../host/workspace-reads.js";
+import { sampleBridge } from "../../../sample-host/bridge.js";
+import { bridge, useGraph, useTaskSummary } from "../index.js";
+import { TaskModelsSchema } from "../../../shared/protocol.js";
+import type { Change, DesktopBridge, Detail, GraphView, Job, ReplyMap, Request, Snapshot, TaskSummary } from "../../../shared/protocol.js";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => { for (const clean of cleanups.splice(0)) clean(); });

@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs";
 import { build } from "esbuild";
 import { expect, it } from "vitest";
-import config from "../vite.config.js";
+import config from "../../vite.config.js";
 
 /**
  * The sample host is a development and test adapter
- * ([D-NEW-desktop-sample-host](../../../docs/11-open-decisions.md)), so the
+ * ([D-NEW-desktop-sample-host](../../../../docs/11-open-decisions.md)), so the
  * packaged renderer must not contain it: the app the person installs answers
  * from their own records or says it could not, and never from a sample.
  *

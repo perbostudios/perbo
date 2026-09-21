@@ -5,10 +5,10 @@ import {
   INTERVIEW_CONVERSATION_CAP,
   InterviewEntrySchema,
   RequestSchema,
-} from "../src/shared/protocol.js";
-import { PLANNING_KINDS } from "../src/shared/jobs.js";
-import { editingForm } from "../src/shared/contract-editing.js";
-import { SettingsSchema, TaskModelsSchema } from "../src/shared/protocol.js";
+} from "./protocol.js";
+import { PLANNING_KINDS } from "./jobs.js";
+import { editingForm } from "./contract-editing.js";
+import { SettingsSchema, TaskModelsSchema } from "./protocol.js";
 
 /**
  * The interview's three requests are closed (ADR-0023, D-102): the renderer

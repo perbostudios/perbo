@@ -9,11 +9,11 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { App } from "../src/renderer/shell/App.js";
-import { ContractScreen } from "../src/renderer/tasks/ContractScreen.js";
-import { sampleBridge } from "../src/sample-host/bridge.js";
-import { setPlatformForTests } from "../src/shared/shortcuts.js";
-import type { TaskContext } from "../src/renderer/tasks/task-context.js";
+import { App } from "../shell/App.js";
+import { ContractScreen } from "./ContractScreen.js";
+import { sampleBridge } from "../../sample-host/bridge.js";
+import { setPlatformForTests } from "../../shared/shortcuts.js";
+import type { TaskContext } from "./task-context.js";
 
 /**
  * What the desktop says stops a run (SCP-323, D-096).

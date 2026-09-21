@@ -9,12 +9,12 @@ import {
   within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { App } from "../src/renderer/shell/App.js";
-import { sampleBridge } from "../src/sample-host/bridge.js";
-import { bridge } from "../src/renderer/workspace/index.js";
-import { setPlatformForTests } from "../src/shared/shortcuts.js";
-import { resetRailSize } from "../src/renderer/shell/rail-size.js";
-import type { ReplyMap, Request } from "../src/shared/protocol.js";
+import { App } from "./App.js";
+import { sampleBridge } from "../../sample-host/bridge.js";
+import { bridge } from "../workspace/index.js";
+import { setPlatformForTests } from "../../shared/shortcuts.js";
+import { resetRailSize } from "./rail-size.js";
+import type { ReplyMap, Request } from "../../shared/protocol.js";
 
 let client: QueryClient;
 beforeEach(() => {

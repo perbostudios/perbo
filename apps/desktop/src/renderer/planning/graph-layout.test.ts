@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { graphColumns } from "../src/renderer/planning/graph-layout.js";
+import { graphColumns } from "./graph-layout.js";
 
 /**
  * The Graph pane's own layout (D-100): columns by rank, deterministic, and

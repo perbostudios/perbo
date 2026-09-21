@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { judgingChecks } from "../src/shared/checks.js";
+import { judgingChecks } from "./checks.js";
 
 /**
  * The attempt view shows the checks that judged the change (D-107): a result a
