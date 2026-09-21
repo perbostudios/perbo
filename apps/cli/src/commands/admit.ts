@@ -2049,12 +2049,16 @@ export function listJson(input: {
   });
 }
 
-/** What one listing read: the store it came from, the filter, and the tickets. */
+/**
+ * What one listing read: the store it came from, the filter it was taken
+ * under, and the tickets.
+ *
+ * The document is the report, built once: the table a person reads and the
+ * record `--json` prints are two renderings of one listing rather than two
+ * listings that have to agree.
+ */
 export interface ListReport {
-  store: string;
-  all: boolean;
-  shown: readonly Ticket[];
-  total: number;
+  readonly document: ListJson;
 }
 
 export const ListInputSchema = z.strictObject({
@@ -2068,16 +2072,18 @@ export function list(input: ListInput, context: CommandContext): ListReport {
   const dir = storeFor(context.cwd, input.target);
   const all = listTickets(dir);
   return {
-    store: dir,
-    all: input.all,
-    shown: input.all ? all : all.filter(isActive),
-    total: all.length,
+    document: listJson({
+      store: dir,
+      all: input.all,
+      shown: input.all ? all : all.filter(isActive),
+      total: all.length,
+    }),
   };
 }
 
 /** The listing as a person reads it: two lines a ticket, at a fixed width. */
-function renderListing(report: ListReport): string {
-  const rows = report.shown.map((ticket) => ({
+function renderListing(document: ListJson): string {
+  const rows = document.tickets.map((ticket) => ({
     key: ticket.key,
     state: ticket.state,
     title: ticket.title,
@@ -2131,20 +2137,21 @@ const LIST_GRAMMAR: Grammar<typeof LIST_FLAGS> = {
  */
 export const listReport: CommandReport<ListInput, { json: boolean }, ListReport> = {
   run: list,
-  toJson: (report) => listJson(report),
+  toJson: (report) => report.document,
   render(report, _output, target): Rendered {
+    const { counts, filter } = report.document;
     // Before every other branch, including the empty-store one: in this mode
     // stdout carries one JSON document and nothing else, and an empty store is
     // a listing of no tickets rather than an occasion for advice. The advice is
     // still worth giving, so it goes to stderr where a pipe does not see it.
     if (target.json) {
       return {
-        stdout: `${JSON.stringify(listJson(report), null, 2)}\n`,
-        stderr: report.total === 0 ? EMPTY_STORE_HINT : "",
+        stdout: `${JSON.stringify(report.document, null, 2)}\n`,
+        stderr: counts.total === 0 ? EMPTY_STORE_HINT : "",
         exitCode: EXIT_CODES.approve,
       };
     }
-    if (report.total === 0) {
+    if (counts.total === 0) {
       return {
         stdout: "No admitted work.\n",
         stderr: EMPTY_STORE_HINT,
@@ -2152,9 +2159,9 @@ export const listReport: CommandReport<ListInput, { json: boolean }, ListReport>
       };
     }
     return {
-      stdout: renderListing(report),
-      stderr: `\n${report.shown.length} of ${report.total} shown${
-        report.all ? "" : " (active only; --all for the rest)"
+      stdout: renderListing(report.document),
+      stderr: `\n${counts.shown} of ${counts.total} shown${
+        filter.all ? "" : " (active only; --all for the rest)"
       }\n`,
       exitCode: EXIT_CODES.approve,
     };
