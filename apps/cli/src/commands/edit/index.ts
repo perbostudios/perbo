@@ -868,7 +868,8 @@ export const editCommandLine: NarratedCommand<EditInput, { json: boolean }, Edit
   read(argv) {
     const line = parseArgv(GRAMMAR, argv);
     const undo = line.flags["--undo"];
-    if (undo !== undefined && !/^[1-9][0-9]*$/.test(undo)) {
+    const undone = undo === undefined ? null : Number(undo);
+    if (undone !== null && (!Number.isInteger(undone) || undone < 1)) {
       throw new UsageError(
         `--undo takes the number of the edit to revert, counting from 1. Got '${undo}'`,
       );
@@ -888,7 +889,7 @@ export const editCommandLine: NarratedCommand<EditInput, { json: boolean }, Edit
         manualReviewer: line.flags["--manual-reviewer"] ?? null,
         manualReason: line.flags["--manual-reason"] ?? null,
         graphEdit: line.flags["--graph-edit"] ?? null,
-        undo: undo === undefined ? null : Number(undo),
+        undo: undone,
         author: author ?? "you",
       }),
       output: { json: line.flags["--json"] === true },

@@ -292,3 +292,34 @@ describe("perbo edit", () => {
     expect(after.paths_allowed).toEqual(before.paths_allowed);
   });
 }, SPAWN_TEST_TIMEOUT_MS);
+
+/**
+ * `--undo 2` names the second recorded edit, and what counts as naming a
+ * number is `Number`'s own reading of the token: a person who typed `1.0`,
+ * `01` or a space before the digit named an edit, and the command reverts it.
+ * Anything that is not a whole number at least 1 is refused naming what was
+ * typed, because the alternative is reverting an edit nobody named.
+ */
+describe("the edit --undo names", () => {
+  const undo = (raw: string): number | null =>
+    editCommandLine.read(["PRB-1", "--undo", raw]).input.undo;
+
+  it("is the number the token spells, however it was spelled", () => {
+    expect(undo("1")).toBe(1);
+    expect(undo("2")).toBe(2);
+    expect(undo("1.0")).toBe(1);
+    expect(undo("01")).toBe(1);
+    expect(undo(" 2")).toBe(2);
+    expect(undo("1e3")).toBe(1000);
+  });
+
+  it("is refused where the token spells no edit, in the words the person typed", () => {
+    for (const raw of ["0", "-1", "1.5", "x", ""]) {
+      expect(() => undo(raw)).toThrow(
+        new UsageError(
+          `--undo takes the number of the edit to revert, counting from 1. Got '${raw}'`,
+        ),
+      );
+    }
+  });
+});
