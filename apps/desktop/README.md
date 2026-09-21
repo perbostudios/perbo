@@ -47,7 +47,7 @@ The `node` development dependency is **not** shipped: nothing copies it into the
 ```sh
 pnpm desktop:build
 pnpm --filter @perbo/desktop typecheck test lint
-pnpm --filter @perbo/runner exec vitest run test/codex-admission.test.ts test/codex-rpc.test.ts
+pnpm --filter @perbo/runner exec vitest run src/codex/index.admission.test.ts src/codex/internal/rpc.test.ts
 ```
 
 Host integration tests create disposable Git repositories and call the actual bundled CLI for admission, edit, inspect and approval. Coding execution in these tests is controlled. The screens and flows are described in [docs/15](../../docs/15-product-experience-and-onboarding.md).

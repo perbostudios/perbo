@@ -124,4 +124,4 @@ Scoped here to the seeded-defect corpus and the fixed regression suite drawn fro
 
 **Consumes:** nothing at runtime — it is a build-time step.
 
-**Emits:** `packages/runner/src/skill-content.ts`, the generated module the runner appends to an execution brief for up to three explicitly selected skills, pinned and hashed on the attempt record — never native skill discovery, never repository-supplied instructions ([D-094](11-open-decisions.md)).
+**Emits:** `packages/runner/src/skills/internal/content.ts`, the generated module the runner appends to an execution brief for up to three explicitly selected skills, pinned and hashed on the attempt record — never native skill discovery, never repository-supplied instructions ([D-094](11-open-decisions.md)).

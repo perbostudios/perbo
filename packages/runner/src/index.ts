@@ -9,7 +9,7 @@ export {
   runNumbers,
 } from "./attempts.js";
 export { BundleStore } from "./bundle.js";
-export { runsTurboWithoutForce, TURBO_FORCE_FLAG } from "./checks.js";
+export { runsTurboWithoutForce, TURBO_FORCE_FLAG } from "./checks/index.js";
 export { parseDeclines } from "./declines.js";
 export type { Decline } from "./declines.js";
 export {
@@ -26,8 +26,8 @@ export type { DeliveredChecksReading, TicketDeliveryState } from "./delivery.js"
 export { GithubCredentialError, requireGithubCredential } from "./github-credential.js";
 export type { GithubCredentialReading } from "./github-credential.js";
 export { acquireServeLock, liveRunLocks, ServeLockedError } from "./lock.js";
-export { BaseSourceSchema, runTicket, TicketRunConfigSchema } from "./loop.js";
-export type { BaseSource, TicketRunResult } from "./loop.js";
+export { BaseSourceSchema, runTicket, TicketRunConfigSchema } from "./loop/index.js";
+export type { BaseSource, TicketRunResult } from "./loop/index.js";
 export { mergeLoopPullRequest } from "./merge.js";
 export type { LoopMergeOutcome } from "./merge.js";
 export { preflight, renderPreflight } from "./preflight.js";
@@ -42,5 +42,5 @@ export { RunRefusedError } from "./refusal.js";
 export { resolveResumeSource, resumeNote, ResumeRefusedError } from "./resume.js";
 export { expandableHeredocBodies, UNKNOWN_CWD } from "./shell/index.js";
 export type { CommandSegment, WorktreeScope } from "./shell/index.js";
-export { withExecutorSkills } from "./skills.js";
+export { withExecutorSkills } from "./skills/index.js";
 export { commitSpec } from "./spec-commit.js";
