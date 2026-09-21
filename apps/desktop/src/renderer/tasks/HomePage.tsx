@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { formatUsd } from "@perbo/contracts/browser";
 import {
   Button,
   Dropdown,
@@ -235,7 +236,7 @@ function ArchiveRow({
       <span role="cell">
         {summary.data?.costMicros === null || summary.data === undefined
           ? "—"
-          : "$" + (summary.data.costMicros / 1_000_000).toFixed(2)}
+          : formatUsd(summary.data.costMicros, 2)}
       </span>
       <span role="cell">
         {row.ticket.delivery.state === "merged"
