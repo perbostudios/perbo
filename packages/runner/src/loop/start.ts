@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import {
   assertProviderEnabled,
+  attemptsFileName,
   hasAcceptanceCriteria,
   isRefusal,
   type MaterializationManifest,
@@ -125,7 +126,7 @@ export async function start(args: {
   }
 
   const bundles = new BundleStore({ root: config.bundle_root, retainContext: config.retain_context });
-  const attemptsPath = join(config.state_root, `${contract.ticket_id}.attempts.json`);
+  const attemptsPath = join(config.state_root, attemptsFileName(contract.ticket_id));
   /**
    * Every attempt of every earlier run, read before this one starts: what this
    * run's attempts are appended to, what attributes the commits already on the

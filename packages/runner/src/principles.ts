@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { PRINCIPLES_FILENAME, STORE_DIRNAME } from "@perbo/contracts";
 
 /**
  * The product-principles ratchet (D-065 option 3).
@@ -18,9 +19,11 @@ import { join } from "node:path";
  * data, with a standing instruction that principles resolve what unspecified
  * behaviour should do and never widen scope, weaken security, or excuse a
  * failing check.
+ *
+ * `@perbo/contracts` declares the file's name, and `perbo principle add`
+ * reaches it through this package's entry.
  */
-
-export const PRINCIPLES_FILENAME = "principles.md";
+export { PRINCIPLES_FILENAME };
 
 /**
  * The most principle text a brief will carry. Every byte here is repeated in
@@ -42,6 +45,6 @@ export function readPrinciplesFile(path: string): string | null {
   return `${cut}\n\n(truncated: the principles file exceeds ${PRINCIPLES_MAX_BYTES} bytes; trim it)`;
 }
 
-export function readPrinciples(repositoryRoot: string, storeDirname = ".perbo"): string | null {
+export function readPrinciples(repositoryRoot: string, storeDirname = STORE_DIRNAME): string | null {
   return readPrinciplesFile(join(repositoryRoot, storeDirname, PRINCIPLES_FILENAME));
 }
