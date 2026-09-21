@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  parseWorktreeList,
-  repositoryStatus,
-  topLevel,
-  trackedFiles,
-  worktreeForBranch,
-  type Execute,
-} from "./git.js";
+import { repositoryStatus, topLevel, trackedFiles, worktreeForBranch, type Execute } from "./git.js";
 import type { ProcessResult } from "../process.js";
 
 const ok = (stdout: string): ProcessResult => ({
@@ -32,37 +25,50 @@ function fakeGit(answers: Record<string, ProcessResult>): {
 
 const record = (...fields: string[]): string => fields.join("\0");
 
-describe("parseWorktreeList", () => {
-  it("finds the worktree holding a branch, across records", () => {
-    const listed = [
-      record("worktree /checkout", "HEAD abc", "branch refs/heads/main", ""),
-      record("worktree /work/PRB-1", "HEAD def", "branch refs/heads/prb-1", ""),
-    ].join("\0");
-    expect(parseWorktreeList(listed, "refs/heads/prb-1")).toBe("/work/PRB-1");
+describe("the worktree holding a branch", () => {
+  const listing = (listed: string): Record<string, ProcessResult> => ({
+    "worktree list --porcelain -z": ok(listed),
   });
 
-  it("matches a branch whole, so a longer name is not its worktree", () => {
+  it("finds the worktree holding a branch, across records", async () => {
+    const { execute } = fakeGit(
+      listing(
+        [
+          record("worktree /checkout", "HEAD abc", "branch refs/heads/main", ""),
+          record("worktree /work/PRB-1", "HEAD def", "branch refs/heads/prb-1", ""),
+        ].join("\0"),
+      ),
+    );
+    expect(await worktreeForBranch(execute, "/checkout", "refs/heads/prb-1")).toBe("/work/PRB-1");
+  });
+
+  it("matches a branch whole, so a longer name is not its worktree", async () => {
     const listed = record("worktree /work/ab", "branch refs/heads/ab", "") + "\0";
-    expect(parseWorktreeList(listed, "refs/heads/a")).toBeNull();
-    expect(parseWorktreeList(listed, "refs/heads/ab")).toBe("/work/ab");
+    expect(await worktreeForBranch(fakeGit(listing(listed)).execute, "/checkout", "refs/heads/a")).toBeNull();
+    expect(await worktreeForBranch(fakeGit(listing(listed)).execute, "/checkout", "refs/heads/ab")).toBe(
+      "/work/ab",
+    );
   });
 
-  it("keeps a path that holds a newline, which a line-separated listing would split", () => {
+  it("keeps a path that holds a newline, which a line-separated listing would split", async () => {
     const listed = record("worktree /work/two\nlines", "branch refs/heads/prb-1", "") + "\0";
-    expect(parseWorktreeList(listed, "refs/heads/prb-1")).toBe("/work/two\nlines");
+    expect(await worktreeForBranch(fakeGit(listing(listed)).execute, "/checkout", "refs/heads/prb-1")).toBe(
+      "/work/two\nlines",
+    );
   });
 
-  it("answers nothing for a detached record, and for a branch nothing holds", () => {
+  it("answers nothing for a detached record, and for a branch nothing holds", async () => {
     const listed = [
       record("worktree /checkout", "HEAD abc", "detached", ""),
       record("worktree /other", "HEAD def", "branch refs/heads/other", ""),
     ].join("\0");
-    expect(parseWorktreeList(listed, "refs/heads/prb-1")).toBeNull();
-    expect(parseWorktreeList("", "refs/heads/prb-1")).toBeNull();
+    expect(await worktreeForBranch(fakeGit(listing(listed)).execute, "/checkout", "refs/heads/prb-1")).toBeNull();
+    expect(await worktreeForBranch(fakeGit(listing("")).execute, "/checkout", "refs/heads/prb-1")).toBeNull();
   });
 
-  it("answers nothing for a record that names a branch but no worktree", () => {
-    expect(parseWorktreeList(record("branch refs/heads/prb-1", "") + "\0", "refs/heads/prb-1")).toBeNull();
+  it("answers nothing for a record that names a branch but no worktree", async () => {
+    const listed = record("branch refs/heads/prb-1", "") + "\0";
+    expect(await worktreeForBranch(fakeGit(listing(listed)).execute, "/checkout", "refs/heads/prb-1")).toBeNull();
   });
 });
 
@@ -102,6 +108,14 @@ describe("reading a checkout", () => {
       "rev-parse HEAD": ok("abc123\n"),
     });
     expect(await repositoryStatus(detached.execute, "/checkout")).toMatchObject({ branch: "" });
+  });
+
+  it("says a checkout has no commit yet rather than reporting an empty one", async () => {
+    const { execute } = fakeGit({
+      "--no-optional-locks status --porcelain=v1 --branch": ok("## main\n"),
+      "rev-parse HEAD": { code: 128, stdout: "", stderr: "fatal: ambiguous argument 'HEAD'\n", cancelled: false },
+    });
+    await expect(repositoryStatus(execute, "/checkout")).rejects.toThrow("has no commit yet");
   });
 
   it("carries Git's own refusal rather than an empty reading", async () => {

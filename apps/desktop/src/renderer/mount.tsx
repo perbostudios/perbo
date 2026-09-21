@@ -13,8 +13,8 @@ import "./ui/tokens.css";
 import "./styles.css";
 import { App } from "./shell/App.js";
 import { SurfaceProvider, type Surface } from "./shell/surface.js";
-import { bridge } from "./data.js";
-import { flushContractEditors } from "./tasks/contract-editor.js";
+import { bridge } from "./workspace/index.js";
+import { flushContractEditors } from "./contract-editor.js";
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },

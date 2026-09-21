@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Detail, Snapshot, TaskRow } from "../../shared/protocol.js";
-import type { TaskView } from "../shell/App.js";
+import type { TaskView } from "../shell/route.js";
 import { runnerProgress } from "../../shared/runner-progress.js";
 import { exclusiveJob, heldRepository, isLive } from "../../shared/jobs.js";
 

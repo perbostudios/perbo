@@ -7,7 +7,7 @@ import { sampleBridge } from "./bridge.js";
  * reaches stay out of the packaged renderer.
  *
  * The adapter goes into the slot before the renderer is loaded, because
- * `renderer/data.ts` reads the slot as it loads.
+ * `renderer/workspace/` reads the slot as it loads.
  */
 window.perbo = sampleBridge;
 const { mountApp } = await import("../renderer/mount.js");

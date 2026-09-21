@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button, Dialog, FactList, InkIcon, Notice, SectionLabel } from "../ui/index.js";
 import { WizardHeader } from "./wizard.js";
 import { Rename } from "./Rename.js";
-import { errorMessage, useAction } from "../data.js";
+import { errorMessage, useAction } from "../workspace/index.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey } from "./ticket-workspace.js";
 import { costLabel, taskRecords } from "./task-context.js";

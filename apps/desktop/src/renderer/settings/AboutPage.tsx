@@ -1,6 +1,6 @@
 import { Brand, Button, FactList, Notice, PageHeader, SectionLabel } from "../ui/index.js";
-import { errorMessage, useAction, useUsage } from "../data.js";
-import type { PageProps } from "../shell/App.js";
+import { errorMessage, useAction, useUsage } from "../workspace/index.js";
+import type { PageProps } from "../shell/route.js";
 import { useSurface } from "../shell/surface.js";
 import { dollars, monthLabel } from "./UsagePage.js";
 

@@ -14,7 +14,7 @@ import {
   Switch,
   cx,
 } from "../ui/index.js";
-import { errorMessage, useAction, useOutput } from "../data.js";
+import { errorMessage, useAction, useOutput } from "../workspace/index.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { TaskHeader } from "./LoopScreen.js";
 import { costLabel, taskRecords } from "./task-context.js";

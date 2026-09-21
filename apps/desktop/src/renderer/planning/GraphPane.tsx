@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, Notice, cx } from "../ui/index.js";
 import { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS } from "@perbo/contracts/size";
 import type { GraphEdit } from "@perbo/contracts/graph-edit";
-import { bridge, errorMessage, useAction, useGraph } from "../data.js";
+import { bridge, errorMessage, useAction, useGraph } from "../workspace/index.js";
 import { isLive } from "../../shared/jobs.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { GraphInspector, SplitDialog } from "./GraphInspector.js";
@@ -18,8 +18,8 @@ import type {
   Job,
   Snapshot,
 } from "../../shared/protocol.js";
-import type { useContractEditing } from "../tasks/contract-editor.js";
-import type { Route } from "../shell/App.js";
+import type { useContractEditing } from "../contract-editor.js";
+import type { Route } from "../shell/route.js";
 
 /**
  * The Graph pane (D-100, D-101, SCP-316): the plan's execution graph, the size

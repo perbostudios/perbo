@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Notice, ThinkingStatus, cx } from "../ui/index.js";
 import { useQueryClient } from "@tanstack/react-query";
-import { bridge, errorMessage, useGraph } from "../data.js";
+import { bridge, errorMessage, useGraph } from "../workspace/index.js";
 import { graphHistory, latestUndoable } from "./history.js";
 import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS } from "../../shared/contract-editing.js";
 import { INTERVIEW_CONVERSATION_CAP } from "../../shared/protocol.js";
@@ -12,7 +12,7 @@ import type {
   InterviewEntry,
   Snapshot,
 } from "../../shared/protocol.js";
-import type { useContractEditing } from "../tasks/contract-editor.js";
+import type { useContractEditing } from "../contract-editor.js";
 
 /**
  * The interview, docked beside whichever pane is open (D-101, D-102).

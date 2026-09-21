@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { Button, InkIcon, Notice, NumberPop, PageHeader, SectionLabel, cx } from "../ui/index.js";
-import { bridge, errorMessage, useAction } from "../data.js";
+import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { exclusiveJob } from "../../shared/jobs.js";
 import { decisionQuestions } from "../../shared/decisions.js";
 import { useShortcut } from "../shell/shortcuts.js";

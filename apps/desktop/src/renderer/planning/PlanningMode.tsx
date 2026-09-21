@@ -1,13 +1,13 @@
 import { lazy, Suspense, useState } from "react";
 import { Button, EmptyState, InkIcon } from "../ui/index.js";
 import { useCreate } from "../shell/create.js";
-import { useContractEditing } from "../tasks/contract-editor.js";
+import { useContractEditing } from "../contract-editor.js";
 import { ExplorerPane } from "./ExplorerPane.js";
 import { ImpactPane } from "./ImpactPane.js";
 import { HistoryDrawer } from "./HistoryDrawer.js";
 import { InterviewDock } from "./InterviewDock.js";
 import { PLANNING_PANES } from "./panes.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 import type { PlanningPane } from "./panes.js";
 const SpecPane = lazy(() =>
   import("./SpecPane.js").then((module) => ({ default: module.SpecPane })),

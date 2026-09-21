@@ -11,9 +11,9 @@ import {
   Switch,
   useElapsed,
 } from "../ui/index.js";
-import { errorMessage, useAction } from "../data.js";
+import { errorMessage, useAction } from "../workspace/index.js";
 import { useToast } from "../shell/Toast.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 import type { Settings } from "../../shared/protocol.js";
 
 const MOMENTS: { key: keyof Settings["notifyOn"]; label: string }[] = [

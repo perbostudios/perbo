@@ -1,7 +1,7 @@
 import { Button, InkIcon, Notice, NumberPop, PageHeader, SectionLabel } from "../ui/index.js";
-import { errorMessage, useUsage } from "../data.js";
+import { errorMessage, useUsage } from "../workspace/index.js";
 import { timeAgo } from "../time-ago.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 import type { UsageLedger, UsageWindow } from "../../shared/protocol.js";
 
 export const dollars = (micros: number | null): string =>

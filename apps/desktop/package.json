@@ -16,7 +16,7 @@
     "package": "electron-builder --dir",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint src test"
+    "lint": "eslint src"
   },
   "dependencies": {
     "@perbo/planning": "workspace:*",

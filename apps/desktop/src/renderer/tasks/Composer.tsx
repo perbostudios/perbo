@@ -6,9 +6,9 @@ import {
   DraftSchema,
 } from "../../shared/protocol.js";
 import type { Detail, Draft, EditingTarget, TaskModels } from "../../shared/protocol.js";
-import { useContractEditing } from "./contract-editor.js";
+import { useContractEditing } from "../contract-editor.js";
 import { ModelPicker, useProviders } from "../settings/ConnectionScreens.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 import { isLive } from "../../shared/jobs.js";
 export { contractDraft } from "../../shared/contract-editing.js";
 export function Composer({

@@ -3,9 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, EmptyState, LineIcon, Notice } from "../ui/index.js";
 import { withNoGo } from "@perbo/planning/impact";
 import type { ImpactReasonKind, ImpactWarning } from "@perbo/planning/impact";
-import { bridge, errorMessage } from "../data.js";
+import { bridge, errorMessage } from "../workspace/index.js";
 import type { ImpactView, Snapshot } from "../../shared/protocol.js";
-import type { useContractEditing } from "../tasks/contract-editor.js";
+import type { useContractEditing } from "../contract-editor.js";
 
 type Editor = ReturnType<typeof useContractEditing>;
 

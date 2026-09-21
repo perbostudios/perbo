@@ -5,7 +5,7 @@ import {
   ManifestEditorSchema,
   type ManifestEditor,
 } from "../../shared/protocol.js";
-import { bridge, errorMessage, useAction } from "../data.js";
+import { bridge, errorMessage, useAction } from "../workspace/index.js";
 
 export function ManifestDialog({
   repoId,
