@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { parseReviewArgs } from "./commands/review/index.js";
 import { admitCommandLine, approveCommandLine, listCommandLine } from "./commands/admit.js";
 import { baselineCommandLine } from "./commands/baseline/index.js";
 import { runCommandLine, startEntryPoint, type EntryPoint } from "./command-line/terminal.js";
@@ -9,7 +8,7 @@ import { doctorCommandLine, executeCommandLine } from "./commands/run/index.js";
 import { COMMAND_NAMES, type CommandName } from "./command-line/names.js";
 import { inspectCommandLine } from "./commands/inspect.js";
 import { principleCommandLine } from "./commands/principle.js";
-import { runReviewCommand } from "./commands/review/index.js";
+import { reviewCommandLine } from "./commands/review/index.js";
 import { VERSION } from "./version.js";
 import { stopsCommandLine } from "./commands/stops.js";
 import { indexCommandLine } from "./commands/symbol-index.js";
@@ -48,7 +47,7 @@ export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
       case "baseline":
         return runCommandLine(baselineCommandLine, { argv: rest, streams, cwd });
       case "review":
-        return runReviewCommand({ args: parseReviewArgs(rest), streams, cwd, now: new Date() });
+        return runCommandLine(reviewCommandLine, { argv: rest, streams, cwd });
       case "inspect":
         return runCommandLine(inspectCommandLine, { argv: rest, streams, cwd });
       case "verdict":

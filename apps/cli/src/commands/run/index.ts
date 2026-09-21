@@ -88,7 +88,7 @@ import {
   type FlagTable,
   type Grammar,
 } from "../../command-line/grammar.js";
-import type { NarratedCommand } from "../../command-line/terminal.js";
+import { narratedStreams, type NarratedCommand } from "../../command-line/terminal.js";
 import type { CommandContext } from "../../command.js";
 import { UsageError } from "../../usage-error.js";
 import {
@@ -3174,22 +3174,6 @@ export function mergeRunConfig(
     delivery_branch: run.branch ?? null,
   };
 }
-
-/**
- * The streams a narrated command is given, as the bodies above take them.
- *
- * Diagnostics and stdout are separate writes at the terminal, and one object
- * with both is what everything below the command reads.
- */
-const narratedStreams = (context: {
-  stdout(chunk: string): void;
-  isTTY: boolean;
-  diagnostics: { stderr(chunk: string): void };
-}): Streams => ({
-  stdout: context.stdout,
-  stderr: (chunk) => context.diagnostics.stderr(chunk),
-  isTTY: context.isTTY,
-});
 
 /**
  * `perbo doctor`, over its own line.

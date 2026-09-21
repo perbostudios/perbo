@@ -1,9 +1,23 @@
 /**
- * Flag parsing. Hand-rolled and strict: an unrecognised flag is exit 1, not a
- * silently ignored typo that produces a review of something else.
+ * The line `perbo review` is asked for by: which flags it offers, and the
+ * combinations of them it refuses.
+ *
+ * The walk itself is `command-line/grammar.ts`, so an unrecognised flag is
+ * exit 1 here as it is everywhere — never a silently ignored typo that
+ * produces a review of something else. What is here is what only this command
+ * knows: its two enumerations, its turn count, and which of its flags cannot
+ * be given together.
  */
 
 import type { ModelProvider } from "@perbo/model";
+import {
+  listFlag,
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../../command-line/grammar.js";
 import { UsageError } from "../../../usage-error.js";
 
 /**
@@ -76,172 +90,107 @@ export interface ReviewArgs {
   rawArtifact: string | null;
 }
 
-const TAKES_VALUE = new Set([
-  "--contract",
-  "--diff",
-  "--checks",
-  "--repo",
-  "--head",
-  "--base",
-  "--pr",
-  "--outcome",
-  "--criterion",
-  "--path",
-  "--store",
-  "--suppressions",
-  "--rule-authority",
-  "--bundle",
-  "--state",
-  "--resume",
-  "--format",
-  "--model",
-  "--max-turns",
-  "--provider",
-  "--raw-artifact",
-]);
-
-const FLAGS = new Set(["--json", "--no-color", "--color", "--quiet"]);
-
 export const DEFAULT_STATE_DIR = ".perbo/reviews";
 
-export function parseReviewArgs(argv: string[]): ReviewArgs {
-  const args: ReviewArgs = {
-    contract: null,
-    diff: null,
-    checks: null,
-    repo: ".",
-    head: null,
-    base: null,
-    pr: null,
-    outcome: null,
-    criteria: [],
-    paths: [],
-    store: null,
-    suppressions: null,
-    ruleAuthority: null,
-    bundle: null,
-    state: DEFAULT_STATE_DIR,
-    resume: null,
-    format: null,
-    json: false,
-    color: null,
-    model: null,
-    provider: "claude-cli",
-    maxTurns: null,
-    quiet: false,
-    rawArtifact: null,
-  };
+const REVIEW_FLAGS = {
+  "--contract": valueFlag(),
+  "--diff": valueFlag(),
+  "--checks": valueFlag(),
+  "--repo": valueFlag(),
+  "--head": valueFlag(),
+  "--base": valueFlag(),
+  "--pr": valueFlag(),
+  "--outcome": valueFlag(),
+  "--criterion": listFlag(),
+  "--path": listFlag(),
+  "--store": valueFlag(),
+  "--suppressions": valueFlag(),
+  "--rule-authority": valueFlag(),
+  "--bundle": valueFlag(),
+  "--state": valueFlag(),
+  "--resume": valueFlag(),
+  "--format": valueFlag(),
+  "--model": valueFlag(),
+  "--max-turns": valueFlag(),
+  "--provider": valueFlag(),
+  /** The corpus harness's own, so that a scored run can keep what redaction removes. */
+  "--raw-artifact": valueFlag({ hidden: true }),
+  "--json": switchFlag(),
+  "--no-color": switchFlag(),
+  "--color": switchFlag(),
+  "--quiet": switchFlag(),
+} satisfies FlagTable;
 
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i]!;
-    if (!token.startsWith("--")) {
-      throw new UsageError(`unexpected argument '${token}'`);
-    }
-    const eq = token.indexOf("=");
-    const name = eq === -1 ? token : token.slice(0, eq);
+export const REVIEW_GRAMMAR: Grammar<typeof REVIEW_FLAGS> = {
+  command: "review",
+  flags: REVIEW_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal:
+      "review takes no positional argument: what it judges is named by a flag, e.g. perbo " +
+      "review --contract c.json --diff change.diff",
+  },
+  afterDoubleDash: "positionals",
+};
 
-    if (FLAGS.has(name)) {
-      if (eq !== -1) throw new UsageError(`${name} does not take a value`);
-      if (name === "--json") args.json = true;
-      if (name === "--no-color") args.color = false;
-      if (name === "--color") args.color = true;
-      if (name === "--quiet") args.quiet = true;
-      continue;
-    }
-    if (!TAKES_VALUE.has(name)) {
-      throw new UsageError(`unknown flag '${name}'`);
-    }
-
-    const value = eq === -1 ? argv[++i] : token.slice(eq + 1);
-    if (value === undefined) throw new UsageError(`${name} requires a value`);
-
-    switch (name) {
-      case "--contract":
-        args.contract = value;
-        break;
-      case "--diff":
-        args.diff = value;
-        break;
-      case "--checks":
-        args.checks = value;
-        break;
-      case "--repo":
-        args.repo = value;
-        break;
-      case "--head":
-        args.head = value;
-        break;
-      case "--base":
-        args.base = value;
-        break;
-      case "--pr":
-        args.pr = value;
-        break;
-      case "--outcome":
-        args.outcome = value;
-        break;
-      case "--criterion":
-        args.criteria.push(value);
-        break;
-      case "--path":
-        args.paths.push(value);
-        break;
-      case "--store":
-        args.store = value;
-        break;
-      case "--suppressions":
-        args.suppressions = value;
-        break;
-      case "--rule-authority":
-        args.ruleAuthority = value;
-        break;
-      case "--bundle":
-        args.bundle = value;
-        break;
-      case "--state":
-        args.state = value;
-        break;
-      case "--resume":
-        args.resume = value;
-        break;
-      case "--raw-artifact":
-        args.rawArtifact = value;
-        break;
-      case "--format": {
-        const known = REVIEW_FORMATS.find((format) => format === value);
-        if (known === undefined) {
-          throw new UsageError(
-            `--format must be one of ${REVIEW_FORMATS.map((format) => `'${format}'`).join(", ")}`,
-          );
-        }
-        args.format = known;
-        break;
-      }
-      case "--model":
-        args.model = value;
-        break;
-      case "--provider":
-        if (
-          value !== "anthropic" &&
-          value !== "claude-cli" &&
-          value !== "codex-cli"
-        ) {
-          throw new UsageError(
-            "--provider must be 'anthropic', 'claude-cli' or 'codex-cli'",
-          );
-        }
-        args.provider = value;
-        break;
-      case "--max-turns": {
-        const turns = Number(value);
-        if (!Number.isInteger(turns) || turns < 1) {
-          throw new UsageError("--max-turns requires a positive integer");
-        }
-        args.maxTurns = turns;
-        break;
-      }
-    }
+/** One of the two enumerations the line carries, refused by name rather than fallen back from. */
+function readFormat(value: string): ReviewFormat {
+  const known = REVIEW_FORMATS.find((format) => format === value);
+  if (known === undefined) {
+    throw new UsageError(
+      `--format must be one of ${REVIEW_FORMATS.map((format) => `'${format}'`).join(", ")}`,
+    );
   }
+  return known;
+}
+
+function readProvider(value: string): ModelProvider {
+  if (value !== "anthropic" && value !== "claude-cli" && value !== "codex-cli") {
+    throw new UsageError("--provider must be 'anthropic', 'claude-cli' or 'codex-cli'");
+  }
+  return value;
+}
+
+function readMaxTurns(value: string): number {
+  const turns = Number(value);
+  if (!Number.isInteger(turns) || turns < 1) {
+    throw new UsageError("--max-turns requires a positive integer");
+  }
+  return turns;
+}
+
+export function parseReviewArgs(argv: string[]): ReviewArgs {
+  const line = parseArgv(REVIEW_GRAMMAR, argv);
+  const format = line.flags["--format"];
+  const provider = line.flags["--provider"];
+  const maxTurns = line.flags["--max-turns"];
+  const args: ReviewArgs = {
+    contract: line.flags["--contract"] ?? null,
+    diff: line.flags["--diff"] ?? null,
+    checks: line.flags["--checks"] ?? null,
+    repo: line.flags["--repo"] ?? ".",
+    head: line.flags["--head"] ?? null,
+    base: line.flags["--base"] ?? null,
+    pr: line.flags["--pr"] ?? null,
+    outcome: line.flags["--outcome"] ?? null,
+    criteria: [...(line.flags["--criterion"] ?? [])],
+    paths: [...(line.flags["--path"] ?? [])],
+    store: line.flags["--store"] ?? null,
+    suppressions: line.flags["--suppressions"] ?? null,
+    ruleAuthority: line.flags["--rule-authority"] ?? null,
+    bundle: line.flags["--bundle"] ?? null,
+    state: line.flags["--state"] ?? DEFAULT_STATE_DIR,
+    resume: line.flags["--resume"] ?? null,
+    format: format === undefined ? null : readFormat(format),
+    json: line.flags["--json"] === true,
+    color: line.flags["--color"] === true ? true : line.flags["--no-color"] === true ? false : null,
+    model: line.flags["--model"] ?? null,
+    provider: provider === undefined ? "claude-cli" : readProvider(provider),
+    maxTurns: maxTurns === undefined ? null : readMaxTurns(maxTurns),
+    quiet: line.flags["--quiet"] === true,
+    rawArtifact: line.flags["--raw-artifact"] ?? null,
+  };
 
   // Before every other rule, because it is the one refusal that has to hold
   // whatever else was asked for: nothing is read from the stream, so nothing is
