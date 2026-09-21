@@ -1,12 +1,16 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { createScratch, initRepository } from "@perbo/test-support";
 import { DesktopService, type ServiceOptions } from "../service.js";
 import type { runProcess, startLineProcess } from "../process.js";
 import type { Change } from "../../shared/protocol.js";
 
-const temporary: string[] = [];
+/**
+ * A directory removed when the case that asked for it ends.
+ *
+ * `disposeFixtures` takes these back along with the hosts, so a file that
+ * registers it has said where every directory it makes here goes.
+ */
+export const scratchDirectory = createScratch("perbo-desktop-");
 const services: DesktopService[] = [];
 /**
  * Shut down every host this module made and remove every directory it made.
@@ -17,17 +21,12 @@ const services: DesktopService[] = [];
  */
 export async function disposeFixtures(): Promise<void> {
   await Promise.all(services.splice(0).map((service) => service.shutdown()));
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 }
 /** A host shut down when the case ends — a second one over the same profile included. */
 export function trackService<T extends DesktopService>(service: T): T {
   services.push(service);
   return service;
-}
-/** A directory removed when the case ends. */
-export function trackDirectory(path: string): string {
-  temporary.push(path);
-  return path;
 }
 /**
  * A whole host over a temporary checkout and the bundled CLI, with what it
@@ -35,24 +34,13 @@ export function trackDirectory(path: string): string {
  * the theme it applied and every change it told.
  */
 export function fixture(process?: typeof runProcess, startProcess?: typeof startLineProcess) {
-  const root = trackDirectory(mkdtempSync(join(tmpdir(), "perbo-desktop-")));
+  const root = scratchDirectory();
   // The folder name holds a space, because a path this host hands to a command
   // is one argument whatever it holds.
-  const repo = join(root, "repository with spaces");
-  mkdirSync(repo);
-  for (const args of [
-    ["init", "--initial-branch=main"],
-    ["config", "user.name", "Desktop Test"],
-    ["config", "user.email", "desktop@example.invalid"],
-    ["config", "commit.gpgsign", "false"],
-  ])
-    execFileSync("git", args, { cwd: repo, stdio: "ignore" });
-  writeFileSync(join(repo, "README.md"), "# Test repository\n");
-  execFileSync("git", ["add", "README.md"], { cwd: repo });
-  execFileSync("git", ["commit", "-m", "Initial test state"], {
-    cwd: repo,
-    stdio: "ignore",
-  });
+  const repo = initRepository(join(root, "repository with spaces"), {
+    files: { "README.md": "# Test repository\n" },
+    message: "Initial test state",
+  }).dir;
   const notifications: { title: string; body: string; silent: boolean | undefined }[] = [];
   const holds: { hold: boolean; displaySleep: boolean }[] = [];
   const themes: string[] = [];

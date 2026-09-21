@@ -1,17 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createScratch } from "@perbo/test-support";
 import { explorerPath, safePath } from "./paths.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
-const temporary: string[] = [];
+const scratchDirectory = createScratch("perbo-paths-");
 afterEach(() => {
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 });
 function repository(): RegisteredRepository {
-  const root = mkdtempSync(join(tmpdir(), "perbo-paths-"));
-  temporary.push(root);
+  const root = scratchDirectory();
   const path = join(root, "checkout");
   mkdirSync(join(path, "src"), { recursive: true });
   writeFileSync(join(path, "src", "main.ts"), "export const a = 1;\n");

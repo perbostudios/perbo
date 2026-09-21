@@ -126,6 +126,9 @@ importers:
       '@perbo/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@perbo/test-support':
+        specifier: workspace:*
+        version: link:../../tooling/test-support
       '@perbo/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig

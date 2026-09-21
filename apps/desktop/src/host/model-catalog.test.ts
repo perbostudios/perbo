@@ -1,26 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   existsSync,
-  mkdtempSync,
   mkdirSync,
   readFileSync,
-  rmSync,
   watch,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, delimiter, join } from "node:path";
+import { createScratch } from "@perbo/test-support";
 import { discoverModels } from "./model-catalog.js";
 import { RequestSchema } from "../shared/protocol.js";
 
-const temporary: string[] = [];
+const scratchDirectory = createScratch("perbo-catalog-test-");
 afterEach(() => {
-  for (const dir of temporary.splice(0))
-    rmSync(dir, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 });
 function fixture(handler: string) {
-  const root = mkdtempSync(join(tmpdir(), "perbo-catalog-test-"));
-  temporary.push(root);
+  const root = scratchDirectory();
   const binary = join(root, "provider cli");
   const trace = join(root, "trace.jsonl");
   const login = join(root, "login");

@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { createScratch } from "@perbo/test-support";
 import { JobRunner, type JobOperation } from "./runner.js";
 import { Changes } from "../changes.js";
 import { Profile } from "../profile/store.js";
@@ -11,9 +9,9 @@ import type { Change, Job } from "../../shared/protocol.js";
 import type { ProcessResult } from "../process.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
-const temporary: string[] = [];
+const scratchDirectory = createScratch("perbo-runner-");
 afterEach(() => {
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 });
 const repo: RegisteredRepository = {
   id: "80000000-0000-4000-8000-000000000001",
@@ -24,8 +22,7 @@ const other: RegisteredRepository = { ...repo, id: "80000000-0000-4000-8000-0000
 const settle = (): Promise<void> => Promise.resolve();
 /** A runner over a real profile and change stream, with everything it tells recorded. */
 function runner(result: ProcessResult = { code: 0, stdout: "", stderr: "", cancelled: false }) {
-  const directory = mkdtempSync(join(tmpdir(), "perbo-runner-"));
-  temporary.push(directory);
+  const directory = scratchDirectory();
   const profile = Profile.open(directory);
   const told: Change[] = [];
   const order: string[] = [];

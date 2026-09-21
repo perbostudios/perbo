@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createScratch } from "@perbo/test-support";
 import { SettingsSchema } from "../../shared/protocol.js";
 import { configPath } from "./layout.js";
 import {
@@ -17,9 +17,9 @@ import {
 } from "./config.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
-const temporary: string[] = [];
+const scratchDirectory = createScratch("perbo-config-");
 afterEach(() => {
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 });
 const manifest = {
   manifest_version: 1,
@@ -53,8 +53,7 @@ const entry = {
   reason: "Local configuration",
 };
 function repository(config?: Record<string, unknown>): RegisteredRepository {
-  const root = mkdtempSync(join(tmpdir(), "perbo-config-"));
-  temporary.push(root);
+  const root = scratchDirectory();
   const path = join(root, "checkout");
   mkdirSync(path, { recursive: true });
   const repo = { id: "80000000-0000-4000-8000-000000000001", name: "checkout", path };

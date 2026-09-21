@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createScratch, initRepository } from "@perbo/test-support";
 import { RepositoryRegistry } from "./registry.js";
 import { Changes } from "../changes.js";
 import { WorkspaceReads } from "../workspace-reads.js";
@@ -11,35 +10,25 @@ import { runProcess } from "../process.js";
 import { configPath } from "./layout.js";
 import type { Change, Job } from "../../shared/protocol.js";
 
-const temporary: string[] = [];
+const scratchDirectory = createScratch("perbo-registry-");
 afterEach(() => {
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 });
 /** A real checkout, because registering one asks Git where its root is. */
 function checkout(name = "checkout"): string {
-  const root = mkdtempSync(join(tmpdir(), "perbo-registry-"));
-  temporary.push(root);
-  const path = join(root, name);
-  mkdirSync(path, { recursive: true });
-  for (const args of [
-    ["init", "--initial-branch=main"],
-    ["config", "user.name", "Desktop Test"],
-    ["config", "user.email", "desktop@example.invalid"],
-    ["config", "commit.gpgsign", "false"],
-  ])
-    execFileSync("git", args, { cwd: path, stdio: "ignore" });
-  writeFileSync(join(path, "README.md"), "# Test repository\n");
-  execFileSync("git", ["add", "README.md"], { cwd: path });
-  execFileSync("git", ["commit", "-m", "Initial test state"], { cwd: path, stdio: "ignore" });
-  return realpathSync(path);
+  const root = scratchDirectory();
+  const { dir } = initRepository(join(root, name), {
+    files: { "README.md": "# Test repository\n" },
+    message: "Initial test state",
+  });
+  return realpathSync(dir);
 }
 function registry(jobs: Job[] = []): {
   registry: RepositoryRegistry;
   profile: Profile;
   told: Change[];
 } {
-  const directory = mkdtempSync(join(tmpdir(), "perbo-registry-profile-"));
-  temporary.push(directory);
+  const directory = scratchDirectory("perbo-registry-profile-");
   const profile = Profile.open(directory);
   const told: Change[] = [];
   const changes = new Changes({

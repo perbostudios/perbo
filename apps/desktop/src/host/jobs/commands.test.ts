@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { createScratch } from "@perbo/test-support";
 import { SettingsSchema } from "../../shared/protocol.js";
 import {
   admitDraftArgs,
@@ -27,9 +26,9 @@ import type { PlanContract } from "@perbo/contracts";
 import type { LimitsTableSchema } from "@perbo/contracts";
 import type { z } from "zod";
 
-const temporary: string[] = [];
+const scratchDirectory = createScratch("perbo-commands-");
 afterEach(() => {
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 });
 const settings = SettingsSchema.parse({});
 const draft: Draft = {
@@ -266,8 +265,7 @@ describe("the guards a job runs before it starts", () => {
 
 describe("writePrivate", () => {
   it("writes the file readable only by its owner, and refuses to write over one", () => {
-    const directory = mkdtempSync(join(tmpdir(), "perbo-commands-"));
-    temporary.push(directory);
+    const directory = scratchDirectory();
     const path = writePrivate(directory, "run-1.json", '{"merge":"person"}');
     expect(readFileSync(path, "utf8")).toBe('{"merge":"person"}');
     expect(statSync(path).mode & 0o777).toBe(0o600);

@@ -2,13 +2,11 @@ import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import {
   mkdirSync,
-  mkdtempSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createScratch } from "@perbo/test-support";
 import { afterEach } from "vitest";
 import type { Ticket } from "@perbo/contracts";
 import {
@@ -22,10 +20,9 @@ import {
 } from "./records.js";
 import { InterviewEditSchema } from "../shared/protocol.js";
 
-const temporary: string[] = [];
+const scratchDirectory = createScratch("perbo-records-");
 afterEach(() => {
-  for (const path of temporary.splice(0))
-    rmSync(path, { recursive: true, force: true });
+  scratchDirectory.removeAll();
 });
 const ticket = (
   state: Ticket["state"],
@@ -123,8 +120,7 @@ describe("retained records the desktop reads directly", () => {
   });
 
   it("reads a diff's totals through the same size and hash checks as retained output, and caches by hash", () => {
-    const root = mkdtempSync(join(tmpdir(), "perbo-records-"));
-    temporary.push(root);
+    const root = scratchDirectory();
     const objects = join(root, "objects");
     mkdirSync(objects);
     const diff = [
@@ -176,8 +172,7 @@ describe("retained records the desktop reads directly", () => {
   });
 
   it("summarises a ticket from its attempts record and the latest execution bundle", () => {
-    const root = mkdtempSync(join(tmpdir(), "perbo-records-"));
-    temporary.push(root);
+    const root = scratchDirectory();
     const store = join(root, ".perbo");
     mkdirSync(join(store, "state"), { recursive: true });
     mkdirSync(join(store, "bundles", "bundles"), { recursive: true });
@@ -288,8 +283,7 @@ describe("the edit the chat cards", () => {
   it("clips a summary longer than a conversation line holds, rather than losing the line", () => {
     // `perbo edit` caps no summary: `set_node_paths` writes every glob it was
     // given, and a plan scoped to a few long ones runs past 300 characters.
-    const root = mkdtempSync(join(tmpdir(), "perbo-draft-record-"));
-    temporary.push(root);
+    const root = scratchDirectory("perbo-draft-record-");
     const path = join(root, "PRB-1.draft.json");
     const summary = `node_2 paths set to ${"packages/queue-deep-directory/**, ".repeat(12)}`;
     expect(summary.length).toBeGreaterThan(300);
@@ -304,8 +298,7 @@ describe("the edit the chat cards", () => {
   });
 
   it("clips the entity keys either side of an edit to what a line holds", () => {
-    const root = mkdtempSync(join(tmpdir(), "perbo-draft-keys-"));
-    temporary.push(root);
+    const root = scratchDirectory("perbo-draft-keys-");
     const path = join(root, "PRB-1.draft.json");
     const keys = Array.from({ length: 240 }, (_, at) => `criterion:${"c".repeat(240)}${String(at)}`);
     writeFileSync(path, JSON.stringify(record("an edit", keys)));
