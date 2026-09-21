@@ -107,8 +107,7 @@ describe("baseline harness arguments", () => {
     // The flag-injection cases for every other command are in
     // `command-line/terminal.flag-injection.test.ts`; this one is here because
     // only this module may import this module's interior. `result` is the verb
-    // `--json` applies to, so a partner id shaped like it used to decide what
-    // this command printed.
+    // `--json` applies to, so a partner id shaped like it is a partner id.
     expect(parseE1Args(["result", "--partner", "--x=--json"])).toMatchObject({
       subject: "--x=--json",
       json: false,
@@ -119,6 +118,26 @@ describe("baseline harness arguments", () => {
       subject: "acme",
       arm: "agent_direct",
     });
+  });
+
+  it("answers a flag it does not have before it asks what a value is", () => {
+    // The whole line is read by the grammar first, and only then is each value
+    // asked to be a number, a date or a partner id. So a line carrying both a
+    // flag this verb has no room for and a value it cannot take is answered
+    // about the flag: the person typed one thing that is not a flag here, and
+    // hearing about the minutes first would send them to the wrong end of it.
+    expect(() =>
+      parseE1Args(["time", "--partner", "p", "--interruptions", "bad", "--nope", "1"]),
+    ).toThrow(/unknown flag '--nope' for baseline time/);
+    // With every flag one this verb has, the value is what the refusal is about.
+    expect(() => parseE1Args(["time", "--partner", "p", "--interruptions", "bad"])).toThrow(
+      /--interruptions takes a number, not 'bad'/,
+    );
+    // A flag that exists on another verb is named as that rather than unknown,
+    // and is still answered before any value is read.
+    expect(() =>
+      parseE1Args(["time", "--partner", "p", "--interruptions", "bad", "--defect", "d"]),
+    ).toThrow(/--defect does not apply to baseline time/);
   });
 
   it("reads a date as a day and a timestamp as itself, and refuses anything else", async () => {
