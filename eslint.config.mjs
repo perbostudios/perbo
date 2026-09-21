@@ -83,7 +83,6 @@ const PRODUCTION_SOURCE_ONLY = {
  */
 export const EXPORT_ALL_BURN_DOWN = [
   "packages/review/src/index.ts",
-  "packages/runner/src/index.ts",
 ];
 
 export default tseslint.config(
