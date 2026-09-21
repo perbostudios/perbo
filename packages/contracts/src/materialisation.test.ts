@@ -5,7 +5,7 @@ import {
   MaterializationManifestSchema,
   LifecycleScriptPolicySchema,
   manifestHash,
-} from "../src/materialisation.js";
+} from "./materialisation.js";
 
 const entry = {
   path: ".env.local",

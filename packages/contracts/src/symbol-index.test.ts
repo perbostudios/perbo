@@ -3,7 +3,7 @@ import {
   SYMBOL_INDEX_SCHEMA_VERSION,
   SymbolIndexSchema,
   UnsupportedRepositorySchema,
-} from "../src/symbol-index.js";
+} from "./symbol-index.js";
 
 /** A record of the shape `perbo index` writes, with one file in it. */
 const INDEX = {

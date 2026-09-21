@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { matchesAny } from "../src/paths.js";
+import { matchesAny } from "./paths.js";
 
 /**
- * `glob-conformance.json` is what a path glob means, written as cases, and
+ * `test/glob-conformance.json` is what a path glob means, written as cases, and
  * `matchesAny` is the implementation those cases define. A matcher written
  * elsewhere to these semantics — a check that runs before anything is built
  * cannot import this one — answers the same table.
@@ -16,7 +16,7 @@ interface Case {
 }
 
 const { cases } = JSON.parse(
-  readFileSync(new URL("./glob-conformance.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../test/glob-conformance.json", import.meta.url), "utf8"),
 ) as { cases: Case[] };
 
 describe("what a path glob means", () => {

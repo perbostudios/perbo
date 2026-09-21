@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { onePieceOfWork } from "../src/index.js";
+import { onePieceOfWork } from "./paths.js";
 
 /**
  * A spec is one piece of work's, in a folder of its own under the folder this

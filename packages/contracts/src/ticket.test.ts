@@ -20,7 +20,7 @@ import {
   resumeWithUnrecordedOpener,
   transition,
   type Ticket,
-} from "../src/ticket.js";
+} from "./ticket.js";
 
 const ticket = (overrides: Partial<Ticket> = {}): Ticket =>
   TicketSchema.parse({

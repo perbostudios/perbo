@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NEVER_READ_PATHS, isNeverReadPath } from "../src/index.js";
+import { NEVER_READ_PATHS, isNeverReadPath } from "./paths.js";
 
 /**
  * The paths no surface reads into a model context or onto a screen (D-012,

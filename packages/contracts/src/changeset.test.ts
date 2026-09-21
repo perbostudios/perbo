@@ -4,7 +4,7 @@ import {
   changeSetFromNameStatus,
   parseNameStatus,
   parseUnifiedDiff,
-} from "../src/changeset.js";
+} from "./changeset.js";
 
 const modified = `diff --git a/packages/auth/signup.ts b/packages/auth/signup.ts
 index 1111111..2222222 100644

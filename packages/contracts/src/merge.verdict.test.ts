@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { D073_CHANGES_REQUESTED, loopMergeDecision, readD073Verdicts } from "../src/merge.js";
+import { D073_CHANGES_REQUESTED, loopMergeDecision, readD073Verdicts } from "./merge.js";
 
 /**
  * The two verdicts a D-073 review comment carries.

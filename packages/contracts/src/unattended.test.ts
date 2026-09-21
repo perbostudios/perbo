@@ -3,7 +3,7 @@ import {
   TICKET_SCHEMA_VERSION,
   TicketSchema,
   type Ticket,
-} from "../src/ticket.js";
+} from "./ticket.js";
 import {
   DIRECT_ARM_COMMIT_TRAILER,
   commitCarriesArm,
@@ -11,7 +11,7 @@ import {
   mergedAt,
   summariseUnattendedMerges,
   unattendedMergeStatus,
-} from "../src/unattended.js";
+} from "./unattended.js";
 
 /**
  * SCP-196: the loop's own success as a live number.

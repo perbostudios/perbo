@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SIZE_THRESHOLDS, planSizeCounts, sizeEstimate } from "../src/size.js";
+import { SIZE_THRESHOLDS, planSizeCounts, sizeEstimate } from "./size.js";
 
 describe("the size estimate", () => {
   it("is S at the smallest bound: one node, four criteria, ten files, one package", () => {

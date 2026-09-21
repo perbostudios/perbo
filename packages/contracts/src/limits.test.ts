@@ -9,7 +9,7 @@ import {
   assertWithinLimits,
   limitFor,
   limitsForCredential,
-} from "../src/limits.js";
+} from "./limits.js";
 
 describe("assertWithinLimits", () => {
   it("gates every countable resource through one call", () => {

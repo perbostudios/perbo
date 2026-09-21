@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { NodeIdSchema, RequirementIdSchema } from "../src/ids.js";
+import { NodeIdSchema, RequirementIdSchema } from "./ids.js";
 import {
   PlanContractSchema,
   PlanNodeSchema,
   planNodes,
   unknownRequirementIds,
-} from "../src/plan.js";
+} from "./plan.js";
 
 /** The canonical P1 from docs/04, with four criteria to group. */
 const criterion = (n: number) => ({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GRAPH_EDIT_OPS, GraphEditSchema } from "../src/graph-edit.js";
+import { GRAPH_EDIT_OPS, GraphEditSchema } from "./graph-edit.js";
 
 const verification = { kind: "test" as const, assertion: "the assertion that proves it" };
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { REVIEW_DECISIONS, REVIEW_ROUTES, routeForReview } from "../src/review.js";
+import { REVIEW_DECISIONS, REVIEW_ROUTES, routeForReview } from "./review.js";
 import {
   OUTCOME_CRITERION_ASSERTION,
   OUTCOME_CRITERION_ID,
@@ -12,7 +12,7 @@ import {
   sourceContractFromPullRequest,
   sourceIdentity,
   statesCriteria,
-} from "../src/source.js";
+} from "./source.js";
 
 /**
  * A contract nobody admitted (SCP-179).
@@ -25,8 +25,8 @@ import {
  * asserted is the contract that comes out, not that a parse ran.
  *
  * Fail-first, measured 2026-09-04: with `packages/contracts/src` put back to
- * the base commit 846e501 this file does not collect — `../src/source.js` is
- * not there and `../src/review.js` exports no routing.
+ * the base commit 846e501 this file does not collect — `./source.js` is not
+ * there and `./review.js` exports no routing.
  */
 
 const pull = (body: string, overrides: Record<string, unknown> = {}) =>

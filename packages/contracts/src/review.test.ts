@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { assertReviewerContextKind, mayOccupyInstructionPosition } from "../src/context.js";
-import { AttemptUsageSchema } from "../src/attempt.js";
+import { assertReviewerContextKind, mayOccupyInstructionPosition } from "./context.js";
+import { AttemptUsageSchema } from "./attempt.js";
 import {
   EXIT_CODES,
   NodeReviewsSchema,
   ReviewArtifactSchema,
   exitCodeForDecision,
   findingKey,
-} from "../src/review.js";
-import { RunBundleSchema, RunCostBasisSchema } from "../src/runbundle.js";
+} from "./review.js";
+import { RunBundleSchema, RunCostBasisSchema } from "./runbundle.js";
 
 describe("finding identity", () => {
   const parts = { rule_id: "criterion.unverified", criterion_id: "ac_2", file: "a.ts", symbol: "f" };

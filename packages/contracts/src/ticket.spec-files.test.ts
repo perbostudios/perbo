@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  EXECUTION_ATTEMPT_SCHEMA_VERSION,
-  ExecutionAttemptSchema,
-  TICKET_SCHEMA_VERSION,
-  TicketSchema,
-  admittedSpecFiles,
-  type Ticket,
-} from "../src/index.js";
+import { EXECUTION_ATTEMPT_SCHEMA_VERSION, ExecutionAttemptSchema } from "./attempt.js";
+import { TICKET_SCHEMA_VERSION, TicketSchema, admittedSpecFiles, type Ticket } from "./ticket.js";
 
 const HASH = `sha256:${"a".repeat(64)}`;
 const OTHER = `sha256:${"b".repeat(64)}`;

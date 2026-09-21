@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CheckResultSchema, CheckResultsFileSchema, checksForNode, wholeChangeChecks } from "../src/check.js";
+import { CheckResultSchema, CheckResultsFileSchema, checksForNode, wholeChangeChecks } from "./check.js";
 
 /** A check record as written before the re-run fields existed. */
 const OLDER_RECORD = {

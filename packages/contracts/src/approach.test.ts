@@ -4,7 +4,7 @@ import {
   ApproachRecordSchema,
   approachProblems,
   findCycle,
-} from "../src/approach.js";
+} from "./approach.js";
 
 const record = {
   schema_version: APPROACH_SCHEMA_VERSION,

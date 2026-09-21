@@ -3,7 +3,7 @@ import {
   TICKET_STATES,
   TICKET_STATES_REACHABLE,
   TICKET_TRANSITIONS,
-} from "../src/ticket.js";
+} from "./ticket.js";
 
 /**
  * `TICKET_STATES_REACHABLE` is a hand-written list of what Stage 3 can actually

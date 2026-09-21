@@ -7,7 +7,7 @@ import {
   PlanContractP3Schema,
   PlanContractSchema,
   hasAcceptanceCriteria,
-} from "../src/plan.js";
+} from "./plan.js";
 
 const validP1 = {
   plan_id: "plan_01J8QK",

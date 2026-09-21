@@ -9,7 +9,7 @@ import {
   withReconciliation,
   withWaits,
   type Ticket,
-} from "../src/ticket.js";
+} from "./ticket.js";
 
 /**
  * `blocked` is reachable now: the queue derives it from `depends_on` and from

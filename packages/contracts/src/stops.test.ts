@@ -12,8 +12,8 @@ import {
   type StopAnswer,
   type StopVerdict,
   type StopVerdicts,
-} from "../src/stops.js";
-import { wilsonInterval } from "../src/wilson.js";
+} from "./stops.js";
+import { wilsonInterval } from "./wilson.js";
 
 /**
  * D-060, measured live: what one `perbo sync` writes per ticket, and what

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loopMergeDecision, type LoopMergeObservation } from "../src/merge.js";
+import { loopMergeDecision, type LoopMergeObservation } from "./merge.js";
 
 /**
  * SCP-227: an approval survives a clean re-level and nothing else.

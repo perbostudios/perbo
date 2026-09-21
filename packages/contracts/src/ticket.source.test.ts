@@ -5,7 +5,7 @@ import {
   TicketSchema,
   TicketSourceSchema,
   ticketSourceLabel,
-} from "../src/ticket.js";
+} from "./ticket.js";
 
 /**
  * Where the work came from, as the record says it.

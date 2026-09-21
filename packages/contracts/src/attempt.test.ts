@@ -3,7 +3,7 @@ import {
   EXECUTION_ATTEMPT_SCHEMA_VERSION,
   ExecutionAttemptSchema,
   TERMINATION_REASONS,
-} from "../src/attempt.js";
+} from "./attempt.js";
 
 /**
  * The two verification fields an attempt carries, and what a record written

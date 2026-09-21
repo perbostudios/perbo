@@ -4,7 +4,7 @@ import {
   StandingProhibitedSchema,
   readStandingProhibited,
   standingGlob,
-} from "../src/index.js";
+} from "./standing.js";
 
 /**
  * The list a repository prohibits for every ticket (D-105), read from

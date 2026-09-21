@@ -8,7 +8,7 @@ import {
   type LoopMergeObservation,
   type LoopMergeRuleId,
   type LoopMergeStop,
-} from "../src/merge.js";
+} from "./merge.js";
 
 /**
  * The sentences the merge decision hands a person, read for identifiers only

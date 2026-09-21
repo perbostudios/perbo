@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REDACTION, SecretIndex, isSecretPath, secretValuesOf } from "../src/secrets.js";
+import { REDACTION, SecretIndex, isSecretPath, secretValuesOf } from "./secrets.js";
 
 describe("secretValuesOf", () => {
   it("takes the right-hand side of an assignment, not the whole line", () => {

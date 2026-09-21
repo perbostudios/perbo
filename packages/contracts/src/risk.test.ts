@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { changeSetFromDiff } from "../src/changeset.js";
-import { packageOf } from "../src/paths.js";
-import { deriveActualRisk, derivePlannedRisk, raisePlanLevel } from "../src/risk.js";
+import { changeSetFromDiff } from "./changeset.js";
+import { packageOf } from "./paths.js";
+import { deriveActualRisk, derivePlannedRisk, raisePlanLevel } from "./risk.js";
 
 const scope = (paths: string[]) => ({
   repository_id: "repo_01J8QH",

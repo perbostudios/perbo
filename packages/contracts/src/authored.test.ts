@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AuthoredAttemptSchema, MAX_REPORTED_ATTEMPTS, issueAuthoredAttempts } from "../src/index.js";
+import { AuthoredAttemptSchema, MAX_REPORTED_ATTEMPTS, issueAuthoredAttempts } from "./authored.js";
 
 const kinds = (body: string) => issueAuthoredAttempts(body).attempts.map((attempt) => attempt.kind);
 const whats = (body: string) => issueAuthoredAttempts(body).attempts.map((attempt) => attempt.what);

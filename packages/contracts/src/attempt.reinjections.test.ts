@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BRIEF_TARGET_MAX_CHARS, BriefReinjectionSchema, EXECUTION_ATTEMPT_SCHEMA_VERSION, ExecutionAttemptSchema } from "../src/attempt.js";
+import { BRIEF_TARGET_MAX_CHARS, BriefReinjectionSchema, EXECUTION_ATTEMPT_SCHEMA_VERSION, ExecutionAttemptSchema } from "./attempt.js";
 
 /**
  * D-096: every time an attempt's brief went back after a compaction is on the
