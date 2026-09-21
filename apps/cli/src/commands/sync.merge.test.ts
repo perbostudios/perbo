@@ -9,9 +9,10 @@ import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { makeAttempt } from "../test-support/attempt-fixture.js";
 import { recordDelivery, runSyncCommand } from "./sync.js";
-import { runStopsCommand } from "./stops.js";
+import { stopsCommandLine } from "./stops.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { REPO_ROOT } from "../test-support/paths.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-202: the loop merges the pull request it opened, behind the `merge`
@@ -461,7 +462,7 @@ describe("ac_2 — the merge, the trailer, and what is written back", () => {
     await withGh(gh.bin, () => syncMerge(repo, capture()));
 
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo, now: NOW });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo, now: NOW });
     expect(streams.out.join("")).toContain("1 merged ticket with a known answer (1 unattended, 0 attended)");
   }, MERGE_TEST_TIMEOUT_MS);
 });

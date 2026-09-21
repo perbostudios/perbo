@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import {
   DELIVERY_ARMS,
   EXIT_CODES,
@@ -18,8 +18,17 @@ import {
   type UnattendedMergesSummary,
   type WilsonInterval,
 } from "@perbo/contracts";
-import { UsageError } from "../usage-error.js";
-import type { Streams } from "../streams.js";
+import { z } from "zod";
+import { UsageError, readInput } from "../usage-error.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../command-line/grammar.js";
+import type { CommandContext, Rendered, ReportCommand } from "../command-line/terminal.js";
+import type { Diagnostics } from "../diagnostics.js";
 import {
   attemptsRecordSubject,
   buildReportForSubject,
@@ -33,7 +42,8 @@ import {
   escapeRows,
   type EscapeRow,
 } from "./escapes/index.js";
-import { listChanges, storeDir, type SyncedChange } from "../store/tickets.js";
+import { listChanges, type SyncedChange } from "../store/tickets.js";
+import { storeFor, StoreTargetSchema } from "../store/index.js";
 import {
   activeVerdicts,
   mergeLocalVerdicts,
@@ -74,14 +84,30 @@ import {
  * history says it merged.
  */
 
-export interface StopsArgs {
-  repo: string;
-  store: string | null;
-  json: boolean;
-  /** ISO instant; changes first seen at or after it form the window. */
-  since: string | null;
+/**
+ * An instant as a person writes one: `2026-09-01`, a full timestamp, or
+ * anything else `Date.parse` reads.
+ *
+ * A check rather than a regex, because what the window is bounded by is a
+ * time and not a spelling — and a check rather than a transform, because the
+ * endpoint publishes this schema to a session as JSON Schema, which has no way
+ * to say "and then it is rewritten". {@link toInstant} is where it is.
+ */
+export const IsoInstantSchema = z.string().superRefine((raw, ctx) => {
+  if (Number.isNaN(Date.parse(raw))) {
+    ctx.addIssue({ code: "custom", message: `--since requires an ISO date, got '${raw}'` });
+  }
+});
+
+/** The same instant, as every record in the store spells one. */
+const toInstant = (raw: string): string => new Date(Date.parse(raw)).toISOString();
+
+export const StopsInputSchema = z.strictObject({
+  target: StoreTargetSchema,
+  /** Changes first seen at or after it form the window. */
+  since: IsoInstantSchema.nullable(),
   /** Report the window per ISO-8601 week as well as in total. */
-  byWeek: boolean;
+  byWeek: z.boolean(),
   /**
    * SCP-206: read the unattended row for one arm only.
    *
@@ -90,60 +116,12 @@ export interface StopsArgs {
    * at once, which is not the number it asks for. Null is every ticket, which
    * is what this command printed before a second arm existed.
    */
-  arm: DeliveryArm | null;
-}
-
-export function parseStopsArgs(argv: readonly string[]): StopsArgs {
-  const args: StopsArgs = { repo: ".", store: null, json: false, since: null, byWeek: false, arm: null };
-  const tokens = argv.flatMap((token) =>
-    token.startsWith("--") && token.includes("=")
-      ? [token.slice(0, token.indexOf("=")), token.slice(token.indexOf("=") + 1)]
-      : [token],
-  );
-  const value = (index: number, token: string): string => {
-    const next = tokens[index];
-    if (next === undefined) throw new UsageError(`${token} requires a value`);
-    return next;
-  };
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = value(++i, token);
-        break;
-      case "--store":
-        args.store = value(++i, token);
-        break;
-      case "--json":
-        args.json = true;
-        break;
-      case "--by-week":
-        args.byWeek = true;
-        break;
-      case "--arm": {
-        const raw = value(++i, token);
-        if (!(DELIVERY_ARMS as readonly string[]).includes(raw)) {
-          throw new UsageError(`--arm requires one of ${DELIVERY_ARMS.join(", ")}, got '${raw}'`);
-        }
-        args.arm = raw as DeliveryArm;
-        break;
-      }
-      case "--since": {
-        const raw = value(++i, token);
-        const ms = Date.parse(raw);
-        if (Number.isNaN(ms)) throw new UsageError(`--since requires an ISO date, got '${raw}'`);
-        args.since = new Date(ms).toISOString();
-        break;
-      }
-      default:
-        throw new UsageError(`unknown option '${token}' for stops`);
-    }
-  }
-  return args;
-}
+  arm: z.enum(DELIVERY_ARMS).nullable(),
+});
+export type StopsInput = z.infer<typeof StopsInputSchema>;
 
 /** Every readable stops record in the store; an unreadable one is named and stepped over. */
-export function readStopVerdictFiles(dir: string, streams: Streams): StopVerdicts[] {
+export function readStopVerdictFiles(dir: string, diagnostics: Diagnostics): StopVerdicts[] {
   const inside = join(dir, "state");
   if (!existsSync(inside)) return [];
   const unreadable: string[] = [];
@@ -160,7 +138,7 @@ export function readStopVerdictFiles(dir: string, streams: Streams): StopVerdict
     });
   if (unreadable.length > 0) {
     // A store that shrank must never look like a small one.
-    streams.stderr(
+    diagnostics.stderr(
       `warning: ${unreadable.length} file(s) in ${inside} are not readable stops records and were ` +
         `skipped: ${unreadable.join(", ")}\n`,
     );
@@ -180,17 +158,17 @@ export function readStopVerdictFiles(dir: string, streams: Streams): StopVerdict
  */
 export function readStopRecords(
   dir: string,
-  streams: Streams,
+  diagnostics: Diagnostics,
   // Passed in by the two commands that also print the decisions, so an
   // unreadable verdicts file is named on stderr once rather than twice.
-  decisions: readonly LocalVerdict[] = readDecisions(dir, streams),
+  decisions: readonly LocalVerdict[] = readDecisions(dir, diagnostics),
 ): StopVerdicts[] {
-  return mergeLocalVerdicts(readStopVerdictFiles(dir, streams), decisions);
+  return mergeLocalVerdicts(readStopVerdictFiles(dir, diagnostics), decisions);
 }
 
 /** The decisions this store holds, superseded rows included. */
-export function readDecisions(dir: string, streams: Streams): LocalVerdict[] {
-  return readLocalVerdictsOrWarn(dir, streams).verdicts;
+export function readDecisions(dir: string, diagnostics: Diagnostics): LocalVerdict[] {
+  return readLocalVerdictsOrWarn(dir, diagnostics).verdicts;
 }
 
 /**
@@ -786,19 +764,52 @@ function mergedTicketSubject(ticket: Ticket): InspectSubject {
   };
 }
 
-export async function runStopsCommand(input: {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  /** The instant the last week runs to; the clock, so a test can hold it still. */
-  now?: Date;
-}): Promise<number> {
-  const args = parseStopsArgs(input.argv);
-  const dir = storeDir(resolve(input.cwd, args.repo), args.store);
-  const decisions = readDecisions(dir, input.streams);
-  const files = readStopRecords(dir, input.streams, decisions);
+/** Everything one reading of the stops is made of. */
+export interface StopsReport {
+  /** The store the reading came from, for the line that says nothing is recorded yet. */
+  store: string;
+  /** Exactly what `--json` writes. */
+  document: StopsDocument;
+  /** The decisions the tables are made of, printed under them. */
+  decisions: readonly LocalVerdict[];
+  /** How many stop records the store held, before the window narrowed them. */
+  recordCount: number;
+}
 
-  const since = args.since;
+export interface StopsDocument {
+  since: string | null;
+  arm: DeliveryArm | null;
+  summary: StopsSummary;
+  d060: D060Reading;
+  /**
+   * The counterfactual, under a name that says what it is: the same bar read
+   * over the population the exclusion took the dogfood answers out of. It is
+   * not a partner reading, and it is here for one question — whether `d060`'s
+   * verdict is the exclusion's or the answers'.
+   */
+  d060_pooling_dogfood: D060Reading;
+  /**
+   * The same sentence the table prints under it: a consumer that reads
+   * `summary.precision` out of this document is quoting a partner number, and
+   * it travels with what the label cannot promise.
+   */
+  partner_reading_caveat: string;
+  before: StopsSummary | null;
+  widened_by_hiding: boolean;
+  unattended_merges: UnattendedMergesSummary;
+  merged_cost: MergedCostSummary;
+  loop_merges: LoopMergesSummary;
+  incomplete_reviews: IncompleteReviewRow[];
+  weeks?: StopsWeek[];
+}
+
+export function stops(input: StopsInput, context: CommandContext): StopsReport {
+  const now = context.now;
+  const dir = storeFor(context.cwd, input.target);
+  const decisions = readDecisions(dir, context.diagnostics);
+  const files = readStopRecords(dir, context.diagnostics, decisions);
+
+  const since = input.since === null ? null : toInstant(input.since);
   const window = since === null ? files : files.filter((file) => file.first_seen_at >= since);
   const before = since === null ? null : summariseStops(files.filter((file) => file.first_seen_at < since));
   const summary = summariseStops(window);
@@ -810,7 +821,7 @@ export async function runStopsCommand(input: {
   // exclusion itself produced can be told from one the answers earned.
   const d060PoolingDogfood = judgeAgainstD060(summary.pooled_precision);
   const widened = before !== null && widenedByHiding(before, summary);
-  const weeks = args.byWeek ? stopsByWeek(window, { since, now: input.now ?? new Date() }) : null;
+  const weeks = input.byWeek ? stopsByWeek(window, { since, now }) : null;
 
   // SCP-196: the loop's own number, beside D-060's. `--since` bounds the
   // population the same way it bounds the stops above — a ticket merged
@@ -825,7 +836,7 @@ export async function runStopsCommand(input: {
   // way a ticket's does, so it belongs in every population below; on a
   // repository that admitted nothing it is the only kind there is.
   const changes = listChanges(dir).filter(
-    (change) => args.arm === null || change.delivery.arm === args.arm,
+    (change) => input.arm === null || change.delivery.arm === input.arm,
   );
   const mergedChanges = changes.filter((change) => {
     if (change.state !== "merged") return false;
@@ -846,11 +857,11 @@ export async function runStopsCommand(input: {
           storeDirectory: dir,
           subject: mergedSubject(dir, change),
           attempt: null,
-          streams: input.streams,
+          streams: context.diagnostics,
         }),
       );
     } catch (error) {
-      input.streams.stderr(
+      context.diagnostics.stderr(
         `warning: ${change.key}'s attempts record could not be read and is left out of the cost ` +
           `per merged ticket: ${error instanceof Error ? error.message.split("\n")[0] : String(error)}\n`,
       );
@@ -860,7 +871,7 @@ export async function runStopsCommand(input: {
   // SCP-202: D-077's own count, over the same population. `escapeRows` reads
   // the records `perbo sync` wrote and nothing else — no `git`, no `gh` —
   // which is what lets this command stay the offline reading it has been.
-  const loopMerges = summariseLoopMerges(mergedChanges, escapeRows(dir, input.streams, input.now ?? new Date()));
+  const loopMerges = summariseLoopMerges(mergedChanges, escapeRows(dir, context.diagnostics, now));
 
   // The reviews that left a criterion unjudged, over every ticket rather than
   // the merged ones: a change whose review could not resolve a criterion is
@@ -868,63 +879,116 @@ export async function runStopsCommand(input: {
   // buckets by when a change merged, and these did not.
   const incomplete = incompleteReviewRows(changes);
 
-  if (args.json) {
-    input.streams.stdout(
-      `${JSON.stringify(
-        {
-          since,
-          arm: args.arm,
-          summary,
-          d060,
-          // The counterfactual, under a name that says what it is: the same
-          // bar read over the population the exclusion took the dogfood
-          // answers out of. It is not a partner reading, and it is here for
-          // one question — whether `d060`'s verdict is the exclusion's or the
-          // answers'.
-          d060_pooling_dogfood: d060PoolingDogfood,
-          // The same sentence the table prints under it: a consumer that reads
-          // `summary.precision` out of this document is quoting a partner
-          // number, and it travels with what the label cannot promise.
-          partner_reading_caveat: PARTNER_READING_CAVEAT,
-          before,
-          widened_by_hiding: widened,
-          unattended_merges: unattended,
-          merged_cost: cost,
-          loop_merges: loopMerges,
-          incomplete_reviews: incomplete,
-          ...(weeks === null ? {} : { weeks }),
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    return EXIT_CODES.approve;
-  }
-
-  input.streams.stdout(`${renderStopsAndUnattended(summary, unattended, cost, loopMerges)}\n`);
-  // Directly under the table the verdict is about, and before everything else
-  // this command prints: the bar is what the first two rows are read against.
-  input.streams.stdout(renderD060(d060, summary, d060PoolingDogfood));
-  if (weeks !== null) input.streams.stdout(`\n${renderStopsWeeks(weeks, summary)}\n`);
-  const unjudged = renderIncompleteReviews(incomplete);
-  if (unjudged !== null) input.streams.stdout(`\n${unjudged}\n`);
-  // After the tables the numbers are in, because this is what they are made
-  // of: the decisions themselves, and who took each where the record says.
-  const decided = renderDecisions(decisions);
-  if (decided !== null) input.streams.stdout(`\n${decided}\n`);
-  if (before !== null) {
-    input.streams.stdout(`\nsince ${since}; before it: ${brief(before)}\n`);
-  }
-  if (widened) input.streams.stdout(`${HIDING_WARNING}\n`);
-  (weeks ?? []).forEach((week, index, all) => {
-    if (week.widened_by_hiding) input.streams.stdout(`${weekHidingWarning(all[index - 1]!.week, week.week)}\n`);
-  });
-  if (files.length === 0) {
-    input.streams.stderr(
-      `nothing recorded in ${join(dir, "state")} or ${verdictsPath(dir)} yet: \`perbo sync <KEY>\` ` +
-        "reads the answers off a pull request once one is open, and `perbo verdict <review> " +
-        "--endorse|--override <stop key>` records one here without one.\n",
-    );
-  }
-  return EXIT_CODES.approve;
+  return {
+    store: dir,
+    decisions,
+    recordCount: files.length,
+    document: {
+      since,
+      arm: input.arm,
+      summary,
+      d060,
+      d060_pooling_dogfood: d060PoolingDogfood,
+      partner_reading_caveat: PARTNER_READING_CAVEAT,
+      before,
+      widened_by_hiding: widened,
+      unattended_merges: unattended,
+      merged_cost: cost,
+      loop_merges: loopMerges,
+      incomplete_reviews: incomplete,
+      ...(weeks === null ? {} : { weeks }),
+    },
+  };
 }
+
+const FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--json": switchFlag(),
+  "--by-week": switchFlag(),
+  "--arm": valueFlag(),
+  "--since": valueFlag(),
+} satisfies FlagTable;
+
+const GRAMMAR: Grammar<typeof FLAGS> = {
+  command: "stops",
+  flags: FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal: "stops takes no ticket key: it reads every recorded stop, e.g. perbo stops --by-week",
+  },
+  afterDoubleDash: "positionals",
+};
+
+export const stopsCommandLine: ReportCommand<StopsInput, { json: boolean }, StopsReport> = {
+  kind: "report",
+  name: "stops",
+  grammars: [GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor: () => GRAMMAR,
+  read(argv) {
+    const line = parseArgv(GRAMMAR, argv);
+    const arm = line.flags["--arm"];
+    if (arm !== undefined && !(DELIVERY_ARMS as readonly string[]).includes(arm)) {
+      throw new UsageError(`--arm requires one of ${DELIVERY_ARMS.join(", ")}, got '${arm}'`);
+    }
+    const input = readInput(StopsInputSchema, {
+      target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+      since: line.flags["--since"] ?? null,
+      byWeek: line.flags["--by-week"] === true,
+      arm: arm ?? null,
+    });
+    return {
+      // Spelled in full here as well as in the command: the day a person types
+      // is a fact about a line, and an instant is what the window is read
+      // against.
+      input: { ...input, since: input.since === null ? null : toInstant(input.since) },
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  run: stops,
+  toJson: (report) => report.document,
+  render(report, _output, target): Rendered {
+    const { document } = report;
+    if (target.json) {
+      return {
+        stdout: `${JSON.stringify(document, null, 2)}\n`,
+        stderr: "",
+        exitCode: EXIT_CODES.approve,
+      };
+    }
+    const out = [
+      `${renderStopsAndUnattended(document.summary, document.unattended_merges, document.merged_cost, document.loop_merges)}\n`,
+      // Directly under the table the verdict is about, and before everything
+      // else this command prints: the bar is what the first two rows are read
+      // against.
+      renderD060(document.d060, document.summary, document.d060_pooling_dogfood),
+    ];
+    const weeks = document.weeks ?? null;
+    if (weeks !== null) out.push(`\n${renderStopsWeeks(weeks, document.summary)}\n`);
+    const unjudged = renderIncompleteReviews(document.incomplete_reviews);
+    if (unjudged !== null) out.push(`\n${unjudged}\n`);
+    // After the tables the numbers are in, because this is what they are made
+    // of: the decisions themselves, and who took each where the record says.
+    const decided = renderDecisions(report.decisions);
+    if (decided !== null) out.push(`\n${decided}\n`);
+    if (document.before !== null) {
+      out.push(`\nsince ${document.since}; before it: ${brief(document.before)}\n`);
+    }
+    if (document.widened_by_hiding) out.push(`${HIDING_WARNING}\n`);
+    (weeks ?? []).forEach((week, index, all) => {
+      if (week.widened_by_hiding) out.push(`${weekHidingWarning(all[index - 1]!.week, week.week)}\n`);
+    });
+    return {
+      stdout: out.join(""),
+      stderr:
+        report.recordCount === 0
+          ? `nothing recorded in ${join(report.store, "state")} or ${verdictsPath(report.store)} yet: \`perbo sync <KEY>\` ` +
+            "reads the answers off a pull request once one is open, and `perbo verdict <review> " +
+            "--endorse|--override <stop key>` records one here without one.\n"
+          : "",
+      exitCode: EXIT_CODES.approve,
+    };
+  },
+};

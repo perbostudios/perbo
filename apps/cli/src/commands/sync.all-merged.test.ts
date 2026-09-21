@@ -5,9 +5,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES, TICKET_SCHEMA_VERSION, TicketSchema, wilsonInterval, type Ticket } from "@perbo/contracts";
 import { GithubCredentialError, TicketDeliveryStateSchema, type TicketDeliveryState } from "@perbo/runner";
 import type { Streams } from "../streams.js";
-import { runStopsCommand } from "./stops.js";
+import { stopsCommandLine } from "./stops.js";
 import { runSyncCommand } from "./sync.js";
 import { readTicket, storeDir, writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-203: `perbo sync --all-merged` reads every merged ticket's pull
@@ -336,7 +337,7 @@ describe("ac_3 — after the sweep, `perbo stops` prints the unattended-merges r
     expect(syncStreams.out.join("")).toContain("16 merged tickets: 16 filled, 0 unchanged, 0 unreadable\n");
 
     const stopsStreams = capture();
-    const stopsCode = await runStopsCommand({ argv: ["--repo", repo], streams: stopsStreams, cwd: repo });
+    const stopsCode = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams: stopsStreams, cwd: repo });
     expect(stopsCode).toBe(EXIT_CODES.approve);
     const out = stopsStreams.out.join("");
 

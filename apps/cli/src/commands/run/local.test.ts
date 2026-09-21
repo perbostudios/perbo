@@ -26,7 +26,7 @@ import { pollPullRequest, type PreflightRequest, type PreflightResult } from "@p
 import { branchName } from "@perbo/workspace";
 import { parseAdmitArgs, runAdmitCommand } from "../admit.js";
 import type { Streams } from "../../streams.js";
-import { runEscapesCommand } from "../escapes/index.js";
+import { escapesCommandLine } from "../escapes/index.js";
 import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "./index.js";
 import { buildInspectReport } from "../inspect.js";
 import {
@@ -36,7 +36,7 @@ import {
   writeLocalRunRecord,
   type LocalRunRecord,
 } from "./local.js";
-import { runStopsCommand } from "../stops.js";
+import { stopsCommandLine } from "../stops.js";
 import { runSyncCommand } from "../sync.js";
 import {
   headCommit,
@@ -50,6 +50,7 @@ import {
 import { makeAttempt } from "../../test-support/attempt-fixture.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "../../test-support/open-build.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * `perbo run` with nothing admitted behind it (AYO-32).
@@ -1725,7 +1726,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       const escapes = captureStreams();
       expect(
-        await runEscapesCommand({
+        await runCommandLine(escapesCommandLine, {
           argv: ["--repo", repo.root, "--json"],
           streams: escapes,
           cwd: repo.root,
@@ -1756,12 +1757,12 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       expect(runRow["status"]).toBe("not observed");
       // And on the printed table a person reads, one line each.
       const printed = captureStreams();
-      await runEscapesCommand({ argv: ["--repo", repo.root], streams: printed, cwd: repo.root, now: NOW });
+      await runCommandLine(escapesCommandLine, { argv: ["--repo", repo.root], streams: printed, cwd: repo.root, now: NOW });
       expect(printed.out.join("")).toContain(run.run_id);
 
       const stops = captureStreams();
       expect(
-        await runStopsCommand({
+        await runCommandLine(stopsCommandLine, {
           argv: ["--repo", repo.root, "--json"],
           streams: stops,
           cwd: repo.root,
@@ -1856,7 +1857,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       const escapesOf = async (repo: Repo) => {
         const streams = captureStreams();
         expect(
-          await runEscapesCommand({
+          await runCommandLine(escapesCommandLine, {
             argv: ["--repo", repo.root, "--json"],
             streams,
             cwd: repo.root,
@@ -1880,14 +1881,14 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       expect(localRow["reverted"]).toBe(ticketRow["reverted"]);
       // And on the printed table, the run gets a line of its own.
       const printed = captureStreams();
-      await runEscapesCommand({ argv: ["--repo", local.root], streams: printed, cwd: local.root, now: NOW });
+      await runCommandLine(escapesCommandLine, { argv: ["--repo", local.root], streams: printed, cwd: local.root, now: NOW });
       expect(printed.out.join("")).toContain(merged.run_id);
       expect(printed.out.join("")).not.toContain("no merged tickets yet");
 
       const stopsOf = async (repo: Repo) => {
         const streams = captureStreams();
         expect(
-          await runStopsCommand({
+          await runCommandLine(stopsCommandLine, {
             argv: ["--repo", repo.root, "--json"],
             streams,
             cwd: repo.root,

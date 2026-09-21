@@ -62,6 +62,7 @@ import { WIDTH, clip, pad, painter, spread, wrap, type Paint } from "../text.js"
 import { specStaleness } from "../spec/staleness.js";
 import { storeDir } from "../store/index.js";
 import type { Streams } from "../streams.js";
+import type { Diagnostics } from "../diagnostics.js";
 import {
   activeVerdicts,
   readLocalVerdictsOrWarn,
@@ -919,7 +920,7 @@ export function buildReportForSubject(input: {
   subject: InspectSubject;
   attempt: string | null;
   /** Where an unreadable verdicts file is named; the report itself is still built. */
-  streams?: Streams | undefined;
+  streams?: Diagnostics | undefined;
 }): InspectReport {
   const attemptsPath = join(input.storeDirectory, "state", `${input.subject.ticket_id}.attempts.json`);
   const head = { ...input.subject, attempts_path: attemptsPath };
@@ -2350,7 +2351,7 @@ export function buildInspectReport(input: {
   key: string;
   attempt: string | null;
   /** Where an unreadable verdicts file is named; the report itself is still built. */
-  streams?: Streams | undefined;
+  streams?: Diagnostics | undefined;
 }): InspectReport {
   return buildReportForSubject({
     storeDirectory: input.storeDirectory,

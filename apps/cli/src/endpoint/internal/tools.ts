@@ -6,10 +6,10 @@ import { listCommandLine, parseAdmitArgs, runAdmitCommand, type AdmitArgs } from
 import { collectOutput } from "../../diagnostics.js";
 import type { CommandContext, ReportCommand } from "../../command-line/terminal.js";
 import { runEdit, type EditArgs } from "../../commands/edit/index.js";
-import { runEscapesCommand } from "../../commands/escapes/index.js";
+import { escapesCommandLine } from "../../commands/escapes/index.js";
 import { runInspectCommand } from "../../commands/inspect.js";
 import type { ServeTick } from "../../commands/serve/index.js";
-import { runStopsCommand } from "../../commands/stops.js";
+import { stopsCommandLine, IsoInstantSchema } from "../../commands/stops.js";
 import type { Streams } from "../../streams.js";
 import { runSyncCommand } from "../../commands/sync.js";
 
@@ -178,7 +178,6 @@ const KeySchema = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/).descr
  * does travel as argv is shaped by a schema that admits no leading dash.
  */
 const AttemptIdSchema = z.string().regex(/^att_[0-9a-f]+$/).describe("An attempt id, e.g. att_0000000000000001.");
-const IsoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}(T[0-9:.]+Z?)?$/).describe("An ISO date, e.g. 2026-09-01.");
 const IssueReferenceSchema = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*#[1-9][0-9]*$/)
@@ -227,16 +226,19 @@ const stops = tool({
     "merged ticket, and the precision of stopping.",
   role: "read",
   input: z.object({
-    since: IsoDateSchema.optional().describe("An ISO date; stops before it are left out."),
+    since: IsoInstantSchema.optional().describe("An ISO date; stops before it are left out."),
     by_week: z.boolean().optional().describe("One row per week rather than one table."),
   }),
   run: (input, context) =>
-    captured(true, (streams) =>
-      runStopsCommand({
-        argv: [...repoArgs(context), "--json", ...(input.since ? ["--since", input.since] : []), ...(input.by_week ? ["--by-week"] : [])],
-        streams,
-        cwd: context.cwd,
-      }),
+    reported(
+      stopsCommandLine,
+      {
+        target: targetOf(context),
+        since: input.since ?? null,
+        byWeek: input.by_week ?? false,
+        arm: null,
+      },
+      context,
     ),
 });
 
@@ -245,8 +247,7 @@ const escapes = tool({
   description: "Merged changes whose fourteen days are up, and what escaped review in them.",
   role: "read",
   input: z.object({}),
-  run: (_input, context) =>
-    captured(true, (streams) => runEscapesCommand({ argv: [...repoArgs(context), "--json"], streams, cwd: context.cwd })),
+  run: (_input, context) => reported(escapesCommandLine, { target: targetOf(context) }, context),
 });
 
 const queueState = tool({

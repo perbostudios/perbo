@@ -214,6 +214,11 @@ export function runCommandLine<Input, Output, Deps extends object>(
   command: NarratedCommand<Input, Output, Deps>,
   invocation: Invocation<Deps>,
 ): number | Promise<number>;
+/** A command the table holds, whose own types are behind it. */
+export function runCommandLine(
+  command: TerminalCommand,
+  invocation: Invocation<object>,
+): number | Promise<number>;
 export function runCommandLine(
   command: TerminalCommand,
   invocation: Invocation<object>,

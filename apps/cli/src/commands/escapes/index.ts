@@ -1,6 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { EXIT_CODES, PARTNER_READING_CAVEAT, summariseStops } from "@perbo/contracts";
+import { join } from "node:path";
+import {
+  EXIT_CODES,
+  PARTNER_READING_CAVEAT,
+  summariseStops,
+  type StopsSummary,
+} from "@perbo/contracts";
 import {
   ESCAPE_WINDOW_DAYS,
   TicketEscapesSchema,
@@ -13,9 +18,20 @@ import {
   type TicketCommit,
   type TicketEscapes,
 } from "./internal/record.js";
+import { z } from "zod";
 import { CommandFailedError, gh, git, type RunResult } from "@perbo/workspace";
-import { UsageError } from "../../usage-error.js";
+import { readInput } from "../../usage-error.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../command-line/grammar.js";
+import type { CommandContext, Rendered, ReportCommand } from "../../command-line/terminal.js";
+import type { Diagnostics } from "../../diagnostics.js";
 import type { Streams } from "../../streams.js";
+import type { LocalVerdict } from "../verdict/record.js";
 import { BaselineFileSchema, baselinePath } from "../baseline/index.js";
 import { countDueness, dueAt, duenessOf, escapeReading, type DueCounts } from "./internal/due.js";
 import {
@@ -28,7 +44,8 @@ import {
   renderMetricTable,
   stopsRows,
 } from "../stops.js";
-import { listChanges, storeDir, type SyncedChange } from "../../store/tickets.js";
+import { listChanges, type SyncedChange } from "../../store/tickets.js";
+import { storeFor, StoreTargetSchema } from "../../store/index.js";
 
 /**
  * `perbo escapes` — of the changes that merged, how many were undone or
@@ -49,42 +66,8 @@ const FIELD = "\u001f";
 
 export class EscapeCollectionError extends Error {}
 
-export interface EscapesArgs {
-  repo: string;
-  store: string | null;
-  json: boolean;
-}
-
-export function parseEscapesArgs(argv: readonly string[]): EscapesArgs {
-  const args: EscapesArgs = { repo: ".", store: null, json: false };
-  const tokens = argv.flatMap((token) =>
-    token.startsWith("--") && token.includes("=")
-      ? [token.slice(0, token.indexOf("=")), token.slice(token.indexOf("=") + 1)]
-      : [token],
-  );
-  const value = (index: number, token: string): string => {
-    const next = tokens[index];
-    if (next === undefined) throw new UsageError(`${token} requires a value`);
-    return next;
-  };
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = value(++i, token);
-        break;
-      case "--store":
-        args.store = value(++i, token);
-        break;
-      case "--json":
-        args.json = true;
-        break;
-      default:
-        throw new UsageError(`unknown option '${token}' for escapes`);
-    }
-  }
-  return args;
-}
+export const EscapesInputSchema = z.strictObject({ target: StoreTargetSchema });
+export type EscapesInput = z.infer<typeof EscapesInputSchema>;
 
 /* ------------------------------------------------------------------ *
  * Collection: local `git` and `gh`, under `perbo sync`.
@@ -509,7 +492,7 @@ export function isDogfoodStore(dir: string): boolean {
  * `sync` writes is keyed by the id the store files everything under, so both
  * kinds are read out of `<store>/state` by the same lookup.
  */
-export function escapeRows(dir: string, streams: Streams, now: Date): EscapeRow[] {
+export function escapeRows(dir: string, diagnostics: Diagnostics, now: Date): EscapeRow[] {
   const dogfood = isDogfoodStore(dir);
   const unreadable: string[] = [];
   const rows = listChanges(dir)
@@ -536,7 +519,7 @@ export function escapeRows(dir: string, streams: Streams, now: Date): EscapeRow[
     });
   if (unreadable.length > 0) {
     // A record that cannot be read is not a ticket that did not escape.
-    streams.stderr(
+    diagnostics.stderr(
       `warning: ${unreadable.length} escapes record(s) in ${join(dir, "state")} are not readable ` +
         `and their tickets are reported as not observed: ${unreadable.join(", ")}\n`,
     );
@@ -644,17 +627,33 @@ export function renderEscapeRows(rows: readonly EscapeRow[], now: Date): string 
   return lines.join("\n");
 }
 
-export async function runEscapesCommand(input: {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  now?: Date;
-}): Promise<number> {
-  const args = parseEscapesArgs(input.argv);
-  const now = input.now ?? new Date();
-  const dir = storeDir(resolve(input.cwd, args.repo), args.store);
-  const rows = escapeRows(dir, input.streams, now);
-  const escapes = summariseEscapes(rows);
+/** One reading of what escaped: the document, and what the tables under it are made of. */
+export interface EscapesReport {
+  /** The store the reading came from, for the lines that name it. */
+  store: string;
+  /** Exactly what `--json` writes. */
+  document: EscapesDocument;
+  rows: readonly EscapeRow[];
+  /** The decisions the stops half counts, and who took each. */
+  decisions: readonly LocalVerdict[];
+  /** The clock every reading on the page was decided against. */
+  readAt: Date;
+}
+
+export interface EscapesDocument {
+  window_days: number;
+  read_at: string;
+  due: ReturnType<typeof countDueness>;
+  stops: StopsSummary;
+  escapes: ReturnType<typeof summariseEscapes>;
+  tickets: Array<EscapeRow & { due: boolean; due_at: string | null }>;
+}
+
+export function escapes(input: EscapesInput, context: CommandContext): EscapesReport {
+  const now = context.now;
+  const dir = storeFor(context.cwd, input.target);
+  const rows = escapeRows(dir, context.diagnostics, now);
+  const summary = summariseEscapes(rows);
   // Each change's own fourteen days against this clock, counted apart from the
   // rate: how many are due is a fact about merge dates, and how many of those
   // were read to the end of their window is a fact about the records.
@@ -662,72 +661,108 @@ export async function runEscapesCommand(input: {
   // D-060's pair is not optional here either: an escape rate read on its own
   // says nothing about whether anything was ever stopped, and the two are
   // printed from one table or not at all.
-  const decisions = readDecisions(dir, input.streams);
-  const stops = summariseStops(readStopRecords(dir, input.streams, decisions));
-
-  if (args.json) {
-    input.streams.stdout(
-      `${JSON.stringify(
-        {
-          window_days: ESCAPE_WINDOW_DAYS,
-          // `read_at` is the clock every reading on this page was decided
-          // against; without it a `not yet due` row cannot be told from a stale
-          // one, and `due_at` below cannot be checked against anything.
-          read_at: now.toISOString(),
-          due,
-          stops,
-          escapes,
-          // `status` stays the record contract's word for how far the
-          // observation reached; `due` and `due_at` are this command's reading
-          // of the fourteen days, and they are separate fields because they
-          // answer separate questions.
-          tickets: rows.map((row) => ({
-            ...row,
-            due: duenessOf(row, now) === "due",
-            due_at: dueAt(row),
-          })),
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    return EXIT_CODES.approve;
-  }
-
-  input.streams.stdout(
-    `${renderMetricTable([METRIC_TABLE_HEADER, ...stopsRows(stops), ...escapesRows(escapes, due)])}\n`,
-  );
-  // Precision of stopping is a partner reading wherever it is printed, and this
-  // command prints it in the same rows `perbo stops` does (D-058). What the
-  // dogfood label cannot promise travels with it here for the same reason it
-  // does there: a number quoted out of this table is quoted as a partner's.
-  if (stops.precision.n > 0 || stops.dogfood_stops > 0) {
-    input.streams.stdout(`${PARTNER_READING_CAVEAT}\n`);
-  }
-  input.streams.stdout(rows.length === 0 ? "\nno merged tickets yet\n" : `\n${renderEscapeRows(rows, now)}\n`);
-  // The stops half of the table above counts the decisions taken here beside
-  // the ones ticked on a pull request, so who took each is printed here too,
-  // in the one shape `perbo stops` prints it in.
-  const decided = renderDecisions(decisions);
-  if (decided !== null) input.streams.stdout(`\n${decided}\n`);
-  if (escapes.not_observed > 0) {
-    input.streams.stderr(
-      `${escapes.not_observed} merged ticket(s) have no escapes record in ${join(dir, "state")}: ` +
-        "`perbo sync <KEY>` reads the history after the merge through git and gh; this command " +
-        "never does.\n",
-    );
-  }
-  if (escapes.stale > 0) {
-    // Out of the denominator, and said out loud: a window that closed after the
-    // last sync is unread history, not a ticket that survived.
-    input.streams.stderr(
-      `${escapes.stale} merged ticket(s) have a record that stops short of their ${ESCAPE_WINDOW_DAYS}-day ` +
-        "window — synced while it was still open, or from a checkout behind the default branch — and " +
-        "are out of the rate until `perbo sync <KEY>` reads the rest.\n",
-    );
-  }
-  return EXIT_CODES.approve;
+  const decisions = readDecisions(dir, context.diagnostics);
+  const stops = summariseStops(readStopRecords(dir, context.diagnostics, decisions));
+  return {
+    store: dir,
+    readAt: now,
+    rows,
+    decisions,
+    document: {
+      window_days: ESCAPE_WINDOW_DAYS,
+      // `read_at` is the clock every reading on this page was decided
+      // against; without it a `not yet due` row cannot be told from a stale
+      // one, and `due_at` below cannot be checked against anything.
+      read_at: now.toISOString(),
+      due,
+      stops,
+      escapes: summary,
+      // `status` stays the record contract's word for how far the
+      // observation reached; `due` and `due_at` are this command's reading
+      // of the fourteen days, and they are separate fields because they
+      // answer separate questions.
+      tickets: rows.map((row) => ({ ...row, due: duenessOf(row, now) === "due", due_at: dueAt(row) })),
+    },
+  };
 }
+
+const FLAGS = { "--repo": valueFlag(), "--store": valueFlag(), "--json": switchFlag() } satisfies FlagTable;
+
+const GRAMMAR: Grammar<typeof FLAGS> = {
+  command: "escapes",
+  flags: FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal: "escapes takes no ticket key: it reads every merged change, e.g. perbo escapes --json",
+  },
+  afterDoubleDash: "positionals",
+};
+
+export const escapesCommandLine: ReportCommand<EscapesInput, { json: boolean }, EscapesReport> = {
+  kind: "report",
+  name: "escapes",
+  grammars: [GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor: () => GRAMMAR,
+  read(argv) {
+    const line = parseArgv(GRAMMAR, argv);
+    return {
+      input: readInput(EscapesInputSchema, {
+        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+      }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  run: escapes,
+  toJson: (report) => report.document,
+  render(report, _output, target): Rendered {
+    if (target.json) {
+      return {
+        stdout: `${JSON.stringify(report.document, null, 2)}\n`,
+        stderr: "",
+        exitCode: EXIT_CODES.approve,
+      };
+    }
+    const { stops, escapes: summary, due } = report.document;
+    const out = [
+      `${renderMetricTable([METRIC_TABLE_HEADER, ...stopsRows(stops), ...escapesRows(summary, due)])}\n`,
+      // Precision of stopping is a partner reading wherever it is printed, and
+      // this command prints it in the same rows `perbo stops` does (D-058).
+      // What the dogfood label cannot promise travels with it here for the
+      // same reason it does there: a number quoted out of this table is quoted
+      // as a partner's.
+      stops.precision.n > 0 || stops.dogfood_stops > 0 ? `${PARTNER_READING_CAVEAT}\n` : "",
+      report.rows.length === 0
+        ? "\nno merged tickets yet\n"
+        : `\n${renderEscapeRows(report.rows, report.readAt)}\n`,
+    ];
+    // The stops half of the table above counts the decisions taken here beside
+    // the ones ticked on a pull request, so who took each is printed here too,
+    // in the one shape `perbo stops` prints it in.
+    const decided = renderDecisions(report.decisions);
+    if (decided !== null) out.push(`\n${decided}\n`);
+
+    const said: string[] = [];
+    if (summary.not_observed > 0) {
+      said.push(
+        `${summary.not_observed} merged ticket(s) have no escapes record in ${join(report.store, "state")}: ` +
+          "`perbo sync <KEY>` reads the history after the merge through git and gh; this command " +
+          "never does.\n",
+      );
+    }
+    if (summary.stale > 0) {
+      // Out of the denominator, and said out loud: a window that closed after
+      // the last sync is unread history, not a ticket that survived.
+      said.push(
+        `${summary.stale} merged ticket(s) have a record that stops short of their ${ESCAPE_WINDOW_DAYS}-day ` +
+          "window — synced while it was still open, or from a checkout behind the default branch — and " +
+          "are out of the rate until `perbo sync <KEY>` reads the rest.\n",
+      );
+    }
+    return { stdout: out.join(""), stderr: said.join(""), exitCode: EXIT_CODES.approve };
+  },
+};
 
 /**
  * The record's vocabulary, for the commands that read an escapes file without

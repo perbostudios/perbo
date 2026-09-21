@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { PARTNER_READING_CAVEAT, STOP_VERDICTS_SCHEMA_VERSION, type StopVerdicts } from "@perbo/contracts";
 import type { Streams } from "../streams.js";
-import { HIDING_WARNING, parseStopsArgs, runStopsCommand, weekHidingWarning } from "./stops.js";
+import { HIDING_WARNING, stopsCommandLine, weekHidingWarning } from "./stops.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * `perbo stops --by-week` over fake stops files: the weeks the table prints,
@@ -64,7 +65,7 @@ function store(name: string, records: readonly StopVerdicts[]): string {
 
 async function run(repo: string, argv: readonly string[], now: string): Promise<{ out: string; err: string; code: number }> {
   const streams = capture();
-  const code = await runStopsCommand({ argv: ["--repo", repo, ...argv], streams, cwd: repo, now: new Date(now) });
+  const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, ...argv], streams, cwd: repo, now: new Date(now) });
   return { out: streams.out.join(""), err: streams.err.join(""), code };
 }
 
@@ -285,12 +286,12 @@ describe("perbo stops --by-week", () => {
   });
 
   it("takes --by-week as a flag, in either position", () => {
-    expect(parseStopsArgs(["--by-week"]).byWeek).toBe(true);
-    expect(parseStopsArgs(["--by-week", "--since", "2026-09-02"])).toMatchObject({
+    expect(stopsCommandLine.read(["--by-week"]).input.byWeek).toBe(true);
+    expect(stopsCommandLine.read(["--by-week", "--since", "2026-09-02"]).input).toMatchObject({
       byWeek: true,
       since: "2026-09-02T00:00:00.000Z",
     });
-    expect(parseStopsArgs(["--since", "2026-09-02"]).byWeek).toBe(false);
+    expect(stopsCommandLine.read(["--since", "2026-09-02"]).input.byWeek).toBe(false);
   });
 
   it("prints, for --since without --by-week, exactly the bytes it printed before the flag existed", async () => {

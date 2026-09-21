@@ -10,8 +10,9 @@ import type { Streams } from "../streams.js";
 import { makeAttempt } from "../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
 import { recordDelivery, runSyncCommand } from "./sync.js";
-import { runStopsCommand } from "./stops.js";
+import { stopsCommandLine } from "./stops.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-196: the loop's own success as a live number.
@@ -310,7 +311,7 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     // nothing recorded must not crash the reading.
 
     const streams = capture();
-    const code = await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo });
+    const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(code).toBe(EXIT_CODES.approve);
     const out = streams.out.join("");
     expect(out).toMatch(/unattended merges\s+67%\s+\[21–94\]\s+3 merged tickets with a known answer \(2 unattended, 1 attended\)/);
@@ -344,7 +345,7 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     ]);
 
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(streams.out.join("")).toContain("AYO-1/att_unpriced");
   });
 
@@ -365,7 +366,7 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     writeAttempts(dir, "ticket_1", [priced("ticket_1", 4_000_000)]);
 
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo, "--json"], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
     const parsed = JSON.parse(streams.out.join("")) as {
       unattended_merges: { merged: number; unattended: number; attended: number; unknown: number; share: { point: number; n: number } };
       merged_cost: { tickets: number; attempts: number; priced: number; micros: number };
@@ -404,7 +405,7 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     );
 
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo, "--since", "2026-09-02", "--json"], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--since", "2026-09-02", "--json"], streams, cwd: repo });
     const parsed = JSON.parse(streams.out.join("")) as {
       unattended_merges: { merged: number; attended: number };
     };
@@ -431,7 +432,7 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     writeFileSync(join(dir, "state", "ticket_1.attempts.json"), "{not json");
 
     const streams = capture();
-    const code = await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo });
+    const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(code).toBe(EXIT_CODES.approve);
     expect(streams.err.join("")).toContain("AYO-1");
     expect(streams.out.join("")).toMatch(/unattended merges\s+100%/);

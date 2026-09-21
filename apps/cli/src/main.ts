@@ -9,14 +9,14 @@ import {
 import { runBaselineCommand } from "./commands/baseline/index.js";
 import { runCommandLine, startEntryPoint, type EntryPoint } from "./command-line/terminal.js";
 import { runEditCommand } from "./commands/edit/index.js";
-import { runEscapesCommand } from "./commands/escapes/index.js";
+import { escapesCommandLine } from "./commands/escapes/index.js";
 import { parseExecuteArgs, runDoctorCommand, runExecuteCommand } from "./commands/run/index.js";
 import { COMMAND_NAMES, type CommandName } from "./command-line/names.js";
 import { runInspectCommand } from "./commands/inspect.js";
 import { parsePrincipleArgs, runPrincipleCommand } from "./commands/principle.js";
 import { runReviewCommand } from "./commands/review/index.js";
 import { VERSION } from "./version.js";
-import { runStopsCommand } from "./commands/stops.js";
+import { stopsCommandLine } from "./commands/stops.js";
 import { runIndexCommand } from "./commands/symbol-index.js";
 import { runAgentCommand } from "./commands/agent.js";
 import { runInterviewCommand } from "./commands/interview/index.js";
@@ -79,9 +79,9 @@ export const FULL_ENTRY_POINT: EntryPoint<CommandName> = {
       case "interview":
         return runInterviewCommand({ argv: rest, streams, cwd });
       case "stops":
-        return runStopsCommand({ argv: rest, streams, cwd });
+        return runCommandLine(stopsCommandLine, { argv: rest, streams, cwd });
       case "escapes":
-        return runEscapesCommand({ argv: rest, streams, cwd });
+        return runCommandLine(escapesCommandLine, { argv: rest, streams, cwd });
       case "principle":
         return runPrincipleCommand(parsePrincipleArgs(rest));
       case "index":

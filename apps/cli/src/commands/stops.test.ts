@@ -13,7 +13,8 @@ import {
 import { parseStopAnswers } from "@perbo/runner";
 import { UsageError } from "../usage-error.js";
 import type { Streams } from "../streams.js";
-import { HIDING_WARNING, parseStopsArgs, runStopsCommand } from "./stops.js";
+import { HIDING_WARNING, stopsCommandLine } from "./stops.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * `perbo stops` over fake stops files: the exact numbers, the interval, and
@@ -85,7 +86,7 @@ describe("perbo stops", () => {
   it("prints precision of stopping beside the companion, as one table", async () => {
     const repo = store("three", three);
     const streams = capture();
-    expect(await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo })).toBe(0);
+    expect(await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo })).toBe(0);
     const out = streams.out.join("");
     expect(out).toMatch(/precision of stopping\s+50%\s+\[9–91\]\s+2 changes with an answer \(1 endorsed, 1 overridden\)/);
     expect(out).toMatch(/person shown something\s+67%\s+\[21–94\]\s+3 changes with a pull request or a decision \(2 shown\)/);
@@ -97,7 +98,7 @@ describe("perbo stops", () => {
   it("emits the same numbers as JSON", async () => {
     const repo = store("three-json", three);
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo, "--json"], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
     const parsed = JSON.parse(streams.out.join("")) as {
       since: string | null;
       before: null;
@@ -123,7 +124,7 @@ describe("perbo stops", () => {
       record(4, D3, []),
     ]);
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo, "--since", "2026-09-02"], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--since", "2026-09-02"], streams, cwd: repo });
     const out = streams.out.join("");
     expect(out).toMatch(/precision of stopping\s+100%/);
     expect(out).toContain("before it: precision 50% [9–91] n=2 · shown 100% [34–100] n=2");
@@ -133,7 +134,7 @@ describe("perbo stops", () => {
   it("stays quiet under --since when the companion did not fall", async () => {
     const repo = store("since-quiet", three);
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo, "--since=2026-09-02T00:00:00Z"], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--since=2026-09-02T00:00:00Z"], streams, cwd: repo });
     expect(streams.out.join("")).not.toContain(HIDING_WARNING);
     expect(streams.out.join("")).toContain("before it: precision 50% [9–91] n=2");
   });
@@ -141,7 +142,7 @@ describe("perbo stops", () => {
   it("names an unreadable file and counts the rest", async () => {
     const repo = store("unreadable", three, { "ticket_bad.stops.json": "{not json" });
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(streams.err.join("")).toContain("ticket_bad.stops.json");
     expect(streams.out.join("")).toMatch(/3 changes with a pull request or a decision/);
   });
@@ -149,15 +150,15 @@ describe("perbo stops", () => {
   it("says where to start when nothing has been synced", async () => {
     const repo = store("empty", []);
     const streams = capture();
-    expect(await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo })).toBe(0);
+    expect(await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo })).toBe(0);
     expect(streams.out.join("")).toMatch(/precision of stopping\s+—/);
     expect(streams.err.join("")).toContain("perbo sync");
   });
 
   it("refuses a --since that is not a date, and an option it does not know", () => {
-    expect(() => parseStopsArgs(["--since", "yesterday"])).toThrow(UsageError);
-    expect(() => parseStopsArgs(["--all"])).toThrow(UsageError);
-    expect(parseStopsArgs(["--since", "2026-09-02"]).since).toBe("2026-09-02T00:00:00.000Z");
+    expect(() => stopsCommandLine.read(["--since", "yesterday"]).input).toThrow(UsageError);
+    expect(() => stopsCommandLine.read(["--all"]).input).toThrow(UsageError);
+    expect(stopsCommandLine.read(["--since", "2026-09-02"]).input.since).toBe("2026-09-02T00:00:00.000Z");
   });
 });
 
@@ -218,7 +219,7 @@ describe("stops --arm reads the unattended row for one arm", () => {
 
   const read = async (repo: string, argv: readonly string[]) => {
     const streams = capture();
-    const code = await runStopsCommand({
+    const code = await runCommandLine(stopsCommandLine, {
       argv: ["--repo", repo, "--json", ...argv],
       streams,
       cwd: repo,
@@ -251,7 +252,7 @@ describe("stops --arm reads the unattended row for one arm", () => {
   });
 
   it("refuses an arm that is not one of the two", () => {
-    expect(() => parseStopsArgs(["--arm", "codex"])).toThrow(UsageError);
+    expect(() => stopsCommandLine.read(["--arm", "codex"]).input).toThrow(UsageError);
   });
 });
 
@@ -284,7 +285,7 @@ const answeredStop = (n: number, answer: "endorse" | "override", by?: "person" |
 const read = async (name: string, records: readonly StopVerdicts[]): Promise<string> => {
   const repo = store(name, records);
   const streams = capture();
-  expect(await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo })).toBe(0);
+  expect(await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo })).toBe(0);
   return streams.out.join("");
 };
 
@@ -357,7 +358,7 @@ describe("the reading against D-060's bar", () => {
   it("carries the same verdict in --json", async () => {
     const repo = store("d060-json", population(9, 9));
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo, "--json"], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
     const parsed = JSON.parse(streams.out.join("")) as {
       d060: { verdict: string; bar: number; resolving_n: number; spans_bar: boolean };
     };
@@ -529,7 +530,7 @@ describe("perbo stops excludes dogfood answers from the partner reading", () => 
   it("carries the pooled counterfactual, named as no partner reading, in --json", async () => {
     const repo = store("dogfood-signed-json", signedPopulation("stand_in"));
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo, "--json"], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
     const parsed = JSON.parse(streams.out.join("")) as {
       d060: { verdict: string };
       d060_pooling_dogfood: { verdict: string; interval: { n: number } };
@@ -547,7 +548,7 @@ describe("perbo stops excludes dogfood answers from the partner reading", () => 
   it("reports the same population, and the same caveat, in --json", async () => {
     const repo = store("dogfood-json", mixed);
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo, "--json"], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
     const parsed = JSON.parse(streams.out.join("")) as {
       partner_reading_caveat: string;
       summary: {

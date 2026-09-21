@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { listCommandLine, parseAdmitArgs } from "../commands/admit.js";
 import { parseBaselineArgs } from "../commands/baseline/index.js";
 import { parseEditArgs } from "../commands/edit/index.js";
-import { parseEscapesArgs } from "../commands/escapes/index.js";
+import { escapesCommandLine } from "../commands/escapes/index.js";
 import { parseInspectArgs } from "../commands/inspect.js";
 import { parseInterviewArgs } from "../commands/interview/index.js";
 import { mcpCommandLine } from "../commands/mcp.js";
 import { parseServeArgs } from "../commands/serve/index.js";
-import { parseStopsArgs } from "../commands/stops.js";
+import { stopsCommandLine } from "../commands/stops.js";
 import { parseSyncAllMergedArgs } from "../commands/sync.js";
 import { parseVerdictArgs } from "../commands/verdict/index.js";
 
@@ -39,16 +39,16 @@ describe("list, approve and mcp", () => {
 });
 
 describe("stops and escapes", () => {
-  it.fails("keeps stops' repository path whole", () => {
-    const args = parseStopsArgs(["--repo", "--x=--by-week"]);
-    expect(args.repo).toBe("--x=--by-week");
-    expect(args.byWeek).toBe(false);
+  it("keeps stops' repository path whole", () => {
+    const { input } = stopsCommandLine.read(["--repo", "--x=--by-week"]);
+    expect(input.target.repo).toBe("--x=--by-week");
+    expect(input.byWeek).toBe(false);
   });
 
-  it.fails("keeps escapes' repository path whole", () => {
-    const args = parseEscapesArgs(["--repo", "--x=--json"]);
-    expect(args.repo).toBe("--x=--json");
-    expect(args.json).toBe(false);
+  it("keeps escapes' repository path whole", () => {
+    const line = escapesCommandLine.read(["--repo", "--x=--json"]);
+    expect(line.input.target.repo).toBe("--x=--json");
+    expect(line.output.json).toBe(false);
   });
 });
 
