@@ -2,14 +2,14 @@ import { z } from "zod";
 import { EXIT_CODES } from "@perbo/contracts";
 import { MODEL_PROVIDERS } from "@perbo/model";
 import { isAbsolute } from "node:path";
-import { listCommandLine, parseAdmitArgs, runAdmitCommand, type AdmitArgs } from "../../commands/admit.js";
+import { defaultAdmission, listReport, runAdmitCommand, type AdmitArgs } from "../../commands/admit.js";
 import { collectOutput } from "../../diagnostics.js";
-import type { CommandContext, ReportCommand } from "../../command-line/terminal.js";
+import type { CommandContext, CommandReport } from "../../command.js";
 import { edit } from "../../commands/edit/index.js";
-import { escapesCommandLine } from "../../commands/escapes/index.js";
-import { AttemptIdSchema, inspectCommandLine } from "../../commands/inspect.js";
+import { escapesReport } from "../../commands/escapes/index.js";
+import { AttemptIdSchema, inspectReport } from "../../commands/inspect.js";
 import type { ServeTick } from "../../commands/serve/index.js";
-import { stopsCommandLine, IsoInstantSchema } from "../../commands/stops.js";
+import { stopsReport, IsoInstantSchema } from "../../commands/stops.js";
 import type { Streams } from "../../streams.js";
 import { runSyncCommand } from "../../commands/sync.js";
 
@@ -134,9 +134,12 @@ const targetOf = (context: ToolContext): { repo: string; store: string | null } 
  * command is given the object it would have been given by a line, and its own
  * record is the structured content. What it said while it worked goes in the
  * text beside the record, which is the join a session has always read.
+ *
+ * The command arrives as its {@link CommandReport} half, which has no reading
+ * of argv on it: there is no line here to write and none to read.
  */
 async function reported<Input, Report>(
-  command: ReportCommand<Input, { json: boolean }, Report>,
+  command: CommandReport<Input, { json: boolean }, Report>,
   input: Input,
   context: ToolContext,
 ): Promise<ToolResult> {
@@ -212,12 +215,15 @@ async function narrated(
 const KeySchema = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/).describe("A ticket key, e.g. PRB-118.");
 
 /**
- * Every string a session supplies is a value and only ever a value. The
- * commands' own parsers split `--name=value` tokens wherever they appear, so a
- * value shaped like one would become a flag if it went through them as argv —
- * `--x=--approve` once approved a ticket that way. So the two commands that
- * take free text get their arguments built as objects, and everything that
- * does travel as argv is shaped by a schema that admits no leading dash.
+ * Every string a session supplies is a value and only ever a value: a command
+ * is reached here as a function over typed input, and this file imports
+ * nothing that reads a line (`eslint.config.mjs`). What each schema below is
+ * for is what it says rather than the shape of a flag — a ticket key is a key,
+ * an issue reference is one, a model id is what a provider's own CLI will be
+ * started with, which is an action parameter (ADR-0023 §4).
+ *
+ * `sync_ticket` is the one tool that still hands a command a line, built from
+ * a key this schema has already read and the store `serve` was pointed at.
  */
 const IssueReferenceSchema = z
   .string()
@@ -237,7 +243,7 @@ const listTickets = tool({
   role: "read",
   input: z.object({ all: z.boolean().optional().describe("Include settled tickets.") }),
   run: (input, context) =>
-    reported(listCommandLine, { target: targetOf(context), all: input.all ?? false }, context),
+    reported(listReport, { target: targetOf(context), all: input.all ?? false }, context),
 });
 
 const inspectTicket = tool({
@@ -252,7 +258,7 @@ const inspectTicket = tool({
   }),
   run: (input, context) =>
     reported(
-      inspectCommandLine,
+      inspectReport,
       {
         target: targetOf(context),
         key: input.key,
@@ -275,7 +281,7 @@ const stops = tool({
   }),
   run: (input, context) =>
     reported(
-      stopsCommandLine,
+      stopsReport,
       {
         target: targetOf(context),
         since: input.since ?? null,
@@ -291,7 +297,7 @@ const escapes = tool({
   description: "Merged changes whose fourteen days are up, and what escaped review in them.",
   role: "read",
   input: z.object({}),
-  run: (_input, context) => reported(escapesCommandLine, { target: targetOf(context) }, context),
+  run: (_input, context) => reported(escapesReport, { target: targetOf(context) }, context),
 });
 
 const queueState = tool({
@@ -345,7 +351,7 @@ const admitTicket = tool({
       });
     }
     // Built as values, never parsed from a line: see the note above the schemas.
-    const defaults = parseAdmitArgs([...repoArgs(context), "--json"]);
+    const defaults = defaultAdmission({ target: targetOf(context), json: true });
     const args: AdmitArgs = {
       ...defaults,
       title: input.outcome ?? null,

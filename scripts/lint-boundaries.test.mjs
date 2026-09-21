@@ -179,6 +179,40 @@ test("no process execution in the model package, except in its two named transpo
 });
 
 // --------------------------------------------------------------------------
+// A caller in this process reaches a command as a function, not as a line
+// --------------------------------------------------------------------------
+
+const READS_NO_LINE = "reaches a command as a typed function";
+const RUNS_NO_LINE = "do not run it from a line";
+
+test("the endpoint imports nothing at the argv edge", async () => {
+  const tools = "apps/cli/src/endpoint/internal/tools.ts";
+  await refuses(tools, USES("../../command-line/grammar.js"), READS_NO_LINE);
+  await refuses(tools, USES("../../command-line/terminal.js"), READS_NO_LINE);
+  await refuses("apps/cli/src/endpoint/index.ts", USES("../command-line/terminal.js"), READS_NO_LINE);
+  // What it does reach: the commands themselves, and what it gives them.
+  await allows(tools, USES("../../commands/stops.js"));
+  await allows(tools, USES("../../command.js"));
+  await allows(tools, USES("../../diagnostics.js"));
+});
+
+test("the queue and the interview read their own line and run no command from one", async () => {
+  const serve = "apps/cli/src/commands/serve/index.ts";
+  await refuses(serve, USES("../../command-line/terminal.js"), RUNS_NO_LINE);
+  await refuses(
+    "apps/cli/src/commands/interview/index.ts",
+    USES("../../command-line/terminal.js"),
+    RUNS_NO_LINE,
+  );
+  await allows(serve, USES("../../command-line/grammar.js"));
+});
+
+test("a command that is nobody's in-process callee is not this rule's business", async () => {
+  await allows("apps/cli/src/commands/admit.ts", USES("../command-line/terminal.js"));
+  await allows("apps/cli/src/main.ts", USES("./command-line/terminal.js"));
+});
+
+// --------------------------------------------------------------------------
 // The configuration a package resolves from its own directory
 // --------------------------------------------------------------------------
 

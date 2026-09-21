@@ -232,6 +232,45 @@ const ADMIT_GRAMMAR: Grammar<typeof ADMIT_FLAGS> = {
 
 const TICKET_KEY = /^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/;
 
+/**
+ * An admission before anything has been asked of it: the standing
+ * prohibitions, the generated globs, the expansion budget, the prefix and the
+ * drafting provider this build offers, against one store.
+ *
+ * A caller in this process builds an admission from these and its own values,
+ * rather than from a parse of a line it wrote itself.
+ */
+export function defaultAdmission(input: { target: StoreTarget; json: boolean }): AdmitArgs {
+  return {
+    repo: input.target.repo,
+    store: input.target.store,
+    prefix: DEFAULT_PREFIX,
+    title: null,
+    criteria: [],
+    criteriaFile: null,
+    paths: [],
+    prohibited: [...DEFAULT_PROHIBITED],
+    generated: [...DEFAULT_GENERATED],
+    expansionBudget: DEFAULT_EXPANSION_BUDGET,
+    level: null,
+    priority: "normal",
+    labels: [],
+    dependsOn: [],
+    source: null,
+    sourceUrl: null,
+    from: null,
+    fromFile: null,
+    fromSpec: null,
+    startOver: null,
+    provider: "claude-cli",
+    model: null,
+    manualReviewer: null,
+    manualReason: null,
+    approve: false,
+    json: input.json,
+  };
+}
+
 export function parseAdmitArgs(argv: readonly string[]): AdmitArgs {
   const line = parseArgv(ADMIT_GRAMMAR, argv);
   const flags = line.flags;

@@ -57,6 +57,41 @@ const NO_DEEP_PACKAGE_IMPORT = {
     "Import a package by its name, not a file under its `src/` or `dist/` (docs/07 Package layout).",
 };
 
+/**
+ * The endpoint is a session's reach into this build (D-072, ADR-0023 §4). It
+ * runs commands in this process over typed input and has no line of its own,
+ * so nothing at the argv edge belongs in it: with no parser and no adapter
+ * within reach, "a value shaped like a flag" has no meaning there.
+ */
+const NO_COMMAND_LINE_EDGE = {
+  regex: "(^|/)command-line/",
+  message:
+    "The endpoint reaches a command as a typed function; it reads no command line (ADR-0023 §4).",
+};
+
+/**
+ * The queue and the interview do read a line of their own — by the one
+ * grammar, like every other command. What they may not reach is the adapter
+ * that runs a command *from* a line, because both call other commands in this
+ * process and those callers pass values, never argv.
+ */
+const NO_TERMINAL_ADAPTER = {
+  regex: "(^|/)command-line/terminal",
+  message:
+    "Call the command, do not run it from a line: the terminal adapter is the entry point's (ADR-0023 §4).",
+};
+
+/** The files that call other commands in this process. */
+const IN_PROCESS_CALLERS = {
+  endpoint: ["apps/cli/src/endpoint/**"],
+  queueAndInterview: [
+    "apps/cli/src/commands/serve/index.ts",
+    "apps/cli/src/commands/interview/index.ts",
+    "apps/cli/src/commands/interview/claude.ts",
+    "apps/cli/src/commands/interview/codex.ts",
+  ],
+};
+
 /** A module's fakes are for its tests; the build never emits them. */
 const NO_TEST_SUPPORT = {
   regex: "(^|/)test-support/",
@@ -189,6 +224,46 @@ export default tseslint.config(
             NO_DEEP_PACKAGE_IMPORT,
             NO_TEST_SUPPORT,
             NO_TEST_MODULE,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // The endpoint, which every object above still reaches: each repeats what
+    // it does not mean to drop.
+    files: IN_PROCESS_CALLERS.endpoint,
+    ...PRODUCTION_SOURCE_ONLY,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            NO_FOREIGN_INTERIOR,
+            NO_DEEP_PACKAGE_IMPORT,
+            NO_TEST_SUPPORT,
+            NO_TEST_MODULE,
+            NO_COMMAND_LINE_EDGE,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // The queue and the interview, which read their own line and run no
+    // command from one.
+    files: IN_PROCESS_CALLERS.queueAndInterview,
+    ...PRODUCTION_SOURCE_ONLY,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            NO_FOREIGN_INTERIOR,
+            NO_DEEP_PACKAGE_IMPORT,
+            NO_TEST_SUPPORT,
+            NO_TEST_MODULE,
+            NO_TERMINAL_ADAPTER,
           ],
         },
       ],
