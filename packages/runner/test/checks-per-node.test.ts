@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SecretIndex, type CheckResult, type PlanNode } from "@perbo/contracts";
 import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
-import { runPinnedChecks, type PinnedCheck } from "../src/checks.js";
+import { runPinnedChecks, type PinnedCheck } from "../src/checks/index.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

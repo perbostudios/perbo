@@ -19,8 +19,8 @@ import {
   type RerunStep,
   type ResolvedFailure,
   type TestOutput,
-} from "./rerun.js";
-import { hostTemporaryEnvironment } from "./scratch.js";
+} from "./internal/rerun.js";
+import { hostTemporaryEnvironment } from "../scratch.js";
 
 /**
  * The pinned check set (D-045, docs/08 item 7).

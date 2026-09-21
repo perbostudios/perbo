@@ -12,7 +12,7 @@ import {
 import { cleanup, git, type MaterializedWorkspace, type Workspace } from "@perbo/workspace";
 import { reviewGraph } from "@perbo/review";
 import type { BundleStore } from "../bundle.js";
-import type { PinnedCheck } from "../checks.js";
+import type { PinnedCheck } from "../checks/index.js";
 import { sweepWorktree } from "../orphans.js";
 import { buildAgentEnvironment } from "../profile.js";
 import { RunRefusedError } from "../refusal.js";

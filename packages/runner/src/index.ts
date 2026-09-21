@@ -9,7 +9,7 @@ export {
   runNumbers,
 } from "./attempts.js";
 export { BundleStore } from "./bundle.js";
-export { runsTurboWithoutForce, TURBO_FORCE_FLAG } from "./checks.js";
+export { runsTurboWithoutForce, TURBO_FORCE_FLAG } from "./checks/index.js";
 export { parseDeclines } from "./declines.js";
 export type { Decline } from "./declines.js";
 export {

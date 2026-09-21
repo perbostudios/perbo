@@ -43,11 +43,12 @@ The half of execution that is not the agent.
 - `delivery.ts` — push and pull request through `@perbo/workspace`'s repository module, which
   starts every `git` and `gh` this package runs. The runner holds the credential; the agent never
   sees a token; nothing here merges.
-- `checks.ts` — the pinned set, run in the worktree after the seal: uncached, one at a time, with
+- `checks/` — the pinned set, run in the worktree after the seal: uncached, one at a time, with
   a failed unit check re-run on its own failing files. A ticket whose plan carries an execution
   graph runs the set again once per node afterwards, narrowed to the change's test files inside
   that node's paths ([D-107](../../docs/11-open-decisions.md)); a node's result is evidence for
-  that node's review and never the gate, which stays the whole-change result.
+  that node's review and never the gate, which stays the whole-change result. `index.ts` runs the
+  set; `internal/rerun.ts` reads a failed run's output and plans what is run again.
 - `loop.ts` — the entry and the sequencer: contract → worktree → spec commit → agent → seal →
   checks → review → route → pull request. It holds the run's public types, `runTicket`, the run's
   limits and the order the phases run in; `loop/` is its interior, and nothing outside `loop.ts`

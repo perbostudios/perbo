@@ -12,7 +12,7 @@ import { provision } from "@perbo/workspace";
 import { scratchDirectories } from "@perbo/test-support";
 import { runAgent } from "../src/adapter.js";
 import { AttemptCeilings } from "../src/ceilings.js";
-import { runPinnedChecks } from "../src/checks.js";
+import { runPinnedChecks } from "../src/checks/index.js";
 import { buildAgentEnvironment, buildPermissionProfile } from "../src/profile.js";
 import {
   prepareScratchDirectory,

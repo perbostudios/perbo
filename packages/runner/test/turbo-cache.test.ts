@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SecretIndex } from "@perbo/contracts";
-import { runPinnedChecks } from "../src/checks.js";
+import { runPinnedChecks } from "../src/checks/index.js";
 import { scratchDirectories } from "@perbo/test-support";
 import { initRepository } from "@perbo/test-support";
 

@@ -14,7 +14,7 @@ import {
   type StandingProhibitedEntry,
 } from "@perbo/contracts";
 import { MODEL_PROVIDERS } from "@perbo/model";
-import { PinnedCheckSchema } from "../checks.js";
+import { PinnedCheckSchema } from "../checks/index.js";
 import { DEFAULT_DELIVERED_CHECKS_BOUND_MS } from "../delivery.js";
 
 /**
