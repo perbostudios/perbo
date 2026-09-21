@@ -106,8 +106,10 @@ describe("baseline harness arguments", () => {
     expect(() => parseE1Args(["time", "--partner", "acme", "--nope"])).toThrow(/unknown flag/);
     // The flag-injection cases for every other command are in
     // `command-line/terminal.flag-injection.test.ts`; this one is here because
-    // only this module may import this module's interior.
-    expect(parseE1Args(["time", "--partner", "--x=--json"])).toMatchObject({
+    // only this module may import this module's interior. `result` is the verb
+    // `--json` applies to, so a partner id shaped like it used to decide what
+    // this command printed.
+    expect(parseE1Args(["result", "--partner", "--x=--json"])).toMatchObject({
       subject: "--x=--json",
       json: false,
     });
