@@ -10,6 +10,10 @@ import {
   ReviewArtifactSchema,
   RunBundleSchema,
   addRolls,
+  attemptsPath,
+  bundleManifestsDir,
+  bundleObjectPath,
+  bundleRoot,
   costLabel,
   costOf,
   costPhrase,
@@ -23,6 +27,9 @@ import {
   rollCosts,
   rollLabel,
   sizeEstimate,
+  stateDir,
+  ticketFilePath,
+  ticketIdOfAttemptsFile,
   ticketSourceLabel,
   wholeChangeChecks,
   type ArtifactRef,
@@ -490,15 +497,13 @@ export type ResolveSubject = (storeDirectory: string, name: string) => InspectSu
 
 /** The ids `<store>/state` holds an attempts record for, in the order it lists them. */
 export function recordedIds(storeDirectory: string): string[] {
-  const state = join(storeDirectory, "state");
+  const state = join(storeDirectory, ...stateDir());
   if (!existsSync(state)) return [];
   return readdirSync(state)
-    .filter((name) => name.endsWith(ATTEMPTS_SUFFIX))
-    .map((name) => name.slice(0, -ATTEMPTS_SUFFIX.length))
+    .map(ticketIdOfAttemptsFile)
+    .filter((id): id is string => id !== null)
     .sort();
 }
-
-const ATTEMPTS_SUFFIX = ".attempts.json";
 
 /**
  * The work an attempts record belongs to, read from the record itself.
@@ -518,7 +523,7 @@ export const attemptsRecordSubject: ResolveSubject = (storeDirectory, name) => {
   // attempts are keyed by, and reading them back must not depend on a second
   // file being there.
   const record = readLocalRunRecord(storeDirectory, name);
-  if (record === null && !existsSync(join(storeDirectory, "state", `${name}${ATTEMPTS_SUFFIX}`))) {
+  if (record === null && !existsSync(join(storeDirectory, ...attemptsPath(name)))) {
     const recorded = recordedIds(storeDirectory);
     const runs = listLocalRuns(storeDirectory).map((run) => run.run_id);
     const known = [...new Set([...recorded, ...runs])];
@@ -861,8 +866,8 @@ export function buildReportForSubject(input: {
   /** Where an unreadable verdicts file is named; the report itself is still built. */
   streams?: Diagnostics | undefined;
 }): InspectReport {
-  const attemptsPath = join(input.storeDirectory, "state", `${input.subject.ticket_id}.attempts.json`);
-  const head = { ...input.subject, attempts_path: attemptsPath };
+  const attemptsFile = join(input.storeDirectory, ...attemptsPath(input.subject.ticket_id));
+  const head = { ...input.subject, attempts_path: attemptsFile };
   const verdicts = readLocalVerdictsOrWarn(input.storeDirectory, input.streams ?? null).verdicts.filter(
     (verdict) => verdict.review.ticket_id === input.subject.ticket_id,
   );
@@ -872,14 +877,14 @@ export function buildReportForSubject(input: {
     total_cost: attempts.map((one) => one.round_cost).reduce(addRolls, rollCosts([])),
     verdicts,
   });
-  if (!existsSync(attemptsPath)) return totalled([]);
+  if (!existsSync(attemptsFile)) return totalled([]);
 
-  const record = readAttemptsFile(attemptsPath);
-  const bundleRoot = join(input.storeDirectory, "bundles");
+  const record = readAttemptsFile(attemptsFile);
+  const root = join(input.storeDirectory, ...bundleRoot());
   // Constructed only where the loop already made it: the store creates its
   // directories on construction, and a read must not leave one behind.
-  const store = existsSync(join(bundleRoot, "bundles"))
-    ? new BundleStore({ root: bundleRoot, retainContext: true })
+  const store = existsSync(join(input.storeDirectory, ...bundleManifestsDir()))
+    ? new BundleStore({ root, retainContext: true })
     : null;
   const bundles = store ? store.forTicket(input.subject.ticket_id) : [];
   const limits = effectiveLimits(readRepoConfig(input.storeDirectory), join(input.storeDirectory, "config.json"));
@@ -1930,7 +1935,7 @@ export interface VerifyReport {
  * store it was asked to check.
  */
 function bundlesInStore(storeDirectory: string, ticketId: string): RunBundle[] {
-  const directory = join(storeDirectory, "bundles", "bundles");
+  const directory = join(storeDirectory, ...bundleManifestsDir());
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
     .filter((name) => name.endsWith(".json"))
@@ -1943,7 +1948,7 @@ function bundlesInStore(storeDirectory: string, ticketId: string): RunBundle[] {
 function checkObject(storeDirectory: string, bundle: RunBundle, artifact: ArtifactRef): ObjectCheck {
   const base = { bundle_id: bundle.bundle_id, kind: bundle.kind, name: artifact.name, expected: artifact.sha256 };
   if (!artifact.retained) return { ...base, found: null, status: "not_retained" };
-  const path = join(storeDirectory, "bundles", "objects", artifact.sha256);
+  const path = join(storeDirectory, ...bundleObjectPath(artifact.sha256));
   if (!existsSync(path)) return { ...base, found: null, status: "missing" };
   const found = createHash("sha256").update(readFileSync(path)).digest("hex");
   return { ...base, found, status: found === artifact.sha256 ? "verified" : "mismatch" };
@@ -1963,11 +1968,11 @@ export function verifyAttemptObjects(input: {
   ticket_id: string;
   attempt: string;
 }): VerifyReport {
-  const attemptsPath = join(input.storeDirectory, "state", `${input.ticket_id}.attempts.json`);
-  if (!existsSync(attemptsPath)) {
-    throw new UsageError(`${input.ticket} has no attempts on record in ${attemptsPath}`);
+  const attemptsFile = join(input.storeDirectory, ...attemptsPath(input.ticket_id));
+  if (!existsSync(attemptsFile)) {
+    throw new UsageError(`${input.ticket} has no attempts on record in ${attemptsFile}`);
   }
-  const record = readAttemptsFile(attemptsPath);
+  const record = readAttemptsFile(attemptsFile);
   const attempt = record.attempts.find((one) => one.attempt_id === input.attempt);
   if (attempt === undefined) {
     throw new UsageError(
@@ -2205,7 +2210,7 @@ function queueStanding(storeDirectory: string, ticket: DisplayTicket): QueueStan
  * id", not two.
  */
 export const ticketSubject: ResolveSubject = (storeDirectory, key): InspectSubject => {
-  if (existsSync(join(storeDirectory, "tickets", `${key}.json`))) {
+  if (existsSync(join(storeDirectory, ...ticketFilePath(key)))) {
     return ticketFileSubject(storeDirectory, key);
   }
   try {
@@ -2374,6 +2379,6 @@ export const inspectCommandLine: ReportCommand<
 
 /** Exposed for the tests, which build a store by hand and read it back. */
 export function readBundleObject(storeDirectory: string, sha256: string): string | null {
-  const path = join(storeDirectory, "bundles", "objects", sha256);
+  const path = join(storeDirectory, ...bundleObjectPath(sha256));
   return existsSync(path) ? readFileSync(path, "utf8") : null;
 }

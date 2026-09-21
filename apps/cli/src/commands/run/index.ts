@@ -15,13 +15,17 @@ import {
   PlanContractSchema,
   UNCHECKED,
   addRolls,
+  bundleRoot,
   costOf,
   costPhrase,
   failedChecks,
   formatUsd,
   limitFor,
+  principlesPath,
   rollCosts,
   rollLabel,
+  stateDir,
+  ticketIdOfAttemptsFile,
   type CostRoll,
   type DefaultedResource,
   type DiagnosticResult,
@@ -1538,7 +1542,7 @@ async function runDoctor(options: DoctorOptions): Promise<number> {
   // that is the question a person has when they read `iteration_ceiling_exceeded`.
   const limits = effectiveLimits(repoConfig, configSource);
   const keyFor = (options.keyFor ?? ticketKeys)(store);
-  const hits = ceilingTerminations(join(store, "state"), (id) => keyFor.get(id) ?? id);
+  const hits = ceilingTerminations(join(store, ...stateDir()), (id) => keyFor.get(id) ?? id);
 
   // What judges an attempt here, from the same reader approval refuses a
   // scope with — so the list can be read before a scope is written against it
@@ -2075,7 +2079,9 @@ export function ceilingTerminations(
   const hits: CeilingTermination[] = [];
   const unreadable: string[] = [];
   if (!existsSync(stateRoot)) return { hits, unreadable };
-  for (const name of readdirSync(stateRoot).filter((entry) => entry.endsWith(".attempts.json")).sort()) {
+  for (const name of readdirSync(stateRoot)
+    .filter((entry) => ticketIdOfAttemptsFile(entry) !== null)
+    .sort()) {
     let file: AttemptsFile;
     try {
       file = readAttemptsFile(join(stateRoot, name));
@@ -2979,13 +2985,13 @@ export function mergeRunConfig(
         .digest("hex")
         .slice(0, 12)}`,
     ),
-    bundle_root: join(run.dir, "bundles"),
+    bundle_root: join(run.dir, ...bundleRoot()),
     quarantine_root: join(run.dir, "quarantine"),
-    state_root: join(run.dir, "state"),
+    state_root: join(run.dir, ...stateDir()),
     // The store the ticket was admitted into is where `perbo principle add`
     // writes, so it is where the loop must read (D-065) — a --store user's
     // principles would otherwise never reach a brief.
-    principles_path: join(run.dir, "principles.md"),
+    principles_path: join(run.dir, ...principlesPath()),
     // Approach, not contract: it briefs the executor and gates nothing, so a
     // configuration file that set it would be stating the spec's intent
     // somewhere the spec cannot correct.

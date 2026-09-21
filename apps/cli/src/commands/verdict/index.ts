@@ -5,6 +5,7 @@ import {
   EXIT_CODES,
   StopVerdictsSchema,
   TicketKeySchema,
+  stateDir,
   type StopRouting,
   type Ticket,
 } from "@perbo/contracts";
@@ -322,7 +323,7 @@ function readStopsRecord(dir: string, ticket_id: string): Array<{
   rule_id: string;
   routing: StopRouting;
 }> {
-  const path = join(dir, "state", `${ticket_id}.stops.json`);
+  const path = join(dir, ...stateDir(), `${ticket_id}.stops.json`);
   if (!existsSync(path)) return [];
   try {
     return StopVerdictsSchema.parse(JSON.parse(readFileSync(path, "utf8"))).stops;

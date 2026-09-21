@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   EXIT_CODES,
   PARTNER_READING_CAVEAT,
+  stateDir,
   summariseStops,
   type StopsSummary,
 } from "@perbo/contracts";
@@ -409,7 +410,7 @@ export function collectTicketEscapes(args: {
 }
 
 export const escapesPath = (dir: string, ticket_id: string): string =>
-  join(dir, "state", `${ticket_id}.escapes.json`);
+  join(dir, ...stateDir(), `${ticket_id}.escapes.json`);
 
 export function readTicketEscapes(dir: string, ticket_id: string): TicketEscapes | null {
   const path = escapesPath(dir, ticket_id);
@@ -450,7 +451,7 @@ export function writeTicketEscapes(args: {
     observed_at: args.observed_at,
     streams: args.streams,
   });
-  mkdirSync(join(args.dir, "state"), { recursive: true });
+  mkdirSync(join(args.dir, ...stateDir()), { recursive: true });
   writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`);
   return record;
 }
@@ -521,7 +522,7 @@ export function escapeRows(dir: string, diagnostics: Diagnostics, now: Date): Es
   if (unreadable.length > 0) {
     // A record that cannot be read is not a ticket that did not escape.
     diagnostics.stderr(
-      `warning: ${unreadable.length} escapes record(s) in ${join(dir, "state")} are not readable ` +
+      `warning: ${unreadable.length} escapes record(s) in ${join(dir, ...stateDir())} are not readable ` +
         `and their tickets are reported as not observed: ${unreadable.join(", ")}\n`,
     );
   }
@@ -739,7 +740,7 @@ export const escapesReport: CommandReport<EscapesInput, { json: boolean }, Escap
     const said: string[] = [];
     if (summary.not_observed > 0) {
       said.push(
-        `${summary.not_observed} merged ticket(s) have no escapes record in ${join(report.store, "state")}: ` +
+        `${summary.not_observed} merged ticket(s) have no escapes record in ${join(report.store, ...stateDir())}: ` +
           "`perbo sync <KEY>` reads the history after the merge through git and gh; this command " +
           "never does.\n",
       );

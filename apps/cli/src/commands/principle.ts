@@ -1,8 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import { EXIT_CODES } from "@perbo/contracts";
-import { PRINCIPLES_FILENAME } from "@perbo/runner";
+import { EXIT_CODES, PRINCIPLES_FILENAME } from "@perbo/contracts";
 import { UsageError, readInput } from "../usage-error.js";
 import {
   parseArgv,

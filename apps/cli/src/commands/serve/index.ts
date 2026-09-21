@@ -11,6 +11,7 @@ import {
   WaitSchema,
   assertWithinLimits,
   limitFor,
+  stateDir,
   transition,
   withReconciliation,
   withWaits,
@@ -906,7 +907,7 @@ export async function serve(args: ServeArgs, context: ServeContext): Promise<num
     throw error;
   }
 
-  const state_root = join(dir, "state");
+  const state_root = join(dir, ...stateDir());
   let lock;
   try {
     lock = acquireServeLock({ state_root, repository_root, now: context.now });
