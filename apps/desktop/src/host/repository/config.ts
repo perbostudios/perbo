@@ -2,13 +2,14 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import {
+  ConfiguredFolderError,
   DEFAULT_LIMITS,
-  DEFAULT_SPEC_FOLDER,
   LimitsTableSchema,
   MaterializationManifestSchema,
   PER_TOKEN_COST_LIMITS,
+  SPEC_FOLDER_CONFIG_KEY,
   STANDING_PROHIBITED_KEY,
-  isRepositoryRelativeFolder,
+  configuredFolder,
   readStandingProhibited,
 } from "@perbo/contracts";
 import type { StandingProhibitedEntry } from "@perbo/contracts";
@@ -74,13 +75,13 @@ function configRecord(repo: RegisteredRepository): Record<string, unknown> {
 
 /** Where this repository keeps its specs: `specs`, or the `specs` key (D-103). */
 export function specFolder(repo: RegisteredRepository): string {
-  const named = configRecord(repo)["specs"];
-  if (named === undefined) return DEFAULT_SPEC_FOLDER;
-  if (typeof named !== "string" || !isRepositoryRelativeFolder(named))
-    throw new Error(
-      "This repository's .perbo/config.json sets 'specs' to something that is not a " +
-        "repository-relative folder, for example \"specs\" or \"docs/specs\".",
-    );
+  let named: string;
+  try {
+    named = configuredFolder(configRecord(repo)[SPEC_FOLDER_CONFIG_KEY], SPEC_FOLDER_CONFIG_KEY);
+  } catch (error) {
+    if (!(error instanceof ConfiguredFolderError)) throw error;
+    throw new Error(`This repository's .perbo/config.json ${error.message}`, { cause: error });
+  }
   // Through safePath as well, so a link on the way is refused with its own sentence.
   safePath(repo, named);
   return named;
