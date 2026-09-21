@@ -194,6 +194,10 @@ test("the endpoint imports nothing at the argv edge", async () => {
   await allows(tools, USES("../../commands/stops.js"));
   await allows(tools, USES("../../command.js"));
   await allows(tools, USES("../../diagnostics.js"));
+  // And what every source file is held to, which this object repeats rather
+  // than replaces.
+  await refuses(tools, USES("../../commands/run/internal/relevel.js"), OWN_INTERIOR);
+  await refuses(tools, USES("../../test-support/paths.js"), "imports no test code");
 });
 
 test("the queue and the interview read their own line and run no command from one", async () => {
@@ -205,6 +209,8 @@ test("the queue and the interview read their own line and run no command from on
     RUNS_NO_LINE,
   );
   await allows(serve, USES("../../command-line/grammar.js"));
+  await refuses(serve, USES("../run/internal/relevel.js"), OWN_INTERIOR);
+  await refuses(serve, USES("../../test-support/paths.js"), "imports no test code");
 });
 
 test("a command that is nobody's in-process callee is not this rule's business", async () => {
