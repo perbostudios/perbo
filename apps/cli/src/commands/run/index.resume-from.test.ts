@@ -222,7 +222,7 @@ function withoutClaudeOnPath(): () => void {
 }
 
 /**
- * Every case below runs `runExecuteCommand` end to end against a real
+ * Every case below runs `perbo run` end to end against a real
  * repository, a cold spawn under the load SCP-191 measures rather than an
  * idle machine's five seconds.
  */

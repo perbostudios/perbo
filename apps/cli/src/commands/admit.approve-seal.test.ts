@@ -133,7 +133,7 @@ function storeContents(dir: string): Record<string, string> {
 }
 
 /**
- * Every refusal below still tries `runExecuteCommand` once against a real
+ * Every refusal below still tries a run once against a real
  * repository, a cold spawn under the load SCP-191 measures rather than an
  * idle machine's five seconds.
  */
