@@ -1,9 +1,12 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { PRINCIPLES_FILENAME } from "@perbo/runner";
 import { approveCommandLine, listCommandLine } from "../commands/admit.js";
 import { editCommandLine } from "../commands/edit/index.js";
 import { escapesCommandLine } from "../commands/escapes/index.js";
 import { inspectCommandLine } from "../commands/inspect.js";
 import { mcpCommandLine } from "../commands/mcp.js";
+import { principleCommandLine, principlesPath } from "../commands/principle.js";
 import { stopsCommandLine } from "../commands/stops.js";
 import { storeDir, storeFor } from "../store/index.js";
 
@@ -34,6 +37,7 @@ describe("an empty --repo", () => {
       () => stopsCommandLine.read(["--repo", ""]).input.target,
       () => escapesCommandLine.read(["--repo", ""]).input.target,
       () => mcpCommandLine.read(["--repo", ""]).input.target,
+      () => principleCommandLine.read(["list", "--repo", ""]).input.target,
     ]) {
       const target = read();
       expect(target).toEqual({ repo: "", store: null });
@@ -52,6 +56,7 @@ describe("an empty --store", () => {
       () => stopsCommandLine.read(["--store", ""]).input.target,
       () => escapesCommandLine.read(["--store", ""]).input.target,
       () => mcpCommandLine.read(["--store", ""]).input.target,
+      () => principleCommandLine.read(["list", "--store", ""]).input.target,
     ]) {
       const target = read();
       expect(target).toEqual({ repo: ".", store: "" });
@@ -79,5 +84,25 @@ describe("a key nobody gave", () => {
       /approve requires a ticket key, e\.g\. PRB-1/,
     );
     expect(() => editCommandLine.read([""])).toThrow(/edit requires a ticket key, e\.g\. PRB-1/);
+  });
+});
+
+describe("the file a principle is recorded in", () => {
+  /**
+   * `principle` names a file inside the store rather than the store itself, so
+   * it is the one place an empty value could be read as a relative path and
+   * write beside the process instead — where the brief the runner assembles
+   * would never find it.
+   */
+  it("is the store's, for an empty --repo and an empty --store alike", () => {
+    for (const argv of [
+      ["list", "--store", ""],
+      ["add", "A refusal is preferred to a guess.", "--store", ""],
+      ["list", "--repo", ""],
+      ["add", "A refusal is preferred to a guess.", "--repo", ""],
+    ]) {
+      const { target } = principleCommandLine.read(argv).input;
+      expect(principlesPath(CWD, target)).toBe(join(storeDir(CWD, null), PRINCIPLES_FILENAME));
+    }
   });
 });

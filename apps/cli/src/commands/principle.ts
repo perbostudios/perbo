@@ -1,5 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import { EXIT_CODES } from "@perbo/contracts";
 import { PRINCIPLES_FILENAME } from "@perbo/runner";
@@ -12,8 +12,7 @@ import {
 } from "../command-line/grammar.js";
 import type { CommandContext, Rendered } from "../command.js";
 import type { ReportCommand } from "../command-line/terminal.js";
-import { StoreTargetSchema, type StoreTarget } from "../store/index.js";
-import { DEFAULT_STORE_DIRNAME } from "../store/tickets.js";
+import { StoreTargetSchema, storeFor, type StoreTarget } from "../store/index.js";
 
 /**
  * `perbo principle` — the D-065 ratchet's human side.
@@ -54,8 +53,15 @@ export type PrincipleReport =
   /** `text` is null where nothing has been recorded in this store yet. */
   | { readonly verb: "list"; readonly path: string; readonly text: string | null };
 
+/**
+ * The file in the store the target names, through {@link storeFor} like every
+ * other path this edge resolves: an empty `--store` is the store the
+ * repository holds, and a relative one is resolved rather than left to be read
+ * against whatever directory the process is standing in. A principle written
+ * anywhere else is one the executor's brief never reads.
+ */
 export function principlesPath(cwd: string, target: StoreTarget): string {
-  return join(target.store ?? join(resolve(cwd, target.repo), DEFAULT_STORE_DIRNAME), PRINCIPLES_FILENAME);
+  return join(storeFor(cwd, target), PRINCIPLES_FILENAME);
 }
 
 export function principle(input: PrincipleInput, context: CommandContext): PrincipleReport {
