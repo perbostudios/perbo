@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import {
   DEFAULT_LIMITS,
@@ -12,9 +12,10 @@ import {
   readStandingProhibited,
 } from "@perbo/contracts";
 import type { StandingProhibitedEntry } from "@perbo/contracts";
+import { replaceFile } from "@perbo/workspace";
 import { ManifestEditorSchema } from "../../shared/protocol.js";
 import type { ManifestEditor, ReplyMap, Settings } from "../../shared/protocol.js";
-import { configPath, configTemporaryPath, perboPath } from "./layout.js";
+import { configPath, perboPath } from "./layout.js";
 import { safePath } from "./paths.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
@@ -34,19 +35,13 @@ export function readConfig(repo: RegisteredRepository): Record<string, unknown> 
   }
 }
 
-/** Replaces it, through a temporary file in the same directory so a crash leaves the old one. */
+/** Replaces it whole, so a crash leaves the configuration as it was rather than half of it. */
 export function writeConfig(
   repo: RegisteredRepository,
   config: Record<string, unknown>,
 ): void {
-  const path = configPath(repo);
   mkdirSync(perboPath(repo), { recursive: true });
-  const temporary = configTemporaryPath(repo, randomUUID());
-  writeFileSync(temporary, JSON.stringify(config, null, 2) + "\n", {
-    flag: "wx",
-    mode: 0o600,
-  });
-  renameSync(temporary, path);
+  replaceFile(configPath(repo), JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
 }
 
 /**

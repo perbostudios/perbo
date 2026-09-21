@@ -12,10 +12,6 @@ export function perboPath(repo: RegisteredRepository): string {
 export function configPath(repo: RegisteredRepository): string {
   return safePath(repo, ".perbo", "config.json");
 }
-/** A sibling of the configuration, so a rename over it never crosses a filesystem. */
-export function configTemporaryPath(repo: RegisteredRepository, token: string): string {
-  return safePath(repo, ".perbo", `config-${token}.tmp`);
-}
 export function ticketPath(
   repo: RegisteredRepository,
   key: string,

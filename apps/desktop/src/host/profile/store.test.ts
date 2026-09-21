@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { createScratch } from "@perbo/test-support";
 import { Profile, ProfileStateSchema } from "./store.js";
 import { SettingsSchema } from "../../shared/protocol.js";
@@ -175,6 +183,20 @@ describe("opening the profile", () => {
       state: "completed",
       endedAt: "2026-09-19T09:01:00.000Z",
     });
+  });
+
+  it("leaves nothing beside the record when the save cannot land", () => {
+    const profile = Profile.open(directory());
+    profile.save();
+    // A non-empty directory where the record belongs: the bytes are written
+    // and the step that swaps them in is the one that fails, which is where a
+    // temporary is left behind unless the failure takes it away.
+    rmSync(profile.path);
+    mkdirSync(profile.path);
+    writeFileSync(join(profile.path, "x"), "");
+
+    expect(() => profile.save()).toThrow();
+    expect(readdirSync(dirname(profile.path))).toEqual(["workspace.json"]);
   });
 
   it("carries the record's own bytes, so a save writes what was read", () => {
