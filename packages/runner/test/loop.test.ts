@@ -792,7 +792,7 @@ describe("actual_risk exceeding planned_risk", () => {
 const covers = (criterion_id: string) => ({
   criterion_id,
   status: "met",
-  coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
+  verification_strength: "directly_verified",
   evidence_type: "test_result",
   evidence_ref: "check_unit",
   evidence_assertion: "expect(thing).toBe(1)",

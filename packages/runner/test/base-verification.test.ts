@@ -131,7 +131,7 @@ const agentDouble = (
 const covers = {
   criterion_id: "ac_1",
   status: "met",
-  coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
+  verification_strength: "directly_verified",
   evidence_type: "test_result",
   evidence_ref: "check_unit",
   evidence_assertion: "total([1,2]) is 3",
