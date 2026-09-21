@@ -34,7 +34,7 @@ import {
   type Grammar,
 } from "../../../../command-line/grammar.js";
 import { baselinePath, readBaselineFile } from "../file.js";
-import { formatDuration } from "../../../run/index.js";
+import { formatDuration } from "../../../../duration.js";
 import type { CommandContext, Rendered } from "../../../../command.js";
 import { storeFor, type StoreTarget } from "../../../../store/index.js";
 

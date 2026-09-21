@@ -37,6 +37,7 @@ import {
   type TicketSource,
 } from "@perbo/contracts";
 import { BundleStore, parseDeclines, runNumbers, type Decline } from "@perbo/runner";
+import { formatDuration, formatHumanElapsed } from "../duration.js";
 import { QUEUE_HOLDING_STATES, queueOrder } from "../scheduling.js";
 import { UsageError } from "../usage-error.js";
 import {
@@ -44,7 +45,6 @@ import {
   ceilingResourceFor,
   effectiveLimits,
   formatCost,
-  formatDuration,
   limitAtBreach,
   readAttemptsFile,
   readRepoConfig,
@@ -1097,37 +1097,6 @@ const CHECK_MARK: Record<string, string> = { passed: "✓", failed: "✗", error
  * turns "we did not measure this" into "this took no time and no edits".
  */
 const NOT_RECORDED = "not recorded";
-
-/**
- * The units this prints, smallest first, each with the rounded value at which
- * it overflows into the next one. Hours are the last, so nothing overflows out.
- */
-const HUMAN_SCALES = [
-  { unit: "second", ms: 1_000, overflowsAt: 60 },
-  { unit: "minute", ms: 60_000, overflowsAt: 60 },
-  { unit: "hour", ms: 3_600_000, overflowsAt: Infinity },
-] as const;
-
-/**
- * Human time in the unit a person reads it in: seconds, minutes or hours.
- *
- * `human_elapsed_ms` measures somebody reading a contract and deciding, which
- * usually lands in seconds or minutes; `27308ms` is arithmetic homework, not a
- * reading.
- * Distinct from `formatDuration`, which rounds machine time to whole seconds —
- * a tenth of a second is visible to the person being measured here.
- *
- * The unit follows the rounded value, not the raw one: 59_999 ms rounds to
- * `60.0` seconds, which is a minute a person would never write that way, so it
- * reads `1.0 minute` — and 3_599_999 ms reads `1.0 hour` for the same reason.
- */
-export function formatHumanElapsed(ms: number): string {
-  const scale =
-    HUMAN_SCALES.find((candidate) => Number((ms / candidate.ms).toFixed(1)) < candidate.overflowsAt) ??
-    HUMAN_SCALES[HUMAN_SCALES.length - 1]!;
-  const rendered = (ms / scale.ms).toFixed(1);
-  return `${rendered} ${rendered === "1.0" ? scale.unit : `${scale.unit}s`}`;
-}
 
 /**
  * The admission record, above the attempts: how the criteria arrived, what the

@@ -989,6 +989,9 @@ describe("the admission-friction instrument (D-003, ADR-0027)", () => {
     expect(ticket.admission.elapsed_ms).toBeGreaterThanOrEqual(0);
     expect(approve.err.join("")).toContain("2 edits");
     expect(approve.err.join("")).toContain("outcome reworded");
+    // The same field `perbo inspect` reads, in the same words: a person's own
+    // time is measured to a tenth of a unit wherever it is printed.
+    expect(approve.err.join("")).toContain("1.5 minutes from first rendering to approval");
   });
 
   it("records zero of both when the contract is approved as admitted", () => {

@@ -31,7 +31,7 @@ import {
   type E1Input,
   type E1Report,
 } from "./internal/e1/command.js";
-import { formatDuration } from "../run/index.js";
+import { formatDuration } from "../../duration.js";
 import type { CommandContext, Rendered } from "../../command.js";
 import type { ReportCommand } from "../../command-line/table.js";
 import { storeFor, type StoreTarget } from "../../store/index.js";
