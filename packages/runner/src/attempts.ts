@@ -1,12 +1,4 @@
-import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import {
@@ -17,6 +9,7 @@ import {
   type ExecutionAttempt,
   type VerifiedCommit,
 } from "@perbo/contracts";
+import { replaceFile } from "@perbo/workspace";
 import { sameCommit } from "./resume.js";
 
 /**
@@ -344,32 +337,13 @@ export function appendAttempts(input: {
 
   const attempts: StoredAttempt[] = [...prior, ...input.attempts];
   mkdirSync(dirname(input.path), { recursive: true });
-  writeAtomically(
+  // Replaced whole: a half-written record is refused by every later reader,
+  // which would stop every later run of the ticket.
+  replaceFile(
     input.path,
     `${JSON.stringify({ ticket_id: input.ticket_id, attempts }, null, 2)}\n`,
   );
   return { attempts, runs: runsOnRecord({ ticket_id: input.ticket_id, attempts }) };
-}
-
-/**
- * Replace the record in one step, or leave what is on disk alone.
- *
- * `rename` within a directory is atomic, so a run killed while it writes leaves
- * the record either as it was or as it now is and never half of each — the same
- * step the spend ledger is replaced by, for the same reason. A half-written
- * record is refused by every later reader, and because the reader refuses
- * rather than starts over, that one file would stop every later run of the
- * ticket.
- */
-function writeAtomically(path: string, contents: string): void {
-  const temporary = `${path}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
-  try {
-    writeFileSync(temporary, contents);
-    renameSync(temporary, path);
-  } catch (error) {
-    rmSync(temporary, { force: true });
-    throw error;
-  }
 }
 
 /**

@@ -1,5 +1,14 @@
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ADMISSION_RULES } from "../src/admission.js";
@@ -405,6 +414,48 @@ describe("where each agent's shell stands (D-106 criterion 2)", () => {
       } finally {
         chmodSync(agents, 0o700);
       }
+      discardPreToolGuard(guard);
+    },
+    SPAWN_TEST_TIMEOUT_MS,
+  );
+
+  /**
+   * A refusal has to be about this agent, and a name beside its file is not.
+   *
+   * The bytes a move writes go to a temporary of this call's own before the
+   * rename swaps them in. Anything else standing in that directory — another
+   * hook process's temporary, or what one killed mid-write left — belongs to
+   * that call and not to this one, so it can neither be written over nor stop
+   * this agent moving. A refusal here would reach the executor's own model
+   * saying the guard cannot record where the agent went, which would be a
+   * false account of a directory that is perfectly writable.
+   *
+   * The entry planted here is a directory, because that is the shape a write
+   * to a taken name fails on rather than silently overwriting.
+   */
+  it(
+    "moves an agent although an entry stands beside the file holding its directory",
+    async () => {
+      const guard = guardFor([]);
+      const agents = join(guard.directory, "agents");
+      await runHook(guard.directory, bashCall(ALPHA, "cd src", "toolu_pending_in"));
+      const [file] = readdirSync(agents);
+      const planted = join(agents, `${file!}.pending`);
+      mkdirSync(planted);
+
+      const moved = await runHook(guard.directory, bashCall(ALPHA, "cd ..", "toolu_pending_out"));
+      expect(moved).not.toContain("deny");
+      const [recorded] = last(readPreToolDecisions(guard.decisionsPath), 1);
+      expect(recorded?.decision).toBe("allowed");
+
+      // The move landed, so the next relative target is judged from the root
+      // the shell went back to rather than from the directory it left.
+      await runHook(guard.directory, bashCall(ALPHA, "echo x > out.txt", "toolu_pending_write"));
+      const [after] = last(readPreToolDecisions(guard.decisionsPath), 1);
+      expect(after?.decision).toBe("allowed");
+      expect(after?.cwd).toBe(".");
+      // And what was planted is still there: it was never this call's to remove.
+      expect(statSync(planted).isDirectory()).toBe(true);
       discardPreToolGuard(guard);
     },
     SPAWN_TEST_TIMEOUT_MS,
