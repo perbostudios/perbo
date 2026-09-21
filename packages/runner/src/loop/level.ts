@@ -2,8 +2,10 @@ import { mergeUp, type MergeUpResult } from "../merge-up.js";
 import { describeRange, type SealResult } from "../seal.js";
 import type { JudgingArtifacts } from "../prohibited.js";
 import type { TicketRunConfig } from "./config.js";
+import type { ReviewArtifact } from "@perbo/contracts";
+import type { Ledger } from "./ledger.js";
 import { judgeRelevel, type RelevelContext } from "./relevel.js";
-import type { RoundState, Step } from "./state.js";
+import type { RoundState, RunEnd, Step } from "./state.js";
 
 /**
  * Keeping the attempt's branch level with the base branch (SCP-192).
@@ -264,4 +266,64 @@ export async function levelAfterSeal(args: {
     }
   }
   return { state, mergedBase, sealed, conflictNow };
+}
+
+/** Where a run's branch and its base stand when the run ends. */
+export interface LevelledPublish {
+  state: RoundState;
+  end: RunEnd;
+}
+
+/**
+ * SCP-192, the merge-up before publishing: the base can move between the
+ * review and the publish, and a pull request that is behind at the moment it
+ * opens is the pull request a person spent day four merging by hand. Nothing
+ * unreviewed enters the branch by it — what a clean merge brings in is the
+ * base's own commits, which are already on the base branch.
+ *
+ * A conflict here has no round left to hand it to, so it turns an approved run
+ * into `base_conflict` and nothing is opened.
+ */
+export async function levelBeforePublish(args: {
+  config: TicketRunConfig;
+  state: RoundState;
+  end: RunEnd;
+  ledger: Ledger;
+  rootAttemptId: string;
+  /** The review that judged the change, which the conflict's detail names. */
+  finalReview: ReviewArtifact;
+  progress: (message: string) => void;
+}): Promise<LevelledPublish> {
+  const { config, progress } = args;
+  let state = args.state;
+  let end = args.end;
+  const up = await mergeUp({
+    worktree: state.workspace.path,
+    repository_root: config.repository_root,
+    base_ref: config.base_ref,
+    base_commit: state.baseCommit,
+    ticket_key: config.ticket_key,
+    attempt_id: args.ledger.last()?.attempt_id ?? args.rootAttemptId,
+  });
+  if (up.status === "conflict") {
+    // There is no round left to hand this to — the loop is past its rounds
+    // — and opening a pull request that cannot be merged is the thing this
+    // ticket exists to stop. The change set stays on its branch, and the
+    // attempts are still recorded below.
+    end = {
+      outcome: "base_conflict",
+      detail:
+        `the change was ${args.finalReview.decision === "approve" ? "approved" : "escalated"} and then ` +
+        (up.paths.length > 0
+          ? `${config.base_ref} moved to ${up.tip}, which will not merge into ` +
+            `${state.workspace.branch}: ${up.paths.join(", ")}`
+          : mergeFailedDetail(config.base_ref, up.tip, state.workspace.branch, up.detail)) +
+        ". No pull request was opened; a re-run merges the base up again.",
+    };
+    progress(end.detail);
+  } else if (up.base_commit !== state.baseCommit) {
+    state = { ...state, baseCommit: up.base_commit };
+    progress(`merged ${config.base_ref} at ${state.baseCommit.slice(0, 12)} before publishing`);
+  }
+  return { state, end };
 }

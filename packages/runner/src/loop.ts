@@ -3,7 +3,6 @@ import { setTimeout } from "node:timers/promises";
 import { z } from "zod";
 import {
   assertProviderEnabled,
-  failedChecks,
   hasAcceptanceCriteria,
   isRefusal,
   limitFor,
@@ -45,16 +44,9 @@ import {
 import { Ledger } from "./loop/ledger.js";
 import { acquireRunLock, type HeldRunLock } from "./lock.js";
 import { BundleStore } from "./bundle.js";
-import {
-  deliveredChecksSection,
-  editPullRequestBody,
-  pullRequestBody,
-  readDeliveredChecks,
-  type DeliveredChecksReading,
-} from "./delivery.js";
-import { githubCredential } from "./github-credential.js";
-import { mergeUp, pathsWithConflictMarkers } from "./merge-up.js";
+import { pathsWithConflictMarkers } from "./merge-up.js";
 import { sweepWorktree } from "./orphans.js";
+import type { DeliveredChecksReading } from "./delivery.js";
 import type { LoopMergeOutcome } from "./merge.js";
 import { buildPermissionProfile } from "./profile.js";
 import {
@@ -74,9 +66,10 @@ import { recordAttempt } from "./loop/attempt.js";
 import { briefRound } from "./loop/brief.js";
 import { confirmContinuation, remediationToContinue } from "./loop/continuation.js";
 import { checkRound } from "./loop/check.js";
+import { publish, publishRelevel, type Delivery } from "./loop/deliver.js";
 import { execute } from "./loop/execute.js";
 import { sealRound } from "./loop/seal.js";
-import { levelBeforeExecutor, mergeFailedDetail } from "./loop/level.js";
+import { levelBeforeExecutor, levelBeforePublish } from "./loop/level.js";
 import { reviewRound } from "./loop/review.js";
 import { resolvePorts, type LoopPorts } from "./loop/context.js";
 import {
@@ -1142,15 +1135,14 @@ async function runLockedTicket(
       continue;
     }
 
-    let pull_request: TicketRunResult["pull_request"] = null;
-    /** SCP-202: what the post-approval merge step did, where one ran. */
-    let merge: LoopMergeOutcome | null = null;
-    /** What the checks on the published head said, where there was one. */
-    let delivery_checks: DeliveredChecksReading | null = null;
-    /** SCP-200: the credential path this run published through, where it did. */
-    let github_credential: GithubCredential | null = null;
-    /** SCP-192: the base tip the branch is level with when the run ends. */
-    let merged_base: string | null = state.baseCommit === workspace.base_commit ? null : state.baseCommit;
+    let delivery: Delivery = {
+      pull_request: null,
+      merge: null,
+      delivery_checks: null,
+      github_credential: null,
+      merged_base: state.baseCommit === workspace.base_commit ? null : state.baseCommit,
+      detail,
+    };
     // An escalated outcome publishes too (D-065): the pull request is the
     // surface where the person meets the executor's verified fixes and the
     // "no determinable practice — for you to decide" reasons side by side.
@@ -1159,199 +1151,58 @@ async function runLockedTicket(
     // publish under; its own block below pushes a `relevelled` branch, and a
     // verdict short of that leaves the merge commit local and unpushed.
     if ((outcome === "approved" || outcome === "escalated") && config.publish && state.finalReview && ledger.attempts.length > 0) {
-      // SCP-192, the second merge-up: the base can move between the review and
-      // the publish, and a pull request that is behind at the moment it opens
-      // is the pull request a person spent day four merging by hand. Nothing
-      // unreviewed enters the branch by it — what a clean merge brings in is
-      // the base's own commits, which are already on the base branch.
-      const up = await mergeUp({
-        worktree: workspace.path,
-        repository_root: config.repository_root,
-        base_ref: config.base_ref,
-        base_commit: state.baseCommit,
-        ticket_key: config.ticket_key,
-        attempt_id: ledger.last()?.attempt_id ?? rootAttemptId,
+      const levelled = await levelBeforePublish({
+        config,
+        state,
+        end: { outcome, detail },
+        ledger,
+        rootAttemptId,
+        finalReview: state.finalReview,
+        progress,
       });
-      if (up.status === "conflict") {
-        // There is no round left to hand this to — the loop is past its rounds
-        // — and opening a pull request that cannot be merged is the thing this
-        // ticket exists to stop. The change set stays on its branch, and the
-        // attempts are still recorded below.
-        outcome = "base_conflict";
-        detail =
-          `the change was ${state.finalReview.decision === "approve" ? "approved" : "escalated"} and then ` +
-          (up.paths.length > 0
-            ? `${config.base_ref} moved to ${up.tip}, which will not merge into ` +
-              `${workspace.branch}: ${up.paths.join(", ")}`
-            : mergeFailedDetail(config.base_ref, up.tip, workspace.branch, up.detail)) +
-          ". No pull request was opened; a re-run merges the base up again.";
-        progress(detail);
-      } else if (up.base_commit !== state.baseCommit) {
-        state = { ...state, baseCommit: up.base_commit };
-        progress(`merged ${config.base_ref} at ${state.baseCommit.slice(0, 12)} before publishing`);
-      }
+      state = levelled.state;
+      outcome = levelled.end.outcome;
+      detail = levelled.end.detail;
     }
 
     // A second test rather than an `else`: the block above can turn an approved
     // run into `base_conflict`, and the pull request must not open on it.
     if ((outcome === "approved" || outcome === "escalated") && config.publish && state.finalReview && ledger.attempts.length > 0) {
-      merged_base = state.baseCommit === workspace.base_commit ? null : state.baseCommit;
-      // SCP-200: the runner holds the credential and performs both steps, so
-      // the path is read from the runner's own environment. The preflight in
-      // front of this run already refused a machine that has neither.
-      github_credential = githubCredential();
-      await pushBranch({ worktree: workspace.path, branch: workspace.branch, onProgress: progress });
-      const body = pullRequestBody({
+      delivery = await publish({
+        config,
         contract,
-        attempt: ledger.last()!,
-        review: state.finalReview,
-        attempts: [...ledger.attempts],
-        // Where the work came from, so the person merging reads it here
-        // rather than going back to the ticket for it.
-        source: config.ticket_source,
-        verification_costs: ledger.rounds.flatMap((entry) =>
-          entry.verification
-            ? [
-                {
-                  cost_micros: entry.verification.cost_micros,
-                  cost_basis: entry.verification.cost_basis,
-                },
-              ]
-            : [],
-        ),
-        declines: ledger.declines,
-        // SCP-202: the closing line says which of the two merges this pull
-        // request is waiting for, from the switch that decides it.
-        merge: config.merge,
+        state,
+        ledger,
+        rootAttemptId,
+        finalReview: state.finalReview,
+        detail,
+        push: pushBranch,
+        open: openPullRequest,
+        merge: mergePullRequest,
+        onPullRequest: args.onPullRequest,
+        clock,
+        wait,
+        progress,
       });
-      pull_request = await openPullRequest({
-        worktree: workspace.path,
-        branch: workspace.branch,
-        base_ref: config.base_ref,
-        title: `${config.ticket_key}: ${contract.outcome}`.slice(0, 120),
-        body,
-      });
-      progress(`pull request ${pull_request.url}`);
-      args.onPullRequest?.(pull_request);
-
-      // SCP-202, D-077: the last mile. The step is the same one `perbo sync
-      // --merge` calls and it decides on the switch first, so a repository
-      // that merges by hand reaches no further than that. The six conditions
-      // are read against the pull request as it is now — which, seconds after
-      // it opened, is a pull request whose checks have not run and which no
-      // separate review run has approved, so the ordinary answer here is a
-      // stop, and the merge happens on a later `perbo sync --merge`.
-      //
-      // A stop leaves `outcome` alone: the change was approved and the pull
-      // request is open, and what is missing is a condition of the merge.
-      merge = await mergePullRequest({
-        mode: config.merge,
-        repository_root: config.repository_root,
-        branch: workspace.branch,
-        pull_request_number: pull_request.number,
-        base_ref: config.base_ref,
-        state_root: config.state_root,
-        ticket_key: config.ticket_key,
-        paths_allowed: contract.scope.paths_allowed,
-        attempt_id: ledger.last()?.attempt_id ?? rootAttemptId,
-        now: clock(),
-      });
-      progress(merge.merged ? `merged: ${merge.detail}` : `not merged — ${merge.detail}`);
-
-      // The checks on the head, read here and not earlier: the merge step
-      // decides on a pull request seconds old, and reading first would hand it
-      // a different pull request than the one it has always decided on. The
-      // reading is still before anything records the delivery — that happens
-      // on the result this returns.
-      //
-      // Nothing here throws: the pull request is open, and a run that lost its
-      // whole record because `gh` could not answer one more question would be
-      // the worse outcome.
-      try {
-        delivery_checks = await readDeliveredChecks({
-          worktree: workspace.path,
-          branch: workspace.branch,
-          boundMs: config.delivery_checks_bound_ms,
-          now: clock,
-          sleep: wait,
-          onProgress: progress,
-        });
-        const failed = failedChecks(delivery_checks.checks);
-        progress(
-          `checks on the head: ${delivery_checks.state}` +
-            (delivery_checks.checks.length === 0
-              ? " — none reported"
-              : ` — ${delivery_checks.checks
-                  .map((check) => `${check.name} ${check.conclusion}`)
-                  .join(", ")}`),
-        );
-        if (failed.length > 0) {
-          // The outcome stays what the review decided: the change was
-          // approved and a check on the head went red, and those are two
-          // different facts. The line a person reads carries both.
-          detail =
-            `${detail}; the head's checks failed: ` +
-            failed.map((check) => `${check.name} (${check.conclusion})`).join(", ");
-        }
-        // Below what the body already holds, never over it.
-        const edited = await editPullRequestBody({
-          worktree: workspace.path,
-          branch: workspace.branch,
-          body: `${body}\n${deliveredChecksSection(delivery_checks)}\n`,
-        });
-        if (!edited.edited) {
-          progress(
-            `the pull request body still does not state the checks: ${edited.detail || "gh refused"}`,
-          );
-        }
-      } catch (error) {
-        progress(
-          `the checks on the head could not be read: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+      detail = delivery.detail;
     }
 
-    // SCP-227: a re-levelled branch is pushed and its merge step read. The pull
-    // request already exists — the branch is at `pr_open` — so it is found
-    // rather than opened, and its body is left as it is.
     if (outcome === "relevelled" && config.publish) {
-      merged_base = state.baseCommit === workspace.base_commit ? null : state.baseCommit;
-      github_credential = githubCredential();
-      await pushBranch({ worktree: workspace.path, branch: workspace.branch, onProgress: progress });
-      pull_request = await findPullRequest({ worktree: workspace.path, branch: workspace.branch });
-      if (pull_request === null) {
-        progress(`no open pull request on ${workspace.branch}: the re-level is pushed and nothing else is read`);
-      } else {
-        progress(`pull request ${pull_request.url}`);
-        merge = await mergePullRequest({
-          mode: config.merge,
-          repository_root: config.repository_root,
-          branch: workspace.branch,
-          pull_request_number: pull_request.number,
-          base_ref: config.base_ref,
-          state_root: config.state_root,
-          ticket_key: config.ticket_key,
-          paths_allowed: contract.scope.paths_allowed,
-          attempt_id: ledger.last()?.attempt_id ?? continuesPreviousRun ?? rootAttemptId,
-          now: clock(),
-        });
-        progress(merge.merged ? `merged: ${merge.detail}` : `not merged — ${merge.detail}`);
-        try {
-          delivery_checks = await readDeliveredChecks({
-            worktree: workspace.path,
-            branch: workspace.branch,
-            boundMs: config.delivery_checks_bound_ms,
-            now: clock,
-            sleep: wait,
-            onProgress: progress,
-          });
-          progress(`checks on the head: ${delivery_checks.state}`);
-        } catch (error) {
-          progress(
-            `the checks on the head could not be read: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      }
+      delivery = await publishRelevel({
+        config,
+        contract,
+        state,
+        ledger,
+        rootAttemptId,
+        continuesPreviousRun,
+        detail,
+        push: pushBranch,
+        existing: findPullRequest,
+        merge: mergePullRequest,
+        clock,
+        wait,
+        progress,
+      });
     }
 
     // Appended, never replaced: every earlier run stays readable with its own
@@ -1371,14 +1222,14 @@ async function runLockedTicket(
       rounds: [...ledger.rounds],
       final_review: state.finalReview,
       node_reviews: state.nodeReviews,
-      pull_request,
-      merge,
-      delivery_checks,
-      github_credential,
+      pull_request: delivery.pull_request,
+      merge: delivery.merge,
+      delivery_checks: delivery.delivery_checks,
+      github_credential: delivery.github_credential,
       outcome,
       detail,
       incomplete_review: state.incompleteReview,
-      merged_base,
+      merged_base: delivery.merged_base,
     };
   } finally {
     // Whatever ended the run, nothing of it outlives the worktree. The last
