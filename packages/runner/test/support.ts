@@ -1,16 +1,9 @@
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { Socket } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, vi } from "vitest";
+import { vi } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import {
   EXECUTION_ATTEMPT_SCHEMA_VERSION,
   ExecutionAttemptSchema,
@@ -62,37 +55,10 @@ export const git = (cwd: string, ...args: string[]) =>
   });
 
 /**
- * A temporary directory, removed when the test file that made it has finished.
- *
- * `mkdtempSync` hands the directory to the caller and never takes it back, so a
- * suite that only ever makes them fills the temporary directory with repositories,
- * worktrees and bundle stores — and TMPDIR is pointed inside the checkout when
- * these run under the runner, where the leftovers then show up in `git status`.
- * Removal is registered here rather than in each test so that a directory lives
- * as long as the file that made it, which is what a `beforeAll` fixture needs;
- * the hook is registered on the test file that imports this module.
+ * Temporary directories that live as long as the test file that imports this
+ * module, because the `afterAll` is registered on that file.
  */
-const madeScratch: string[] = [];
-
-export const scratch = (prefix = "perbo-runner-") => {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  madeScratch.push(dir);
-  return dir;
-};
-
-afterAll(() => {
-  for (const dir of madeScratch.splice(0)) {
-    // `maxRetries` is what `rm` offers for the race this hits on a loaded
-    // machine: a process the attempt spawned is still writing into the tree as
-    // it is removed, and the first pass fails with ENOTEMPTY. Beyond that it is
-    // best effort — a fixture that will not be removed is a leak, not a failure.
-    try {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-    } catch {
-      // Left behind; the next `git status` is where it will be noticed.
-    }
-  }
-});
+export const scratch = scratchDirectories("perbo-runner-");
 
 /** A repository with a lockfile, a test script, and committed agent configuration. */
 export function makeRepo(options: { agentConfig?: boolean } = {}): { dir: string; head: string } {
