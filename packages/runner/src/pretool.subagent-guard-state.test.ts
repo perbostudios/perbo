@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ADMISSION_RULES } from "../src/admission.js";
+import { ADMISSION_RULES } from "./admission.js";
 import {
   discardPreToolGuard,
   guardHookEntry,
@@ -19,10 +19,12 @@ import {
   readPreToolDecisions,
   type PreToolDecision,
   type PreToolGuard,
-} from "../src/pretool.js";
-import { UNKNOWN_CWD } from "../src/shell/index.js";
-import { buildPermissionProfile } from "../src/profile.js";
-import { SPAWN_TEST_TIMEOUT_MS, scratch } from "./support.js";
+} from "./pretool.js";
+import { UNKNOWN_CWD } from "./shell/index.js";
+import { buildPermissionProfile } from "./profile.js";
+import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
+
+const scratch = scratchDirectories("perbo-runner-");
 
 /**
  * D-106 criterion 2: the guard keeps its state per agent, and loses nothing

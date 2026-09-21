@@ -5,10 +5,10 @@ import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { LimitsTableSchema, type CommandRecord } from "@perbo/contracts";
 import { scratchDirectories } from "@perbo/test-support";
-import { ADMISSION_RULES } from "../src/admission.js";
-import { runAgent, type AgentResult } from "../src/adapter.js";
-import { AttemptCeilings } from "../src/ceilings.js";
-import { buildAgentEnvironment, buildPermissionProfile } from "../src/profile.js";
+import { ADMISSION_RULES } from "./admission.js";
+import { runAgent, type AgentResult } from "./adapter.js";
+import { AttemptCeilings } from "./ceilings.js";
+import { buildAgentEnvironment, buildPermissionProfile } from "./profile.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

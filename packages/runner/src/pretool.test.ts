@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { ADMISSION_RULES, judgeCommand } from "../src/admission.js";
+import { ADMISSION_RULES, judgeCommand } from "./admission.js";
 import {
   PRE_TOOL_JUDGED_TOOLS,
   discardPreToolGuard,
@@ -12,10 +12,10 @@ import {
   readPreToolDecisions,
   runPreToolHook,
   type PreToolGuardState,
-} from "../src/pretool.js";
-import { inspectToolWrite } from "../src/prohibited.js";
-import { UNKNOWN_CWD } from "../src/shell/index.js";
-import { buildPermissionProfile } from "../src/profile.js";
+} from "./pretool.js";
+import { inspectToolWrite } from "./prohibited.js";
+import { UNKNOWN_CWD } from "./shell/index.js";
+import { buildPermissionProfile } from "./profile.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inspectCommand } from "../src/prohibited.js";
+import { inspectCommand } from "./prohibited.js";
 
 /**
  * SCP-243: a git rule names a verb, and a verb is a whole word.

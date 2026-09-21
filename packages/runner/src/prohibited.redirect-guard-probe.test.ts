@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { inspectCommand } from "../src/prohibited.js";
+import { inspectCommand } from "./prohibited.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

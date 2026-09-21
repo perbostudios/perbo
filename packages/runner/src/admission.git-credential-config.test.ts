@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ADMISSION_RULES, judgeCommand } from "../src/admission.js";
-import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "../src/profile.js";
+import { ADMISSION_RULES, judgeCommand } from "./admission.js";
+import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "./profile.js";
 
 /**
  * SCP-201 criterion 1: `git config` reaches the same credential wiring

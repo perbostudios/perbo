@@ -3,12 +3,12 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema, type CommandRecord } from "@perbo/contracts";
 import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
-import { runAgent, type AgentResult } from "../src/adapter.js";
-import { SUBAGENT_TOOL_NAMES } from "../src/agents.js";
-import { AttemptCeilings } from "../src/ceilings.js";
-import { EXECUTOR_ACCOUNT_HEADING, executorAccount } from "../src/account.js";
-import { buildPermissionProfile } from "../src/profile.js";
-import { fakeAgent, type ScriptedStep } from "../src/test-support/fake-agent.js";
+import { runAgent, type AgentResult } from "./adapter.js";
+import { SUBAGENT_TOOL_NAMES } from "./agents.js";
+import { AttemptCeilings } from "./ceilings.js";
+import { EXECUTOR_ACCOUNT_HEADING, executorAccount } from "./account.js";
+import { buildPermissionProfile } from "./profile.js";
+import { fakeAgent, type ScriptedStep } from "./test-support/fake-agent.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

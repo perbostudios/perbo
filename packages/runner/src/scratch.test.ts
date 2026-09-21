@@ -10,18 +10,18 @@ import {
 } from "@perbo/contracts";
 import { provision } from "@perbo/workspace";
 import { scratchDirectories } from "@perbo/test-support";
-import { runAgent } from "../src/adapter.js";
-import { AttemptCeilings } from "../src/ceilings.js";
-import { runPinnedChecks } from "../src/checks/index.js";
-import { buildAgentEnvironment, buildPermissionProfile } from "../src/profile.js";
+import { runAgent } from "./adapter.js";
+import { AttemptCeilings } from "./ceilings.js";
+import { runPinnedChecks } from "./checks/index.js";
+import { buildAgentEnvironment, buildPermissionProfile } from "./profile.js";
 import {
   prepareScratchDirectory,
   SCRATCH_DIR_NAME,
   scratchEnvironment,
   scratchPath,
-} from "../src/scratch.js";
-import { sealChangeSet, untrackedAfterChecks } from "../src/seal.js";
-import { runnerRepository } from "../src/test-support/repository.js";
+} from "./scratch.js";
+import { sealChangeSet, untrackedAfterChecks } from "./seal.js";
+import { runnerRepository } from "./test-support/repository.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

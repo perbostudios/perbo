@@ -3,10 +3,10 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
 import { scratchDirectories } from "@perbo/test-support";
-import { runAgent, type AgentResult } from "../src/adapter.js";
-import { AttemptCeilings } from "../src/ceilings.js";
-import { buildPermissionProfile } from "../src/profile.js";
-import { inspectCommandWithCwd } from "../src/prohibited.js";
+import { runAgent, type AgentResult } from "./adapter.js";
+import { AttemptCeilings } from "./ceilings.js";
+import { buildPermissionProfile } from "./profile.js";
+import { inspectCommandWithCwd } from "./prohibited.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

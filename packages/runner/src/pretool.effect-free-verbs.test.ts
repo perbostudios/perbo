@@ -2,8 +2,8 @@ import { mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { codexCommandDecision } from "../src/codex/index.js";
-import { EFFECT_FREE_VERBS, judgePreToolCall, type PreToolGuardState } from "../src/pretool.js";
+import { codexCommandDecision } from "./codex/index.js";
+import { EFFECT_FREE_VERBS, judgePreToolCall, type PreToolGuardState } from "./pretool.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { commandSegments, inspectCommand, inspectCommandWithCwd } from "../src/prohibited.js";
+import { commandSegments, inspectCommand, inspectCommandWithCwd } from "./prohibited.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 
@@ -19,7 +19,7 @@ const AYO26_ROOT =
 const HOME = "/Users/nobody";
 const AYO26_TARGET = `${AYO26_ROOT}/packages/runner/test/loop.test.ts`;
 const AYO26 = readFileSync(
-  new URL("./fixtures/ayo-26-heredoc-append.txt", import.meta.url),
+  new URL("../test/fixtures/ayo-26-heredoc-append.txt", import.meta.url),
   "utf8",
 );
 

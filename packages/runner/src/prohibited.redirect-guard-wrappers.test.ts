@@ -2,8 +2,8 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { inspectCommandWithCwd } from "../src/prohibited.js";
-import { UNKNOWN_CWD } from "../src/shell/index.js";
+import { inspectCommandWithCwd } from "./prohibited.js";
+import { UNKNOWN_CWD } from "./shell/index.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { preparePreToolGuard } from "../src/pretool.js";
-import { buildPermissionProfile } from "../src/profile.js";
+import { preparePreToolGuard } from "./pretool.js";
+import { buildPermissionProfile } from "./profile.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

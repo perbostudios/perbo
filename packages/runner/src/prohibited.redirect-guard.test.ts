@@ -2,7 +2,7 @@ import { symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { commandSegments, inspectCommand, inspectPaths } from "../src/prohibited.js";
+import { commandSegments, inspectCommand, inspectPaths } from "./prohibited.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

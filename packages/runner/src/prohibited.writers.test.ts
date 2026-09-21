@@ -2,11 +2,11 @@ import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { matchesListEntry } from "../src/admission.js";
-import { judgePreToolCall } from "../src/pretool.js";
-import { inspectCommand, inspectCommandWithCwd } from "../src/prohibited.js";
-import { WRITERS } from "../src/shell/index.js";
-import { buildPermissionProfile } from "../src/profile.js";
+import { matchesListEntry } from "./admission.js";
+import { judgePreToolCall } from "./pretool.js";
+import { inspectCommand, inspectCommandWithCwd } from "./prohibited.js";
+import { WRITERS } from "./shell/index.js";
+import { buildPermissionProfile } from "./profile.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

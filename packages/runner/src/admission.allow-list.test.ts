@@ -2,8 +2,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { ADMISSION_RULES, judgeCommand, matchesListEntry } from "../src/admission.js";
-import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "../src/profile.js";
+import { ADMISSION_RULES, judgeCommand, matchesListEntry } from "./admission.js";
+import { DEFAULT_COMMAND_ALLOW_LIST, DEFAULT_COMMAND_DENY_LIST } from "./profile.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

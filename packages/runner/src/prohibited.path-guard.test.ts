@@ -1,14 +1,14 @@
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { TicketRunConfigSchema } from "../src/loop.js";
+import { TicketRunConfigSchema } from "./loop.js";
 import { LimitsTableSchema, changeSetFromDiff, type Scope } from "@perbo/contracts";
 import { assessScope } from "@perbo/review";
 import { scratchDirectories } from "@perbo/test-support";
-import { ADMISSION_RULES, judgeCommand } from "../src/admission.js";
-import { runAgent } from "../src/adapter.js";
-import { codexCommandDecision, codexFileDecision } from "../src/codex/index.js";
-import { AttemptCeilings } from "../src/ceilings.js";
+import { ADMISSION_RULES, judgeCommand } from "./admission.js";
+import { runAgent } from "./adapter.js";
+import { codexCommandDecision, codexFileDecision } from "./codex/index.js";
+import { AttemptCeilings } from "./ceilings.js";
 import {
   discardPreToolGuard,
   judgePreToolCall,
@@ -16,11 +16,11 @@ import {
   readPreToolDecisions,
   runPreToolHook,
   type PreToolGuardState,
-} from "../src/pretool.js";
-import { buildPermissionProfile } from "../src/profile.js";
-import { inspectCommand, inspectToolWrite } from "../src/prohibited.js";
-import { inspectWritePath, resolveScope } from "../src/shell/index.js";
-import { fakeAgent } from "../src/test-support/fake-agent.js";
+} from "./pretool.js";
+import { buildPermissionProfile } from "./profile.js";
+import { inspectCommand, inspectToolWrite } from "./prohibited.js";
+import { inspectWritePath, resolveScope } from "./shell/index.js";
+import { fakeAgent } from "./test-support/fake-agent.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

@@ -8,10 +8,10 @@ import {
   discardPreToolGuard,
   guardHookEntry,
   preparePreToolGuard,
-} from "../src/pretool.js";
-import { briefStateBlock, readReinjections, reinjectedBrief } from "../src/brief.js";
-import { buildPermissionProfile } from "../src/profile.js";
-import { briefRecords } from "../src/test-support/records.js";
+} from "./pretool.js";
+import { briefStateBlock, readReinjections, reinjectedBrief } from "./brief.js";
+import { buildPermissionProfile } from "./profile.js";
+import { briefRecords } from "./test-support/records.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

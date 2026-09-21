@@ -3,9 +3,9 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { ADMISSION_RULES } from "../src/admission.js";
-import { PERBO_AGENT_ROLES, SUBAGENT_TOOL_NAMES } from "../src/agents.js";
-import { buildArgv } from "../src/adapter.js";
+import { ADMISSION_RULES } from "./admission.js";
+import { PERBO_AGENT_ROLES, SUBAGENT_TOOL_NAMES } from "./agents.js";
+import { buildArgv } from "./adapter.js";
 import {
   attemptSettings,
   discardPreToolGuard,
@@ -13,13 +13,13 @@ import {
   preparePreToolGuard,
   readPreToolDecisions,
   type PreToolGuard,
-} from "../src/pretool.js";
+} from "./pretool.js";
 import {
   buildPermissionProfile,
   DEFAULT_AGENT_TOOLS,
   DEFAULT_COMMAND_ALLOW_LIST,
   DEFAULT_COMMAND_DENY_LIST,
-} from "../src/profile.js";
+} from "./profile.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 
