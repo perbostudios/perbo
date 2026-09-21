@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REDACTION, SecretIndex, isSecretPath, secretValuesOf } from "./secrets.js";
+import { REDACTION, SecretIndex, isSecretPath, replaceValues, secretValuesOf } from "./secrets.js";
 
 describe("secretValuesOf", () => {
   it("takes the right-hand side of an assignment, not the whole line", () => {
@@ -18,6 +18,32 @@ describe("secretValuesOf", () => {
   it("indexes long unbroken runs from a key file", () => {
     const pem = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END PRIVATE KEY-----";
     expect(secretValuesOf(pem)).toContain("MIIEvQIBADANBgkqhkiG9w0BAQEFAASC");
+  });
+});
+
+describe("replaceValues", () => {
+  it("takes the longer value out first, so a prefix of it leaves no tail", () => {
+    // The tail is the half of a credential that is still a credential: with
+    // the prefix replaced first, `1234` would be left standing in the text.
+    for (const values of [
+      ["abcdefgh", "abcdefgh1234"],
+      ["abcdefgh1234", "abcdefgh"],
+    ]) {
+      const replaced = replaceValues("a abcdefgh1234 b", values, "[r]");
+      expect(replaced.text, values.join()).toBe("a [r] b");
+      expect(replaced.count, values.join()).toBe(1);
+    }
+  });
+
+  it("counts every occurrence and leaves text carrying none alone", () => {
+    expect(replaceValues("p4ssw0rd and p4ssw0rd", ["p4ssw0rd"], "[r]")).toEqual({
+      text: "[r] and [r]",
+      count: 2,
+    });
+    expect(replaceValues("nothing here", ["p4ssw0rd", ""], "[r]")).toEqual({
+      text: "nothing here",
+      count: 0,
+    });
   });
 });
 
