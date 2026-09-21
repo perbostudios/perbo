@@ -79,7 +79,7 @@ import { runCommandLine } from "../../command-line/terminal.js";
  * that commit does not have), the workspace packages rebuilt, then
  * `pnpm exec vitest run src/commands/run/local.test.ts` in `apps/cli`. Result: 7 of 7
  * failed, six on `unknown flag '--outcome'` and one on `unknown flag '--pr'`,
- * thrown by `parseExecuteArgs` — at that commit the command takes its plan only
+ * thrown where the run reads its line — at that commit the command takes its plan only
  * from an admitted ticket. The same command after the change: 7 passed.
  */
 
