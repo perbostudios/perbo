@@ -7,7 +7,8 @@ import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "../src/loop.js";
 import { RunRefusedError } from "../src/refusal.js";
-import { finding, git, makeContract, makeRepo, makeReview, scratch, withoutInstall } from "./support.js";
+import { finding, makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
+import { git, makeRepo, scratch } from "./support.js";
 
 /**
  * SCP-314: the spec the change is judged against is the branch's first commit,

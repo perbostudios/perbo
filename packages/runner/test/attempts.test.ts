@@ -18,7 +18,8 @@ import {
 import { BundleStore } from "../src/bundle.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
-import { makeAttempt, makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { makeAttempt, makeContract, makeReview } from "../src/test-support/records.js";
+import { makeRepo, scratch } from "./support.js";
 
 /**
  * Re-running one approved contract.
@@ -104,7 +105,11 @@ function executorDouble(behaviour: {
 
 const approves = (review_id: string) =>
   async () => ({
-    artifact: makeReview({ review_id, decision: "approve", verification_strength: "directly_verified" }),
+    artifact: makeReview({
+      review_id,
+      decision: "approve",
+      coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
+    }),
     bundle: {
       prompt_version: "reviewer_v2",
       system_prompt: "s",

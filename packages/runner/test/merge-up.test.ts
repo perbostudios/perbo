@@ -6,7 +6,8 @@ import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { mergeUp } from "../src/merge-up.js";
-import { finding, git, makeContract, makeRepo, makeReview, scratch, withoutInstall } from "./support.js";
+import { finding, makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
+import { git, makeRepo, scratch } from "./support.js";
 
 /**
  * SCP-192: the loop keeps its branch level with the base.

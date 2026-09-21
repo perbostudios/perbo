@@ -14,7 +14,8 @@ import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket, type TicketRunConfig } from "../src/loop.js";
 import { resolveResumeSource, sameCommit } from "../src/resume.js";
 import { TRANSPORT_RETRY_DELAY_MS } from "../src/transport.js";
-import { git, makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { makeContract, makeReview } from "../src/test-support/records.js";
+import { git, makeRepo, scratch } from "./support.js";
 
 /**
  * Resuming an attempt a ceiling cut (SCP-154).

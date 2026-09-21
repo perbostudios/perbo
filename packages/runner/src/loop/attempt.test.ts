@@ -18,7 +18,8 @@ import type { SealResult } from "../seal.js";
 import { classifyTermination, providerPark, recordAttempt, withCeilingGuidance } from "./attempt.js";
 import { TicketRunConfigSchema } from "./config.js";
 import { Ledger } from "./ledger.js";
-import { agentResult, contract, finding, roundState } from "./test-support/fakes.js";
+import { finding } from "../test-support/records.js";
+import { agentResult, contract, roundState } from "./test-support/fakes.js";
 
 const manifest = (): MaterializationManifest =>
   MaterializationManifestSchema.parse({

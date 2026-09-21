@@ -6,7 +6,8 @@ import { LimitsTableSchema } from "@perbo/contracts";
 import { runCodexAgent } from "../src/adapter-codex.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { briefRecords, SPAWN_TEST_TIMEOUT_MS } from "./support.js";
+import { briefRecords } from "../src/test-support/records.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "./support.js";
 
 /**
  * D-096 on Codex, through `runCodexAgent` itself: a compaction that completes

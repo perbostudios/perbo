@@ -7,7 +7,7 @@ import {
   type ReviewArtifact,
 } from "@perbo/contracts";
 import { pullRequestBody } from "../src/delivery.js";
-import { finding, makeContract, makeReview } from "./support.js";
+import { finding, makeContract, makeReview } from "../src/test-support/records.js";
 
 /**
  * The pull-request body, read for identifiers only this repository knows.

@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
 import { TicketRunConfigSchema, runTicket, type TicketRunResult } from "../src/loop.js";
-import { makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { makeContract, makeReview } from "../src/test-support/records.js";
+import { makeRepo, scratch } from "./support.js";
 
 /**
  * What an attempt leaves running when it ends.
@@ -130,7 +131,7 @@ const approve = (async () => ({
   artifact: makeReview({
     review_id: "rev_0000000000000263",
     decision: "approve",
-    verification_strength: "directly_verified",
+    coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
   }),
   bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
 })) as never;

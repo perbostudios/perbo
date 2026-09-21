@@ -6,7 +6,8 @@ import type { AgentResult } from "../src/adapter.js";
 import type { BriefRecords } from "../src/brief.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
-import { finding, makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { finding, makeContract, makeReview } from "../src/test-support/records.js";
+import { makeRepo, scratch } from "./support.js";
 
 /**
  * D-096: what the round hands the re-injection mechanisms.

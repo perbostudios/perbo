@@ -5,7 +5,8 @@ import { DeliveredCheckSchema, LimitsTableSchema, type ChangeSet } from "@perbo/
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
-import { makeContract, makeRepo, makeReview, scratch, withoutInstall } from "./support.js";
+import { makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
+import { makeRepo, scratch } from "./support.js";
 
 /**
  * The loop reads the checks on the head it pushed before it records a delivery.

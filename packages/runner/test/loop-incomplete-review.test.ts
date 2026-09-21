@@ -5,7 +5,8 @@ import { LimitsTableSchema, type ReviewArtifact } from "@perbo/contracts";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
-import { finding, makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { finding, makeContract, makeReview } from "../src/test-support/records.js";
+import { makeRepo, scratch } from "./support.js";
 
 /**
  * An `incomplete` verdict whose unjudgeable criteria hang on a finding the
@@ -132,7 +133,7 @@ const incomplete = (review_id: string, findings: ReturnType<typeof finding>[]) =
   makeReview({
     review_id,
     decision: "incomplete",
-    coverage_status: "cannot_determine",
+    coverage: [{ criterion_id: "ac_1", status: "cannot_determine" }],
     findings,
   });
 

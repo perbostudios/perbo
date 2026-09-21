@@ -12,7 +12,8 @@ import { branchName } from "@perbo/workspace";
 import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
-import { git, makeAttempt, makeContract, makeRepo, scratch, withoutInstall } from "./support.js";
+import { makeAttempt, makeContract, withoutInstall } from "../src/test-support/records.js";
+import { git, makeRepo, scratch } from "./support.js";
 
 /**
  * Which commit's verification a check failure is attributed to.
@@ -129,7 +130,7 @@ const agentDouble = (
 const covers = {
   criterion_id: "ac_1",
   status: "met",
-  verification_strength: "directly_verified",
+  coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
   evidence_type: "test_result",
   evidence_ref: "check_unit",
   evidence_assertion: "total([1,2]) is 3",

@@ -6,7 +6,8 @@ import type { AgentResult } from "../src/adapter.js";
 import { EgressLog } from "../src/egress.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import type { LoopMergeOutcome } from "../src/merge.js";
-import { makeContract, makeRepo, makeReview, scratch, withoutInstall } from "./support.js";
+import { makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
+import { makeRepo, scratch } from "./support.js";
 
 /**
  * SCP-202: the loop's own post-approval merge step.

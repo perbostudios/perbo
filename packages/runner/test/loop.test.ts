@@ -22,14 +22,12 @@ import { TRANSPORT_RETRY_DELAY_MS } from "../src/transport.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
 import {
   finding,
-  git,
   makeAttempt,
   makeContract,
-  makeRepo,
   makeReview,
-  scratch,
   withoutInstall,
-} from "./support.js";
+} from "../src/test-support/records.js";
+import { git, makeRepo, scratch } from "./support.js";
 
 /**
  * The loop, with the agent and the reviewer replaced by doubles.
@@ -545,7 +543,13 @@ describe("the record", () => {
       hooks: {
         agent: agent.run as never,
         review: (async () => ({
-          artifact: makeReview({ review_id: "rev_0000000000000001", decision: "approve", verification_strength: "directly_verified" }),
+          artifact: makeReview({
+            review_id: "rev_0000000000000001",
+            decision: "approve",
+            coverage: [
+              { criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" },
+            ],
+          }),
           bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
         })) as never,
       },
@@ -611,7 +615,7 @@ describe("the record", () => {
           artifact: makeReview({
             review_id: "rev_0000000000000002",
             decision: "approve",
-            verification_strength: "directly_verified",
+            coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
             changeset_id: stated,
           }),
           bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
@@ -722,7 +726,11 @@ describe("actual_risk exceeding planned_risk", () => {
     });
     const reviews = [
       makeReview({ review_id: "rev_0000000000000001", decision: "remediable", findings: [finding()] }),
-      makeReview({ review_id: "rev_0000000000000002", decision: "approve", verification_strength: "directly_verified" }),
+      makeReview({
+        review_id: "rev_0000000000000002",
+        decision: "approve",
+        coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
+      }),
     ];
     let call = 0;
 
@@ -782,7 +790,7 @@ describe("actual_risk exceeding planned_risk", () => {
 const covers = (criterion_id: string) => ({
   criterion_id,
   status: "met",
-  verification_strength: "directly_verified",
+  coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
   evidence_type: "test_result",
   evidence_ref: "check_unit",
   evidence_assertion: "expect(thing).toBe(1)",
@@ -964,7 +972,7 @@ describe("a review that did not complete", () => {
           artifact: makeReview({
             review_id: "rev_0000000000000001",
             decision: "error",
-            coverage_status: "cannot_determine",
+            coverage: [{ criterion_id: "ac_1", status: "cannot_determine" }],
             error: {
               kind: "provider_unavailable",
               message: "HTTP 529 after 3 attempts",
@@ -1004,7 +1012,7 @@ describe("a review that did not complete", () => {
           artifact: makeReview({
             review_id: "rev_0000000000000001",
             decision: "error",
-            coverage_status: "cannot_determine",
+            coverage: [{ criterion_id: "ac_1", status: "cannot_determine" }],
             error: {
               kind: "provider_unavailable",
               message: "the claude CLI failed: spawn E2BIG",
@@ -1045,7 +1053,7 @@ describe("a review that did not complete", () => {
           artifact: makeReview({
             review_id: "rev_0000000000000001",
             decision: "incomplete",
-            coverage_status: "cannot_determine",
+            coverage: [{ criterion_id: "ac_1", status: "cannot_determine" }],
           }),
           bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
         })) as never,
@@ -1837,7 +1845,7 @@ describe("the pull request the loop publishes", () => {
             artifact: makeReview({
               review_id: "rev_0000000000000001",
               decision: "approve",
-              verification_strength: "directly_verified",
+              coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
             }),
             bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
           })) as never,
@@ -1869,7 +1877,7 @@ describe("an attempt whose model transport gave up", () => {
     artifact: makeReview({
       review_id: "rev_0000000000000009",
       decision: "approve",
-      verification_strength: "directly_verified",
+      coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
     }),
     bundle: {
       prompt_version: "reviewer_v2",

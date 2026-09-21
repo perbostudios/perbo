@@ -8,7 +8,7 @@ import { reinjectedBrief } from "../src/brief.js";
 import { AttemptCeilings } from "../src/ceilings.js";
 import { CodexExecutorSession } from "../src/codex-rpc.js";
 import { EgressLog } from "../src/egress.js";
-import { briefRecords } from "./support.js";
+import { briefRecords } from "../src/test-support/records.js";
 
 /**
  * D-096 on Codex: a thread whose context was compacted gets the brief again.

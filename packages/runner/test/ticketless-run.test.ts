@@ -12,14 +12,8 @@ import {
 import { BundleStore } from "../src/bundle.js";
 import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
-import {
-  finding,
-  makeRepo,
-  makeReview,
-  scratch,
-  watchOutbound,
-  withoutInstall,
-} from "./support.js";
+import { finding, makeReview, withoutInstall } from "../src/test-support/records.js";
+import { makeRepo, scratch, watchOutbound } from "./support.js";
 
 /**
  * The loop on a contract nobody admitted (AYO-32).

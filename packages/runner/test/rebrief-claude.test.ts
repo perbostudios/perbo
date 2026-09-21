@@ -10,7 +10,8 @@ import {
 } from "../src/pretool.js";
 import { briefStateBlock, readReinjections, reinjectedBrief } from "../src/brief.js";
 import { buildPermissionProfile } from "../src/profile.js";
-import { briefRecords, scratch } from "./support.js";
+import { briefRecords } from "../src/test-support/records.js";
+import { scratch } from "./support.js";
 
 /**
  * D-096 on Claude: after a compaction the executor, and each subagent, gets

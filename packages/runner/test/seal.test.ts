@@ -10,7 +10,8 @@ import {
   pushAttemptBranch,
   TicketDeliveryStateSchema,
 } from "../src/delivery.js";
-import { finding, makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { finding, makeContract, makeReview } from "../src/test-support/records.js";
+import { makeRepo, scratch } from "./support.js";
 import { readFileSync as read } from "node:fs";
 
 async function worktreeFor(repo: { dir: string; head: string }, attempt = "att_seal") {
@@ -219,7 +220,7 @@ describe("delivery", () => {
     const review = makeReview({
       review_id: "rev_0000000000000002",
       decision: "approve",
-      verification_strength: "directly_verified",
+      coverage: [{ criterion_id: "ac_1", status: "met", verification_strength: "directly_verified" }],
       findings: [finding({ routing: "advisory", blocking: false })],
     });
     const attempt = {

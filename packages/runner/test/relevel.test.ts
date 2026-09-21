@@ -13,7 +13,8 @@ import {
   conflictPrompt,
   conflictPromptVersion,
 } from "../src/prompt.js";
-import { git, makeContract, makeRepo, makeReview, scratch, withoutInstall } from "./support.js";
+import { makeContract, makeReview, withoutInstall } from "../src/test-support/records.js";
+import { git, makeRepo, scratch } from "./support.js";
 
 /**
  * SCP-227: a re-level run keeps an open branch level with its base without an

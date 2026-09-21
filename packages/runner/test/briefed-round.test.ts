@@ -15,7 +15,8 @@ import { TicketRunConfigSchema, runTicket } from "../src/loop.js";
 import { buildPermissionProfile } from "../src/profile.js";
 import { executorPrompt, remediationPrompt } from "../src/prompt.js";
 import { fakeAgent } from "../src/test-support/fake-agent.js";
-import { finding, makeContract, makeRepo, makeReview, scratch } from "./support.js";
+import { finding, makeContract, makeReview } from "../src/test-support/records.js";
+import { makeRepo, scratch } from "./support.js";
 
 /**
  * D-092: a remediation round is briefed with its predecessor's own account,
