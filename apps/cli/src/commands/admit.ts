@@ -77,7 +77,7 @@ import {
   contextManifestHash,
   headCommit,
   idsFor,
-  listTickets as storedTickets,
+  listTickets,
   nextKey,
   readContract,
   readJudgingPaths,
@@ -1009,7 +1009,7 @@ function resolveTyped(input: AdmitInput): Resolved {
  */
 function board(dir: string, leftOff: (key: string) => void): BoardEntry[] {
   const inFlight = new Set<string>(["plan_review", ...QUEUE_HOLDING_STATES]);
-  return storedTickets(dir)
+  return listTickets(dir)
     .filter((ticket) => inFlight.has(ticket.state))
     .flatMap((ticket) => {
       // A ticket whose contract cannot be read is stepped over, as `list`
@@ -2064,9 +2064,9 @@ export const ListInputSchema = z.strictObject({
 });
 export type ListInput = z.infer<typeof ListInputSchema>;
 
-export function listTickets(input: ListInput, context: CommandContext): ListReport {
+export function list(input: ListInput, context: CommandContext): ListReport {
   const dir = storeFor(context.cwd, input.target);
-  const all = storedTickets(dir);
+  const all = listTickets(dir);
   return {
     store: dir,
     all: input.all,
@@ -2130,7 +2130,7 @@ const LIST_GRAMMAR: Grammar<typeof LIST_FLAGS> = {
  * process — the queue's endpoint — over the same typed input.
  */
 export const listReport: CommandReport<ListInput, { json: boolean }, ListReport> = {
-  run: listTickets,
+  run: list,
   toJson: (report) => listJson(report),
   render(report, _output, target): Rendered {
     // Before every other branch, including the empty-store one: in this mode
