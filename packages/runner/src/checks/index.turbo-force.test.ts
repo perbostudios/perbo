@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TURBO_FORCE_FLAG, runsTurboWithoutForce, withTurboForce } from "../src/checks/index.js";
+import { TURBO_FORCE_FLAG, runsTurboWithoutForce, withTurboForce } from "./index.js";
 
 /**
  * The argv half of running a check uncached: which commands are a turbo

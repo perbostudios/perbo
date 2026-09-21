@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EXECUTOR_SKILLS, ExecutorSkillsSchema } from "@perbo/contracts";
-import { withExecutorSkills } from "../src/skills/index.js";
+import { withExecutorSkills } from "./index.js";
 
 describe("host-selected executor guidance", () => {
   it("preserves ordinary execution exactly when no skill is selected", () => {

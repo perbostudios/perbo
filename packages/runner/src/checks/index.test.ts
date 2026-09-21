@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SecretIndex } from "@perbo/contracts";
 import { scratchDirectories } from "@perbo/test-support";
-import { runPinnedChecks } from "../src/checks/index.js";
+import { runPinnedChecks } from "./index.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

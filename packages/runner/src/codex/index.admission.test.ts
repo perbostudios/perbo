@@ -5,10 +5,10 @@ import { join } from "node:path";
 import {
   codexCommandDecision,
   codexFileDecision,
-} from "../src/codex/index.js";
-import { buildPermissionProfile } from "../src/profile.js";
-import { TicketRunConfigSchema } from "../src/loop.js";
-import type { PreToolGuardState } from "../src/pretool.js";
+} from "./index.js";
+import { buildPermissionProfile } from "../profile.js";
+import { TicketRunConfigSchema } from "../loop.js";
+import type { PreToolGuardState } from "../pretool.js";
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0))

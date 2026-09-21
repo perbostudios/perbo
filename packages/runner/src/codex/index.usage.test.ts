@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LimitsTableSchema } from "@perbo/contracts";
 import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
-import { runCodexAgent } from "../src/codex/index.js";
-import { AttemptCeilings } from "../src/ceilings.js";
-import { buildPermissionProfile } from "../src/profile.js";
-import { briefRecords } from "../src/test-support/records.js";
+import { runCodexAgent } from "./index.js";
+import { AttemptCeilings } from "../ceilings.js";
+import { buildPermissionProfile } from "../profile.js";
+import { briefRecords } from "../test-support/records.js";
 
 /**
  * D-106: `thread/tokenUsage/updated` is cumulative per thread (ADR-0038's

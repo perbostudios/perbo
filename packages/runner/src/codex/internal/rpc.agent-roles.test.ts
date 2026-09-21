@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { PERBO_AGENT_ROLE_NAMES } from "../src/agents.js";
-import { writeAgentRoleFiles } from "../src/codex/internal/rpc.js";
+import { PERBO_AGENT_ROLE_NAMES } from "../../agents.js";
+import { writeAgentRoleFiles } from "./rpc.js";
 
 /**
  * AC2: Perbo's role definitions replace the built-in roles in the runner's

@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SecretIndex } from "@perbo/contracts";
 import { SPAWN_TEST_TIMEOUT_MS, scratchDirectories } from "@perbo/test-support";
-import { CHECK_DETAIL_MAX_CHARS, runPinnedChecks } from "../src/checks/index.js";
-import { parseTestOutput, planRerun, resolveFailures } from "../src/checks/internal/rerun.js";
+import { CHECK_DETAIL_MAX_CHARS, runPinnedChecks } from "../index.js";
+import { parseTestOutput, planRerun, resolveFailures } from "./rerun.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 

@@ -3,12 +3,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LimitsTableSchema } from "@perbo/contracts";
-import { codexNotificationHandler, type CodexItem } from "../src/codex/index.js";
-import { reinjectedBrief } from "../src/brief.js";
-import { AttemptCeilings } from "../src/ceilings.js";
-import { CodexExecutorSession } from "../src/codex/internal/rpc.js";
-import { EgressLog } from "../src/egress.js";
-import { briefRecords } from "../src/test-support/records.js";
+import { codexNotificationHandler, type CodexItem } from "./index.js";
+import { reinjectedBrief } from "../brief.js";
+import { AttemptCeilings } from "../ceilings.js";
+import { CodexExecutorSession } from "./internal/rpc.js";
+import { EgressLog } from "../egress.js";
+import { briefRecords } from "../test-support/records.js";
 
 /**
  * D-096 on Codex: a thread whose context was compacted gets the brief again.

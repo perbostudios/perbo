@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CodexExecutorSession } from "../src/codex/internal/rpc.js";
-import { buildAgentEnvironment, buildPermissionProfile } from "../src/profile.js";
+import { CodexExecutorSession } from "./rpc.js";
+import { buildAgentEnvironment, buildPermissionProfile } from "../../profile.js";
 
 const roots: string[] = [];
 const sessions: CodexExecutorSession[] = [];

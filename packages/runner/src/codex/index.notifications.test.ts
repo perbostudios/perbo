@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
-import { codexNotificationHandler, type CodexItem } from "../src/codex/index.js";
-import { AttemptCeilings } from "../src/ceilings.js";
-import { EgressLog } from "../src/egress.js";
+import { codexNotificationHandler, type CodexItem } from "./index.js";
+import { AttemptCeilings } from "../ceilings.js";
+import { EgressLog } from "../egress.js";
 
 /**
  * The Codex transport's half of the stall detector (SCP-323, D-096), driven
