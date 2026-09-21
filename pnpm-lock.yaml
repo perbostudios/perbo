@@ -217,9 +217,6 @@ importers:
       '@perbo/review':
         specifier: workspace:*
         version: link:../review
-      '@perbo/runner':
-        specifier: workspace:*
-        version: link:../runner
       '@perbo/workspace':
         specifier: workspace:*
         version: link:../workspace
@@ -310,6 +307,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.4.0
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
       eslint:
         specifier: 'catalog:'
         version: 10.9.1(jiti@2.7.0)

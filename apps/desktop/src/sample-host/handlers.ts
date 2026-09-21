@@ -1,6 +1,12 @@
-import { EMPTY_SPEC_TEXT, mergeSpecText, readSpecSections, renderSpec, specSlug } from "@perbo/planning/spec-text";
-import { applyGraphEdit } from "@perbo/planning/graph-edit";
-import { impactReport } from "@perbo/planning/impact";
+import {
+  applyGraphEdit,
+  EMPTY_SPEC_TEXT,
+  impactReport,
+  mergeSpecText,
+  readSpecSections,
+  renderSpec,
+  specSlug,
+} from "@perbo/planning/browser";
 import { isNeverReadPath } from "@perbo/contracts/paths";
 import type { GraphEdit } from "@perbo/contracts/graph-edit";
 import { openDrafts } from "../shared/contract-editing.js";

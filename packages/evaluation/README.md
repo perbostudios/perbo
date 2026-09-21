@@ -54,8 +54,8 @@ directory that is not there, and `test/corpus-read-guard.test.ts` keeps any othe
 reading the corpus behind the gate's back. It scans `test/` and everything under it, which is what
 vitest itself collects, so a suite in a subdirectory is held to the same rule. And it parses the
 files it scans rather than searching them for a name: it follows the loader from the module that
-exports it — `src/corpus.ts`, and `src/index.ts`, which re-exports it — to whatever local name it
-arrives under, so an import under an alias, off a namespace, or out of a dynamic `import()` is the
+exports it — `src/corpus.ts` — through any re-export to whatever local name it arrives under, so an
+import under an alias, off a namespace, or out of a dynamic `import()` is the
 same offence as the plain call. No test file may hold the loader at all, no helper beside them may
 call it without naming a directory, and no file but the gate may hand it on.
 

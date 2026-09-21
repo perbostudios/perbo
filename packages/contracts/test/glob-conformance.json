@@ -1,9 +1,9 @@
 {
   "_comment": [
     "What a path glob means, as cases. `matchesAny` in packages/contracts/src/paths.ts is the one",
-    "home for these semantics, and packages/contracts/test/glob-conformance.test.ts runs every case",
-    "against it. Every other copy of the matcher answers every case the same way; a copy is held to",
-    "this file rather than to a reading of its own.",
+    "home for these semantics, and packages/contracts/src/paths.glob-conformance.test.ts runs",
+    "every case against it. Every other copy of the matcher answers every case the same way; a",
+    "copy is held to this file rather than to a reading of its own.",
     "A row is added when a case is decided, never removed to make a matcher pass."
   ],
   "cases": [

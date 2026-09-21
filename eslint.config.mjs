@@ -82,13 +82,8 @@ const PRODUCTION_SOURCE_ONLY = {
  * curates a package's entry into named exports takes that entry off this list.
  */
 export const EXPORT_ALL_BURN_DOWN = [
-  "packages/contracts/src/index.ts",
-  "packages/contracts/src/materialisation.ts",
-  "packages/evaluation/src/index.ts",
-  "packages/planning/src/index.ts",
   "packages/review/src/index.ts",
   "packages/runner/src/index.ts",
-  "packages/workspace/src/index.ts",
 ];
 
 export default tseslint.config(

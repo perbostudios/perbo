@@ -28,6 +28,11 @@ Three properties are why a draft here is safe to show a person:
 | `diff.ts` | `contractEditCount`: what changed between the contract as first rendered and the one approved |
 | `errors.ts` | `PlanningError` and `DraftRejectedError` — a draft that is not the shape is refused, not repaired |
 
+`src/index.ts` is what a Node caller imports and `src/browser.ts` the part the desktop's renderer
+does: the spec text, the impact report and the graph edit path, none of which reach a `node:`
+module. `src/browser.test.ts` bundles that surface for a browser with tree shaking off and holds it,
+and fails for a module that needs Node, so the check can come out either way.
+
 ## What is recorded
 
 `draftContract` returns the validated draft together with the model's `provider`, `model_id`, `prompt_version`, token `usage`, `cost_micros` and `cost_basis`, resolved by `resolveModelCost` from `@perbo/model` — the same accounting every model call in this repository carries — so a draft over `claude-cli` carries the dollars the transport reported and one over `codex-cli` says `unavailable` rather than inventing a Claude price. It also names any proposed glob whose leading directory is not in the tree: shown to the person, not refused, because a new package is a real case.
