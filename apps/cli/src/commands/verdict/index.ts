@@ -8,7 +8,15 @@ import {
   type StopRouting,
   type Ticket,
 } from "@perbo/contracts";
-import { UsageError } from "../../usage-error.js";
+import { z } from "zod";
+import { UsageError, readInput } from "../../usage-error.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../command-line/grammar.js";
 import {
   buildInspectReport,
   buildReportForSubject,
@@ -18,8 +26,9 @@ import {
 } from "../inspect.js";
 import { pad } from "../../text.js";
 import { refuseUnknownReview, storedReviewSubject, storedReviewsFor } from "../review/stored.js";
-import { storeDir } from "../../store/index.js";
-import type { Streams } from "../../streams.js";
+import type { CommandContext, Rendered } from "../../command.js";
+import type { ReportCommand } from "../../command-line/table.js";
+import { StoreTargetSchema, storeDir } from "../../store/index.js";
 import { listTickets } from "../../store/tickets.js";
 import {
   GIT_IDENTITY_COMMANDS,
@@ -36,6 +45,7 @@ import {
   verdictFor,
   verdictsPath,
   writeLocalVerdicts,
+  VERDICT_DECISIONS,
   type LocalVerdict,
   type VerdictDecision,
 } from "./record.js";
@@ -68,165 +78,154 @@ import {
  */
 
 /** What every invocation carries, whichever of the two it is. */
-interface VerdictCommonArgs {
+const VerdictCommonSchema = {
+  target: StoreTargetSchema,
   /** The change: a ticket key, a pull request (url or number), or a review id. */
-  reference: string;
-  repo: string;
-  store: string | null;
-  json: boolean;
-}
+  reference: z.string().min(1),
+};
 
-/** Taking a decision, which is what this command was built to do. */
-export interface VerdictRecordArgs extends VerdictCommonArgs {
-  list: false;
-  decision: VerdictDecision;
-  /** The finding key, whole or by any unambiguous prefix. */
-  key: string;
-  note: string | null;
-  author: string | null;
-  replace: boolean;
-  /**
-   * `--stand-in`: the AI acting as the founder's partner took this decision,
-   * not a person (D-058). It is recorded on the row and keeps the answer out of
-   * every partner reading `perbo stops` prints — the same label the pull
-   * request carries when the stand-in signs a tick there.
-   */
-  standIn: boolean;
-}
+export const VerdictInputSchema = z.discriminatedUnion("list", [
+  /** Taking a decision, which is what this command was built to do. */
+  z.strictObject({
+    ...VerdictCommonSchema,
+    list: z.literal(false),
+    decision: z.enum(VERDICT_DECISIONS),
+    /** The finding key, whole or by any unambiguous prefix. */
+    key: z.string().min(1),
+    note: z.string().nullable(),
+    author: z.string().nullable(),
+    replace: z.boolean(),
+    /**
+     * `--stand-in`: the AI acting as the founder's partner took this decision,
+     * not a person (D-058). It is recorded on the row and keeps the answer out
+     * of every partner reading `perbo stops` prints — the same label the pull
+     * request carries when the stand-in signs a tick there.
+     */
+    standIn: z.boolean(),
+  }),
+  /** `--list`: reading back the decisions already taken, and taking none. */
+  z.strictObject({ ...VerdictCommonSchema, list: z.literal(true) }),
+]);
+export type VerdictInput = z.infer<typeof VerdictInputSchema>;
+export type VerdictRecordInput = Extract<VerdictInput, { list: false }>;
+export type VerdictListInput = Extract<VerdictInput, { list: true }>;
 
-/** `--list`: reading back the decisions already taken, and taking none. */
-export interface VerdictListArgs extends VerdictCommonArgs {
-  list: true;
-}
-
-export type VerdictArgs = VerdictRecordArgs | VerdictListArgs;
-
-const DECISION_FLAGS: Record<string, VerdictDecision> = {
+/** The four decisions, each spelled as the flag that takes it. */
+const DECISION_FLAGS = {
   "--endorse": "endorse",
   "--override": "override",
   "--accept": "accept",
   "--reject": "reject",
+} as const satisfies Record<`--${string}`, VerdictDecision>;
+
+type DecisionFlag = keyof typeof DECISION_FLAGS;
+
+const isDecisionFlag = (name: string): name is DecisionFlag => name in DECISION_FLAGS;
+
+/**
+ * SCP-189: a decision flag refuses a value that is missing or starts with
+ * `--`, because there it is another flag whose own value the person forgot
+ * rather than a key — and a key taken from it would be reported later as
+ * something else entirely, or as a positional count naming no flag at all.
+ */
+const decisionFlag = (name: DecisionFlag) => valueFlag({ refuseFlagShaped: `missing key after ${name}` });
+
+const VERDICT_FLAGS = {
+  "--endorse": decisionFlag("--endorse"),
+  "--override": decisionFlag("--override"),
+  "--accept": decisionFlag("--accept"),
+  "--reject": decisionFlag("--reject"),
+  "--note": valueFlag(),
+  "--author": valueFlag(),
+  "--replace": switchFlag(),
+  "--stand-in": switchFlag(),
+  "--list": switchFlag(),
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const VERDICT_GRAMMAR: Grammar<typeof VERDICT_FLAGS> = {
+  command: "verdict",
+  flags: VERDICT_FLAGS,
+  positionals: {
+    min: 1,
+    max: 1,
+    refusal:
+      "verdict takes exactly one review — a ticket key, a pull request or a review id, " +
+      "e.g. perbo verdict PRB-7 --override <key>",
+  },
+  afterDoubleDash: "positionals",
 };
 
-export function parseVerdictArgs(argv: readonly string[]): VerdictArgs {
-  const tokens = argv.flatMap((token) =>
-    token.startsWith("--") && token.includes("=")
-      ? [token.slice(0, token.indexOf("=")), token.slice(token.indexOf("=") + 1)]
-      : [token],
-  );
-  const value = (index: number, token: string): string => {
-    const next = tokens[index];
-    if (next === undefined) throw new UsageError(`${token} requires a value`);
-    return next;
-  };
+function readVerdict(argv: readonly string[]): {
+  input: VerdictInput;
+  output: { json: boolean };
+} {
+  const line = parseArgv(VERDICT_GRAMMAR, argv);
+  const flags = line.flags;
 
-  const positional: string[] = [];
-  let decision: VerdictDecision | null = null;
-  let key: string | null = null;
-  let taken: string | null = null;
-  let list = false;
-  const args: Omit<VerdictRecordArgs, "list" | "reference" | "decision" | "key"> = {
-    note: null,
-    author: null,
-    replace: false,
-    standIn: false,
-    repo: ".",
-    store: null,
-    json: false,
-  };
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    if (!token.startsWith("--")) {
-      positional.push(token);
-      continue;
-    }
-    const flagged = DECISION_FLAGS[token];
-    if (flagged !== undefined) {
-      // Two decisions in one invocation is a person meaning one of them, and
-      // guessing which is how a record stops being evidence.
-      if (decision !== null) {
-        throw new UsageError(`${taken} and ${token} are two decisions; take one at a time`);
-      }
-      // SCP-189: a token starting with `--` right after a decision flag is
-      // another flag whose value the person forgot, not a key — `value()`
-      // would happily hand it over and let a later check report the wrong
-      // thing (or, worse, a positional-count mismatch naming no flag at all).
-      const next = tokens[i + 1];
-      if (next === undefined || next.startsWith("--")) {
-        throw new UsageError(`missing key after ${token}`);
-      }
-      decision = flagged;
-      taken = token;
-      key = next;
-      i += 1;
-      continue;
-    }
-    switch (token) {
-      case "--note":
-        args.note = value(++i, token);
-        break;
-      case "--author":
-        args.author = value(++i, token);
-        break;
-      case "--replace":
-        args.replace = true;
-        break;
-      case "--stand-in":
-        args.standIn = true;
-        break;
-      case "--list":
-        list = true;
-        break;
-      case "--repo":
-        args.repo = value(++i, token);
-        break;
-      case "--store":
-        args.store = value(++i, token);
-        break;
-      case "--json":
-        args.json = true;
-        break;
-      default:
-        throw new UsageError(`unknown option '${token}' for verdict`);
-    }
+  // Two decisions in one invocation is a person meaning one of them, and
+  // guessing which is how a record stops being evidence. Read from the order
+  // they were written, so the refusal names the two that were.
+  const decisions = line.given.filter(isDecisionFlag);
+  if (decisions.length > 1) {
+    throw new UsageError(`${decisions[0]} and ${decisions[1]} are two decisions; take one at a time`);
   }
+  const taken = decisions[0] ?? null;
 
-  if (positional.length !== 1) {
-    throw new UsageError(
-      "verdict takes exactly one review — a ticket key, a pull request or a review id, " +
-        "e.g. perbo verdict PRB-7 --override <key>",
-    );
-  }
-  if (list) {
+  const note = flags["--note"] ?? null;
+  const author = flags["--author"] ?? null;
+  const replace = flags["--replace"] === true;
+  const standIn = flags["--stand-in"] === true;
+  const common = {
+    reference: line.positionals[0]!,
+    target: { repo: flags["--repo"] ?? ".", store: flags["--store"] ?? null },
+  };
+  const output = { json: flags["--json"] === true };
+
+  if (flags["--list"] === true) {
     // `--list` reads the record; the flags that write to it have nothing to do
     // here. Refused rather than ignored, because a person who typed a note
     // beside `--list` believed they were recording something.
-    if (decision !== null) {
+    if (taken !== null) {
       throw new UsageError(
         `--list prints the decisions already recorded and ${taken} takes one; ask for one or the other`,
       );
     }
     const writing = [
-      args.note === null ? null : "--note",
-      args.author === null ? null : "--author",
-      args.replace ? "--replace" : null,
-      args.standIn ? "--stand-in" : null,
+      note === null ? null : "--note",
+      author === null ? null : "--author",
+      replace ? "--replace" : null,
+      standIn ? "--stand-in" : null,
     ].filter((flag): flag is string => flag !== null);
     if (writing.length > 0) {
       throw new UsageError(`${writing.join(" and ")} belong to taking a decision; --list only reads`);
     }
-    return { list: true, reference: positional[0]!, repo: args.repo, store: args.store, json: args.json };
+    return { input: readInput(VerdictInputSchema, { list: true, ...common }), output };
   }
-  if (decision === null || key === null) {
+  if (taken === null) {
     throw new UsageError(
       "verdict needs one decision: --endorse or --override <stop key>, or --accept or " +
         "--reject <finding key>",
     );
   }
-  if (args.note !== null && args.note.trim() === "") {
+  if (note !== null && note.trim() === "") {
     throw new UsageError("--note requires text; leave it out to record no note");
   }
-  return { ...args, list: false, reference: positional[0]!, decision, key };
+  return {
+    input: readInput(VerdictInputSchema, {
+      ...common,
+      list: false,
+      decision: DECISION_FLAGS[taken],
+      key: flags[taken]!,
+      note,
+      author,
+      replace,
+      standIn,
+    }),
+    output,
+  };
 }
 
 /**
@@ -373,24 +372,27 @@ export function resolveFindingKey(findings: readonly KnownFinding[], key: string
  * made, which is the point: this needs no account and no token beyond what
  * committing to the repository already needs.
  */
-function refuseUnnamed(streams: Streams, json: boolean, repositoryRoot: string): number {
+function refuseUnnamed(repositoryRoot: string, json: boolean): Rendered {
   if (json) {
-    streams.stdout(
-      `${JSON.stringify(
+    return {
+      stdout: `${JSON.stringify(
         { refused: true, reason: "no author", repository: repositoryRoot, set: [...GIT_IDENTITY_COMMANDS] },
         null,
         2,
       )}\n`,
-    );
-    return EXIT_CODES.usage_or_input_error;
+      stderr: "",
+      exitCode: EXIT_CODES.usage_or_input_error,
+    };
   }
-  streams.stderr(
-    `nothing was recorded: ${repositoryRoot} names nobody to record the decision against. ` +
+  return {
+    stdout: "",
+    stderr:
+      `nothing was recorded: ${repositoryRoot} names nobody to record the decision against. ` +
       "Set the identity git already asks you for and decide again:\n" +
       `${GIT_IDENTITY_COMMANDS.map((command) => `      ${command}\n`).join("")}` +
       "  or name whoever decided with --author.\n",
-  );
-  return EXIT_CODES.usage_or_input_error;
+    exitCode: EXIT_CODES.usage_or_input_error,
+  };
 }
 
 /**
@@ -420,14 +422,13 @@ function whoDecided(row: LocalVerdict): string {
  * join `verdictFor` uses, so `--list` and every other reader of this file
  * agree about which decisions belong to which work.
  */
-function listDecisions(args: VerdictListArgs, streams: Streams, dir: string, subject: InspectSubject): number {
-  // The strict reader, as the write path uses: reporting "no decisions
-  // recorded" for a file this cannot parse would be a lie about the record.
-  const recorded = readLocalVerdicts(dir).verdicts.filter(
-    (row) => row.review.ticket_id === subject.ticket_id,
-  );
+function renderListing(report: VerdictListed, json: boolean): Rendered {
+  const { recorded, subject, reference, path } = report;
+  const out: string[] = [];
+  const err: string[] = [];
+  const streams = { stdout: (chunk: string) => out.push(chunk), stderr: (chunk: string) => err.push(chunk) };
 
-  if (args.json) {
+  if (json) {
     // The rows as the file holds them: same fields, same order, nothing
     // computed and nothing dropped, in the shape `verdicts.json` itself has —
     // so a caller can diff this against the file and see only the narrowing to
@@ -443,20 +444,20 @@ function listDecisions(args: VerdictListArgs, streams: Streams, dir: string, sub
         2,
       )}\n`,
     );
-    return EXIT_CODES.approve;
+    return { stdout: out.join(""), stderr: err.join(""), exitCode: EXIT_CODES.approve };
   }
 
   if (recorded.length === 0) {
     streams.stdout("no decisions recorded\n");
     streams.stderr(
       `  nothing has been decided here about ${subject.ticket}. ` +
-        `\`perbo verdict ${args.reference} --endorse|--override|--accept|--reject <key>\` ` +
+        `\`perbo verdict ${reference} --endorse|--override|--accept|--reject <key>\` ` +
         // Not `inspect`, which reads the attempts a run left and so has nothing
         // to say about a review no run filed. The command being typed here
         // knows every finding of either, and says so when a key is not one.
         "takes one, and refuses a key it does not know by naming every finding on this review\n",
     );
-    return EXIT_CODES.approve;
+    return { stdout: out.join(""), stderr: err.join(""), exitCode: EXIT_CODES.approve };
   }
 
   // A decision that replaced an earlier one is stamped on the row it replaced,
@@ -482,9 +483,9 @@ function listDecisions(args: VerdictListArgs, streams: Streams, dir: string, sub
   streams.stderr(
     `  ${subject.ticket}: ${recorded.length} decision(s), ${standing} standing; ` +
       "a replaced one is kept and marked\n" +
-      `  ${verdictsPath(dir)} — this machine only; nothing was sent anywhere\n`,
+      `  ${path} — this machine only; nothing was sent anywhere\n`,
   );
-  return EXIT_CODES.approve;
+  return { stdout: out.join(""), stderr: err.join(""), exitCode: EXIT_CODES.approve };
 }
 
 /** The pull request number a reference names, whichever way it was written. */
@@ -544,18 +545,46 @@ function one(matches: readonly Ticket[], reference: string, what: string): Ticke
 export const ticketReviewSubject: ResolveSubject = (dir, reference): InspectSubject =>
   ticketSubject(dir, resolveReview(dir, reference).key);
 
-export interface VerdictOptions {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
+/** What a verdict is given beyond its input. */
+export interface VerdictDeps {
   /**
    * How a reference a person typed becomes the work it names.
    * {@link ticketReviewSubject} unless a caller names another.
    */
-  resolve?: ResolveSubject;
-  /** The clock, so a test can hold it still. */
-  now?: Date;
+  resolve: ResolveSubject;
 }
+
+/** `--list`: the rows this store holds about one change. */
+export interface VerdictListed {
+  readonly kind: "listed";
+  readonly subject: InspectSubject;
+  /** The reference as it was typed, which the advice line repeats. */
+  readonly reference: string;
+  readonly recorded: readonly LocalVerdict[];
+  readonly path: string;
+}
+
+/** What one invocation did, or refused to do. */
+export type VerdictReport =
+  | VerdictListed
+  /** Nothing to record the decision against: no `--author` and no git identity. */
+  | { readonly kind: "unnamed"; readonly repositoryRoot: string }
+  /** A decision already stands on this finding and `--replace` was not given. */
+  | {
+      readonly kind: "refused";
+      readonly subject: InspectSubject;
+      readonly existing: LocalVerdict;
+      readonly message: string;
+    }
+  | {
+      readonly kind: "recorded";
+      readonly subject: InspectSubject;
+      readonly verdict: LocalVerdict;
+      readonly finding: KnownFinding;
+      /** A decision it replaced stands on the record, superseded. */
+      readonly superseded: boolean;
+      readonly path: string;
+    };
 
 /**
  * The work a reference names: whatever ran here, and then what was reviewed
@@ -580,12 +609,27 @@ function subjectFor(dir: string, reference: string, resolve: ResolveSubject): In
   }
 }
 
-export async function runVerdictCommand(input: VerdictOptions): Promise<number> {
-  const args = parseVerdictArgs(input.argv);
-  const repositoryRoot = resolve(input.cwd, args.repo);
-  const dir = storeDir(repositoryRoot, args.store);
-  const subject = subjectFor(dir, args.reference, input.resolve ?? ticketReviewSubject);
-  if (args.list) return listDecisions(args, input.streams, dir, subject);
+export function verdict(
+  input: VerdictInput,
+  context: CommandContext & Partial<VerdictDeps>,
+): VerdictReport {
+  const repositoryRoot = resolve(context.cwd, input.target.repo);
+  const dir = storeDir(repositoryRoot, input.target.store);
+  const subject = subjectFor(dir, input.reference, context.resolve ?? ticketReviewSubject);
+  if (input.list) {
+    // The strict reader, as the write path uses: reporting "no decisions
+    // recorded" for a file this cannot parse would be a lie about the record.
+    return {
+      kind: "listed",
+      subject,
+      reference: input.reference,
+      recorded: readLocalVerdicts(dir).verdicts.filter(
+        (row) => row.review.ticket_id === subject.ticket_id,
+      ),
+      path: verdictsPath(dir),
+    };
+  }
+  const args = input;
   const finding = resolveFindingKey(knownFindings(dir, subject), args.key);
 
   if (isStopDecision(args.decision) && finding.routing === null) {
@@ -603,14 +647,14 @@ export async function runVerdictCommand(input: VerdictOptions): Promise<number> 
   // and a `decided_by` from another.
   const identity = readGitIdentity(repositoryRoot);
   const author = args.author ?? authorLine(identity);
-  if (author === null) return refuseUnnamed(input.streams, args.json, repositoryRoot);
+  if (author === null) return { kind: "unnamed", repositoryRoot };
   const decided_by = args.author === null ? decidedBy(identity) : authorIdentity(args.author);
 
   // `subject.ticket` is what a person calls this work (`InspectSubject.ticket`).
   // The record carries it as the ticket key where it is one and `null` where it
   // is not, rather than inventing a key nothing minted.
   const key = TicketKeySchema.safeParse(subject.ticket);
-  const verdict: LocalVerdict = {
+  const taking: LocalVerdict = {
     review: {
       reference: args.reference,
       ticket_id: subject.ticket_id,
@@ -629,7 +673,7 @@ export async function runVerdictCommand(input: VerdictOptions): Promise<number> 
     // The same rule for the same reason: absent is a person, which is what
     // every row written at this command line before `--stand-in` existed was.
     ...(args.standIn ? { answered_by: DOGFOOD_ANSWERER } : {}),
-    decided_at: (input.now ?? new Date()).toISOString(),
+    decided_at: context.now.toISOString(),
     note: args.note,
     superseded_at: null,
   };
@@ -640,56 +684,94 @@ export async function runVerdictCommand(input: VerdictOptions): Promise<number> 
   const standing = verdictFor(previous.verdicts, subject.ticket_id, finding.finding_key);
   let next;
   try {
-    next = recordVerdict({ previous, verdict, replace: args.replace });
+    next = recordVerdict({ previous, verdict: taking, replace: args.replace });
   } catch (error) {
     if (!(error instanceof VerdictConflictError)) throw error;
+    return { kind: "refused", subject, existing: error.existing, message: error.message };
+  }
+  writeLocalVerdicts(dir, next);
+
+  return {
+    kind: "recorded",
+    subject,
+    verdict: taking,
+    finding,
+    superseded: standing !== null,
+    path: verdictsPath(dir),
+  };
+}
+
+/**
+ * What one decision looks like once it is taken, and what a refusal looks
+ * like: the same two answers whether a person is reading them or a script is.
+ */
+function renderVerdict(report: VerdictReport, json: boolean): Rendered {
+  if (report.kind === "listed") return renderListing(report, json);
+  if (report.kind === "unnamed") return refuseUnnamed(report.repositoryRoot, json);
+  if (report.kind === "refused") {
     // SCP-189: a `--json` caller asked for machine-readable output and a
     // refusal is not an exception to that — one JSON object naming the
     // standing decision, on stdout, nothing on stderr, so "already decided"
     // reads as data rather than as the prose every other refusal prints.
-    if (args.json) {
-      input.streams.stdout(
-        `${JSON.stringify(
+    if (json) {
+      return {
+        stdout: `${JSON.stringify(
           {
             refused: true,
-            finding_key: error.existing.finding_key,
-            decision: error.existing.decision,
-            author: error.existing.author,
-            decided_at: error.existing.decided_at,
+            finding_key: report.existing.finding_key,
+            decision: report.existing.decision,
+            author: report.existing.author,
+            decided_at: report.existing.decided_at,
           },
           null,
           2,
         )}\n`,
-      );
-      return EXIT_CODES.usage_or_input_error;
+        stderr: "",
+        exitCode: EXIT_CODES.usage_or_input_error,
+      };
     }
-    input.streams.stderr(
-      `${subject.ticket} unchanged: ${error.message}` +
-        `${error.existing.note === null ? "" : ` (${error.existing.note})`}. ` +
+    return {
+      stdout: "",
+      stderr:
+        `${report.subject.ticket} unchanged: ${report.message}` +
+        `${report.existing.note === null ? "" : ` (${report.existing.note})`}. ` +
         "Pass --replace to decide it again; the earlier decision stays on the record.\n",
-    );
-    return EXIT_CODES.usage_or_input_error;
+      exitCode: EXIT_CODES.usage_or_input_error,
+    };
   }
-  writeLocalVerdicts(dir, next);
-
-  const superseded = standing !== null;
-  if (args.json) {
-    input.streams.stdout(`${JSON.stringify(verdict, null, 2)}\n`);
-    return EXIT_CODES.approve;
+  const { subject, finding, verdict: taken } = report;
+  if (json) {
+    return { stdout: `${JSON.stringify(taken, null, 2)}\n`, stderr: "", exitCode: EXIT_CODES.approve };
   }
-  input.streams.stdout(
-    `${subject.ticket}  ${finding.finding_key.slice(0, 12)}  ${args.decision}  ` +
-      `${verdict.author}  ${verdict.decided_at}\n`,
-  );
-  input.streams.stderr(
-    `  ${finding.rule_id} · ${finding.routing ?? "not a stop"} · read from ${finding.source}\n` +
-      (args.note === null ? "" : `  note: ${args.note}\n`) +
-      (args.standIn
+  return {
+    stdout:
+      `${subject.ticket}  ${finding.finding_key.slice(0, 12)}  ${taken.decision}  ` +
+      `${taken.author}  ${taken.decided_at}\n`,
+    stderr:
+      `  ${finding.rule_id} · ${finding.routing ?? "not a stop"} · read from ${finding.source}\n` +
+      (taken.note === null ? "" : `  note: ${taken.note}\n`) +
+      (taken.answered_by === DOGFOOD_ANSWERER
         ? "  recorded as the AI stand-in's answer: dogfood, and outside every partner reading " +
           "`perbo stops` prints (D-058)\n"
         : "") +
-      (superseded ? "  the decision it replaces stays on the record, superseded\n" : "") +
-      `  ${verdictsPath(dir)} — this machine only; nothing was sent anywhere\n`,
-  );
-  return EXIT_CODES.approve;
+      (report.superseded ? "  the decision it replaces stays on the record, superseded\n" : "") +
+      `  ${report.path} — this machine only; nothing was sent anywhere\n`,
+    exitCode: EXIT_CODES.approve,
+  };
 }
+
+export const verdictCommandLine: ReportCommand<
+  VerdictInput,
+  { json: boolean },
+  VerdictReport,
+  VerdictDeps
+> = {
+  kind: "report",
+  name: "verdict",
+  grammars: [VERDICT_GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor: () => VERDICT_GRAMMAR,
+  read: readVerdict,
+  run: verdict,
+  render: (report, _output, target) => renderVerdict(report, target.json),
+};

@@ -6,16 +6,16 @@ import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import { TicketRunConfigSchema } from "@perbo/runner";
 import { UsageError } from "../../../usage-error.js";
-import { parseAdmitArgs, runAdmitCommand } from "../../admit.js";
+import { admitCommandLine, listCommandLine } from "../../admit.js";
 import type { Streams } from "../../../streams.js";
-import { TICKET_RUNS, parseExecuteArgs } from "../index.js";
+import { TICKET_RUNS, executeCommandLine } from "../index.js";
 import { processDeps } from "../../serve/index.js";
 import { readTicket, storeDir as storeDirOf, writeTicket } from "../../../store/tickets.js";
 import { TicketSchema, transition, withReconciliation } from "@perbo/contracts";
-import { runListCommand, parseListArgs } from "../../admit.js";
 import { mergedTicketContext, ticketKeysMergedBetween } from "./relevel.js";
 import { storeDir } from "../../../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../../test-support/spawn-timeout.js";
+import { runCommandLine } from "../../../command-line/terminal.js";
 
 /**
  * SCP-227: what a re-level's conflict round is briefed with, read from the
@@ -45,15 +45,15 @@ function capture(): Streams & { out: string[]; err: string[] } {
 
 function admitted(repo: string, outcome: string, path: string): string {
   const streams = capture();
-  const code = runAdmitCommand({
-    args: parseAdmitArgs([
+  const code = runCommandLine(admitCommandLine, {
+    argv: [
       "--repo", repo,
       "--outcome", outcome,
       "--criterion", `${outcome} :: a test asserts it`,
       "--path", path,
       "--approve",
       "--json",
-    ]),
+    ],
     streams,
     cwd: repo,
   });
@@ -288,7 +288,7 @@ describe("the store's hooks for a re-level", () => {
       }),
     );
     const streams = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo]), streams, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(streams.out.join("")).toContain(
       "re-level did not level the branch at cccccccccccc (exit 3: carries 1 commit the loop did not make)",
     );
@@ -324,8 +324,8 @@ describe("the queue's reading of a branch", () => {
 
 describe("run --relevel", () => {
   it("is a flag and takes no value", () => {
-    expect(parseExecuteArgs(["--ticket", "AYO-1", "--relevel"]).relevel).toBe(true);
-    expect(parseExecuteArgs(["--ticket", "AYO-1"]).relevel).toBe(false);
-    expect(() => parseExecuteArgs(["--relevel=yes"])).toThrow(UsageError);
+    expect(executeCommandLine.read(["--ticket", "AYO-1", "--relevel"]).input.relevel).toBe(true);
+    expect(executeCommandLine.read(["--ticket", "AYO-1"]).input.relevel).toBe(false);
+    expect(() => executeCommandLine.read(["--relevel=yes"])).toThrow(UsageError);
   });
 });

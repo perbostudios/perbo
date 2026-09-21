@@ -5,13 +5,14 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, PROHIBITED_ACTIONS, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { makeAttempt } from "../test-support/attempt-fixture.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
-import { runStopsCommand } from "./stops.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
+import { stopsCommandLine } from "./stops.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { REPO_ROOT } from "../test-support/paths.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-202: the loop merges the pull request it opened, behind the `merge`
@@ -179,11 +180,11 @@ afterEach(() => {
 });
 
 /** The `gh` on PATH, and the credential every read and the merge go through. */
-const withGh = <T,>(bin: string, body: () => Promise<T>): Promise<T> => {
+const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   process.env.GH_TOKEN = "test-token";
   delete process.env.GITHUB_TOKEN;
-  return body();
+  return Promise.resolve(body());
 };
 
 /** A ticket at `pr_open` behind a pull request the loop published. */
@@ -194,8 +195,8 @@ function publishedTicket(
   const repo = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo",
       repo,
       "--outcome",
@@ -205,7 +206,7 @@ function publishedTicket(
       "--path",
       "packages/search/**",
       "--approve",
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });
@@ -258,12 +259,14 @@ const NOW = new Date("2026-09-04T10:00:00.000Z");
 
 /** `perbo sync <KEY> --merge`, with the escape collection left out of it. */
 const syncMerge = (repo: string, streams: Streams) =>
-  runSyncCommand({
+  runCommandLine(syncCommandLine, {
     argv: ["PRB-1", "--merge", "--repo", repo],
     streams,
     cwd: repo,
     now: NOW,
-    mergeFacts: () => null,
+    deps: {
+      mergeFacts: () => null,
+    },
   });
 
 /** The `gh` invocation whose verb is `pr merge`, or undefined if there was none. */
@@ -461,7 +464,7 @@ describe("ac_2 — the merge, the trailer, and what is written back", () => {
     await withGh(gh.bin, () => syncMerge(repo, capture()));
 
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo, now: NOW });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo, now: NOW });
     expect(streams.out.join("")).toContain("1 merged ticket with a known answer (1 unattended, 0 attended)");
   }, MERGE_TEST_TIMEOUT_MS);
 });

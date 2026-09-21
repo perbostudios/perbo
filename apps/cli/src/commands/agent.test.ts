@@ -4,9 +4,15 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "../usage-error.js";
-import { agentLaunch, parseAgentArgs, runAgentCommand, sweepStaleLaunchFiles, type AgentLaunch } from "./agent.js";
+import {
+  agentCommandLine,
+  agentLaunch,
+  sweepStaleLaunchFiles,
+  type AgentLaunch,
+} from "./agent.js";
 import { ENDPOINT_FILE, type EndpointRecord } from "../endpoint/index.js";
-import { parseMcpArgs, runMcpCommand } from "./mcp.js";
+import { mcpCommandLine } from "./mcp.js";
+import { runCommandLine } from "../command-line/terminal.js";
 import type { Streams } from "../streams.js";
 
 /**
@@ -39,17 +45,20 @@ function repository(served: boolean): string {
   return dir;
 }
 
-describe("parseAgentArgs", () => {
+/** The input one line means, which is what the assertions below are about. */
+const agentLine = (argv: readonly string[]) => agentCommandLine.read(argv).input;
+
+describe("the line a session is asked for by", () => {
   it("takes a provider and passes everything after -- through", () => {
-    expect(parseAgentArgs([])).toEqual({ repo: ".", store: null, provider: "claude", passthrough: [] });
-    expect(parseAgentArgs(["--provider", "codex", "--", "--model", "gpt-5.4", "-a"])).toEqual({
+    expect(agentLine([])).toEqual({ repo: ".", store: null, provider: "claude", passthrough: [] });
+    expect(agentLine(["--provider", "codex", "--", "--model", "gpt-5.4", "-a"])).toEqual({
       repo: ".",
       store: null,
       provider: "codex",
       passthrough: ["--model", "gpt-5.4", "-a"],
     });
-    expect(() => parseAgentArgs(["--provider", "cursor"])).toThrow(UsageError);
-    expect(() => parseAgentArgs(["--model", "x"])).toThrow(/after --/);
+    expect(() => agentLine(["--provider", "cursor"])).toThrow(UsageError);
+    expect(() => agentLine(["--model", "x"])).toThrow(/after --/);
   });
 });
 
@@ -93,13 +102,15 @@ describe("perbo agent", () => {
     const repo = repository(false);
     const streams = capture();
     const launches: AgentLaunch[] = [];
-    const code = await runAgentCommand({
+    const code = await runCommandLine(agentCommandLine, {
       argv: ["--repo", repo],
       streams,
       cwd: repo,
-      launch: async (launch) => {
-        launches.push(launch);
-        return 0;
+      deps: {
+        launch: async (launch) => {
+          launches.push(launch);
+          return 0;
+        },
       },
     });
     expect(code).toBe(EXIT_CODES.did_not_complete);
@@ -111,15 +122,17 @@ describe("perbo agent", () => {
     const repo = repository(true);
     const streams = capture();
     let seen: { exists: boolean; mode: number; body: string } | null = null;
-    const code = await runAgentCommand({
+    const code = await runCommandLine(agentCommandLine, {
       argv: ["--repo", repo],
       streams,
       cwd: repo,
-      launch: async (launch) => {
-        const file = launch.file!;
-        seen = { exists: existsSync(file), mode: statSync(file).mode & 0o777, body: readFileSync(file, "utf8") };
-        expect(launch.cwd).toBe(repo);
-        return 0;
+      deps: {
+        launch: async (launch) => {
+          const file = launch.file!;
+          seen = { exists: existsSync(file), mode: statSync(file).mode & 0o777, body: readFileSync(file, "utf8") };
+          expect(launch.cwd).toBe(repo);
+          return 0;
+        },
       },
     });
     expect(code).toBe(0);
@@ -152,13 +165,15 @@ describe("perbo agent", () => {
     try {
       const streams = capture();
       const launches: AgentLaunch[] = [];
-      const code = await runAgentCommand({
+      const code = await runCommandLine(agentCommandLine, {
         argv: ["--repo", repo],
         streams,
         cwd: repo,
-        launch: async (launch) => {
-          launches.push(launch);
-          return 0;
+        deps: {
+          launch: async (launch) => {
+            launches.push(launch);
+            return 0;
+          },
         },
       });
       expect(code).toBe(EXIT_CODES.did_not_complete);
@@ -172,7 +187,14 @@ describe("perbo agent", () => {
 
   it("returns the provider's own exit code", async () => {
     const repo = repository(true);
-    const code = await runAgentCommand({ argv: ["--repo", repo, "--provider", "codex"], streams: capture(), cwd: repo, launch: async () => 7 });
+    const code = await runCommandLine(agentCommandLine, {
+      argv: ["--repo", repo, "--provider", "codex"],
+      streams: capture(),
+      cwd: repo,
+      deps: {
+        launch: async () => 7,
+      },
+    });
     expect(code).toBe(7);
   });
 });
@@ -181,8 +203,11 @@ describe("perbo mcp", () => {
   it("prints the person's block, or the drafter's, and writes nothing", () => {
     const repo = repository(true);
     const streams = capture();
-    expect(parseMcpArgs(["--drafter", "--json"])).toMatchObject({ role: "drafter", json: true });
-    expect(runMcpCommand({ argv: ["--repo", repo], streams, cwd: repo })).toBe(EXIT_CODES.approve);
+    expect(mcpCommandLine.read(["--drafter", "--json"])).toMatchObject({
+      input: { role: "drafter" },
+      output: { json: true },
+    });
+    expect(runCommandLine(mcpCommandLine, { argv: ["--repo", repo], streams, cwd: repo })).toBe(EXIT_CODES.approve);
     const text = streams.out.join("");
     expect(text).toContain(record.url);
     expect(text).toContain(record.tokens.person);
@@ -192,7 +217,7 @@ describe("perbo mcp", () => {
     expect(text).toContain("bearer_token_env_var");
 
     const json = capture();
-    runMcpCommand({ argv: ["--repo", repo, "--drafter", "--json"], streams: json, cwd: repo });
+    runCommandLine(mcpCommandLine, { argv: ["--repo", repo, "--drafter", "--json"], streams: json, cwd: repo });
     expect(JSON.parse(json.out.join(""))).toEqual({
       mcpServers: { perbo: { type: "http", url: record.url, headers: { Authorization: `Bearer ${record.tokens.drafter}` } } },
     });
@@ -201,7 +226,7 @@ describe("perbo mcp", () => {
   it("says which command to start when no queue is serving", () => {
     const repo = repository(false);
     const streams = capture();
-    expect(runMcpCommand({ argv: ["--repo", repo], streams, cwd: repo })).toBe(EXIT_CODES.did_not_complete);
+    expect(runCommandLine(mcpCommandLine, { argv: ["--repo", repo], streams, cwd: repo })).toBe(EXIT_CODES.did_not_complete);
     expect(streams.err.join("")).toContain("perbo serve");
     expect(streams.out).toEqual([]);
   });

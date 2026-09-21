@@ -12,9 +12,10 @@ import {
   type ModelTurn,
 } from "@perbo/model";
 import { UsageError } from "../usage-error.js";
-import { parseAdmitArgs, readTicket, runAdmitCommand, storeDir } from "./admit.js";
+import { admitCommandLine, readTicket, storeDir } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { nextKey, readDraftSnapshot } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-draft-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -131,23 +132,17 @@ const one = {
 
 async function admitFrom(repo: string, model: Model, extra: string[] = []) {
   const streams = capture();
-  const code = await runAdmitCommand({
-    args: parseAdmitArgs(["--repo", repo, "--from", "o/r#412", ...extra]),
-    streams,
-    cwd: repo,
-    model,
-    fetchIssue,
-  });
+  const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from", "o/r#412", ...extra], streams, cwd: repo, deps: { model, fetchIssue } });
   return { code, streams };
 }
 
 function admittedTyped(repo: string, outcome: string, path: string): string {
   const streams = capture();
-  const code = runAdmitCommand({
-    args: parseAdmitArgs([
+  const code = runCommandLine(admitCommandLine, {
+    argv: [
       "--repo", repo, "--outcome", outcome, "--criterion", `${outcome} :: a test asserts it`,
       "--path", path, "--approve", "--json",
-    ]),
+    ],
     streams,
     cwd: repo,
   });

@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { SecretIndex, type CheckResult } from "@perbo/contracts";
 import { BundleStore } from "@perbo/runner";
-import { buildInspectReport, renderInspect, runInspectCommand } from "./inspect.js";
+import { buildInspectReport, inspectCommandLine, renderInspect } from "./inspect.js";
 import { makeAttempt, makeTicket } from "../test-support/attempt-fixture.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * What `perbo inspect` says about a graphed ticket's checks (D-107).
@@ -449,7 +450,7 @@ describe("a graphed attempt's checks section", () => {
     const { repo, store } = storeWithNodeChecks();
     const streams = capture();
     expect(
-      await runInspectCommand({
+      await runCommandLine(inspectCommandLine, {
         argv: ["AYO-1", "--repo", repo, "--store", store, "--json"],
         streams: streams.streams,
         cwd: repo,
@@ -503,7 +504,7 @@ describe("a graphed attempt's review section", () => {
     const { repo, store } = storeWithNodeReviews();
     const streams = capture();
     expect(
-      await runInspectCommand({
+      await runCommandLine(inspectCommandLine, {
         argv: ["AYO-1", "--repo", repo, "--store", store, "--json"],
         streams: streams.streams,
         cwd: repo,
@@ -537,7 +538,7 @@ describe("a graphed attempt's review section", () => {
     const { repo, store } = storeWithReviewButNoNodeReviewsArtifact();
     const streams = capture();
     expect(
-      await runInspectCommand({
+      await runCommandLine(inspectCommandLine, {
         argv: ["AYO-3", "--repo", repo, "--store", store, "--json"],
         streams: streams.streams,
         cwd: repo,

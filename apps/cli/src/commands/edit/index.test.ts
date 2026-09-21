@@ -5,11 +5,12 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { hasAcceptanceCriteria, planNodes } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
-import { parseAdmitArgs, runAdmitCommand, runApproveCommand } from "../admit.js";
+import { admitCommandLine, approveCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
-import { runEditCommand } from "./index.js";
+import { editCommandLine } from "./index.js";
 import { contractPathFor, readContract, readDraftSnapshot, readTicket, storeDir } from "../../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-edit-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -39,14 +40,14 @@ function capture(): Streams & { out: string[]; err: string[] } {
 
 function admitted(name: string, path = "packages/search/**", ...extra: string[]): { repo: string; dir: string } {
   const repo = repository(name);
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo", repo,
       "--outcome", "Search results are paginated.",
       "--criterion", "A search returns at most 25 hits per page. :: a 140-hit query returns 25",
       "--path", path,
       ...extra,
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });
@@ -73,12 +74,12 @@ const rewrite = (name: string, mutate: string) =>
     `const c = JSON.parse(fs.readFileSync(file, "utf8"));\n${mutate}\nfs.writeFileSync(file, JSON.stringify(c, null, 2));`,
   );
 
-const edit = (repo: string, editor: string | null, ...argv: string[]) =>
-  runEditCommand({
+const edit = async (repo: string, editor: string | null, ...argv: string[]) =>
+  runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo, ...argv],
     streams: capture(),
     cwd: repo,
-    env: editor === null ? {} : { EDITOR: editor },
+    deps: { env: editor === null ? {} : { EDITOR: editor } },
   });
 
 describe("perbo edit", () => {
@@ -228,14 +229,14 @@ describe("perbo edit", () => {
 
   it("lets a person state a P3's decisions in the editor, after which approve signs it", async () => {
     const { repo, dir } = admitted("edit-p3", ".github/workflows/**");
-    expect(() => runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
       .toThrow(/not yet stated/);
     const editor = rewrite(
       "state-p3",
       'c.named_approver = "lian"; c.alternatives = ["leave CI as it is"]; c.contingency = "revert the workflow change";',
     );
     expect(await edit(repo, editor)).toBe(0);
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
     const contract = readContract(dir, "PRB-1");
     if (contract.level !== "P3") throw new Error(`expected P3, got ${contract.level}`);
     expect(contract.named_approver).toBe("lian");
@@ -245,7 +246,7 @@ describe("perbo edit", () => {
   it("edits without an editor: --outcome, --criterion and --path each replace their part", async () => {
     const { repo, dir } = admitted("edit-flags");
     const streams = capture();
-    const code = await runEditCommand({
+    const code = await runCommandLine(editCommandLine, {
       argv: [
         "PRB-1", "--repo", repo,
         "--outcome", "Search is paginated and counted.",
@@ -255,7 +256,7 @@ describe("perbo edit", () => {
       ],
       streams,
       cwd: repo,
-      env: {},
+      deps: { env: {} },
     });
     expect(code).toBe(0);
     const contract = readContract(dir, "PRB-1");
@@ -272,7 +273,7 @@ describe("perbo edit", () => {
   it("edits the prohibited paths the explorer marks, replacing the list and leaving the scope alone", async () => {
     const { repo, dir } = admitted("edit-prohibit");
     const before = readContract(dir, "PRB-1").scope;
-    const code = await runEditCommand({
+    const code = await runCommandLine(editCommandLine, {
       argv: [
         "PRB-1", "--repo", repo,
         "--prohibit", "packages/search/src/generated/**",
@@ -280,7 +281,7 @@ describe("perbo edit", () => {
       ],
       streams: capture(),
       cwd: repo,
-      env: {},
+      deps: { env: {} },
     });
     expect(code).toBe(0);
     const after = readContract(dir, "PRB-1").scope;
@@ -291,3 +292,34 @@ describe("perbo edit", () => {
     expect(after.paths_allowed).toEqual(before.paths_allowed);
   });
 }, SPAWN_TEST_TIMEOUT_MS);
+
+/**
+ * `--undo 2` names the second recorded edit, and what counts as naming a
+ * number is `Number`'s own reading of the token: a person who typed `1.0`,
+ * `01` or a space before the digit named an edit, and the command reverts it.
+ * Anything that is not a whole number at least 1 is refused naming what was
+ * typed, because the alternative is reverting an edit nobody named.
+ */
+describe("the edit --undo names", () => {
+  const undo = (raw: string): number | null =>
+    editCommandLine.read(["PRB-1", "--undo", raw]).input.undo;
+
+  it("is the number the token spells, however it was spelled", () => {
+    expect(undo("1")).toBe(1);
+    expect(undo("2")).toBe(2);
+    expect(undo("1.0")).toBe(1);
+    expect(undo("01")).toBe(1);
+    expect(undo(" 2")).toBe(2);
+    expect(undo("1e3")).toBe(1000);
+  });
+
+  it("is refused where the token spells no edit, in the words the person typed", () => {
+    for (const raw of ["0", "-1", "1.5", "x", ""]) {
+      expect(() => undo(raw)).toThrow(
+        new UsageError(
+          `--undo takes the number of the edit to revert, counting from 1. Got '${raw}'`,
+        ),
+      );
+    }
+  });
+});

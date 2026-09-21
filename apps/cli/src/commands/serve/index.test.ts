@@ -6,9 +6,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES, TicketSchema, transition, withReconciliation, type Ticket, type TicketState } from "@perbo/contracts";
 import { acquireServeLock } from "@perbo/runner";
 import { UsageError } from "../../usage-error.js";
-import { parseAdmitArgs, runAdmitCommand } from "../admit.js";
+import { admitCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
-import { ServeTickSchema, keyFromAdmitJson, parseServeArgs, processDeps, runServeCommand, type ServeDeps } from "./index.js";
+import { ServeTickSchema, processDeps, serveCommandLine, type ServeDeps } from "./index.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 import { readEndpoint } from "../../endpoint/index.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
 import { readTicket, storeDir, writeTicket } from "../../store/tickets.js";
@@ -77,7 +78,7 @@ function admitted(
     "--approve",
     "--json",
   ];
-  const code = runAdmitCommand({ args: parseAdmitArgs(argv), streams, cwd: repo });
+  const code = runCommandLine(admitCommandLine, { argv: argv, streams, cwd: repo });
   if (code !== EXIT_CODES.approve) throw new Error(`admit failed: ${streams.err.join("")}`);
   const document = JSON.parse(streams.out.join("")) as { ticket: { key: string } };
   return document.ticket.key;
@@ -139,28 +140,33 @@ function fakes(overrides: Partial<ServeDeps> = {}): Fakes {
   return { spawned, fetched, synced, listed, drafted, deps };
 }
 
+/** The input one line means, which is what the assertions below are about. */
+const serveLine = (argv: readonly string[]) => serveCommandLine.read(argv).input;
+
+/** The one moment every queue here is asked to run at, so a record's dates are the test's. */
+const AT = new Date("2026-09-10T12:00:00.000Z");
+
 async function serveOnce(repo: string, deps: ServeDeps, extra: string[] = [], paused = false) {
   const streams = capture();
-  const code = await runServeCommand({
+  const code = await runCommandLine(serveCommandLine, {
     argv: ["--repo", repo, "--once", ...extra],
     streams,
     cwd: repo,
-    now: new Date("2026-09-10T12:00:00.000Z"),
-    deps,
-    paused,
+    now: AT,
+    deps: { processes: deps, clock: () => AT, paused },
   });
   return { code, streams };
 }
 
-describe("parseServeArgs", () => {
+describe("the line a queue is asked for by", () => {
   it("refuses an unknown flag and a non-numeric interval", () => {
-    expect(() => parseServeArgs(["--repo", ".", "--forever"])).toThrow(UsageError);
-    expect(() => parseServeArgs(["--interval", "soon"])).toThrow(UsageError);
-    expect(() => parseServeArgs(["--interval", "0"])).toThrow(UsageError);
+    expect(() => serveLine(["--repo", ".", "--forever"])).toThrow(UsageError);
+    expect(() => serveLine(["--interval", "soon"])).toThrow(UsageError);
+    expect(() => serveLine(["--interval", "0"])).toThrow(UsageError);
   });
 
   it("defaults to a minute between ticks, no publish, and running until stopped", () => {
-    expect(parseServeArgs([])).toEqual({
+    expect(serveLine([])).toEqual({
       repo: ".",
       store: null,
       publish: false,
@@ -169,14 +175,14 @@ describe("parseServeArgs", () => {
       json: false,
       noEndpoint: false,
     });
-    expect(parseServeArgs(["--interval", "5s", "--publish", "--once", "--json"])).toMatchObject({
+    expect(serveLine(["--interval", "5s", "--publish", "--once", "--json"])).toMatchObject({
       publish: true,
       once: true,
       intervalMs: 5_000,
       json: true,
     });
-    expect(parseServeArgs(["--interval", "2m"]).intervalMs).toBe(120_000);
-    expect(parseServeArgs(["--interval", "1500"]).intervalMs).toBe(1500);
+    expect(serveLine(["--interval", "2m"]).intervalMs).toBe(120_000);
+    expect(serveLine(["--interval", "1500"]).intervalMs).toBe(1500);
   });
 });
 
@@ -729,11 +735,11 @@ describe("perbo serve --once", () => {
 /** A ticket admitted by hand from a tracker reference, so the store holds that issue. */
 function admittedFrom(repo: string, reference: string): string {
   const streams = capture();
-  const code = runAdmitCommand({
-    args: parseAdmitArgs([
+  const code = runCommandLine(admitCommandLine, {
+    argv: [
       "--repo", repo, "--outcome", "Docs say what is true.", "--criterion", "Docs say what is true. :: a test asserts it",
       "--path", "docs/**", "--source", reference, "--approve", "--json",
-    ]),
+    ],
     streams,
     cwd: repo,
   });
@@ -768,13 +774,12 @@ describe("perbo serve drafts labelled tracker issues", () => {
       if (++ticks >= 2) controller.abort();
     };
     const streams = capture();
-    const code = await runServeCommand({
+    const code = await runCommandLine(serveCommandLine, {
       argv: ["--repo", repo, "--interval", "1s", "--json"],
       streams,
       cwd: repo,
-      now: new Date("2026-09-10T12:00:00.000Z"),
-      deps: f.deps,
-      signal: controller.signal,
+      now: AT,
+      deps: { processes: f.deps, clock: () => AT, signal: controller.signal },
     });
     expect(code).toBe(EXIT_CODES.approve);
     // #2 before #3, and #2 alone: one draft a tick, and the fake wrote no
@@ -812,13 +817,12 @@ describe("perbo serve drafts labelled tracker issues", () => {
       if (++ticks >= 2) controller.abort();
     };
     const streams = capture();
-    await runServeCommand({
+    await runCommandLine(serveCommandLine, {
       argv: ["--repo", repo, "--interval", "1s"],
       streams,
       cwd: repo,
-      now: new Date("2026-09-10T12:00:00.000Z"),
-      deps: f.deps,
-      signal: controller.signal,
+      now: AT,
+      deps: { processes: f.deps, clock: () => AT, signal: controller.signal },
     });
     expect(f.drafted).toEqual(["o/r#5"]);
     expect(streams.err.join("")).toContain("draft of o/r#5 exited 1; not tried again while this queue runs");
@@ -866,13 +870,6 @@ describe("perbo serve drafts labelled tracker issues", () => {
     expect(streams.err.join("")).toContain("sets 'tracker' to something this cannot read");
     expect(streams.err.join("")).toContain("repository");
     expect(f.listed).toEqual([]);
-  });
-
-  it("reads the key of the one ticket admit wrote, and nothing from anything else", () => {
-    expect(keyFromAdmitJson(JSON.stringify({ ticket: { key: "AYO-4" }, contract: {}, draft: null }))).toBe("AYO-4");
-    expect(keyFromAdmitJson(JSON.stringify({ tickets: [{ ticket: { key: "AYO-5" } }, { ticket: { key: "AYO-6" } }] }))).toBeNull();
-    expect(keyFromAdmitJson("not json")).toBeNull();
-    expect(keyFromAdmitJson(JSON.stringify({ ticket: { key: "--approve" } }))).toBeNull();
   });
 });
 

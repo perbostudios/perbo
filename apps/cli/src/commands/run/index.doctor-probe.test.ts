@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts";
 import type { PreflightResult } from "@perbo/runner";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { runDoctorCommand, type DoctorOptions } from "./index.js";
+import { doctorCommandLine } from "./index.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * `perbo doctor --probe`: one minimal call at the configured reviewer model,
@@ -142,28 +143,18 @@ const materializable: DiagnosticResult = DiagnosticResultSchema.parse({
   proposed: null,
 });
 
+/** The line this diagnostic is asked for by: a repository, and how much it asks. */
 const doctorArgs = (
   repo: string,
   flags: { probe: boolean; publish: boolean; json?: boolean; writeConfig?: boolean },
-): DoctorOptions["args"] => ({
-  ticket: null,
-  store: null,
-  contract: null,
-  config: null,
+): string[] => [
+  "--repo",
   repo,
-  worktreeRoot: null,
-  publish: flags.publish,
-  json: flags.json ?? false,
-  quiet: true,
-  writeConfig: flags.writeConfig ?? false,
-  probe: flags.probe,
-  resumeFrom: null,
-  outcome: null,
-  criteria: [],
-  paths: [],
-  pr: null,
-  relevel: false,
-});
+  ...(flags.publish ? ["--publish"] : []),
+  ...(flags.json ?? false ? ["--json"] : []),
+  ...(flags.writeConfig ?? false ? ["--write-config"] : []),
+  ...(flags.probe ? ["--probe"] : []),
+];
 
 const originalPath = process.env.PATH;
 const originalKey = process.env.ANTHROPIC_API_KEY;
@@ -226,21 +217,20 @@ async function doctor(
 
   const out: string[] = [];
   const err: string[] = [];
-  const code = await runDoctorCommand({
-    args: doctorArgs(repo, {
-      probe: options.probe,
-      publish: options.publish ?? false,
-      json: options.json ?? false,
-      writeConfig: options.writeConfig ?? false,
-    }),
+  const code = await runCommandLine(doctorCommandLine, {
+    argv: doctorArgs(repo, {
+        probe: options.probe,
+        publish: options.publish ?? false,
+        json: options.json ?? false,
+        writeConfig: options.writeConfig ?? false,
+      }),
     streams: {
-      stdout: (chunk) => out.push(chunk),
-      stderr: (chunk) => err.push(chunk),
-      isTTY: options.isTTY ?? true,
-    },
+        stdout: (chunk) => out.push(chunk),
+        stderr: (chunk) => err.push(chunk),
+        isTTY: options.isTTY ?? true,
+      },
     cwd: process.cwd(),
-    preflight: () => machineReady,
-    diagnose: () => Promise.resolve(materializable),
+    deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
   });
   return { stdout: out.join(""), stderr: err.join(""), code };
 }

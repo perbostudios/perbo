@@ -13,9 +13,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
-import { exitForThrown } from "../../command-line/terminal.js";
-import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "./index.js";
-import { attemptsRecordSubject, runInspectCommand } from "../inspect.js";
+import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
+import { type ExecuteDeps, executeCommandLine } from "./index.js";
+import { attemptsRecordSubject, inspectCommandLine } from "../inspect.js";
 import { storeDir } from "../../store/index.js";
 
 /**
@@ -175,16 +175,15 @@ const uncoloured = (text: string): string => text.replace(/\u001b\[[0-9;]*m/g, "
 async function program(
   repo: string,
   argv: readonly string[],
-  options: Omit<ExecuteOptions, "args" | "streams" | "cwd"> = {},
+  options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string }> {
   const streams = capture();
   try {
-    const code = await runExecuteCommand({
-      args: parseExecuteArgs(["--repo", repo, ...argv]),
+    const code = await runCommandLine(executeCommandLine, {
+      argv: ["--repo", repo, ...argv],
       streams: streams.streams,
       cwd: repo,
-      preflight: okPreflight,
-      ...options,
+      deps: { preflight: okPreflight, ...options },
     });
     return { code, err: streams.err.join("") };
   } catch (error) {
@@ -285,11 +284,11 @@ describe("a repository the diagnostic refuses", () => {
     // report a script parses, field for field, and in the one a person reads.
     const inspected = async (isTTY: boolean): Promise<string> => {
       const read = capture(isTTY);
-      await runInspectCommand({
+      await runCommandLine(inspectCommandLine, {
         argv: [runId, "--repo", repo],
         streams: read.streams,
         cwd: repo,
-        subject: attemptsRecordSubject,
+        deps: { subject: attemptsRecordSubject },
       });
       return read.out.join("");
     };

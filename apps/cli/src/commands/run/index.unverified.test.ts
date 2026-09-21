@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
-import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "./index.js";
+import { type ExecuteDeps, executeCommandLine } from "./index.js";
 import { storeDir } from "../../store/index.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * A run on a repository whose own scripts give a worktree nothing to run: a
@@ -237,32 +238,30 @@ const CRITERION = "total() returns the sum of its inputs :: total([1,2]) is 3 ::
 async function loop(
   repo: string,
   argv: readonly string[],
-  options: Omit<ExecuteOptions, "args" | "streams" | "cwd"> = {},
+  options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string; out: string }> {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await runExecuteCommand({
-    args: parseExecuteArgs([
-      "--repo",
-      repo,
-      "--outcome",
-      OUTCOME,
-      "--criterion",
-      CRITERION,
-      "--path",
-      "src/**",
-      "--json",
-      ...argv,
-    ]),
+  const code = await runCommandLine(executeCommandLine, {
+    argv: [
+        "--repo",
+        repo,
+        "--outcome",
+        OUTCOME,
+        "--criterion",
+        CRITERION,
+        "--path",
+        "src/**",
+        "--json",
+        ...argv,
+      ],
     streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY: false,
-    },
+        stdout: (chunk: string) => out.push(chunk),
+        stderr: (chunk: string) => err.push(chunk),
+        isTTY: false,
+      },
     cwd: repo,
-    preflight: okPreflight,
-    hooks: { review: reviewer() as never },
-    ...options,
+    deps: { preflight: okPreflight, hooks: { review: reviewer() as never }, ...options },
   });
   // Unparsed: a run that refuses writes nothing to stdout, and a test that
   // parsed eagerly would fail on the JSON rather than on the refusal.

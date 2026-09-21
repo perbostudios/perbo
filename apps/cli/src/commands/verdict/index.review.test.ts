@@ -23,7 +23,8 @@ import {
   writeTicketlessBundle,
   type ReviewTarget,
 } from "../review/ticketless.js";
-import { runVerdictCommand } from "./index.js";
+import { verdictCommandLine } from "./index.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 import { makeAttempt, makeReview } from "../../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
 
@@ -191,12 +192,14 @@ const readVerdicts = (store: string) =>
   LocalVerdictsSchema.parse(JSON.parse(readFileSync(join(store, "verdicts.json"), "utf8")));
 
 const verdict = (repo: string, argv: string[], now = NOW) =>
-  runVerdictCommand({
+  runCommandLine(verdictCommandLine, {
     argv: [...argv, "--repo", repo],
     streams: capture(),
     cwd: repo,
     now,
-    resolve: attemptsRecordSubject,
+    deps: {
+      resolve: attemptsRecordSubject,
+    },
   });
 
 describe("perbo verdict answers a review that `review --pr` wrote", () => {
@@ -204,12 +207,14 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
     const { repo, store } = repositoryWithReview("records");
     const streams = capture();
 
-    const code = await runVerdictCommand({
+    const code = await runCommandLine(verdictCommandLine, {
       argv: [REVIEW_ID, "--accept", QUEUE.slice(0, 12), "--note", "fair: no test covers it", "--author", AUTHOR, "--repo", repo],
       streams,
       cwd: repo,
       now: NOW,
-      resolve: attemptsRecordSubject,
+      deps: {
+        resolve: attemptsRecordSubject,
+      },
     });
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -256,12 +261,14 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
     const streams = capture();
 
     expect(
-      await runVerdictCommand({
+      await runCommandLine(verdictCommandLine, {
         argv: [REVIEW_ID, "--list", "--repo", repo],
         streams,
         cwd: repo,
         now: NOW,
-        resolve: attemptsRecordSubject,
+        deps: {
+          resolve: attemptsRecordSubject,
+        },
       }),
     ).toBe(EXIT_CODES.approve);
     const printed = streams.out.join("");
@@ -278,12 +285,14 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
     const refused = capture();
 
     expect(
-      await runVerdictCommand({
+      await runCommandLine(verdictCommandLine, {
         argv: [REVIEW_ID, "--reject", QUEUE, "--author", AUTHOR, "--repo", repo],
         streams: refused,
         cwd: repo,
         now: LATER,
-        resolve: attemptsRecordSubject,
+        deps: {
+          resolve: attemptsRecordSubject,
+        },
       }),
     ).toBe(EXIT_CODES.usage_or_input_error);
     expect(refused.err.join("")).toContain("--replace");
@@ -302,18 +311,18 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
   it("refuses a prefix that names both findings", async () => {
     const { repo } = repositoryWithReview("ambiguous");
     expect(QUEUE.startsWith(AMBIGUOUS) && SERVER.startsWith(AMBIGUOUS)).toBe(true);
-    await expect(verdict(repo, [REVIEW_ID, "--accept", AMBIGUOUS, "--author", AUTHOR])).rejects.toThrow(
+    expect(() => verdict(repo, [REVIEW_ID, "--accept", AMBIGUOUS, "--author", AUTHOR])).toThrow(
       /names 2 findings/,
     );
   });
 
   it("refuses a review that is in neither place, naming both", async () => {
     const { repo, store } = repositoryWithReview("unknown");
-    await expect(verdict(repo, ["rev_nothingatall", "--accept", QUEUE, "--author", AUTHOR])).rejects.toThrow(
+    expect(() => verdict(repo, ["rev_nothingatall", "--accept", QUEUE, "--author", AUTHOR])).toThrow(
       /holds no attempts for rev_nothingatall[\s\S]*reviews/,
     );
     // And the one it does hold is named, so a mistyped id is a short step back.
-    await expect(verdict(repo, ["rev_nothingatall", "--list"])).rejects.toThrow(new RegExp(REVIEW_ID));
+    expect(() => verdict(repo, ["rev_nothingatall", "--list"])).toThrow(new RegExp(REVIEW_ID));
     expect(store).toContain(".perbo");
   });
 }, SPAWN_TEST_TIMEOUT_MS);
@@ -408,12 +417,14 @@ describe("a review an attempt filed still resolves through the attempts record",
     const streams = capture();
 
     expect(
-      await runVerdictCommand({
+      await runCommandLine(verdictCommandLine, {
         argv: [WORK_ID, "--accept", key.slice(0, 12), "--author", AUTHOR, "--repo", repo],
         streams,
         cwd: repo,
         now: NOW,
-        resolve: attemptsRecordSubject,
+        deps: {
+          resolve: attemptsRecordSubject,
+        },
       }),
     ).toBe(EXIT_CODES.approve);
     expect(readVerdicts(store).verdicts[0]).toMatchObject({

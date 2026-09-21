@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
-import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "./run/index.js";
-import { attemptsRecordSubject, runInspectCommand } from "./inspect.js";
+import { type ExecuteDeps, executeCommandLine } from "./run/index.js";
+import { attemptsRecordSubject, inspectCommandLine } from "./inspect.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * What `perbo inspect` says about the pull request a run with no ticket
@@ -305,28 +306,26 @@ async function withGh<T>(bin: string, body: () => Promise<T>): Promise<T> {
 async function run(
   repo: string,
   argv: readonly string[],
-  options: Omit<ExecuteOptions, "args" | "streams" | "cwd"> = {},
+  options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; out: string; err: string }> {
   const streams = capture();
-  const code = await runExecuteCommand({
-    args: parseExecuteArgs([
-      "--repo",
-      repo,
-      "--outcome",
-      OUTCOME,
-      "--criterion",
-      CRITERION,
-      "--json",
-      ...argv,
-    ]),
+  const code = await runCommandLine(executeCommandLine, {
+    argv: [
+        "--repo",
+        repo,
+        "--outcome",
+        OUTCOME,
+        "--criterion",
+        CRITERION,
+        "--json",
+        ...argv,
+      ],
     streams: streams.streams,
     cwd: repo,
-    preflight: okPreflight,
-    hooks: {
-      review: reviewer() as never,
-      push: (async () => ({ pushed: true, detail: "hooked" })) as never,
-    },
-    ...options,
+    deps: { preflight: okPreflight, hooks: {
+        review: reviewer() as never,
+        push: (async () => ({ pushed: true, detail: "hooked" })) as never,
+      }, ...options },
   });
   return { code, out: streams.out.join(""), err: streams.err.join("") };
 }
@@ -343,18 +342,18 @@ async function inspect(
   runId: string,
 ): Promise<{ report: { pull_request_url: string | null }; shown: string }> {
   const asJson = capture(false);
-  await runInspectCommand({
+  await runCommandLine(inspectCommandLine, {
     argv: [runId, "--repo", repo],
     streams: asJson.streams,
     cwd: repo,
-    subject: attemptsRecordSubject,
+    deps: { subject: attemptsRecordSubject },
   });
   const onTty = capture(true);
-  await runInspectCommand({
+  await runCommandLine(inspectCommandLine, {
     argv: [runId, "--repo", repo],
     streams: onTty.streams,
     cwd: repo,
-    subject: attemptsRecordSubject,
+    deps: { subject: attemptsRecordSubject },
   });
   return {
     report: JSON.parse(asJson.out.join("")) as { pull_request_url: string | null },

@@ -13,7 +13,7 @@ import {
   type StopVerdicts,
 } from "@perbo/contracts";
 import { git } from "@perbo/workspace";
-import type { Streams } from "../../streams.js";
+import type { Diagnostics } from "../../diagnostics.js";
 
 /**
  * Local verdicts: the decision a person took at the command line, recorded on
@@ -382,15 +382,15 @@ export function readLocalVerdicts(dir: string): LocalVerdicts {
 
 /**
  * The same, for a reader: an unreadable file is named on stderr and read as
- * empty. `streams` is nullable for the one caller that builds a report with
+ * empty. `diagnostics` is nullable for the one caller that builds a report with
  * nowhere to say it — the warning is then left to whoever prints the report.
  */
-export function readLocalVerdictsOrWarn(dir: string, streams: Streams | null): LocalVerdicts {
+export function readLocalVerdictsOrWarn(dir: string, diagnostics: Diagnostics | null): LocalVerdicts {
   try {
     return readLocalVerdicts(dir);
   } catch (error) {
     if (!(error instanceof VerdictStoreError)) throw error;
-    streams?.stderr(`warning: ${error.message}; local decisions were not counted\n`);
+    diagnostics?.stderr(`warning: ${error.message}; local decisions were not counted\n`);
     return EMPTY_LOCAL_VERDICTS;
   }
 }

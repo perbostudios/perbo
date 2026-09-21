@@ -4,11 +4,12 @@ import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
-import { parseAdmitArgs, runAdmitCommand } from "../commands/admit.js";
+import { admitCommandLine } from "../commands/admit.js";
 import type { Streams } from "../streams.js";
 import { ENDPOINT_FILE, readEndpoint, startEndpoint, type RunningEndpoint } from "./index.js";
 import { ENDPOINT_TOOLS, PERSON_ONLY_ACTS } from "./internal/tools.js";
 import { storeDir } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * The tool endpoint the queue hosts: paseo's mechanism, Perbo's authority.
@@ -51,8 +52,8 @@ function repository(): string {
 
 function admitted(repo: string, outcome: string, path: string): string {
   const streams = capture();
-  const code = runAdmitCommand({
-    args: parseAdmitArgs(["--repo", repo, "--outcome", outcome, "--criterion", `${outcome} :: a test asserts it`, "--path", path, "--json"]),
+  const code = runCommandLine(admitCommandLine, {
+    argv: ["--repo", repo, "--outcome", outcome, "--criterion", `${outcome} :: a test asserts it`, "--path", path, "--json"],
     streams,
     cwd: repo,
   });
@@ -220,6 +221,28 @@ describe("the endpoint", () => {
     const denied = await rpc(endpoint.url, tokens.drafter, call("admit_ticket", { outcome: "x", criteria: ["x :: y"], paths: ["docs/**"] }));
     expect(denied.json?.error?.code).toBe(-32602);
     expect(denied.json?.error?.message).toContain("not for this role");
+  });
+
+  it("refuses two sources for one draft rather than preferring one of them", async () => {
+    const repo = repository();
+    const endpoint = await serve(repo);
+    const token = readEndpoint(storeDir(repo))!.tokens.person;
+    const both = await rpc(
+      endpoint.url,
+      token,
+      call("admit_ticket", { from: "o/r#412", from_file: "/tmp/issue.md" }),
+    );
+    const result = both.json?.result as { isError?: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toMatch(
+      /--from and --from-file are mutually exclusive: one contract is drafted from one document/,
+    );
+    // Nothing was admitted from either of them.
+    const listed = await rpc(endpoint.url, token, call("list_tickets", { all: true }));
+    expect(
+      (listed.json?.result as { structuredContent: { tickets: unknown[] } }).structuredContent
+        .tickets,
+    ).toEqual([]);
   });
 
   it("never lets a session string become a flag: a value shaped like --x=--approve stays a value", async () => {

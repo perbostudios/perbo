@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
+import { z } from "zod";
 import {
   DEFAULT_ADR_FOLDER,
   DEFAULT_SPEC_FOLDER,
@@ -34,6 +35,30 @@ export class StoreError extends Error {}
 export function storeDir(repositoryRoot: string, override?: string | null): string {
   return override ? resolve(override) : join(resolve(repositoryRoot), DEFAULT_STORE_DIRNAME);
 }
+
+/**
+ * Which store a command works against: the repository it was pointed at, and
+ * an explicit store inside or outside it.
+ *
+ * One field of every command's input, so a caller that has the two paths has
+ * the whole of the answer to "where does this read and write" without
+ * spelling `--repo` and `--store` again.
+ *
+ * Either path may be empty, and an empty one is not a missing one: `--repo ""`
+ * is the directory the command was run in and `--store ""` is the store that
+ * directory holds, which is where the command works with neither flag given.
+ * `perbo list --repo "$REPO"` with `REPO` unset therefore lists the store it
+ * is standing in rather than refusing a line it can act on.
+ */
+export const StoreTargetSchema = z.strictObject({
+  repo: z.string(),
+  store: z.string().nullable(),
+});
+export type StoreTarget = z.infer<typeof StoreTargetSchema>;
+
+/** The store a target names, from the directory the command was run in. */
+export const storeFor = (cwd: string, target: StoreTarget): string =>
+  storeDir(resolve(cwd, target.repo), target.store);
 
 /**
  * What a record in the store says about where the repository is, when it says

@@ -5,10 +5,11 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, TicketSchema, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { runSyncCommand } from "./sync.js";
+import { syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-157: `perbo sync` on a `failed` ticket whose branch a person delivered
@@ -124,11 +125,11 @@ afterEach(() => {
  * before the read, so a suite that let the machine's own environment decide it
  * would ask `gh auth status` on one developer's machine and not on another's.
  */
-const withGh = <T,>(bin: string, body: () => Promise<T>): Promise<T> => {
+const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   process.env.GH_TOKEN = "test-token";
   delete process.env.GITHUB_TOKEN;
-  return body();
+  return Promise.resolve(body());
 };
 
 const PR_URL = "https://github.com/o/r/pull/41";
@@ -153,7 +154,7 @@ const ghAnswer = (state: "OPEN" | "CLOSED" | "MERGED"): string =>
  */
 function failedTicket(name: string): { repo: string; dir: string; ticket: Ticket; branch: string } {
   const repo = repository(name);
-  runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-01T09:00:00.000Z");
   const branch = branchName({
@@ -186,7 +187,7 @@ describe("ac_3 — a failed ticket with no pull request is left exactly as it is
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.did_not_complete);
@@ -204,7 +205,7 @@ describe("ac_2 — a failed ticket whose branch a person merged by hand is walke
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -234,7 +235,7 @@ describe("ac_2 — a failed ticket whose branch a person merged by hand is walke
     const gh = fakeGh("open-only", { stdout: ghAnswer("OPEN") });
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);

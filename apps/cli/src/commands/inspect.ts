@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { z } from "zod";
 import {
   CheckResultsFileSchema,
@@ -60,8 +60,19 @@ import {
 } from "./run/local.js";
 import { WIDTH, clip, pad, painter, spread, wrap, type Paint } from "../text.js";
 import { specStaleness } from "../spec/staleness.js";
-import { storeDir } from "../store/index.js";
-import type { Streams } from "../streams.js";
+
+import type { Diagnostics } from "../diagnostics.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../command-line/grammar.js";
+import type { CommandContext, CommandReport, Rendered } from "../command.js";
+import type { ReportCommand } from "../command-line/table.js";
+import { readInput } from "../usage-error.js";
+import { storeFor, StoreTargetSchema } from "../store/index.js";
 import {
   activeVerdicts,
   readLocalVerdictsOrWarn,
@@ -108,65 +119,53 @@ import { describeScheduling } from "./serve/waits.js";
  * name no ticket claims.
  */
 
-export interface InspectArgs {
-  key: string;
-  attempt: string | null;
-  /**
-   * The attempt whose bundle objects are to be re-hashed, or null for a
-   * reading rather than a check. Its own flag and not a boolean beside
-   * `--attempt`, because the two answer different questions: `--attempt`
-   * narrows what is printed, `--verify` prints nothing about the attempt at
-   * all and returns a verdict on the bytes.
-   */
-  verify: string | null;
-  json: boolean;
-  repo: string;
-  store: string | null;
-}
+/**
+ * An attempt's id as the loop mints one.
+ *
+ * The shape a *session* must supply through the endpoint, where an id is a
+ * string a model returned and ADR-0023 §4 says what may become an action
+ * parameter. A person at the terminal names an attempt they read off their
+ * own store, and the store is what refuses one it does not hold.
+ */
+export const AttemptIdSchema = z
+  .string()
+  .regex(/^att_[0-9a-f]+$/, "an attempt id looks like att_0000000000000001");
 
-export function parseInspectArgs(argv: readonly string[]): InspectArgs {
-  const args: InspectArgs = { key: "", attempt: null, verify: null, json: false, repo: ".", store: null };
-  const tokens = argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
+export const InspectInputSchema = z
+  .strictObject({
+    target: StoreTargetSchema,
+    /**
+     * A ticket key, or the name of a run nothing admitted (SCP-284).
+     *
+     * Any name at all, including none: what a store holds is the store's
+     * answer, and it gives it naming the name it was asked for.
+     */
+    key: z.string(),
+    /** One attempt, for that attempt alone. */
+    attempt: z.string().nullable(),
+    /**
+     * The attempt whose bundle objects are to be re-hashed, or null for a
+     * reading rather than a check. Its own field and not a boolean beside
+     * `attempt`, because the two answer different questions: `attempt`
+     * narrows what is printed, `verify` prints nothing about the attempt at
+     * all and returns a verdict on the bytes.
+     */
+    verify: z.string().nullable(),
+  })
+  // Refused rather than resolved in favour of one of them: `verify` names the
+  // attempt it checks, so the two would be two answers to the same question
+  // and a caller that gave both meant something this cannot tell.
+  .superRefine((input, ctx) => {
+    if (input.verify !== null && input.attempt !== null) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "--verify names the attempt to check, so it cannot be given with --attempt: " +
+          `perbo inspect ${input.key} --verify ${input.verify}`,
+      });
+    }
   });
-  const positional: string[] = [];
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    if (!token.startsWith("--")) {
-      positional.push(token);
-      continue;
-    }
-    if (token === "--json") {
-      args.json = true;
-      continue;
-    }
-    if (token !== "--attempt" && token !== "--verify" && token !== "--repo" && token !== "--store") {
-      throw new UsageError(`unknown flag '${token}'`);
-    }
-    const value = tokens[++i];
-    if (value === undefined) throw new UsageError(`${token} requires a value`);
-    if (token === "--attempt") args.attempt = value;
-    if (token === "--verify") args.verify = value;
-    if (token === "--repo") args.repo = value;
-    if (token === "--store") args.store = value;
-  }
-  if (positional.length !== 1) {
-    throw new UsageError("inspect takes exactly one ticket key, e.g. perbo inspect PRB-1");
-  }
-  args.key = positional[0]!;
-  // Refused rather than resolved in favour of one of them: `--verify` names the
-  // attempt it checks, so the two flags would be two answers to the same
-  // question and a person who typed both meant something this cannot tell.
-  if (args.verify !== null && args.attempt !== null) {
-    throw new UsageError(
-      "--verify names the attempt to check, so it cannot be given with --attempt: " +
-        `perbo inspect ${args.key} --verify ${args.verify}`,
-    );
-  }
-  return args;
-}
+export type InspectInput = z.infer<typeof InspectInputSchema>;
 
 /** The closure verification as the loop persists it (`verification.json`). */
 const ClosureVerificationFileSchema = z.object({
@@ -919,7 +918,7 @@ export function buildReportForSubject(input: {
   subject: InspectSubject;
   attempt: string | null;
   /** Where an unreadable verdicts file is named; the report itself is still built. */
-  streams?: Streams | undefined;
+  streams?: Diagnostics | undefined;
 }): InspectReport {
   const attemptsPath = join(input.storeDirectory, "state", `${input.subject.ticket_id}.attempts.json`);
   const head = { ...input.subject, attempts_path: attemptsPath };
@@ -2350,7 +2349,7 @@ export function buildInspectReport(input: {
   key: string;
   attempt: string | null;
   /** Where an unreadable verdicts file is named; the report itself is still built. */
-  streams?: Streams | undefined;
+  streams?: Diagnostics | undefined;
 }): InspectReport {
   return buildReportForSubject({
     storeDirectory: input.storeDirectory,
@@ -2360,56 +2359,136 @@ export function buildInspectReport(input: {
   });
 }
 
-export interface InspectOptions {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  /**
-   * How the name on the command line is resolved to the work it stands for.
-   * {@link ticketSubject} unless a caller names another.
-   */
-  subject?: ResolveSubject;
+/** How the name on the command line is resolved to the work it stands for. */
+export interface InspectDeps {
+  /** {@link ticketSubject} unless a caller names another. */
+  subject: ResolveSubject;
 }
 
-export async function runInspectCommand(input: InspectOptions): Promise<number> {
-  const args = parseInspectArgs(input.argv);
-  const storeDirectory = storeDir(resolve(input.cwd, args.repo), args.store);
-  if (args.verify !== null) {
-    const subject = (input.subject ?? ticketSubject)(storeDirectory, args.key);
-    const verification = verifyAttemptObjects({
+/**
+ * What `perbo inspect` answers: a reading of one piece of work, or a verdict
+ * on the bytes of one attempt.
+ */
+export type InspectOutcome =
+  | { kind: "report"; report: InspectReport; attempt: string | null }
+  | { kind: "verification"; verification: VerifyReport };
+
+export function inspect(
+  input: InspectInput,
+  context: CommandContext & Partial<InspectDeps>,
+): InspectOutcome {
+  const storeDirectory = storeFor(context.cwd, input.target);
+  const resolveSubject = context.subject ?? ticketSubject;
+  if (input.verify !== null) {
+    const subject = resolveSubject(storeDirectory, input.key);
+    return {
+      kind: "verification",
+      verification: verifyAttemptObjects({
+        storeDirectory,
+        ticket: subject.ticket,
+        ticket_id: subject.ticket_id,
+        attempt: input.verify,
+      }),
+    };
+  }
+  return {
+    kind: "report",
+    attempt: input.attempt,
+    report: buildReportForSubject({
       storeDirectory,
-      ticket: subject.ticket,
-      ticket_id: subject.ticket_id,
-      attempt: args.verify,
-    });
-    // The human rendering whenever `--json` was not asked for, where the
-    // reading above switches on the terminal instead. What a check returns is
-    // a verdict and an exit code, not a document to pipe into a renderer, and
-    // `perbo inspect X --verify att … | tee` has to say the same thing in a
-    // pipeline that it says on a terminal.
-    input.streams.stdout(
-      args.json ? `${JSON.stringify(verification, null, 2)}\n` : renderVerification(verification),
-    );
-    // The gate is closed on a record that does not verify: not a usage error
-    // (the command did what it was asked), and not a crash (nothing fell over).
-    return verification.ok ? 0 : EXIT_CODES.gate_closed;
-  }
-  const report = buildReportForSubject({
-    storeDirectory,
-    subject: (input.subject ?? ticketSubject)(storeDirectory, args.key),
-    attempt: args.attempt,
-    streams: input.streams,
-  });
-  if (args.json || !input.streams.isTTY) {
-    input.streams.stdout(`${JSON.stringify(report, null, 2)}\n`);
-  } else {
-    const color = process.env.NO_COLOR === undefined;
-    input.streams.stdout(
-      `${renderInspect(report, { color, detail: args.attempt !== null, version: VERSION })}\n`,
-    );
-  }
-  return 0;
+      subject: resolveSubject(storeDirectory, input.key),
+      attempt: input.attempt,
+      streams: context.diagnostics,
+    }),
+  };
 }
+
+const FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--attempt": valueFlag(),
+  "--verify": valueFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const GRAMMAR: Grammar<typeof FLAGS> = {
+  command: "inspect",
+  flags: FLAGS,
+  positionals: {
+    min: 1,
+    max: 1,
+    refusal: "inspect takes exactly one ticket key, e.g. perbo inspect PRB-1",
+  },
+  afterDoubleDash: "positionals",
+};
+
+/**
+ * One ticket in full, as its record and as the reading a person gets.
+ *
+ * Reached by the terminal through its line below, and by a caller in this
+ * process — the queue's endpoint — over the same typed input.
+ */
+export const inspectReport: CommandReport<InspectInput, { json: boolean }, InspectOutcome, InspectDeps> = {
+  run: inspect,
+  toJson: (outcome) =>
+    outcome.kind === "verification" ? outcome.verification : outcome.report,
+  render(outcome, output, target): Rendered {
+    if (outcome.kind === "verification") {
+      // The human rendering whenever `--json` was not asked for, where the
+      // reading below switches on the terminal instead. What a check returns
+      // is a verdict and an exit code, not a document to pipe into a renderer,
+      // and `perbo inspect X --verify att … | tee` has to say the same thing
+      // in a pipeline that it says on a terminal.
+      return {
+        stdout: output.json
+          ? `${JSON.stringify(outcome.verification, null, 2)}\n`
+          : renderVerification(outcome.verification),
+        stderr: "",
+        // The gate is closed on a record that does not verify: not a usage
+        // error (the command did what it was asked), and not a crash (nothing
+        // fell over).
+        exitCode: outcome.verification.ok ? 0 : EXIT_CODES.gate_closed,
+      };
+    }
+    return {
+      stdout: target.json
+        ? `${JSON.stringify(outcome.report, null, 2)}\n`
+        : `${renderInspect(outcome.report, {
+            color: target.color,
+            detail: outcome.attempt !== null,
+            version: VERSION,
+          })}\n`,
+      stderr: "",
+      exitCode: 0,
+    };
+  },
+};
+
+export const inspectCommandLine: ReportCommand<
+  InspectInput,
+  { json: boolean },
+  InspectOutcome,
+  InspectDeps
+> = {
+  kind: "report",
+  name: "inspect",
+  grammars: [GRAMMAR],
+  jsonWhenPiped: true,
+  grammarFor: () => GRAMMAR,
+  read(argv) {
+    const line = parseArgv(GRAMMAR, argv);
+    return {
+      input: readInput(InspectInputSchema, {
+        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+        key: line.positionals[0],
+        attempt: line.flags["--attempt"] ?? null,
+        verify: line.flags["--verify"] ?? null,
+      }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  ...inspectReport,
+};
 
 /** Exposed for the tests, which build a store by hand and read it back. */
 export function readBundleObject(storeDirectory: string, sha256: string): string | null {

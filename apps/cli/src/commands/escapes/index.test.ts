@@ -11,18 +11,10 @@ import {
 import { TicketDeliveryStateSchema, type TicketDeliveryState } from "@perbo/runner";
 import type { Streams } from "../../streams.js";
 import { baselinePath } from "../baseline/index.js";
-import {
-  EscapeCollectionError,
-  TicketEscapesSchema,
-  escapeStatus,
-  escapesPath,
-  readMergeFacts,
-  runEscapesCommand,
-  type MergeFacts,
-  type TicketEscapes,
-} from "./index.js";
-import { runSyncCommand } from "../sync.js";
+import { EscapeCollectionError, TicketEscapesSchema, escapeStatus, escapesCommandLine, escapesPath, readMergeFacts, type MergeFacts, type TicketEscapes } from "./index.js";
+import { syncCommandLine } from "../sync.js";
 import { idsFor, readTicket, storeDir, writeTicket } from "../../store/tickets.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * `perbo escapes` (SCP-145) over a real git history: one merge reverted, one
@@ -177,24 +169,26 @@ const sync = (
   observedAt: string,
   options: { real?: boolean; streams?: Streams } = {},
 ) =>
-  runSyncCommand({
+  runCommandLine(syncCommandLine, {
     argv: [ticket.key, "--repo", fixtureAt.repo],
     streams: options.streams ?? capture(),
     cwd: fixtureAt.repo,
     now: new Date(observedAt),
-    poll: () => Promise.resolve(delivery(ticket, observedAt)),
-    ...(options.real === true
-      ? {}
-      : {
-          mergeFacts: (): MergeFacts => ({
-            default_branch: "main",
-            merge_commit: fixtureAt.merges[ticket.key]!,
-            merged_at: mergedAt,
-            branch_commits: [],
-            pull_request_url: ticket.delivery.pull_request_url,
-            pull_request_number: ticket.delivery.pull_request_number,
+    deps: {
+      poll: () => Promise.resolve(delivery(ticket, observedAt)),
+      ...(options.real === true
+        ? {}
+        : {
+            mergeFacts: (): MergeFacts => ({
+              default_branch: "main",
+              merge_commit: fixtureAt.merges[ticket.key]!,
+              merged_at: mergedAt,
+              branch_commits: [],
+              pull_request_url: ticket.delivery.pull_request_url,
+              pull_request_number: ticket.delivery.pull_request_number,
+            }),
           }),
-        }),
+    },
   });
 
 /**
@@ -234,7 +228,7 @@ function fakeGh(name: string, payload: unknown) {
       }
     },
     /** The same, held across an `await` — `sync` reaches `gh` after one. */
-    during: async <T>(body: () => Promise<T>): Promise<T> => {
+    during: async <T>(body: () => T | Promise<T>): Promise<Awaited<T>> => {
       const path = process.env.PATH;
       process.env.PATH = `${bin}${path === undefined ? "" : `:${path}`}`;
       try {
@@ -287,9 +281,9 @@ async function fourCases(name: string): Promise<Fixture & { rows: string; json: 
     await sync(f, ticket, entry.mergedAt, OBSERVED_AT);
   }
   const table = capture();
-  await runEscapesCommand({ argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
+  await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
   const json = capture();
-  await runEscapesCommand({ argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
+  await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
   return { ...f, rows: table.out.join(""), json: JSON.parse(json.out.join("")) as unknown };
 }
 
@@ -326,9 +320,9 @@ async function readReport(f: Fixture): Promise<{
   json: JsonOutput;
 }> {
   const table = capture();
-  await runEscapesCommand({ argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
+  await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
   const json = capture();
-  await runEscapesCommand({ argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
+  await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
   const text = table.out.join("");
   const lines = text.split("\n");
   return {
@@ -451,7 +445,7 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     const ticket = ticketAt(f, "AYO-1", "ayo/AYO-1", 1);
     await sync(f, ticket, MERGED_AT, OBSERVED_AT);
     const streams = capture();
-    await runEscapesCommand({ argv: ["--repo", f.repo, "--json"], streams, cwd: f.repo, now: READ_AT });
+    await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams, cwd: f.repo, now: READ_AT });
     const row = (JSON.parse(streams.out.join("")) as JsonOutput).tickets[0]!;
     expect(row.same_path_touched).toBe(true);
     expect(row.same_path.map((commit) => commit.sha)).toEqual([rework]);
@@ -467,20 +461,22 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     f.git("2026-08-03T00:00:00Z", "revert", "-m", "1", "--no-edit", f.merges["AYO-1"]!);
     const absent = "9".repeat(40);
     const ticket = ticketAt(f, "AYO-1", "ayo/AYO-1", 1);
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: [ticket.key, "--repo", f.repo],
       streams: capture(),
       cwd: f.repo,
       now: new Date(OBSERVED_AT),
-      poll: () => Promise.resolve(delivery(ticket, OBSERVED_AT)),
-      mergeFacts: (): MergeFacts => ({
-        default_branch: "main",
-        merge_commit: f.merges["AYO-1"]!,
-        merged_at: MERGED_AT,
-        branch_commits: [absent],
-        pull_request_url: ticket.delivery.pull_request_url,
-        pull_request_number: ticket.delivery.pull_request_number,
-      }),
+      deps: {
+        poll: () => Promise.resolve(delivery(ticket, OBSERVED_AT)),
+        mergeFacts: (): MergeFacts => ({
+          default_branch: "main",
+          merge_commit: f.merges["AYO-1"]!,
+          merged_at: MERGED_AT,
+          branch_commits: [absent],
+          pull_request_url: ticket.delivery.pull_request_url,
+          pull_request_number: ticket.delivery.pull_request_number,
+        }),
+      },
     });
     const record = JSON.parse(readFileSync(escapesPath(f.dir, ticket.ticket_id), "utf8")) as {
       branch_commits: Array<{ sha: string; subject: string }>;
@@ -511,7 +507,7 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     expect(record.reverts[0]!.reverts).toEqual([upstream.merges["AYO-1"]]);
 
     const streams = capture();
-    await runEscapesCommand({ argv: ["--repo", local.repo, "--json"], streams, cwd: local.repo, now: READ_AT });
+    await runCommandLine(escapesCommandLine, { argv: ["--repo", local.repo, "--json"], streams, cwd: local.repo, now: READ_AT });
     const json = JSON.parse(streams.out.join("")) as JsonOutput;
     expect(json.tickets[0]!.status).toBe("observed");
     expect(json.tickets[0]!.reverted).toBe(true);
@@ -539,7 +535,7 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     expect(record.observed_head.committed_at).toBe(MERGED_AT);
 
     const json = capture();
-    await runEscapesCommand({ argv: ["--repo", local.repo, "--json"], streams: json, cwd: local.repo, now: READ_AT });
+    await runCommandLine(escapesCommandLine, { argv: ["--repo", local.repo, "--json"], streams: json, cwd: local.repo, now: READ_AT });
     const parsed = JSON.parse(json.out.join("")) as JsonOutput;
     expect(parsed.tickets[0]!.status).toBe("stale");
     expect(parsed.tickets[0]!.observed_through).toBe(MERGED_AT);
@@ -550,7 +546,7 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     expect(parsed.escapes.revert_rate.n).toBe(0);
 
     const table = capture();
-    await runEscapesCommand({ argv: ["--repo", local.repo], streams: table, cwd: local.repo, now: READ_AT });
+    await runCommandLine(escapesCommandLine, { argv: ["--repo", local.repo], streams: table, cwd: local.repo, now: READ_AT });
     expect(table.out.join("")).toContain("`perbo sync AYO-1`");
     expect(table.err.join("")).toContain("behind the default branch");
 
@@ -558,7 +554,7 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     local.git(undefined, "remote", "set-url", "origin", upstream.repo);
     await sync(local, ticket, MERGED_AT, "2026-09-17T00:00:00.000Z");
     const after = capture();
-    await runEscapesCommand({
+    await runCommandLine(escapesCommandLine, {
       argv: ["--repo", local.repo, "--json"],
       streams: after,
       cwd: local.repo,
@@ -606,7 +602,7 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     }) as typeof fetch;
     try {
       const streams = capture();
-      const code = await runEscapesCommand({ argv: ["--repo", f.repo, "--json"], streams, cwd: f.repo, now: READ_AT });
+      const code = await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams, cwd: f.repo, now: READ_AT });
       expect(code).toBe(0);
       const json = JSON.parse(streams.out.join("")) as JsonOutput;
       expect(json.tickets.map((row) => row.ticket_key)).toEqual(["AYO-1"]);
@@ -738,12 +734,14 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     const silent = fakeGh("gh-silent-bin", null);
     const streams = capture();
     await silent.during(() =>
-      runSyncCommand({
+      runCommandLine(syncCommandLine, {
         argv: [ticket.key, "--repo", f.repo],
         streams,
         cwd: f.repo,
         now: new Date("2026-09-20T00:00:00.000Z"),
-        poll: () => Promise.resolve(delivery(ticket, "2026-09-20T00:00:00.000Z")),
+        deps: {
+          poll: () => Promise.resolve(delivery(ticket, "2026-09-20T00:00:00.000Z")),
+        },
       }),
     );
     expect(readFileSync(escapesPath(f.dir, ticket.ticket_id), "utf8")).toBe(written);
@@ -757,7 +755,7 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     await sync(f, ticket, mergedAt, OBSERVED_AT);
 
     const streams = capture();
-    await runEscapesCommand({ argv: ["--repo", f.repo, "--json"], streams, cwd: f.repo, now: READ_AT });
+    await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams, cwd: f.repo, now: READ_AT });
     const json = JSON.parse(streams.out.join("")) as JsonOutput;
     expect(json.tickets[0]!.status).toBe("window open");
     expect(json.tickets[0]!.due).toBe(false);
@@ -769,7 +767,7 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     expect(json.escapes.revert_rate.n).toBe(0);
 
     const table = capture();
-    await runEscapesCommand({ argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
+    await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
     expect(table.out.join("")).toContain("not yet due");
     expect(table.out.join("")).toContain("not yet due until 2026-09-21T00:00:00.000Z");
     expect(table.out.join("")).not.toMatch(/AYO-1.*\bno\b/);
@@ -787,7 +785,7 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
 
     const read = async (now: string): Promise<JsonOutput> => {
       const streams = capture();
-      await runEscapesCommand({
+      await runCommandLine(escapesCommandLine, {
         argv: ["--repo", f.repo, "--json"],
         streams,
         cwd: f.repo,
@@ -814,7 +812,7 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     // And it says so, with the command that fixes it — the same courtesy the
     // never-synced ticket already got.
     const table = capture();
-    await runEscapesCommand({
+    await runCommandLine(escapesCommandLine, {
       argv: ["--repo", f.repo],
       streams: table,
       cwd: f.repo,
@@ -870,7 +868,7 @@ describe("ac_3 — the rate, its interval and its n, in the stops table", () => 
     const ticket = ticketAt(f, "AYO-1", "ayo/AYO-1", 1);
     await sync(f, ticket, MERGED_AT, OBSERVED_AT);
     const streams = capture();
-    await runEscapesCommand({ argv: ["--repo", f.repo], streams, cwd: f.repo, now: READ_AT });
+    await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo], streams, cwd: f.repo, now: READ_AT });
     const out = streams.out.join("");
     expect(out).toContain("precision of stopping");
     expect(out).toContain("person shown something");
@@ -944,9 +942,9 @@ describe("ac_4 — the stand-in partner's merged tickets are the first populatio
     );
 
     const table = capture();
-    await runEscapesCommand({ argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
+    await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
     const json = capture();
-    await runEscapesCommand({ argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
+    await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
     const parsed = JSON.parse(json.out.join("")) as JsonOutput;
 
     expect(parsed.tickets).toHaveLength(4);
@@ -987,7 +985,7 @@ describe("ac_4 — the stand-in partner's merged tickets are the first populatio
     );
 
     const json = capture();
-    await runEscapesCommand({ argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
+    await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
     const parsed = JSON.parse(json.out.join("")) as JsonOutput;
     expect(parsed.tickets).toHaveLength(4);
     for (const row of parsed.tickets) expect(row.dogfood).toBe(true);
@@ -1031,40 +1029,42 @@ describe("ac_4 / SCP-157 — a hand-off reconciliation counts toward the merged 
     writeTicket(f.dir, ticket);
 
     const PR_URL = "https://github.com/o/r/pull/99";
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["AYO-9", "--repo", f.repo],
       streams: capture(),
       cwd: f.repo,
       now: new Date(OBSERVED_AT),
-      poll: () =>
-        Promise.resolve(
-          TicketDeliveryStateSchema.parse({
-            ticket_id: ticket.ticket_id,
-            branch,
-            pull_request_url: PR_URL,
-            pull_request_number: 99,
-            state: "merged",
-            merge_state: null,
-            checks: [],
-            observed: true,
-            human_review_verdicts: [],
-            finding_outcomes: {},
-            candidate_missed_recall: 0,
-            reverted_by: null,
-            fixed_by: null,
-            attempts: [],
-            observed_at: OBSERVED_AT,
-            stop_answers: [],
-          }),
-        ),
-      mergeFacts: (): MergeFacts => ({
-        default_branch: "main",
-        merge_commit: f.merges["AYO-9"]!,
-        merged_at: MERGED_AT,
-        branch_commits: [],
-        pull_request_url: PR_URL,
-        pull_request_number: 99,
-      }),
+      deps: {
+        poll: () =>
+          Promise.resolve(
+            TicketDeliveryStateSchema.parse({
+              ticket_id: ticket.ticket_id,
+              branch,
+              pull_request_url: PR_URL,
+              pull_request_number: 99,
+              state: "merged",
+              merge_state: null,
+              checks: [],
+              observed: true,
+              human_review_verdicts: [],
+              finding_outcomes: {},
+              candidate_missed_recall: 0,
+              reverted_by: null,
+              fixed_by: null,
+              attempts: [],
+              observed_at: OBSERVED_AT,
+              stop_answers: [],
+            }),
+          ),
+        mergeFacts: (): MergeFacts => ({
+          default_branch: "main",
+          merge_commit: f.merges["AYO-9"]!,
+          merged_at: MERGED_AT,
+          branch_commits: [],
+          pull_request_url: PR_URL,
+          pull_request_number: 99,
+        }),
+      },
     });
 
     const after = readTicket(f.dir, "AYO-9");
@@ -1074,7 +1074,7 @@ describe("ac_4 / SCP-157 — a hand-off reconciliation counts toward the merged 
     // No code change to `escapes` for this: it already reads every ticket
     // whose `state` is `merged`, whatever route got it there.
     const json = capture();
-    await runEscapesCommand({ argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
+    await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
     const report = JSON.parse(json.out.join("")) as JsonOutput;
     expect(report.escapes.merged).toBe(1);
     expect(report.tickets.map((row) => row.ticket_key)).toContain("AYO-9");

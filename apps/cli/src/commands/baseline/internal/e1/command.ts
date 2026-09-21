@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import {
   E1LedgerSchema,
   E1StateError,
@@ -25,10 +25,18 @@ import {
   type E1Thresholds,
 } from "./ledger.js";
 import { UsageError } from "../../../../usage-error.js";
+import {
+  listFlag,
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../../../command-line/grammar.js";
 import { baselinePath, readBaselineFile } from "../file.js";
 import { formatDuration } from "../../../run/index.js";
-import { storeDir } from "../../../../store/index.js";
-import type { Streams } from "../../../../streams.js";
+import type { CommandContext, Rendered } from "../../../../command.js";
+import { storeFor, type StoreTarget } from "../../../../store/index.js";
 
 /**
  * `perbo baseline` beyond the stopwatch: the E1 harness (D-038, SCP-080).
@@ -54,8 +62,9 @@ export function isE1Command(token: string | undefined): token is E1Command {
   return (E1_COMMANDS as readonly string[]).includes(token ?? "");
 }
 
-export interface E1Args {
+export interface E1Input {
   command: E1Command;
+  target: StoreTarget;
   subject: string | null;
   arm: E1Arm;
   title: string | null;
@@ -75,37 +84,68 @@ export interface E1Args {
   agreedWith: string | null;
   record: string | null;
   thresholds: Partial<E1Thresholds>;
-  json: boolean;
-  repo: string;
-  store: string | null;
 }
 
-const VALUE_FLAGS = new Set([
-  "--partner",
-  "--item",
-  "--title",
-  "--from",
-  "--started",
-  "--opened",
-  "--interruptions",
-  "--friction",
-  "--abandoned",
-  "--defect",
-  "--period",
-  "--eligible",
-  "--voluntary",
-  "--on-request",
-  "--agreed-on",
-  "--agreed-with",
-  "--record",
-  "--ratio-ten",
-  "--ratio-five",
-  "--routing",
-  "--abandonment",
-  "--defects",
-  "--repo",
-  "--store",
-]);
+/** What one harness invocation did: the ledger it read, or the record it wrote. */
+export type E1Report =
+  | { readonly kind: "read"; readonly ledger: E1Ledger; readonly path: string }
+  | {
+      readonly kind: "recorded";
+      readonly verb: E1Command;
+      readonly subject: string;
+      readonly ledger: E1Ledger;
+      readonly now: Date;
+    };
+
+const E1_FLAGS = {
+  "--partner": valueFlag(),
+  "--item": valueFlag(),
+  "--title": valueFlag(),
+  "--from": valueFlag(),
+  "--started": valueFlag(),
+  "--opened": valueFlag(),
+  "--interruptions": valueFlag(),
+  "--friction": valueFlag(),
+  "--abandoned": valueFlag(),
+  "--defect": listFlag(),
+  "--period": valueFlag(),
+  "--eligible": valueFlag(),
+  "--voluntary": valueFlag(),
+  "--on-request": valueFlag(),
+  "--agreed-on": valueFlag(),
+  "--agreed-with": valueFlag(),
+  "--record": valueFlag(),
+  // What the harness is held to, agreed before anything was measured and
+  // named on the line only where a comparison sets its own (hidden: the
+  // product offers the agreed thresholds, not a way to pick them per run).
+  "--ratio-ten": valueFlag({ hidden: true }),
+  "--ratio-five": valueFlag({ hidden: true }),
+  "--routing": valueFlag({ hidden: true }),
+  "--abandonment": valueFlag({ hidden: true }),
+  "--defects": valueFlag({ hidden: true }),
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--agent": switchFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+type E1Flag = keyof typeof E1_FLAGS;
+
+export const e1GrammarFor = (command: E1Command): Grammar => e1Grammar(command);
+
+const e1Grammar = (command: E1Command): Grammar<typeof E1_FLAGS> => ({
+  command: `baseline ${command}`,
+  flags: E1_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal: `baseline ${command} takes flags, not a positional argument`,
+  },
+  afterDoubleDash: "positionals",
+});
+
+/** Every verb's grammar, for the check that the help names each flag exactly once. */
+export const E1_GRAMMARS: readonly Grammar[] = E1_COMMANDS.map(e1Grammar);
 
 /** Every subcommand answers to these; they say where the ledger is, not what is in it. */
 const WHERE = ["--repo", "--store"] as const;
@@ -188,145 +228,68 @@ export function parseWhen(flag: string, raw: string): Date {
   return when;
 }
 
-export function parseE1Args(argv: readonly string[]): E1Args {
-  const tokens = argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
-  const [command, ...rest] = tokens;
+export function readE1(argv: readonly string[]): { input: E1Input; output: { json: boolean } } {
+  const [command, ...rest] = argv;
   if (!isE1Command(command)) throw new UsageError(USAGE);
+  const line = parseArgv(e1Grammar(command), rest);
+  const flags = line.flags;
 
-  const args: E1Args = {
-    command,
-    subject: null,
-    arm: "partner",
-    title: null,
-    item: null,
-    from: null,
-    started: null,
-    opened: null,
-    interruptions: 0,
-    friction: 0,
-    abandoned: null,
-    defects: [],
-    period: null,
-    eligible: null,
-    voluntary: null,
-    onRequest: 0,
-    agreedOn: null,
-    agreedWith: null,
-    record: null,
-    thresholds: {},
-    json: false,
-    repo: ".",
-    store: null,
-  };
-
-  for (let i = 0; i < rest.length; i += 1) {
-    const token = rest[i]!;
-    if (!token.startsWith("--")) {
-      throw new UsageError(`baseline ${command} takes flags, not '${token}'`);
-    }
-    if (!ALLOWED[command].includes(token)) {
-      throw new UsageError(
-        VALUE_FLAGS.has(token) || token === "--json" || token === "--agent"
-          ? `${token} does not apply to baseline ${command}`
-          : `unknown flag '${token}'`,
-      );
-    }
-    if (token === "--json") {
-      args.json = true;
-      continue;
-    }
-    if (token === "--agent") {
-      args.arm = "agent_direct";
-      continue;
-    }
-    const value = rest[++i];
-    if (value === undefined) throw new UsageError(`${token} requires a value`);
-    switch (token) {
-      case "--partner":
-        args.subject = value;
-        break;
-      case "--item":
-        args.item = value;
-        break;
-      case "--title":
-        args.title = value;
-        break;
-      case "--from":
-        args.from = value;
-        break;
-      case "--started":
-        args.started = value;
-        break;
-      case "--opened":
-        args.opened = value;
-        break;
-      case "--interruptions":
-        args.interruptions = minutes(token, value);
-        break;
-      case "--friction":
-        args.friction = minutes(token, value);
-        break;
-      case "--abandoned":
-        args.abandoned = value;
-        break;
-      case "--defect":
-        args.defects.push(value);
-        break;
-      case "--period":
-        args.period = value;
-        break;
-      case "--eligible":
-        args.eligible = number(token, value);
-        break;
-      case "--voluntary":
-        args.voluntary = number(token, value);
-        break;
-      case "--on-request":
-        args.onRequest = number(token, value);
-        break;
-      case "--agreed-on":
-        args.agreedOn = value;
-        break;
-      case "--agreed-with":
-        args.agreedWith = value;
-        break;
-      case "--record":
-        args.record = value;
-        break;
-      case "--ratio-ten":
-        args.thresholds.ratio_by_ticket_10 = number(token, value);
-        break;
-      case "--ratio-five":
-        args.thresholds.ratio_through_ticket_5 = number(token, value);
-        break;
-      case "--routing":
-        args.thresholds.min_voluntary_routing_rate = number(token, value);
-        break;
-      case "--abandonment":
-        args.thresholds.max_mid_flow_abandonment_rate = number(token, value);
-        break;
-      case "--defects":
-        args.thresholds.min_defects_caught = number(token, value);
-        break;
-      case "--repo":
-        args.repo = value;
-        break;
-      case "--store":
-        args.store = value;
-        break;
-      default:
-        throw new UsageError(`unknown flag '${token}'`);
+  // A flag that exists but belongs to another subcommand is named rather than
+  // called unknown: the person wrote something real in the wrong place.
+  for (const flag of line.given) {
+    if (!ALLOWED[command].includes(flag)) {
+      throw new UsageError(`${flag} does not apply to baseline ${command}`);
     }
   }
+
+  const value = <Flag extends E1Flag>(flag: Flag): string | undefined =>
+    flags[flag] as string | undefined;
+  const optionalNumber = (flag: E1Flag): number | null => {
+    const raw = value(flag);
+    return raw === undefined ? null : number(flag, raw);
+  };
+  const thresholds: Partial<E1Thresholds> = {};
+  for (const [flag, field] of [
+    ["--ratio-ten", "ratio_by_ticket_10"],
+    ["--ratio-five", "ratio_through_ticket_5"],
+    ["--routing", "min_voluntary_routing_rate"],
+    ["--abandonment", "max_mid_flow_abandonment_rate"],
+    ["--defects", "min_defects_caught"],
+  ] as const) {
+    const raw = value(flag);
+    if (raw !== undefined) thresholds[field] = number(flag, raw);
+  }
+
+  const interruptions = value("--interruptions");
+  const friction = value("--friction");
+  const args: E1Input = {
+    command,
+    target: { repo: value("--repo") ?? ".", store: value("--store") ?? null },
+    subject: value("--partner") ?? null,
+    arm: flags["--agent"] === true ? "agent_direct" : "partner",
+    title: value("--title") ?? null,
+    item: value("--item") ?? null,
+    from: value("--from") ?? null,
+    started: value("--started") ?? null,
+    opened: value("--opened") ?? null,
+    interruptions: interruptions === undefined ? 0 : minutes("--interruptions", interruptions),
+    friction: friction === undefined ? 0 : minutes("--friction", friction),
+    abandoned: value("--abandoned") ?? null,
+    defects: [...(flags["--defect"] ?? [])],
+    period: value("--period") ?? null,
+    eligible: optionalNumber("--eligible"),
+    voluntary: optionalNumber("--voluntary"),
+    onRequest: optionalNumber("--on-request") ?? 0,
+    agreedOn: value("--agreed-on") ?? null,
+    agreedWith: value("--agreed-with") ?? null,
+    record: value("--record") ?? null,
+    thresholds,
+  };
 
   if (args.command !== "result" && args.subject === null) {
     throw new UsageError(`baseline ${args.command} needs --partner <id>`);
   }
-  return args;
+  return { input: args, output: { json: flags["--json"] === true } };
 }
 
 export function e1Path(storeDirectory: string): string {
@@ -471,64 +434,67 @@ export function renderE1Report(ledger: E1Ledger, path: string): string {
   return lines.join("\n");
 }
 
-export interface E1Options {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  now?: () => Date;
-}
-
-export async function runE1Command(input: E1Options): Promise<number> {
-  const args = parseE1Args(input.argv);
-  const now = (input.now ?? (() => new Date()))();
-  const store = storeDir(resolve(input.cwd, args.repo), args.store);
+export function e1(input: E1Input, context: CommandContext): E1Report {
+  const now = context.now;
+  const store = storeFor(context.cwd, input.target);
   const path = e1Path(store);
   const before = readE1Ledger(path);
 
-  if (args.command === "result") {
-    const ledger = args.subject
-      ? { ...before, subjects: before.subjects.filter((one) => one.subject_id === args.subject) }
+  if (input.command === "result") {
+    const ledger = input.subject
+      ? { ...before, subjects: before.subjects.filter((one) => one.subject_id === input.subject) }
       : before;
-    if (args.subject && ledger.subjects.length === 0) {
-      throw new UsageError(`no baseline is open for ${args.subject} in ${path}`);
+    if (input.subject && ledger.subjects.length === 0) {
+      throw new UsageError(`no baseline is open for ${input.subject} in ${path}`);
     }
-    if (args.json || !input.streams.isTTY) {
-      const report = e1Report(ledger);
-      input.streams.stdout(
-        `${JSON.stringify(
-          {
-            path,
-            ...report,
-            // The cohort read is over partners; the stand-in's arm is beside it
-            // and never in it (SCP-080).
-            cohort: e1Cohort(report.partners),
-          },
-          null,
-          2,
-        )}\n`,
-      );
-    } else {
-      input.streams.stdout(`${renderE1Report(ledger, path)}\n`);
-    }
-    return 0;
+    return { kind: "read", ledger, path };
   }
 
-  const subject = args.subject!;
+  const subject = input.subject!;
   let after: E1Ledger;
   try {
-    after = apply(before, args, subject, store, now);
+    after = apply(before, input, subject, store, now);
   } catch (error) {
     if (error instanceof E1StateError) throw new UsageError(error.message);
     throw error;
   }
   writeE1Ledger(path, after);
-  input.streams.stdout(`${announce(args, subject, after, now)}\n`);
-  return 0;
+  return { kind: "recorded", verb: input.command, subject, ledger: after, now };
+}
+
+/** The ledger as a person reads it back, or the one line the record just took. */
+export function renderE1(report: E1Report, json: boolean): Rendered {
+  if (report.kind === "recorded") {
+    return {
+      stdout: `${announce(report.verb, report.subject, report.ledger, report.now)}\n`,
+      stderr: "",
+      exitCode: 0,
+    };
+  }
+  if (!json) {
+    return { stdout: `${renderE1Report(report.ledger, report.path)}\n`, stderr: "", exitCode: 0 };
+  }
+  const summary = e1Report(report.ledger);
+  return {
+    stdout: `${JSON.stringify(
+      {
+        path: report.path,
+        ...summary,
+        // The cohort read is over partners; the stand-in's arm is beside it
+        // and never in it (SCP-080).
+        cohort: e1Cohort(summary.partners),
+      },
+      null,
+      2,
+    )}\n`,
+    stderr: "",
+    exitCode: 0,
+  };
 }
 
 function apply(
   ledger: E1Ledger,
-  args: E1Args,
+  args: E1Input,
   subject: string,
   store: string,
   now: Date,
@@ -575,7 +541,7 @@ function apply(
  * the entry already holds the two times and the pauses the person reported
  * while they worked, so re-typing them is a chance to get them wrong.
  */
-function baselineTicketFor(args: E1Args, store: string, now: Date) {
+function baselineTicketFor(args: E1Input, store: string, now: Date) {
   if (args.from !== null) {
     if (args.started !== null || args.opened !== null) {
       throw new UsageError("--from takes the times from the stopwatch entry; drop --started/--opened");
@@ -612,7 +578,7 @@ function baselineTicketFor(args: E1Args, store: string, now: Date) {
   });
 }
 
-function productRunFor(args: E1Args, now: Date): E1ProductRun {
+function productRunFor(args: E1Input, now: Date): E1ProductRun {
   const work_item_id = requireFlag(args.item, "--item <ID>", "run");
   const started = parseWhen("--started", requireFlag(args.started, "--started <iso>", "run"));
   const defects = args.defects.map((raw) => parseDefect(raw, work_item_id, now));
@@ -651,9 +617,9 @@ function productRunFor(args: E1Args, now: Date): E1ProductRun {
   };
 }
 
-function announce(args: E1Args, subject_id: string, ledger: E1Ledger, now: Date): string {
+function announce(verb: E1Command, subject_id: string, ledger: E1Ledger, now: Date): string {
   const after = e1Subject(ledger, subject_id)!;
-  switch (args.command) {
+  switch (verb) {
     case "open":
       return (
         `opened ${subject_id} (${after.arm}) with thresholds agreed ${after.thresholds.agreed_at} ` +

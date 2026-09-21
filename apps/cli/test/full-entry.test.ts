@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { FULL_COMMAND_SET } from "../src/commands/run/index.js";
+import { COMMAND_NAMES } from "../src/command-line/names.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/open-build.js";
 
 /**
@@ -69,7 +69,7 @@ function offered(help: string): string[] {
 // whatever vitest's default would do to a describe block that shares it.
 describe.sequential("the entry point", () => {
   it("names the same commands the code's full set carries, so neither drifts alone", () => {
-    expect([...FULL_COMMAND_SET].sort()).toEqual([...OPEN, ...CLOSED].sort());
+    expect([...COMMAND_NAMES].sort()).toEqual([...OPEN, ...CLOSED].sort());
   });
 
 

@@ -5,12 +5,13 @@ import { join } from "node:path";
 import { SecretIndex } from "@perbo/contracts";
 import { BundleStore } from "@perbo/runner";
 import { afterAll, describe, expect, it } from "vitest";
-import { parseAdmitArgs, runAdmitCommand } from "../admit.js";
-import { parseExecuteArgs, runExecuteCommand } from "./index.js";
+import { admitCommandLine } from "../admit.js";
+import { executeCommandLine } from "./index.js";
 import { buildInspectReport, renderInspect } from "../inspect.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
 import { makeAttempt, makeTicket } from "../../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * `perbo run --ticket <id> --resume-from <bundle_id>` at the command line
@@ -123,14 +124,14 @@ function retainedDiff(dir: string): string {
 function admit(repo: string): { ticket_id: string; base_commit: string } {
   const admitted = streams();
   expect(
-    runAdmitCommand({
-      args: parseAdmitArgs([
+    runCommandLine(admitCommandLine, {
+      argv: [
         "--repo", repo,
         "--outcome", "Search results are paginated.",
         "--criterion", "A page holds 25 hits. :: a 140-hit query returns 25",
         "--path", "packages/search/**",
         "--approve",
-      ]),
+      ],
       streams: admitted.streams,
       cwd: repo,
     }),
@@ -221,7 +222,7 @@ function withoutClaudeOnPath(): () => void {
 }
 
 /**
- * Every case below runs `runExecuteCommand` end to end against a real
+ * Every case below runs `perbo run` end to end against a real
  * repository, a cold spawn under the load SCP-191 measures rather than an
  * idle machine's five seconds.
  */
@@ -246,8 +247,8 @@ describe("perbo run --resume-from, when the base commit has moved", () => {
     const bundleBefore = readFileSync(bundle.path, "utf8");
 
     const run = streams();
-    const code = await runExecuteCommand({
-      args: parseExecuteArgs(["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id]),
+    const code = await runCommandLine(executeCommandLine, {
+      argv: ["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id],
       streams: run.streams,
       cwd: repo,
     });
@@ -288,8 +289,8 @@ describe("perbo run --resume-from, when the base commit has moved", () => {
 
     const wrongTicket = streams();
     expect(
-      await runExecuteCommand({
-        args: parseExecuteArgs(["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id]),
+      await runCommandLine(executeCommandLine, {
+        argv: ["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id],
         streams: wrongTicket.streams,
         cwd: repo,
       }),
@@ -299,8 +300,8 @@ describe("perbo run --resume-from, when the base commit has moved", () => {
 
     const notABundle = streams();
     expect(
-      await runExecuteCommand({
-        args: parseExecuteArgs(["--repo", repo, "--ticket", "PRB-1", "--resume-from", "../../etc/passwd"]),
+      await runCommandLine(executeCommandLine, {
+        argv: ["--repo", repo, "--ticket", "PRB-1", "--resume-from", "../../etc/passwd"],
         streams: notABundle.streams,
         cwd: repo,
       }),
@@ -332,8 +333,8 @@ describe("perbo run --resume-from, when the bundle matches the run", () => {
     let code: number;
     const run = streams();
     try {
-      code = await runExecuteCommand({
-        args: parseExecuteArgs(["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id]),
+      code = await runCommandLine(executeCommandLine, {
+        argv: ["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id],
         streams: run.streams,
         cwd: repo,
       });

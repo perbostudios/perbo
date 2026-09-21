@@ -3,12 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { UsageError } from "../../usage-error.js";
-import {
-  BaselineFileSchema,
-  parseBaselineArgs,
-  runBaselineCommand,
-  type BaselineFile,
-} from "./index.js";
+import { BaselineFileSchema, baselineCommandLine, type BaselineFile } from "./index.js";
+import { runCommandLine } from "../../command-line/terminal.js";
+import type { Streams } from "../../streams.js";
 import { makeTicket } from "../../test-support/attempt-fixture.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-baseline-test-"));
@@ -26,11 +23,16 @@ function repo(name: string): string {
 async function baseline(dir: string, argv: string[], when: Date, isTTY = false) {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await runBaselineCommand({
+  const streams: Streams = {
+    stdout: (chunk) => out.push(chunk),
+    stderr: (chunk) => err.push(chunk),
+    isTTY,
+  };
+  const code = await runCommandLine(baselineCommandLine, {
     argv: [...argv, "--repo", dir],
-    streams: { stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY },
+    streams,
     cwd: dir,
-    now: () => when,
+    now: when,
   });
   return { code, out: out.join(""), err: err.join("") };
 }
@@ -40,16 +42,15 @@ const readFile = (dir: string): BaselineFile =>
 
 describe("perbo baseline argument parsing", () => {
   it("needs a subcommand, a title for start, and only the flags that apply", () => {
-    expect(() => parseBaselineArgs([])).toThrow(UsageError);
-    expect(() => parseBaselineArgs(["begin"])).toThrow(UsageError);
-    expect(() => parseBaselineArgs(["start"])).toThrow(/takes one title/);
-    expect(() => parseBaselineArgs(["start", "a", "b"])).toThrow(/takes one title/);
-    expect(() => parseBaselineArgs(["start", "a", "--pr", "u"])).toThrow(/--pr does not apply/);
-    expect(() => parseBaselineArgs(["pause", "extra"])).toThrow(/no positional/);
-    expect(parseBaselineArgs(["stop", "--pr=https://x/pull/1", "--note", "n"])).toMatchObject({
-      command: "stop",
-      pullRequest: "https://x/pull/1",
-      note: "n",
+    expect(() => baselineCommandLine.read([])).toThrow(UsageError);
+    expect(() => baselineCommandLine.read(["begin"])).toThrow(UsageError);
+    expect(() => baselineCommandLine.read(["start"])).toThrow(/takes one title/);
+    expect(() => baselineCommandLine.read(["start", "a", "b"])).toThrow(/takes one title/);
+    expect(() => baselineCommandLine.read(["start", "a", "--pr", "u"])).toThrow(/--pr does not apply/);
+    expect(() => baselineCommandLine.read(["pause", "extra"])).toThrow(/no positional/);
+    expect(baselineCommandLine.read(["stop", "--pr=https://x/pull/1", "--note", "n"]).input).toMatchObject({
+      kind: "stopwatch",
+      input: { command: "stop", pullRequest: "https://x/pull/1", note: "n" },
     });
   });
 });
@@ -205,5 +206,23 @@ describe("perbo baseline", () => {
     mkdirSync(join(dir, ".perbo"), { recursive: true });
     writeFileSync(join(dir, ".perbo", "baseline.json"), JSON.stringify({ schema_version: 1, entries: "no" }));
     await expect(baseline(dir, ["start", "x"], at(0))).rejects.toThrow(/baseline\.json is not a baseline record/);
+  });
+});
+
+describe("what a pipe carries", () => {
+  it("is the record for the two verbs that have one, and the same line for the rest", async () => {
+    // `jsonWhenPiped` is the command's, so it holds for every verb behind it;
+    // what each verb does with it is the rendering's. The line verbs write the
+    // same sentence either way, which is what docs/04 promises (D-NEW-cli-grammar).
+    const dir = repo("piped");
+    const piped = await baseline(dir, ["start", "a title"], at(0), false);
+    const terminal = await baseline(repo("terminal"), ["start", "a title"], at(0), true);
+    expect(piped.out).toBe(terminal.out);
+    expect(piped.out).toMatch(/^started bl_/);
+
+    const listed = await baseline(dir, ["list"], at(1), false);
+    expect(JSON.parse(listed.out)).toMatchObject({ summary: { entries: 1, open: 1 } });
+    const read = await baseline(dir, ["list"], at(1), true);
+    expect(() => JSON.parse(read.out)).toThrow();
   });
 });

@@ -24,10 +24,10 @@ import {
 } from "@perbo/contracts";
 import { pollPullRequest, type PreflightRequest, type PreflightResult } from "@perbo/runner";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "../admit.js";
+import { admitCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
-import { runEscapesCommand } from "../escapes/index.js";
-import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "./index.js";
+import { escapesCommandLine } from "../escapes/index.js";
+import { type ExecuteDeps, executeCommandLine } from "./index.js";
 import { buildInspectReport } from "../inspect.js";
 import {
   LOCAL_RUN_SCHEMA_VERSION,
@@ -36,8 +36,8 @@ import {
   writeLocalRunRecord,
   type LocalRunRecord,
 } from "./local.js";
-import { runStopsCommand } from "../stops.js";
-import { runSyncCommand } from "../sync.js";
+import { stopsCommandLine } from "../stops.js";
+import { syncCommandLine } from "../sync.js";
 import {
   headCommit,
   idsFor,
@@ -50,6 +50,7 @@ import {
 import { makeAttempt } from "../../test-support/attempt-fixture.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "../../test-support/open-build.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * `perbo run` with nothing admitted behind it (AYO-32).
@@ -78,7 +79,7 @@ import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
  * that commit does not have), the workspace packages rebuilt, then
  * `pnpm exec vitest run src/commands/run/local.test.ts` in `apps/cli`. Result: 7 of 7
  * failed, six on `unknown flag '--outcome'` and one on `unknown flag '--pr'`,
- * thrown by `parseExecuteArgs` — at that commit the command takes its plan only
+ * thrown where the run reads its line — at that commit the command takes its plan only
  * from an admitted ticket. The same command after the change: 7 passed.
  */
 
@@ -551,15 +552,14 @@ function filesUnder(dir: string): string[] {
 async function run(
   repo: string,
   argv: readonly string[],
-  options: Omit<ExecuteOptions, "args" | "streams" | "cwd"> = {},
+  options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; out: string; err: string; json: RunJson }> {
   const streams = capture();
-  const code = await runExecuteCommand({
-    args: parseExecuteArgs(["--repo", repo, ...argv]),
+  const code = await runCommandLine(executeCommandLine, {
+    argv: ["--repo", repo, ...argv],
     streams: streams.streams,
     cwd: repo,
-    preflight: okPreflight,
-    ...options,
+    deps: { preflight: okPreflight, ...options },
   });
   const out = streams.out.join("");
   return { code, out, err: streams.err.join(""), json: JSON.parse(out) as RunJson };
@@ -813,14 +813,14 @@ describe("the write guard a run with nothing admitted enforces", () => {
       agent_binary: guardedAgent("guard-parity-ticket", callsFor(ticketOutside)),
       materialization_manifest: noInstall(ticketed),
     });
-    await runAdmitCommand({
-      args: parseAdmitArgs([
+    await runCommandLine(admitCommandLine, {
+      argv: [
         "--repo", ticketed,
         "--outcome", OUTCOME,
         "--criterion", CRITERION,
         "--path", "src/**",
         "--approve",
-      ]),
+      ],
       streams: capture().streams,
       cwd: ticketed,
     });
@@ -858,14 +858,14 @@ describe("the branch a ticket-backed run works on", () => {
     });
     const other = "Totals are rounded to whole cents";
     for (const outcome of [OUTCOME, other]) {
-      await runAdmitCommand({
-        args: parseAdmitArgs([
+      await runCommandLine(admitCommandLine, {
+        argv: [
           "--repo", repo,
           "--outcome", outcome,
           "--criterion", CRITERION,
           "--path", "src/**",
           "--approve",
-        ]),
+        ],
         streams: capture().streams,
         cwd: repo,
       });
@@ -1310,11 +1310,11 @@ describe("a run with nothing admitted, after its pull request is open", () => {
     else process.env.GITHUB_TOKEN = originalGithubToken;
   });
 
-  const withGh = async <T>(bin: string, body: () => Promise<T>): Promise<T> => {
+  const withGh = async <T>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
     process.env.PATH = `${bin}:${originalPath ?? ""}`;
     process.env.GH_TOKEN = "test-token";
     delete process.env.GITHUB_TOKEN;
-    return body();
+    return await body();
   };
 
   describe("sync over a store that holds only local runs", () => {
@@ -1349,7 +1349,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       const streams = captureStreams();
       const code = await withGh(bin, () =>
-        runSyncCommand({ argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
@@ -1405,7 +1405,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       const streams = captureStreams();
       const code = await withGh(bin, () =>
-        runSyncCommand({ argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
@@ -1429,7 +1429,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       const streams = captureStreams();
       const code = await withGh(fakeGh("no-pull-request", {}), () =>
-        runSyncCommand({ argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
@@ -1470,15 +1470,17 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       const streams = captureStreams();
       const code = await withGh(bin, () =>
-        runSyncCommand({
+        runCommandLine(syncCommandLine, {
           argv: ["--repo", repo.root],
           streams,
           cwd: repo.root,
           now: NOW,
-          poll: async (args) =>
-            args.branch === branchOf(broken)
-              ? Promise.reject(new Error("gh: the remote end hung up unexpectedly"))
-              : pollPullRequest(args),
+          deps: {
+            poll: async (args) =>
+              args.branch === branchOf(broken)
+                ? Promise.reject(new Error("gh: the remote end hung up unexpectedly"))
+                : pollPullRequest(args),
+          },
         }),
       );
 
@@ -1509,7 +1511,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
           },
         }),
         () =>
-          runSyncCommand({ argv: [run.run_id, "--repo", repo.root], streams: read, cwd: repo.root, now: NOW }),
+          runCommandLine(syncCommandLine, { argv: [run.run_id, "--repo", repo.root], streams: read, cwd: repo.root, now: NOW }),
       );
       expect(readCode).toBe(EXIT_CODES.approve);
       expect(read.out.join("")).toContain(`${run.run_id}  pr_open  open`);
@@ -1521,7 +1523,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       process.env.PATH = originalPath;
       delete process.env.GH_TOKEN;
       delete process.env.GITHUB_TOKEN;
-      const unreadCode = await runSyncCommand({
+      const unreadCode = await runCommandLine(syncCommandLine, {
         argv: [run.run_id, "--repo", repo.root],
         streams: unread,
         cwd: repo.root,
@@ -1539,7 +1541,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       expect(existsSync(join(root, ".perbo"))).toBe(false);
 
       const streams = captureStreams();
-      const code = await runSyncCommand({ argv: ["--repo", root], streams, cwd: root, now: NOW });
+      const code = await runCommandLine(syncCommandLine, { argv: ["--repo", root], streams, cwd: root, now: NOW });
 
       expect(code).toBe(EXIT_CODES.approve);
       const said = [...streams.out, ...streams.err].join("");
@@ -1553,7 +1555,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       mkdirSync(repo.dir, { recursive: true });
 
       const streams = captureStreams();
-      const code = await runSyncCommand({ argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW });
+      const code = await runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW });
 
       expect(code).toBe(EXIT_CODES.approve);
       expect(
@@ -1700,7 +1702,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       });
 
       await withGh(bin, async () => {
-        const ticketSync = await runSyncCommand({
+        const ticketSync = await runCommandLine(syncCommandLine, {
           argv: ["AYO-1", "--repo", repo.root],
           streams: captureStreams(),
           cwd: repo.root,
@@ -1708,7 +1710,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
         });
         expect(ticketSync).toBe(EXIT_CODES.approve);
         const sweep = captureStreams();
-        const runSync = await runSyncCommand({
+        const runSync = await runCommandLine(syncCommandLine, {
           argv: ["--repo", repo.root],
           streams: sweep,
           cwd: repo.root,
@@ -1725,7 +1727,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       const escapes = captureStreams();
       expect(
-        await runEscapesCommand({
+        await runCommandLine(escapesCommandLine, {
           argv: ["--repo", repo.root, "--json"],
           streams: escapes,
           cwd: repo.root,
@@ -1756,12 +1758,12 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       expect(runRow["status"]).toBe("not observed");
       // And on the printed table a person reads, one line each.
       const printed = captureStreams();
-      await runEscapesCommand({ argv: ["--repo", repo.root], streams: printed, cwd: repo.root, now: NOW });
+      await runCommandLine(escapesCommandLine, { argv: ["--repo", repo.root], streams: printed, cwd: repo.root, now: NOW });
       expect(printed.out.join("")).toContain(run.run_id);
 
       const stops = captureStreams();
       expect(
-        await runStopsCommand({
+        await runCommandLine(stopsCommandLine, {
           argv: ["--repo", repo.root, "--json"],
           streams: stops,
           cwd: repo.root,
@@ -1815,7 +1817,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
           },
         }),
         async () => {
-          const code = await runSyncCommand({
+          const code = await runCommandLine(syncCommandLine, {
             argv: ["AYO-2", "--repo", ticketed.root],
             streams: captureStreams(),
             cwd: ticketed.root,
@@ -1841,7 +1843,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
           },
         }),
         async () => {
-          const code = await runSyncCommand({
+          const code = await runCommandLine(syncCommandLine, {
             argv: ["--repo", local.root],
             streams: captureStreams(),
             cwd: local.root,
@@ -1856,7 +1858,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       const escapesOf = async (repo: Repo) => {
         const streams = captureStreams();
         expect(
-          await runEscapesCommand({
+          await runCommandLine(escapesCommandLine, {
             argv: ["--repo", repo.root, "--json"],
             streams,
             cwd: repo.root,
@@ -1880,14 +1882,14 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       expect(localRow["reverted"]).toBe(ticketRow["reverted"]);
       // And on the printed table, the run gets a line of its own.
       const printed = captureStreams();
-      await runEscapesCommand({ argv: ["--repo", local.root], streams: printed, cwd: local.root, now: NOW });
+      await runCommandLine(escapesCommandLine, { argv: ["--repo", local.root], streams: printed, cwd: local.root, now: NOW });
       expect(printed.out.join("")).toContain(merged.run_id);
       expect(printed.out.join("")).not.toContain("no merged tickets yet");
 
       const stopsOf = async (repo: Repo) => {
         const streams = captureStreams();
         expect(
-          await runStopsCommand({
+          await runCommandLine(stopsCommandLine, {
             argv: ["--repo", repo.root, "--json"],
             streams,
             cwd: repo.root,

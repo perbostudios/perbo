@@ -6,11 +6,11 @@ import { afterAll, describe, expect, it } from "vitest";
 import { SYMBOL_INDEX_SCHEMA_VERSION, SymbolIndexSchema } from "@perbo/contracts";
 import {
   buildSymbolIndex,
+  indexCommandLine,
   isUnsupportedRepository,
-  parseIndexArgs,
-  runIndexCommand,
   symbolIndexPath,
 } from "./symbol-index.js";
+import { runCommandLine } from "../command-line/terminal.js";
 import type { Streams } from "../streams.js";
 import { FIXTURES } from "../test-support/paths.js";
 
@@ -215,7 +215,7 @@ describe("the index of an authored monorepo", () => {
       // and the stamp says the checkout is not the commit.
       expect(built.files.find((file) => file.path === "packages/core/src/theme.ts")?.imports).toEqual([]);
       const streams = capture();
-      expect(runIndexCommand({ argv: ["--repo", root], streams, cwd: scratch })).toBe(0);
+      expect(runCommandLine(indexCommandLine, { argv: ["--repo", root], streams, cwd: scratch })).toBe(0);
       expect(streams.out()).toContain("with uncommitted changes");
     },
     TIMEOUT,
@@ -315,7 +315,7 @@ describe("what the index skips rather than fails on", () => {
         writeFileSync(join(at, "packages", "core", "src", "blank.ts"), 'import "";\nexport const blank = 1;\n');
       });
       const streams = capture();
-      expect(runIndexCommand({ argv: ["--repo", root], streams, cwd: scratch })).toBe(0);
+      expect(runCommandLine(indexCommandLine, { argv: ["--repo", root], streams, cwd: scratch })).toBe(0);
       const built = SymbolIndexSchema.parse(JSON.parse(readFileSync(symbolIndexPath(root), "utf8")));
       expect(built.files.map((file) => file.path)).toEqual(
         (EXPECTED as { files: { path: string }[] }).files.map((file) => file.path),
@@ -370,7 +370,7 @@ describe("a repository outside TypeScript and JavaScript", () => {
     () => {
       const root = repositoryFrom("symbol-index-unsupported");
       const streams = capture();
-      const code = runIndexCommand({ argv: ["--repo", root, "--json"], streams, cwd: scratch });
+      const code = runCommandLine(indexCommandLine, { argv: ["--repo", root, "--json"], streams, cwd: scratch });
       expect(code).toBe(0);
       expect(JSON.parse(streams.out())).toEqual({
         supported: false,
@@ -380,7 +380,7 @@ describe("a repository outside TypeScript and JavaScript", () => {
       expect(() => readFileSync(symbolIndexPath(root), "utf8")).toThrow();
 
       const plain = capture();
-      expect(runIndexCommand({ argv: ["--repo", root], streams: plain, cwd: scratch })).toBe(0);
+      expect(runCommandLine(indexCommandLine, { argv: ["--repo", root], streams: plain, cwd: scratch })).toBe(0);
       expect(plain.out()).toMatch(/not indexed|unsupported/i);
       expect(plain.out()).toContain(".py");
     },
@@ -394,7 +394,7 @@ describe("perbo index, the command", () => {
     () => {
       const root = repositoryFrom("symbol-index");
       const streams = capture();
-      const code = runIndexCommand({ argv: ["--repo", root, "--json"], streams, cwd: scratch });
+      const code = runCommandLine(indexCommandLine, { argv: ["--repo", root, "--json"], streams, cwd: scratch });
       expect(code).toBe(0);
 
       const printed = JSON.parse(streams.out()) as unknown;
@@ -411,7 +411,7 @@ describe("perbo index, the command", () => {
     () => {
       const root = repositoryFrom("symbol-index");
       const streams = capture();
-      expect(runIndexCommand({ argv: ["--repo", root], streams, cwd: scratch })).toBe(0);
+      expect(runCommandLine(indexCommandLine, { argv: ["--repo", root], streams, cwd: scratch })).toBe(0);
       const printed = streams.out();
       expect(() => JSON.parse(printed)).toThrow();
       // The counts the summary is for: nine files, and the exports and edges in them.
@@ -423,16 +423,17 @@ describe("perbo index, the command", () => {
   );
 
   it("refuses a flag it does not take", () => {
-    expect(() => parseIndexArgs(["--depth", "2"])).toThrow(/--depth/);
-    expect(() => parseIndexArgs(["--json=yes"])).toThrow();
-    expect(() => parseIndexArgs(["--repo"])).toThrow(/value/);
+    expect(() => indexCommandLine.read(["--depth", "2"])).toThrow(/--depth/);
+    expect(() => indexCommandLine.read(["--json=yes"])).toThrow();
+    expect(() => indexCommandLine.read(["--repo"])).toThrow(/value/);
+    expect(() => indexCommandLine.read(["somewhere"])).toThrow(/index takes no argument/);
   });
 
   it("defaults to the working directory and to the summary", () => {
-    expect(parseIndexArgs([])).toEqual({ repo: ".", json: false });
-    expect(parseIndexArgs(["--repo", "/somewhere", "--json"])).toEqual({
-      repo: "/somewhere",
-      json: true,
+    expect(indexCommandLine.read([])).toEqual({ input: { repo: "." }, output: { json: false } });
+    expect(indexCommandLine.read(["--repo", "/somewhere", "--json"])).toEqual({
+      input: { repo: "/somewhere" },
+      output: { json: true },
     });
   });
 });

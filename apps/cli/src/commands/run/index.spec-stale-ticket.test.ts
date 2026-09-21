@@ -13,12 +13,13 @@ import {
 } from "@perbo/model";
 import { commitSpec } from "@perbo/runner";
 import { UsageError } from "../../usage-error.js";
-import { parseAdmitArgs, runAdmitCommand, runApproveCommand } from "../admit.js";
+import { admitCommandLine, approveCommandLine } from "../admit.js";
 import type { Streams } from "../../streams.js";
 import { TICKET_RUNS } from "./index.js";
 import { buildInspectReport, renderInspect, type InspectReport } from "../inspect.js";
-import { runIndexCommand } from "../symbol-index.js";
+import { indexCommandLine } from "../symbol-index.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * What a stale spec does to the ticket it was drafted for (D-103), over a real
@@ -87,7 +88,7 @@ function repository(spec = SPEC): { repo: string; specPath: string } {
   );
   execFileSync("git", ["-C", repo, "add", "-A"], { env: gitIdentity });
   execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitIdentity });
-  runIndexCommand({ argv: ["--repo", repo], streams: capture(), cwd: repo });
+  runCommandLine(indexCommandLine, { argv: ["--repo", repo], streams: capture(), cwd: repo });
   return { repo, specPath };
 }
 
@@ -153,12 +154,7 @@ const hashOf = (path: string): string =>
 /** A repository with `PRB-1` admitted from its spec and nothing more: a ticket at `plan_review`. */
 async function admitted(spec = SPEC): Promise<{ repo: string; specPath: string; dir: string }> {
   const { repo, specPath } = repository(spec);
-  const code = await runAdmitCommand({
-    args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath]),
-    streams: capture(),
-    cwd: repo,
-    model: scripted(DRAFT),
-  });
+  const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath], streams: capture(), cwd: repo, deps: { model: scripted(DRAFT) } });
   expect(code).toBe(0);
   const dir = storeDir(repo, null);
   expect(readTicket(dir, "PRB-1").state).toBe("plan_review");
@@ -168,7 +164,7 @@ async function admitted(spec = SPEC): Promise<{ repo: string; specPath: string; 
 /** A repository with `PRB-1` admitted from its spec and approved: a ticket at `ready`. */
 async function approved(spec = SPEC): Promise<{ repo: string; specPath: string; dir: string }> {
   const { repo, specPath, dir } = await admitted(spec);
-  expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+  expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
   expect(readTicket(dir, "PRB-1").state).toBe("ready");
   return { repo, specPath, dir };
 }
@@ -176,8 +172,7 @@ async function approved(spec = SPEC): Promise<{ repo: string; specPath: string; 
 /** The same, for work admitted from the command line: a ticket at `ready` with no spec. */
 async function ticketless(): Promise<{ repo: string; dir: string }> {
   const { repo } = repository();
-  const code = await runAdmitCommand({
-    args: parseAdmitArgs([
+  const code = await runCommandLine(admitCommandLine, { argv: [
       "--repo",
       repo,
       "--outcome",
@@ -186,13 +181,9 @@ async function ticketless(): Promise<{ repo: string; dir: string }> {
       "A signup queues one email :: one message is on the queue",
       "--path",
       "packages/queue/**",
-    ]),
-    streams: capture(),
-    cwd: repo,
-    model: scripted(DRAFT),
-  });
+    ], streams: capture(), cwd: repo, deps: { model: scripted(DRAFT) } });
   expect(code).toBe(0);
-  expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+  expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
   return { repo, dir: storeDir(repo, null) };
 }
 
@@ -252,18 +243,13 @@ describe("a run starting a ticket that has not started", () => {
   it("starts where the spec was edited while the draft was being read, before approval", async () => {
     const { repo, specPath } = repository(SPEC);
     expect(
-      await runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--from-spec", specPath]),
-        streams: capture(),
-        cwd: repo,
-        model: scripted(DRAFT),
-      }),
+      await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath], streams: capture(), cwd: repo, deps: { model: scripted(DRAFT) } }),
     ).toBe(0);
     const dir = storeDir(repo, null);
     expect(readTicket(dir, "PRB-1").state).toBe("plan_review");
 
     writeFileSync(specPath, SPEC.replace("60 seconds", "45 seconds"));
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
     expect(readTicket(dir, "PRB-1").state).toBe("ready");
 
     // The run starts, and the record says the spec it was approved from.
@@ -297,7 +283,7 @@ describe("a run starting a ticket that has not started", () => {
       execFileSync("git", ["-C", repo, "config", "commit.gpgsign", "false"], { env: gitIdentity });
 
       writeFileSync(specPath, SPEC.replace("60 seconds", "45 seconds"));
-      expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+      expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
 
       const spec = readTicket(dir, "PRB-1").admission.spec;
       if (spec === null) throw new Error("PRB-1 was admitted from a spec and should carry one");
@@ -338,7 +324,7 @@ describe("a run starting a ticket that has not started", () => {
       "export function send(): number {\n  return 1;\n}\n",
     );
     execFileSync("git", ["-C", repo, "commit", "-qam", "rename the sender"], { env: gitIdentity });
-    runIndexCommand({ argv: ["--repo", repo], streams: capture(), cwd: repo });
+    runCommandLine(indexCommandLine, { argv: ["--repo", repo], streams: capture(), cwd: repo });
     expect(() => TICKET_RUNS.starting(work(repo), false)).toThrow(/@sendActivation/);
     expect(readTicket(dir, "PRB-1").state).toBe("plan_invalid");
   });
@@ -419,7 +405,7 @@ describe("a run starting a ticket that has not started", () => {
       "export function send(): number {\n  return 1;\n}\n",
     );
     execFileSync("git", ["-C", repo, "commit", "-qam", "rename the sender"], { env: gitIdentity });
-    runIndexCommand({ argv: ["--repo", repo], streams: capture(), cwd: repo });
+    runCommandLine(indexCommandLine, { argv: ["--repo", repo], streams: capture(), cwd: repo });
 
     const said: string[] = [];
     const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
@@ -508,7 +494,7 @@ describe("what approval records about the spec", () => {
     // would print "every name in it is still here" over a name that had gone.
     const { repo, specPath, dir } = await admitted();
     writeFileSync(specPath, SPEC.replace("60 seconds", "45 seconds"));
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
     const spec = readTicket(dir, "PRB-1").admission.spec;
     expect(spec?.names_that_resolved).toEqual([]);
     expect(spec?.symbols_judged_at_approval).toBe(false);
@@ -520,7 +506,7 @@ describe("what approval records about the spec", () => {
       "export function send(): number {\n  return 1;\n}\n",
     );
     execFileSync("git", ["-C", repo, "commit", "-qam", "rename the sender"], { env: gitIdentity });
-    runIndexCommand({ argv: ["--repo", repo], streams: capture(), cwd: repo });
+    runCommandLine(indexCommandLine, { argv: ["--repo", repo], streams: capture(), cwd: repo });
 
     const report = buildInspectReport({ storeDirectory: dir, key: "PRB-1", attempt: null });
     expect(report.spec_staleness?.stale).toEqual([]);
@@ -551,7 +537,7 @@ describe("what approval records about the spec", () => {
       "export function send(): number {\n  return 1;\n}\n",
     );
     execFileSync("git", ["-C", repo, "commit", "-qam", "rename the sender"], { env: gitIdentity });
-    runIndexCommand({ argv: ["--repo", repo], streams: capture(), cwd: repo });
+    runCommandLine(indexCommandLine, { argv: ["--repo", repo], streams: capture(), cwd: repo });
 
     // Judged, so the lost name is stale and the run stops — the reading such a
     // ticket has always had, through the strict record and the loose one.
@@ -572,7 +558,7 @@ describe("what approval records about the spec", () => {
     // and `readFileSync` throws, which is the shape approval has to survive.
     rmSync(specPath);
     mkdirSync(specPath);
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
     rmSync(specPath, { recursive: true });
     writeFileSync(specPath, SPEC);
 

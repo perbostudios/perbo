@@ -19,12 +19,12 @@ import {
   type ModelTurn,
 } from "@perbo/model";
 import { UsageError } from "../usage-error.js";
-import { runEditCommand } from "./edit/index.js";
-import { buildInspectReport, renderInspect, runInspectCommand } from "./inspect.js";
-import { LIST_JSON_SCHEMA_VERSION, ListJsonSchema, applyObservedPath, loadAdmitted, parseAdmitArgs, parseListArgs, runAdmitCommand, runApproveCommand, runListCommand, statesObserved } from "./admit.js";
+import { editCommandLine } from "./edit/index.js";
+import { buildInspectReport, inspectCommandLine, renderInspect } from "./inspect.js";
+import { LIST_JSON_SCHEMA_VERSION, ListJsonSchema, admitCommandLine, applyObservedPath, approveCommandLine, listCommandLine, loadAdmitted, statesObserved } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { PACKAGE_ROOT, REPO_ROOT } from "../test-support/paths.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
 import {
   TicketDeliveryStateSchema,
   TicketRunConfigSchema,
@@ -58,6 +58,7 @@ import {
   storeDir,
   writeTicket,
 } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -162,13 +163,7 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
   it("refuses --approve together with --from: a drafted scope nobody read cannot bind a run", () => {
     const repo = repository("draft-approve");
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--from", "octo/repo#7", "--approve"]),
-        streams: capture(),
-        cwd: repo,
-        fetchIssue,
-        model: drafter(),
-      }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from", "octo/repo#7", "--approve"], streams: capture(), cwd: repo, deps: { fetchIssue, model: drafter() } }),
     ).toThrow(/cannot be approved in the same command.*perbo approve <key>/s);
     expect(existsSync(join(storeDir(repo, null), "tickets"))).toBe(false);
   });
@@ -176,13 +171,7 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
   it("creates a plan_review ticket from the draft, keeps the snapshot, approves nothing", async () => {
     const repo = repository("admit-from");
     const streams = capture();
-    const code = await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from", "o/r#412"]),
-      streams,
-      cwd: repo,
-      model: drafter(),
-      fetchIssue,
-    });
+    const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from", "o/r#412"], streams, cwd: repo, deps: { model: drafter(), fetchIssue } });
     expect(code).toBe(0);
 
     const dir = storeDir(repo, null);
@@ -222,7 +211,7 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
     // ...and is not mistaken for a ticket by the store.
     expect(nextKey(dir, "PRB")).toBe("PRB-2");
     const list = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo, "--json"]), streams: list, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo, "--json"], streams: list, cwd: repo });
     expect(ListJsonSchema.parse(JSON.parse(list.out.join(""))).tickets).toHaveLength(1);
 
     const err = streams.err.join("");
@@ -234,17 +223,11 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
 
   it("lets a typed flag override the draft's corresponding part", async () => {
     const repo = repository("admit-from-override");
-    await runAdmitCommand({
-      args: parseAdmitArgs([
+    await runCommandLine(admitCommandLine, { argv: [
         "--repo", repo, "--from", "o/r#412",
         "--outcome", "Typed outcome.",
         "--path", "packages/queue/**",
-      ]),
-      streams: capture(),
-      cwd: repo,
-      model: drafter(),
-      fetchIssue,
-    });
+      ], streams: capture(), cwd: repo, deps: { model: drafter(), fetchIssue } });
     const dir = storeDir(repo, null);
     const contract = readContract(dir, "PRB-1");
     expect(contract.outcome).toBe("Typed outcome.");
@@ -257,13 +240,7 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
   it("turns a failure to read the issue into one sentence", async () => {
     const repo = repository("admit-from-gh-fails");
     await expect(
-      runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--from", "o/r#412"]),
-        streams: capture(),
-        cwd: repo,
-        model: drafter(),
-        fetchIssue: () => Promise.reject(new PlanningError("gh could not read o/r#412: not found")),
-      }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from", "o/r#412"], streams: capture(), cwd: repo, deps: { model: drafter(), fetchIssue: () => Promise.reject(new PlanningError("gh could not read o/r#412: not found")) } }),
     ).rejects.toThrow(/gh could not read o\/r#412: not found/);
     expect(existsSync(join(storeDir(repo, null), "tickets"))).toBe(false);
   });
@@ -271,24 +248,18 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
   it("refuses a draft that is not the shape and writes nothing", async () => {
     const repo = repository("admit-from-bad-draft");
     await expect(
-      runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--from", "o/r#412"]),
-        streams: capture(),
-        cwd: repo,
-        model: drafter({ outcome: "x", steps: ["do it"] }),
-        fetchIssue,
-      }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from", "o/r#412"], streams: capture(), cwd: repo, deps: { model: drafter({ outcome: "x", steps: ["do it"] }), fetchIssue } }),
     ).rejects.toThrow(/not a contract draft/);
     expect(existsSync(join(storeDir(repo, null), "tickets"))).toBe(false);
   });
 
   it("refuses a reference that is not owner/repo#N before reaching gh", () => {
-    expect(() => parseAdmitArgs(["--from", "PRB-1"])).toThrow(UsageError);
+    expect(() => admitCommandLine.read(["--from", "PRB-1"]).input).toThrow(UsageError);
   });
 
   it("keeps typed admission synchronous and model-free", () => {
     const repo = repository("admit-typed-sync");
-    const result = runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+    const result = runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
     expect(typeof result).toBe("number");
     expect(readDraftSnapshot(storeDir(repo, null), "PRB-1")?.draft).toBeNull();
   });
@@ -348,12 +319,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
 
     const repo = repository("admit-from-file");
     const model = recordingDrafter();
-    const code = await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from-file", path]),
-      streams: capture(),
-      cwd: repo,
-      model,
-    });
+    const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-file", path], streams: capture(), cwd: repo, deps: { model } });
     expect(code).toBe(0);
 
     // The drafted contract: an outcome, at least two criteria, a scope.
@@ -375,13 +341,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     // The same call `--from` makes, shown by making it: the same repository,
     // the same title and body, and the two requests compared field by field.
     const fromModel = recordingDrafter();
-    await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from", "o/r#412"]),
-      streams: capture(),
-      cwd: repo,
-      model: fromModel,
-      fetchIssue: () => Promise.resolve({ ...issue, body }),
-    });
+    await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from", "o/r#412"], streams: capture(), cwd: repo, deps: { model: fromModel, fetchIssue: () => Promise.resolve({ ...issue, body }) } });
 
     const fromFileRequest = model.requests[0]!;
     const fromRequest = fromModel.requests[0]!;
@@ -404,12 +364,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
   it("produces a candidate only: nothing is executed or admitted from it (D-072)", async () => {
     const repo = repository("admit-from-file-candidate");
     const path = pasted("SCP-152.md", markdown);
-    await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from-file", path]),
-      streams: capture(),
-      cwd: repo,
-      model: recordingDrafter(),
-    });
+    await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-file", path], streams: capture(), cwd: repo, deps: { model: recordingDrafter() } });
 
     const dir = storeDir(repo, null);
     const ticket = readTicket(dir, "PRB-1");
@@ -426,24 +381,19 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
 
     // The one command that could have skipped the person is refused outright.
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--from-file", path, "--approve"]),
-        streams: capture(),
-        cwd: repo,
-        model: recordingDrafter(),
-      }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-file", path, "--approve"], streams: capture(), cwd: repo, deps: { model: recordingDrafter() } }),
     ).toThrow(/--from-file drafts the contract with a model.*perbo approve <key>/s);
   });
 
   it("refuses --from and --from-file together, naming the conflict", () => {
-    expect(() => parseAdmitArgs(["--from", "o/r#412", "--from-file", "issue.md"])).toThrow(
+    expect(() => admitCommandLine.read(["--from", "o/r#412", "--from-file", "issue.md"]).input).toThrow(
       UsageError,
     );
-    expect(() => parseAdmitArgs(["--from", "o/r#412", "--from-file", "issue.md"])).toThrow(
+    expect(() => admitCommandLine.read(["--from", "o/r#412", "--from-file", "issue.md"]).input).toThrow(
       /--from and --from-file are mutually exclusive/,
     );
     // Either order, and in the `--flag=value` spelling too.
-    expect(() => parseAdmitArgs(["--from-file=issue.md", "--from=o/r#412"])).toThrow(
+    expect(() => admitCommandLine.read(["--from-file=issue.md", "--from=o/r#412"]).input).toThrow(
       /--from and --from-file are mutually exclusive/,
     );
   });
@@ -463,12 +413,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     );
     const model = recordingDrafter();
     const streams = capture();
-    await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from-file", path]),
-      streams,
-      cwd: repo,
-      model,
-    });
+    await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-file", path], streams, cwd: repo, deps: { model } });
 
     const dir = storeDir(repo, null);
     const attempts = readDraftSnapshot(dir, "PRB-1")?.draft?.issue_authored_attempts ?? [];
@@ -555,12 +500,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
       ].join("\n"),
     );
     const streams = capture();
-    await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from-file", path]),
-      streams,
-      cwd: repo,
-      model: recordingDrafter(),
-    });
+    await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-file", path], streams, cwd: repo, deps: { model: recordingDrafter() } });
 
     const dir = storeDir(repo, null);
     const draftRecord = readDraftSnapshot(dir, "PRB-1")?.draft;
@@ -579,12 +519,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
   it("records criteria_source drafted and the path, and inspect names it", async () => {
     const repo = repository("admit-from-file-inspect");
     const path = pasted("SCP-154.md", markdown);
-    await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from-file", path]),
-      streams: capture(),
-      cwd: repo,
-      model: recordingDrafter(),
-    });
+    await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-file", path], streams: capture(), cwd: repo, deps: { model: recordingDrafter() } });
 
     const dir = storeDir(repo, null);
     const ticket = readTicket(dir, "PRB-1");
@@ -606,7 +541,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
 
     // ...and through the command a person actually runs.
     const streams = capture();
-    await runInspectCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo });
+    await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo });
     expect(unwrapped(streams.out.join(""))).toContain(path);
   });
 
@@ -621,12 +556,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     mkdirSync(nested, { recursive: true });
     writeFileSync(join(nested, "SCP-169.md"), markdown);
 
-    await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from-file", "SCP-169.md"]),
-      streams: capture(),
-      cwd: nested,
-      model: recordingDrafter(),
-    });
+    await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-file", "SCP-169.md"], streams: capture(), cwd: nested, deps: { model: recordingDrafter() } });
 
     const ticket = readTicket(storeDir(repo, null), "PRB-1");
     expect(ticket.source.kind).toBe("file");
@@ -647,12 +577,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
   it("is read as a file by inspect, list --json and the pull-request body", async () => {
     const repo = repository("admit-from-file-readers");
     const path = pasted("SCP-169-readers.md", markdown);
-    await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from-file", path]),
-      streams: capture(),
-      cwd: repo,
-      model: recordingDrafter(),
-    });
+    await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-file", path], streams: capture(), cwd: repo, deps: { model: recordingDrafter() } });
     const dir = storeDir(repo, null);
     const ticket = readTicket(dir, "PRB-1");
 
@@ -669,20 +594,20 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     // ...and through the command a person actually runs, which carries the
     // kind and the reference into the report it prints.
     const inspected = capture();
-    await runInspectCommand({ argv: ["PRB-1", "--repo", repo], streams: inspected, cwd: repo });
+    await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams: inspected, cwd: repo });
     const printed = JSON.parse(inspected.out.join("")) as { source: unknown };
     expect(printed.source).toMatchObject({ kind: "file", reference: path });
 
     // `list --json`: the kind and the reference, for whatever reads the listing.
     const listed = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo, "--json"]), streams: listed, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo, "--json"], streams: listed, cwd: repo });
     const document = ListJsonSchema.parse(JSON.parse(listed.out.join("")));
     expect(document.tickets[0]!.source).toMatchObject({ kind: "file", reference: path });
 
     // The table a person reads says which kind it is too, rather than leaving
     // an absolute path and a Jira key to be told apart by eye.
     const table = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo]), streams: table, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo], streams: table, cwd: repo });
     expect(table.out.join("")).toContain(`file ${path}`);
 
     // And the pull request, built by the runner from this ticket's own source.
@@ -727,12 +652,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
   it("hands the run configuration the ticket's own source, so the loop can publish it", async () => {
     const repo = repository("admit-from-file-run-config");
     const path = pasted("SCP-169-config.md", markdown);
-    await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from-file", path]),
-      streams: capture(),
-      cwd: repo,
-      model: recordingDrafter(),
-    });
+    await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-file", path], streams: capture(), cwd: repo, deps: { model: recordingDrafter() } });
     const dir = storeDir(repo, null);
     const ticket = readTicket(dir, "PRB-1");
     const config = TicketRunConfigSchema.parse(mergeRunConfig(subjectOf({ dir, ticket }), null));
@@ -753,12 +673,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     const nested = join(repo, "notes");
     mkdirSync(nested, { recursive: true });
     writeFileSync(join(nested, "issue.md"), markdown);
-    await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from-file", "issue.md"]),
-      streams: capture(),
-      cwd: nested,
-      model: recordingDrafter(),
-    });
+    await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-file", "issue.md"], streams: capture(), cwd: nested, deps: { model: recordingDrafter() } });
 
     const dir = storeDir(repo, null);
     const ticket = readTicket(dir, "PRB-1");
@@ -778,7 +693,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     // because a path too long for the column is wrapped across lines rather
     // than clipped — half a path names nothing a person can open.
     const streams = capture();
-    await runInspectCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo });
+    await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo });
     const squeeze = (text: string) => text.replace(/\s+/g, "");
     expect(squeeze(streams.out.join(""))).toContain(squeeze(join(nested, "issue.md")));
   });
@@ -786,12 +701,7 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
   it("says one sentence, naming the path, when the file is not there", async () => {
     const repo = repository("admit-from-file-missing");
     await expect(
-      runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--from-file", "nope.md"]),
-        streams: capture(),
-        cwd: repo,
-        model: recordingDrafter(),
-      }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-file", "nope.md"], streams: capture(), cwd: repo, deps: { model: recordingDrafter() } }),
     ).rejects.toThrow(/no file at .*nope\.md/);
     // And nothing was admitted on the way to failing.
     expect(existsSync(join(storeDir(repo, null), "tickets"))).toBe(false);
@@ -808,7 +718,7 @@ describe("level is derived, not chosen", () => {
 
   it("derives P1 for one ordinary package and records where the level came from", () => {
     const repo = repository("level-p1");
-    runAdmitCommand({ args: parseAdmitArgs(argvFor(repo, "--path", "packages/search/**")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: argvFor(repo, "--path", "packages/search/**"), streams: capture(), cwd: repo });
     const dir = storeDir(repo, null);
     expect(readContract(dir, "PRB-1").level).toBe("P1");
     expect(readTicket(dir, "PRB-1").admission).toMatchObject({ level_source: "derived", derived_level: "P1" });
@@ -816,7 +726,7 @@ describe("level is derived, not chosen", () => {
 
   it("derives P2 for a security-sensitive scope, with fields derived rather than placeholders", () => {
     const repo = repository("level-p2");
-    runAdmitCommand({ args: parseAdmitArgs(argvFor(repo, "--path", "packages/auth/**")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: argvFor(repo, "--path", "packages/auth/**"), streams: capture(), cwd: repo });
     const contract = readContract(storeDir(repo, null), "PRB-1");
     if (contract.level !== "P2") throw new Error(`expected P2, got ${contract.level}`);
     expect(contract.security_impact).toContain("packages/auth/**");
@@ -826,8 +736,8 @@ describe("level is derived, not chosen", () => {
 
   it("lets --level raise the derivation and refuses to lower it (D-010)", () => {
     const raised = repository("level-raise");
-    runAdmitCommand({
-      args: parseAdmitArgs(argvFor(raised, "--path", "packages/search/**", "--level", "P2")),
+    runCommandLine(admitCommandLine, {
+      argv: argvFor(raised, "--path", "packages/search/**", "--level", "P2"),
       streams: capture(),
       cwd: raised,
     });
@@ -837,8 +747,8 @@ describe("level is derived, not chosen", () => {
 
     const lowered = repository("level-lower");
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(argvFor(lowered, "--path", "packages/auth/**", "--level", "P1")),
+      runCommandLine(admitCommandLine, {
+        argv: argvFor(lowered, "--path", "packages/auth/**", "--level", "P1"),
         streams: capture(),
         cwd: lowered,
       }),
@@ -848,21 +758,21 @@ describe("level is derived, not chosen", () => {
 
   it("derives P3 for CI scope, and approve refuses it until a person states the decisions", () => {
     const repo = repository("level-p3");
-    runAdmitCommand({ args: parseAdmitArgs(argvFor(repo, "--path", ".github/workflows/**")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: argvFor(repo, "--path", ".github/workflows/**"), streams: capture(), cwd: repo });
     const dir = storeDir(repo, null);
     const contract = readContract(dir, "PRB-1");
     if (contract.level !== "P3") throw new Error(`expected P3, got ${contract.level}`);
     expect(contract.decision_record).toContain(".github/workflows/**");
     expect(contract.named_approver).toBe("not yet stated");
-    expect(() => runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
       .toThrow(/not yet stated.*perbo edit PRB-1/s);
     expect(readTicket(dir, "PRB-1").approved_at).toBeNull();
 
     // Nor can it be approved at admission, and nothing is written when it cannot.
     const atAdmission = repository("level-p3-approve");
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(argvFor(atAdmission, "--path", "infra/**", "--approve")),
+      runCommandLine(admitCommandLine, {
+        argv: argvFor(atAdmission, "--path", "infra/**", "--approve"),
         streams: capture(),
         cwd: atAdmission,
       }),
@@ -879,8 +789,8 @@ describe("level is derived, not chosen", () => {
     );
     // `packages/reviewer` is not inside `packages/review`, and `**/*.pem` has
     // no place to compare with, so this approves.
-    runAdmitCommand({
-      args: parseAdmitArgs(argvFor(beside, "--path", "packages/reviewer/src/**", "--approve")),
+    runCommandLine(admitCommandLine, {
+      argv: argvFor(beside, "--path", "packages/reviewer/src/**", "--approve"),
       streams: capture(),
       cwd: beside,
     });
@@ -889,8 +799,8 @@ describe("level is derived, not chosen", () => {
     // A scope with no literal prefix names every path, the store included.
     const everything = repository("judging-everything");
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(argvFor(everything, "--path", "**", "--approve")),
+      runCommandLine(admitCommandLine, {
+        argv: argvFor(everything, "--path", "**", "--approve"),
         streams: capture(),
         cwd: everything,
       }),
@@ -908,12 +818,12 @@ describe("level is derived, not chosen", () => {
     };
     const repo = repository("judging-scope");
     protect(repo);
-    runAdmitCommand({
-      args: parseAdmitArgs(argvFor(repo, "--path", "packages/review/src/closure-verify.ts")),
+    runCommandLine(admitCommandLine, {
+      argv: argvFor(repo, "--path", "packages/review/src/closure-verify.ts"),
       streams: capture(),
       cwd: repo,
     });
-    expect(() => runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
       .toThrow(/reaches what judges the attempt.*packages\/review\/src\/closure-verify\.ts overlaps protected packages\/review\/\*\*.*perbo edit PRB-1/s);
     expect(readTicket(storeDir(repo, null), "PRB-1").approved_at).toBeNull();
 
@@ -921,16 +831,16 @@ describe("level is derived, not chosen", () => {
     // itself is protected without any configuration.
     const beside = repository("judging-scope-ok");
     protect(beside);
-    runAdmitCommand({
-      args: parseAdmitArgs(argvFor(beside, "--path", "apps/cli/src/**", "--approve")),
+    runCommandLine(admitCommandLine, {
+      argv: argvFor(beside, "--path", "apps/cli/src/**", "--approve"),
       streams: capture(),
       cwd: beside,
     });
     expect(readTicket(storeDir(beside, null), "PRB-1").approved_at).not.toBeNull();
     const store = repository("judging-scope-store");
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(argvFor(store, "--path", ".perbo/tickets/**", "--approve")),
+      runCommandLine(admitCommandLine, {
+        argv: argvFor(store, "--path", ".perbo/tickets/**", "--approve"),
         streams: capture(),
         cwd: store,
       }),
@@ -962,12 +872,12 @@ describe("level is derived, not chosen", () => {
 
     const repo = repository("judging-check-definition");
     pinCheckDocs(repo);
-    runAdmitCommand({
-      args: parseAdmitArgs(argvFor(repo, "--path", "scripts/**")),
+    runCommandLine(admitCommandLine, {
+      argv: argvFor(repo, "--path", "scripts/**"),
       streams: capture(),
       cwd: repo,
     });
-    expect(() => runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
       .toThrow(/reaches what judges the attempt.*scripts\/\*\* overlaps protected scripts\/validate_docs\.py \(checks\[check_docs\]\.definition_path\).*perbo edit PRB-1/s);
     expect(readTicket(storeDir(repo, null), "PRB-1").approved_at).toBeNull();
 
@@ -975,8 +885,8 @@ describe("level is derived, not chosen", () => {
     // approved: the refusal is about that file, not about `scripts/`.
     const beside = repository("judging-check-definition-ok");
     pinCheckDocs(beside);
-    runAdmitCommand({
-      args: parseAdmitArgs(argvFor(beside, "--path", "scripts/other.py", "--approve")),
+    runCommandLine(admitCommandLine, {
+      argv: argvFor(beside, "--path", "scripts/other.py", "--approve"),
       streams: capture(),
       cwd: beside,
     });
@@ -987,14 +897,14 @@ describe("level is derived, not chosen", () => {
 describe("how a criterion is proven", () => {
   it("admits a documentation ticket: two artifact criteria over docs/**", () => {
     const repo = repository("criteria-docs");
-    runAdmitCommand({
-      args: parseAdmitArgs([
+    runCommandLine(admitCommandLine, {
+      argv: [
         "--repo", repo,
         "--outcome", "D-071 is recorded with its reversal trigger.",
         "--criterion", "The decision entry exists. :: docs/11-open-decisions.md has a D-071 heading :: artifact",
         "--criterion", "The ADR cites it. :: the accepted ADR links D-071 :: artifact",
         "--path", "docs/**",
-      ]),
+      ],
       streams: capture(),
       cwd: repo,
     });
@@ -1010,11 +920,11 @@ describe("how a criterion is proven", () => {
 
   it("defaults the kind to test and refuses one it does not know", () => {
     const repo = repository("criteria-kind");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
     expect(criteriaOf(readContract(storeDir(repo, null), "PRB-1"))[0]?.expected_verification.kind).toBe("test");
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(admitArgv(repo, "--criterion", "a :: b :: hunch")),
+      runCommandLine(admitCommandLine, {
+        argv: admitArgv(repo, "--criterion", "a :: b :: hunch"),
         streams: capture(),
         cwd: repo,
       }),
@@ -1025,11 +935,16 @@ describe("how a criterion is proven", () => {
     const repo = repository("criteria-manual");
     const manual = ["--criterion", "The rendering reads well. :: a person reads it at 80 columns :: manual"];
     expect(() =>
-      runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, ...manual)), streams: capture(), cwd: repo }),
+      runCommandLine(admitCommandLine, { argv: admitArgv(repo, ...manual), streams: capture(), cwd: repo }),
     ).toThrow(/--manual-reviewer/);
-    runAdmitCommand({
-      args: parseAdmitArgs(
-        admitArgv(repo, ...manual, "--manual-reviewer", "lian", "--manual-reason", "layout is judged by eye"),
+    runCommandLine(admitCommandLine, {
+      argv: admitArgv(
+        repo,
+        ...manual,
+        "--manual-reviewer",
+        "lian",
+        "--manual-reason",
+        "layout is judged by eye",
       ),
       streams: capture(),
       cwd: repo,
@@ -1047,15 +962,8 @@ describe("how a criterion is proven", () => {
 describe("the admission-friction instrument (D-003, ADR-0027)", () => {
   it("reports the person's time and what they changed on a drafted ticket approved after an edit", async () => {
     const repo = repository("friction-drafted");
-    await runAdmitCommand({
-      args: parseAdmitArgs(["--repo", repo, "--from", "o/r#412"]),
-      streams: capture(),
-      cwd: repo,
-      now: new Date("2026-09-02T10:00:00.000Z"),
-      model: drafter(),
-      fetchIssue,
-    });
-    await runEditCommand({
+    await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from", "o/r#412"], streams: capture(), cwd: repo, now: new Date("2026-09-02T10:00:00.000Z"), deps: { model: drafter(), fetchIssue } });
+    await runCommandLine(editCommandLine, {
       argv: [
         "PRB-1", "--repo", repo,
         "--outcome", "New users get an activation email within a minute of signing up.",
@@ -1066,7 +974,7 @@ describe("the admission-friction instrument (D-003, ADR-0027)", () => {
       now: new Date("2026-09-02T10:00:30.000Z"),
     });
     const approve = capture();
-    runApproveCommand({
+    runCommandLine(approveCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams: approve,
       cwd: repo,
@@ -1085,7 +993,7 @@ describe("the admission-friction instrument (D-003, ADR-0027)", () => {
 
   it("records zero of both when the contract is approved as admitted", () => {
     const repo = repository("friction-immediate");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     expect(readTicket(storeDir(repo, null), "PRB-1").admission).toMatchObject({
       human_elapsed_ms: 0,
       edit_count: 0,
@@ -1097,7 +1005,7 @@ describe("perbo admit", () => {
   it("creates a ticket and a contract that the review step can actually take", () => {
     const repo = repository("admit-basic");
     const streams = capture();
-    expect(runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams, cwd: repo })).toBe(0);
+    expect(runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams, cwd: repo })).toBe(0);
 
     const dir = storeDir(repo, null);
     const ticket = readTicket(dir, "PRB-1");
@@ -1116,7 +1024,7 @@ describe("perbo admit", () => {
   it("refuses a criterion with nothing that could prove it", () => {
     const repo = repository("admit-no-assertion");
     const argv = ["--repo", repo, "--outcome", "x", "--criterion", "it works", "--path", "src/**"];
-    expect(() => runAdmitCommand({ args: parseAdmitArgs(argv), streams: capture(), cwd: repo })).toThrow(
+    expect(() => runCommandLine(admitCommandLine, { argv: argv, streams: capture(), cwd: repo })).toThrow(
       UsageError,
     );
   });
@@ -1124,15 +1032,15 @@ describe("perbo admit", () => {
   it("refuses a ticket with no criteria and one with no scope", () => {
     const repo = repository("admit-incomplete");
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--outcome", "x", "--path", "src/**"]),
+      runCommandLine(admitCommandLine, {
+        argv: ["--repo", repo, "--outcome", "x", "--path", "src/**"],
         streams: capture(),
         cwd: repo,
       }),
     ).toThrow(/criterion/);
     expect(() =>
-      runAdmitCommand({
-        args: parseAdmitArgs(["--repo", repo, "--outcome", "x", "--criterion", "a :: b"]),
+      runCommandLine(admitCommandLine, {
+        argv: ["--repo", repo, "--outcome", "x", "--criterion", "a :: b"],
         streams: capture(),
         cwd: repo,
       }),
@@ -1140,12 +1048,12 @@ describe("perbo admit", () => {
   });
 
   it("refuses P0, which has no criteria for review to judge", () => {
-    expect(() => parseAdmitArgs(["--level", "P0"])).toThrow(/P0/);
+    expect(() => admitCommandLine.read(["--level", "P0"]).input).toThrow(/P0/);
   });
 
   it("records what admission cost, which E1 cannot be read without", () => {
     const repo = repository("admit-friction");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
     const ticket = readTicket(storeDir(repo, null), "PRB-1");
     expect(ticket.admission.criteria_count).toBe(1);
     expect(ticket.admission.criteria_source).toBe("typed");
@@ -1155,7 +1063,7 @@ describe("perbo admit", () => {
   it("never hands out a key twice, even after the ticket holding it is deleted", () => {
     const repo = repository("admit-keys");
     for (let i = 0; i < 3; i += 1) {
-      runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+      runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
     }
     const dir = storeDir(repo, null);
     expect(nextKey(dir, "PRB")).toBe("PRB-4");
@@ -1166,14 +1074,14 @@ describe("perbo admit", () => {
     rmSync(join(dir, "tickets", "PRB-3.json"));
     expect(nextKey(dir, "PRB")).toBe("PRB-4");
 
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
     expect(readTicket(dir, "PRB-4").key).toBe("PRB-4");
   });
 
   it("falls back to the scan when the sequence file is unreadable, and still cannot collide", () => {
     const repo = repository("admit-keys-corrupt");
     for (let i = 0; i < 2; i += 1) {
-      runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+      runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
     }
     const dir = storeDir(repo, null);
     writeFileSync(join(dir, "tickets", "sequence.json"), "{ not json");
@@ -1191,7 +1099,7 @@ describe("perbo admit", () => {
     // prefix admission mints under starts at 1 rather than continuing a count
     // kept for another prefix.
     expect(nextKey(dir, "PRB")).toBe("PRB-1");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
 
     expect(readTicket(dir, "PRB-1").key).toBe("PRB-1");
     // And the AYO high-water mark is still where it was: the keys already
@@ -1204,10 +1112,10 @@ describe("perbo admit", () => {
 
   it("does not mistake the sequence file for a ticket", () => {
     const repo = repository("admit-keys-listing");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
     expect(existsSync(join(storeDir(repo, null), "tickets", "sequence.json"))).toBe(true);
     const streams = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo, "--json"]), streams, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
     expect(ListJsonSchema.parse(JSON.parse(streams.out.join(""))).tickets).toHaveLength(1);
   });
 }, SPAWN_TEST_TIMEOUT_MS);
@@ -1215,9 +1123,9 @@ describe("perbo admit", () => {
 describe("perbo approve", () => {
   it("moves the ticket to ready and freezes the contract", () => {
     const repo = repository("approve-basic");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
     const streams = capture();
-    expect(runApproveCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
 
     const ticket = readTicket(storeDir(repo, null), "PRB-1");
     expect(ticket.state).toBe("ready");
@@ -1227,14 +1135,14 @@ describe("perbo approve", () => {
 
   it("names the tickets that do exist when asked for one that does not", () => {
     const repo = repository("approve-missing");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
-    expect(() => runApproveCommand({ argv: ["PRB-7", "--repo", repo], streams: capture(), cwd: repo }))
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-7", "--repo", repo], streams: capture(), cwd: repo }))
       .toThrow(TicketStoreError);
   });
 
   it("refuses a ticket and a contract that were edited apart", () => {
     const repo = repository("approve-drift");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     const dir = storeDir(repo, null);
     const contractFile = join(dir, "tickets", "PRB-1.contract.json");
     const contract = JSON.parse(readFileSync(contractFile, "utf8"));
@@ -1246,7 +1154,7 @@ describe("perbo approve", () => {
 
   it("will not run a ticket whose contract nobody approved", () => {
     const repo = repository("approve-unapproved");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
     expect(() => loadAdmitted(repo, repo, null, "PRB-1")).toThrow(/has not been approved/);
   });
 }, SPAWN_TEST_TIMEOUT_MS);
@@ -1262,15 +1170,15 @@ describe("perbo list", () => {
   it("says what to do when there is nothing admitted", () => {
     const repo = repository("list-empty");
     const streams = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo]), streams, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(streams.out.join("")).toContain("No admitted work");
     expect(streams.err.join("")).toContain("backlog stays where it is");
   });
 
   it("shows admitted work and hides what is finished unless asked", () => {
     const repo = repository("list-active");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
 
     const dir = storeDir(repo, null);
     const cancelled = transition(readTicket(dir, "PRB-2"), "cancelled", "not doing it");
@@ -1282,20 +1190,20 @@ describe("perbo list", () => {
     ]);
 
     const active = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo]), streams: active, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo], streams: active, cwd: repo });
     expect(active.out.join("")).toContain("PRB-1");
     expect(active.out.join("")).not.toContain("PRB-2");
 
     const all = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo, "--all"]), streams: all, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo, "--all"], streams: all, cwd: repo });
     expect(all.out.join("")).toContain("PRB-2");
   }, LIST_REWRITE_TIMEOUT_MS);
 
   it("emits parseable tickets with --json", () => {
     const repo = repository("list-json");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
     const streams = capture();
-    runListCommand({ args: parseListArgs(["--repo", repo, "--json"]), streams, cwd: repo });
+    runCommandLine(listCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
     const parsed = ListJsonSchema.parse(JSON.parse(streams.out.join("")));
     expect(parsed.tickets).toHaveLength(1);
     expect(() => TicketSchema.parse(parsed.tickets[0])).not.toThrow();
@@ -1333,7 +1241,7 @@ describe("perbo list --json", () => {
   function fixture(name: string, count: number): { repo: string; keys: string[] } {
     const repo = repository(name);
     for (let i = 0; i < count; i += 1) {
-      runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+      runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
     }
     const dir = storeDir(repo, null);
     writeTicket(dir, transition(readTicket(dir, `PRB-${count}`), "cancelled", "not doing it"));
@@ -1342,8 +1250,8 @@ describe("perbo list --json", () => {
 
   const listed = (repo: string, ...extra: string[]) => {
     const streams = capture();
-    const code = runListCommand({
-      args: parseListArgs(["--repo", repo, ...extra]),
+    const code = runCommandLine(listCommandLine, {
+      argv: ["--repo", repo, ...extra],
       streams,
       cwd: repo,
     });
@@ -1495,7 +1403,7 @@ describe("the states a run is recorded as having passed through", () => {
 
   it("walks a ticket to the terminal state even when a step has no row", () => {
     const repo = repository("observed-path");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     const dir = storeDir(repo, null);
     const running = transition(readTicket(dir, "PRB-1"), "provisioning", "run started");
 
@@ -1518,7 +1426,7 @@ describe("the states a run is recorded as having passed through", () => {
 describe("the store", () => {
   it("keeps the contract in its own file, so a change to it is visible in a diff", () => {
     const repo = repository("store-shape");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     const dir = storeDir(repo, null);
     expect(existsSync(join(dir, "tickets", "PRB-1.json"))).toBe(true);
     expect(existsSync(join(dir, "tickets", "PRB-1.contract.json"))).toBe(true);
@@ -1559,7 +1467,7 @@ describe("perbo sync", () => {
 
   async function delivered(name: string): Promise<{ repo: string; dir: string }> {
     const repo = repository(name);
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     const dir = storeDir(repo, null);
     const at = new Date("2026-08-28T01:00:00.000Z");
     let ticket = recordDelivery(
@@ -1576,16 +1484,18 @@ describe("perbo sync", () => {
 
   it("says nothing has been executed rather than calling gh for a branch that does not exist", async () => {
     const repo = repository("sync-nobranch");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     const streams = capture();
     let called = false;
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams,
       cwd: repo,
-      poll: () => {
-        called = true;
-        return observed("open");
+      deps: {
+        poll: () => {
+          called = true;
+          return observed("open");
+        },
       },
     });
     expect(called).toBe(false);
@@ -1594,11 +1504,13 @@ describe("perbo sync", () => {
 
   it("moves a ticket to merged when gh says the pull request merged", async () => {
     const { repo, dir } = await delivered("sync-merged");
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
-      poll: () => observed("merged"),
+      deps: {
+        poll: () => observed("merged"),
+      },
     });
     const ticket = readTicket(dir, "PRB-1");
     expect(ticket.state).toBe("merged");
@@ -1608,12 +1520,14 @@ describe("perbo sync", () => {
   it("is idempotent: syncing twice leaves the same record and no second history entry", async () => {
     const { repo, dir } = await delivered("sync-idempotent");
     const run = () =>
-      runSyncCommand({
+      runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date("2026-08-28T02:00:00.000Z"),
-        poll: () => observed("merged"),
+        deps: {
+          poll: () => observed("merged"),
+        },
       });
     await run();
     const first = readTicket(dir, "PRB-1");
@@ -1631,11 +1545,13 @@ describe("perbo sync", () => {
     const { repo, dir } = await delivered("sync-unreachable");
     const before = readTicket(dir, "PRB-1");
     const streams = capture();
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams,
       cwd: repo,
-      poll: () => observed("none", false),
+      deps: {
+        poll: () => observed("none", false),
+      },
     });
     const after = readTicket(dir, "PRB-1");
     expect(after.delivery).toEqual(before.delivery);
@@ -1645,11 +1561,13 @@ describe("perbo sync", () => {
 
   it("does not invent a merge from an open pull request", async () => {
     const { repo, dir } = await delivered("sync-open");
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
-      poll: () => observed("open"),
+      deps: {
+        poll: () => observed("open"),
+      },
     });
     expect(readTicket(dir, "PRB-1").state).toBe("pr_open");
   });
@@ -1658,7 +1576,7 @@ describe("perbo sync", () => {
 describe("the run configuration an admitted ticket derives", () => {
   it("puts the worktree root outside the repository, where no workspace is above it", () => {
     const repo = repository("config-worktree");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     const admitted = loadAdmitted(repo, repo, null, "PRB-1");
     const config = mergeRunConfig(subjectOf(admitted), null) as Record<string, string>;
 
@@ -1677,7 +1595,7 @@ describe("the run configuration an admitted ticket derives", () => {
 
   it("layers the repository's agreed configuration over what the ticket knows", () => {
     const repo = repository("config-layers");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     const admitted = loadAdmitted(repo, repo, null, "PRB-1");
     writeFileSync(
       join(admitted.dir, "config.json"),
@@ -1695,7 +1613,7 @@ describe("the run configuration an admitted ticket derives", () => {
 
   it("resolves a relative source_checkout against the repository the ticket names", () => {
     const repo = repository("config-manifest");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     const admitted = loadAdmitted(repo, repo, null, "PRB-1");
     writeFileSync(
       join(admitted.dir, "config.json"),
@@ -1709,7 +1627,7 @@ describe("the run configuration an admitted ticket derives", () => {
 
   it("ignores a delivery_branch the repository's config.json sets, and says so", () => {
     const repo = repository("config-delivery-branch");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     const admitted = loadAdmitted(repo, repo, null, "PRB-1");
     const id = admitted.ticket.ticket_id.replace(/^ticket_/, "");
     writeFileSync(
@@ -1735,7 +1653,7 @@ describe("the run configuration an admitted ticket derives", () => {
 
   it("keeps the branch the ticket's delivery record names over one an explicit --config names", () => {
     const repo = repository("config-override-branch");
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     const admitted = loadAdmitted(repo, repo, null, "PRB-1");
     const id = admitted.ticket.ticket_id.replace(/^ticket_/, "");
     const recorded = `ayo/${id}/published-before-the-rename`;
@@ -1762,7 +1680,7 @@ describe("the run configuration an admitted ticket derives", () => {
 describe("retrying a ticket that already ran", () => {
   const readyTicket = (name: string) => {
     const repo = repository(name);
-    runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo, "--approve")), streams: capture(), cwd: repo });
+    runCommandLine(admitCommandLine, { argv: admitArgv(repo, "--approve"), streams: capture(), cwd: repo });
     return { repo, dir: storeDir(repo, null) };
   };
 

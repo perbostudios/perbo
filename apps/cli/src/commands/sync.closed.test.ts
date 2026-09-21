@@ -6,11 +6,12 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
 import { pollPullRequest, type TicketDeliveryState } from "@perbo/runner";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-235/SCP-252 — a closed, unmerged pull request is read as closed, not as
@@ -102,11 +103,11 @@ afterEach(() => {
   else process.env.GITHUB_TOKEN = originalGithubToken;
 });
 
-const withGh = <T,>(bin: string, body: () => Promise<T>): Promise<T> => {
+const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   process.env.GH_TOKEN = "test-token";
   delete process.env.GITHUB_TOKEN;
-  return body();
+  return Promise.resolve(body());
 };
 
 /** A ticket sitting at `pr_open` behind a pull request the loop published. */
@@ -114,8 +115,8 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
   const repo = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo",
       repo,
       "--outcome",
@@ -125,7 +126,7 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
       "--path",
       "packages/search/**",
       "--approve",
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });
@@ -159,15 +160,17 @@ describe("sync records a pull request GitHub closed without merging", () => {
     const code = await withGh(
       fakeGh("closed-conflicting", ghAnswer("CONFLICTING", "DIRTY", { state: "CLOSED", closedAt: "2026-09-03T04:00:00.000Z" })),
       () =>
-        runSyncCommand({
+        runCommandLine(syncCommandLine, {
           argv: ["PRB-1", "--repo", repo],
           streams,
           cwd: repo,
           now: NOW,
-          poll: async (args) => {
-            const result = await pollPullRequest(args);
-            captured = result;
-            return result;
+          deps: {
+            poll: async (args) => {
+              const result = await pollPullRequest(args);
+              captured = result;
+              return result;
+            },
           },
         }),
     );
@@ -201,7 +204,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
           comments: [{ body: "thanks" }, verdictComment("CHANGES REQUESTED")],
         }),
       ),
-      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -231,7 +234,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
           comments: [verdictComment("APPROVE")],
         }),
       ),
-      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -246,7 +249,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
     const streams = capture();
 
     const code = await withGh(fakeGh("still-open-conflicting", ghAnswer("CONFLICTING", "DIRTY")), () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);

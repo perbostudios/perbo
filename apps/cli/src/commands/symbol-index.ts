@@ -25,9 +25,18 @@ import {
   type UnsupportedRepository,
 } from "@perbo/contracts";
 import { CommandFailedError, git } from "@perbo/workspace";
-import { UsageError } from "../usage-error.js";
+import { z } from "zod";
+import { readInput } from "../usage-error.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../command-line/grammar.js";
+import type { CommandContext, Rendered } from "../command.js";
+import type { ReportCommand } from "../command-line/table.js";
 import { StoreError, headCommit, storeDir } from "../store/index.js";
-import type { Streams } from "../streams.js";
 
 /**
  * `perbo index` — the symbol and import index (D-015).
@@ -728,30 +737,19 @@ function writeAtomically(path: string, contents: string): void {
   }
 }
 
-export interface IndexArgs {
-  repo: string;
-  json: boolean;
-}
+export const IndexInputSchema = z.strictObject({
+  /** The repository to index, from the directory the command was run in. */
+  repo: z.string(),
+});
+export type IndexInput = z.infer<typeof IndexInputSchema>;
 
-export function parseIndexArgs(argv: string[]): IndexArgs {
-  const args: IndexArgs = { repo: ".", json: false };
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i]!;
-    if (!token.startsWith("--")) throw new UsageError(`unexpected argument '${token}'`);
-    const eq = token.indexOf("=");
-    const name = eq === -1 ? token : token.slice(0, eq);
-    if (name === "--json") {
-      if (eq !== -1) throw new UsageError("--json does not take a value");
-      args.json = true;
-      continue;
-    }
-    if (name !== "--repo") throw new UsageError(`unknown flag '${name}'`);
-    const value = eq === -1 ? argv[++i] : token.slice(eq + 1);
-    if (value === undefined || value.length === 0) throw new UsageError("--repo requires a value");
-    args.repo = value;
-  }
-  return args;
-}
+/**
+ * What one indexing run produced: the index it wrote, or the answer that this
+ * repository is not one it can index.
+ */
+export type IndexReport =
+  | { readonly supported: true; readonly index: SymbolIndex; readonly path: string }
+  | { readonly supported: false; readonly answer: UnsupportedRepository };
 
 const document = (record: unknown): string => `${JSON.stringify(record, null, 2)}\n`;
 
@@ -785,21 +783,59 @@ const renderUnsupported = (answer: UnsupportedRepository): string =>
  * repository nothing has run in for the same reason, and a caller that needs
  * to act on it reads `supported` out of `--json`.
  */
-export function runIndexCommand(options: { argv: string[]; streams: Streams; cwd: string }): number {
-  const args = parseIndexArgs(options.argv);
-  const root = repositoryRootAt(resolve(options.cwd, args.repo));
+export function buildIndex(input: IndexInput, context: CommandContext): IndexReport {
+  const root = repositoryRootAt(resolve(context.cwd, input.repo));
   const built = buildSymbolIndex({ repositoryRoot: root });
 
   if (isUnsupportedRepository(built)) {
     // No file is written: the index is the file, and this repository has none.
     // Writing an answer here would also stand on top of an index a supported
     // checkout of the same store had already built.
-    options.streams.stdout(args.json ? document(built) : renderUnsupported(built));
-    return EXIT_CODES.approve;
+    return { supported: false, answer: built };
   }
 
   const path = symbolIndexPath(root);
   writeAtomically(path, document(built));
-  options.streams.stdout(args.json ? document(built) : renderSummary(built, path));
-  return EXIT_CODES.approve;
+  return { supported: true, index: built, path };
 }
+
+const INDEX_FLAGS = {
+  "--repo": valueFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const INDEX_GRAMMAR: Grammar<typeof INDEX_FLAGS> = {
+  command: "index",
+  flags: INDEX_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal: "index takes no argument: it reads the repository --repo names, e.g. perbo index --repo .",
+  },
+  afterDoubleDash: "positionals",
+};
+
+export const indexCommandLine: ReportCommand<IndexInput, { json: boolean }, IndexReport> = {
+  kind: "report",
+  name: "index",
+  grammars: [INDEX_GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor: () => INDEX_GRAMMAR,
+  read(argv) {
+    const line = parseArgv(INDEX_GRAMMAR, argv);
+    return {
+      input: readInput(IndexInputSchema, { repo: line.flags["--repo"] ?? "." }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  run: buildIndex,
+  toJson: (report) => (report.supported ? report.index : report.answer),
+  render(report, _output, target): Rendered {
+    const stdout = target.json
+      ? document(report.supported ? report.index : report.answer)
+      : report.supported
+        ? renderSummary(report.index, report.path)
+        : renderUnsupported(report.answer);
+    return { stdout, stderr: "", exitCode: EXIT_CODES.approve };
+  },
+};

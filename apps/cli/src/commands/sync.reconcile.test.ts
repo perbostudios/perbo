@@ -5,12 +5,13 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { derivedBranch, runSyncCommand } from "./sync.js";
+import { derivedBranch, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { makeAttempt } from "../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * `perbo sync` brings a **stranded** ticket back.
@@ -124,11 +125,11 @@ afterEach(() => {
  * before the read, so a suite that let the machine's own environment decide it
  * would ask `gh auth status` on one developer's machine and not on another's.
  */
-const withGh = <T,>(bin: string, body: () => Promise<T>): Promise<T> => {
+const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   process.env.GH_TOKEN = "test-token";
   delete process.env.GITHUB_TOKEN;
-  return body();
+  return Promise.resolve(body());
 };
 
 const PR_URL = "https://github.com/o/r/pull/41";
@@ -160,7 +161,7 @@ function stranded(
   options: { writeAttemptsFile?: boolean; attemptsOn?: (ticket: Ticket) => string } = {},
 ): { repo: string; dir: string; ticket: Ticket; branch: string } {
   const repo = repository(name);
-  runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-01T09:00:00.000Z");
 
@@ -222,7 +223,7 @@ describe("perbo sync derives the stranded ticket's branch and asks gh about it o
       expect(readTicket(dir, "PRB-1").delivery.branch).toBeNull();
 
       await withGh(gh.bin, () =>
-        runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
       );
 
       const calls = gh.invocations();
@@ -240,7 +241,7 @@ describe("perbo sync derives the stranded ticket's branch and asks gh about it o
     const gh = fakeGh("recorded-ayo", { stdout: ghAnswer("OPEN") });
 
     await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     const calls = gh.invocations();
@@ -254,7 +255,7 @@ describe("perbo sync derives the stranded ticket's branch and asks gh about it o
     const gh = fakeGh("recorded-none", { stdout: ghAnswer("OPEN") });
 
     await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     expect(gh.invocations()[0]?.slice(0, 3)).toEqual([
@@ -282,7 +283,7 @@ describe("what gh and the attempts record say decides where the ticket lands", (
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -296,7 +297,7 @@ describe("what gh and the attempts record say decides where the ticket lands", (
     const gh = fakeGh("evidence-closed", { stdout: ghAnswer("CLOSED") });
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -317,7 +318,7 @@ describe("what gh and the attempts record say decides where the ticket lands", (
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.did_not_complete);
@@ -331,7 +332,7 @@ describe("what gh and the attempts record say decides where the ticket lands", (
     const gh = fakeGh("evidence-merged", { stdout: ghAnswer("MERGED") });
 
     await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     const ticket = readTicket(dir, "PRB-1");
@@ -346,7 +347,7 @@ describe("the history a reconciliation writes says it is a reconciliation", () =
     const gh = fakeGh("provenance", { stdout: ghAnswer("OPEN") });
 
     await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
     );
 
     const after = readTicket(dir, "PRB-1");
@@ -381,7 +382,7 @@ describe("sync refuses rather than inventing a history it cannot walk", () => {
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.did_not_complete);
@@ -399,7 +400,7 @@ describe("sync refuses rather than inventing a history it cannot walk", () => {
     const streams = capture();
 
     const code = await withGh(gh.bin, () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.did_not_complete);

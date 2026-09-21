@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts";
 import type { PreflightResult } from "@perbo/runner";
 import { afterAll, describe, expect, it } from "vitest";
-import { runDoctorCommand, type DoctorOptions } from "./index.js";
+import { doctorCommandLine } from "./index.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { runCommandLine } from "../../command-line/terminal.js";
+import type { Streams } from "../../streams.js";
 
 /**
  * The CHECKS block: the pinned checks `perbo doctor` can see would read a
@@ -29,31 +31,18 @@ const streams = () => {
   return { out, err, human: sink(out, err, true), machine: sink(out, err, false) };
 };
 
-const sink = (out: string[], err: string[], isTTY: boolean): DoctorOptions["streams"] => ({
+const sink = (out: string[], err: string[], isTTY: boolean): Streams => ({
   stdout: (chunk: string) => out.push(chunk),
   stderr: (chunk: string) => err.push(chunk),
   isTTY,
 });
 
-const doctorArgs = (repo: string, json: boolean): DoctorOptions["args"] => ({
-  ticket: null,
-  store: null,
-  contract: null,
-  config: null,
+/** The line this diagnostic is asked for by: a repository, and the record or the reading. */
+const doctorArgs = (repo: string, json: boolean): string[] => [
+  "--repo",
   repo,
-  worktreeRoot: null,
-  publish: false,
-  json,
-  quiet: true,
-  writeConfig: false,
-  probe: false,
-  resumeFrom: null,
-  outcome: null,
-  criteria: [],
-  paths: [],
-  pr: null,
-  relevel: false,
-});
+  ...(json ? ["--json"] : []),
+];
 
 /** A machine and a checkout that are both fine, so nothing else is in the report. */
 const machineReady: PreflightResult = {
@@ -97,13 +86,11 @@ function repository(name: string, config: Record<string, unknown> | null): strin
 
 async function doctor(repo: string, json = false): Promise<{ text: string; code: number }> {
   const sinks = streams();
-  const code = await runDoctorCommand({
-    args: doctorArgs(repo, json),
+  const code = await runCommandLine(doctorCommandLine, {
+    argv: doctorArgs(repo, json),
     streams: json ? sinks.machine : sinks.human,
     cwd: process.cwd(),
-    commands: ["doctor", "review", "run"],
-    preflight: () => machineReady,
-    diagnose: () => Promise.resolve(materializable),
+    deps: { commands: ["doctor", "review", "run"], preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
   });
   return { text: sinks.out.join(""), code };
 }

@@ -11,10 +11,11 @@ import {
   type Ticket,
 } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * What the ticket's delivery record says about the checks on its head.
@@ -92,11 +93,11 @@ afterEach(() => {
  * before the read, so a suite that let the machine's own environment decide it
  * would ask `gh auth status` on one developer's machine and not on another's.
  */
-const withGh = <T,>(bin: string, body: () => Promise<T>): Promise<T> => {
+const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   process.env.GH_TOKEN = "test-token";
   delete process.env.GITHUB_TOKEN;
-  return body();
+  return Promise.resolve(body());
 };
 
 const AT = new Date("2026-09-07T09:00:00.000Z");
@@ -112,8 +113,8 @@ function publishedTicket(
   const repo = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo",
       repo,
       "--outcome",
@@ -123,7 +124,7 @@ function publishedTicket(
       "--path",
       "packages/search/**",
       "--approve",
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });
@@ -198,7 +199,7 @@ describe("the checks the run read, on the ticket", () => {
           { name: "lint", status: "IN_PROGRESS" },
         ]),
       ),
-      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -230,13 +231,13 @@ describe("the checks the run read, on the ticket", () => {
           { __typename: "StatusContext", context: "ci/legacy", state: "PENDING" },
         ]),
       ),
-      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     // That the sync returned at all is half the claim: an empty conclusion
     // carried through to the write is neither a conclusion the record can hold
     // nor `unchecked`, and the write refuses it — a `ZodError` out of
-    // `runSyncCommand` in place of a delivery record.
+    // `sync` in place of a delivery record.
     expect(code).toBe(EXIT_CODES.approve);
     const after = readTicket(dir, "PRB-1");
     expect(after.delivery.checks).toEqual([

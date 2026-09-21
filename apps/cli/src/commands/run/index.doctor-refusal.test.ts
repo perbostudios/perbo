@@ -7,8 +7,9 @@ import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts"
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import type { DiagnoseRequest } from "@perbo/workspace";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runDoctorCommand, type DoctorOptions } from "./index.js";
+import { type DoctorDeps, doctorCommandLine } from "./index.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * `perbo doctor`, with the three things it does that start another program —
@@ -64,26 +65,13 @@ const streams = () => {
   };
 };
 
-const doctorArgs = (repo: string, extra: Partial<DoctorOptions["args"]> = {}): DoctorOptions["args"] => ({
-  ticket: null,
-  store: null,
-  contract: null,
-  config: null,
+/** The line this diagnostic is asked for by: a repository, and the record. */
+const doctorArgs = (repo: string, extra: readonly string[] = []): string[] => [
+  "--repo",
   repo,
-  worktreeRoot: null,
-  publish: false,
-  json: true,
-  quiet: true,
-  writeConfig: false,
-  probe: false,
-  resumeFrom: null,
-  outcome: null,
-  criteria: [],
-  paths: [],
-  pr: null,
-  relevel: false,
+  "--json",
   ...extra,
-});
+];
 
 /** The findings, as the real diagnostic states them — through its own schema. */
 const cannotMaterialize: DiagnosticResult = DiagnosticResultSchema.parse({
@@ -148,29 +136,26 @@ describe("perbo doctor", () => {
     const requests: DiagnoseRequest[] = [];
     const { out, streams: sink } = streams();
 
-    const code = await runDoctorCommand({
-      args: doctorArgs(dir),
+    const code = await runCommandLine(doctorCommandLine, {
+      argv: doctorArgs(dir),
       streams: sink,
       cwd: process.cwd(),
-      preflight: () => machineReady,
-      diagnose: (request) => {
-        requests.push(request);
-        return Promise.resolve(cannotMaterialize);
-      },
-      // SCP-279: the fourth collaborator, stubbed like the others. The real one
-      // asks `gh` what this repository runs on a pull request.
-      pullRequestChecks: (request) =>
-        Promise.resolve({
-          answered: false,
-          runs_checks: false,
-          workflows: [],
-          workflows_seen: 0,
-          workflows_ref: null,
-          required_checks: [],
-          base_ref: request.base_ref,
-          detail: "not asked here",
-        }),
-      baseRef: onMain,
+      deps: { preflight: () => machineReady, diagnose: (request) => {
+          requests.push(request);
+          return Promise.resolve(cannotMaterialize);
+        }, // SCP-279: the fourth collaborator, stubbed like the others. The real one
+        // asks `gh` what this repository runs on a pull request.
+        pullRequestChecks: (request) =>
+          Promise.resolve({
+            answered: false,
+            runs_checks: false,
+            workflows: [],
+            workflows_seen: 0,
+            workflows_ref: null,
+            required_checks: [],
+            base_ref: request.base_ref,
+            detail: "not asked here",
+          }), baseRef: onMain },
     });
 
     expect(code).toBe(1);
@@ -271,14 +256,14 @@ describe("perbo doctor", () => {
 
 async function run(
   repo: string,
-  collaborators: Pick<DoctorOptions, "preflight" | "diagnose" | "baseRef" | "pullRequestChecks">,
+  collaborators: Partial<Pick<DoctorDeps, "preflight" | "diagnose" | "baseRef" | "pullRequestChecks">>,
 ): Promise<{ out: string[]; err: string[]; code: number }> {
   const sink = streams();
-  const code = await runDoctorCommand({
-    args: doctorArgs(repo),
+  const code = await runCommandLine(doctorCommandLine, {
+    argv: doctorArgs(repo),
     streams: sink.streams,
     cwd: process.cwd(),
-    ...collaborators,
+    deps: { ...collaborators },
   });
   return { out: sink.out, err: sink.err, code };
 }

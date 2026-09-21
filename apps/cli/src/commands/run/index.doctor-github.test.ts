@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts";
-import { runDoctorCommand, type DoctorOptions } from "./index.js";
+import { doctorCommandLine } from "./index.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * SCP-200 criterion 2: `perbo doctor` says which credential path GitHub is
@@ -63,25 +64,12 @@ const materializable: DiagnosticResult = DiagnosticResultSchema.parse({
   proposed: null,
 });
 
-const doctorArgs = (repo: string, json: boolean): DoctorOptions["args"] => ({
-  ticket: null,
-  store: null,
-  contract: null,
-  config: null,
+/** The line this diagnostic is asked for by: a repository, and the record or the reading. */
+const doctorArgs = (repo: string, json: boolean): string[] => [
+  "--repo",
   repo,
-  worktreeRoot: null,
-  publish: false,
-  json,
-  quiet: true,
-  writeConfig: false,
-  probe: false,
-  resumeFrom: null,
-  outcome: null,
-  criteria: [],
-  paths: [],
-  pr: null,
-  relevel: false,
-});
+  ...(json ? ["--json"] : []),
+];
 
 const originalPath = process.env.PATH;
 const originalToken = process.env.GH_TOKEN;
@@ -347,11 +335,11 @@ async function doctor(
   else process.env.GH_TOKEN = options.token;
 
   const out: string[] = [];
-  await runDoctorCommand({
-    args: doctorArgs(repo, options.json),
+  await runCommandLine(doctorCommandLine, {
+    argv: doctorArgs(repo, options.json),
     streams: { stdout: (chunk) => out.push(chunk), stderr: () => undefined, isTTY: !options.json },
     cwd: process.cwd(),
-    diagnose: () => Promise.resolve(materializable),
+    deps: { diagnose: () => Promise.resolve(materializable) },
   });
   return out.join("");
 }

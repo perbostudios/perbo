@@ -8,8 +8,9 @@ import {
   type PreflightRequest,
   type PreflightResult,
 } from "@perbo/runner";
-import { parseExecuteArgs, runExecuteCommand, type ExecuteOptions } from "./run/index.js";
-import { attemptsRecordSubject, runInspectCommand } from "./inspect.js";
+import { type ExecuteDeps, executeCommandLine } from "./run/index.js";
+import { attemptsRecordSubject, inspectCommandLine } from "./inspect.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * What `perbo inspect` says about the checks on the head a run published.
@@ -450,31 +451,29 @@ async function withGh<T>(bin: string, body: () => Promise<T>): Promise<T> {
 async function run(
   repo: string,
   argv: readonly string[],
-  options: Omit<ExecuteOptions, "args" | "streams" | "cwd"> & { tty?: boolean } = {},
+  options: Partial<ExecuteDeps> & { tty?: boolean } = {},
 ): Promise<{ code: number; out: string; err: string }> {
   // On a terminal and without `--json`, the command prints what a person reads
   // rather than the record a script parses; both are the same run.
   const { tty, ...rest } = options;
   const streams = capture(tty === true);
-  const code = await runExecuteCommand({
-    args: parseExecuteArgs([
-      "--repo",
-      repo,
-      "--outcome",
-      OUTCOME,
-      "--criterion",
-      CRITERION,
-      ...(tty === true ? [] : ["--json"]),
-      ...argv,
-    ]),
+  const code = await runCommandLine(executeCommandLine, {
+    argv: [
+        "--repo",
+        repo,
+        "--outcome",
+        OUTCOME,
+        "--criterion",
+        CRITERION,
+        ...(tty === true ? [] : ["--json"]),
+        ...argv,
+      ],
     streams: streams.streams,
     cwd: repo,
-    preflight: okPreflight,
-    hooks: {
-      review: reviewer() as never,
-      push: (async () => ({ pushed: true, detail: "hooked" })) as never,
-    },
-    ...rest,
+    deps: { preflight: okPreflight, hooks: {
+        review: reviewer() as never,
+        push: (async () => ({ pushed: true, detail: "hooked" })) as never,
+      }, ...rest },
   });
   return { code, out: streams.out.join(""), err: streams.err.join("") };
 }
@@ -507,18 +506,18 @@ async function inspect(
   shown: string;
 }> {
   const asJson = capture(false);
-  await runInspectCommand({
+  await runCommandLine(inspectCommandLine, {
     argv: [runId, "--repo", repo],
     streams: asJson.streams,
     cwd: repo,
-    subject: attemptsRecordSubject,
+    deps: { subject: attemptsRecordSubject },
   });
   const onTty = capture(true);
-  await runInspectCommand({
+  await runCommandLine(inspectCommandLine, {
     argv: [runId, "--repo", repo],
     streams: onTty.streams,
     cwd: repo,
-    subject: attemptsRecordSubject,
+    deps: { subject: attemptsRecordSubject },
   });
   return {
     report: JSON.parse(asJson.out.join("")) as { delivery_checks: RunReport["delivery_checks"] },

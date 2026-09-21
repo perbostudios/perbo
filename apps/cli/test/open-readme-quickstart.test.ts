@@ -15,9 +15,11 @@ import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { preflight, type PreflightRequest } from "@perbo/runner";
 import { parseReviewArgs } from "../src/commands/review/index.js";
-import { FULL_COMMAND_SET, parseExecuteArgs, runDoctorCommand } from "../src/commands/run/index.js";
+import { doctorCommandLine, executeCommandLine } from "../src/commands/run/index.js";
+import { COMMAND_NAMES } from "../src/command-line/names.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/open-build.js";
 import { REPO_ROOT } from "../src/test-support/paths.js";
+import { runCommandLine } from "../src/command-line/terminal.js";
 
 /**
  * The open README's quick start, run rather than read.
@@ -151,8 +153,8 @@ function invokedBinary(step: Step): string | null {
  * drift this file exists to catch.
  */
 const PARSERS: Record<string, (argv: string[]) => unknown> = {
-  run: parseExecuteArgs,
-  doctor: parseExecuteArgs,
+  run: (argv) => executeCommandLine.read(argv),
+  doctor: (argv) => doctorCommandLine.read(argv),
   review: parseReviewArgs,
 };
 
@@ -168,9 +170,9 @@ function checkAgainstTheCli(step: Step): void {
   const command = rest[0] ?? "";
   const named = (why: string): Error =>
     new Error(`quick-start step ${step.position} — \`${step.text}\` — ${why}`);
-  if (!FULL_COMMAND_SET.includes(command as (typeof FULL_COMMAND_SET)[number])) {
+  if (!COMMAND_NAMES.includes(command as (typeof COMMAND_NAMES)[number])) {
     throw named(
-      `names \`${command}\`, which \`perbo\` does not dispatch (it has: ${FULL_COMMAND_SET.join(", ")})`,
+      `names \`${command}\`, which \`perbo\` does not dispatch (it has: ${COMMAND_NAMES.join(", ")})`,
     );
   }
   const parse = PARSERS[command];
@@ -660,12 +662,12 @@ describe("the prerequisites the quick start states before its first command", ()
     // shipped `doctor`. What the README states the floor *is* is checked
     // against the workspace's own `engines` above.
     const out: string[] = [];
-    const status = await runDoctorCommand({
-      args: parseExecuteArgs(["--repo", repo]),
+    const status = await runCommandLine(doctorCommandLine, {
+      argv: ["--repo", repo],
       streams: { stdout: (chunk) => out.push(chunk), stderr: () => undefined, isTTY: true },
       cwd: repo,
-      preflight: (request: PreflightRequest) =>
-        preflight({ ...request, minNodeMajor: Number(process.versions.node.split(".")[0]) + 1 }),
+      deps: { preflight: (request: PreflightRequest) =>
+          preflight({ ...request, minNodeMajor: Number(process.versions.node.split(".")[0]) + 1 }) },
     });
     // eslint-disable-next-line no-control-regex
     const shown = out.join("").replace(/\u001b\[[0-9;]*m/g, "");

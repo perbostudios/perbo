@@ -19,7 +19,20 @@ import {
 } from "@perbo/contracts";
 import { PlanningError, blockingEdit, contractEditCount, readSpecFile } from "@perbo/planning";
 import { assembleContract, assertContractSealed, assertRequirementsCarried, chooseLevel, parseCriterion, recordedEdits, type ManualVerifier } from "../admit.js";
+import { z } from "zod";
 import type { Streams } from "../../streams.js";
+import {
+  listFlag,
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../command-line/grammar.js";
+import type { CommandContext } from "../../command.js";
+import type { NarratedCommand } from "../../command-line/table.js";
+import { readInput } from "../../usage-error.js";
+import { storeFor, StoreTargetSchema } from "../../store/index.js";
 import { UsageError } from "../../usage-error.js";
 import { readNodePageInputs } from "../../spec/pages.js";
 import {
@@ -33,7 +46,6 @@ import {
   readContract,
   readDraftSnapshotFile,
   readTicket,
-  storeDir,
   writeApproachRecord,
   writeContract,
   writeDraftSnapshot,
@@ -81,119 +93,49 @@ export interface EditArgs {
   json: boolean;
 }
 
-export interface EditInput {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  now?: Date;
-  /** Where `VISUAL` and `EDITOR` are read from. Tests supply one. */
-  env?: NodeJS.ProcessEnv;
-}
-
-const takeValue = (rest: readonly string[], index: number, token: string): string => {
-  const next = rest[index];
-  if (next === undefined) throw new UsageError(`${token} requires a value`);
-  return next;
-};
-
-export function parseEditArgs(argv: readonly string[]): { key: string; args: EditArgs } {
-  const [key, ...rest] = argv;
-  if (!key || key.startsWith("--")) throw new UsageError("edit requires a ticket key, e.g. PRB-1");
-  const args: EditArgs = {
-    repo: ".",
-    store: null,
-    outcome: null,
-    criteria: [],
-    paths: [],
-    prohibited: [],
-    manualReviewer: null,
-    manualReason: null,
-    graphEdit: null,
-    undo: null,
-    author: "you",
-    json: false,
-  };
-  const tokens = rest.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = takeValue(tokens, ++i, token);
-        break;
-      case "--store":
-        args.store = takeValue(tokens, ++i, token);
-        break;
-      case "--outcome":
-        args.outcome = takeValue(tokens, ++i, token);
-        break;
-      case "--criterion":
-        args.criteria.push(takeValue(tokens, ++i, token));
-        break;
-      case "--path":
-        args.paths.push(takeValue(tokens, ++i, token));
-        break;
-      case "--prohibit":
-        args.prohibited.push(takeValue(tokens, ++i, token));
-        break;
-      case "--manual-reviewer":
-        args.manualReviewer = takeValue(tokens, ++i, token);
-        break;
-      case "--manual-reason":
-        args.manualReason = takeValue(tokens, ++i, token);
-        break;
-      case "--graph-edit":
-        args.graphEdit = takeValue(tokens, ++i, token);
-        break;
-      case "--undo": {
-        const raw = takeValue(tokens, ++i, token);
-        const number = Number(raw);
-        if (!Number.isInteger(number) || number < 1) {
-          throw new UsageError(
-            `--undo takes the number of the edit to revert, counting from 1. Got '${raw}'`,
-          );
-        }
-        args.undo = number;
-        break;
-      }
-      case "--author": {
-        const author = takeValue(tokens, ++i, token);
-        if (!(EDIT_AUTHORS as readonly string[]).includes(author)) {
-          throw new UsageError(`--author must be ${EDIT_AUTHORS.join(" or ")}. Got '${author}'`);
-        }
-        args.author = author as EditAuthor;
-        break;
-      }
-      case "--json":
-        args.json = true;
-        break;
-      default:
-        throw new UsageError(`unknown option '${token}' for edit`);
-    }
-  }
-  // One edit at a time, through one path. `--graph-edit` and the flag edits
-  // change different things by different rules, and an `--undo` reverts rather
-  // than applies: a command asking for two of them means something this cannot
+export const EditInputSchema = z.strictObject({
+  target: StoreTargetSchema,
+  key: z.string().min(1, "edit requires a ticket key, e.g. PRB-1"),
+  outcome: z.string().nullable(),
+  criteria: z.array(z.string()),
+  paths: z.array(z.string()),
+  /** Paths the executor may not write even inside the allowed ones (D-105). Replaces the list. */
+  prohibited: z.array(z.string()),
+  manualReviewer: z.string().nullable(),
+  manualReason: z.string().nullable(),
+  /** One graph edit, as JSON. See `GraphEditSchema` in `@perbo/contracts`. */
+  graphEdit: z.string().nullable(),
+  /** The number of the edit to revert, one upward through the recorded list. */
+  undo: z.int().min(1, "--undo takes the number of the edit to revert, counting from 1").nullable(),
+  /** Who is making it. The interview passes `interview`; a person's edits count. */
+  author: z.enum(EDIT_AUTHORS),
+}).superRefine((input, ctx) => {
+  // One edit at a time, through one path. `graphEdit` and the field edits
+  // change different things by different rules, and an `undo` reverts rather
+  // than applies: an edit asking for two of them means something this cannot
   // tell, and picking one would apply an edit nobody asked for.
   const asked = [
-    args.graphEdit !== null ? "--graph-edit" : null,
-    args.undo !== null ? "--undo" : null,
-    args.outcome !== null ||
-    args.criteria.length > 0 ||
-    args.paths.length > 0 ||
-    args.prohibited.length > 0
+    input.graphEdit !== null ? "--graph-edit" : null,
+    input.undo !== null ? "--undo" : null,
+    input.outcome !== null ||
+    input.criteria.length > 0 ||
+    input.paths.length > 0 ||
+    input.prohibited.length > 0
       ? "--outcome/--criterion/--path/--prohibit"
       : null,
   ].filter((each): each is string => each !== null);
   if (asked.length > 1) {
-    throw new UsageError(
-      `${asked.join(" and ")} are separate edit paths, and edit applies one edit at a time`,
-    );
+    ctx.addIssue({
+      code: "custom",
+      message: `${asked.join(" and ")} are separate edit paths, and edit applies one edit at a time`,
+    });
   }
-  return { key, args };
+});
+export type EditInput = z.infer<typeof EditInputSchema>;
+
+/** Where `VISUAL` and `EDITOR` are read from. Tests supply one. */
+export interface EditDeps {
+  env: NodeJS.ProcessEnv;
 }
 
 const IDENTITY = ["plan_id", "ticket_id", "version"] as const;
@@ -282,35 +224,35 @@ function assertIdentityKept(before: PlanContract, after: PlanContract, key: stri
   }
 }
 
-export async function runEditCommand(input: EditInput): Promise<number> {
-  const { key, args } = parseEditArgs(input.argv);
-  return runEdit({ key, args, streams: input.streams, cwd: input.cwd, now: input.now, env: input.env });
-}
-
 /**
- * The edit with its arguments already built, for a caller that holds them as
- * values rather than as a command line — the queue's endpoint, whose inputs
- * are a session's strings and must never be parsed as flags.
+ * One edit, applied. Narrated: what it says as it goes is the answer, and the
+ * `--json` document is the contract it wrote.
+ *
+ * In-process callers — the endpoint, whose inputs are a session's strings, and
+ * the interview — reach this with an object, so nothing they hold is ever read
+ * as a flag.
  */
-export async function runEdit(input: {
-  key: string;
-  args: EditArgs;
-  streams: Streams;
-  cwd: string;
-  now?: Date | undefined;
-  env?: NodeJS.ProcessEnv | undefined;
-}): Promise<number> {
-  const now = input.now ?? new Date();
-  const { key, args } = input;
-  const { streams } = input;
-  const dir = storeDir(resolve(input.cwd, args.repo), args.store);
+export async function edit(
+  input: EditInput,
+  output: { json: boolean },
+  context: CommandContext & { stdout(chunk: string): void; isTTY: boolean } & Partial<EditDeps>,
+): Promise<number> {
+  const now = context.now;
+  const { key } = input;
+  const args: EditArgs = { ...input, repo: input.target.repo, store: input.target.store, json: output.json };
+  const streams: Streams = {
+    stdout: context.stdout,
+    stderr: (chunk) => context.diagnostics.stderr(chunk),
+    isTTY: context.isTTY,
+  };
+  const dir = storeFor(context.cwd, input.target);
 
   const ticket = readTicket(dir, key);
   if (args.graphEdit !== null || args.undo !== null) {
     // The graph path decides for itself what approval forbids: a node's
     // criteria and paths are contract and freeze at approval, an edge is
     // approach and does not (ADR-0016, D-100).
-    return runGraphEdit({ key, args, streams, cwd: input.cwd, now, dir, ticket });
+    return runGraphEdit({ key, args, streams, cwd: context.cwd, now, dir, ticket });
   }
   if (ticket.approved_at !== null) {
     throw new UsageError(
@@ -389,7 +331,7 @@ export async function runEdit(input: {
     throw new UsageError(mismatch);
   };
   if (interactive) {
-    edited = editInteractively(path, key, input.env ?? process.env, input.cwd, streams);
+    edited = editInteractively(path, key, context.env ?? process.env, context.cwd, streams);
     assertIdentityKept(before, edited, key);
     if (!hasAcceptanceCriteria(edited)) {
       throw new UsageError(
@@ -498,7 +440,7 @@ export async function runEdit(input: {
   // A contract with no spec behind it cites nothing.
   assertRequirementsCarried(
     contract,
-    specRequirementIds(resolve(input.cwd, args.repo), ticket),
+    specRequirementIds(resolve(context.cwd, args.repo), ticket),
     ticket.admission.spec?.path ?? null,
     `. The file is left as you edited it: drop the citation, then run perbo edit ${key} again`,
   );
@@ -507,7 +449,7 @@ export async function runEdit(input: {
   // pair untouched, rather than after the contract has been rewritten.
   const approach = readApproachRecord(dir, key, contract);
   // Read before the first write, so an edit whose spec cannot be read lands nowhere.
-  const pages = readNodePageInputs({ repositoryRoot: resolve(input.cwd, args.repo), ticket, contract });
+  const pages = readNodePageInputs({ repositoryRoot: resolve(context.cwd, args.repo), ticket, contract });
   writeContract(dir, ticket, contract);
   // The approach record keeps the order between nodes. A plan left with no
   // nodes has no order to keep, so the record goes with the graph, and stays
@@ -895,3 +837,63 @@ function specRequirementIds(repositoryRoot: string, ticket: Ticket): string[] {
     );
   }
 }
+
+const FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--outcome": valueFlag(),
+  "--criterion": listFlag(),
+  "--path": listFlag(),
+  "--prohibit": listFlag(),
+  "--manual-reviewer": valueFlag(),
+  "--manual-reason": valueFlag(),
+  "--graph-edit": valueFlag(),
+  "--undo": valueFlag(),
+  "--author": valueFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const GRAMMAR: Grammar<typeof FLAGS> = {
+  command: "edit",
+  flags: FLAGS,
+  positionals: { min: 1, max: 1, refusal: "edit requires a ticket key, e.g. PRB-1" },
+  afterDoubleDash: "positionals",
+};
+
+export const editCommandLine: NarratedCommand<EditInput, { json: boolean }, EditDeps> = {
+  kind: "narrated",
+  name: "edit",
+  grammars: [GRAMMAR],
+  grammarFor: () => GRAMMAR,
+  read(argv) {
+    const line = parseArgv(GRAMMAR, argv);
+    const undo = line.flags["--undo"];
+    const undone = undo === undefined ? null : Number(undo);
+    if (undone !== null && (!Number.isInteger(undone) || undone < 1)) {
+      throw new UsageError(
+        `--undo takes the number of the edit to revert, counting from 1. Got '${undo}'`,
+      );
+    }
+    const author = line.flags["--author"];
+    if (author !== undefined && !(EDIT_AUTHORS as readonly string[]).includes(author)) {
+      throw new UsageError(`--author must be ${EDIT_AUTHORS.join(" or ")}. Got '${author}'`);
+    }
+    return {
+      input: readInput(EditInputSchema, {
+        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+        key: line.positionals[0],
+        outcome: line.flags["--outcome"] ?? null,
+        criteria: [...(line.flags["--criterion"] ?? [])],
+        paths: [...(line.flags["--path"] ?? [])],
+        prohibited: [...(line.flags["--prohibit"] ?? [])],
+        manualReviewer: line.flags["--manual-reviewer"] ?? null,
+        manualReason: line.flags["--manual-reason"] ?? null,
+        graphEdit: line.flags["--graph-edit"] ?? null,
+        undo: undone,
+        author: author ?? "you",
+      }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  run: edit,
+};

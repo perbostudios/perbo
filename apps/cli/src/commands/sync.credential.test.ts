@@ -5,11 +5,12 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-200 criterion 1, for `perbo sync`: which credential `gh` was read
@@ -110,12 +111,12 @@ afterEach(() => {
 });
 
 /** The environment a sync runs in: this `gh`, and this much of a credential. */
-function withGh<T>(bin: string, token: string | null, body: () => Promise<T>): Promise<T> {
+function withGh<T>(bin: string, token: string | null, body: () => T | Promise<T>): Promise<Awaited<T>> {
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   delete process.env.GITHUB_TOKEN;
   if (token === null) delete process.env.GH_TOKEN;
   else process.env.GH_TOKEN = token;
-  return body();
+  return Promise.resolve(body());
 }
 
 /** A ticket sitting at `pr_open` behind a pull request the loop published. */
@@ -123,8 +124,8 @@ function publishedTicket(name: string): { repo: string; dir: string } {
   const repo = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo",
       repo,
       "--outcome",
@@ -134,7 +135,7 @@ function publishedTicket(name: string): { repo: string; dir: string } {
       "--path",
       "packages/search/**",
       "--approve",
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });
@@ -169,7 +170,7 @@ describe("sync says which credential it read GitHub through", () => {
       const gh = fakeGh("sync-token", 1);
 
       const code = await withGh(gh.path, SENTINEL, () =>
-        runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
@@ -188,7 +189,7 @@ describe("sync says which credential it read GitHub through", () => {
       const gh = fakeGh("sync-login", 0);
 
       const code = await withGh(gh.path, null, () =>
-        runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
@@ -207,7 +208,7 @@ describe("sync says which credential it read GitHub through", () => {
       const streams = capture();
 
       const code = await withGh(gh.path, null, () =>
-        runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.did_not_complete);

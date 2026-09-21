@@ -10,7 +10,7 @@ import {
   type Ticket,
 } from "@perbo/contracts";
 import type { Streams } from "../streams.js";
-import { runStopsCommand } from "./stops.js";
+import { stopsCommandLine } from "./stops.js";
 import {
   ESCAPE_WINDOW_DAYS,
   TICKET_ESCAPES_SCHEMA_VERSION,
@@ -18,6 +18,7 @@ import {
   type EscapeCommit,
 } from "./escapes/index.js";
 import { storeDir, writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-202 criterion 4: what the loop's own merges cost, beside the share that
@@ -164,7 +165,7 @@ describe("ac_4 — the loop's own merges are counted beside the unattended share
     const repo = populated("loop-merges-table");
     const streams = capture();
 
-    const code = await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo, now: NOW });
+    const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo, now: NOW });
     expect(code).toBe(EXIT_CODES.approve);
     const out = streams.out.join("");
 
@@ -186,7 +187,7 @@ describe("ac_4 — the loop's own merges are counted beside the unattended share
     const repo = populated("loop-merges-json");
     const streams = capture();
 
-    await runStopsCommand({ argv: ["--repo", repo, "--json"], streams, cwd: repo, now: NOW });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo, now: NOW });
     const report = JSON.parse(streams.out.join("")) as { loop_merges: Record<string, number> };
 
     expect(report.loop_merges).toEqual({

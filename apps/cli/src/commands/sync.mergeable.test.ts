@@ -5,11 +5,12 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-192 criterion 3: a pull request that stopped being mergeable is recorded
@@ -88,11 +89,11 @@ afterEach(() => {
  * before the read, so a suite that let the machine's own environment decide it
  * would ask `gh auth status` on one developer's machine and not on another's.
  */
-const withGh = <T,>(bin: string, body: () => Promise<T>): Promise<T> => {
+const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   process.env.GH_TOKEN = "test-token";
   delete process.env.GITHUB_TOKEN;
-  return body();
+  return Promise.resolve(body());
 };
 
 /** A ticket sitting at `pr_open` behind a pull request the loop published. */
@@ -100,8 +101,8 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
   const repo = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo",
       repo,
       "--outcome",
@@ -111,7 +112,7 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
       "--path",
       "packages/search/**",
       "--approve",
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });
@@ -142,7 +143,7 @@ describe("sync records a pull request that stopped being mergeable", () => {
     const streams = capture();
 
     const code = await withGh(fakeGh("conflicting", ghAnswer("CONFLICTING", "DIRTY")), () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -157,7 +158,7 @@ describe("sync records a pull request that stopped being mergeable", () => {
     const streams = capture();
 
     const code = await withGh(fakeGh("clean", ghAnswer("MERGEABLE", "CLEAN")), () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -170,7 +171,7 @@ describe("sync records a pull request that stopped being mergeable", () => {
     const streams = capture();
 
     await withGh(fakeGh("unknown", ghAnswer("UNKNOWN", "UNKNOWN")), () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     // GitHub computes mergeability asynchronously, so `UNKNOWN` is "not yet",

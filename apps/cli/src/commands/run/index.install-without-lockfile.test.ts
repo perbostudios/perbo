@@ -12,13 +12,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
-import {
-  parseExecuteArgs,
-  runDoctorCommand,
-  runExecuteCommand,
-  type ExecuteOptions,
-} from "./index.js";
+import { type ExecuteDeps, doctorCommandLine, executeCommandLine } from "./index.js";
 import { storeDir } from "../../store/index.js";
+import { runCommandLine } from "../../command-line/terminal.js";
 
 /**
  * A first run on a repository that has no lockfile yet.
@@ -254,32 +250,30 @@ const CRITERION = "total() returns the sum of its inputs :: total([1,2]) is 3 ::
 async function loop(
   repo: string,
   argv: readonly string[],
-  options: Omit<ExecuteOptions, "args" | "streams" | "cwd"> = {},
+  options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string; out: string }> {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await runExecuteCommand({
-    args: parseExecuteArgs([
-      "--repo",
-      repo,
-      "--outcome",
-      OUTCOME,
-      "--criterion",
-      CRITERION,
-      "--path",
-      "src/**",
-      "--json",
-      ...argv,
-    ]),
+  const code = await runCommandLine(executeCommandLine, {
+    argv: [
+        "--repo",
+        repo,
+        "--outcome",
+        OUTCOME,
+        "--criterion",
+        CRITERION,
+        "--path",
+        "src/**",
+        "--json",
+        ...argv,
+      ],
     streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY: false,
-    },
+        stdout: (chunk: string) => out.push(chunk),
+        stderr: (chunk: string) => err.push(chunk),
+        isTTY: false,
+      },
     cwd: repo,
-    preflight: okPreflight,
-    hooks: { review: reviewer() as never },
-    ...options,
+    deps: { preflight: okPreflight, hooks: { review: reviewer() as never }, ...options },
   });
   // The report is returned unparsed: a run that refuses writes nothing to
   // stdout, and a test that parses eagerly fails on the JSON rather than on
@@ -383,11 +377,11 @@ describe("doctor on a repository with no lockfile", () => {
     const repo = repository("doctor");
 
     const reported = capture(false);
-    const code = await runDoctorCommand({
-      args: parseExecuteArgs(["--repo", repo, "--json"]),
+    const code = await runCommandLine(doctorCommandLine, {
+      argv: ["--repo", repo, "--json"],
       streams: reported.streams,
       cwd: repo,
-      preflight: okPreflight,
+      deps: { preflight: okPreflight },
     });
 
     const report = JSON.parse(reported.out.join("")) as {
@@ -414,11 +408,11 @@ describe("doctor on a repository with no lockfile", () => {
 
     // The report a person reads says it too, rather than only the JSON.
     const shown = capture(true);
-    await runDoctorCommand({
-      args: parseExecuteArgs(["--repo", repo]),
+    await runCommandLine(doctorCommandLine, {
+      argv: ["--repo", repo],
       streams: shown.streams,
       cwd: repo,
-      preflight: okPreflight,
+      deps: { preflight: okPreflight },
     });
     const text = shown.out.join("");
     expect(text).toContain("advisory  lockfile_missing");
@@ -473,16 +467,16 @@ async function doctor(
   options: { write?: boolean; human?: boolean } = {},
 ): Promise<{ text: string; code: number }> {
   const shown = capture(options.human === true);
-  const code = await runDoctorCommand({
-    args: parseExecuteArgs([
-      "--repo",
-      repo,
-      ...(options.human ? [] : ["--json"]),
-      ...(options.write ? ["--write-config"] : []),
-    ]),
+  const code = await runCommandLine(doctorCommandLine, {
+    argv: [
+        "--repo",
+        repo,
+        ...(options.human ? [] : ["--json"]),
+        ...(options.write ? ["--write-config"] : []),
+      ],
     streams: shown.streams,
     cwd: repo,
-    preflight: okPreflight,
+    deps: { preflight: okPreflight },
   });
   return { text: shown.out.join(""), code };
 }

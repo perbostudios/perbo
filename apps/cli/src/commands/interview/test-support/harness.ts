@@ -5,7 +5,7 @@ import { claudeInterviewTransport } from "../claude.js";
 /** What the transport is told to run. The scripted SDK spawns nothing. */
 const CLAUDE = "/usr/local/bin/claude";
 import { codexInterviewTransport } from "../codex.js";
-import { runInterviewCommand } from "../index.js";
+import { interviewCommandLine } from "../index.js";
 import type { Streams } from "../../../streams.js";
 import { fakeAppServer, type ServerStep } from "./fake-app-server.js";
 import {
@@ -18,6 +18,7 @@ import {
   type InterviewHarness,
 } from "./contract.js";
 import { scriptedSdk, type ScriptStep } from "./fake-sdk.js";
+import { runCommandLine } from "../../../command-line/terminal.js";
 
 /**
  * The two transports, each driven by the same script (SCP-312).
@@ -69,7 +70,7 @@ export function claudeHarness(): InterviewHarness {
         cwd: input.repo,
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       });
-      const code = await runInterviewCommand({
+      const code = await runCommandLine(interviewCommandLine, {
         argv: [
           "--repo",
           input.repo,
@@ -79,9 +80,11 @@ export function claudeHarness(): InterviewHarness {
         ],
         streams,
         cwd: input.repo,
-        transport: claudeInterviewTransport(sdk, CLAUDE),
-        model: drafter(),
-        turns: oneTurn(),
+        deps: {
+          transport: claudeInterviewTransport(sdk, CLAUDE),
+          model: drafter(),
+          turns: oneTurn(),
+        },
       });
       const decisions: ContractDecision[] = sdk.calls.map((call) => ({
         tool: call.tool,
@@ -118,7 +121,7 @@ export function codexHarness(scratch: () => string): InterviewHarness {
         steps: input.steps.map(asServerStep),
         threadId: input.sessionId ?? "thread-0001",
       });
-      const code = await runInterviewCommand({
+      const code = await runCommandLine(interviewCommandLine, {
         argv: [
           "--repo",
           input.repo,
@@ -130,9 +133,11 @@ export function codexHarness(scratch: () => string): InterviewHarness {
         ],
         streams,
         cwd: input.repo,
-        transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
-        model: drafter(),
-        turns: oneTurn(),
+        deps: {
+          transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
+          model: drafter(),
+          turns: oneTurn(),
+        },
       });
       // A tool call the interview refused is answered with the refusal's own
       // words, as the other transport answers one, so what says it was refused

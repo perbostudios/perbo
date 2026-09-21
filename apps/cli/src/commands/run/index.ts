@@ -79,6 +79,18 @@ import {
   statesObserved,
   writeTicket,
 } from "../admit.js";
+import { COMMAND_NAMES } from "../../command-line/names.js";
+import {
+  listFlag,
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../command-line/grammar.js";
+import type { NarratedCommand } from "../../command-line/table.js";
+import { narratedStreams } from "../../streams.js";
+import type { CommandContext } from "../../command.js";
 import { UsageError } from "../../usage-error.js";
 import {
   LOCAL_RUN_SCHEMA_VERSION,
@@ -127,31 +139,6 @@ import { listTickets, readApproachRecord } from "../../store/tickets.js";
  * moves through, the key a ceiling hit is reported under — is {@link TICKET_RUNS},
  * the one place here that reads and writes the ticket store.
  */
-
-/** Every command this binary carries. */
-export const FULL_COMMAND_SET = [
-  "doctor",
-  "baseline",
-  "review",
-  "inspect",
-  "verdict",
-  "run",
-  "admit",
-  "approve",
-  "edit",
-  "list",
-  "sync",
-  "serve",
-  "mcp",
-  "agent",
-  "interview",
-  "stops",
-  "escapes",
-  "principle",
-  "index",
-] as const;
-
-export type FullCommandName = (typeof FULL_COMMAND_SET)[number];
 
 /**
  * The spec's No-Gos, from the ticket's approach record (D-100).
@@ -226,6 +213,34 @@ export interface TicketRuns {
   finished(work: AdmittedWork, result: TicketRunResult, at: Date, relevel: boolean): string;
 }
 
+/**
+ * `perbo doctor`: what the diagnostic is pointed at and how much it asks.
+ *
+ * A run's flags are not here and are refused by name. A line typed at the
+ * diagnostic that names a ticket, a contract or a bundle is a person asking
+ * for something else, and a diagnostic that took the word and ignored it
+ * answered a question nobody asked.
+ */
+export interface DoctorArgs {
+  store: string | null;
+  config: string | null;
+  repo: string;
+  /** Where worktrees would go. `doctor` says what a package manager makes of it. */
+  worktreeRoot: string | null;
+  publish: boolean;
+  json: boolean;
+  /** Write the proposed `.perbo/config.json` when none exists. */
+  writeConfig: boolean;
+  /**
+   * Make one minimal call at the configured reviewer model and say whether the
+   * provider answers this machine, before an attempt has spent anything. Off
+   * by default, because a diagnostic that calls a provider without being asked
+   * is one nobody can run offline.
+   */
+  probe: boolean;
+}
+
+/** `perbo run`: the contract to run, where it runs and what it may publish. */
 export interface ExecuteArgs {
   /** An admitted ticket key. Supplies the contract, and is moved by the run. */
   ticket: string | null;
@@ -233,23 +248,12 @@ export interface ExecuteArgs {
   contract: string | null;
   config: string | null;
   repo: string;
-  /** Where worktrees would go. `doctor` says what a package manager makes of it. */
-  worktreeRoot: string | null;
   publish: boolean;
   json: boolean;
   quiet: boolean;
-  /** `doctor` only: write the proposed `.perbo/config.json` when none exists. */
-  writeConfig: boolean;
-  /**
-   * `doctor` only: make one minimal call at the configured reviewer model and
-   * say whether the provider answers this machine, before an attempt has spent
-   * anything. Off by default, because a diagnostic that calls a provider
-   * without being asked is one nobody can run offline.
-   */
-  probe: boolean;
   /**
    * The execution bundle of an attempt a ceiling cut, whose retained
-   * `change.diff` this run starts from (SCP-154). `run` only.
+   * `change.diff` this run starts from (SCP-154).
    */
   resumeFrom: string | null;
   /**
@@ -264,78 +268,64 @@ export interface ExecuteArgs {
   pr: string | null;
   /**
    * SCP-227: re-level an admitted ticket's open branch with its base rather
-   * than run the ticket. `run` with `--ticket` only.
+   * than run the ticket. Takes `--ticket`.
    */
   relevel: boolean;
 }
 
-const TAKES_VALUE = new Set([
-  "--ticket",
-  "--store",
-  "--contract",
-  "--config",
-  "--repo",
-  "--worktree-root",
-  "--resume-from",
-  "--outcome",
-  "--criterion",
-  "--path",
-  "--pr",
-]);
-const FLAGS = new Set(["--publish", "--json", "--quiet", "--write-config", "--probe", "--relevel"]);
+const DOCTOR_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--config": valueFlag(),
+  "--worktree-root": valueFlag(),
+  "--publish": switchFlag(),
+  "--json": switchFlag(),
+  "--write-config": switchFlag(),
+  "--probe": switchFlag(),
+} satisfies FlagTable;
 
-export function parseExecuteArgs(argv: string[]): ExecuteArgs {
-  const args: ExecuteArgs = {
-    ticket: null,
-    store: null,
-    contract: null,
-    config: null,
-    repo: ".",
-    worktreeRoot: null,
-    publish: false,
-    json: false,
-    quiet: false,
-    writeConfig: false,
-    probe: false,
-    resumeFrom: null,
-    outcome: null,
-    criteria: [],
-    paths: [],
-    pr: null,
-    relevel: false,
-  };
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i]!;
-    if (!token.startsWith("--")) throw new UsageError(`unexpected argument '${token}'`);
-    const eq = token.indexOf("=");
-    const name = eq === -1 ? token : token.slice(0, eq);
-    if (FLAGS.has(name)) {
-      if (eq !== -1) throw new UsageError(`${name} does not take a value`);
-      if (name === "--publish") args.publish = true;
-      if (name === "--json") args.json = true;
-      if (name === "--quiet") args.quiet = true;
-      if (name === "--write-config") args.writeConfig = true;
-      if (name === "--probe") args.probe = true;
-      if (name === "--relevel") args.relevel = true;
-      continue;
-    }
-    if (!TAKES_VALUE.has(name)) throw new UsageError(`unknown flag '${name}'`);
-    const value = eq === -1 ? argv[++i] : token.slice(eq + 1);
-    if (value === undefined) throw new UsageError(`${name} requires a value`);
-    if (name === "--ticket") args.ticket = value;
-    if (name === "--store") args.store = value;
-    if (name === "--contract") args.contract = value;
-    if (name === "--config") args.config = value;
-    if (name === "--repo") args.repo = value;
-    if (name === "--worktree-root") args.worktreeRoot = value;
-    if (name === "--resume-from") args.resumeFrom = value;
-    if (name === "--outcome") args.outcome = value;
-    if (name === "--criterion") args.criteria.push(value);
-    if (name === "--path") args.paths.push(value);
-    if (name === "--pr") args.pr = value;
-  }
-  return args;
-}
+const DOCTOR_GRAMMAR: Grammar<typeof DOCTOR_FLAGS> = {
+  command: "doctor",
+  flags: DOCTOR_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal:
+      "doctor takes no positional argument: the repository it reads is --repo, e.g. perbo " +
+      "doctor --repo .",
+  },
+  afterDoubleDash: "positionals",
+};
+
+const RUN_FLAGS = {
+  "--ticket": valueFlag(),
+  "--store": valueFlag(),
+  "--contract": valueFlag(),
+  "--config": valueFlag(),
+  "--repo": valueFlag(),
+  "--publish": switchFlag(),
+  "--json": switchFlag(),
+  "--quiet": switchFlag(),
+  "--resume-from": valueFlag(),
+  "--outcome": valueFlag(),
+  "--criterion": listFlag(),
+  "--path": listFlag(),
+  "--pr": valueFlag(),
+  "--relevel": switchFlag(),
+} satisfies FlagTable;
+
+const RUN_GRAMMAR: Grammar<typeof RUN_FLAGS> = {
+  command: "run",
+  flags: RUN_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal:
+      "run takes no positional argument: what it runs is named by a flag, e.g. perbo run " +
+      "--ticket PRB-1",
+  },
+  afterDoubleDash: "positionals",
+};
 
 function readJson(path: string, label: string): unknown {
   try {
@@ -560,37 +550,48 @@ export function renderRun(
   return lines.join("\n");
 }
 
-export interface ExecuteOptions {
-  args: ExecuteArgs;
-  streams: Streams;
-  cwd: string;
-  /** When the contract was minted, for a run that mints one. */
-  now?: Date;
+/** The four parts of a run a test replaces; production uses the real thing. */
+export interface ExecuteDeps {
   /**
-   * Injected by the tests, the way `runDoctorCommand` takes its own. Production
+   * Injected by the tests, the way the diagnostic takes its own. Production
    * checks the real machine, which means spawning the agent binary, `git` and
    * `gh` to ask each for its version.
    */
-  preflight?: (request: PreflightRequest) => PreflightResult;
+  preflight: (request: PreflightRequest) => PreflightResult;
   /**
    * The `gh` a `--pr` reads a pull request's plan with. Production leaves it
    * unset and the one on PATH is used; a test names a binary instead, so that
    * pointing this command at a different `gh` does not mean editing the
    * environment of the whole process.
    */
-  gh?: { binary?: string | undefined } | undefined;
+  gh: { binary?: string | undefined } | undefined;
   /**
    * The agent, the reviewer, the verifier and the checks, as the loop takes
    * them. Injected by the tests so the two steps that cost money can be driven
    * without paying a provider; everything between them stays the real thing.
    */
-  hooks?: NonNullable<Parameters<typeof runTicket>[0]["hooks"]>;
+  hooks: NonNullable<Parameters<typeof runTicket>[0]["hooks"]>;
   /**
    * Whether this repository runs anything on a pull request (SCP-279). The
    * reader that asks `gh` is the default; a test names its own so that what a
    * run does with the answer can be driven without a repository that has one.
    */
-  pullRequestChecks?: PullRequestChecksReader;
+  pullRequestChecks: PullRequestChecksReader;
+}
+
+/** What a run is given: where it runs, what it says as it goes, and its four parts. */
+export type ExecuteContext = CommandContext & {
+  stdout(chunk: string): void;
+  isTTY: boolean;
+} & Partial<ExecuteDeps>;
+
+/** A run as the body below reads it: its line, its streams and its parts in one object. */
+interface ExecuteOptions extends Partial<ExecuteDeps> {
+  args: ExecuteArgs;
+  streams: Streams;
+  cwd: string;
+  /** When the contract was minted, for a run that mints one. */
+  now?: Date;
 }
 
 /**
@@ -886,7 +887,7 @@ export const TICKET_RUNS: TicketRuns = {
   },
 };
 
-export async function runExecuteCommand(options: ExecuteOptions): Promise<number> {
+async function runExecute(options: ExecuteOptions): Promise<number> {
   const { args, streams } = options;
   const now = options.now ?? new Date();
   const progress = args.quiet ? undefined : (message: string) => streams.stderr(`  ${message}\n`);
@@ -1453,16 +1454,14 @@ export function renderCommands(commands: readonly string[]): string[] {
   ];
 }
 
-export interface DoctorOptions {
-  args: ExecuteArgs;
-  streams: Streams;
-  cwd: string;
+/** The five reads of the machine a diagnostic makes, which a test replaces. */
+export interface DoctorDeps {
   /**
-   * Injected by the tests, the way `runReviewCommand` takes its preflight.
+   * Injected by the tests, the way a review takes its preflight.
    * Production checks the real machine — which means spawning `git`, the agent
    * binary and `gh` to ask each for its version.
    */
-  preflight?: (request: PreflightRequest) => PreflightResult;
+  preflight: (request: PreflightRequest) => PreflightResult;
   /**
    * Likewise the materialisation diagnostic, which walks the checkout with
    * `git ls-files`, and the base reading, which asks `git` which branch the
@@ -1470,18 +1469,31 @@ export interface DoctorOptions {
    * program, so a test that supplies all three is a test of this command and
    * of nothing else.
    */
-  diagnose?: (request: DiagnoseRequest) => Promise<DiagnosticResult>;
-  baseRef?: (checkout: string, options: { publish: boolean }) => ProposedBase | null;
-  /** The commands reported as the COMMANDS block. {@link FULL_COMMAND_SET} unless a caller names another. */
-  commands?: readonly string[];
+  diagnose: (request: DiagnoseRequest) => Promise<DiagnosticResult>;
+  baseRef: (checkout: string, options: { publish: boolean }) => ProposedBase | null;
+  /** The commands reported as the COMMANDS block. {@link COMMAND_NAMES} unless a caller names another. */
+  commands: readonly string[];
   /** A ticket key per ticket id, for the ceiling hits below. The ticket store answers unless a caller names another. */
-  keyFor?: (store: string) => Map<string, string>;
+  keyFor: (store: string) => Map<string, string>;
   /**
    * Whether this repository runs anything on a pull request (SCP-279), read
    * through `gh`. The real reader is the default here too; a test that names
    * its own is testing the report rather than the reading.
    */
-  pullRequestChecks?: PullRequestChecksReader;
+  pullRequestChecks: PullRequestChecksReader;
+}
+
+/** What a diagnostic is given: where it looks, what it says as it goes, and its reads. */
+export type DoctorContext = CommandContext & {
+  stdout(chunk: string): void;
+  isTTY: boolean;
+} & Partial<DoctorDeps>;
+
+/** A diagnostic as the body below reads it: its line, its streams and its reads in one object. */
+interface DoctorOptions extends Partial<DoctorDeps> {
+  args: DoctorArgs;
+  streams: Streams;
+  cwd: string;
 }
 
 /**
@@ -1495,8 +1507,8 @@ export interface DoctorOptions {
  */
 const DOCTOR_CHECKS_TIMEOUT_MS = 10_000;
 
-export async function runDoctorCommand(options: DoctorOptions): Promise<number> {
-  const commands = options.commands ?? FULL_COMMAND_SET;
+async function runDoctor(options: DoctorOptions): Promise<number> {
+  const commands = options.commands ?? COMMAND_NAMES;
   const checkMachine = options.preflight ?? preflight;
   const materialise = options.diagnose ?? diagnose;
   const readBase = options.baseRef ?? proposedBase;
@@ -3163,3 +3175,93 @@ export function mergeRunConfig(
     delivery_branch: run.branch ?? null,
   };
 }
+
+/**
+ * `perbo doctor`, over its own line.
+ *
+ * It answers while it looks — a block a section, in the order it reads them —
+ * so there is no record to hand back.
+ */
+export const doctorCommandLine: NarratedCommand<DoctorArgs, Record<string, never>, DoctorDeps> = {
+  kind: "narrated",
+  name: "doctor",
+  grammars: [DOCTOR_GRAMMAR],
+  grammarFor: () => DOCTOR_GRAMMAR,
+  read(argv) {
+    const line = parseArgv(DOCTOR_GRAMMAR, argv);
+    return {
+      input: {
+        store: line.flags["--store"] ?? null,
+        config: line.flags["--config"] ?? null,
+        repo: line.flags["--repo"] ?? ".",
+        worktreeRoot: line.flags["--worktree-root"] ?? null,
+        publish: line.flags["--publish"] === true,
+        json: line.flags["--json"] === true,
+        writeConfig: line.flags["--write-config"] === true,
+        probe: line.flags["--probe"] === true,
+      },
+      output: {},
+    };
+  },
+  run(input, _output, context) {
+    return runDoctor({
+      args: input,
+      streams: narratedStreams(context),
+      cwd: context.cwd,
+      ...(context.preflight ? { preflight: context.preflight } : {}),
+      ...(context.diagnose ? { diagnose: context.diagnose } : {}),
+      ...(context.baseRef ? { baseRef: context.baseRef } : {}),
+      ...(context.commands ? { commands: context.commands } : {}),
+      ...(context.keyFor ? { keyFor: context.keyFor } : {}),
+      ...(context.pullRequestChecks ? { pullRequestChecks: context.pullRequestChecks } : {}),
+    });
+  },
+};
+
+/**
+ * `perbo run`, over its own line.
+ *
+ * A diagnostic's flags are not here and are refused by name: `--probe` and
+ * `--write-config` ask a question about the machine, and a run that took
+ * either and ignored it would spend an attempt answering something else.
+ */
+export const executeCommandLine: NarratedCommand<ExecuteArgs, Record<string, never>, ExecuteDeps> = {
+  kind: "narrated",
+  name: "run",
+  grammars: [RUN_GRAMMAR],
+  grammarFor: () => RUN_GRAMMAR,
+  read(argv) {
+    const line = parseArgv(RUN_GRAMMAR, argv);
+    return {
+      input: {
+        ticket: line.flags["--ticket"] ?? null,
+        store: line.flags["--store"] ?? null,
+        contract: line.flags["--contract"] ?? null,
+        config: line.flags["--config"] ?? null,
+        repo: line.flags["--repo"] ?? ".",
+        publish: line.flags["--publish"] === true,
+        json: line.flags["--json"] === true,
+        quiet: line.flags["--quiet"] === true,
+        resumeFrom: line.flags["--resume-from"] ?? null,
+        outcome: line.flags["--outcome"] ?? null,
+        criteria: [...(line.flags["--criterion"] ?? [])],
+        paths: [...(line.flags["--path"] ?? [])],
+        pr: line.flags["--pr"] ?? null,
+        relevel: line.flags["--relevel"] === true,
+      },
+      output: {},
+    };
+  },
+  run(input, _output, context) {
+    return runExecute({
+      args: input,
+      streams: narratedStreams(context),
+      cwd: context.cwd,
+      now: context.now,
+      ...(context.preflight ? { preflight: context.preflight } : {}),
+      ...(context.gh ? { gh: context.gh } : {}),
+      ...(context.hooks ? { hooks: context.hooks } : {}),
+      ...(context.pullRequestChecks ? { pullRequestChecks: context.pullRequestChecks } : {}),
+    });
+  },
+};

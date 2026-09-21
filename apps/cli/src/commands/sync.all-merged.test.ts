@@ -5,9 +5,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES, TICKET_SCHEMA_VERSION, TicketSchema, wilsonInterval, type Ticket } from "@perbo/contracts";
 import { GithubCredentialError, TicketDeliveryStateSchema, type TicketDeliveryState } from "@perbo/runner";
 import type { Streams } from "../streams.js";
-import { runStopsCommand } from "./stops.js";
-import { runSyncCommand } from "./sync.js";
+import { stopsCommandLine } from "./stops.js";
+import { syncCommandLine } from "./sync.js";
 import { readTicket, storeDir, writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-203: `perbo sync --all-merged` reads every merged ticket's pull
@@ -151,14 +152,16 @@ describe("ac_1 — the sweep visits every ticket whose delivery is merged, once,
     }
 
     const calls: string[] = [];
-    const code = await runSyncCommand({
+    const code = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--repo", repo],
       streams: capture(),
       cwd: repo,
       now: NOW,
-      poll: (call) => {
-        calls.push(call.ticket_id);
-        return Promise.resolve(observed({ pull_request_number: 1, commits_outside_loop: false }));
+      deps: {
+        poll: (call) => {
+          calls.push(call.ticket_id);
+          return Promise.resolve(observed({ pull_request_number: 1, commits_outside_loop: false }));
+        },
       },
     });
 
@@ -192,27 +195,65 @@ describe("ac_1 — the sweep visits every ticket whose delivery is merged, once,
       return Promise.resolve(observed({ pull_request_number: 1, commits_outside_loop: true }));
     };
 
-    const withoutForce = await runSyncCommand({
+    const withoutForce = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--repo", repo],
       streams: capture(),
       cwd: repo,
       now: NOW,
-      poll,
+      deps: {
+        poll,
+      },
     });
     expect(withoutForce).toBe(EXIT_CODES.approve);
     expect(calls).toBe(0);
     expect(readTicket(dir, "AYO-1").delivery.commits_outside_loop).toBe(false);
 
-    const withForce = await runSyncCommand({
+    const withForce = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--force", "--repo", repo],
       streams: capture(),
       cwd: repo,
       now: NOW,
-      poll,
+      deps: {
+        poll,
+      },
     });
     expect(withForce).toBe(EXIT_CODES.approve);
     expect(calls).toBe(1);
     expect(readTicket(dir, "AYO-1").delivery.commits_outside_loop).toBe(true);
+  });
+
+  it("reads --all-merged wherever on the line it was written", async () => {
+    const repo = fixtureStore("all-merged-after-repo");
+    const dir = storeDir(repo, null);
+    writeTicket(
+      dir,
+      fixtureTicket({
+        key: "AYO-1",
+        ticket_id: "ticket_1",
+        state: "merged",
+        delivery_state: "merged",
+        opened_by: "loop",
+        commits_outside_loop: null,
+      }),
+    );
+
+    const calls: string[] = [];
+    const code = await runCommandLine(syncCommandLine, {
+      argv: ["--repo", repo, "--all-merged"],
+      streams: capture(),
+      cwd: repo,
+      now: NOW,
+      deps: {
+        poll: (call) => {
+          calls.push(call.ticket_id);
+          return Promise.resolve(observed({ pull_request_number: 1, commits_outside_loop: false }));
+        },
+      },
+    });
+
+    expect(code).toBe(EXIT_CODES.approve);
+    expect(calls).toEqual(["ticket_1"]);
+    expect(readTicket(dir, "AYO-1").delivery.commits_outside_loop).toBe(false);
   });
 });
 
@@ -239,16 +280,18 @@ describe("ac_2 — one line per ticket, a closing count, and an unreadable pull 
     for (const ticket of [readable, unreadable]) writeTicket(dir, ticket);
 
     const streams = capture();
-    const code = await runSyncCommand({
+    const code = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--repo", repo],
       streams,
       cwd: repo,
       now: NOW,
-      poll: (call) => {
-        if (call.ticket_id === "ticket_2") {
-          throw new GithubCredentialError("gh is not logged in and no GH_TOKEN is set");
-        }
-        return Promise.resolve(observed({ pull_request_number: 1, commits_outside_loop: false }));
+      deps: {
+        poll: (call) => {
+          if (call.ticket_id === "ticket_2") {
+            throw new GithubCredentialError("gh is not logged in and no GH_TOKEN is set");
+          }
+          return Promise.resolve(observed({ pull_request_number: 1, commits_outside_loop: false }));
+        },
       },
     });
 
@@ -279,12 +322,14 @@ describe("ac_2 — one line per ticket, a closing count, and an unreadable pull 
     );
 
     const streams = capture();
-    const code = await runSyncCommand({
+    const code = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--repo", repo],
       streams,
       cwd: repo,
       now: NOW,
-      poll: () => Promise.resolve(observed({ pull_request_number: 1, observed: false })),
+      deps: {
+        poll: () => Promise.resolve(observed({ pull_request_number: 1, observed: false })),
+      },
     });
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -317,26 +362,28 @@ describe("ac_3 — after the sweep, `perbo stops` prints the unattended-merges r
     for (const ticket of tickets) writeTicket(dir, ticket);
 
     const syncStreams = capture();
-    const syncCode = await runSyncCommand({
+    const syncCode = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--repo", repo],
       streams: syncStreams,
       cwd: repo,
       now: NOW,
-      poll: (call) =>
-        Promise.resolve(
-          observed({
-            pull_request_number: 1,
-            // Three of the eleven loop-opened pull requests carry a person's
-            // commit; the rest merged with only the loop's own.
-            commits_outside_loop: ["ticket_6", "ticket_7", "ticket_8"].includes(call.ticket_id),
-          }),
-        ),
+      deps: {
+        poll: (call) =>
+          Promise.resolve(
+            observed({
+              pull_request_number: 1,
+              // Three of the eleven loop-opened pull requests carry a person's
+              // commit; the rest merged with only the loop's own.
+              commits_outside_loop: ["ticket_6", "ticket_7", "ticket_8"].includes(call.ticket_id),
+            }),
+          ),
+      },
     });
     expect(syncCode).toBe(EXIT_CODES.approve);
     expect(syncStreams.out.join("")).toContain("16 merged tickets: 16 filled, 0 unchanged, 0 unreadable\n");
 
     const stopsStreams = capture();
-    const stopsCode = await runStopsCommand({ argv: ["--repo", repo], streams: stopsStreams, cwd: repo });
+    const stopsCode = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams: stopsStreams, cwd: repo });
     expect(stopsCode).toBe(EXIT_CODES.approve);
     const out = stopsStreams.out.join("");
 

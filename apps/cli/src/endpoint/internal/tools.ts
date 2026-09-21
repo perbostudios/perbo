@@ -1,15 +1,23 @@
 import { z } from "zod";
-import { EXIT_CODES } from "@perbo/contracts";
+import { EXIT_CODES, TicketKeySchema } from "@perbo/contracts";
 import { MODEL_PROVIDERS } from "@perbo/model";
 import { isAbsolute } from "node:path";
-import { parseAdmitArgs, parseListArgs, runAdmitCommand, runListCommand, type AdmitArgs } from "../../commands/admit.js";
-import { runEdit, type EditArgs } from "../../commands/edit/index.js";
-import { runEscapesCommand } from "../../commands/escapes/index.js";
-import { runInspectCommand } from "../../commands/inspect.js";
+import {
+  IssueReferenceSchema,
+  ModelIdSchema,
+  admitDraftReport,
+  defaultAdmission,
+  listReport,
+  type DraftAdmission,
+} from "../../commands/admit.js";
+import { collectOutput } from "../../diagnostics.js";
+import type { CommandContext, CommandReport } from "../../command.js";
+import { edit } from "../../commands/edit/index.js";
+import { escapesReport } from "../../commands/escapes/index.js";
+import { AttemptIdSchema, inspectReport } from "../../commands/inspect.js";
 import type { ServeTick } from "../../commands/serve/index.js";
-import { runStopsCommand } from "../../commands/stops.js";
-import type { Streams } from "../../streams.js";
-import { runSyncCommand } from "../../commands/sync.js";
+import { stopsReport, IsoInstantSchema } from "../../commands/stops.js";
+import { sync } from "../../commands/sync.js";
 
 /**
  * The tools the queue's endpoint offers a session (the founder's decision of
@@ -70,72 +78,107 @@ function tool<Input extends z.ZodType>(definition: EndpointTool<Input>): Endpoin
   return definition as unknown as EndpointTool;
 }
 
-const repoArgs = (context: ToolContext): string[] => [
-  "--repo",
-  context.repo,
-  ...(context.store === null ? [] : ["--store", context.store]),
-];
+/** The store this endpoint's commands work against, as their input names it. */
+const targetOf = (context: ToolContext): { repo: string; store: string | null } => ({
+  repo: context.repo,
+  store: context.store,
+});
 
 /**
- * Run one command with its streams captured, and turn what it wrote into a
- * tool result: the JSON it printed as the structured content where it printed
- * one, everything else as text, and its exit code as the error flag.
+ * One command run over typed input, and what it answered as a tool result.
+ *
+ * Nothing is parsed on the way in and nothing is parsed on the way out: the
+ * command is given the object it would have been given by a line, and its own
+ * record is the structured content. What it said while it worked goes in the
+ * text beside the record, which is the join a session has always read.
+ *
+ * The command arrives as its {@link CommandReport} half, which has no reading
+ * of argv on it: there is no line here to write and none to read.
  */
-async function captured(
-  json: boolean,
-  command: (streams: Streams) => number | Promise<number>,
+async function reported<Input, Report>(
+  command: CommandReport<Input, { json: boolean }, Report>,
+  input: Input,
+  context: ToolContext,
 ): Promise<ToolResult> {
-  const out: string[] = [];
-  const err: string[] = [];
-  const streams: Streams = {
-    stdout: (chunk) => out.push(chunk),
-    stderr: (chunk) => err.push(chunk),
-    isTTY: false,
+  const collected = collectOutput();
+  const commandContext: CommandContext = {
+    cwd: context.cwd,
+    now: new Date(),
+    diagnostics: collected.streams,
   };
-  let code: number;
+  let report: Report;
   try {
-    code = await command(streams);
+    report = await command.run(input, commandContext);
   } catch (error) {
     return {
       content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
       isError: true,
     };
   }
-  const stdout = out.join("");
-  const stderr = err.join("").trim();
-  let structuredContent: unknown;
-  if (json && stdout.trim().length > 0) {
-    try {
-      structuredContent = JSON.parse(stdout);
-    } catch {
-      // Not the JSON the command promised: the text below still carries it.
-    }
+  const rendered = command.render(report, { json: true }, { isTTY: false, color: false, json: true });
+  const structuredContent = command.toJson === undefined ? undefined : command.toJson(report);
+  const stdout = `${rendered.stdout}`.trim();
+  const stderr = `${collected.stderr()}${rendered.stderr}`.trim();
+  const text = [stdout, stderr].filter((part) => part.length > 0).join("\n");
+  return {
+    content: [{ type: "text", text: text.length === 0 ? `exit ${rendered.exitCode}` : text }],
+    ...(structuredContent === undefined ? {} : { structuredContent }),
+    ...(rendered.exitCode === EXIT_CODES.approve ? {} : { isError: true }),
+  };
+}
+
+/**
+ * One command that answers while it works, and what it said as a tool result.
+ *
+ * It writes text rather than a record, so there is no structured content to
+ * give back: its stdout and stderr are joined exactly as a session has always
+ * read them.
+ */
+async function narrated(
+  run: (
+    output: { json: boolean },
+    context: CommandContext & { stdout(chunk: string): void; isTTY: boolean },
+  ) => Promise<number> | number,
+  context: ToolContext,
+): Promise<ToolResult> {
+  const collected = collectOutput();
+  let code: number;
+  try {
+    code = await run(
+      { json: false },
+      {
+        cwd: context.cwd,
+        now: new Date(),
+        diagnostics: collected.streams,
+        stdout: collected.streams.stdout,
+        isTTY: false,
+      },
+    );
+  } catch (error) {
+    return {
+      content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
+      isError: true,
+    };
   }
-  const text = [stdout.trim(), stderr].filter((part) => part.length > 0).join("\n");
+  const text = [collected.stdout().trim(), collected.stderr().trim()]
+    .filter((part) => part.length > 0)
+    .join("\n");
   return {
     content: [{ type: "text", text: text.length === 0 ? `exit ${code}` : text }],
-    ...(structuredContent === undefined ? {} : { structuredContent }),
     ...(code === EXIT_CODES.approve ? {} : { isError: true }),
   };
 }
 
-const KeySchema = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/).describe("A ticket key, e.g. PRB-118.");
+const KeySchema = TicketKeySchema.describe("A ticket key, e.g. PRB-118.");
 
 /**
- * Every string a session supplies is a value and only ever a value. The
- * commands' own parsers split `--name=value` tokens wherever they appear, so a
- * value shaped like one would become a flag if it went through them as argv —
- * `--x=--approve` once approved a ticket that way. So the two commands that
- * take free text get their arguments built as objects, and everything that
- * does travel as argv is shaped by a schema that admits no leading dash.
+ * Every string a session supplies is a value and only ever a value: a command
+ * is reached here as a function over typed input, and this file imports
+ * nothing that reads a line (`eslint.config.mjs`). What each schema below is
+ * for is what it says rather than the shape of a flag — a ticket key is a key,
+ * an issue reference is one, a model id is what a provider's own CLI will be
+ * started with, which is an action parameter (ADR-0023 §4).
  */
-const AttemptIdSchema = z.string().regex(/^att_[0-9a-f]+$/).describe("An attempt id, e.g. att_0000000000000001.");
-const IsoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}(T[0-9:.]+Z?)?$/).describe("An ISO date, e.g. 2026-09-01.");
-const IssueReferenceSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*#[1-9][0-9]*$/)
-  .describe("owner/repo#N.");
-const ModelIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).describe("A model id, e.g. claude-opus-5.");
 const AbsoluteFileSchema = z
   .string()
   .refine((path) => isAbsolute(path) && !path.startsWith("-"), "an absolute path")
@@ -149,13 +192,7 @@ const listTickets = tool({
   role: "read",
   input: z.object({ all: z.boolean().optional().describe("Include settled tickets.") }),
   run: (input, context) =>
-    captured(true, (streams) =>
-      runListCommand({
-        args: parseListArgs([...repoArgs(context), "--json", ...(input.all ? ["--all"] : [])]),
-        streams,
-        cwd: context.cwd,
-      }),
-    ),
+    reported(listReport, { target: targetOf(context), all: input.all ?? false }, context),
 });
 
 const inspectTicket = tool({
@@ -166,15 +203,18 @@ const inspectTicket = tool({
   role: "read",
   input: z.object({
     key: KeySchema,
-    attempt: AttemptIdSchema.optional().describe("One attempt id, for that attempt alone."),
+    attempt: AttemptIdSchema.optional().describe("An attempt id, e.g. att_0000000000000001; for that attempt alone."),
   }),
   run: (input, context) =>
-    captured(true, (streams) =>
-      runInspectCommand({
-        argv: [input.key, ...repoArgs(context), "--json", ...(input.attempt ? ["--attempt", input.attempt] : [])],
-        streams,
-        cwd: context.cwd,
-      }),
+    reported(
+      inspectReport,
+      {
+        target: targetOf(context),
+        key: input.key,
+        attempt: input.attempt ?? null,
+        verify: null,
+      },
+      context,
     ),
 });
 
@@ -185,16 +225,19 @@ const stops = tool({
     "merged ticket, and the precision of stopping.",
   role: "read",
   input: z.object({
-    since: IsoDateSchema.optional().describe("An ISO date; stops before it are left out."),
+    since: IsoInstantSchema.optional().describe("An ISO date; stops before it are left out."),
     by_week: z.boolean().optional().describe("One row per week rather than one table."),
   }),
   run: (input, context) =>
-    captured(true, (streams) =>
-      runStopsCommand({
-        argv: [...repoArgs(context), "--json", ...(input.since ? ["--since", input.since] : []), ...(input.by_week ? ["--by-week"] : [])],
-        streams,
-        cwd: context.cwd,
-      }),
+    reported(
+      stopsReport,
+      {
+        target: targetOf(context),
+        since: input.since ?? null,
+        byWeek: input.by_week ?? false,
+        arm: null,
+      },
+      context,
     ),
 });
 
@@ -203,8 +246,7 @@ const escapes = tool({
   description: "Merged changes whose fourteen days are up, and what escaped review in them.",
   role: "read",
   input: z.object({}),
-  run: (_input, context) =>
-    captured(true, (streams) => runEscapesCommand({ argv: [...repoArgs(context), "--json"], streams, cwd: context.cwd })),
+  run: (_input, context) => reported(escapesReport, { target: targetOf(context) }, context),
 });
 
 const queueState = tool({
@@ -258,8 +300,10 @@ const admitTicket = tool({
       });
     }
     // Built as values, never parsed from a line: see the note above the schemas.
-    const defaults = parseAdmitArgs([...repoArgs(context), "--json"]);
-    const args: AdmitArgs = {
+    // `admitDraft` has no `approve` among its fields at all, so there is no
+    // approving to reach from here whatever this object carries (D-072).
+    const defaults = defaultAdmission(targetOf(context));
+    const admission: DraftAdmission = {
       ...defaults,
       title: input.outcome ?? null,
       criteria: [...(input.criteria ?? [])],
@@ -276,11 +320,8 @@ const admitTicket = tool({
       priority: input.priority ?? defaults.priority,
       labels: [...(input.labels ?? [])],
       dependsOn: [...(input.depends_on ?? [])],
-      approve: false,
-      json: true,
     };
-    if (args.approve) throw new Error("the endpoint cannot approve");
-    return captured(true, (streams) => runAdmitCommand({ args, streams, cwd: context.cwd }));
+    return reported(admitDraftReport, admission, context);
   },
 });
 
@@ -307,29 +348,36 @@ const editTicket = tool({
     ...z.toJSONSchema(EditTicketInputSchema),
     anyOf: [{ required: ["outcome"] }, { required: ["criteria"] }, { required: ["paths"] }],
   },
-  run: (input, context) => {
-    const args: EditArgs = {
-      repo: context.repo,
-      store: context.store,
-      outcome: input.outcome ?? null,
-      criteria: [...(input.criteria ?? [])],
-      paths: [...(input.paths ?? [])],
-      // The endpoint's tool names outcome, criteria and scope; a prohibited
-      // path is a person's mark in the explorer, not a field a session sets.
-      prohibited: [],
-      manualReviewer: null,
-      manualReason: null,
-      graphEdit: null,
-      undo: null,
-      // The endpoint is the person's own session: its edits are recorded as
-      // the interview's, so they do not raise the friction count (D-100).
-      author: "interview",
-      json: false,
-    };
-    // No editor can be reached: the fields above are required, and the
+  run: (input, context) =>
+    // No editor can be reached: the fields below are required, and the
     // environment handed in names none.
-    return captured(false, (streams) => runEdit({ key: input.key, args, streams, cwd: context.cwd, env: {} }));
-  },
+    narrated(
+      (output, commandContext) =>
+        edit(
+          {
+            target: targetOf(context),
+            key: input.key,
+            outcome: input.outcome ?? null,
+            criteria: [...(input.criteria ?? [])],
+            paths: [...(input.paths ?? [])],
+            // The endpoint's tool names outcome, criteria and scope; a
+            // prohibited path is a person's mark in the explorer, not a field
+            // a session sets.
+            prohibited: [],
+            manualReviewer: null,
+            manualReason: null,
+            graphEdit: null,
+            undo: null,
+            // The endpoint is the person's own session: its edits are recorded
+            // as the interview's, so they do not raise the friction count
+            // (D-100).
+            author: "interview",
+          },
+          output,
+          { ...commandContext, env: {} },
+        ),
+      context,
+    ),
 });
 
 const syncTicket = tool({
@@ -340,7 +388,14 @@ const syncTicket = tool({
   role: "write",
   input: z.object({ key: KeySchema }),
   run: (input, context) =>
-    captured(false, (streams) => runSyncCommand({ argv: [input.key, ...repoArgs(context)], streams, cwd: context.cwd })),
+    narrated(
+      (_output, commandContext) =>
+        sync(
+          { mode: "ticket", target: targetOf(context), key: input.key, merge: false },
+          commandContext,
+        ),
+      context,
+    ),
 });
 
 const queuePause = tool({

@@ -10,8 +10,9 @@ import {
   type Ticket,
 } from "@perbo/contracts";
 import type { Streams } from "../streams.js";
-import { runStopsCommand } from "./stops.js";
+import { stopsCommandLine } from "./stops.js";
 import { writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * The two ways a review that could not resolve a criterion reaches a person,
@@ -96,7 +97,7 @@ describe("`stops` over a store holding both kinds of incomplete review", () => {
     );
 
     const streams = capture();
-    const code = await runStopsCommand({ argv: ["--repo", repo], streams, cwd: process.cwd() });
+    const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: process.cwd() });
 
     expect(code).toBe(EXIT_CODES.approve);
     const printed = streams.out.join("");
@@ -119,7 +120,7 @@ describe("`stops` over a store holding both kinds of incomplete review", () => {
     mkdirSync(join(repo, ".perbo", "state"), { recursive: true });
 
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo], streams, cwd: process.cwd() });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: process.cwd() });
 
     expect(streams.out.join("")).not.toContain("incomplete review");
   });

@@ -36,11 +36,26 @@ import {
   type PreToolGuardState,
   type WorktreeScope,
 } from "@perbo/runner";
-import { parseAdmitArgs, runAdmitCommand, type AdmitArgs } from "../admit.js";
+import { collectOutput } from "../../diagnostics.js";
+import {
+  admitDraft,
+  admitDraftReport,
+  defaultAdmission,
+  type AdmissionReport,
+} from "../admit.js";
 import { UsageError } from "../../usage-error.js";
-import { runEdit, type EditArgs } from "../edit/index.js";
+import {
+  parseArgv,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../command-line/grammar.js";
+import { edit, type EditInput } from "../edit/index.js";
 import { adrFolder, specFolder, storeDir, trackedFiles } from "../../store/index.js";
 import type { Streams } from "../../streams.js";
+import type { NarratedCommand } from "../../command-line/table.js";
+import { narratedStreams } from "../../streams.js";
+import type { CommandContext } from "../../command.js";
 import {
   listTickets,
   readApproachRecord,
@@ -806,59 +821,27 @@ export interface InterviewArgs {
   provider: InterviewProvider;
 }
 
-export function parseInterviewArgs(argv: readonly string[]): InterviewArgs {
-  const args: InterviewArgs = {
-    repo: ".",
-    store: null,
-    spec: null,
-    session: null,
-    model: null,
-    provider: "claude",
-  };
-  const tokens = argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
-  const value = (index: number, token: string): string => {
-    const next = tokens[index];
-    if (next === undefined) throw new UsageError(`${token} requires a value`);
-    return next;
-  };
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = value(++i, token);
-        break;
-      case "--store":
-        args.store = value(++i, token);
-        break;
-      case "--spec":
-        args.spec = value(++i, token);
-        break;
-      case "--session":
-        args.session = value(++i, token);
-        break;
-      case "--model":
-        args.model = value(++i, token);
-        break;
-      case "--provider": {
-        const provider = value(++i, token);
-        if (!(INTERVIEW_PROVIDERS as readonly string[]).includes(provider)) {
-          throw new UsageError(
-            `--provider takes ${INTERVIEW_PROVIDERS.join(" or ")} (got '${provider}')`,
-          );
-        }
-        args.provider = provider as InterviewProvider;
-        break;
-      }
-      default:
-        throw new UsageError(`unknown option '${token}' for interview`);
-    }
-  }
-  return args;
-}
+const INTERVIEW_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--spec": valueFlag(),
+  "--session": valueFlag(),
+  "--model": valueFlag(),
+  "--provider": valueFlag(),
+} satisfies FlagTable;
+
+const INTERVIEW_GRAMMAR: Grammar<typeof INTERVIEW_FLAGS> = {
+  command: "interview",
+  flags: INTERVIEW_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal:
+      "interview takes no positional argument: the spec folder it writes is --spec, " +
+      "e.g. perbo interview --spec specs/<slug>",
+  },
+  afterDoubleDash: "positionals",
+};
 
 /**
  * The three places this session may write, as globs relative to the repository.
@@ -1317,24 +1300,25 @@ export interface InterviewTool<Input extends z.ZodType = z.ZodType> {
 const tool = <Input extends z.ZodType>(definition: InterviewTool<Input>): InterviewTool =>
   definition as unknown as InterviewTool;
 
-/** Run one command with its streams captured, and say what it wrote. */
+/** Run one command with its writes collected, and say what it wrote. */
 async function captured(
   command: (streams: Streams) => number | Promise<number>,
 ): Promise<{ code: number; text: string }> {
-  const out: string[] = [];
-  const err: string[] = [];
-  const streams: Streams = {
-    stdout: (chunk) => out.push(chunk),
-    stderr: (chunk) => err.push(chunk),
-    isTTY: false,
-  };
+  const collected = collectOutput();
   try {
-    const code = await command(streams);
-    return { code, text: [out.join("").trim(), err.join("").trim()].filter(Boolean).join("\n") };
+    const code = await command(collected.streams);
+    return { code, text: wrote(collected.stdout(), collected.stderr()) };
   } catch (error) {
-    return { code: EXIT_CODES.did_not_complete, text: error instanceof Error ? error.message : String(error) };
+    return {
+      code: EXIT_CODES.did_not_complete,
+      text: error instanceof Error ? error.message : String(error),
+    };
   }
 }
+
+/** What a command wrote, as a session reads it: the record, then what was said beside it. */
+const wrote = (stdout: string, stderr: string): string =>
+  [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
 
 /** The ticket this spec was last drafted into, if one is still open to re-drafting. */
 function ticketFromSpec(context: InterviewContext): string | null {
@@ -1403,34 +1387,42 @@ const generatePlan = tool({
       );
     }
     const startOver = drafted?.open ?? null;
-    // Built as values: nothing a model returned is parsed as a flag (ADR-0023).
-    const defaults = parseAdmitArgs([
-      "--repo",
-      context.repo,
-      ...(context.store === null ? [] : ["--store", context.store]),
-    ]);
-    const args: AdmitArgs = {
-      ...defaults,
-      fromSpec: join(context.repositoryRoot, context.spec),
-      startOver,
-      approve: false,
-      json: false,
-    };
-    if (args.approve) throw new Error("the interview cannot approve");
-    const ran = await captured((streams) =>
-      runAdmitCommand({
-        args,
-        streams,
-        cwd: context.cwd,
-        ...(context.model === undefined ? {} : { model: context.model }),
-      }),
+    // Built as values: nothing a model returned is parsed as a flag (ADR-0023
+    // §4). A draft has no `approve` among its fields, so there is no approving
+    // to reach from here — this session prepares, the person approves (D-072).
+    const collected = collectOutput();
+    let report: AdmissionReport;
+    try {
+      report = await admitDraft(
+        {
+          ...defaultAdmission({ repo: context.repo, store: context.store }),
+          fromSpec: join(context.repositoryRoot, context.spec),
+          startOver,
+        },
+        {
+          cwd: context.cwd,
+          now: new Date(),
+          diagnostics: collected.streams,
+          ...(context.model === undefined ? {} : { model: context.model }),
+        },
+      );
+    } catch (error) {
+      return said(error instanceof Error ? error.message : String(error), true);
+    }
+    const rendered = admitDraftReport.render(
+      report,
+      { json: false },
+      { isTTY: false, color: false, json: false },
     );
-    if (ran.code !== EXIT_CODES.approve) return said(ran.text, true);
+    const text = wrote(
+      collected.stdout() + rendered.stdout,
+      collected.stderr() + rendered.stderr,
+    );
     context.specTaken();
     const key = startOver ?? ticketFromSpec(context) ?? "the ticket";
     return said(
       `${startOver === null ? "admitted" : "re-drafted"} ${key} in plan_review from ${context.spec}. ` +
-        `A person reads and approves it; this session cannot.\n${ran.text}`,
+        `A person reads and approves it; this session cannot.\n${text}`,
     );
   },
 });
@@ -1496,7 +1488,7 @@ const undoEdit = tool({
 });
 
 /**
- * One edit through `runEdit`, on the plan drafted from this interview's own
+ * One edit through `perbo edit`, on the plan drafted from this interview's own
  * spec, with the before and after it recorded.
  *
  * The ticket is derived rather than named: a key is a value a model returns,
@@ -1506,7 +1498,7 @@ const undoEdit = tool({
  */
 async function applyEdit(
   context: InterviewContext,
-  edit: Pick<EditArgs, "graphEdit" | "outcome" | "criteria" | "paths" | "undo">,
+  change: Partial<Pick<EditInput, "graphEdit" | "outcome" | "criteria" | "paths" | "undo">>,
 ): Promise<InterviewToolResult> {
   // Whatever state it is in: an approved plan's order may still change and its
   // contract may not, and `perbo edit` is what holds that line (ADR-0016).
@@ -1514,22 +1506,36 @@ async function applyEdit(
   // it runs, and would answer with a second account of the same rule.
   const key = draftedFromSpec(context)?.key ?? null;
   if (key === null) return said(noPlanToChange(context, "change"), true);
-  const args: EditArgs = {
-    repo: context.repo,
-    store: context.store,
-    ...edit,
+  const input: EditInput = {
+    target: { repo: context.repo, store: context.store },
+    key,
+    outcome: change.outcome ?? null,
+    criteria: change.criteria ?? [],
+    paths: change.paths ?? [],
+    graphEdit: change.graphEdit ?? null,
+    undo: change.undo ?? null,
     // A prohibited path is the person's own mark in the explorer (D-105), and
     // a manual reviewer is their own choice: neither is a field this sets.
     prohibited: [],
     manualReviewer: null,
     manualReason: null,
     author: INTERVIEW_AUTHOR,
-    json: false,
   };
   // No editor can be reached: every field the interactive path needs is given,
   // and the environment handed in names none.
   const ran = await captured((streams) =>
-    runEdit({ key, args, streams, cwd: context.cwd, env: {} }),
+    edit(
+      input,
+      { json: false },
+      {
+        cwd: context.cwd,
+        now: new Date(),
+        diagnostics: streams,
+        stdout: streams.stdout,
+        isTTY: streams.isTTY,
+        env: {},
+      },
+    ),
   );
   if (ran.code !== EXIT_CODES.approve) return said(ran.text, true);
   const snapshot = readDraftSnapshot(context.storeDirectory, key);
@@ -1775,27 +1781,40 @@ export interface InterviewTransport {
   run(session: InterviewSession): AsyncIterable<InterviewStreamed>;
 }
 
-export interface InterviewInput {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  /** Injected by tests: the transport. Otherwise the one `--provider` names. */
-  transport?: InterviewTransport;
-  /** Injected by tests: the drafting model `generate_plan` runs the drafter with. */
-  model?: Model;
+/** The three parts of a session a test replaces; production uses the real thing. */
+export interface InterviewDeps {
+  /** The transport. Otherwise the one `--provider` names. */
+  transport: InterviewTransport;
+  /** The drafting model `generate_plan` runs the drafter with. */
+  model: Model;
   /** The person's turns, one JSON line each. Defaults to stdin. */
-  turns?: AsyncIterable<string>;
-  now?: Date;
+  turns: AsyncIterable<string>;
 }
 
-export async function runInterviewCommand(input: InterviewInput): Promise<number> {
-  const args = parseInterviewArgs(input.argv);
-  const repositoryRoot = resolve(input.cwd, args.repo);
+/** What a session is given: where it runs, what it says as it goes, and its three parts. */
+export type InterviewContextForRun = CommandContext & {
+  stdout(chunk: string): void;
+  isTTY: boolean;
+} & Partial<InterviewDeps>;
+
+/**
+ * `perbo interview`, over typed input.
+ *
+ * It answers while it works — one JSON event a line on stdout, the card and
+ * the warnings on stderr — and ends when the person's turns do, so there is no
+ * record to hand back.
+ */
+export async function interview(
+  args: InterviewArgs,
+  context: InterviewContextForRun,
+): Promise<number> {
+  const streams = narratedStreams(context);
+  const repositoryRoot = resolve(context.cwd, args.repo);
   const storeDirectory = storeDir(repositoryRoot, args.store);
   const specs = specFolder(storeDirectory);
   const adr = adrFolder(storeDirectory);
   const spec = resolveSpec(repositoryRoot, specs, args);
-  const emit = (event: InterviewEvent): void => input.streams.stdout(encodeInterviewEvent(event));
+  const emit = (event: InterviewEvent): void => streams.stdout(encodeInterviewEvent(event));
 
   const permission = interviewPermission({
     state: interviewGuardState({
@@ -1807,11 +1826,11 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     }),
     specPath: join(repositoryRoot, spec),
     emit,
-    say: (line) => input.streams.stderr(line),
+    say: (line) => streams.stderr(line),
   });
 
-  const context: InterviewContext = {
-    cwd: input.cwd,
+  const toolContext: InterviewContext = {
+    cwd: context.cwd,
     repo: args.repo,
     store: args.store,
     repositoryRoot,
@@ -1819,7 +1838,7 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     spec,
     specWritten: permission.specWritten,
     specTaken: permission.specTaken,
-    model: input.model,
+    model: context.model,
   };
 
   const tools: InterviewBoundTool[] = INTERVIEW_TOOLS.map((each) => ({
@@ -1835,7 +1854,7 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
         emit({ type: "tool", tool: each.name, ok: false, detail });
         return said(`${each.name} was called with input it does not take:\n${detail}`, true);
       }
-      const result = await each.run(parsed.data, context);
+      const result = await each.run(parsed.data, toolContext);
       const detail = result.content.map((part) => part.text).join("\n");
       emit({ type: "tool", tool: each.name, ok: result.isError !== true, detail });
       // The questions are their own line: the card says a tool ran, and what
@@ -1860,25 +1879,26 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
       model: args.model,
       tools: [...INTERVIEW_TOOL_NAMES],
     });
-    input.streams.stderr(
+    streams.stderr(
       `interview ${id} in ${repositoryRoot}, writing ${spec}, CONTEXT.md and ${adr}; anything else ` +
         "is refused rather than asked, and it cannot approve, publish or merge\n",
     );
     const unrecorded = recordSession(repositoryRoot, join(repositoryRoot, dirname(spec)), {
       session_id: id,
       spec,
-      started_at: (input.now ?? new Date()).toISOString(),
+      started_at: context.now.toISOString(),
       model: args.model,
       provider: args.provider,
     });
     if (unrecorded !== null) {
-      input.streams.stderr(
+      streams.stderr(
         `this session was not recorded beside its spec, so --session ${id} will not find it: ${unrecorded}\n`,
       );
     }
   };
 
-  const transport = input.transport ?? (await loadInterviewTransport(args.provider, repositoryRoot));
+  const transport =
+    context.transport ?? (await loadInterviewTransport(args.provider, repositoryRoot));
   const session: InterviewSession = {
     cwd: repositoryRoot,
     model: args.model,
@@ -1886,9 +1906,9 @@ export async function runInterviewCommand(input: InterviewInput): Promise<number
     orientation: interviewOrientation({ repositoryRoot, spec, adr }),
     tools,
     decide: (tool, toolInput, where) => permission.canUseTool(tool, toolInput, where),
-    turns: turnsAsText(input),
+    turns: turnsAsText(context.turns),
     sessionId: () => sessionId,
-    stderr: (data) => input.streams.stderr(data),
+    stderr: (data) => streams.stderr(data),
   };
 
   let reason = "the session ended";
@@ -2077,8 +2097,8 @@ function isSymlink(path: string): boolean {
 }
 
 /** The person's turns, as text, one line of stdin each. */
-async function* turnsAsText(input: InterviewInput): AsyncGenerator<string> {
-  for await (const line of input.turns ?? linesOfStdin()) {
+async function* turnsAsText(turns: AsyncIterable<string> | undefined): AsyncGenerator<string> {
+  for await (const line of turns ?? linesOfStdin()) {
     const turn = decodeInterviewTurn(line);
     if (turn === null) continue;
     yield turn.text;
@@ -2089,3 +2109,36 @@ async function* turnsAsText(input: InterviewInput): AsyncGenerator<string> {
 async function* linesOfStdin(): AsyncGenerator<string> {
   for await (const line of createInterface({ input: process.stdin })) yield line;
 }
+
+/** `perbo interview`, over its own line. */
+export const interviewCommandLine: NarratedCommand<
+  InterviewArgs,
+  Record<string, never>,
+  InterviewDeps
+> = {
+  kind: "narrated",
+  name: "interview",
+  grammars: [INTERVIEW_GRAMMAR],
+  grammarFor: () => INTERVIEW_GRAMMAR,
+  read(argv) {
+    const line = parseArgv(INTERVIEW_GRAMMAR, argv);
+    const provider = line.flags["--provider"] ?? "claude";
+    if (!(INTERVIEW_PROVIDERS as readonly string[]).includes(provider)) {
+      throw new UsageError(
+        `--provider takes ${INTERVIEW_PROVIDERS.join(" or ")} (got '${provider}')`,
+      );
+    }
+    return {
+      input: {
+        repo: line.flags["--repo"] ?? ".",
+        store: line.flags["--store"] ?? null,
+        spec: line.flags["--spec"] ?? null,
+        session: line.flags["--session"] ?? null,
+        model: line.flags["--model"] ?? null,
+        provider: provider as InterviewProvider,
+      },
+      output: {},
+    };
+  },
+  run: (input, _output, context) => interview(input, context),
+};

@@ -1,5 +1,11 @@
-import { resolve } from "node:path";
 import { UsageError } from "../../usage-error.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../command-line/grammar.js";
 import { baselinePath, readBaselineFile, writeBaselineFile } from "./internal/file.js";
 import {
   BASELINE_COMPARISON_MINIMUM,
@@ -14,10 +20,21 @@ import {
   summarizeBaseline,
   type BaselineFile,
 } from "./internal/stopwatch.js";
-import { E1_COMMANDS, isE1Command, runE1Command } from "./internal/e1/command.js";
+import {
+  E1_COMMANDS,
+  E1_GRAMMARS,
+  e1,
+  e1GrammarFor,
+  isE1Command,
+  readE1,
+  renderE1,
+  type E1Input,
+  type E1Report,
+} from "./internal/e1/command.js";
 import { formatDuration } from "../run/index.js";
-import { storeDir } from "../../store/index.js";
-import type { Streams } from "../../streams.js";
+import type { CommandContext, Rendered } from "../../command.js";
+import type { ReportCommand } from "../../command-line/table.js";
+import { storeFor, type StoreTarget } from "../../store/index.js";
 import { listTickets } from "../../store/tickets.js";
 
 /**
@@ -31,30 +48,73 @@ import { listTickets } from "../../store/tickets.js";
  * not the one D-038 asked for.
  */
 
-export interface BaselineArgs {
+export interface StopwatchInput {
   command: "start" | "pause" | "resume" | "stop" | "abandon" | "list";
+  target: StoreTarget;
   title: string | null;
   ref: string | null;
   pullRequest: string | null;
   note: string | null;
   reason: string | null;
-  json: boolean;
-  repo: string;
-  store: string | null;
 }
+
+/** Either half of the measurement: the stopwatch's verbs, or the harness's. */
+export type BaselineInput =
+  | { readonly kind: "stopwatch"; readonly input: StopwatchInput }
+  | { readonly kind: "harness"; readonly input: E1Input };
+
+/** What one stopwatch verb did: the file it read, or the entry it moved. */
+export type StopwatchReport =
+  | { readonly kind: "listed"; readonly file: BaselineFile; readonly path: string; readonly now: Date }
+  | {
+      readonly kind: "moved";
+      readonly verb: Exclude<StopwatchInput["command"], "list">;
+      readonly entry: BaselineFile["entries"][number];
+      readonly now: Date;
+      /** `start` only: a ticket was already admitted, so this capture is late. */
+      readonly late: string | null;
+    };
+
+export type BaselineReport =
+  | { readonly kind: "stopwatch"; readonly report: StopwatchReport }
+  | { readonly kind: "harness"; readonly report: E1Report };
 
 const COMMANDS = new Set(["start", "pause", "resume", "stop", "abandon", "list"]);
 const harness = () =>
   `The E1 harness — a partner's ten, sealed, and the ratio against them — is baseline ${E1_COMMANDS.join(" | ")}.`;
-const TAKES_VALUE = new Set(["--ref", "--pr", "--note", "--reason", "--repo", "--store"]);
 
-export function parseBaselineArgs(argv: readonly string[]): BaselineArgs {
-  const tokens = argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
-  const [command, ...rest] = tokens;
+/**
+ * One table for every verb, so a flag that belongs to another one parses and
+ * is then refused by name: `--pr does not apply to baseline start` says what
+ * `unknown flag` cannot.
+ */
+const BASELINE_FLAGS = {
+  "--ref": valueFlag(),
+  "--pr": valueFlag(),
+  "--note": valueFlag(),
+  "--reason": valueFlag(),
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+/** What each verb takes after itself: `start` its title, the rest nothing. */
+const baselineGrammar = (command: StopwatchInput["command"]): Grammar<typeof BASELINE_FLAGS> => ({
+  command: `baseline ${command}`,
+  flags: BASELINE_FLAGS,
+  positionals:
+    command === "start"
+      ? {
+          min: 1,
+          max: 1,
+          refusal: 'baseline start takes one title, e.g. perbo baseline start "Paginate search"',
+        }
+      : { min: 0, max: 0, refusal: `baseline ${command} takes no positional argument` },
+  afterDoubleDash: "positionals",
+});
+
+function readStopwatch(argv: readonly string[]): { input: StopwatchInput; output: { json: boolean } } {
+  const [command, ...rest] = argv;
   if (command === undefined || !COMMANDS.has(command)) {
     throw new UsageError(
       `baseline needs one of: start "<title>" [--ref owner/repo#N], pause, resume, ` +
@@ -62,53 +122,31 @@ export function parseBaselineArgs(argv: readonly string[]): BaselineArgs {
         harness(),
     );
   }
-  const args: BaselineArgs = {
-    command: command as BaselineArgs["command"],
+  const verb = command as StopwatchInput["command"];
+  const line = parseArgv(baselineGrammar(verb), rest);
+  const args: StopwatchInput = {
+    command: verb,
+    target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
     title: null,
-    ref: null,
-    pullRequest: null,
-    note: null,
-    reason: null,
-    json: false,
-    repo: ".",
-    store: null,
+    ref: line.flags["--ref"] ?? null,
+    pullRequest: line.flags["--pr"] ?? null,
+    note: line.flags["--note"] ?? null,
+    reason: line.flags["--reason"] ?? null,
   };
-  const positional: string[] = [];
-  for (let i = 0; i < rest.length; i += 1) {
-    const token = rest[i]!;
-    if (!token.startsWith("--")) {
-      positional.push(token);
-      continue;
-    }
-    if (token === "--json") {
-      args.json = true;
-      continue;
-    }
-    if (!TAKES_VALUE.has(token)) throw new UsageError(`unknown flag '${token}'`);
-    const value = rest[++i];
-    if (value === undefined) throw new UsageError(`${token} requires a value`);
-    if (token === "--ref") args.ref = value;
-    if (token === "--pr") args.pullRequest = value;
-    if (token === "--note") args.note = value;
-    if (token === "--reason") args.reason = value;
-    if (token === "--repo") args.repo = value;
-    if (token === "--store") args.store = value;
-  }
-  if (args.command === "start") {
-    if (positional.length !== 1 || positional[0]!.trim() === "") {
+  if (verb === "start") {
+    const title = line.positionals[0]!;
+    if (title.trim() === "") {
       throw new UsageError('baseline start takes one title, e.g. perbo baseline start "Paginate search"');
     }
-    args.title = positional[0]!;
-  } else if (positional.length > 0) {
-    throw new UsageError(`baseline ${args.command} takes no positional argument`);
+    args.title = title;
   }
-  const allowed: Record<BaselineArgs["command"], Array<keyof BaselineArgs>> = {
+  const allowed: Record<StopwatchInput["command"], Array<keyof StopwatchInput>> = {
     start: ["ref"],
     pause: [],
     resume: [],
     stop: ["pullRequest", "note"],
     abandon: ["reason"],
-    list: ["json"],
+    list: [],
   };
   for (const [field, flag] of [
     ["ref", "--ref"],
@@ -120,8 +158,18 @@ export function parseBaselineArgs(argv: readonly string[]): BaselineArgs {
       throw new UsageError(`${flag} does not apply to baseline ${args.command}`);
     }
   }
-  return args;
+  return { input: args, output: { json: line.flags["--json"] === true } };
 }
+
+/** Every verb's grammar, for the check that the help names each flag exactly once. */
+const STOPWATCH_VERBS = ["start", "pause", "resume", "stop", "abandon", "list"] as const;
+const BASELINE_GRAMMARS = STOPWATCH_VERBS.map(baselineGrammar);
+
+/** The verb a line names, or `list`'s grammar for one that names none: `read` refuses it. */
+const stopwatchVerb = (token: string | undefined): StopwatchInput["command"] =>
+  (STOPWATCH_VERBS as readonly string[]).includes(token ?? "")
+    ? (token as StopwatchInput["command"])
+    : "list";
 
 export function renderBaselineList(file: BaselineFile, path: string, now: Date): string {
   const summary = summarizeBaseline(file);
@@ -157,37 +205,15 @@ export function renderBaselineList(file: BaselineFile, path: string, now: Date):
   return lines.join("\n");
 }
 
-export interface BaselineOptions {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  /** Injected by tests; the command reads the clock once per invocation. */
-  now?: () => Date;
-}
-
-export async function runBaselineCommand(input: BaselineOptions): Promise<number> {
-  // The stopwatch and the harness are one command because they are one
-  // measurement: `internal/e1/` is where a reading becomes a partner's sealed
-  // ten and the ratio the product is held to (D-038, SCP-080).
-  if (isE1Command(input.argv[0])) {
-    const { argv, streams, cwd } = input;
-    return runE1Command(input.now ? { argv, streams, cwd, now: input.now } : { argv, streams, cwd });
-  }
-  const args = parseBaselineArgs(input.argv);
-  const now = (input.now ?? (() => new Date()))();
-  const store = storeDir(resolve(input.cwd, args.repo), args.store);
+function stopwatch(input: StopwatchInput, context: CommandContext): StopwatchReport {
+  const args = input;
+  const now = context.now;
+  const store = storeFor(context.cwd, input.target);
   const path = baselinePath(store);
   const before = readBaselineFile(path);
 
   if (args.command === "list") {
-    if (args.json || !input.streams.isTTY) {
-      input.streams.stdout(
-        `${JSON.stringify({ ...before, path, summary: summarizeBaseline(before) }, null, 2)}\n`,
-      );
-    } else {
-      input.streams.stdout(`${renderBaselineList(before, path, now)}\n`);
-    }
-    return 0;
+    return { kind: "listed", file: before, path, now };
   }
 
   let after: BaselineFile;
@@ -224,44 +250,111 @@ export async function runBaselineCommand(input: BaselineOptions): Promise<number
     args.command === "start" || args.command === "pause" || args.command === "resume"
       ? openBaseline(after)!
       : after.entries.find((candidate) => openBaseline(before)?.id === candidate.id)!;
-  switch (args.command) {
+  return {
+    kind: "moved",
+    verb: args.command,
+    entry,
+    now,
+    late:
+      args.command === "start" && before.captured_before_first_use && !after.captured_before_first_use
+        ? store
+        : null,
+  };
+}
+
+/** What the stopwatch did, in the one line a person reads it back as. */
+function renderStopwatch(report: StopwatchReport, json: boolean): Rendered {
+  if (report.kind === "listed") {
+    return {
+      stdout: json
+        ? `${JSON.stringify(
+            { ...report.file, path: report.path, summary: summarizeBaseline(report.file) },
+            null,
+            2,
+          )}\n`
+        : `${renderBaselineList(report.file, report.path, report.now)}\n`,
+      stderr: "",
+      exitCode: 0,
+    };
+  }
+  const { entry, now } = report;
+  const stderr =
+    report.late === null
+      ? ""
+      : `warning: a ticket is already admitted in ${report.late}, so this baseline is recorded as ` +
+        "captured after first use — it is not the number to compare against\n";
+  switch (report.verb) {
     case "start":
-      input.streams.stdout(`started ${entry.id} "${entry.title}" at ${entry.started_at}\n`);
-      if (before.captured_before_first_use && !after.captured_before_first_use) {
-        input.streams.stderr(
-          `warning: a ticket is already admitted in ${store}, so this baseline is recorded as ` +
-            "captured after first use — it is not the number to compare against\n",
-        );
-      }
-      break;
+      return { stdout: `started ${entry.id} "${entry.title}" at ${entry.started_at}\n`, stderr, exitCode: 0 };
     case "pause":
-      input.streams.stdout(
-        `paused ${entry.id} at ${entry.paused_at} (${formatDuration(baselineElapsedMs(entry, now))} so far)\n`,
-      );
-      break;
+      return {
+        stdout: `paused ${entry.id} at ${entry.paused_at} (${formatDuration(baselineElapsedMs(entry, now))} so far)\n`,
+        stderr,
+        exitCode: 0,
+      };
     case "resume":
-      input.streams.stdout(
-        `resumed ${entry.id} (${formatDuration(entry.paused_ms)} paused in total)\n`,
-      );
-      break;
+      return {
+        stdout: `resumed ${entry.id} (${formatDuration(entry.paused_ms)} paused in total)\n`,
+        stderr,
+        exitCode: 0,
+      };
     case "stop":
-      input.streams.stdout(
-        `completed ${entry.id} "${entry.title}": ${formatDuration(entry.elapsed_ms ?? 0)} ` +
+      return {
+        stdout:
+          `completed ${entry.id} "${entry.title}": ${formatDuration(entry.elapsed_ms ?? 0)} ` +
           `(${formatDuration(entry.paused_ms)} paused)` +
           (entry.pull_request_url ? ` → ${entry.pull_request_url}` : "") +
           "\n",
-      );
-      break;
+        stderr,
+        exitCode: 0,
+      };
     case "abandon":
-      input.streams.stdout(
-        `abandoned ${entry.id} "${entry.title}" after ${formatDuration(entry.elapsed_ms ?? 0)}` +
+      return {
+        stdout:
+          `abandoned ${entry.id} "${entry.title}" after ${formatDuration(entry.elapsed_ms ?? 0)}` +
           (entry.note ? `: ${entry.note}` : "") +
           "\n",
-      );
-      break;
+        stderr,
+        exitCode: 0,
+      };
   }
-  return 0;
 }
+
+/**
+ * The stopwatch and the harness are one command because they are one
+ * measurement: `internal/e1/` is where a reading becomes a partner's sealed
+ * ten and the ratio the product is held to (D-038, SCP-080).
+ */
+export const baselineCommandLine: ReportCommand<
+  BaselineInput,
+  { json: boolean },
+  BaselineReport
+> = {
+  kind: "report",
+  name: "baseline",
+  grammars: [...BASELINE_GRAMMARS, ...E1_GRAMMARS],
+  // `list` and `result` print their record to a pipe without being asked; the
+  // verbs that write one line print that line either way.
+  jsonWhenPiped: true,
+  grammarFor: (argv) =>
+    isE1Command(argv[0]) ? e1GrammarFor(argv[0]) : baselineGrammar(stopwatchVerb(argv[0])),
+  read(argv) {
+    if (isE1Command(argv[0])) {
+      const { input, output } = readE1(argv);
+      return { input: { kind: "harness", input }, output };
+    }
+    const { input, output } = readStopwatch(argv);
+    return { input: { kind: "stopwatch", input }, output };
+  },
+  run: (input, context) =>
+    input.kind === "harness"
+      ? { kind: "harness", report: e1(input.input, context) }
+      : { kind: "stopwatch", report: stopwatch(input.input, context) },
+  render: (report, _output, target) =>
+    report.kind === "harness"
+      ? renderE1(report.report, target.json)
+      : renderStopwatch(report.report, target.json),
+};
 
 /**
  * What `perbo escapes` reads of the same file: where it is, and the schema it

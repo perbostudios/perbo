@@ -30,11 +30,21 @@ import {
 } from "../../scheduling.js";
 import { startEndpoint, type RunningEndpoint } from "../../endpoint/index.js";
 import { CommandFailedError, gh, git } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand, type DraftProvider } from "../admit.js";
+import { admitDraft, defaultAdmission, type DraftProvider } from "../admit.js";
 import { UsageError } from "../../usage-error.js";
+import {
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../../command-line/grammar.js";
 import { effectiveLimits, readRepoConfig, requireBase, resolveBase } from "../run/index.js";
 import type { Streams } from "../../streams.js";
-import { derivedBranch, isStranded, runSyncCommand } from "../sync.js";
+import type { NarratedCommand } from "../../command-line/table.js";
+import { narratedStreams } from "../../streams.js";
+import type { CommandContext } from "../../command.js";
+import { derivedBranch, isStranded, sync } from "../sync.js";
 import { listTickets, readContract, readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 import { describeWaits } from "./waits.js";
 
@@ -98,56 +108,28 @@ function parseInterval(raw: string): number {
   return ms;
 }
 
-export function parseServeArgs(argv: readonly string[]): ServeArgs {
-  const args: ServeArgs = {
-    repo: ".",
-    store: null,
-    publish: false,
-    once: false,
-    intervalMs: DEFAULT_INTERVAL_MS,
-    json: false,
-    noEndpoint: false,
-  };
-  const tokens = argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
-  const value = (index: number, token: string): string => {
-    const next = tokens[index];
-    if (next === undefined) throw new UsageError(`${token} requires a value`);
-    return next;
-  };
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = value(++i, token);
-        break;
-      case "--store":
-        args.store = value(++i, token);
-        break;
-      case "--publish":
-        args.publish = true;
-        break;
-      case "--once":
-        args.once = true;
-        break;
-      case "--interval":
-        args.intervalMs = parseInterval(value(++i, token));
-        break;
-      case "--json":
-        args.json = true;
-        break;
-      case "--no-endpoint":
-        args.noEndpoint = true;
-        break;
-      default:
-        throw new UsageError(`unknown option '${token}' for serve`);
-    }
-  }
-  return args;
-}
+const SERVE_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--publish": switchFlag(),
+  "--once": switchFlag(),
+  "--interval": valueFlag(),
+  "--json": switchFlag(),
+  "--no-endpoint": switchFlag(),
+} satisfies FlagTable;
+
+const SERVE_GRAMMAR: Grammar<typeof SERVE_FLAGS> = {
+  command: "serve",
+  flags: SERVE_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal:
+      "serve takes no ticket key: it runs the queue over the whole store, " +
+      "e.g. perbo serve --once --json",
+  },
+  afterDoubleDash: "positionals",
+};
 
 /**
  * Every process the queue would start, as functions, so a test can hand in
@@ -245,11 +227,19 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
   },
 
   async sync({ key, merge, onLine }) {
-    return runSyncCommand({
-      argv: [key, "--repo", target.repo, ...(target.store ? ["--store", target.store] : []), ...(merge ? ["--merge"] : [])],
-      streams: lineStreams(onLine),
-      cwd: target.cwd,
-    });
+    // Built as values, as the draft below is: a key the queue read out of the
+    // store is an argument, and there is no line here for it to become part of.
+    const lines = lineStreams(onLine);
+    return sync(
+      { mode: "ticket", target: { repo: target.repo, store: target.store }, key, merge },
+      {
+        cwd: target.cwd,
+        now: new Date(),
+        diagnostics: lines,
+        stdout: lines.stdout,
+        isTTY: lines.isTTY,
+      },
+    );
   },
 
   async sealedPaths({ repository_root, base_ref, branch }) {
@@ -316,25 +306,26 @@ export function processDeps(target: { repo: string; store: string | null; cwd: s
   },
 
   async draft({ reference, provider, model, onLine }) {
-    const out: string[] = [];
     const lines = lineStreams(onLine);
-    const streams: Streams = { stdout: (chunk) => out.push(chunk), stderr: lines.stderr, isTTY: false };
-    // Built as values, as the endpoint builds them: the reference is an argument, never a line.
-    const args = {
-      ...parseAdmitArgs(["--repo", target.repo, ...(target.store ? ["--store", target.store] : []), "--json"]),
-      from: reference,
-      ...(provider === null ? {} : { provider }),
-      model,
-    };
-    let code: number;
+    // Built as values, as the endpoint builds them: the reference is an
+    // argument, never a line, and a draft has no approval to set (D-072).
+    const defaults = defaultAdmission({ repo: target.repo, store: target.store });
     try {
-      code = await runAdmitCommand({ args, streams, cwd: target.cwd });
+      const report = await admitDraft(
+        {
+          ...defaults,
+          from: reference,
+          ...(provider === null ? {} : { provider }),
+          model,
+        },
+        { cwd: target.cwd, now: new Date(), diagnostics: lines },
+      );
+      return { code: EXIT_CODES.approve, key: report.key };
     } catch (error) {
       if (!(error instanceof UsageError)) throw error;
       onLine(`draft refused: ${error.message}`);
       return { code: EXIT_CODES.usage_or_input_error, key: null };
     }
-    return { code, key: keyFromAdmitJson(out.join("")) };
   },
 
   sleep(ms, signal) {
@@ -381,18 +372,6 @@ const oneLine = (text: string): string =>
     .replace(/ {2,}/g, " ")
     .trim()
     .slice(0, 120);
-
-/** The key of the ticket `admit --json` wrote. Null where the output is not admit's. */
-export function keyFromAdmitJson(stdout: string): string | null {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(stdout);
-  } catch {
-    return null;
-  }
-  const parsed = z.object({ ticket: z.object({ key: TicketKeySchema }) }).safeParse(raw);
-  return parsed.success ? parsed.data.ticket.key : null;
-}
 
 /**
  * `.perbo/config.json`'s `tracker`: the repository whose open issues carrying
@@ -870,20 +849,34 @@ function summarise(tick: ServeTick): string {
   );
 }
 
-export async function runServeCommand(input: {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  now?: Date;
-  deps?: ServeDeps;
+/** What a test replaces in a queue: its processes, its clock, and how it is stopped. */
+export interface ServeCommandDeps {
+  /** Every process the queue would start. The real ones unless a caller names its own. */
+  processes: ServeDeps;
+  /** What time it is, asked once a tick. A live clock unless a caller names its own. */
+  clock: () => Date;
   /** Stops the loop between ticks. The program wires SIGINT and SIGTERM to it. */
-  signal?: AbortSignal;
-  /** Start paused, as the endpoint's `queue_pause` leaves a queue. Tests only. */
-  paused?: boolean;
-}): Promise<number> {
-  const args = parseServeArgs(input.argv);
-  const { streams } = input;
-  const repository_root = resolve(input.cwd, args.repo);
+  signal: AbortSignal;
+  /** Start paused, as the endpoint's `queue_pause` leaves a queue. */
+  paused: boolean;
+}
+
+/** What a queue is given: where it runs, what it says as it goes, and its processes. */
+export type ServeContext = CommandContext & {
+  stdout(chunk: string): void;
+  isTTY: boolean;
+} & Partial<ServeCommandDeps>;
+
+/**
+ * `perbo serve`, over typed input.
+ *
+ * It answers while it works — one line a decision, or one JSON document a tick
+ * under `--json` — and runs until it is stopped, so there is no record to hand
+ * back.
+ */
+export async function serve(args: ServeArgs, context: ServeContext): Promise<number> {
+  const streams = narratedStreams(context);
+  const repository_root = resolve(context.cwd, args.repo);
   const dir = storeDir(repository_root, args.store);
   const configPath = join(dir, "config.json");
   const repoConfig = readRepoConfig(dir);
@@ -916,19 +909,20 @@ export async function runServeCommand(input: {
   const state_root = join(dir, "state");
   let lock;
   try {
-    lock = acquireServeLock({ state_root, repository_root, now: input.now ?? new Date() });
+    lock = acquireServeLock({ state_root, repository_root, now: context.now });
   } catch (error) {
     if (!(error instanceof ServeLockedError)) throw error;
     streams.stderr(`error: ${error.message}\n`);
     return EXIT_CODES.usage_or_input_error;
   }
 
-  const deps = input.deps ?? processDeps({ repo: args.repo, store: args.store, cwd: input.cwd });
+  const deps =
+    context.processes ?? processDeps({ repo: args.repo, store: args.store, cwd: context.cwd });
 
   const controller = new AbortController();
   const stop = () => controller.abort();
-  const signal = input.signal ?? controller.signal;
-  if (input.signal === undefined) {
+  const signal = context.signal ?? controller.signal;
+  if (context.signal === undefined) {
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
   }
@@ -936,7 +930,7 @@ export async function runServeCommand(input: {
   const capacity = limitFor(limits, "concurrent_local_attempts");
   const queue: Queue = {
     dir,
-    cwd: input.cwd,
+    cwd: context.cwd,
     repository_root,
     state_root,
     base_ref: base.base_ref,
@@ -946,12 +940,12 @@ export async function runServeCommand(input: {
     args,
     deps,
     streams,
-    clock: input.now === undefined ? () => new Date() : () => input.now!,
+    clock: context.clock ?? (() => new Date()),
     children: new Map(),
     lastFetchDetail: null,
     saidNotPublishing: false,
     tick: 0,
-    paused: input.paused ?? false,
+    paused: context.paused ?? false,
     lastTick: null,
     tracker,
     draftAttempted: new Set(),
@@ -975,7 +969,7 @@ export async function runServeCommand(input: {
     if (!args.noEndpoint) {
       endpoint = await startEndpoint({
         dir,
-        cwd: input.cwd,
+        cwd: context.cwd,
         repo: args.repo,
         store: args.store,
         queue: {
@@ -1009,7 +1003,7 @@ export async function runServeCommand(input: {
       await Promise.all(queue.children.values());
     }
   } finally {
-    if (input.signal === undefined) {
+    if (context.signal === undefined) {
       process.off("SIGINT", stop);
       process.off("SIGTERM", stop);
     }
@@ -1018,3 +1012,35 @@ export async function runServeCommand(input: {
   }
   return EXIT_CODES.approve;
 }
+
+/** `perbo serve`, over its own line. */
+export const serveCommandLine: NarratedCommand<
+  ServeArgs,
+  Record<string, never>,
+  ServeCommandDeps
+> = {
+  kind: "narrated",
+  name: "serve",
+  grammars: [SERVE_GRAMMAR],
+  grammarFor: () => SERVE_GRAMMAR,
+  read(argv) {
+    const line = parseArgv(SERVE_GRAMMAR, argv);
+    const interval = line.flags["--interval"];
+    return {
+      input: {
+        repo: line.flags["--repo"] ?? ".",
+        store: line.flags["--store"] ?? null,
+        // Publication authority is a person's own flag, typed here and carried
+        // on every run this queue starts (D-079). Nothing else on the line can
+        // set it: a value is a value, whatever it is shaped like.
+        publish: line.flags["--publish"] === true,
+        once: line.flags["--once"] === true,
+        intervalMs: interval === undefined ? DEFAULT_INTERVAL_MS : parseInterval(interval),
+        json: line.flags["--json"] === true,
+        noEndpoint: line.flags["--no-endpoint"] === true,
+      },
+      output: {},
+    };
+  },
+  run: (input, _output, context) => serve(input, context),
+};

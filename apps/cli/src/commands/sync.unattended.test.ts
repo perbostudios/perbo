@@ -5,13 +5,14 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, TICKET_SCHEMA_VERSION, TicketSchema, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
 import { makeAttempt } from "../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
-import { runStopsCommand } from "./stops.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
+import { stopsCommandLine } from "./stops.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * SCP-196: the loop's own success as a live number.
@@ -102,11 +103,11 @@ afterEach(() => {
  * before the read, so a suite that let the machine's own environment decide it
  * would ask `gh auth status` on one developer's machine and not on another's.
  */
-const withGh = <T,>(bin: string, body: () => Promise<T>): Promise<T> => {
+const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>> => {
   process.env.PATH = `${bin}:${originalPath ?? ""}`;
   process.env.GH_TOKEN = "test-token";
   delete process.env.GITHUB_TOKEN;
-  return body();
+  return Promise.resolve(body());
 };
 
 /** A ticket sitting at `pr_open` behind a pull request the loop published. */
@@ -114,8 +115,8 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
   const repo = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
-  runAdmitCommand({
-    args: parseAdmitArgs([
+  runCommandLine(admitCommandLine, {
+    argv: [
       "--repo",
       repo,
       "--outcome",
@@ -125,7 +126,7 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
       "--path",
       "packages/search/**",
       "--approve",
-    ]),
+    ],
     streams: capture(),
     cwd: repo,
   });
@@ -160,7 +161,7 @@ describe("sync reads commits_outside_loop from gh, by message, not by author", (
         { oid: "c1", messageHeadline: "PRB-1: pagination", messageBody: "Attempt: att_1\nBase: aaa\n" },
         { oid: "c2", messageHeadline: "PRB-1: merge main into the attempt branch", messageBody: "Attempt: att_1\nBase: bbb\n" },
       ])),
-      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -180,7 +181,7 @@ describe("sync reads commits_outside_loop from gh, by message, not by author", (
         // the loop uses — the message is what tells them apart, not the name.
         { oid: "c2", messageHeadline: "fix the off-by-one the review missed", messageBody: "" },
       ])),
-      () => runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(readTicket(dir, "PRB-1").delivery.commits_outside_loop).toBe(true);
@@ -191,7 +192,7 @@ describe("sync reads commits_outside_loop from gh, by message, not by author", (
     const streams = capture();
 
     await withGh(fakeGh("no-commits-field", ghAnswer("OPEN", [])), () =>
-      runSyncCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
     );
 
     expect(readTicket(dir, "PRB-1").delivery.commits_outside_loop).toBeNull();
@@ -310,7 +311,7 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     // nothing recorded must not crash the reading.
 
     const streams = capture();
-    const code = await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo });
+    const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(code).toBe(EXIT_CODES.approve);
     const out = streams.out.join("");
     expect(out).toMatch(/unattended merges\s+67%\s+\[21–94\]\s+3 merged tickets with a known answer \(2 unattended, 1 attended\)/);
@@ -344,7 +345,7 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     ]);
 
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(streams.out.join("")).toContain("AYO-1/att_unpriced");
   });
 
@@ -365,7 +366,7 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     writeAttempts(dir, "ticket_1", [priced("ticket_1", 4_000_000)]);
 
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo, "--json"], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
     const parsed = JSON.parse(streams.out.join("")) as {
       unattended_merges: { merged: number; unattended: number; attended: number; unknown: number; share: { point: number; n: number } };
       merged_cost: { tickets: number; attempts: number; priced: number; micros: number };
@@ -404,7 +405,7 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     );
 
     const streams = capture();
-    await runStopsCommand({ argv: ["--repo", repo, "--since", "2026-09-02", "--json"], streams, cwd: repo });
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--since", "2026-09-02", "--json"], streams, cwd: repo });
     const parsed = JSON.parse(streams.out.join("")) as {
       unattended_merges: { merged: number; attended: number };
     };
@@ -431,7 +432,7 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     writeFileSync(join(dir, "state", "ticket_1.attempts.json"), "{not json");
 
     const streams = capture();
-    const code = await runStopsCommand({ argv: ["--repo", repo], streams, cwd: repo });
+    const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(code).toBe(EXIT_CODES.approve);
     expect(streams.err.join("")).toContain("AYO-1");
     expect(streams.out.join("")).toMatch(/unattended merges\s+100%/);

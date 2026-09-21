@@ -4,11 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { runEditCommand } from "./edit/index.js";
-import { runInspectCommand, type InspectReport } from "./inspect.js";
+import { editCommandLine } from "./edit/index.js";
+import { inspectCommandLine, type InspectReport } from "./inspect.js";
 import { storeDir } from "../store/tickets.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-graph-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -55,8 +56,8 @@ function repository(): string {
 
 function admitted(criteria: number, paths: string[]): string {
   const repo = repository();
-  const code = runAdmitCommand({
-    args: parseAdmitArgs([
+  const code = runCommandLine(admitCommandLine, {
+    argv: [
       "--repo", repo,
       "--outcome", "New users receive an activation email.",
       ...Array.from({ length: criteria }, (_, i) => [
@@ -64,7 +65,7 @@ function admitted(criteria: number, paths: string[]): string {
         `criterion ${i + 1} holds :: assertion ${i + 1}`,
       ]).flat(),
       ...paths.flatMap((path) => ["--path", path]),
-    ]),
+    ],
     streams: capture(false),
     cwd: repo,
   });
@@ -73,7 +74,7 @@ function admitted(criteria: number, paths: string[]): string {
 }
 
 const graphEdit = (repo: string, edit: unknown) =>
-  runEditCommand({
+  runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo, "--graph-edit", JSON.stringify(edit)],
     streams: capture(false),
     cwd: repo,
@@ -82,14 +83,14 @@ const graphEdit = (repo: string, edit: unknown) =>
 /** The rendering as a person reads it at 80 columns: colour stripped. */
 async function inspectText(repo: string): Promise<string> {
   const streams = capture(true);
-  expect(await runInspectCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
+  expect(await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
   // eslint-disable-next-line no-control-regex
   return streams.out.join("").replace(/\u001b\[[0-9;]*m/g, "");
 }
 
 async function inspectJson(repo: string): Promise<InspectReport> {
   const streams = capture(false);
-  expect(await runInspectCommand({ argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
+  expect(await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
   return JSON.parse(streams.out.join("")) as never;
 }
 
@@ -173,7 +174,7 @@ describe("perbo inspect on a plan with a graph", () => {
 
   it("leaves a prohibited path out of the files in scope", async () => {
     const repo = admitted(2, ["packages/queue/**"]);
-    await runEditCommand({
+    await runCommandLine(editCommandLine, {
       argv: ["PRB-1", "--repo", repo, "--path", "packages/queue/src/**"],
       streams: capture(false),
       cwd: repo,

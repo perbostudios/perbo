@@ -20,12 +20,13 @@ import {
   pullRequestBody,
   type TicketDeliveryState,
 } from "@perbo/runner";
-import { parseAdmitArgs, runAdmitCommand } from "./admit.js";
+import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { recordDelivery, runSyncCommand } from "./sync.js";
+import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { makeAttempt, makeReview } from "../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { runCommandLine } from "../command-line/terminal.js";
 
 /**
  * `perbo sync` reads the answers ticked against each stop off the pull
@@ -102,7 +103,7 @@ const observed = (
 
 function delivered(name: string): { repo: string; dir: string; ticket_id: string } {
   const repo = repository(name);
-  runAdmitCommand({ args: parseAdmitArgs(admitArgv(repo)), streams: capture(), cwd: repo });
+  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-02T01:00:00.000Z");
   let ticket = recordDelivery(
@@ -128,21 +129,23 @@ describe("perbo sync writes the stop answers beside the attempt record", () => {
   it("records what gh read off the pull request, keyed by finding", async () => {
     const { repo, dir, ticket_id } = delivered("stops-first");
     const streams = capture();
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams,
       cwd: repo,
       now: new Date(T1),
-      poll: () =>
-        Promise.resolve(
-          observed(
-            [
-              { finding_key: k1, rule_id: "auth.token_never_expires", routing: "blocks", answer: "endorse" },
-              { finding_key: k2, rule_id: "behaviour.incidental_change", routing: "declined", answer: null },
-            ],
-            T1,
+      deps: {
+        poll: () =>
+          Promise.resolve(
+            observed(
+              [
+                { finding_key: k1, rule_id: "auth.token_never_expires", routing: "blocks", answer: "endorse" },
+                { finding_key: k2, rule_id: "behaviour.incidental_change", routing: "declined", answer: null },
+              ],
+              T1,
+            ),
           ),
-        ),
+      },
     });
     const stops = readStops(dir, ticket_id);
     expect(stops.ticket_key).toBe("PRB-1");
@@ -178,12 +181,14 @@ describe("perbo sync writes the stop answers beside the attempt record", () => {
       { finding_key: k1, rule_id: "auth.token_never_expires", routing: "blocks", answer: "endorse" },
     ];
     const sync = (at: string) =>
-      runSyncCommand({
+      runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date(at),
-        poll: () => Promise.resolve(observed(answers, at)),
+        deps: {
+          poll: () => Promise.resolve(observed(answers, at)),
+        },
       });
     await sync(T1);
     const first = readStops(dir, ticket_id);
@@ -199,15 +204,17 @@ describe("perbo sync writes the stop answers beside the attempt record", () => {
   it("re-stamps answered_at when the person changed their answer", async () => {
     const { repo, dir, ticket_id } = delivered("stops-changed");
     const sync = (answer: "endorse" | "override", at: string) =>
-      runSyncCommand({
+      runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date(at),
-        poll: () =>
-          Promise.resolve(
-            observed([{ finding_key: k1, rule_id: "auth.token_never_expires", routing: "blocks", answer }], at),
-          ),
+        deps: {
+          poll: () =>
+            Promise.resolve(
+              observed([{ finding_key: k1, rule_id: "auth.token_never_expires", routing: "blocks", answer }], at),
+            ),
+        },
       });
     await sync("endorse", T1);
     await sync("override", T2);
@@ -216,12 +223,14 @@ describe("perbo sync writes the stop answers beside the attempt record", () => {
 
   it("records a pull request on which nothing was shown, so the companion has a denominator", async () => {
     const { repo, dir, ticket_id } = delivered("stops-none");
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
       now: new Date(T1),
-      poll: () => Promise.resolve(observed([], T1)),
+      deps: {
+        poll: () => Promise.resolve(observed([], T1)),
+      },
     });
     const stops = readStops(dir, ticket_id);
     expect(stops.shown_to_person).toBe(false);
@@ -231,12 +240,14 @@ describe("perbo sync writes the stop answers beside the attempt record", () => {
 
   it("writes nothing when gh could not be asked", async () => {
     const { repo, dir, ticket_id } = delivered("stops-unreachable");
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
       now: new Date(T1),
-      poll: () => Promise.resolve(observed([], T1, false)),
+      deps: {
+        poll: () => Promise.resolve(observed([], T1, false)),
+      },
     });
     expect(existsSync(stopsFile(dir, ticket_id))).toBe(false);
   });
@@ -350,14 +361,16 @@ describe("perbo sync records who answered each stop", () => {
     });
     const answered = tick(tick(body, STAND_IN_STOP!, "endorse", "stand_in"), PERSON_STOP!, "endorse", "unsigned");
 
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
       now: new Date(T1),
-      // `gh` is the only thing stood in for: what it returns is the real body
-      // above, read by the real parser.
-      poll: () => Promise.resolve(observed(parseStopAnswers(answered), T1)),
+      deps: {
+        // `gh` is the only thing stood in for: what it returns is the real body
+        // above, read by the real parser.
+        poll: () => Promise.resolve(observed(parseStopAnswers(answered), T1)),
+      },
     });
 
     const stops = readStops(dir, ticket_id).stops;
@@ -382,12 +395,14 @@ describe("perbo sync records who answered each stop", () => {
       attempts: [dogfoodAttempt as never],
     });
     const sync = (text: string, at: string) =>
-      runSyncCommand({
+      runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date(at),
-        poll: () => Promise.resolve(observed(parseStopAnswers(text), at)),
+        deps: {
+          poll: () => Promise.resolve(observed(parseStopAnswers(text), at)),
+        },
       });
 
     await sync(tick(body, STAND_IN_STOP!, "endorse", "stand_in"), T1);
@@ -411,12 +426,14 @@ describe("perbo sync records who answered each stop", () => {
       attempts: [dogfoodAttempt as never],
     });
     const sync = (text: string, at: string) =>
-      runSyncCommand({
+      runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
         streams: capture(),
         cwd: repo,
         now: new Date(at),
-        poll: () => Promise.resolve(observed(parseStopAnswers(text), at)),
+        deps: {
+          poll: () => Promise.resolve(observed(parseStopAnswers(text), at)),
+        },
       });
 
     await sync(tick(body, STAND_IN_STOP!, "endorse", "stand_in"), T1);
@@ -456,12 +473,14 @@ describe("perbo sync records who answered each stop", () => {
     });
     const signed = tick(tick(body, STAND_IN_STOP!, "endorse", "stand_in"), PERSON_STOP!, "override", "stand_in");
 
-    await runSyncCommand({
+    await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams: capture(),
       cwd: repo,
       now: new Date(T1),
-      poll: () => Promise.resolve(observed(parseStopAnswers(signed), T1)),
+      deps: {
+        poll: () => Promise.resolve(observed(parseStopAnswers(signed), T1)),
+      },
     });
 
     const record = readStops(dir, ticket_id);

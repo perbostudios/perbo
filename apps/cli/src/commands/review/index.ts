@@ -32,7 +32,15 @@ import {
   type PreflightRequest,
   type PreflightResult,
 } from "@perbo/runner";
-import { STDIN, isTicketlessArgs, type ReviewArgs } from "./internal/args.js";
+import {
+  REVIEW_GRAMMAR,
+  STDIN,
+  isTicketlessArgs,
+  parseReviewArgs,
+  type ReviewArgs,
+} from "./internal/args.js";
+import type { NarratedCommand } from "../../command-line/table.js";
+import { narratedStreams } from "../../streams.js";
 import { UsageError } from "../../usage-error.js";
 import { renderReviewMarkdown } from "./internal/markdown.js";
 import { renderArtifact } from "./internal/card.js";
@@ -55,6 +63,9 @@ import {
   saveResumeRecord,
   type ResumeRecord,
 } from "./internal/resume.js";
+
+/** The four parts of a review a test replaces; production uses the real thing. */
+export type ReviewDeps = Required<Omit<RunOptions, "args" | "streams" | "cwd" | "now">>;
 
 export interface RunOptions {
   args: ReviewArgs;
@@ -553,6 +564,33 @@ export async function runReviewCommand(options: RunOptions): Promise<number> {
 
   return emit(redacted, contract, options, resumeCommand, ticketlessOutcome);
 }
+
+/**
+ * `perbo review`, over its own line.
+ *
+ * It answers while it works — what it is reading, what it is waiting on, what
+ * it spent — and writes the artifact at the end, so there is no record to hand
+ * back before the run is over.
+ */
+export const reviewCommandLine: NarratedCommand<ReviewArgs, Record<string, never>, ReviewDeps> = {
+  kind: "narrated",
+  name: "review",
+  grammars: [REVIEW_GRAMMAR],
+  grammarFor: () => REVIEW_GRAMMAR,
+  read: (argv) => ({ input: parseReviewArgs([...argv]), output: {} }),
+  run(input, _output, context) {
+    return runReviewCommand({
+      args: input,
+      streams: narratedStreams(context),
+      cwd: context.cwd,
+      now: context.now,
+      ...(context.makeModel ? { makeModel: context.makeModel } : {}),
+      ...(context.preflight ? { preflight: context.preflight } : {}),
+      ...(context.gh ? { gh: context.gh } : {}),
+      ...(context.stdin ? { stdin: context.stdin } : {}),
+    });
+  },
+};
 
 /** The command's parser, its card and its resume record, for the entry, the library and the tests. */
 export type { ReviewArgs, ReviewFormat } from "./internal/args.js";

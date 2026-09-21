@@ -32,7 +32,6 @@ import {
   type RiskDerivation,
   type Scope,
   type Ticket,
-  type TicketPriority,
   type VerificationKind,
   unknownRequirementIds,
 } from "@perbo/contracts";
@@ -56,8 +55,19 @@ import {
 import { ProviderError, createModel, type Model, type ModelProvider } from "@perbo/model";
 import { RepoReader } from "@perbo/review";
 import { QUEUE_HOLDING_STATES } from "../scheduling.js";
-import { UsageError } from "../usage-error.js";
-import type { Streams } from "../streams.js";
+import { UsageError, readInput } from "../usage-error.js";
+import {
+  aliasFlag,
+  listFlag,
+  parseArgv,
+  switchFlag,
+  valueFlag,
+  type FlagTable,
+  type Grammar,
+} from "../command-line/grammar.js";
+import type { CommandContext, CommandReport, Rendered } from "../command.js";
+import type { Diagnostics } from "../diagnostics.js";
+import type { NarratedCommand, ReportCommand } from "../command-line/table.js";
 import { prohibitedSpecPaths, regenerateNodePages, specCommitFiles } from "../spec/pages.js";
 import { specBaseline } from "../spec/staleness.js";
 import {
@@ -85,7 +95,7 @@ import {
   type DraftSnapshotFile,
   type JudgingRule,
 } from "../store/tickets.js";
-import { specFolder } from "../store/index.js";
+import { specFolder, storeFor, StoreTargetSchema, type StoreTarget } from "../store/index.js";
 import { describeScheduling } from "./serve/waits.js";
 
 /**
@@ -133,73 +143,246 @@ const DEFAULT_PREFIX = "PRB";
 
 export type DraftProvider = ModelProvider;
 
-export interface AdmitArgs {
-  repo: string;
-  store: string | null;
-  prefix: string;
-  title: string | null;
-  criteria: string[];
-  criteriaFile: string | null;
-  paths: string[];
-  prohibited: string[];
-  generated: string[];
-  expansionBudget: number;
+/** The drafting providers this build offers. */
+const DRAFT_PROVIDERS = ["anthropic", "claude-cli", "codex-cli"] as const;
+
+const TICKET_KEY = /^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/;
+
+/** A ticket key as a flag names one, refused in the words of that flag. */
+const namedTicketKey = (flag: string) =>
+  z.string().regex(TICKET_KEY, {
+    error: (issue) => `${flag} must be a ticket key like PRB-2. Got '${String(issue.input)}'`,
+  });
+
+const EXPANSION_BUDGET_REFUSAL = "--expansion-budget must be a whole number of files";
+
+/**
+ * `owner/repo#N`. One regex for every caller: the terminal's `--from` and the
+ * endpoint's `from` name the same issue, and a name GitHub cannot have is not
+ * one either of them may hand to `gh`.
+ */
+export const IssueReferenceSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*#[1-9][0-9]*$/, {
+    error: (issue) =>
+      `--from must be a GitHub issue like owner/repo#412. Got '${String(issue.input)}'`,
+  });
+
+/**
+ * The drafting model's id. It is what a provider's own CLI is started with,
+ * which is an action parameter (ADR-0023 §4), so what it may hold is a rule
+ * about the value and every caller is held to it.
+ */
+export const ModelIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, {
+  error: (issue) => `--model must be a model id like claude-opus-5. Got '${String(issue.input)}'`,
+});
+
+/**
+ * What one admission is asked for, whoever asks: the terminal through
+ * {@link admitCommandLine}, and a caller in this process through
+ * {@link admitDraft}.
+ *
+ * Every rule about a value is here, so the endpoint, the queue and the
+ * interview are held to what a person typing the same thing is held to.
+ * Reading a token as a number is the line's own and stays at the edge; what
+ * the number then has to be is this.
+ */
+const ADMISSION_FIELDS = {
+  target: StoreTargetSchema,
+  prefix: z.string().regex(/^[A-Z][A-Z0-9]{1,9}$/, {
+    error: (issue) =>
+      `--prefix must be 2 to 10 uppercase letters or digits starting with a letter, so a ` +
+      `key reads like PRB-118. Got '${String(issue.input)}'`,
+  }),
+  /** One sentence: what will be true afterwards. It becomes the contract's outcome. */
+  title: z.string().nullable(),
+  criteria: z.array(z.string()),
+  criteriaFile: z.string().nullable(),
+  paths: z.array(z.string()),
+  prohibited: z.array(z.string()),
+  generated: z.array(z.string()),
+  expansionBudget: z
+    .int({ error: EXPANSION_BUDGET_REFUSAL })
+    .min(0, { error: EXPANSION_BUDGET_REFUSAL }),
   /** Null means derived from the scope. A value may only raise the derivation. */
-  level: "P1" | "P2" | "P3" | null;
-  priority: TicketPriority;
-  labels: string[];
-  dependsOn: string[];
-  source: string | null;
-  sourceUrl: string | null;
+  level: z
+    .enum(["P1", "P2", "P3"], {
+      error:
+        "--level must be P1, P2 or P3; P0 carries no acceptance criteria, so nothing could " +
+        "review it",
+    })
+    .nullable(),
+  priority: z.enum(["urgent", "high", "normal", "low"], {
+    error: "--priority must be urgent, high, normal or low",
+  }),
+  labels: z.array(z.string()),
+  dependsOn: z.array(namedTicketKey("--depends-on")),
+  source: z.string().nullable(),
+  sourceUrl: z
+    .string()
+    .refine(
+      (value) => {
+        try {
+          new URL(value);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { error: (issue) => `--source-url must be a URL. Got '${String(issue.input)}'` },
+    )
+    .nullable(),
   /** `owner/repo#N`: draft the contract from this issue with a model. */
-  from: string | null;
+  from: IssueReferenceSchema.nullable(),
   /** A Markdown file holding a pasted issue: draft the contract from it instead. */
-  fromFile: string | null;
+  fromFile: z.string().nullable(),
   /** The `spec.md` of a spec folder: draft the contract and its graph from it (D-103). */
-  fromSpec: string | null;
+  fromSpec: z.string().nullable(),
   /** A ticket in `plan_review` to re-draft from that spec, keeping its key (D-103). */
+  startOver: namedTicketKey("--start-over").nullable(),
+  provider: z.enum(DRAFT_PROVIDERS, {
+    error: "--provider must be 'anthropic', 'claude-cli' or 'codex-cli'",
+  }),
+  model: ModelIdSchema.nullable(),
+  manualReviewer: z.string().nullable(),
+  manualReason: z.string().nullable(),
+};
+
+/** What one admission is: the fields above, and the approval only a person asks for. */
+type Admission = {
+  from: string | null;
+  fromFile: string | null;
+  fromSpec: string | null;
   startOver: string | null;
-  provider: DraftProvider;
-  model: string | null;
-  manualReviewer: string | null;
-  manualReason: string | null;
-  approve: boolean;
-  json: boolean;
-}
-
-export interface ListArgs {
-  repo: string;
-  store: string | null;
-  all: boolean;
-  json: boolean;
-}
-
-const takeValue = (rest: string[], index: number, token: string): string => {
-  const next = rest[index];
-  if (next === undefined) throw new UsageError(`${token} requires a value`);
-  return next;
+  approve?: boolean;
 };
 
 /**
- * Split `--name=value` into `["--name", "value"]`, leaving everything else
- * alone, so `--outcome=x` and `--outcome x` mean the same thing.
- *
- * `parseReviewArgs` has always accepted both forms. These commands did not, so
- * one binary rejected `--outcome=x` and accepted `--contract=x` — a difference
- * nobody chose and nothing documented.
+ * The rules between the fields, which hold whichever schema carries them. A
+ * draft has no `approve` at all, so reading it as absent is reading what
+ * {@link DraftAdmissionSchema} means.
  */
-function splitInlineValues(argv: readonly string[]): string[] {
-  return argv.flatMap((token) => {
-    if (!token.startsWith("--")) return [token];
-    const eq = token.indexOf("=");
-    return eq === -1 ? [token] : [token.slice(0, eq), token.slice(eq + 1)];
-  });
+const admissionRules = (input: Admission, ctx: z.RefinementCtx): void => {
+  // Two sources for one draft is not a preference to resolve by picking one:
+  // whichever lost would have been read as the thing being admitted, and the
+  // ticket would carry the provenance of the other.
+  const sources = (
+    [
+      ["--from", input.from],
+      ["--from-file", input.fromFile],
+      ["--from-spec", input.fromSpec],
+    ] as const
+  ).filter(([, value]) => value !== null);
+  if (sources.length > 1) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        `${sources.map(([flag]) => flag).join(" and ")} are mutually exclusive: one contract is ` +
+        `drafted from one document. Got ` +
+        sources.map(([flag, value]) => `${flag} '${value}'`).join(" and "),
+    });
+  }
+  if (input.startOver === null) return;
+  // Starting over is drafting the same ticket again from the document it was
+  // drafted from, so there is one source it can come from and it is a spec.
+  if (input.fromSpec === null) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        `--start-over ${input.startOver} re-drafts a ticket from its spec, so it needs the spec: ` +
+        "perbo admit --from-spec specs/<slug>/spec.md --start-over " +
+        input.startOver,
+    });
+  }
+  if (input.approve === true) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        "--start-over drafts the contract with a model, so it cannot be approved in the same " +
+        "command: read the draft, then `perbo approve <key>`",
+    });
+  }
+};
+
+/** An admission, with the approval only the terminal can ask for. */
+export const AdmissionInputSchema = z
+  .strictObject({ ...ADMISSION_FIELDS, approve: z.boolean() })
+  .superRefine(admissionRules);
+export type AdmissionInput = z.infer<typeof AdmissionInputSchema>;
+
+/**
+ * An admission a caller in this process makes: the same fields, strict, with
+ * no `approve` among them — so an object carrying one is refused rather than
+ * quietly stripped. Approval is the person's own keystroke (D-072), and
+ * {@link admitCommandLine} is the only reader that can ask for it.
+ */
+export const DraftAdmissionSchema = z.strictObject(ADMISSION_FIELDS).superRefine(admissionRules);
+export type DraftAdmission = z.infer<typeof DraftAdmissionSchema>;
+
+/** What a draft is given beyond the store: the model and the issue reader. */
+export interface AdmitDeps {
+  /** The drafting model. Otherwise built from the admission's provider. */
+  model: Model;
+  /** The issue reader. Otherwise `gh issue view`. */
+  fetchIssue: (reference: string) => Promise<GitHubIssue>;
 }
 
-export function parseAdmitArgs(argv: readonly string[]): AdmitArgs {
-  const args: AdmitArgs = {
-    repo: ".",
-    store: null,
+const ADMIT_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--prefix": valueFlag(),
+  "--outcome": valueFlag(),
+  // The spelling `perbo admit --title` has always taken, recorded as the
+  // outcome it is: one field, so the last of the two given wins.
+  "--title": aliasFlag("--outcome"),
+  "--criterion": listFlag(),
+  "--criteria-file": valueFlag(),
+  "--path": listFlag(),
+  "--prohibit": listFlag(),
+  "--generated": listFlag(),
+  "--expansion-budget": valueFlag(),
+  "--level": valueFlag(),
+  "--priority": valueFlag(),
+  "--label": listFlag(),
+  "--depends-on": listFlag(),
+  "--source": valueFlag(),
+  "--source-url": valueFlag(),
+  "--from": valueFlag(),
+  "--from-file": valueFlag(),
+  "--from-spec": valueFlag(),
+  "--start-over": valueFlag(),
+  "--provider": valueFlag(),
+  "--model": valueFlag(),
+  "--manual-reviewer": valueFlag(),
+  "--manual-reason": valueFlag(),
+  "--approve": switchFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const ADMIT_GRAMMAR: Grammar<typeof ADMIT_FLAGS> = {
+  command: "admit",
+  flags: ADMIT_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal:
+      'admit takes no positional argument: what is admitted is given as flags, e.g. perbo admit ' +
+      '--outcome "..." --criterion "what :: how it is proven" --path "src/**"',
+  },
+  afterDoubleDash: "positionals",
+};
+
+/**
+ * An admission before anything has been asked of it: the standing
+ * prohibitions, the generated globs, the expansion budget, the prefix and the
+ * drafting provider this build offers, against one store.
+ *
+ * A caller in this process builds an admission from these and its own values.
+ * There is no `approve` among them, because there is no approving here.
+ */
+export function defaultAdmission(target: StoreTarget): DraftAdmission {
+  return {
+    target,
     prefix: DEFAULT_PREFIX,
     title: null,
     criteria: [],
@@ -222,212 +405,60 @@ export function parseAdmitArgs(argv: readonly string[]): AdmitArgs {
     model: null,
     manualReviewer: null,
     manualReason: null,
-    approve: false,
-    json: false,
   };
-  const tokens = splitInlineValues(argv);
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = takeValue(tokens, ++i, token);
-        break;
-      case "--store":
-        args.store = takeValue(tokens, ++i, token);
-        break;
-      case "--prefix": {
-        const prefix = takeValue(tokens, ++i, token);
-        // Checked here rather than reaching TicketKeySchema, where the failure
-        // arrived as `error: the review did not complete: ZodError…` with a
-        // stack trace and exit 3 — for a command that is not a review.
-        if (!/^[A-Z][A-Z0-9]{1,9}$/.test(prefix)) {
-          throw new UsageError(
-            `--prefix must be 2 to 10 uppercase letters or digits starting with a letter, so a ` +
-              `key reads like PRB-118. Got '${prefix}'`,
-          );
-        }
-        args.prefix = prefix;
-        break;
-      }
-      case "--outcome":
-      case "--title":
-        args.title = takeValue(tokens, ++i, token);
-        break;
-      case "--criterion":
-        args.criteria.push(takeValue(tokens, ++i, token));
-        break;
-      case "--criteria-file":
-        args.criteriaFile = takeValue(tokens, ++i, token);
-        break;
-      case "--path":
-        args.paths.push(takeValue(tokens, ++i, token));
-        break;
-      case "--prohibit":
-        args.prohibited.push(takeValue(tokens, ++i, token));
-        break;
-      case "--generated":
-        args.generated.push(takeValue(tokens, ++i, token));
-        break;
-      case "--expansion-budget": {
-        const raw = takeValue(tokens, ++i, token);
-        const budget = Number(raw);
-        if (!Number.isInteger(budget) || budget < 0) {
-          throw new UsageError(`--expansion-budget must be a whole number of files. Got '${raw}'`);
-        }
-        args.expansionBudget = budget;
-        break;
-      }
-      case "--level": {
-        const level = takeValue(tokens, ++i, token);
-        if (level !== "P1" && level !== "P2" && level !== "P3") {
-          throw new UsageError(
-            `--level must be P1, P2 or P3; P0 carries no acceptance criteria, so nothing could ` +
-              "review it",
-          );
-        }
-        args.level = level;
-        break;
-      }
-      case "--priority": {
-        const priority = takeValue(tokens, ++i, token);
-        if (!["urgent", "high", "normal", "low"].includes(priority)) {
-          throw new UsageError(`--priority must be urgent, high, normal or low`);
-        }
-        args.priority = priority as TicketPriority;
-        break;
-      }
-      case "--label":
-        args.labels.push(takeValue(tokens, ++i, token));
-        break;
-      case "--depends-on": {
-        const key = takeValue(tokens, ++i, token);
-        if (!/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/.test(key)) {
-          throw new UsageError(`--depends-on must be a ticket key like PRB-2. Got '${key}'`);
-        }
-        args.dependsOn.push(key);
-        break;
-      }
-      case "--source":
-        args.source = takeValue(tokens, ++i, token);
-        break;
-      case "--source-url": {
-        const url = takeValue(tokens, ++i, token);
-        try {
-          new URL(url);
-        } catch {
-          throw new UsageError(`--source-url must be a URL. Got '${url}'`);
-        }
-        args.sourceUrl = url;
-        break;
-      }
-      case "--from": {
-        const reference = takeValue(tokens, ++i, token);
-        if (!/^[\w.-]+\/[\w.-]+#[1-9]\d*$/.test(reference)) {
-          throw new UsageError(`--from must be a GitHub issue like owner/repo#412. Got '${reference}'`);
-        }
-        args.from = reference;
-        break;
-      }
-      case "--from-file":
-        args.fromFile = takeValue(tokens, ++i, token);
-        break;
-      case "--from-spec":
-        args.fromSpec = takeValue(tokens, ++i, token);
-        break;
-      case "--start-over": {
-        const key = takeValue(tokens, ++i, token);
-        if (!/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/.test(key)) {
-          throw new UsageError(`--start-over must be a ticket key like PRB-2. Got '${key}'`);
-        }
-        args.startOver = key;
-        break;
-      }
-      case "--provider": {
-        const provider = takeValue(tokens, ++i, token);
-        if (provider !== "anthropic" && provider !== "claude-cli" && provider !== "codex-cli") {
-          throw new UsageError("--provider must be 'anthropic', 'claude-cli' or 'codex-cli'");
-        }
-        args.provider = provider;
-        break;
-      }
-      case "--model":
-        args.model = takeValue(tokens, ++i, token);
-        break;
-      case "--manual-reviewer":
-        args.manualReviewer = takeValue(tokens, ++i, token);
-        break;
-      case "--manual-reason":
-        args.manualReason = takeValue(tokens, ++i, token);
-        break;
-      case "--approve":
-        args.approve = true;
-        break;
-      case "--json":
-        args.json = true;
-        break;
-      default:
-        throw new UsageError(`unknown option '${token}' for admit`);
-    }
-  }
-  // Two sources for one draft is not a preference to resolve by picking one:
-  // whichever lost would have been read as the thing being admitted, and the
-  // ticket would carry the provenance of the other.
-  const sources = (
-    [
-      ["--from", args.from],
-      ["--from-file", args.fromFile],
-      ["--from-spec", args.fromSpec],
-    ] as const
-  ).filter(([, value]) => value !== null);
-  if (sources.length > 1) {
-    throw new UsageError(
-      `${sources.map(([flag]) => flag).join(" and ")} are mutually exclusive: one contract is ` +
-        `drafted from one document. Got ` +
-        sources.map(([flag, value]) => `${flag} '${value}'`).join(" and "),
-    );
-  }
-  if (args.startOver !== null) {
-    // Starting over is drafting the same ticket again from the document it was
-    // drafted from, so there is one source it can come from and it is a spec.
-    if (args.fromSpec === null) {
-      throw new UsageError(
-        `--start-over ${args.startOver} re-drafts a ticket from its spec, so it needs the spec: ` +
-          "perbo admit --from-spec specs/<slug>/spec.md --start-over " + args.startOver,
-      );
-    }
-    if (args.approve) {
-      throw new UsageError(
-        "--start-over drafts the contract with a model, so it cannot be approved in the same " +
-          "command: read the draft, then `perbo approve <key>`",
-      );
-    }
-  }
-  return args;
 }
 
-export function parseListArgs(argv: readonly string[]): ListArgs {
-  const args: ListArgs = { repo: ".", store: null, all: false, json: false };
-  const tokens = splitInlineValues(argv);
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]!;
-    switch (token) {
-      case "--repo":
-        args.repo = takeValue(tokens, ++i, token);
-        break;
-      case "--store":
-        args.store = takeValue(tokens, ++i, token);
-        break;
-      case "--all":
-        args.all = true;
-        break;
-      case "--json":
-        args.json = true;
-        break;
-      default:
-        throw new UsageError(`unknown option '${token}' for list`);
-    }
+/**
+ * One `perbo admit` line as the admission it asks for.
+ *
+ * The line's own reading is here — a token becoming a number, a flag naming
+ * the standing lists it adds to — and what every value then has to be is
+ * {@link AdmissionInputSchema}, which a caller in this process reaches too.
+ */
+function readAdmission(argv: readonly string[]): {
+  input: AdmissionInput;
+  output: { json: boolean };
+} {
+  const line = parseArgv(ADMIT_GRAMMAR, argv);
+  const flags = line.flags;
+
+  const rawBudget = flags["--expansion-budget"];
+  const expansionBudget = rawBudget === undefined ? DEFAULT_EXPANSION_BUDGET : Number(rawBudget);
+  if (!Number.isInteger(expansionBudget) || expansionBudget < 0) {
+    throw new UsageError(`${EXPANSION_BUDGET_REFUSAL}. Got '${rawBudget}'`);
   }
-  return args;
+
+  return {
+    input: readInput(AdmissionInputSchema, {
+      target: { repo: flags["--repo"] ?? ".", store: flags["--store"] ?? null },
+      prefix: flags["--prefix"] ?? DEFAULT_PREFIX,
+      title: flags["--outcome"] ?? null,
+      criteria: [...(flags["--criterion"] ?? [])],
+      criteriaFile: flags["--criteria-file"] ?? null,
+      paths: [...(flags["--path"] ?? [])],
+      // The standing prohibitions and the generated globs are what every
+      // contract starts with; a flag adds to them rather than replacing them.
+      prohibited: [...DEFAULT_PROHIBITED, ...(flags["--prohibit"] ?? [])],
+      generated: [...DEFAULT_GENERATED, ...(flags["--generated"] ?? [])],
+      expansionBudget,
+      level: flags["--level"] ?? null,
+      priority: flags["--priority"] ?? "normal",
+      labels: [...(flags["--label"] ?? [])],
+      dependsOn: [...(flags["--depends-on"] ?? [])],
+      source: flags["--source"] ?? null,
+      sourceUrl: flags["--source-url"] ?? null,
+      from: flags["--from"] ?? null,
+      fromFile: flags["--from-file"] ?? null,
+      fromSpec: flags["--from-spec"] ?? null,
+      startOver: flags["--start-over"] ?? null,
+      provider: flags["--provider"] ?? "claude-cli",
+      model: flags["--model"] ?? null,
+      manualReviewer: flags["--manual-reviewer"] ?? null,
+      manualReason: flags["--manual-reason"] ?? null,
+      approve: flags["--approve"] === true,
+    }),
+    output: { json: flags["--json"] === true },
+  };
 }
 
 /**
@@ -509,7 +540,7 @@ function readCriteriaFile(path: string): string[] {
     .filter((line) => line.length > 0 && !line.startsWith("#"));
 }
 
-function sourceOf(args: AdmitArgs, issue: SourceIssue | null, path: string | null): Ticket["source"] {
+function sourceOf(args: AdmissionInput, issue: SourceIssue | null, path: string | null): Ticket["source"] {
   if (issue && path !== null) {
     // A pasted file is not a tracker and it is not nothing, so it has a kind of
     // its own. It used to be recorded as `none` with the path in the reference,
@@ -888,7 +919,7 @@ function draftingModel(provider: DraftProvider, modelId: string | null): Model {
   return createModel(provider, { submitSchema: CONTRACT_DRAFT_JSON_SCHEMA, modelId });
 }
 
-interface Resolved {
+export interface Resolved {
   outcome: string;
   criteria: AcceptanceCriterion[];
   paths: string[];
@@ -911,14 +942,14 @@ interface Resolved {
   requirementIds: string[];
 }
 
-export interface AdmitInput {
-  args: AdmitArgs;
-  streams: Streams;
+/** One admission under way: what was asked for, and what it is run against. */
+interface Admitting {
+  args: AdmissionInput;
   cwd: string;
-  now?: Date;
-  /** The drafting model, for tests. Otherwise built from `--provider`. */
+  now: Date;
+  /** Progress while a model drafts, and what was left off the board. */
+  diagnostics: Diagnostics;
   model?: Model;
-  /** The issue reader, for tests. Otherwise `gh issue view`. */
   fetchIssue?: (reference: string) => Promise<GitHubIssue>;
 }
 
@@ -931,7 +962,7 @@ export interface AdmitInput {
  * of the two it was holding.
  */
 function readSource(
-  input: AdmitInput,
+  input: Admitting,
 ): Promise<{ issue: SourceIssue; path: string | null; spec: Spec | null }> {
   const { args } = input;
   if (args.fromSpec !== null) {
@@ -974,7 +1005,7 @@ function specReference(path: string): string {
 const contentHash = (text: string): string =>
   `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 
-function typedCriteria(input: AdmitInput): AcceptanceCriterion[] {
+function typedCriteria(input: Admitting): AcceptanceCriterion[] {
   const { args } = input;
   const raw = args.criteriaFile
     ? [...args.criteria, ...readCriteriaFile(resolve(input.cwd, args.criteriaFile))]
@@ -983,7 +1014,7 @@ function typedCriteria(input: AdmitInput): AcceptanceCriterion[] {
   return raw.map((line, index) => parseCriterion(line, index, manual));
 }
 
-function resolveTyped(input: AdmitInput): Resolved {
+function resolveTyped(input: Admitting): Resolved {
   const { args } = input;
   if (!args.title) throw new UsageError("--outcome is required: one sentence, what will be true");
   const criteria = typedCriteria(input);
@@ -1070,9 +1101,9 @@ const DRAFT_READ_LIMITS = {
  * a spec adds — the ids a criterion may cite, and the No-Gos — travels beside
  * the text, never inside the instruction position.
  */
-async function resolveDrafted(input: AdmitInput): Promise<Resolved> {
-  const { args, streams } = input;
-  const repositoryRoot = resolve(input.cwd, args.repo);
+async function resolveDrafted(input: Admitting): Promise<Resolved> {
+  const { args, diagnostics } = input;
+  const repositoryRoot = resolve(input.cwd, args.target.repo);
   let issue: SourceIssue;
   let sourcePath: string | null;
   let spec: Spec | null;
@@ -1095,7 +1126,7 @@ async function resolveDrafted(input: AdmitInput): Promise<Resolved> {
       // records that folder whole and the loop commits it, so a `spec.md` at
       // the root of the repository, or under a folder the repository keeps
       // other things in, would put all of it on the branch.
-      const specs = specFolder(storeDir(repositoryRoot, args.store));
+      const specs = specFolder(storeDir(repositoryRoot, args.target.store));
       if (onePieceOfWork(within.split(sep).join("/"), specs) === null) {
         throw new UsageError(
           `--from-spec names ${sourcePath}, which is not one piece of work's spec. A spec lives at ` +
@@ -1112,7 +1143,7 @@ async function resolveDrafted(input: AdmitInput): Promise<Resolved> {
       }
     }
     const model = input.model ?? draftingModel(args.provider, args.model);
-    streams.stderr(
+    diagnostics.stderr(
       `read ${issue.reference}: ${issue.title}\ndrafting the contract with ${model.provider} ` +
         `${model.model_id}; nothing runs until you approve it\n`,
     );
@@ -1131,8 +1162,8 @@ async function resolveDrafted(input: AdmitInput): Promise<Resolved> {
       repositoryId: repositoryId(repositoryRoot),
       defaultProhibited: args.prohibited,
       defaultGenerated: args.generated,
-      board: board(storeDir(repositoryRoot, args.store), (key) =>
-        streams.stderr(`${key} is in flight but its contract cannot be read; it is left off the board\n`),
+      board: board(storeDir(repositoryRoot, args.target.store), (key) =>
+        diagnostics.stderr(`${key} is in flight but its contract cannot be read; it is left off the board\n`),
       ),
       reader: new RepoReader(repositoryRoot, DRAFT_READ_LIMITS),
       model,
@@ -1168,7 +1199,7 @@ async function resolveDrafted(input: AdmitInput): Promise<Resolved> {
   // person still has `perbo edit --graph-edit` to build one.
   const overridden = typed.length > 0 ? "--criterion" : args.paths.length > 0 ? "--path" : null;
   if (overridden !== null && drafted.draft.nodes.length > 0) {
-    streams.stderr(
+    diagnostics.stderr(
       `${overridden} replaces what the drafted graph divided, so the graph is not kept. ` +
         "Build one with perbo edit KEY --graph-edit.\n",
     );
@@ -1217,12 +1248,69 @@ async function resolveDrafted(input: AdmitInput): Promise<Resolved> {
 }
 
 /**
- * Synchronous for typed admission, which every test and script relies on; a
- * promise when `--from`, `--from-file` or `--from-spec` is given, because
- * drafting calls a model.
+ * What one admission wrote: the ticket, the contract it is bound by, the
+ * approach beside it and the draft it came from, with what the reading of it
+ * needs.
  */
-export function runAdmitCommand(input: AdmitInput): number | Promise<number> {
-  const started = Date.now();
+export interface AdmissionReport {
+  /** A new ticket, or the same ticket drafted from its spec again (D-103). */
+  readonly kind: "admitted" | "re-drafted";
+  readonly key: string;
+  readonly ticket: Ticket;
+  readonly contract: PlanContract;
+  readonly approach: ApproachRecord | null;
+  readonly draft: DraftSnapshot["draft"] | null;
+  readonly level: LevelChoice;
+  /** What the admission read: the outcome, the criteria, the scope and the graph. */
+  readonly resolved: Resolved;
+  /** Where the ticket was written, from where the command was run. */
+  readonly storedAt: string;
+  /** The node pages written beside the spec, from the repository's root. */
+  readonly pages: readonly string[];
+  /** The scope is the model's proposal: nothing named a path. */
+  readonly scopeProposed: boolean;
+}
+
+/**
+ * Admit one piece of work as a ticket.
+ *
+ * Synchronous for typed admission, which every test and script relies on; a
+ * promise when `from`, `fromFile` or `fromSpec` is given, because drafting
+ * calls a model.
+ */
+export function admit(
+  input: AdmissionInput,
+  context: CommandContext & Partial<AdmitDeps>,
+): AdmissionReport | Promise<AdmissionReport> {
+  return admitting(
+    {
+      args: input,
+      cwd: context.cwd,
+      now: context.now,
+      diagnostics: context.diagnostics,
+      ...(context.model === undefined ? {} : { model: context.model }),
+      ...(context.fetchIssue === undefined ? {} : { fetchIssue: context.fetchIssue }),
+    },
+    Date.now(),
+  );
+}
+
+/**
+ * Admit one piece of work as a draft, which is how a caller in this process
+ * admits: the queue, the endpoint and the interview reach this and there is
+ * no approving from here (D-072, ADR-0023 §4).
+ */
+export function admitDraft(
+  input: DraftAdmission,
+  context: CommandContext & Partial<AdmitDeps>,
+): AdmissionReport | Promise<AdmissionReport> {
+  // Read as a draft, which is strict and has no `approve` among its fields:
+  // an object carrying one is refused here rather than quietly stripped, so a
+  // caller that believed it could approve is told that it cannot.
+  return admit({ ...readInput(DraftAdmissionSchema, input), approve: false }, context);
+}
+
+function admitting(input: Admitting, started: number): AdmissionReport | Promise<AdmissionReport> {
   const flag =
     input.args.from !== null
       ? "--from"
@@ -1245,7 +1333,7 @@ export function runAdmitCommand(input: AdmitInput): number | Promise<number> {
     // Starting over is re-drafting from a spec, which is the only source a
     // ticket's plan can be drafted again from: `--from` and `--from-file` name
     // a document the ticket was never drafted from, and the flags a caller
-    // built by hand are checked here as `parseAdmitArgs` checks a command line.
+    // built by hand are checked here as a command line's are.
     if (input.args.startOver !== null && flag !== "--from-spec") {
       throw new UsageError(
         `--start-over ${input.args.startOver} re-drafts a ticket from its spec, so it needs the ` +
@@ -1257,20 +1345,20 @@ export function runAdmitCommand(input: AdmitInput): number | Promise<number> {
     // nothing can change, and finding that out after a draft has been paid for
     // is the whole of what it costs.
     if (input.args.startOver !== null) {
-      const repositoryRoot = resolve(input.cwd, input.args.repo);
+      const repositoryRoot = resolve(input.cwd, input.args.target.repo);
       assertRedraftable(
-        storeDir(repositoryRoot, input.args.store),
+        storeDir(repositoryRoot, input.args.target.store),
         input.args.startOver,
         relative(repositoryRoot, resolve(input.cwd, input.args.fromSpec!)).split(sep).join("/"),
       );
     }
     return resolveDrafted(input).then((resolved) =>
       input.args.startOver === null
-        ? admit(input, started, resolved)
+        ? admitted(input, started, resolved)
         : redraft(input, started, resolved, input.args.startOver),
     );
   }
-  return admit(input, started, resolveTyped(input));
+  return admitted(input, started, resolveTyped(input));
 }
 
 const money = (micros: number, basis: string): string =>
@@ -1279,11 +1367,10 @@ const money = (micros: number, basis: string): string =>
 const duration = (ms: number): string =>
   ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 60_000)}min`;
 
-function admit(input: AdmitInput, started: number, resolved: Resolved): number {
-  const now = input.now ?? new Date();
-  const { args, streams } = input;
-  const repositoryRoot = resolve(input.cwd, args.repo);
-  const dir = storeDir(repositoryRoot, args.store);
+function admitted(input: Admitting, started: number, resolved: Resolved): AdmissionReport {
+  const { args, now } = input;
+  const repositoryRoot = resolve(input.cwd, args.target.repo);
+  const dir = storeDir(repositoryRoot, args.target.store);
 
   const key = nextKey(dir, args.prefix);
   const { ticket_id, plan_id } = idsFor(key, now);
@@ -1440,24 +1527,19 @@ function admit(input: AdmitInput, started: number, resolved: Resolved): number {
   ticket = withSpecFiles({ dir, repositoryRoot, ticket });
   const path = writeTicket(dir, ticket);
 
-  if (args.json) {
-    streams.stdout(
-      `${JSON.stringify({ ticket, contract, approach, draft: snapshot.draft }, null, 2)}\n`,
-    );
-    return EXIT_CODES.approve;
-  }
-
-  streams.stdout(`${key}  ${ticket.title}\n`);
-  streams.stderr(renderAdmitted({ input, key, ticket, contract, level, resolved, path, approach }));
-  if (pages !== null && pages.written.length > 0) {
-    streams.stderr(
-      `\n  spec      ${resolved.spec?.path ?? "spec.md"}\n` +
-        pages.written
-          .map((page) => `            ${relative(repositoryRoot, page).split(sep).join("/")}\n`)
-          .join(""),
-    );
-  }
-  return EXIT_CODES.approve;
+  return {
+    kind: "admitted",
+    key,
+    ticket,
+    contract,
+    approach,
+    draft: snapshot.draft,
+    level,
+    resolved,
+    storedAt: relative(input.cwd, path),
+    pages: (pages?.written ?? []).map((page) => relative(repositoryRoot, page).split(sep).join("/")),
+    scopeProposed: resolved.drafted !== null && args.paths.length === 0,
+  };
 }
 
 /**
@@ -1613,11 +1695,15 @@ function assertRedraftable(dir: string, key: string, specPath: string): Ticket {
  * other than an edit (D-100), and the confirmation before it is the desktop's:
  * a command line is already deliberate.
  */
-function redraft(input: AdmitInput, started: number, resolved: Resolved, key: string): number {
-  const now = input.now ?? new Date();
-  const { args, streams } = input;
-  const repositoryRoot = resolve(input.cwd, args.repo);
-  const dir = storeDir(repositoryRoot, args.store);
+function redraft(
+  input: Admitting,
+  started: number,
+  resolved: Resolved,
+  key: string,
+): AdmissionReport {
+  const { args, now } = input;
+  const repositoryRoot = resolve(input.cwd, args.target.repo);
+  const dir = storeDir(repositoryRoot, args.target.store);
 
   if (resolved.spec === null) {
     throw new UsageError(`--start-over ${key} re-drafts a ticket from its spec, so it needs the spec`);
@@ -1754,42 +1840,26 @@ function redraft(input: AdmitInput, started: number, resolved: Resolved, key: st
     ],
   });
   const pages = regenerateNodePages({ repositoryRoot, ticket: updated, contract });
-  writeTicket(dir, withSpecFiles({ dir, repositoryRoot, ticket: updated }));
+  const path = writeTicket(dir, withSpecFiles({ dir, repositoryRoot, ticket: updated }));
 
-  if (args.json) {
-    streams.stdout(
-      `${JSON.stringify({ ticket: updated, contract, approach, draft: snapshot.draft }, null, 2)}\n`,
-    );
-    return EXIT_CODES.approve;
-  }
-  streams.stdout(`${key}  ${updated.title}\n`);
-  streams.stderr(
-    `${key} re-drafted from ${resolved.spec?.path ?? "its spec"}: plan version ${contract.version}, ` +
-      `${resolved.criteria.length} criteria, ${resolved.nodes.length} node` +
-      `${resolved.nodes.length === 1 ? "" : "s"}\n` +
-      `  The graph edits made to the last version are dropped and kept in the log, marked replaced.\n` +
-      (pages !== null && pages.written.length > 0
-        ? pages.written
-            .map((page) => `  ${relative(repositoryRoot, page).split(sep).join("/")}\n`)
-            .join("")
-        : "") +
-      `\nRead it once more, then approve it:\n  perbo approve ${key}\n`,
-  );
-  return EXIT_CODES.approve;
+  return {
+    kind: "re-drafted",
+    key,
+    ticket: updated,
+    contract,
+    approach,
+    draft: snapshot.draft,
+    level,
+    resolved,
+    storedAt: relative(input.cwd, path),
+    pages: (pages?.written ?? []).map((page) => relative(repositoryRoot, page).split(sep).join("/")),
+    scopeProposed: resolved.drafted !== null && args.paths.length === 0,
+  };
 }
 
 /** The human rendering: outcome, criteria, scope and level, then the next step. */
-function renderAdmitted(args: {
-  input: AdmitInput;
-  key: string;
-  ticket: Ticket;
-  contract: PlanContract;
-  level: LevelChoice;
-  resolved: Resolved;
-  path: string;
-  approach: ApproachRecord | null;
-}): string {
-  const { key, ticket, contract, level, resolved } = args;
+function renderAdmitted(report: AdmissionReport): string {
+  const { key, ticket, contract, level, resolved } = report;
   const drafted = resolved.drafted;
   const criteria = resolved.criteria
     .map(
@@ -1860,16 +1930,16 @@ function renderAdmitted(args: {
               `          paths:    ${node.paths.join(", ")}\n`,
           )
           .join("") +
-        (args.approach && args.approach.edges.length > 0
-          ? `    order     ${args.approach.edges
+        (report.approach !== null && report.approach.edges.length > 0
+          ? `    order     ${report.approach.edges
               .map((edge) => `${edge.from} -> ${edge.to}`)
               .join(", ")}  (approach: it may change during execution)\n`
           : "")
       : "";
   const noGos =
-    args.approach && args.approach.no_gos.length > 0
+    report.approach !== null && report.approach.no_gos.length > 0
       ? `  no-gos    from the spec, kept out of the contract\n` +
-        args.approach.no_gos.map((noGo) => `            ${noGo}\n`).join("")
+        report.approach.no_gos.map((noGo) => `            ${noGo}\n`).join("")
       : "";
   return (
     head +
@@ -1878,7 +1948,7 @@ function renderAdmitted(args: {
     `  outcome   ${contract.outcome}\n` +
     `  criteria\n${criteria}` +
     `  scope     ${contract.scope.paths_allowed.join(", ")}` +
-    (drafted && args.input.args.paths.length === 0 ? "  (proposed by the model)" : "") +
+    (report.scopeProposed ? "  (proposed by the model)" : "") +
     unknown +
     "\n" +
     (ticket.depends_on.length > 0 ? `  after     ${ticket.depends_on.join(", ")}\n` : "") +
@@ -1886,12 +1956,97 @@ function renderAdmitted(args: {
     noGos +
     (drafted ? `  rationale ${drafted.draft.rationale}\n` : "") +
     attempts +
-    `  stored    ${relative(args.input.cwd, args.path)}` +
+    `  stored    ${report.storedAt}` +
     (drafted ? " (draft beside it)\n" : "\n") +
     next +
     "\nAdmitting takes ownership of this one piece of work. Nothing else moved.\n"
   );
 }
+
+/** The re-draft's rendering: what changed, where the pages went, and the next step. */
+function renderRedrafted(report: AdmissionReport): string {
+  const { key, contract, resolved } = report;
+  return (
+    `${key} re-drafted from ${resolved.spec?.path ?? "its spec"}: plan version ${contract.version}, ` +
+    `${resolved.criteria.length} criteria, ${resolved.nodes.length} node` +
+    `${resolved.nodes.length === 1 ? "" : "s"}\n` +
+    `  The graph edits made to the last version are dropped and kept in the log, marked replaced.\n` +
+    report.pages.map((page) => `  ${page}\n`).join("") +
+    `\nRead it once more, then approve it:\n  perbo approve ${key}\n`
+  );
+}
+
+/** The spec's own pages, listed under the admission they were written for. */
+const renderPages = (report: AdmissionReport): string =>
+  report.pages.length === 0
+    ? ""
+    : `\n  spec      ${report.resolved.spec?.path ?? "spec.md"}\n` +
+      report.pages.map((page) => `            ${page}\n`).join("");
+
+/**
+ * Admitting one piece of work, as the record of it and as what a person reads.
+ *
+ * Reached by the terminal through its line below, and by a caller in this
+ * process — the queue, the endpoint, the interview — through
+ * {@link admitDraft}, over the same typed input.
+ */
+export const admitReport: CommandReport<
+  AdmissionInput,
+  { json: boolean },
+  AdmissionReport,
+  AdmitDeps
+> = {
+  run: admit,
+  toJson: (report) => ({
+    ticket: report.ticket,
+    contract: report.contract,
+    approach: report.approach,
+    draft: report.draft,
+  }),
+  render(report, _output, target): Rendered {
+    if (target.json) {
+      return {
+        stdout: `${JSON.stringify(admitReport.toJson!(report), null, 2)}\n`,
+        stderr: "",
+        exitCode: EXIT_CODES.approve,
+      };
+    }
+    return {
+      stdout: `${report.key}  ${report.ticket.title}\n`,
+      stderr:
+        report.kind === "admitted"
+          ? renderAdmitted(report) + renderPages(report)
+          : renderRedrafted(report),
+      exitCode: EXIT_CODES.approve,
+    };
+  },
+};
+
+/**
+ * Admitting a draft, as a caller in this process reaches it: the same run and
+ * the same rendering over input that has no `approve` to set.
+ */
+export const admitDraftReport: CommandReport<
+  DraftAdmission,
+  { json: boolean },
+  AdmissionReport,
+  AdmitDeps
+> = { ...admitReport, run: admitDraft };
+
+export const admitCommandLine: ReportCommand<
+  AdmissionInput,
+  { json: boolean },
+  AdmissionReport,
+  AdmitDeps
+> = {
+  kind: "report",
+  name: "admit",
+  grammars: [ADMIT_GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor: () => ADMIT_GRAMMAR,
+  read: readAdmission,
+  ...admitReport,
+};
 
 /**
  * What `perbo edit` recorded the **person** changing, across every edit,
@@ -1923,21 +2078,26 @@ export function recordedEdits(snapshot: DraftSnapshot): { count: number; changes
   return { count: changes.length, changes };
 }
 
-export function runApproveCommand(input: {
-  argv: string[];
-  streams: Streams;
-  cwd: string;
-  now?: Date;
-}): number {
-  const now = input.now ?? new Date();
-  const [key, ...rest] = input.argv;
-  if (!key || key.startsWith("--")) throw new UsageError("approve requires a ticket key, e.g. PRB-1");
-  const args = parseListArgs(rest);
-  const dir = storeDir(resolve(input.cwd, args.repo), args.store);
+/**
+ * What approving asks for: which store, and which ticket in it.
+ *
+ * `--json` is not part of it. The desktop passes the flag and this command has
+ * no JSON form; taking it as input would say it had one.
+ */
+export const ApprovalInputSchema = z.strictObject({
+  target: StoreTargetSchema,
+  key: z.string().min(1, "approve requires a ticket key, e.g. PRB-1"),
+});
+export type ApprovalInput = z.infer<typeof ApprovalInputSchema>;
+
+export function approve(input: ApprovalInput, context: CommandContext): number {
+  const now = context.now;
+  const { key } = input;
+  const dir = storeFor(context.cwd, input.target);
 
   const existing = readTicket(dir, key);
   if (existing.approved_at !== null) {
-    input.streams.stderr(`${key} was already approved at ${existing.approved_at}\n`);
+    context.diagnostics.stderr(`${key} was already approved at ${existing.approved_at}\n`);
     return EXIT_CODES.approve;
   }
   const contract = readContract(dir, key);
@@ -1982,7 +2142,7 @@ export function runApproveCommand(input: {
     }),
   });
   writeTicket(dir, approved);
-  input.streams.stderr(
+  context.diagnostics.stderr(
     `${key} approved. ${contract.plan_id} v${contract.version} is immutable from here.\n` +
       `  ${duration(human_elapsed_ms)} from first rendering to approval, ` +
       (edits
@@ -2059,30 +2219,41 @@ export function listJson(input: {
   });
 }
 
-export function runListCommand(input: { args: ListArgs; streams: Streams; cwd: string }): number {
-  const { args, streams } = input;
-  const dir = storeDir(resolve(input.cwd, args.repo), args.store);
+/**
+ * What one listing read: the store it came from, the filter it was taken
+ * under, and the tickets.
+ *
+ * The document is the report, built once: the table a person reads and the
+ * record `--json` prints are two renderings of one listing rather than two
+ * listings that have to agree.
+ */
+export interface ListReport {
+  readonly document: ListJson;
+}
+
+export const ListInputSchema = z.strictObject({
+  target: StoreTargetSchema,
+  /** Settled tickets too, rather than the active ones alone. */
+  all: z.boolean(),
+});
+export type ListInput = z.infer<typeof ListInputSchema>;
+
+export function list(input: ListInput, context: CommandContext): ListReport {
+  const dir = storeFor(context.cwd, input.target);
   const all = listTickets(dir);
-  const shown = args.all ? all : all.filter(isActive);
+  return {
+    document: listJson({
+      store: dir,
+      all: input.all,
+      shown: input.all ? all : all.filter(isActive),
+      total: all.length,
+    }),
+  };
+}
 
-  // Before every other branch, including the empty-store one: in this mode
-  // stdout carries one JSON document and nothing else, and an empty store is a
-  // listing of no tickets rather than an occasion for advice. The advice is
-  // still worth giving, so it goes to stderr where a pipe does not see it.
-  if (args.json) {
-    const document = listJson({ store: dir, all: args.all, shown, total: all.length });
-    streams.stdout(`${JSON.stringify(document, null, 2)}\n`);
-    if (all.length === 0) streams.stderr(EMPTY_STORE_HINT);
-    return EXIT_CODES.approve;
-  }
-
-  if (all.length === 0) {
-    streams.stdout("No admitted work.\n");
-    streams.stderr(EMPTY_STORE_HINT);
-    return EXIT_CODES.approve;
-  }
-
-  const rows = shown.map((ticket) => ({
+/** The listing as a person reads it: two lines a ticket, at a fixed width. */
+function renderListing(document: ListJson): string {
+  const rows = document.tickets.map((ticket) => ({
     key: ticket.key,
     state: ticket.state,
     title: ticket.title,
@@ -2096,24 +2267,128 @@ export function runListCommand(input: { args: ListArgs; streams: Streams; cwd: s
     waits: describeScheduling(ticket.scheduling, ticket.state),
   }));
   const keyWidth = Math.max(6, ...rows.map((row) => row.key.length));
-
-  streams.stdout(
+  return (
     `${"TICKET".padEnd(keyWidth)}  ${"STATE".padEnd(STATE_WIDTH)}  OUTCOME\n` +
-      rows
-        .map(
-          (row) =>
-            `${row.key.padEnd(keyWidth)}  ${row.state.padEnd(STATE_WIDTH)}  ${row.title}\n` +
-            `${" ".repeat(keyWidth)}  ${" ".repeat(STATE_WIDTH)}  ${row.priority}${
-              row.source === "—" ? "" : ` · ${row.source}`
-            }${row.waits === null ? "" : ` · ${row.waits}`}\n`,
-        )
-        .join(""),
+    rows
+      .map(
+        (row) =>
+          `${row.key.padEnd(keyWidth)}  ${row.state.padEnd(STATE_WIDTH)}  ${row.title}\n` +
+          `${" ".repeat(keyWidth)}  ${" ".repeat(STATE_WIDTH)}  ${row.priority}${
+            row.source === "—" ? "" : ` · ${row.source}`
+          }${row.waits === null ? "" : ` · ${row.waits}`}\n`,
+      )
+      .join("")
   );
-  streams.stderr(
-    `\n${shown.length} of ${all.length} shown${args.all ? "" : " (active only; --all for the rest)"}\n`,
-  );
-  return EXIT_CODES.approve;
 }
+
+const LIST_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  "--all": switchFlag(),
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const LIST_GRAMMAR: Grammar<typeof LIST_FLAGS> = {
+  command: "list",
+  flags: LIST_FLAGS,
+  positionals: {
+    min: 0,
+    max: 0,
+    refusal: "list takes no ticket key: it prints the admitted work, e.g. perbo list --all",
+  },
+  afterDoubleDash: "positionals",
+};
+
+/**
+ * Every admitted ticket, as the listing's record and as the table a person reads.
+ *
+ * Reached by the terminal through its line below, and by a caller in this
+ * process — the queue's endpoint — over the same typed input.
+ */
+export const listReport: CommandReport<ListInput, { json: boolean }, ListReport> = {
+  run: list,
+  toJson: (report) => report.document,
+  render(report, _output, target): Rendered {
+    const { counts, filter } = report.document;
+    // Before every other branch, including the empty-store one: in this mode
+    // stdout carries one JSON document and nothing else, and an empty store is
+    // a listing of no tickets rather than an occasion for advice. The advice is
+    // still worth giving, so it goes to stderr where a pipe does not see it.
+    if (target.json) {
+      return {
+        stdout: `${JSON.stringify(report.document, null, 2)}\n`,
+        stderr: counts.total === 0 ? EMPTY_STORE_HINT : "",
+        exitCode: EXIT_CODES.approve,
+      };
+    }
+    if (counts.total === 0) {
+      return {
+        stdout: "No admitted work.\n",
+        stderr: EMPTY_STORE_HINT,
+        exitCode: EXIT_CODES.approve,
+      };
+    }
+    return {
+      stdout: renderListing(report.document),
+      stderr: `\n${counts.shown} of ${counts.total} shown${
+        filter.all ? "" : " (active only; --all for the rest)"
+      }\n`,
+      exitCode: EXIT_CODES.approve,
+    };
+  },
+};
+
+export const listCommandLine: ReportCommand<ListInput, { json: boolean }, ListReport> = {
+  kind: "report",
+  name: "list",
+  grammars: [LIST_GRAMMAR],
+  jsonWhenPiped: false,
+  grammarFor: () => LIST_GRAMMAR,
+  read(argv) {
+    const line = parseArgv(LIST_GRAMMAR, argv);
+    return {
+      input: readInput(ListInputSchema, {
+        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+        all: line.flags["--all"] === true,
+      }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  ...listReport,
+};
+
+const APPROVE_FLAGS = {
+  "--repo": valueFlag(),
+  "--store": valueFlag(),
+  // Accepted because the desktop passes it on every approval. Approving
+  // writes no record to stdout, so it selects nothing.
+  "--json": switchFlag(),
+} satisfies FlagTable;
+
+const APPROVE_GRAMMAR: Grammar<typeof APPROVE_FLAGS> = {
+  command: "approve",
+  flags: APPROVE_FLAGS,
+  positionals: { min: 1, max: 1, refusal: "approve requires a ticket key, e.g. PRB-1" },
+  afterDoubleDash: "positionals",
+};
+
+export const approveCommandLine: NarratedCommand<ApprovalInput, { json: boolean }> = {
+  kind: "narrated",
+  name: "approve",
+  grammars: [APPROVE_GRAMMAR],
+  grammarFor: () => APPROVE_GRAMMAR,
+  read(argv) {
+    const line = parseArgv(APPROVE_GRAMMAR, argv);
+    return {
+      input: readInput(ApprovalInputSchema, {
+        target: { repo: line.flags["--repo"] ?? ".", store: line.flags["--store"] ?? null },
+        key: line.positionals[0],
+      }),
+      output: { json: line.flags["--json"] === true },
+    };
+  },
+  run: (input, _output, context) => approve(input, context),
+};
 
 export { TicketStoreError };
 
