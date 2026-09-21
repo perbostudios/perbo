@@ -3,10 +3,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Checkbox, LineIcon, Notice, Segmented, cx } from "../ui/index.js";
 import { standingGlob } from "@perbo/contracts/standing";
 import { planNodes } from "@perbo/contracts/plan";
-import { bridge, errorMessage } from "../data.js";
+import { bridge, errorMessage } from "../workspace/index.js";
 import type { DraftMark } from "../../shared/contract-editing.js";
 import type { Snapshot } from "../../shared/protocol.js";
-import type { useContractEditing } from "../tasks/contract-editor.js";
+import type { useContractEditing } from "../contract-editor.js";
 import { nodesNaming, rowMark, treeRows, viaLabel, type RowMark } from "./explorer-tree.js";
 
 type Editor = ReturnType<typeof useContractEditing>;

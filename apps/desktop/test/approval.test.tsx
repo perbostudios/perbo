@@ -13,7 +13,7 @@ import type { AcceptanceCriterion } from "@perbo/contracts";
 import { EditingSessionSchema } from "../src/shared/protocol.js";
 import type { ReplyMap, Request } from "../src/shared/protocol.js";
 import { editingForm } from "../src/shared/contract-editing.js";
-import { bridge } from "../src/renderer/data.js";
+import { bridge } from "../src/renderer/workspace/index.js";
 import { sampleBridge } from "../src/sample-host/bridge.js";
 import { Composer } from "../src/renderer/tasks/Composer.js";
 import { ContractScreen } from "../src/renderer/tasks/ContractScreen.js";

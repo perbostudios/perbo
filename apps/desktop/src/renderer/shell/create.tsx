@@ -2,10 +2,10 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { InkIcon, LineIcon, Notice, cx } from "../ui/index.js";
-import { bridge, errorMessage } from "../data.js";
+import { bridge, errorMessage } from "../workspace/index.js";
 import type { EditingSession, EditingTarget, Snapshot } from "../../shared/protocol.js";
 import type { PlanningPane } from "../planning/panes.js";
-import type { Route } from "./App.js";
+import type { Route } from "./route.js";
 import { RAIL_WIDTH, useRailSize } from "./rail-size.js";
 import { useShortcut } from "./shortcuts.js";
 

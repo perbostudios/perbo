@@ -19,7 +19,7 @@ configure({ asyncUtilTimeout: 5_000 });
 /**
  * The adapter every renderer test is driven against: one sample host in the
  * slot `window.perbo`, filled before a test file's own imports run, so
- * `renderer/data.ts` reads it exactly as it reads preload's in Electron.
+ * `renderer/workspace/` reads it exactly as it reads preload's in Electron.
  *
  * A Node-environment suite has no window and loads none of this: the sample
  * host reads `location` and `localStorage` when it loads.

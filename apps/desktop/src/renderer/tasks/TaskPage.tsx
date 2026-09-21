@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Button, Notice } from "../ui/index.js";
-import { errorMessage, useDetail } from "../data.js";
-import type { PageProps, TaskView } from "../shell/App.js";
+import { errorMessage, useDetail } from "../workspace/index.js";
+import type { PageProps, TaskView } from "../shell/route.js";
 import { Composer } from "./Composer.js";
 import { ContractScreen } from "./ContractScreen.js";
 import { LoopScreen } from "./LoopScreen.js";

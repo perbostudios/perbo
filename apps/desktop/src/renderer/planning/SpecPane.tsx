@@ -3,11 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, InkIcon, Notice } from "../ui/index.js";
 import type { SpecField } from "@perbo/planning/spec-text";
 import { specSymbolNames } from "@perbo/planning/spec-text";
-import { bridge } from "../data.js";
-import { useContractEditing } from "../tasks/contract-editor.js";
+import { bridge } from "../workspace/index.js";
+import { useContractEditing } from "../contract-editor.js";
 import { SpecSection } from "./SpecSection.js";
 import type { ExportedName, SpecSections, SpecView } from "../../shared/protocol.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 
 const Composer = lazy(() =>
   import("../tasks/Composer.js").then((module) => ({ default: module.Composer })),

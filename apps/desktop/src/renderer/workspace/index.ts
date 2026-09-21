@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { isLive } from "../shared/jobs.js";
+import { isLive } from "../../shared/jobs.js";
 import { useEffect } from "react";
-import type { DesktopBridge, Request } from "../shared/protocol.js";
-import { workspaceRefresh } from "./workspace-refresh.js";
+import type { DesktopBridge, Request } from "../../shared/protocol.js";
+import { workspaceRefresh } from "./internal/refresh.js";
 
 const missingHost: DesktopBridge = {
   async request() {

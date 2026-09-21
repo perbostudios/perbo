@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Button, InkIcon, Notice, PageHeader, cx } from "../ui/index.js";
-import { errorMessage, useAction } from "../data.js";
+import { errorMessage, useAction } from "../workspace/index.js";
 import { useToast } from "../shell/Toast.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 import {
   DEFAULT_SHORTCUTS,
   SHORTCUT_GROUPS,

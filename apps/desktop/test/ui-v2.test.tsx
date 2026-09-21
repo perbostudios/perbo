@@ -11,7 +11,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "../src/renderer/shell/App.js";
 import { sampleBridge } from "../src/sample-host/bridge.js";
-import { bridge } from "../src/renderer/data.js";
+import { bridge } from "../src/renderer/workspace/index.js";
 import { setPlatformForTests } from "../src/shared/shortcuts.js";
 import { resetRailSize } from "../src/renderer/shell/rail-size.js";
 import type { ReplyMap, Request } from "../src/shared/protocol.js";

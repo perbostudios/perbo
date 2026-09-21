@@ -11,7 +11,8 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { App, type Route, type TaskView } from "../src/renderer/shell/App.js";
+import { App } from "../src/renderer/shell/App.js";
+import type { Route, TaskView } from "../src/renderer/shell/route.js";
 import type { Detail, Snapshot } from "../src/shared/protocol.js";
 import { runnerProgress } from "../src/shared/runner-progress.js";
 import { HomePage } from "../src/renderer/tasks/HomePage.js";

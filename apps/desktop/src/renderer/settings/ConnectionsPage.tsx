@@ -11,10 +11,10 @@ import {
   SectionLabel,
   useElapsed,
 } from "../ui/index.js";
-import { errorMessage, useAction } from "../data.js";
+import { errorMessage, useAction } from "../workspace/index.js";
 import { useToast } from "../shell/Toast.js";
 import { ModelPicker, useProviders } from "./ConnectionScreens.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 
 /** Settings · Connections (S6): the accounts, the defaults for new tasks, and the repositories. */
 export function ConnectionsPage({ workspace, navigate }: PageProps) {

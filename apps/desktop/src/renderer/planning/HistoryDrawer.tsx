@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Notice, cx } from "../ui/index.js";
-import { bridge, errorMessage, useGraph } from "../data.js";
+import { bridge, errorMessage, useGraph } from "../workspace/index.js";
 import { draftHistory, graphHistory, latestUndoable } from "./history.js";
 import type { HistoryRow } from "./history.js";
-import type { useContractEditing } from "../tasks/contract-editor.js";
+import type { useContractEditing } from "../contract-editor.js";
 
 /**
  * Every change to this planning, over the current pane rather than beside it,

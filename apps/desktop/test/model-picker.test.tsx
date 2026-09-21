@@ -10,7 +10,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { ModelPicker } from "../src/renderer/settings/ConnectionScreens.js";
-import { bridge } from "../src/renderer/data.js";
+import { bridge } from "../src/renderer/workspace/index.js";
 import { SettingsSchema } from "../src/shared/protocol.js";
 import type { ModelCatalog, ModelProvider } from "../src/shared/protocol.js";
 

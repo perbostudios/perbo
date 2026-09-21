@@ -6,7 +6,7 @@ import { App } from "../src/renderer/shell/App.js";
 import { CreateContext } from "../src/renderer/shell/create.js";
 import { HomePage } from "../src/renderer/tasks/HomePage.js";
 import { sampleBridge } from "../src/sample-host/bridge.js";
-import { bridge } from "../src/renderer/data.js";
+import { bridge } from "../src/renderer/workspace/index.js";
 import { resetRailSize } from "../src/renderer/shell/rail-size.js";
 import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests } from "../src/shared/shortcuts.js";
 import { withDraft } from "../src/renderer/shell/create.js";

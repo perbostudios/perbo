@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { EditingSessionSchema, LegacyEditingSchema, TaskModelsSchema } from "../../shared/protocol.js";
-import type { DesktopBridge, Detail, EditingForm, EditingOperation, EditingSession, EditingTarget, LegacyEditing, TaskModels } from "../../shared/protocol.js";
-import { editingForm } from "../../shared/contract-editing.js";
-import { bridge } from "../data.js";
+import { EditingSessionSchema, LegacyEditingSchema, TaskModelsSchema } from "../shared/protocol.js";
+import type { DesktopBridge, Detail, EditingForm, EditingOperation, EditingSession, EditingTarget, LegacyEditing, TaskModels } from "../shared/protocol.js";
+import { editingForm } from "../shared/contract-editing.js";
+import { bridge } from "./workspace/index.js";
 
 const saving = new Set<Promise<void>>();
 const unsaved = new Set<ContractEditor>();

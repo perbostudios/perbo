@@ -12,11 +12,11 @@ import {
 import { Rename } from "./Rename.js";
 import { isArchived } from "../../shared/archive.js";
 import { timeAgo } from "../time-ago.js";
-import { errorMessage, useAction, useTaskSummary } from "../data.js";
+import { errorMessage, useAction, useTaskSummary } from "../workspace/index.js";
 import { useCreate } from "../shell/create.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { useToast } from "../shell/Toast.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 import type { Snapshot, TaskRow, TaskSummary } from "../../shared/protocol.js";
 import { archiveRows, isFiled } from "../../shared/archive.js";
 import { displayKey, projectTicket, stageName } from "./ticket-workspace.js";

@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { ChangeSchema } from "../shared/protocol.js";
-import { ALL_SCOPE, ReadGenerations, SNAPSHOT_SCOPE } from "../shared/read-generations.js";
-import type { Change, DesktopBridge, Job, Snapshot } from "../shared/protocol.js";
+import { ChangeSchema } from "../../../shared/protocol.js";
+import { ALL_SCOPE, ReadGenerations, SNAPSHOT_SCOPE } from "../../../shared/read-generations.js";
+import type { Change, DesktopBridge, Job, Snapshot } from "../../../shared/protocol.js";
 
 const message = (error: unknown): string => error instanceof Error ? error.message : String(error);
 

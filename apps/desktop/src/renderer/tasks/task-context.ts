@@ -1,5 +1,5 @@
 import type { Detail } from "../../shared/protocol.js";
-import type { PageProps, TaskView } from "../shell/App.js";
+import type { PageProps, TaskView } from "../shell/route.js";
 import { projectTicket } from "./ticket-workspace.js";
 export interface TaskContext extends PageProps {
   detail: Detail;

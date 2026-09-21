@@ -13,10 +13,10 @@ import {
   cx,
   useElapsed,
 } from "../ui/index.js";
-import { bridge, errorMessage, useAction } from "../data.js";
+import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { ManifestDialog } from "./ManifestDialog.js";
 import { SkillPicker } from "./SkillPicker.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 import { ModelCatalogSchema } from "../../shared/protocol.js";
 import type {
   ModelProvider,
