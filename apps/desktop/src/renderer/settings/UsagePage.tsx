@@ -1,3 +1,4 @@
+import { formatUsd } from "@perbo/contracts/browser";
 import { Button, InkIcon, Notice, NumberPop, PageHeader, SectionLabel } from "../ui/index.js";
 import { errorMessage, useUsage } from "../workspace/index.js";
 import { timeAgo } from "../time-ago.js";
@@ -5,7 +6,7 @@ import type { PageProps } from "../shell/route.js";
 import type { UsageLedger, UsageWindow } from "../../shared/protocol.js";
 
 export const dollars = (micros: number | null): string =>
-  micros === null ? "—" : "$" + (micros / 1_000_000).toFixed(2);
+  micros === null ? "—" : formatUsd(micros, 2);
 const resetLabel = (window: UsageWindow): string => {
   if (!window.resetsAt) return "";
   const at = new Date(window.resetsAt);

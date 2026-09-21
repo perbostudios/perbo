@@ -1,3 +1,4 @@
+import { formatUsd } from "@perbo/contracts/browser";
 import type { Detail } from "../../shared/protocol.js";
 import type { PageProps, TaskView } from "../shell/route.js";
 import { projectTicket } from "./ticket-workspace.js";
@@ -46,7 +47,14 @@ export function taskRecords({ detail, workspace, repoId }: TaskContext) {
     title: workspace.titles?.[repoId + ":" + ticket.key] ?? ticket.title,
   };
 }
-export const costLabel = (detail: Detail): string =>
-  detail.cost.unavailable > 0 && detail.cost.micros === 0
+/**
+ * What a run has cost so far. A total is all-in only where every component of
+ * it is priced (D-070): where some are not, the figure is a floor and says so,
+ * and where none is, there is no figure to give.
+ */
+export const costLabel = ({ cost }: Pick<Detail, "cost">): string =>
+  cost.unavailable > 0 && cost.micros === 0
     ? "Unavailable"
-    : "$" + (detail.cost.micros / 1_000_000).toFixed(2);
+    : cost.partial && cost.micros > 0
+      ? `at least ${formatUsd(cost.micros, 2)}`
+      : formatUsd(cost.micros, 2);
