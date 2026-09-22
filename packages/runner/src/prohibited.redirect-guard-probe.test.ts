@@ -361,6 +361,16 @@ const ROWS: Array<[string, Decision, string]> = [
   ["awk '{print $1}' sub/data.csv", "allowed", "scp-190"],
   ["perl -e 'print 1'", "allowed", "scp-190"],
 
+  // ---- the operands `xargs` appends from its standard input are destinations
+  // the line does not spell, unless it names where the write goes.
+  ["echo /etc/x | xargs touch", "refused", "xargs-stdin"],
+  ["xargs -0 rm -rf < list.txt", "refused", "xargs-stdin"],
+  ["find . -name '*.log' | xargs rm -f", "refused", "xargs-stdin"],
+  ["xargs cp a", "refused", "xargs-stdin"],
+  ["ls sub | xargs -I{} cp {} <root>/out", "allowed", "xargs-stdin"],
+  ["ls sub | xargs -0 -n1 cp -t <root>/out", "allowed", "xargs-stdin"],
+  ["ls sub | xargs grep TODO", "allowed", "xargs-stdin"],
+
   // ---- the filesystem root is a directory a shell can stand in.
   ["cd /", "allowed", "root-directory"],
   ["pushd /", "allowed", "root-directory"],

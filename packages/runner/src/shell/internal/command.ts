@@ -8,6 +8,12 @@ export interface Context {
   depth: number;
   /** Where the command's standard input comes from, where the line says. */
   stdin?: StdinSource | undefined;
+  /**
+   * The wrapper that appends the words it reads from standard input to this
+   * command, where one stands in front of it. Those words are operands, so a
+   * writer reached this way names destinations the line does not carry.
+   */
+  appendsOperands?: string | undefined;
 }
 
 export const basename = (word: string) => word.slice(word.lastIndexOf("/") + 1);

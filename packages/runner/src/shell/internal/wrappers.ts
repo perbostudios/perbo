@@ -22,6 +22,18 @@ export interface WrapperSpec {
   dirs?: readonly string[];
   /** Options refused by name, because their operand hides a command. */
   refuse?: readonly string[];
+  /**
+   * True where the wrapper appends the words it reads from standard input to
+   * the command it runs. Those words are operands the line does not spell, so a
+   * writer behind such a wrapper is handed destinations the guard cannot see.
+   */
+  appendsOperands?: boolean;
+  /**
+   * Options that make an appending wrapper substitute instead: the words it
+   * reads replace a placeholder in operands the line already spells, so the
+   * destination among them stays readable.
+   */
+  substitutes?: readonly string[];
   /** True where a bare `-5` is an option, as it is for `nice`. */
   numeric?: boolean;
   /** Operands taken before the program, as `timeout` takes a duration. */
@@ -56,6 +68,8 @@ export const WRAPPERS = new Map<string, WrapperSpec>([
   ["xargs", {
     flags: ["-0", "-o", "-p", "-r", "-t", "-x", "--null", "--no-run-if-empty", "--interactive", "--open-tty", "--verbose", "--exit", "--help", "--version"],
     values: ["-a", "-d", "-E", "-e", "-I", "-i", "-J", "-L", "-l", "-n", "-P", "-R", "-s", "--arg-file", "--delimiter", "--eof", "--replace", "--max-lines", "--max-args", "--max-procs", "--max-chars", "--process-slot-var"],
+    appendsOperands: true,
+    substitutes: ["-I", "-i", "-J", "--replace"],
   }],
 ]);
 

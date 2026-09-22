@@ -237,15 +237,40 @@ export function writerFindings(
 
   const findings = written.flatMap(({ word, label }) => judge(word, label));
   if (targetDirectory !== null) {
+    // The operands are written into a directory the line names, so the words the
+    // wrapper appends are sources.
     return [...findings, ...judge(targetDirectory, `the ${verb} destination`)];
   }
   const skip = spec.skip !== undefined && !anyPresent(spec.skipUnless, present) ? spec.skip : 0;
   const remaining = operands.slice(skip);
+  // Where the operands are destinations and a wrapper appends more of them from
+  // its standard input, the write lands somewhere the line never spelled.
+  const appended: WriteFinding[] =
+    context.appendsOperands !== undefined && (everyOperand || spec.operands !== "none")
+      ? [
+          {
+            detail:
+              `the ${verb} destination cannot be resolved — ${context.appendsOperands} appends ` +
+              `the words it reads from standard input to this command, and they are not on the ` +
+              `line: ${context.segment.slice(0, 200)}`,
+            target: null,
+            resolved: null,
+          },
+        ]
+      : [];
   if (everyOperand || spec.operands === "all") {
-    return [...findings, ...remaining.flatMap((operand) => judge(operand, `the ${verb} target`))];
+    return [
+      ...findings,
+      ...appended,
+      ...remaining.flatMap((operand) => judge(operand, `the ${verb} target`)),
+    ];
   }
   if (spec.operands === "last" && remaining.length >= (spec.least ?? 2)) {
-    return [...findings, ...judge(remaining[remaining.length - 1]!, `the ${verb} destination`)];
+    return [
+      ...findings,
+      ...appended,
+      ...judge(remaining[remaining.length - 1]!, `the ${verb} destination`),
+    ];
   }
-  return findings;
+  return [...findings, ...appended];
 }

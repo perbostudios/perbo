@@ -1,4 +1,11 @@
-import { basename, isAssignment, optionSet, type Context } from "./command.js";
+import {
+  anyPresent,
+  basename,
+  isAssignment,
+  optionSet,
+  optionsPresent,
+  type Context,
+} from "./command.js";
 import {
   destinationSentence,
   judgeTarget,
@@ -166,6 +173,8 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   let cwd = context.cwd;
   /** True when the nested command runs in this shell rather than a new one. */
   let nestedRunsHere = false;
+  /** The wrapper standing in front of the command that appends its operands. */
+  let appendsOperands: string | undefined;
 
   const stopHere = (): Analysis => ({
     findings,
@@ -419,9 +428,16 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     }
     const wrapper = WRAPPERS.get(program);
     if (wrapper !== undefined) {
+      const at = i;
       i += 1;
       const stop = consumeOptions(program, wrapper);
       if (stop !== null) return stop;
+      if (
+        wrapper.appendsOperands === true &&
+        !anyPresent(wrapper.substitutes, optionsPresent(words.slice(at + 1, i)))
+      ) {
+        appendsOperands = program;
+      }
       i += wrapper.operands ?? 0;
       continue;
     }
@@ -498,7 +514,9 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       // written more than the destinations this table names, so a caller
       // deciding the line by where those landed has not seen the whole act.
       if (spec.beyondNamedPaths !== true) mutating = true;
-      findings.push(...writerFindings(verb, spec, rest, { ...context, cwd }));
+      findings.push(
+        ...writerFindings(verb, spec, rest, { ...context, cwd, appendsOperands }),
+      );
     } else if (verb === "ln") {
       programs.push(verb);
       mutating = true;
