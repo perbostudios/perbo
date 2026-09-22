@@ -6,6 +6,7 @@ import { createElement, type PropsWithChildren } from "react";
 import { sizeEstimate } from "@perbo/contracts/size";
 import { WorkspaceRefresh } from "./refresh.js";
 import { WorkspaceReads } from "../../../host/workspace-reads.js";
+import { READ_ATTEMPTS } from "../../../shared/read-generations.js";
 import { sampleBridge } from "../../../sample-host/bridge.js";
 import { bridge, useGraph, useTaskSummary } from "../index.js";
 import { TaskModelsSchema } from "../../../shared/protocol.js";
@@ -141,6 +142,50 @@ describe("workspace refresh interface", () => {
     f.override(async () => { throw new Error("Repository unavailable"); });
     f.emit({ kind: "records", sequence: 1, repoId: f.row.repoId, key: f.row.ticket.key });
     await vi.waitFor(() => expect(f.client.getQueryData<Snapshot>(["workspace"])!.errors.join(" ")).toContain("Repository unavailable"));
+    expect(f.client.getQueryData<Snapshot>(["workspace"])!.refreshingRepos).toContain(f.row.repoId);
+  });
+
+  it("reads a repository again when its records moved while it was being read", async () => {
+    const f = await fixture();
+    let reads = 0;
+    const original = f.override(async (request) => {
+      if (request.kind !== "repositorySnapshot") return original(request);
+      reads += 1;
+      if (reads === 1) {
+        await Promise.resolve();
+        f.emit({ kind: "records", sequence: 2, repoId: f.row.repoId, key: f.row.ticket.key });
+      }
+      return original(request);
+    });
+    f.emit({ kind: "records", sequence: 1, repoId: f.row.repoId, key: f.row.ticket.key });
+    await vi.waitFor(() => expect(f.client.getQueryData<Snapshot>(["workspace"])!.refreshingRepos).toEqual([]));
+    expect(reads).toBe(2);
+  });
+
+  /**
+   * A repository whose records move faster than they can be read never
+   * settles, and the refresh follows the same ceiling every other read does:
+   * it says so, leaves the repository pending, and reads it again on the next
+   * event or the next poll.
+   */
+  it("gives up on a repository whose records never settle", async () => {
+    const f = await fixture();
+    let reads = 0;
+    // Mutates for longer than the ceiling allows, then settles: an unbounded
+    // refresh reads the settled records and reports no failure at all.
+    const original = f.override(async (request) => {
+      if (request.kind !== "repositorySnapshot") return original(request);
+      reads += 1;
+      if (reads <= READ_ATTEMPTS + 5) {
+        await Promise.resolve();
+        f.emit({ kind: "records", sequence: reads + 1, repoId: f.row.repoId, key: f.row.ticket.key });
+      }
+      return original(request);
+    });
+    f.emit({ kind: "records", sequence: 1, repoId: f.row.repoId, key: f.row.ticket.key });
+    await vi.waitFor(() => expect(f.client.getQueryData<Snapshot>(["workspace"])!.errors.join(" "))
+      .toContain("changed while every attempt to read them"));
+    expect(reads).toBe(READ_ATTEMPTS);
     expect(f.client.getQueryData<Snapshot>(["workspace"])!.refreshingRepos).toContain(f.row.repoId);
   });
 

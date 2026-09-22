@@ -91,26 +91,23 @@ export class WorkspaceRefresh {
     if (this.refreshing.has(repoId)) return;
     const work = (async () => {
       try {
-        for (;;) {
-          const token = this.generations.token(repoId);
-          const results = await Promise.allSettled([
-            this.connection.request({ kind: "repositorySnapshot", repoId }), this.visible(repoId),
-          ]);
-          if (token !== this.generations.token(repoId)) continue;
-          const [records, visible] = results;
-          if (records.status === "rejected") throw records.reason;
-          const result = records.value;
-          if (!result.errors.length && visible.status === "fulfilled") this.pending.delete(repoId);
-          this.patch((snapshot) => {
-            const repositoryErrors = { ...snapshot.repositoryErrors, [repoId]: result.errors };
-            return this.merge({ ...snapshot,
-              repositories: snapshot.repositories.map((repo) => repo.id === repoId ? result.repository : repo),
-              tasks: result.errors.length ? snapshot.tasks : [...snapshot.tasks.filter((row) => row.repoId !== repoId), ...result.tasks],
-              repositoryErrors, errors: Object.values(repositoryErrors).flat(),
-            });
+        // Both halves settle before the guard judges them, so a records change
+        // that landed under either takes the pair again rather than leaving the
+        // repository's rows and the evidence beside them read a moment apart.
+        const [records, visible] = await this.generations.read(repoId, () => Promise.allSettled([
+          this.connection.request({ kind: "repositorySnapshot", repoId }), this.visible(repoId),
+        ]));
+        if (records.status === "rejected") throw records.reason;
+        const result = records.value;
+        if (!result.errors.length && visible.status === "fulfilled") this.pending.delete(repoId);
+        this.patch((snapshot) => {
+          const repositoryErrors = { ...snapshot.repositoryErrors, [repoId]: result.errors };
+          return this.merge({ ...snapshot,
+            repositories: snapshot.repositories.map((repo) => repo.id === repoId ? result.repository : repo),
+            tasks: result.errors.length ? snapshot.tasks : [...snapshot.tasks.filter((row) => row.repoId !== repoId), ...result.tasks],
+            repositoryErrors, errors: Object.values(repositoryErrors).flat(),
           });
-          return;
-        }
+        });
       } catch (error) {
         this.patch((snapshot) => ({ ...snapshot, errors: [...snapshot.errors, "Could not refresh the recorded outcome: " + message(error)] }));
       }
