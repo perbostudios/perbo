@@ -13,7 +13,7 @@ import {
 import { BundleStore } from "@perbo/runner";
 import { UsageError } from "../usage-error.js";
 import { buildInspectReport, inspectCommandLine, renderInspect } from "./inspect.js";
-import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "../test-support/attempt-fixture.js";
+import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "../test-support/records.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
 

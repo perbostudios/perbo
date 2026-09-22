@@ -7,7 +7,7 @@ import { EXIT_CODES, PROHIBITED_ACTIONS, transition, type Ticket } from "@perbo/
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
 import type { Streams } from "../streams.js";
-import { makeAttempt } from "../test-support/attempt-fixture.js";
+import { makeAttempt } from "../test-support/records.js";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import { stopsCommandLine } from "./stops.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";

@@ -24,8 +24,8 @@ import {
 } from "../review/ticketless.js";
 import { verdictCommandLine } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
-import { makeAttempt, makeReview } from "../../test-support/attempt-fixture.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { makeAttempt, makeReview } from "../../test-support/records.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { recordStreams } from "../../test-support/streams.js";
 
 /**

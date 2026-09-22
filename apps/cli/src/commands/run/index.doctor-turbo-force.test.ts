@@ -5,7 +5,7 @@ import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts"
 import type { PreflightResult } from "@perbo/runner";
 import { afterAll, describe, expect, it } from "vitest";
 import { doctorCommandLine } from "./index.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 

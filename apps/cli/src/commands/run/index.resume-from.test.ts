@@ -9,8 +9,8 @@ import { admitCommandLine } from "../admit.js";
 import { executeCommandLine } from "./index.js";
 import { buildInspectReport, renderInspect } from "../inspect.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
-import { makeAttempt, makeTicket } from "../../test-support/attempt-fixture.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { makeAttempt, makeTicket } from "../../test-support/records.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 

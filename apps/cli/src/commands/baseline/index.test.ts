@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { UsageError } from "../../usage-error.js";
 import { BaselineFileSchema, baselineCommandLine, type BaselineFile } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
-import { makeTicket } from "../../test-support/attempt-fixture.js";
+import { makeTicket } from "../../test-support/records.js";
 import { recordStreams } from "../../test-support/streams.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-baseline-test-"));

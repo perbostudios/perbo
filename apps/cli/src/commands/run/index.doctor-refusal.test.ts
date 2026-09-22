@@ -8,7 +8,7 @@ import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import type { DiagnoseRequest } from "@perbo/workspace";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type DoctorDeps, doctorCommandLine } from "./index.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams, type RecordedStreams } from "../../test-support/streams.js";
 

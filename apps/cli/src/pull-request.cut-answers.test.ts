@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { UsageError } from "./usage-error.js";
 import { readPullRequest, readPullRequestChecks, readRefRange } from "./pull-request.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "./test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 
 /**
  * What these reads do with an answer that arrived cut.

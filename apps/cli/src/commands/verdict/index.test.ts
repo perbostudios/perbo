@@ -24,8 +24,8 @@ import { inspectCommandLine } from "../inspect.js";
 import { stopsCommandLine } from "../stops.js";
 import { verdictCommandLine } from "./index.js";
 import { LocalVerdictSchema, LocalVerdictsSchema } from "./record.js";
-import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "../../test-support/attempt-fixture.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "../../test-support/records.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 

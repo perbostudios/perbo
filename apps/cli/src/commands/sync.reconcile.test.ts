@@ -8,8 +8,8 @@ import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
 import { derivedBranch, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
-import { makeAttempt } from "../test-support/attempt-fixture.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { makeAttempt } from "../test-support/records.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
 

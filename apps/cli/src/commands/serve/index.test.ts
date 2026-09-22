@@ -10,7 +10,7 @@ import { admitCommandLine } from "../admit.js";
 import { ServeTickSchema, processDeps, serveCommandLine, type ServeDeps } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { readEndpoint } from "../../endpoint/index.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 import { recordStreams } from "../../test-support/streams.js";
 

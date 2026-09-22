@@ -10,7 +10,6 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -46,9 +45,9 @@ import {
   storeDir,
   writeTicket,
 } from "../../store/tickets.js";
-import { makeAttempt } from "../../test-support/attempt-fixture.js";
+import { makeAttempt } from "../../test-support/records.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "../../test-support/built-cli.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS, watchOutbound } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 
@@ -277,46 +276,6 @@ const okPreflight = (_request: PreflightRequest): PreflightResult => ({
   tools: {},
   github: null,
 });
-
-/**
- * Every outbound connection this process asks for while a run is under way.
- *
- * `fetch` is the call a hosted plane would be reached by, and watching only
- * `fetch` would miss `node:http`, `node:https`, an undici agent obtained
- * directly and anything a library opened for itself. All of them end at one
- * place — `net.Socket.prototype.connect`, which `tls.connect` and `http2` also
- * go through — so that is where this watches, with the `fetch` spy kept beside
- * it because a mocked `fetch` would never reach a socket at all.
- *
- * What an in-process watch cannot see is a **child** process opening its own
- * socket, and this run spawns several. That half is covered on the record
- * rather than here: the runner observes every host an attempt names, in its
- * commands and its tool inputs, and the attempt's `egress` is asserted empty
- * beside these — the two together are what "nothing went out" rests on.
- */
-function watchOutbound(): { destinations: () => string[] } {
-  const asked: string[] = [];
-  const connect = Socket.prototype.connect;
-  vi.spyOn(Socket.prototype, "connect").mockImplementation(function (
-    this: Socket,
-    ...args: Parameters<Socket["connect"]>
-  ) {
-    const [first, second] = args;
-    const target =
-      typeof first === "object" && first !== null
-        ? JSON.stringify(first)
-        : `${String(first)}${typeof second === "string" ? ` ${second}` : ""}`;
-    asked.push(target);
-    return connect.apply(this, args);
-  });
-  const fetched = vi.spyOn(globalThis, "fetch");
-  return {
-    destinations: () => [
-      ...asked,
-      ...fetched.mock.calls.map((call) => `fetch ${String(call[0])}`),
-    ],
-  };
-}
 
 /**
  * The repository's own `.perbo/config.json` — the pinned checks, the protected

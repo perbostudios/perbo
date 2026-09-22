@@ -30,8 +30,8 @@ import {
   pullRequestBody,
   type TicketDeliveryState,
 } from "@perbo/runner";
-import { makeReview } from "../test-support/attempt-fixture.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { makeReview } from "../test-support/records.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { mergeRunConfig } from "./run/index.js";
 
 /**

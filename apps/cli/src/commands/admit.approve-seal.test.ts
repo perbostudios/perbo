@@ -8,7 +8,7 @@ import { admitCommandLine, approveCommandLine, loadAdmitted } from "./admit.js";
 import { editCommandLine } from "./edit/index.js";
 import { executeCommandLine } from "./run/index.js";
 import { readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
 

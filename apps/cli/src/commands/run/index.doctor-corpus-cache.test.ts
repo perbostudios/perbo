@@ -6,7 +6,7 @@ import type { PreflightResult } from "@perbo/runner";
 import { afterAll, describe, expect, it } from "vitest";
 import { doctorCommandLine } from "./index.js";
 import { USAGE } from "../../command-line/usage.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 

@@ -13,7 +13,7 @@ import { readTicket, storeDir as storeDirOf, writeTicket } from "../../../store/
 import { TicketSchema, transition, withReconciliation } from "@perbo/contracts";
 import { mergedTicketContext, ticketKeysMergedBetween } from "./relevel.js";
 import { storeDir } from "../../../store/tickets.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../../../command-line/terminal.js";
 import { recordStreams } from "../../../test-support/streams.js";
 

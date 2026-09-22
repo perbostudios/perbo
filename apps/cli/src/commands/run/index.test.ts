@@ -31,7 +31,7 @@ import {
   usageOf,
 } from "./index.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
-import { makeAttempt, makeTicket } from "../../test-support/attempt-fixture.js";
+import { makeAttempt, makeTicket } from "../../test-support/records.js";
 import { REPO_ROOT } from "../../test-support/paths.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";

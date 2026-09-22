@@ -10,7 +10,7 @@ import { parseReviewArgs } from "./internal/args.js";
 import { UsageError } from "../../usage-error.js";
 import { normalisePullRequestReference } from "../../pull-request.js";
 import { runReviewCommand } from "./index.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { FIXTURES, PACKAGE_ROOT, REPO_ROOT } from "../../test-support/paths.js";
 import { recordStreams } from "../../test-support/streams.js";
 

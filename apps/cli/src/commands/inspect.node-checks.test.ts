@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { SecretIndex, type CheckResult } from "@perbo/contracts";
 import { BundleStore } from "@perbo/runner";
 import { buildInspectReport, inspectCommandLine, renderInspect } from "./inspect.js";
-import { makeAttempt, makeTicket } from "../test-support/attempt-fixture.js";
+import { makeAttempt, makeTicket } from "../test-support/records.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
 
