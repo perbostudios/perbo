@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { sizeEstimate } from "@perbo/contracts/size";
 import { GraphPane } from "./GraphPane.js";
 import { bridge } from "../workspace/index.js";
@@ -16,7 +16,7 @@ const sessionId = "90000000-0000-4000-8000-000000000002";
 const jobId = "90000000-0000-4000-8000-000000000003";
 const key = "PRB-901";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); cleanup(); vi.restoreAllMocks(); });
 
 const graph = (): GraphView => ({
   key, state: "planning", approved: false, outcome: "A sample plan", nodes: [], criteria: [],
@@ -72,9 +72,14 @@ const job = (): Job => ({
 describe("the Graph pane's reads", () => {
   it("reads nothing while a run reports progress", async () => {
     const view = await pane();
+    // The clock a read could be held behind is this test's, so nothing here
+    // measures how loaded the machine is: every timer a progress update could
+    // have armed runs, and the queue a read resolves through is flushed, before
+    // the count is read.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     for (let sequence = 1; sequence <= 20; sequence++)
       view.emit({ kind: "progress", sequence, job: { ...job(), log: "progress " + String(sequence) } });
-    await new Promise((settle) => setTimeout(settle, 1100));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(view.reads()).toBe(1);
   });
 });
