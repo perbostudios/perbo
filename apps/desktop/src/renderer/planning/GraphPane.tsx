@@ -83,41 +83,15 @@ export function GraphPane({
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const graph = useGraph(repoId, key);
-  const view: GraphView | undefined = graph.data;
-
   /**
    * The records this pane reads are written while a run moves, so the pane
-   * follows them (D-100): one that refreshed only on its own edits would show
-   * the run as it stood when it was opened. A run's progress arrives many
-   * times a minute and each read walks the repository's bundle store, so it is
-   * taken at most once a second, and the last one is never dropped.
+   * follows them (D-100). It reads through the workspace refresh, which takes
+   * a repository again on a records change and on the poll — about two seconds
+   * while a run is live, fifteen while none is — and patches a progress update
+   * where it stands without reading anything (D-095).
    */
-  useEffect(() => {
-    if (key === null) return undefined;
-    let at = 0;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const take = (): void => {
-      at = Date.now();
-      timer = null;
-      void client.invalidateQueries({ queryKey: ["graph", repoId, key] });
-    };
-    const stop = bridge.subscribe((change: Change) => {
-      const job = "job" in change ? change.job : undefined;
-      const mine =
-        change.kind === "records"
-          ? change.repoId === null || change.repoId === repoId
-          : change.kind === "progress" && (job?.key === key || job?.resultKey === key);
-      if (!mine || timer !== null) return;
-      const since = Date.now() - at;
-      if (since >= 1000) take();
-      else timer = setTimeout(take, 1000 - since);
-    });
-    return () => {
-      if (timer !== null) clearTimeout(timer);
-      stop();
-    };
-  }, [client, key, repoId]);
+  const graph = useGraph(repoId, key);
+  const view: GraphView | undefined = graph.data;
 
   /** One edit, through the host, with the pane redrawn from what the store then holds. */
   const apply = useCallback(
