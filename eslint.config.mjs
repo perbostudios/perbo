@@ -136,6 +136,19 @@ const NO_TEST_MODULE = {
   message: "Production code imports no test code (docs/07 Package layout).",
 };
 
+/**
+ * `apps/desktop/src` is three layers: the host, which has Node and the
+ * person's credentials; the renderer, which is a browser; and `shared/`, the
+ * protocol and the readings both of them hold. The first two reach each other
+ * only through the third, and the third reaches neither, so what crosses is
+ * what the protocol says and nothing else (docs/07 "Package layout").
+ */
+const DESKTOP_LAYERS_MEET =
+  "The host and the renderer meet in `shared/`, which imports neither (docs/07 Package layout).";
+
+const NO_HOST_LAYER = { regex: "(^|/)host/", message: DESKTOP_LAYERS_MEET };
+const NO_RENDERER_LAYER = { regex: "(^|/)renderer/", message: DESKTOP_LAYERS_MEET };
+
 /** Where a package's interface and its modules live. */
 const SOURCE = ["**/src/**"];
 
@@ -293,6 +306,65 @@ export default tseslint.config(
             NO_TEST_SUPPORT,
             NO_TEST_MODULE,
             NO_COMMAND_LINE_EDGE,
+          ],
+        },
+      ],
+    },
+  },
+  // The desktop's three layers. Each repeats what every source file is held
+  // to, because this object replaces the rule's options for the files it
+  // names, and each ignores the tests and fakes that drive one layer from
+  // another.
+  {
+    files: ["apps/desktop/src/renderer/**"],
+    ...PRODUCTION_SOURCE_ONLY,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            NO_FOREIGN_INTERIOR,
+            NO_DEEP_PACKAGE_IMPORT,
+            NO_TEST_SUPPORT,
+            NO_TEST_MODULE,
+            NO_HOST_LAYER,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["apps/desktop/src/host/**"],
+    ...PRODUCTION_SOURCE_ONLY,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            NO_FOREIGN_INTERIOR,
+            NO_DEEP_PACKAGE_IMPORT,
+            NO_TEST_SUPPORT,
+            NO_TEST_MODULE,
+            NO_RENDERER_LAYER,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["apps/desktop/src/shared/**"],
+    ...PRODUCTION_SOURCE_ONLY,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            NO_FOREIGN_INTERIOR,
+            NO_DEEP_PACKAGE_IMPORT,
+            NO_TEST_SUPPORT,
+            NO_TEST_MODULE,
+            NO_HOST_LAYER,
+            NO_RENDERER_LAYER,
           ],
         },
       ],

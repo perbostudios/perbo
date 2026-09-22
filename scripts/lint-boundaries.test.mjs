@@ -150,6 +150,58 @@ test("production code reaches no test module, and a test does", async () => {
 });
 
 // --------------------------------------------------------------------------
+// The desktop's three layers meet in one of them
+// --------------------------------------------------------------------------
+
+const IN_SHARED = "meet in `shared/`";
+
+test("the renderer reaches the host only through `shared/`", async () => {
+  const pane = "apps/desktop/src/renderer/tasks/ContractScreen.tsx";
+  await refuses(pane, USES("../../host/service.js"), IN_SHARED);
+  await refuses("apps/desktop/src/renderer/main.tsx", USES("./host/records.js"), IN_SHARED);
+  await allows(pane, USES("../../shared/protocol.js"));
+  // The sample host is a browser's stand-in for the host, not the host.
+  await allows(pane, USES("../../sample-host/records.js"));
+});
+
+test("the host reaches the renderer only through `shared/`", async () => {
+  const service = "apps/desktop/src/host/service.ts";
+  await refuses(service, USES("../renderer/shell/App.js"), IN_SHARED);
+  await allows(service, USES("../shared/protocol.js"));
+});
+
+test("`shared/` is what both import, so it imports neither", async () => {
+  const protocol = "apps/desktop/src/shared/protocol.ts";
+  await refuses(protocol, USES("../host/service.js"), IN_SHARED);
+  await refuses(protocol, USES("../renderer/shell/App.js"), IN_SHARED);
+  await allows(protocol, USES("./shortcuts.js"));
+});
+
+test("a layer is still held to what every source file is", async () => {
+  // Each layer's object repeats these rather than replacing them.
+  for (const where of [
+    "apps/desktop/src/renderer/tasks/ContractScreen.tsx",
+    "apps/desktop/src/host/service.ts",
+    "apps/desktop/src/shared/protocol.ts",
+  ]) {
+    await refuses(where, USES("../workspace/internal/refresh.js"), OWN_INTERIOR);
+    await refuses(where, USES("@perbo/contracts/src/review.js"), BY_NAME);
+    await refuses(where, USES("../test-support/fixture.js"), NO_TEST_CODE);
+  }
+});
+
+test("a test and a fake reach across the layers", async () => {
+  await allows(
+    "apps/desktop/src/renderer/contract-editor.test.ts",
+    USES("../host/workspace-reads.js"),
+  );
+  await allows(
+    "apps/desktop/src/renderer/test-support/fixture.ts",
+    USES("../../host/workspace-reads.js"),
+  );
+});
+
+// --------------------------------------------------------------------------
 // ADR-0023: what the overrides must not drop
 // --------------------------------------------------------------------------
 
