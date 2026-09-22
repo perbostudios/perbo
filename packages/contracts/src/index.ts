@@ -96,6 +96,7 @@ export {
 } from "./ids.js";
 export type { NodeId } from "./ids.js";
 export {
+  answersGroup,
   decodeInterviewTurn,
   encodeInterviewEvent,
   encodeInterviewTurn,
@@ -103,7 +104,9 @@ export {
   InterviewQuestionGroupSchema,
   interviewSaidMessage,
   InterviewTurnSchema,
+  LEAVE_IT_TO_THE_INTERVIEW,
   MAX_QUESTION_GROUPS,
+  PART_LETTERS,
 } from "./interview-protocol.js";
 export type { InterviewEvent, InterviewQuestionGroup } from "./interview-protocol.js";
 export {

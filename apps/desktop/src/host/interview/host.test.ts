@@ -84,6 +84,11 @@ function host(repo: RegisteredRepository) {
   const deps: InterviewDeps = {
     editing,
     repository: () => repo,
+    tickets: {
+      contract: () => {
+        throw new Error("no contract in this test");
+      },
+    },
     cli: {
       spawn: (args, _repo, options) => {
         const child = new FakeInterview(options);

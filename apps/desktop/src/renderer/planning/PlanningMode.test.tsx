@@ -8,6 +8,13 @@ import { HomePage } from "../tasks/HomePage.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import { bridge } from "../workspace/index.js";
 import { resetRailSize } from "../shell/rail-size.js";
+import { DEFAULT_ASKED_HEIGHT, resetAskedHeight } from "../shell/asked-size.js";
+import {
+  DEFAULT_DOCK_WIDTH,
+  MAX_DOCK_WIDTH,
+  MIN_DOCK_WIDTH,
+  resetDockWidth,
+} from "../shell/dock-size.js";
 import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests } from "../../shared/shortcuts.js";
 import { withDraft } from "../shell/create.js";
 import { SpecSection } from "./SpecSection.js";
@@ -54,6 +61,8 @@ const railNames = (): string[] =>
 describe("Create in the rail (SCP-334)", () => {
   it("reads Create, Home, Archive, Settings, bound to ⌘1 to ⌘4 in that order, with ⌘N still creating", async () => {
     resetRailSize();
+    resetDockWidth();
+    resetAskedHeight();
     mount();
     await screen.findByRole("heading", { name: /Hi, / });
     const names = railNames();
@@ -91,11 +100,12 @@ describe("Create in the rail (SCP-334)", () => {
     expect(location.hash).toMatch(/^#planning\//);
     const panes = screen.getByRole("group", { name: "Planning panes" });
     expect(within(panes).getByRole("button", { name: "Spec" }).getAttribute("aria-current")).toBe("page");
-    expect(railNames().slice(0, 7)).toEqual([
+    // No plan yet, so no graph to offer: Spec, the files it is written
+    // against, and what it is likely to touch.
+    expect(railNames().slice(0, 6)).toEqual([
       "Create",
       "Spec",
       "Explorer",
-      "Graph",
       "Impact",
       "Home",
       "Archive",
@@ -160,7 +170,7 @@ describe("Create in the rail (SCP-334)", () => {
   it("lists a session the picker just opened first, before the host's refresh lands", async () => {
     const workspace = await sampleBridge.request({ kind: "snapshot" });
     const session = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId: workspace.repositories[0]!.id } });
-    const stale = { ...workspace, drafts: [{ id: "older", repoId: session.repoId, key: null, outcome: "An older draft", phase: "editing" as const }] };
+    const stale = { ...workspace, drafts: [{ id: "older", repoId: session.repoId, key: null, outcome: "An older draft", phase: "editing" as const, nodes: 0, scope: { paths: [], prohibited: [] } }] };
     const seeded = withDraft(stale, session);
     expect(seeded.drafts!.map((draft) => draft.id)).toEqual([session.id, "older"]);
     expect(withDraft(seeded, session).drafts!.map((draft) => draft.id)).toEqual([session.id, "older"]);
@@ -416,6 +426,22 @@ describe("the Explorer pane's preview (SCP-318)", () => {
  * assigns requirement ids with `@perbo/planning`'s own code.
  */
 describe("the Spec pane (SCP-336)", () => {
+  /**
+   * A section's editor, opened first.
+   *
+   * The pane shows a section as it reads until somebody asks to type in it, so
+   * the textarea a test writes into is not on the page until something opens
+   * it — which is what a person does by clicking, and what this does too.
+   * Re-asked every time rather than held, because leaving a section closes its
+   * editor and the next write needs the one that is open now.
+   */
+  const specField = (label: string): HTMLTextAreaElement => {
+    const shown = screen.getByLabelText(label);
+    if (shown instanceof HTMLTextAreaElement) return shown;
+    fireEvent.mouseDown(shown);
+    return screen.getByLabelText(label) as HTMLTextAreaElement;
+  };
+
   const startPlanning = async (repo = /example\/webstore/): Promise<void> => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Create" }));
@@ -430,7 +456,7 @@ describe("the Spec pane (SCP-336)", () => {
     fireEvent.blur(title);
     for (const [label, value] of Object.entries(sections)) {
       if (label === "title") continue;
-      const field = screen.getByLabelText(label);
+      const field = specField(label);
       fireEvent.change(field, { target: { value } });
       fireEvent.blur(field);
       await waitFor(() => expect((field as HTMLTextAreaElement).value).toBe(value));
@@ -454,20 +480,19 @@ describe("the Spec pane (SCP-336)", () => {
     await write(SPEC);
 
     await screen.findByText("specs/a-light-colour-mode/spec.md");
-    const listed = await screen.findByRole("list", { name: "Requirements" });
-    const rows = within(listed).getAllByRole("listitem").map((row) => row.textContent ?? "");
-    expect(rows).toHaveLength(3);
-    expect(rows[0]).toContain("R1");
-    expect(rows[2]).toContain("R3");
-    // Nothing has been drafted, so no requirement has landed in a node.
-    expect(rows.every((row) => row.includes("none yet"))).toBe(true);
+    // The ids are written into the section they were typed in.
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R1:"));
+    expect(specField("Spec Requirements").value).toContain("R3:");
+    // Nothing has been drafted, so no requirement has landed in a node, and the
+    // list of where they landed is a column of "none yet" — so it is not there.
+    expect(screen.queryByRole("list", { name: "Requirements" })).toBeNull();
   });
 
   it("keeps a requirement's id when its text is edited, and gives the next one to a new one", async () => {
     await startPlanning();
     await write(SPEC);
-    const requirements = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
-    await waitFor(() => expect(requirements.value).toContain("R1:"));
+    const requirements = specField("Spec Requirements") as HTMLTextAreaElement;
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R1:"));
     // R2 and R3 both go — the highest id with them — and one is written.
     fireEvent.change(requirements, {
       target: {
@@ -481,19 +506,55 @@ describe("the Spec pane (SCP-336)", () => {
       },
     });
     fireEvent.blur(requirements);
-    const rows = async (): Promise<string[]> =>
-      within(await screen.findByRole("list", { name: "Requirements" }))
-        .getAllByRole("listitem")
-        .map((row) => row.textContent ?? "");
-    await waitFor(async () => expect(await rows()).toHaveLength(2));
-    const after = await rows();
+    // The ids are read where they are written, the list of nodes being absent
+    // until there is a plan for a requirement to have landed in.
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R4:"));
+    const after = specField("Spec Requirements")
+      .value.split("\n")
+      .filter((line) => /R\d+:/.test(line));
+    expect(after).toHaveLength(2);
     expect(after[0]).toContain("R1");
-    // Its text changed and its id did not.
-    expect(after[0]).toContain("A person can choose");
+    // Its text changed and its id did not. The text is read in the box it is
+    // edited in; the list beside it says where each id landed, and saying the
+    // sentence twice is what made the pane twice as long as the spec.
+    expect(specField("Spec Requirements").value).toContain("R1: A person can choose");
     // R2 and R3 were each used once, so the new requirement is R4.
     expect(after[1]).toContain("R4");
-    expect(after.join(" ")).not.toContain("R2");
-    expect(after.join(" ")).not.toContain("R3");
+    expect(after.join(" ")).not.toContain("R2:");
+    expect(after.join(" ")).not.toContain("R3:");
+  });
+
+  it("shows a section as it reads, and opens the editor where it is clicked", async () => {
+    await startPlanning();
+    await write({
+      title: SPEC.title,
+      "Spec Requirements": "### The page\n\n- The rail follows the mode.",
+    });
+    await screen.findByText("specs/a-light-colour-mode/spec.md");
+
+    // The section is not an editor until somebody asks for one.
+    const reading = screen.getByLabelText("Spec Requirements");
+    expect(reading.tagName).toBe("DIV");
+    // The marks the file uses to say a thing are not the thing: the heading is
+    // a heading, the requirement's id is beside its line, and neither `###` nor
+    // `R1:` is in the words.
+    const heading = within(reading).getByText("The page");
+    expect(heading.textContent).not.toContain("#");
+    await waitFor(() => expect(within(reading).getByText("R1").className).toBe("spec-req-id"));
+    const item = within(reading).getByText("The rail follows the mode.");
+    expect(item.textContent).not.toContain("R1:");
+
+    // Clicking gives back the editor, with the file's own characters in it.
+    fireEvent.mouseDown(reading);
+    const editor = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
+    expect(editor.tagName).toBe("TEXTAREA");
+    expect(editor.value).toContain("### The page");
+    expect(editor.value).toContain("R1:");
+    expect(document.activeElement).toBe(editor);
+
+    // And leaving it goes back to reading, without asking for a second save.
+    fireEvent.blur(editor);
+    await waitFor(() => expect(screen.getByLabelText("Spec Requirements").tagName).toBe("DIV"));
   });
 
   it("offers Generate plan once the spec has a title and an outcome, not before", async () => {
@@ -505,7 +566,7 @@ describe("the Spec pane (SCP-336)", () => {
     const generate = (): HTMLButtonElement =>
       screen.getByRole("button", { name: "Generate plan" }) as HTMLButtonElement;
     expect(generate().disabled).toBe(true);
-    const outcome = screen.getByLabelText("Spec Outcome");
+    const outcome = specField("Spec Outcome");
     fireEvent.change(outcome, { target: { value: SPEC["Spec Outcome"] } });
     fireEvent.blur(outcome);
     await waitFor(() => expect(generate().disabled).toBe(false));
@@ -522,10 +583,11 @@ describe("the Spec pane (SCP-336)", () => {
     const ready = async (): Promise<void> => {
       await startPlanning();
       await write(SPEC);
-      await screen.findByText(/exported TS symbols/);
+      // The index reports behind the dot in the pane head.
+      await screen.findAllByRole("button", { name: "About the symbol index" });
     };
     const notes = (): HTMLTextAreaElement =>
-      screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
+      specField("Spec Notes") as HTMLTextAreaElement;
     const type = (value: string): void => {
       fireEvent.change(notes(), { target: { value } });
     };
@@ -622,8 +684,11 @@ describe("the Spec pane (SCP-336)", () => {
 
     it("counts the names not in the index, beside the index's size and its commit", async () => {
       await ready();
-      await screen.findByText("every @name resolves");
-      expect(screen.getByText("index · 7 exported TS symbols · 9f2c1ab")).toBeTruthy();
+      // Nothing is said when every name resolves: the absence of the warning
+      // below is the answer, and the index's own size is behind the dot.
+      expect(screen.queryByText(/name is not|names are not/)).toBeNull();
+      expect(screen.getAllByText(/7 exported TypeScript symbols, read at 9f2c1ab/).length)
+        .toBeGreaterThan(0);
 
       type("@signUp and @retryQueue.");
       fireEvent.blur(notes());
@@ -656,8 +721,10 @@ describe("the Spec pane (SCP-336)", () => {
     it("checks no name in a repository the index cannot describe, and says why", async () => {
       await startPlanning(/example\/landing/);
       await write({ title: "A landing page", "Spec Notes": "@signUp is not checked here." });
-      await screen.findByText("no TypeScript or JavaScript here, so no @name is checked");
-      expect(screen.getByText(/index · not built: no tracked TypeScript or JavaScript/)).toBeTruthy();
+      // A repository with nothing to check says so once, behind the dot, and
+      // not a second time in the line beside it.
+      await screen.findAllByRole("button", { name: "About the symbol index" });
+      expect(screen.queryByText(/so no @name is checked/)).toBeNull();
       // Nothing is marked wrong: there is no list to be missing from.
       expect(document.querySelectorAll(".sym--unknown")).toHaveLength(0);
       expect(screen.queryByRole("button", { name: /^Use @/ })).toBeNull();
@@ -740,7 +807,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
 
@@ -768,7 +835,7 @@ describe("the Spec pane (SCP-336)", () => {
       await startPlanning();
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       const notice = (await screen.findByText(/Nothing was saved/)).closest(
@@ -776,7 +843,7 @@ describe("the Spec pane (SCP-336)", () => {
       ) as HTMLElement;
 
       fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-      await waitFor(() => expect(outcome.value).toBe("The interview's sentence."));
+      await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's sentence."));
       expect(screen.queryByText(/Nothing was saved/)).toBeNull();
       const written =
         (JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>)[
@@ -790,14 +857,14 @@ describe("the Spec pane (SCP-336)", () => {
       await startPlanning();
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await screen.findByText(/Nothing was saved/);
 
       // Another section left while the refusal stands. Writing it would write
       // the whole spec, and carry the refused Outcome over the interview's.
-      const notes = screen.getByLabelText("Spec Notes");
+      const notes = specField("Spec Notes");
       fireEvent.change(notes, { target: { value: "A note typed meanwhile." } });
       fireEvent.blur(notes);
       const written = (): string =>
@@ -822,7 +889,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await screen.findByText(/Nothing was saved/);
@@ -836,12 +903,13 @@ describe("the Spec pane (SCP-336)", () => {
       // Notes is not part of the conflict, so it follows the refetch either
       // way — waiting for it is waiting for the new view to have actually
       // landed, rather than finding the notice still up from before it did.
-      const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
-      await waitFor(() => expect(notes.value).toBe("Written while the card was open."));
+      await waitFor(() =>
+        expect(specField("Spec Notes").value).toBe("Written while the card was open."),
+      );
 
       // The card survived that refetch, with the person's text still in it —
       // not replaced by the further change underneath.
-      expect(outcome.value).toBe("The person's sentence.");
+      expect(specField("Spec Outcome").value).toBe("The person's sentence.");
       const notice = screen.getByText(/Nothing was saved/).closest(".notice") as HTMLElement;
       expect(within(notice).getByText("The interview's sentence.")).toBeTruthy();
       expect(within(notice).getByText("The person's sentence.")).toBeTruthy();
@@ -861,14 +929,14 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await screen.findByText(/Nothing was saved/);
 
       // Typed while the card is open, and never committed — `commit` bails
       // while `conflict` is set, so nothing has gone out for it yet.
-      const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
+      const notes = specField("Spec Notes") as HTMLTextAreaElement;
       fireEvent.change(notes, { target: { value: "Typed while the card was open." } });
       fireEvent.blur(notes);
 
@@ -926,7 +994,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       const notice = (await screen.findByText(/Nothing was saved/)).closest(".notice") as HTMLElement;
@@ -936,14 +1004,14 @@ describe("the Spec pane (SCP-336)", () => {
       // not survive past this, or it becomes what the next save is read
       // against instead of the file this pane has since followed.
       fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-      await waitFor(() => expect(outcome.value).toBe("The interview's sentence."));
+      await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's sentence."));
       expect(screen.queryByText(/Nothing was saved/)).toBeNull();
 
       // The file moves again, in a section the settled refusal never named.
       await elsewhere({ notes: "Written while the card was open." });
       await client.invalidateQueries({ queryKey: ["spec", sessionId()] });
-      const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
-      await waitFor(() => expect(notes.value).toBe("Written while the card was open."));
+      const notes = specField("Spec Notes") as HTMLTextAreaElement;
+      await waitFor(() => expect(specField("Spec Notes").value).toBe("Written while the card was open."));
 
       // Built on what is now shown, which already is the file's own text.
       fireEvent.change(notes, {
@@ -966,7 +1034,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ outcome: "The interview's first sentence." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       const notice = (await screen.findByText(/Nothing was saved/)).closest(".notice") as HTMLElement;
@@ -989,7 +1057,7 @@ describe("the Spec pane (SCP-336)", () => {
 
       // Taking the file's side takes what the card showed.
       fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-      await waitFor(() => expect(outcome.value).toBe("The interview's first sentence."));
+      await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's first sentence."));
     });
 
     it("keeps the held refusal through a save that errors while its card is still open", async () => {
@@ -1010,7 +1078,7 @@ describe("the Spec pane (SCP-336)", () => {
         await write(SPEC);
         await elsewhere({ outcome: "The interview's first sentence." });
 
-        const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+        const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
         fireEvent.change(outcome, { target: { value: "The person's sentence." } });
         fireEvent.blur(outcome);
         const notice = (await screen.findByText(/Nothing was saved/)).closest(
@@ -1044,7 +1112,7 @@ describe("the Spec pane (SCP-336)", () => {
         // Taking the file's side takes what the card showed, not the
         // file's later move.
         fireEvent.click(within(notice).getByRole("button", { name: "Use the file's" }));
-        await waitFor(() => expect(outcome.value).toBe("The interview's first sentence."));
+        await waitFor(() => expect(specField("Spec Outcome").value).toBe("The interview's first sentence."));
       } finally {
         asked.mockRestore();
       }
@@ -1065,7 +1133,7 @@ describe("the Spec pane (SCP-336)", () => {
         await write(SPEC);
         await elsewhere({ outcome: "The interview's first sentence." });
 
-        const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+        const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
         fireEvent.change(outcome, { target: { value: "The person's sentence." } });
         fireEvent.blur(outcome);
         const notice = (await screen.findByText(/Nothing was saved/)).closest(
@@ -1096,8 +1164,8 @@ describe("the Spec pane (SCP-336)", () => {
         // The file moves again, in a section the settled refusal never named.
         await elsewhere({ notes: "Written after the errored resend." });
         await client.invalidateQueries({ queryKey: ["spec", sessionId()] });
-        const notes = screen.getByLabelText("Spec Notes") as HTMLTextAreaElement;
-        await waitFor(() => expect(notes.value).toBe("Written after the errored resend."));
+        const notes = specField("Spec Notes") as HTMLTextAreaElement;
+        await waitFor(() => expect(specField("Spec Notes").value).toBe("Written after the errored resend."));
 
         // Built on what is now shown, which already is the file's own text —
         // refused only if the held view outlived the card that showed it.
@@ -1122,7 +1190,7 @@ describe("the Spec pane (SCP-336)", () => {
       await write(SPEC);
       await elsewhere({ notes: "The interview's note." });
 
-      const outcome = screen.getByLabelText("Spec Outcome") as HTMLTextAreaElement;
+      const outcome = specField("Spec Outcome") as HTMLTextAreaElement;
       fireEvent.change(outcome, { target: { value: "The person's sentence." } });
       fireEvent.blur(outcome);
       await waitFor(() => {
@@ -1158,7 +1226,7 @@ describe("the Spec pane (SCP-336)", () => {
       // The person, still on the read from before the interview wrote, adds a
       // different one of their own — typed into the textarea as it already
       // shows the three original lines, ids included.
-      const requirements = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
+      const requirements = specField("Spec Requirements") as HTMLTextAreaElement;
       fireEvent.change(requirements, {
         target: { value: `${requirements.value}\n- The person's own requirement.` },
       });
@@ -1231,13 +1299,13 @@ describe("the Spec pane (SCP-336)", () => {
     const watched = watchBridge();
     try {
       // An outcome typed and not yet left: Generate plan must save it first.
-      const outcome = screen.getByLabelText("Spec Outcome");
+      const outcome = specField("Spec Outcome");
       fireEvent.change(outcome, { target: { value: "A changed outcome." } });
       watched.hold();
       fireEvent.click(screen.getByRole("button", { name: "Generate plan" }));
       await waitFor(() => expect(watched.events).toContain("specSave:called"));
       // Left while that save is out: it goes before the drafter reads the file.
-      const noGos = screen.getByLabelText("Spec No-Gos");
+      const noGos = specField("Spec No-Gos");
       fireEvent.change(noGos, { target: { value: "- Left while the save was out." } });
       fireEvent.blur(noGos);
       watched.let();
@@ -1261,6 +1329,7 @@ describe("the Spec pane (SCP-336)", () => {
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
     const drafts = (await sampleBridge.request({ kind: "drafts" })) ?? [];
     location.hash = `planning/${drafts[0]!.id}/spec`;
+    await screen.findByLabelText("Spec title");
     fireEvent.click(await screen.findByRole("button", { name: "Start over from the spec…" }));
     const dialog = await screen.findByRole("dialog", { name: "Start over from the spec?" });
     const startOver = (): HTMLButtonElement => within(dialog).getByRole("button", { name: "Start over" }) as HTMLButtonElement;
@@ -1268,7 +1337,7 @@ describe("the Spec pane (SCP-336)", () => {
     const watched = watchBridge();
     try {
       watched.hold();
-      const notes = screen.getByLabelText("Spec Notes");
+      const notes = specField("Spec Notes");
       fireEvent.change(notes, { target: { value: "Written with the dialog open." } });
       fireEvent.blur(notes);
       await waitFor(() => expect(startOver().disabled).toBe(true));
@@ -1286,21 +1355,21 @@ describe("the Spec pane (SCP-336)", () => {
     const title = await screen.findByLabelText("Spec title");
     fireEvent.change(title, { target: { value: SPEC.title } });
     fireEvent.blur(title);
-    const outcome = screen.getByLabelText("Spec Outcome");
+    const outcome = specField("Spec Outcome");
     fireEvent.change(outcome, { target: { value: SPEC["Spec Outcome"] } });
     fireEvent.blur(outcome);
-    const requirements = screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement;
+    const requirements = specField("Spec Requirements") as HTMLTextAreaElement;
     fireEvent.change(requirements, {
       target: { value: "- The person can choose Light, Dark or System.\n- Text meets WCAG AA contrast." },
     });
     fireEvent.blur(requirements);
 
     await screen.findByText("specs/a-light-colour-mode/spec.md");
-    await waitFor(() => expect(requirements.value).toContain("R2:"));
-    await screen.findByText("Saved in the repository — the file is the spec");
-    expect(requirements.value).toContain("- R1: The person can choose Light, Dark or System.");
-    expect(requirements.value).toContain("- R2: Text meets WCAG AA contrast.");
-    expect(requirements.value).not.toContain("R3:");
+    await waitFor(() => expect(specField("Spec Requirements").value).toContain("R2:"));
+    await screen.findByText("Saved");
+    expect(specField("Spec Requirements").value).toContain("- R1: The person can choose Light, Dark or System.");
+    expect(specField("Spec Requirements").value).toContain("- R2: Text meets WCAG AA contrast.");
+    expect(specField("Spec Requirements").value).not.toContain("R3:");
     const stored = JSON.parse(localStorage.getItem("perbo:preview-specs") ?? "{}") as Record<string, string>;
     expect(stored["a-light-colour-mode"]).toContain("perbo:requirement-ids through R2");
     expect(stored["a-light-colour-mode"]).toContain(SPEC["Spec Outcome"]);
@@ -1329,7 +1398,7 @@ describe("the Spec pane (SCP-336)", () => {
     mount();
     await screen.findByLabelText("Spec title");
     await waitFor(() =>
-      expect((screen.getByLabelText("Spec Requirements") as HTMLTextAreaElement).value).toContain(
+      expect((specField("Spec Requirements") as HTMLTextAreaElement).value).toContain(
         "written elsewhere",
       ),
     );
@@ -1342,7 +1411,9 @@ describe("the Spec pane (SCP-336)", () => {
     await screen.findByText("Drafting the plan from your spec");
     // It lands on the drafted contract, as compiling one does.
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    expect(location.hash).toMatch(/^#task\//);
+    // The drafter divides this spec into two nodes, so the plan has a graph
+    // and the graph is what is shown; a flat plan lands on the contract.
+    expect(location.hash).toMatch(/^#planning\/[^/]+\/graph$/);
 
     // Back in planning, each requirement names the node its criteria sit in.
     const drafts = (await sampleBridge.request({ kind: "drafts" })) ?? [];
@@ -1368,6 +1439,7 @@ describe("the Spec pane (SCP-336)", () => {
     const version = (await sampleBridge.request({ kind: "detail", repoId: planning.repoId, key }))
       .ticket.plan_version;
     location.hash = `planning/${planning.id}/spec`;
+    await screen.findByLabelText("Spec title");
 
     fireEvent.click(await screen.findByRole("button", { name: "Start over from the spec…" }));
     const dialog = await screen.findByRole("dialog", { name: /Start over from the spec/ });
@@ -1476,19 +1548,22 @@ describe("the Graph pane (SCP-316)", () => {
   const graphOf = (plan: { repoId: string; key: string }) =>
     sampleBridge.request({ kind: "graphRead", repoId: plan.repoId, key: plan.key });
 
-  it("approves the plan on the fixed binding, producing the contract the runner reads", async () => {
+  it("confirms the plan on the fixed binding, and approval waits for the contract", async () => {
     const plan = await openGraph();
     const detail = () => sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key });
     expect((await detail()).ticket.approved_at).toBeNull();
-    expect(screen.getByRole("button", { name: "Approve · start the loop" })).toBeTruthy();
+    // The graph says the division is right; what freezes is stated on the
+    // contract, so that is where approving happens and nowhere else.
+    expect(screen.getByRole("button", { name: "Confirm the plan" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
     // ⇧⌘↵, which is fixed and cannot be rebound.
     expect(effectiveShortcuts({}).approve).toBe("Shift+Meta+Enter");
     fireEvent.keyDown(window, { key: "Enter", metaKey: true, shiftKey: true });
-    await waitFor(async () => expect((await detail()).ticket.approved_at).not.toBeNull());
-    // The same request the contract screen sends: approve, then the loop.
-    await waitFor(async () =>
-      expect((await sampleBridge.request({ kind: "snapshot" })).jobs.some((job) => job.kind === "run")).toBe(true),
-    );
+    await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/));
+    // Nothing is approved and nothing runs until it is approved there.
+    expect((await detail()).ticket.approved_at).toBeNull();
+    expect((await sampleBridge.request({ kind: "snapshot" })).jobs.some((job) => job.kind === "run"))
+      .toBe(false);
   });
 
   it("moves the size estimate as the graph changes", async () => {
@@ -1650,7 +1725,7 @@ describe("the Graph pane (SCP-316)", () => {
     expect(pane("Graph").getAttribute("aria-current")).toBe("page");
   });
 
-  it("approves a flat plan, which has criteria and no graph to curate", async () => {
+  it("confirms a flat plan, which has criteria and no graph to curate", async () => {
     const plan = await planned();
     const edit = async (edit: GraphEdit) =>
       sampleBridge.request({ kind: "graphEdit", repoId: plan.repoId, key: plan.key, edit });
@@ -1664,8 +1739,11 @@ describe("the Graph pane (SCP-316)", () => {
     await screen.findByText(/This plan is flat/);
     const detail = () => sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key });
     expect((await detail()).ticket.approved_at).toBeNull();
-    fireEvent.click(await screen.findByRole("button", { name: "Approve · start the loop" }));
-    await waitFor(async () => expect((await detail()).ticket.approved_at).not.toBeNull());
+    // A flat plan is confirmed the same way: the contract is where what
+    // freezes is stated, whether or not the work was divided.
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }));
+    await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/));
+    expect((await detail()).ticket.approved_at).toBeNull();
   });
 
   /**
@@ -1702,7 +1780,12 @@ describe("the Graph pane (SCP-316)", () => {
         ),
       ).toBe(false);
     await waitFor(settled, { timeout: 6000 });
-    fireEvent.click(await screen.findByRole("button", { name: "Approve · start the loop" }));
+    // Confirm on the graph, approve on the contract: one approval, on the
+    // page that says what freezes.
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 }),
+    );
     // The loop is running; the person comes back to the graph to watch it.
     await waitFor(
       async () =>
@@ -1779,7 +1862,11 @@ describe("the Graph pane (SCP-316)", () => {
       }),
     );
     await screen.findByLabelText("Spec title");
-    fireEvent.click(pane("Graph"));
+    // The rail does not offer Graph before there is one, so this is the pane
+    // a link or a restored route can still land on: it says what it has.
+    expect(screen.queryByRole("button", { name: "Graph" })).toBeNull();
+    const planning = (await sampleBridge.request({ kind: "drafts" }))![0]!;
+    location.hash = `planning/${planning.id}/graph`;
     await screen.findByText("No graph yet");
     expect(screen.queryByRole("button", { name: "Node" })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
@@ -1795,6 +1882,12 @@ describe("the interview docked in planning mode (SCP-313)", () => {
   const pane = (name: string) =>
     within(screen.getByRole("group", { name: "Planning panes" })).getByRole("button", { name });
   const dock = (): HTMLElement => screen.getByRole("complementary", { name: "Interview" });
+  /** Everything the dock's own hints hold, which is where an asking is kept. */
+  const askedInTranscript = (): string =>
+    within(dock())
+      .queryAllByRole("tooltip", { hidden: true })
+      .map((hint) => hint.textContent ?? "")
+      .join("\n");
   const composer = (): HTMLTextAreaElement =>
     screen.getByLabelText("Message the interview") as HTMLTextAreaElement;
 
@@ -1847,7 +1940,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     location.hash = `planning/${plan.id}/spec`;
     mount();
     await screen.findByLabelText("Spec title");
-    for (const name of ["Spec", "Explorer", "Graph"]) {
+    for (const name of ["Spec", "Explorer", "Impact"]) {
       fireEvent.click(pane(name));
       // The dock is beside the pane, not inside it, so it survives the switch.
       await waitFor(() => expect(dock()).toBeTruthy());
@@ -1884,6 +1977,114 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     expect(await within(dock()).findByText(/Noted: “split the queue node”/)).toBeTruthy();
     // The composer empties, ready for the next turn.
     await waitFor(() => expect(composer().value).toBe(""));
+  });
+
+  it("keeps what a box wrote behind a dot, and opens it on hover and on focus", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await within(dock()).findByRole("group", { name: "How the queue is split" });
+
+    // The line in the chat says only that an asking happened; the questions
+    // themselves are behind its dot.
+    const said = await within(dock()).findByText(/Asked 3 questions/);
+    // The questions are in the document — a screen reader reaches them through
+    // `aria-describedby` whether or not they are on screen — but the line the
+    // chat shows is the summary, and the rest stays shut until it is asked for.
+    const shown = [...said.childNodes]
+      .filter((node) => !(node instanceof HTMLElement && node.className.includes("info-hint")))
+      .map((node) => node.textContent ?? "")
+      .join("");
+    expect(shown).toContain("Asked 3 questions");
+    // The count says how much is still queued; the titles say what it is about.
+    expect(shown).toContain("about ");
+    expect(shown).not.toContain("Where does the split go?");
+    const dot = within(said).getByRole("button", { name: "The questions that were asked" });
+    const hint = within(said).getByRole("tooltip", { hidden: true });
+    expect(hint.textContent).toContain("Where does the split go?");
+    expect(dot.getAttribute("aria-describedby")).toBe(hint.id);
+    expect(dot.getAttribute("aria-expanded")).toBe("false");
+    expect(hint.className).not.toContain("info-hint-body--open");
+
+    fireEvent.pointerEnter(dot);
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("true"));
+    expect(within(said).getByRole("tooltip").className).toContain("info-hint-body--open");
+    // Crossing the gap to the panel keeps it open: the panel hangs against the
+    // window, so the space between the two is neither of them, and shutting at
+    // once would close the thing the pointer is travelling to.
+    fireEvent.pointerLeave(dot);
+    fireEvent.pointerEnter(within(said).getByRole("tooltip"));
+    await new Promise((settle) => setTimeout(settle, 220));
+    expect(dot.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.pointerLeave(within(said).getByRole("tooltip"));
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("false"));
+
+    // A keyboard reaches it too: it is not a hover-only affordance.
+    fireEvent.focus(dot);
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("true"));
+    fireEvent.keyDown(dot, { key: "Escape" });
+    await waitFor(() => expect(dot.getAttribute("aria-expanded")).toBe("false"));
+
+    await waitFor(() => expect(within(dock()).queryAllByText(/Noted:/)).toHaveLength(0));
+  });
+
+
+  it("resizes the interview by dragging the bar on its edge, and remembers it", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    const bar = screen.getByRole("separator", { name: "Resize the interview" });
+    expect(dock().style.width).toBe(`${DEFAULT_DOCK_WIDTH}px`);
+    expect(bar.getAttribute("aria-valuenow")).toBe(String(DEFAULT_DOCK_WIDTH));
+
+    // The dock is on the right, so the width is the distance from the pointer
+    // to the window's right edge.
+    Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+    fireEvent.pointerDown(bar, { button: 0, pointerId: 1 });
+    fireEvent.pointerMove(bar, { pointerId: 1, clientX: 700 });
+    await waitFor(() => expect(dock().style.width).toBe("500px"));
+    fireEvent.pointerUp(bar, { pointerId: 1 });
+
+    // A move after the drag has ended does not keep dragging it.
+    fireEvent.pointerMove(bar, { pointerId: 1, clientX: 900 });
+    expect(dock().style.width).toBe("500px");
+    expect(
+      screen.getByRole("separator", { name: "Resize the interview" }).getAttribute("aria-valuenow"),
+    ).toBe("500");
+    expect(localStorage.getItem("perbo:dock")).toBe("500");
+  });
+
+  it("holds the interview's width inside its bounds, and the keyboard moves it", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    const bar = () => screen.getByRole("separator", { name: "Resize the interview" });
+    Object.defineProperty(window, "innerWidth", { value: 1200, configurable: true });
+
+    // Dragged past either end, it stops at the end rather than going past it.
+    fireEvent.pointerDown(bar(), { button: 0, pointerId: 1 });
+    fireEvent.pointerMove(bar(), { pointerId: 1, clientX: 1190 });
+    await waitFor(() => expect(dock().style.width).toBe(`${MIN_DOCK_WIDTH}px`));
+    fireEvent.pointerMove(bar(), { pointerId: 1, clientX: 10 });
+    await waitFor(() => expect(dock().style.width).toBe(`${MAX_DOCK_WIDTH}px`));
+    fireEvent.pointerUp(bar(), { pointerId: 1 });
+
+    // Left widens, because the edge moving left is the dock growing.
+    fireEvent.keyDown(bar(), { key: "ArrowRight" });
+    await waitFor(() => expect(dock().style.width).toBe(`${MAX_DOCK_WIDTH - 16}px`));
+    fireEvent.keyDown(bar(), { key: "ArrowLeft" });
+    await waitFor(() => expect(dock().style.width).toBe(`${MAX_DOCK_WIDTH}px`));
+    // Home puts it back where it opens, as double-clicking does.
+    fireEvent.keyDown(bar(), { key: "Home" });
+    await waitFor(() => expect(dock().style.width).toBe(`${DEFAULT_DOCK_WIDTH}px`));
+    fireEvent.doubleClick(bar());
+    expect(dock().style.width).toBe(`${DEFAULT_DOCK_WIDTH}px`);
   });
 
   it("puts one group of questions at a time, and sends the options' own words", async () => {
@@ -1924,15 +2125,76 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     // Answering the first group brings the second.
     const second = await card("Question 2");
     expect(second.getByText("What happens to the old node?")).toBeTruthy();
-    // The first is off the card, though the transcript still holds it.
+    // The first is off the card, though the transcript still holds it behind
+    // the dot on the line that says the asking happened.
     expect(second.queryByText("Where does the split go?")).toBeNull();
-    expect(within(dock()).getAllByText("Where does the split go?").length).toBeGreaterThan(0);
-    // Every part carries a way out of choosing, and the composer stays live.
-    expect(second.getAllByRole("radio")).toHaveLength(3);
+    expect(askedInTranscript()).toContain("Where does the split go?");
+    // Its own two answers, the way out of choosing between them, and the way
+    // out of the card altogether.
+    expect(second.getAllByRole("radio")).toHaveLength(4);
     expect(second.getByText("Let the interview decide")).toBeTruthy();
-    expect((composer() as HTMLTextAreaElement).disabled).toBe(false);
+    expect(second.getByText("Something else")).toBeTruthy();
+    // The card is the only way to answer while one is up.
+    expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(true);
+    fireEvent.click(second.getByRole("radio", { name: /Something else/ }));
+    await waitFor(() =>
+      expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false),
+    );
+    // And the box has the caret: saying the answer is not on the card is
+    // already the start of typing it, so the next keystroke lands in the box
+    // without a hand leaving the keyboard for the mouse.
+    await waitFor(() => expect(document.activeElement).toBe(composer()));
 
     await waitFor(() => expect(within(dock()).getAllByText(/Noted:/)).toHaveLength(1));
+  });
+
+  it("keeps the questions a size of their own, which the bar on its edge sets", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const card = await within(dock()).findByRole("group", { name: "How the queue is split" });
+    expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT}px`);
+
+    // Asking for the box back does not make the card taller: the room comes
+    // from the conversation above it.
+    fireEvent.click(within(card).getAllByRole("radio", { name: /Something else/ })[0]!);
+    await waitFor(() =>
+      expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false),
+    );
+    expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT}px`);
+
+    // The bar on its top edge sets the height; dragging up makes it taller.
+    const bar = within(dock()).getByRole("separator", { name: "Resize the questions" });
+    fireEvent.keyDown(bar, { key: "ArrowUp" });
+    await waitFor(() => expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT + 16}px`));
+    fireEvent.keyDown(bar, { key: "ArrowDown" });
+    await waitFor(() => expect(card.style.height).toBe(`${DEFAULT_ASKED_HEIGHT}px`));
+    expect(localStorage.getItem("perbo:asked")).toBe(String(DEFAULT_ASKED_HEIGHT));
+  });
+
+  it("puts the session's own recommendation at the top of a part's answers", async () => {
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    const card = within(
+      await within(dock()).findByRole("group", { name: "How the queue is split" }),
+    );
+
+    // The sample offers "Split at the read" second-to-none but marks it the
+    // recommendation; a person reads the top of a list, so it is put there.
+    const first = card.getAllByRole("radio")[0]!;
+    expect(first.closest("label")?.textContent).toContain("Split at the read");
+    expect(first.closest("label")?.textContent).toContain("recommended");
+    // The two standing answers come last, in that order.
+    const labels = card.getAllByRole("radio").map((radio) => radio.closest("label")?.textContent ?? "");
+    expect(labels.at(-2)).toContain("Let the interview decide");
+    expect(labels.at(-1)).toContain("Something else");
   });
 
   it("takes the questions away once the person says something of their own", async () => {
@@ -1947,6 +2209,13 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await within(dock()).findByRole("group", { name: "How the queue is split" });
 
+    // The box is behind the card, and "Something else" is how it comes back.
+    fireEvent.click(
+      within(dock()).getAllByRole("radio", { name: /Something else/ })[0]!,
+    );
+    await waitFor(() =>
+      expect(composer().closest(".composer")?.hasAttribute("hidden")).toBe(false),
+    );
     fireEvent.change(composer(), { target: { value: "what do you mean by split?" } });
     fireEvent.click(within(dock()).getAllByRole("button", { name: "Send" }).at(-1)!);
 
@@ -1954,9 +2223,55 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       expect(within(dock()).queryByRole("group", { name: "How the queue is split" })).toBeNull(),
     );
     // Nothing asked is lost: the transcript still holds every question.
-    expect(within(dock()).getAllByText("Where does the split go?").length).toBeGreaterThan(0);
-    expect(within(dock()).getAllByText("What happens to the old node?").length).toBeGreaterThan(0);
+    expect(askedInTranscript()).toContain("Where does the split go?");
+    expect(askedInTranscript()).toContain("What happens to the old node?");
     expect(await within(dock()).findByText(/Noted:/)).toBeTruthy();
+  });
+
+  it("keeps saying it is working through a pause it takes mid-turn", async () => {
+    // The pause that reads as something having gone wrong: the session says a
+    // line, then goes quiet to read the repository before it says the next.
+    // The lines alone cannot tell that from a session that has finished.
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+
+    await sampleBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: plan.id });
+    await sampleBridge.request({
+      kind: "interviewTurn",
+      id: plan.id,
+      text: "what is this piece of work for?",
+    });
+    expect((await within(dock()).findAllByText("Thinking…")).length).toBeGreaterThan(0);
+
+    // It speaks, and then says nothing for a while. The turn is not over, so
+    // the dock is still saying so — which is the whole point: the lines alone
+    // would read as a session that had finished.
+    await within(dock()).findByText(/I'll look at what's already here/);
+    expect((await within(dock()).findAllByText("Thinking…")).length).toBeGreaterThan(0);
+
+    // The rest of the turn lands, and only then does it stop saying it.
+    await within(dock()).findByText(/Noted:/);
+    await waitFor(() => expect(within(dock()).queryAllByText("Thinking…")).toHaveLength(0));
+  });
+
+  it("stops saying it is working when the interview is stopped mid-turn", async () => {
+    // Something going wrong, or the person deciding not to wait, is the one
+    // case the indicator must not sit through: nothing is coming.
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    await sampleBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: plan.id });
+    await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "why two nodes?" });
+    expect((await within(dock()).findAllByText("Thinking…")).length).toBeGreaterThan(0);
+
+    await sampleBridge.request({ kind: "interviewStop", id: plan.id });
+    await waitFor(() => expect(within(dock()).queryAllByText("Thinking…")).toHaveLength(0));
+    // And the turn it was in the middle of still lands without bringing it back.
+    await within(dock()).findByText(/Noted:/);
+    expect(within(dock()).queryAllByText("Thinking…")).toHaveLength(0);
   });
 
   it("says the interview is working until its answer lands", async () => {
@@ -1992,7 +2307,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(
-      await within(dock()).findByText(/Named from your first message: specs\/add-a-dark-mode-toggle/),
+      await within(dock()).findByText(/Named specs\/add-a-dark-mode-toggle from your first message/),
     ).toBeTruthy();
     // The turn was heard: the session answers it, and the composer is ready
     // for the next one.
@@ -2020,7 +2335,31 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     await waitFor(() => expect(composer().value).toBe("?!?!"));
   });
 
-  it("takes the Undo off a card once a later edit is in the way", async () => {
+  // The refused arm of the same rule. A call that worked is dropped for saying
+  // what the graph already says; one that was refused is said nowhere else —
+  // no `asked` follows a rejected call — so dropping it too would leave the
+  // dock on "Working…" and then nothing at all.
+  it("keeps a refused tool card, and shows its reason without asking", async () => {
+    const session = await planning();
+    location.hash = `planning/${session.id}/spec`;
+    mount();
+    await screen.findByLabelText("Message the interview");
+    fireEvent.change(composer(), { target: { value: "refuse it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    // Named for what it tried rather than what it did: it never happened.
+    expect(await within(dock()).findByText("Changing the plan")).toBeTruthy();
+    expect(within(dock()).getByText("refused by the edit path")).toBeTruthy();
+    // The reason is on the page, not behind the i: it is the thing to act on.
+    expect(within(dock()).getByText(/node_404 is not in this plan/)).toBeTruthy();
+    expect(
+      within(dock()).queryByRole("button", { name: /^What happened/ }),
+    ).toBeNull();
+    // And the turn ended, so the dock is not left saying it is working.
+    await waitFor(() => expect(within(dock()).queryByText("Working…")).toBeNull());
+  });
+
+  it("takes a card away once a later edit puts its undo out of reach", async () => {
     const session = await planning();
     const current = await sampleBridge.request({ kind: "editingRead", id: session.id });
     await sampleBridge.request({
@@ -2052,6 +2391,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       await waitFor(() => expect(composer().value).toBe(""));
     }
     expect(await within(dock()).findByRole("button", { name: /^Undo/ })).toBeTruthy();
+    expect(within(dock()).getByText("Changed the plan")).toBeTruthy();
 
     // A hand edit lands after it, which D-100 says an undo may not reach past.
     const plan = { repoId: session.repoId, key: key! };
@@ -2067,11 +2407,70 @@ describe("the interview docked in planning mode (SCP-313)", () => {
         expected_verification: { kind: second.kind, assertion: second.assertion },
       },
     });
-    // The card asks the plan rather than the snapshot it was drawn from, so it
-    // stops offering an undo the host would refuse.
+    // The card asks the plan rather than the snapshot it was drawn from. With
+    // the undo out of reach it carries nothing the graph does not already show,
+    // so the whole card goes rather than the button alone — asserted on the
+    // card's own name, since a missing button cannot tell the two apart.
     await waitFor(() =>
       expect(within(dock()).queryByRole("button", { name: /^Undo/ })).toBeNull(),
     );
+    expect(within(dock()).queryByText("Changed the plan")).toBeNull();
+    // The conversation it was standing in is untouched: what goes is the panel,
+    // not the turns around it.
+    expect(within(dock()).getAllByText(/tighten the first criterion/).length).toBeGreaterThan(0);
+  });
+
+  // The other two arms of the same rule. A card is kept or dropped by which
+  // tool made it, so each tool needs its own run: a drafting happens once and
+  // is the only word on what the spec aimed at the drafter, and an undo is the
+  // only word that a change was taken back. Neither is said anywhere else, and
+  // neither may be dropped for being a tool call that worked.
+  it("keeps the drafting and the undo, which are said nowhere else", async () => {
+    const session = await planning();
+    const current = await sampleBridge.request({ kind: "editingRead", id: session.id });
+    await sampleBridge.request({
+      kind: "editingSubmit",
+      id: session.id,
+      revision: current.revision,
+      operationId: crypto.randomUUID(),
+      intent: "generate",
+    });
+    await waitFor(
+      async () =>
+        expect((await sampleBridge.request({ kind: "editingRead", id: session.id })).key).not.toBeNull(),
+      { timeout: 5000 },
+    );
+    location.hash = `planning/${session.id}/spec`;
+    mount();
+    await screen.findByLabelText("Message the interview");
+
+    const say = async (text: string): Promise<void> => {
+      fireEvent.change(composer(), { target: { value: text } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      await waitFor(() => expect(composer().value).toBe(""));
+    };
+    // A turn to get past the refusal the sample opens with, then an edit, so
+    // there is something for the undo to take back.
+    await say("what is this for?");
+    await say("tighten the first criterion");
+    expect(await within(dock()).findByText("Changed the plan")).toBeTruthy();
+
+    // The drafting: kept, and its report reachable rather than shown.
+    await say("draft it");
+    expect(await within(dock()).findByText("Drafted the plan")).toBeTruthy();
+    expect(
+      within(dock()).getByRole("button", { name: "What happened: Drafted the plan" }),
+    ).toBeTruthy();
+
+    // The undo: kept, though no undo is ever offered on an undo's own card —
+    // the plan's history refuses to undo one, so it can never be the edit the
+    // card's button points at, and a rule that kept only those would lose it.
+    await say("take it back");
+    expect(await within(dock()).findByText("Took a change back")).toBeTruthy();
+    // And the edit it took back is gone from the chat with its undo, while the
+    // drafting is still there.
+    await waitFor(() => expect(within(dock()).queryByText("Changed the plan")).toBeNull());
+    expect(within(dock()).getByText("Drafted the plan")).toBeTruthy();
   });
 
   it("opens the plan's history over the pane, with the chat still beside it", async () => {
@@ -2204,13 +2603,112 @@ describe("the Impact pane (SCP-320)", () => {
   };
   const row = (path: string) => screen.getByLabelText(path);
 
+  // A plan is the thing impact is measured against, so the plan arriving is the
+  // question being asked. Somebody who has just had one drafted and opens this
+  // pane wants what it disturbs, not a button that will tell them.
+  it("asks once on its own when the planning has a plan, and not again", async () => {
+    const asked = vi.spyOn(sampleBridge, "request");
+    const runs = (): number =>
+      asked.mock.calls.filter(([request]) => request.kind === "impactRead").length;
+    try {
+      await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
+      const opened = await session();
+      expect(runs()).toBe(0);
+      // A plan needs a spec to be drafted from, through the host as the Spec
+      // pane's own Generate does.
+      await sampleBridge.request({
+        kind: "specSave",
+        id: opened.id,
+        repoId: opened.repoId,
+        title: "A light colour mode",
+        sections: {
+          outcome: "The application supports a usable light colour mode.",
+          requirements: "- The person can choose Light, Dark or System without a restart.",
+          no_gos: "",
+          rabbit_holes: "",
+          notes: "",
+        },
+        base: NOTHING_YET,
+      });
+      const withSpec = await session();
+      await sampleBridge.request({
+        kind: "editingSubmit",
+        id: withSpec.id,
+        revision: withSpec.revision,
+        operationId: crypto.randomUUID(),
+        intent: "generate",
+      });
+      await waitFor(
+        async () => expect((await session()).key).not.toBeNull(),
+        { timeout: 5000 },
+      );
+      // No button was pressed, and the answer arrives.
+      await waitFor(() => expect(runs()).toBeGreaterThan(0));
+      await waitFor(() => expect(screen.queryByText("not checked yet")).toBeNull());
+      const once = runs();
+      // And it is asked once: the answer is a whole `perbo index` over the
+      // tracked tree, so a re-render is not a reason to run it again.
+      await waitFor(() => expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy());
+      expect(runs()).toBe(once);
+    } finally {
+      asked.mockRestore();
+    }
+  });
+
+  // A person settles a plan from whichever pane answered their last question,
+  // so the way onward is on all three rather than only on the Graph. It
+  // confirms and never approves: the contract is the page that states what
+  // freezes, and it carries the one approval there is.
+  it.each(["Impact", "Explorer"])("offers the way to the contract from %s", async (pane) => {
+    await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
+    // No plan yet, so there is nothing to confirm and the control is absent —
+    // these panes are read while the work is still being described.
+    await openPane(pane);
+    expect(screen.queryByRole("button", { name: "Confirm the plan" })).toBeNull();
+
+    const opened = await session();
+    await sampleBridge.request({
+      kind: "specSave",
+      id: opened.id,
+      repoId: opened.repoId,
+      title: "A light colour mode",
+      sections: {
+        outcome: "The application supports a usable light colour mode.",
+        requirements: "- The person can choose Light, Dark or System without a restart.",
+        no_gos: "",
+        rabbit_holes: "",
+        notes: "",
+      },
+      base: NOTHING_YET,
+    });
+    const withSpec = await session();
+    await sampleBridge.request({
+      kind: "editingSubmit",
+      id: withSpec.id,
+      revision: withSpec.revision,
+      operationId: crypto.randomUUID(),
+      intent: "generate",
+    });
+    await waitFor(async () => expect((await session()).key).not.toBeNull(), { timeout: 5000 });
+
+    await openPane(pane);
+    // Read before the click: confirming leaves planning, and the session is
+    // read off the route this is standing on.
+    const key = (await session()).key!;
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }));
+    // The contract, and not an approval taken on a pane that never said what
+    // it was freezing.
+    await waitFor(() => expect(location.hash).toContain(`${key}/contract`));
+  });
+
   it("sits last in the rail's planning panes, and asks for nothing until it is asked", async () => {
     await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
-    expect(railNames().slice(0, 7)).toEqual([
+    // No plan has been drafted here, so there is no graph to offer and Impact
+    // is last of the three that are.
+    expect(railNames().slice(0, 6)).toEqual([
       "Create",
       "Spec",
       "Explorer",
-      "Graph",
       "Impact",
       "Home",
       "Archive",

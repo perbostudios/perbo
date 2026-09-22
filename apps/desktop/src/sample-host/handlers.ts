@@ -40,6 +40,7 @@ import {
   sampleRead,
   sampleSummary,
   sampleInterviews,
+  sampleWorking,
   sampleTranscript,
   saveSpec,
   snapshot,
@@ -117,13 +118,47 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       },
       120,
     ),
-  explorerMark: (request) =>
-    editing.mark(request.id, request.revision, request.path, request.mark, request.always),
+  explorerMark: (request) => {
+    // As on the real host: an approved contract's scope is frozen, and a mark
+    // against one could never be compiled in. The standing list is the
+    // repository's rather than this ticket's, so it stays writable — either
+    // way on it, which is what `always` being set at all means: true adds the
+    // path and false takes back what this draft added. Null is the ticket's
+    // own scope, and that is what the freeze holds.
+    const marking = editing.read(request.id);
+    const held =
+      marking.key === null
+        ? undefined
+        : snapshot.tasks.find((entry) => entry.ticket.key === marking.key);
+    if (held?.ticket.approved_at && request.always === null)
+      throw new Error(
+        "This contract is approved, so its scope is frozen. Start over from the spec to plan it again.",
+      );
+    return editing.mark(request.id, request.revision, request.path, request.mark, request.always);
+  },
   explorerUndo: (request) => editing.undo(request.id, request.revision, request.edit),
   editingDiscard: (request) => {
+    // The ticket this planning drafted goes with it, as it does on the real
+    // host: a plan thrown away must not leave its ticket on the board with no
+    // way back to the plan. One that has run is not a draft and stays, and one
+    // this planning was merely opened over was never its to throw away.
+    const held = editing.read(request.id);
     const session = editing.discard(request.id, request.revision);
     sampleInterviews.delete(request.id);
-    emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id) });
+    sampleWorking.delete(request.id);
+    emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id), working: false });
+    const drafted =
+      held.key === null || !held.admitted
+        ? undefined
+        : snapshot.tasks.find((entry) => entry.ticket.key === held.key);
+    if (
+      drafted &&
+      ["draft", "specifying", "plan_review", "ready", "plan_invalid"].includes(drafted.ticket.state)
+    ) {
+      snapshot.tasks = snapshot.tasks.filter((entry) => entry !== drafted);
+      plans.delete(drafted.ticket.key);
+      emit({ kind: "records", repoId: held.repoId, key: null });
+    }
     return session;
   },
   interviewStart: (request) => {
@@ -137,6 +172,9 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       nameSpecFromTurn(request.id, request.text);
       startSampleInterview(request.id);
     }
+    // The turn is with the session: it is working until it has answered, as
+    // the host reports of a real one.
+    sampleWorking.add(request.id);
     converse(request.id, { kind: "turn", text: request.text });
     editing.answerAsking(request.id, request.text);
     askingChanged(request.id);
@@ -146,7 +184,8 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
   interviewStop: (request) => {
     sampleInterviews.delete(request.id);
-    emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id) });
+    sampleWorking.delete(request.id);
+    emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id), working: false });
     converse(request.id, { kind: "note", text: "The interview ended: you stopped it." });
     return interviewStatus(request.id);
   },
@@ -181,6 +220,29 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     const markdown = session.specSlug === null ? null : (specFiles()[session.specSlug] ?? null);
     return {
       ...impactReport({ scope: session.form.draft.paths, tracked, spec: markdown, index }),
+      readAt: new Date().toISOString(),
+    };
+  },
+  // The same reading, of a compiled contract's own scope. Answered from the
+  // ticket rather than from a planning session, as the host answers it: the
+  // contract page is reached from a ticket, and one the CLI admitted never had
+  // a session.
+  impactContract: (request) => {
+    const tracked = sampleFiles(request.repoId).filter((path) => !isNeverReadPath(path));
+    const index = SAMPLE_INDEX[request.repoId];
+    if (index === undefined) throw new Error("This sample repository is no longer connected.");
+    const contract = plans.get(request.key);
+    if (contract === undefined) throw new Error("That contract is no longer here.");
+    // The spec the ticket was drafted from, as the host reads it off the
+    // ticket's admission record; here, off the planning that drafted it.
+    const slug = editingRecords().find((record) => record.key === request.key)?.specSlug ?? null;
+    return {
+      ...impactReport({
+        scope: contract.scope.paths_allowed,
+        tracked,
+        spec: slug === null ? null : (specFiles()[slug] ?? null),
+        index,
+      }),
       readAt: new Date().toISOString(),
     };
   },
@@ -258,6 +320,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     ...structuredClone(snapshot),
     drafts: openDrafts(editingRecords()),
     interviews: [...sampleInterviews],
+    working: [...sampleWorking],
   }),
   repositorySnapshot: (request) => {
     const repository = snapshot.repositories.find((entry) => entry.id === request.repoId);

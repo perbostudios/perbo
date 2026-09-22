@@ -10,7 +10,9 @@ import { InkIcon } from "./internal/InkIcon.js";
 
 export { cx } from "./internal/cx.js";
 export { Dropdown } from "./internal/Dropdown.js";
+export { InfoHint } from "./internal/InfoHint.js";
 export { InkIcon } from "./internal/InkIcon.js";
+export type { InkIconName } from "./internal/InkIcon.js";
 export { LineIcon } from "./internal/LineIcon.js";
 export type { LineIconName } from "./internal/LineIcon.js";
 export {

@@ -42,11 +42,11 @@ import { requireGithubCredential } from "./github-credential.js";
  *
  * Nothing here merges. D-077 gave the loop a merge of its own for the
  * integration branch, behind a switch that defaults to a person, and it lives
- * in `merge.ts` beside this module rather than in it — the same division the
- * two files already had, where this one opens a pull request and `merge-up.ts`
- * keeps its branch level. D-041 still stands for `main` and for any customer
- * repository, and `self_merge` is still on the executor's prohibited list: the
- * agent never merges, whichever way the switch is set.
+ * in `merge.ts` beside this module rather than in it — the same division this
+ * module and `loop/internal/merge-up.ts` keep, where this one opens a pull
+ * request and that one keeps the branch level. D-041 still stands for `main`
+ * and for any customer repository, and `self_merge` is still on the executor's
+ * prohibited list: the agent never merges, whichever way the switch is set.
  */
 
 export class DeliveryError extends Error {

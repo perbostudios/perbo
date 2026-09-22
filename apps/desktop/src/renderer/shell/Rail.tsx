@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { InkIcon, LineIcon, cx } from "../ui/index.js";
-import { PLANNING_PANES } from "../planning/panes.js";
+import { InkIcon, cx } from "../ui/index.js";
+import { panesFor } from "../planning/panes.js";
+import type { Snapshot } from "../../shared/protocol.js";
 import { useCreate } from "./create.js";
 import { useShortcut } from "./shortcuts.js";
 import { RAIL_WIDTH, setRailSize, useRailSize } from "./rail-size.js";
@@ -82,10 +83,13 @@ export function Rail({
   route,
   navigate,
   attention,
+  drafts,
 }: {
   route: Route;
   navigate: (route: Route) => void;
   attention: number;
+  /** The open plannings, which say which of them has a graph to offer. */
+  drafts: Snapshot["drafts"];
 }) {
   const inSettings = (SETTINGS_PAGES as readonly string[]).includes(route.page);
   const [hover, setHover] = useState(false);
@@ -152,12 +156,12 @@ export function Rail({
           onMouseLeave={create.leave}
         >
           <span className="rail-icon">
-            <LineIcon name="create" size={22} />
+            <InkIcon name="add-circle" size={22} />
           </span>
         </button>
         {planning && (
           <div className="rail-children" role="group" aria-label="Planning panes">
-            {PLANNING_PANES.map((pane) => (
+            {panesFor(drafts, route.sessionId).map((pane) => (
               <button
                 key={pane.id}
                 className={cx("rail-item", "rail-child", route.pane === pane.id && "selected")}
@@ -167,7 +171,7 @@ export function Rail({
                 onClick={() => navigate({ ...route, pane: pane.id })}
               >
                 <span className="rail-icon">
-                  <LineIcon name={pane.icon} size={18} />
+                  <InkIcon name={pane.icon} size={19} />
                 </span>
               </button>
             ))}
@@ -177,7 +181,7 @@ export function Rail({
       {(
         [
           { page: "home", icon: "home", label: "Home" },
-          { page: "archive", icon: "folder", label: "Archive" },
+          { page: "archive", icon: "inbox", label: "Archive" },
         ] as const
       ).map(({ page, icon, label: text }) => (
         <button
@@ -188,7 +192,7 @@ export function Rail({
           onClick={() => navigate({ page })}
         >
           <span className="rail-icon">
-            <InkIcon name={icon} size={icon === "folder" ? 23 : 22} />
+            <InkIcon name={icon} size={22} />
             {page === "home" && (
               <span
                 className="t-badge rail-badge"

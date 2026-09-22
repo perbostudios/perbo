@@ -75,7 +75,17 @@ export interface SpecRequirementDraft {
  * `parseSpec` already drops — it reads list items there and nothing else — so
  * the reader needs no knowledge of it.
  */
-const MARK = /<!--\s*perbo:requirement-ids through R(\d+)\s*-->/;
+/**
+ * The mark, matched as a whole line and never as part of one.
+ *
+ * Unanchored it also matched a line that merely quoted it — a requirement
+ * about the mark, or a heading naming it — and the filters below drop what
+ * they match, so that line was deleted from the file on the next save with
+ * nothing said. `parseSpec` reads list items and kept it, which left the two
+ * readers of one file disagreeing about what it holds. Multiline, because the
+ * high-water read below looks for it in the whole document.
+ */
+const MARK = /^[ \t]*<!--[ \t]*perbo:requirement-ids through R(\d+)[ \t]*-->[ \t]*$/m;
 const markLine = (highWater: number): string =>
   `<!-- perbo:requirement-ids through R${highWater} -->`;
 
@@ -168,27 +178,61 @@ export function specTitleFromMessage(message: string): string {
 }
 
 /**
- * The requirements a section's text states, each with the id it already
- * carries.
+ * A heading inside a section, which is the one thing there that states no
+ * requirement.
+ *
+ * Three hashes at least, because `#` and `##` are the spec file's own
+ * delimiters: {@link readSpecSections} splits on them, so a `##` line written
+ * inside `## Requirements` would open a new section on the next read and take
+ * every requirement under it out of the file. A line at those two depths stays
+ * what it has always been — a requirement, written back with an id — which
+ * reads oddly and loses nothing.
+ */
+const SECTION_HEADING = /^#{3,6}\s+\S/;
+
+/**
+ * One line of the Requirements section: a requirement, or a heading grouping
+ * the ones under it.
+ */
+type RequirementLine = { heading: string } | { draft: SpecRequirementDraft };
+
+/**
+ * The Requirements section read line by line, each requirement with the id it
+ * already carries.
  *
  * A line that is not a list item is a requirement too, and is written back as
  * one. Dropping it would lose a person's sentence silently, which is the one
  * outcome an editor may not have.
+ *
+ * A heading is the exception, and has to be: `parseSpec` reads list items in
+ * this section and nothing else, so it has always passed headings over. An
+ * editor that numbered them instead would make the two readers of one file
+ * disagree — and the first save after an interview wrote "### The page" would
+ * turn that line into a requirement, shift every id after it, and leave the
+ * person's spec saying something they did not write.
  */
-function parseRequirementLines(text: string): SpecRequirementDraft[] {
+function parseRequirementSection(text: string): RequirementLine[] {
   return text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !MARK.test(line))
-    .map((line) => {
+    .flatMap((line): RequirementLine[] => {
+      if (SECTION_HEADING.test(line)) return [{ heading: line }];
       const item = LIST_ITEM.exec(line);
       const body = (item ? item[1]! : line).trim();
       const match = REQUIREMENT.exec(body);
-      return match
+      const draft = match
         ? { id: match[1]!, text: match[2]!.trim() }
         : { id: null, text: body };
-    })
-    .filter((requirement) => requirement.text.length > 0);
+      return draft.text.length > 0 ? [{ draft }] : [];
+    });
+}
+
+/** The requirements alone, for a reader that wants no structure with them. */
+function parseRequirementLines(text: string): SpecRequirementDraft[] {
+  return parseRequirementSection(text).flatMap((line) =>
+    "draft" in line ? [line.draft] : [],
+  );
 }
 
 /** The list items a section's text states, for No-Gos and Rabbit holes. */
@@ -233,7 +277,8 @@ export function renderSpec(
   if (title.length === 0) {
     throw new PlanningError("a spec's first heading is the title of the work it states");
   }
-  const drafts = parseRequirementLines(text.requirements);
+  const lines = parseRequirementSection(text.requirements);
+  const drafts = lines.flatMap((line) => ("draft" in line ? [line.draft] : []));
   let highWater = Math.max(
     options.highWater ?? 0,
     0,
@@ -253,7 +298,7 @@ export function renderSpec(
   // requirement said twice, not two requirements sharing an id, and only the
   // second reading tells them apart.
   const seen = new Map<string, string>();
-  const requirements: SpecRequirement[] = drafts.flatMap((draft) => {
+  const numbered = (draft: SpecRequirementDraft): SpecRequirement[] => {
     if (draft.id !== null) {
       const already = seen.get(draft.id);
       if (already !== undefined) {
@@ -278,15 +323,77 @@ export function renderSpec(
     const id = `R${highWater}`;
     seen.set(id, draft.text);
     return [{ id, text: draft.text }];
-  });
+  };
+
+  // Walked in the order it was written, and gathered into the groups the
+  // headings make, so a heading keeps the requirements under it: the ids are
+  // the file's, the arrangement is the person's.
+  const requirements: SpecRequirement[] = [];
+  const groups: { heading: string | null; depth: number; lines: string[] }[] = [
+    { heading: null, depth: 0, lines: [] },
+  ];
+  for (const line of lines) {
+    if ("heading" in line) {
+      groups.push({
+        heading: line.heading,
+        depth: (/^#+/.exec(line.heading)?.[0].length ?? 0),
+        lines: [],
+      });
+      continue;
+    }
+    for (const requirement of numbered(line.draft)) {
+      requirements.push(requirement);
+      groups.at(-1)!.lines.push(`- ${requirement.id}: ${requirement.text}`);
+    }
+  }
+
+  /** Whether anything at all survived under this heading, at any depth below it. */
+  const holdsSomething = (at: number): boolean => {
+    const { depth } = groups[at]!;
+    for (let i = at; i < groups.length; i += 1) {
+      const group = groups[i]!;
+      if (i > at && group.heading !== null && group.depth <= depth) break;
+      if (group.lines.length > 0) return true;
+    }
+    return false;
+  };
+
+  // A heading already written, with nothing left anywhere under it, is the
+  // second copy "Keep both" made: that join hands this function the file's text
+  // and the person's one after the other, and the repeat's requirements
+  // deduplicate away by id, leaving the heading standing over nothing.
+  //
+  // Emptiness is what tells the two apart, and it has to be the emptiness of
+  // everything under the heading rather than of its own lines. A person who
+  // writes `### Desktop`, `### CLI` and `### Desktop` again means the third one;
+  // so does one whose repeated `### Desktop` holds a `#### Dock` with a
+  // requirement in it. Dropping either would move that requirement under
+  // `### CLI`, which is worse than the repetition it was meant to clean up.
+  const headings = new Set<string>();
+  const chunks: string[] = [];
+  for (const [at, group] of groups.entries()) {
+    if (group.heading !== null) {
+      if (headings.has(group.heading) && !holdsSomething(at)) continue;
+      headings.add(group.heading);
+    }
+    // One blank line between a heading and its requirements, and one between
+    // one group and the next: built by joining rather than by pushing
+    // separators, so a group with a heading and no lines cannot leave two.
+    const parts = [
+      ...(group.heading === null ? [] : [group.heading]),
+      ...(group.lines.length === 0 ? [] : [group.lines.join("\n")]),
+    ];
+    if (parts.length > 0) chunks.push(parts.join("\n\n"));
+  }
 
   const body: Record<(typeof SPEC_HEADINGS)[number], string> = {
     Outcome: text.outcome.trim(),
-    Requirements: [
-      ...requirements.map((requirement) => `- ${requirement.id}: ${requirement.text}`),
-      // No mark until an id has been given: a file that numbered nothing carries nothing.
-      ...(highWater === 0 ? [] : ["", markLine(highWater)]),
-    ].join("\n"),
+    // No mark until an id has been given: a file that numbered nothing carries
+    // nothing, and a section emptied of its requirements keeps the mark alone
+    // rather than a blank line in front of it.
+    Requirements: [chunks.join("\n\n"), highWater === 0 ? "" : markLine(highWater)]
+      .filter((part) => part.length > 0)
+      .join("\n\n"),
     "No-Gos": listOf(text.no_gos)
       .map((each) => `- ${each}`)
       .join("\n"),

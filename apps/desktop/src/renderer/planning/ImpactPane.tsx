@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, EmptyState, LineIcon, Notice } from "../ui/index.js";
 import { withNoGo } from "@perbo/planning/browser";
 import type { ImpactReasonKind, ImpactWarning } from "@perbo/planning/browser";
 import { bridge, errorMessage } from "../workspace/index.js";
-import type { ImpactView, Snapshot } from "../../shared/protocol.js";
+import type { ImpactView } from "../../shared/protocol.js";
+import type { PageProps } from "../shell/route.js";
 import type { useContractEditing } from "../contract-editor.js";
+import { ConfirmPlan } from "./ConfirmPlan.js";
 
 type Editor = ReturnType<typeof useContractEditing>;
 
@@ -13,10 +15,13 @@ type Editor = ReturnType<typeof useContractEditing>;
  * The Impact pane (D-015, D-101): what this draft is likely to touch that its
  * scope does not cover.
  *
- * **On demand, and that means a button.** The answer is a fresh `perbo index`
- * over the repository's whole tracked tree, so opening the pane shows what was
- * asked for last and asks for nothing; the person asks, and asks again when the
- * draft has moved.
+ * **Asked once when the plan arrives, and by the button after that.** The
+ * answer is a fresh `perbo index` over the repository's whole tracked tree, so
+ * it is not something to run on a timer or on every focus. A plan is the thing
+ * impact is measured against, though, so the first one is the question being
+ * asked: a person who has just had a plan drafted and opens this pane wants
+ * what it disturbs, not a button that will tell them. Once the draft moves,
+ * asking again is theirs.
  *
  * **A warning is advice.** Nothing on this screen reaches a contract, a scope
  * glob or a spec on its own (ADR-0023 §4). The two actions beside a warning are
@@ -38,7 +43,16 @@ const REASON_LABELS: Record<ImpactReasonKind, string> = {
   ci_infra_policy: "CI, infra or policy",
 };
 
-export function ImpactPane({ workspace, editor }: { workspace: Snapshot; editor: Editor }) {
+/**
+ * The plans whose impact has been asked for on its own, as `planning:ticket`.
+ *
+ * Module-scope on purpose: the fact being remembered is about the plan, not
+ * about one mounting of this pane, and the pane is unmounted every time the
+ * person looks at another one.
+ */
+const IMPACT_ASKED = new Set<string>();
+
+export function ImpactPane({ workspace, navigate, editor }: PageProps & { editor: Editor }) {
   const client = useQueryClient();
   const [failure, setFailure] = useState<string | null>(null);
   const [asked, setAsked] = useState(false);
@@ -61,6 +75,23 @@ export function ImpactPane({ workspace, editor }: { workspace: Snapshot; editor:
     retry: false,
   });
   const view: ImpactView | undefined = impact.data;
+
+  // The plan arriving is the ask, and it is asked once for that plan.
+  //
+  // Remembered outside the component because `useState` is per mount: leaving
+  // the pane and coming back mounts a new one, and React Query drops a cached
+  // answer after its `gcTime`, so a pane that decided from its own state would
+  // run a whole `perbo index` again every time the person looked — which is
+  // the standing cost the button exists to keep them in charge of. What is
+  // remembered is the plan, so a draft replaced by a different one is a
+  // different question and is asked again.
+  const key = session?.key ?? null;
+  const once = session === null || key === null ? null : `${session.id}:${key}`;
+  useEffect(() => {
+    if (once === null || IMPACT_ASKED.has(once)) return;
+    IMPACT_ASKED.add(once);
+    setAsked(true);
+  }, [once]);
 
   /** The draft's own mark, the one the Explorer makes, so the history can reverse it. */
   const toScope = useMutation({
@@ -220,6 +251,12 @@ export function ImpactPane({ workspace, editor }: { workspace: Snapshot; editor:
           </>
         )}
       </div>
+      <ConfirmPlan
+        workspace={workspace}
+        navigate={navigate}
+        editor={editor}
+        busy={impact.isFetching}
+      />
     </section>
   );
 }

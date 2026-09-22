@@ -17,27 +17,30 @@ export interface DiscardDeps {
 const NEVER_RUN = ["draft", "specifying", "plan_review", "ready", "plan_invalid"];
 
 /**
- * Delete a contract that has never run, with the records it owns.
+ * Delete a contract that has never run, with the records it owns, and answer
+ * with the reason it stays where it does.
  *
  * Evidence is never deleted: an attempt, a bundle or a pull request on record
  * keeps the ticket, whatever state it is in. The three files removed are the
  * ticket's own, and a path that is a link is left alone rather than followed.
+ *
+ * The reason is answered rather than thrown, because there are two callers
+ * with two different needs: deleting a contract outright says the reason to
+ * the person, and throwing away the planning that drafted it takes the ticket
+ * along only where it can and carries on where it cannot — a ticket whose
+ * loop has run is work, not a draft.
  */
 export async function discardTicket(
   deps: DiscardDeps,
   repo: RegisteredRepository,
   key: string,
-): Promise<void> {
+): Promise<string | null> {
   if (heldRepository(deps.liveJobs(), repo.id))
-    throw new Error(
-      "Wait for the commands running in this repository to finish before deleting a contract.",
-    );
+    return "Wait for the commands running in this repository to finish before deleting a contract.";
   const ticket = (await deps.tickets.list(repo)).tickets.find((entry) => entry.key === key);
-  if (!ticket) throw new Error("This task is no longer in the repository's ticket store.");
+  if (!ticket) return "This task is no longer in the repository's ticket store.";
   if (!NEVER_RUN.includes(ticket.state))
-    throw new Error(
-      "Only a contract that has never run can be deleted. This one has moved past the contract stage.",
-    );
+    return "Only a contract that has never run can be deleted. This one has moved past the contract stage.";
   const attempts = readAttempts(attemptsPath(repo, ticket.ticket_id));
   const bundles = listBundles(bundlesPath(repo));
   if (
@@ -45,15 +48,14 @@ export async function discardTicket(
     attempts.error ||
     bundles.some((bundle) => bundle.ticket_id === ticket.ticket_id)
   )
-    throw new Error(
-      "This contract has recorded attempts or evidence, so it stays. Only a never-run contract can be deleted.",
-    );
+    return "This contract has recorded attempts or evidence, so it stays. Only a never-run contract can be deleted.";
   if (ticket.delivery.pull_request_url)
-    throw new Error("This contract has a pull request on record, so it stays.");
+    return "This contract has a pull request on record, so it stays.";
   for (const suffix of [".json", ".contract.json", ".draft.json"] as const) {
     const path = ticketPath(repo, key, suffix);
     if (existsSync(path) && !lstatSync(path).isSymbolicLink()) rmSync(path);
   }
   forgetTicket(deps.profile.state, repo.id, key);
   discardEditingFor(deps.profile.state, repo.id, key);
+  return null;
 }

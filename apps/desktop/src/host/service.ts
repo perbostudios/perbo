@@ -154,8 +154,10 @@ export class DesktopService {
         recordSpec: (id, slug) => this.editing.recordSpec(id, slug),
         beginAsking: (id, entry) => this.editing.beginAsking(id, entry),
         answerAsking: (id, text) => this.editing.answerAsking(id, text),
+        countNodes: (id, nodes) => this.editing.countNodes(id, nodes),
       },
       repository: (id) => this.repository(id),
+      tickets: { contract: (repo, key) => this.tickets.contract(repo, key) },
       cli: this.cli,
       changes: this.changes,
     });
@@ -238,6 +240,7 @@ export class DesktopService {
     // host's own state rather than anything read off a repository, and a
     // cached listing would say one was still there after it had gone.
     const interviews = this.interviews.running();
+    const working = this.interviews.working();
     const workspace = await this.reads.read("snapshot", "snapshot", async () => {
       const records = await Promise.all(
         this.state.repositories.map((repo) => this.tickets.repositorySnapshot(repo.id)),
@@ -266,7 +269,7 @@ export class DesktopService {
         drafts: openDrafts(this.state.editingSessions),
       };
     });
-    return { ...workspace, interviews };
+    return { ...workspace, interviews, working };
   }
   async detail(repoId: string, key: string): Promise<Detail> {
     return this.tickets.detail(repoId, key);

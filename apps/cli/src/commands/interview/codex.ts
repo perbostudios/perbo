@@ -352,6 +352,10 @@ class AppServer {
       if (outcome.id === started.turn.id && outcome.status !== "completed") {
         yield { message: { type: "codex", method: "turn/completed", turn: outcome } };
       }
+      // Outside that: the message is only carried for a turn that ended some
+      // other way, but every turn that ends hands the next word to the person,
+      // and a turn that ended well is the ordinary case.
+      yield { idle: true };
     }
   }
 

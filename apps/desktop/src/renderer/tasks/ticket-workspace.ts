@@ -60,6 +60,9 @@ export function projectTicket(
   else if (["merge", "called-off"].includes(requested)) screen = ticket.delivery.pull_request_url ? requested as "merge" | "called-off" : "review";
   else if (requested === "complete" && ticket.delivery.state === "merged") screen = "complete";
   else if (requested === "contract") screen = "contract";
+  // The repository's files beside this contract, read-only: asked for from the
+  // contract, and never chosen for a person, so it is only ever `requested`.
+  else if (requested === "explorer") screen = "explorer";
   else if (requested === "review" || ((requested === "auto" || requested === "loop") && resultReady)) screen = "review";
   else if (requested === "auto" && ["plan_review", "ready", "draft", "specifying"].includes(ticket.state) && !active) screen = "contract";
   else if (requested === "auto" && ["merged", "closed", "failed", "cancelled", "inconclusive"].includes(ticket.state) && !active) screen = "review";

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Button, EmptyState, InkIcon } from "../ui/index.js";
 import { useCreate } from "../shell/create.js";
 import { useContractEditing } from "../contract-editor.js";
@@ -6,6 +6,8 @@ import { ExplorerPane } from "./ExplorerPane.js";
 import { ImpactPane } from "./ImpactPane.js";
 import { HistoryDrawer } from "./HistoryDrawer.js";
 import { InterviewDock } from "./InterviewDock.js";
+import { DockHandle } from "./DockHandle.js";
+import { dockWidthLimit, useDockWidth } from "../shell/dock-size.js";
 import { PLANNING_PANES } from "./panes.js";
 import type { PageProps } from "../shell/route.js";
 import type { PlanningPane } from "./panes.js";
@@ -21,9 +23,10 @@ const GraphPane = lazy(() =>
  * contract editing session so it survives leaving and restarting. The Spec
  * pane holds the spec the plan is drafted from, and the contract steps under
  * it (D-103); the Explorer pane reads the repository and marks paths for the
- * draft's scope; the Graph pane curates the execution graph and approves it
- * once (D-100); the Impact pane lists, on demand, what the draft is likely to
- * touch that its scope does not cover (D-015).
+ * draft's scope; the Graph pane curates the execution graph and confirms it
+ * to the contract, where the one approval is (D-100); the Impact pane lists
+ * what the draft is likely to touch that its scope does not cover (D-015),
+ * checked once when the plan first arrives and by its button after that.
  *
  * One pane at a time, with the interview docked beside it (D-102) and the
  * plan's history opening as a drawer over the pane, so the chat is there from
@@ -38,6 +41,30 @@ export function PlanningMode({
   pane,
 }: PageProps & { sessionId: string; pane: PlanningPane }) {
   const create = useCreate();
+  const stored = useDockWidth();
+  // How much room there is for the two of them, measured rather than assumed:
+  // the rail and the window both move it, and the drag has to stop where the
+  // dock actually stops.
+  const plan = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState(0);
+  useEffect(() => {
+    const held = plan.current;
+    if (held === null) return;
+    const measure = (): void => setRoom(held.getBoundingClientRect().width);
+    measure();
+    // A window that has no ResizeObserver still has a resize event, which is
+    // what moves this in practice; the observer also catches the rail opening
+    // and closing beside it.
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(held);
+    return () => observer.disconnect();
+  }, []);
+  const limit = dockWidthLimit(room);
+  const dock = Math.min(stored, limit);
   // The same editor the Composer binds to: the host is asked for the session, and its answer decides whether there is planning to show.
   const editor = useContractEditing({ kind: "session", id: sessionId }, workspace.settings);
   const [history, setHistory] = useState(false);
@@ -65,9 +92,9 @@ export function PlanningMode({
     );
   const open =
     pane === "explorer" ? (
-      <ExplorerPane workspace={workspace} editor={editor} />
+      <ExplorerPane workspace={workspace} navigate={navigate} editor={editor} />
     ) : pane === "impact" ? (
-      <ImpactPane workspace={workspace} editor={editor} />
+      <ImpactPane workspace={workspace} navigate={navigate} editor={editor} />
     ) : pane === "graph" ? (
       <Suspense fallback={<Opening what="the graph" />}>
         <GraphPane workspace={workspace} navigate={navigate} editor={editor} />
@@ -78,7 +105,7 @@ export function PlanningMode({
       </Suspense>
     );
   return (
-    <div className="plan">
+    <div className="plan" ref={plan}>
       <section
         className="pane"
         aria-label={PLANNING_PANES.find((entry) => entry.id === pane)?.label ?? "Spec"}
@@ -86,11 +113,17 @@ export function PlanningMode({
         {open}
         {history && <HistoryDrawer editor={editor} onClose={() => setHistory(false)} />}
       </section>
+      {/* The chat stays on every pane: its work after a draft is changing the
+          plan through the validated edit path, each change a card with an undo
+          (D-102, D-100). It opens narrow so the pane beside it — the graph
+          most of all — has the room, and the bar between them still moves. */}
+      <DockHandle width={dock} limit={limit} />
       <InterviewDock
         workspace={workspace}
         editor={editor}
         historyOpen={history}
         onHistory={() => setHistory((shown) => !shown)}
+        width={dock}
       />
     </div>
   );

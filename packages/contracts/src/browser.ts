@@ -14,9 +14,12 @@ export type { ExecutorSkillId } from "./executor-skills.js";
 export { GraphEditSchema } from "./graph-edit.js";
 export type { GraphEdit } from "./graph-edit.js";
 export {
+  answersGroup,
+  LEAVE_IT_TO_THE_INTERVIEW,
   MAX_QUESTION_GROUPS,
   MAX_QUESTION_OPTIONS,
   MAX_QUESTION_PARTS,
+  PART_LETTERS,
 } from "./interview-protocol.js";
 export { MaterializationEntrySchema } from "./materialisation-entry.js";
 export {

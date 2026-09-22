@@ -1,4 +1,14 @@
-import { standingGlob, type StandingProhibitedEntry } from "@perbo/contracts/browser";
+// The rule for what counts as a group's answer lives in the protocol, because
+// the interview counts on it too: it refuses to draft while a group it asked
+// is unanswered, and a second copy of the rule would let the two disagree.
+import {
+  LEAVE_IT_TO_THE_INTERVIEW,
+  PART_LETTERS,
+  answersGroup,
+  planNodes,
+  standingGlob,
+  type StandingProhibitedEntry,
+} from "@perbo/contracts/browser";
 import {
   DraftSchema,
   EditingFormSchema,
@@ -88,7 +98,15 @@ const pending = (operation: EditingOperation | null): boolean =>
 export function openDrafts(records: readonly EditingSession[]): OpenDraft[] {
   return records
     .filter((record) => record.phase !== "discarded")
-    .map((record) => ({ id: record.id, repoId: record.repoId, key: record.key, outcome: record.form.draft.outcome, phase: record.phase }))
+    .map((record) => ({
+      id: record.id,
+      repoId: record.repoId,
+      key: record.key,
+      outcome: record.form.draft.outcome,
+      phase: record.phase,
+      nodes: record.nodes,
+      scope: { paths: [...record.form.draft.paths], prohibited: [...record.form.draft.prohibited] },
+    }))
     .reverse();
 }
 
@@ -173,6 +191,7 @@ export class ContractEditing {
           digest: legacy?.digest ?? detail?.digest ?? null,
           revision: 0, resumeNew: target.kind === "new", history: [],
           form: legacy?.form ?? editingForm(this.io.defaults(repoId, key), detail),
+          nodes: detail ? planNodes(detail.contract).length : 0,
           phase: legacy?.pending ? "outcome-unknown" : "editing",
           error: legacy?.pending ? "An older draft has an unconfirmed job. Your text is preserved; check Home before submitting again." : null,
           operation: null,
@@ -202,13 +221,23 @@ export class ContractEditing {
         const manual = "acceptance_criteria" in detail.contract && detail.contract.acceptance_criteria.some(
           (entry) => entry.expected_verification.kind === "manual",
         );
+        // Whether this planning has a graph, for the rail, which is drawn
+        // where no contract can be read. Written wherever the contract is,
+        // rather than only where a session is made: a planning resumed for a
+        // ticket already in plan_review never saw the job that drafted it.
+        next.nodes = planNodes(detail.contract).length;
         if (detail.digest !== next.digest || detail.ticket.approved_at || manual) {
           next.phase = "conflict";
           next.error = manual
             ? "This contract has named manual reviewers. Edit it with the CLI to preserve those assignments."
             : "The saved contract changed or was approved. Your local edits are preserved; open the current contract to review it.";
         } else if (next.phase === "ready") next.phase = "editing";
-        if (next.phase !== current.phase || next.error !== current.error) next.revision++;
+        if (
+          next.phase !== current.phase ||
+          next.error !== current.error ||
+          next.nodes !== current.nodes
+        )
+          next.revision++;
       });
     }
     return current;
@@ -267,6 +296,21 @@ export class ContractEditing {
       }
       const answered = asking.answered + 1;
       session.asking = answered >= line.groups.length ? null : { entry: asking.entry, answered };
+    });
+  }
+
+  /**
+   * Write down how many nodes this planning's plan has.
+   *
+   * The rail is drawn where a contract cannot be read, so it asks this rather
+   * than the plan itself ({@link ../renderer/planning/panes.ts}). Recorded
+   * wherever the plan moves, which is a job settling, a contract being read
+   * again, and an edit — an edit divides a plan or puts one back together just
+   * as a draft does.
+   */
+  countNodes(id: string, nodes: number): void {
+    this.update(id, (session) => {
+      session.nodes = nodes;
     });
   }
 
@@ -568,8 +612,15 @@ export class ContractEditing {
               next.phase = "conflict";
               next.error = "Another editor already holds this task. Your submitted fields remain here; open the current contract to continue from that editor.";
             } else {
+              // Admitted by this planning only where it held no ticket before:
+              // a session that started over on one it was opened with did not
+              // make that ticket, however much of it the re-draft replaced.
+              if (next.key === null) next.admitted = true;
               next.key = detail.ticket.key;
               next.digest = detail.digest;
+              // Whether this plan has a graph, for the rail that cannot read a
+              // contract from where it is drawn.
+              next.nodes = planNodes(detail.contract).length;
               next.form = { ...next.form, draft: contractDraft(detail), step: 2, editing: null, newPath: null };
               next.phase = operation.intent === "draft" ? "editing" : "ready";
               // Generating a plan and starting over both land on a contract, as
@@ -621,43 +672,7 @@ export class ContractEditing {
   }
 }
 
-/**
- * The answer every part of a group carries whatever the session offered, so a
- * person with no view on a question can leave it to the interview rather than
- * picking one of its options to get past it. The dock offers it and the host
- * reads it back, so it is declared once here.
- */
-export const LEAVE_IT_TO_THE_INTERVIEW = "Let the interview decide";
-
-/** The letters a group's parts are read and answered under: 1a, 1b, 1c. */
-export const PART_LETTERS = "abcdefghijklmnopqrstuvwxyz";
-
-/**
- * Whether one turn is this group's answer, in the shape the dock sends: the
- * option's own words for a single part, and the parts lettered as they were
- * read for more than one.
- *
- * Read back rather than flagged on the way in, so a person who types the
- * wording out themselves is answering as much as one who picked it, and so
- * nothing has to be threaded through the turn the host writes down.
- */
-export function answersGroup(
-  group: Extract<InterviewEntry["line"], { kind: "asked" }>["groups"][number],
-  text: string,
-): boolean {
-  const offered = (part: (typeof group.parts)[number]): string[] => [
-    ...part.options.map((option) => option.label),
-    LEAVE_IT_TO_THE_INTERVIEW,
-  ];
-  if (group.parts.length === 1) return offered(group.parts[0]!).includes(text.trim());
-  const lines = text.trim().split("\n");
-  if (lines.length !== group.parts.length) return false;
-  return group.parts.every((part, index) =>
-    offered(part).some(
-      (label) => lines[index]!.trim() === `${PART_LETTERS[index] ?? index + 1}) ${label}`,
-    ),
-  );
-}
+export { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS, answersGroup };
 
 /** Which session a planning's interview runs on, from the models it drafts with. */
 export function interviewProviderFor(models: { draftingProvider: string }): "claude" | "codex" {

@@ -40,7 +40,7 @@ describe("relayed", () => {
     expect(read.line.text).not.toContain("sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz");
   });
 
-  it("clips a session id to what the record holds, and says which it was", () => {
+  it("clips a session id to what the record holds, and keeps it out of the chat", () => {
     const read = relayed(
       line({
         type: "started",
@@ -54,10 +54,16 @@ describe("relayed", () => {
     if (read.kind !== "started") throw new Error("expected a started reading");
     expect(read.session).toHaveLength(200);
     if (read.note.kind !== "note") throw new Error("expected a note");
-    // The note names the id that was recorded, which is the one a later start
-    // continues, rather than the longer one that arrived.
-    expect(read.note.text).toContain(`The session is ${"s".repeat(200)},`);
+    // No session id reaches the conversation, however long it was: it is of no
+    // use to anybody reading the chat. What the note says is the folder the
+    // session may write that is on screen nowhere.
+    expect(read.note.text).not.toContain("s".repeat(40));
     expect(read.note.text).toContain("specs/retry/spec.md");
+    expect(read.note.text).toContain("docs/adr/NEW-retry.md");
+  });
+
+  it("says a turn ended with nothing to show, which is how a pause is told from a stop", () => {
+    expect(relayed(line({ type: "idle" }))).toEqual({ kind: "idle" });
   });
 
   it("redacts a credential the reason names, however many fields it runs to", () => {
@@ -131,7 +137,7 @@ describe("relayed", () => {
 
   it("says the interview ended, with its reason", () => {
     expect(relayed(line({ type: "ended", session_id: "s1", reason: "the session closed" }))).toEqual({
-      kind: "line",
+      kind: "ended",
       line: { kind: "note", text: "The interview ended: the session closed." },
     });
   });

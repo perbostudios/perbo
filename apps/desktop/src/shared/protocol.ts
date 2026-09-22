@@ -428,6 +428,20 @@ export const EditingSessionSchema = z.strictObject({
   id: identifier,
   repoId: identifier,
   key: key.nullable(),
+  /**
+   * Whether this planning admitted the ticket it holds, rather than being
+   * opened over one that already existed.
+   *
+   * Discarding a planning throws away the ticket it drafted, because a plan
+   * thrown away must not leave its ticket on the board with no way back to it.
+   * A session opened over a ticket the CLI admitted, or one another session
+   * drafted, holds that key from birth and did not make it — deleting on the
+   * key alone would take somebody else's work away with this one's.
+   *
+   * Defaulted so a session recorded before this was written reads back as
+   * having admitted nothing, which is the reading that deletes nothing.
+   */
+  admitted: z.boolean().default(false),
   digest: z.string().length(64).nullable(),
   revision: z.number().int().nonnegative(),
   resumeNew: z.boolean(),
@@ -458,6 +472,16 @@ export const EditingSessionSchema = z.strictObject({
    * outlives the line it came from, which the conversation's own cap can drop.
    */
   asking: AskingSchema.nullable().default(null),
+  /**
+   * How many nodes the plan this session drafted has, zero for a flat plan or
+   * for no plan at all.
+   *
+   * Kept here because the rail is outside planning mode and cannot read a
+   * contract: what it needs to know is whether there is a graph worth offering,
+   * and that is a number the reconcile already has in its hand. Zero on a
+   * session from before it existed, which reads as "no graph" and is right.
+   */
+  nodes: z.number().int().nonnegative().default(0),
   form: EditingFormSchema,
   phase: z.enum(["editing", "working", "ready", "conflict", "outcome-unknown", "discarded"]),
   error: z.string().nullable(),
@@ -492,6 +516,18 @@ export interface OpenDraft {
   key: string | null;
   outcome: string;
   phase: EditingSession["phase"];
+  /** How many nodes its plan has: zero for a flat plan, or for no plan yet. */
+  nodes: number;
+  /**
+   * The scope this session holds, which is not yet the contract's.
+   *
+   * A mark made in the Explorer writes here and reaches the contract only
+   * through a compile. Approval freezes the contract's scope and never reads
+   * this one, so the contract page compares the two and refuses to approve
+   * over the difference rather than freezing a scope the person has already
+   * moved on from.
+   */
+  scope: { paths: string[]; prohibited: string[] };
 }
 export const EditingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("new"), repoId: identifier }),
@@ -760,6 +796,15 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    */
   z.strictObject({ kind: z.literal("impactRead"), id: identifier }),
   /**
+   * The same reading, asked of a compiled contract rather than of a draft.
+   *
+   * Impact is only ever actionable before approval — a scope frozen is a
+   * scope no warning can move — so the count belongs on the page where
+   * approving happens, and that page is reached from a ticket, not from a
+   * planning session. A ticket the CLI admitted never had one at all.
+   */
+  z.strictObject({ kind: z.literal("impactContract"), repoId: identifier, key }),
+  /**
    * Write the spec to `specs/<slug>/spec.md`, creating the folders the first
    * time. The session names itself and its repository; the path is the host's
    * to derive, as every other repository path is.
@@ -997,6 +1042,15 @@ export interface Snapshot {
    * screen that asked for it (D-095), so this is what says it is still there.
    */
   interviews?: string[];
+  /**
+   * The editing sessions whose interview is working on what it will say next.
+   *
+   * Beside the live ones for the same reason they are here: a dock opened part
+   * way through a turn has to know it is mid-pause, and the change that said so
+   * went out before it was listening
+   * (D-119).
+   */
+  working?: string[];
 }
 export interface RepositorySnapshot {
   repository: Repository;
@@ -1044,6 +1098,17 @@ export const ChangeSchema = z.discriminatedUnion("kind", [
      * happened to be saving something (D-117).
      */
     asking: AskingSchema.nullable().default(null),
+    /**
+     * Whether the session is working on what it will say next, as against
+     * waiting on the person.
+     *
+     * It is the pauses this answers. A session reading the repository before it
+     * asks anything says nothing for a while, and a reader cannot tell that
+     * from a session that has finished or fallen over — so the dock says which
+     * it is, from the turn the session itself reports finishing
+     * (D-119).
+     */
+    working: z.boolean().default(false),
   }),
   z.object({ kind: z.literal("power"), sequence: z.number().int().nonnegative(), power: PowerStateSchema }),
 ]);
@@ -1170,6 +1235,7 @@ export interface ReplyMap {
   specSave: SpecSaveReply;
   symbolIndex: SymbolIndexView;
   impactRead: ImpactView;
+  impactContract: ImpactView;
   openHelp: null;
   chooseRepository: Repository | null;
   forgetRepository: null;

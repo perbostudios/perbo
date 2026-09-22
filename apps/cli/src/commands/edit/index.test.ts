@@ -291,6 +291,33 @@ describe("perbo edit", () => {
     ]);
     expect(after.paths_allowed).toEqual(before.paths_allowed);
   });
+
+  it("takes the last prohibition back when the edit says there are none", async () => {
+    const { repo, dir } = admitted("edit-unprohibit");
+    // What the admission allowed. Neither edit below names a path, and emptying
+    // the prohibitions is not licence to move the scope they sit inside.
+    const allowed = readContract(dir, "PRB-1").scope.paths_allowed;
+    expect(allowed).toEqual(["packages/search/**"]);
+    expect(await edit(repo, null, "--prohibit", "specs/**")).toBe(0);
+    expect(readContract(dir, "PRB-1").scope.paths_prohibited).toEqual(["specs/**"]);
+
+    // An absent `--prohibit` and an emptied list look the same on a command
+    // line, so "none" has to be said out loud. Without this the last
+    // prohibition could be written and never taken back, and the pane that
+    // unmarked it would show it gone while the contract still carried it.
+    expect(await edit(repo, null, "--no-prohibit")).toBe(0);
+    const after = readContract(dir, "PRB-1").scope;
+    expect(after.paths_prohibited).toEqual([]);
+    expect(after.paths_allowed).toEqual(allowed);
+  });
+
+  it("leaves the prohibited list alone when an edit names neither prohibitions nor none", async () => {
+    const { repo, dir } = admitted("edit-keep-prohibit");
+    await edit(repo, null, "--prohibit", "specs/**");
+    const code = await edit(repo, null, "--outcome", "A different sentence about what is true.");
+    expect(code).toBe(0);
+    expect(readContract(dir, "PRB-1").scope.paths_prohibited).toEqual(["specs/**"]);
+  });
 }, SPAWN_TEST_TIMEOUT_MS);
 
 /**

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 function readPackageVersion(): string {
   const packagePath = new URL("../package.json", import.meta.url);
@@ -7,7 +8,7 @@ function readPackageVersion(): string {
     metadata = JSON.parse(readFileSync(packagePath, "utf8"));
   } catch (error) {
     throw new Error(
-      `could not read CLI package metadata from ${packagePath.pathname}: ${
+      `could not read CLI package metadata from ${fileURLToPath(packagePath)}: ${
         error instanceof Error ? error.message : String(error)
       }`,
       { cause: error },
@@ -20,7 +21,7 @@ function readPackageVersion(): string {
     typeof metadata.version !== "string" ||
     metadata.version.length === 0
   ) {
-    throw new Error(`CLI package metadata at ${packagePath.pathname} has no version`);
+    throw new Error(`CLI package metadata at ${fileURLToPath(packagePath)} has no version`);
   }
   return metadata.version;
 }
