@@ -34,6 +34,34 @@ const NO_TRANSPORT_PROCESS_EXECUTION = {
 };
 
 /**
+ * One module starts every git and gh process (D-NEW-one-git-module,
+ * ADR-NEW-git-and-gh-module). A call here takes one of two forms — a binary
+ * followed by its arguments, or one array of words — so the ban reads the
+ * first word of each. A binary a variable names is out of its reach, and the
+ * module is where a variable that holds one lives.
+ */
+const NO_GIT_OR_GH_PROCESS = {
+  selector:
+    "CallExpression[callee.name=/^(execFile|execFileSync|spawn|spawnSync|run|runOrThrow|runSync)$/]" +
+    ":matches([arguments.0.value=/^(git|gh)$/], [arguments.0.elements.0.value=/^(git|gh)$/])",
+  message:
+    "git and gh go through @perbo/workspace's repository module: argv only, in the runner's " +
+    "allow-listed environment, with prompts off (D-NEW-one-git-module).",
+};
+
+/**
+ * Where one starts instead: the module itself, and the write guard's replay of
+ * the agent's own push, which repeats the agent's global flags in the agent's
+ * environment and so cannot be said through the typed interface. The fixture
+ * repositories the tests build are a test's own git, and the rule reaches no
+ * test or `test-support/` file to begin with.
+ */
+const STARTS_GIT_OR_GH = [
+  "packages/workspace/src/repository/**",
+  "packages/runner/src/push-remote.ts",
+];
+
+/**
  * A package states its interface by name, and a module keeps an interior
  * (ADR-NEW-package-interface; the layout is in docs/07 "Package layout").
  * `export *` re-exports whatever a file happens to hold, so the interface is
@@ -122,6 +150,17 @@ export const EXPORT_ALL_BURN_DOWN = [
   "packages/review/src/index.ts",
 ];
 
+/**
+ * The git and gh ban, over one zone's production source. It repeats the bans
+ * that zone already carries, because this object replaces the rule's options
+ * for the files it names.
+ */
+const startsNoGitOrGh = (files, ...syntax) => ({
+  files,
+  ignores: [...PRODUCTION_SOURCE_ONLY.ignores, ...STARTS_GIT_OR_GH, ...EXPORT_ALL_BURN_DOWN],
+  rules: { "no-restricted-syntax": ["error", ...syntax, NO_GIT_OR_GH_PROCESS] },
+});
+
 export default tseslint.config(
   {
     ignores: [
@@ -196,6 +235,17 @@ export default tseslint.config(
       "no-restricted-syntax": ["error", NO_SHELL_STRING, NO_EXPORT_ALL],
     },
   },
+  // One module starts every git and gh process, in every zone: the source at
+  // large, the reviewer's, the model's and the two transports', each keeping
+  // what it already refused.
+  startsNoGitOrGh(SOURCE, NO_SHELL_STRING, NO_EXPORT_ALL),
+  startsNoGitOrGh(["packages/review/src/**"], NO_PROCESS_EXECUTION, NO_EXPORT_ALL),
+  startsNoGitOrGh(["packages/model/src/**"], NO_TRANSPORT_PROCESS_EXECUTION, NO_EXPORT_ALL),
+  startsNoGitOrGh(
+    ["packages/model/src/claude-cli.ts", "packages/model/src/codex-cli.ts"],
+    NO_SHELL_STRING,
+    NO_EXPORT_ALL,
+  ),
   {
     // A package is imported by its name, and a module's interior is its own.
     files: SOURCE,

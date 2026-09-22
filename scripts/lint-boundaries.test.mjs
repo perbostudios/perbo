@@ -179,6 +179,54 @@ test("no process execution in the model package, except in its two named transpo
 });
 
 // --------------------------------------------------------------------------
+// Every git and gh process goes through one module
+// --------------------------------------------------------------------------
+
+const GIT_ARGV = 'import { execFileSync } from "node:child_process";\nexport const out = execFileSync("git", ["status"]);\n';
+const GH_ARGV = 'import { run } from "./process.js";\nexport const out = run(["gh", "pr", "view"]);\n';
+const NODE_ARGV = 'import { execFileSync } from "node:child_process";\nexport const out = execFileSync("node", ["--version"]);\n';
+const GIT_WORDS = 'export const VERIFY: readonly string[] = ["git", "status", "--porcelain"];\n';
+const ONE_MODULE = "go through @perbo/workspace";
+
+test("a source file starts no git or gh process, whichever form it takes", async () => {
+  await refuses("packages/x/src/a.ts", GIT_ARGV, ONE_MODULE);
+  await refuses("packages/x/src/a.ts", GH_ARGV, ONE_MODULE);
+  await refuses("apps/cli/src/commands/b.ts", GIT_ARGV, ONE_MODULE);
+  await refuses("apps/desktop/src/host/b.ts", GH_ARGV, ONE_MODULE);
+});
+
+test("the module that runs them, and the one call it cannot express, are the exception", async () => {
+  await allows("packages/workspace/src/repository/index.ts", GIT_ARGV);
+  await allows("packages/workspace/src/repository/internal/environment.ts", GH_ARGV);
+  // The write guard replays the agent's own push, with the agent's global
+  // flags in the agent's environment, which the typed interface cannot say.
+  await allows("packages/runner/src/push-remote.ts", GIT_ARGV);
+  // Everything else in the runner is held to the rule.
+  await refuses("packages/runner/src/preflight.ts", GH_ARGV, ONE_MODULE);
+  await refuses("packages/runner/src/loop/index.ts", GIT_ARGV, ONE_MODULE);
+});
+
+test("a repository a test builds for itself is its own", async () => {
+  await allows("tooling/test-support/src/repository.ts", GIT_ARGV);
+  await allows("packages/x/src/a.test.ts", GIT_ARGV);
+  await allows("packages/x/src/test-support/repository.ts", GH_ARGV);
+});
+
+test("the ban is on starting the process, not on naming the binary", async () => {
+  await allows("packages/x/src/a.ts", NODE_ARGV);
+  // `GREENFIELD_VERIFY` in packages/workspace/src/diagnostic.ts: an array of
+  // words no call here takes, which the module it is handed to runs.
+  await allows("packages/x/src/a.ts", GIT_WORDS);
+});
+
+test("the reviewer and the model carry the ban too, transports included", async () => {
+  await refuses("packages/review/src/m.ts", GH_ARGV, ONE_MODULE);
+  await refuses("packages/model/src/m.ts", GH_ARGV, ONE_MODULE);
+  await refuses("packages/model/src/claude-cli.ts", GIT_ARGV, ONE_MODULE);
+  await refuses("packages/model/src/codex-cli.ts", GH_ARGV, ONE_MODULE);
+});
+
+// --------------------------------------------------------------------------
 // A caller in this process reaches a command as a function, not as a line
 // --------------------------------------------------------------------------
 
