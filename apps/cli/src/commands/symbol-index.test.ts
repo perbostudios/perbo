@@ -11,8 +11,8 @@ import {
   symbolIndexPath,
 } from "./symbol-index.js";
 import { runCommandLine } from "../command-line/terminal.js";
-import type { Streams } from "../streams.js";
 import { FIXTURES } from "../test-support/paths.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * `perbo index` over an authored monorepo (SCP-319, D-015).
@@ -74,19 +74,6 @@ function repositoryFrom(fixture: string, edit?: (root: string) => void): string 
   git(root, "add", "-A");
   git(root, "commit", "-m", "the fixture");
   return root;
-}
-
-/** The three writes a command is given, with what it wrote kept. */
-function capture(): Streams & { out: () => string; err: () => string } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    stdout: (chunk: string) => out.push(chunk),
-    stderr: (chunk: string) => err.push(chunk),
-    isTTY: false,
-    out: () => out.join(""),
-    err: () => err.join(""),
-  };
 }
 
 /** The index as the expectation names it: the files and what was skipped, and nothing about this machine. */
@@ -214,7 +201,7 @@ describe("the index of an authored monorepo", () => {
       // What is on disk is what was read: the record describes the checkout,
       // and the stamp says the checkout is not the commit.
       expect(built.files.find((file) => file.path === "packages/core/src/theme.ts")?.imports).toEqual([]);
-      const streams = capture();
+      const streams = recordStreams();
       expect(runCommandLine(indexCommandLine, { argv: ["--repo", root], streams, cwd: scratch })).toBe(0);
       expect(streams.out()).toContain("with uncommitted changes");
     },
@@ -314,7 +301,7 @@ describe("what the index skips rather than fails on", () => {
         writeFileSync(join(at, "packages", "core", "src", "nameless.cjs"), 'module.exports = { "": 1 };\n');
         writeFileSync(join(at, "packages", "core", "src", "blank.ts"), 'import "";\nexport const blank = 1;\n');
       });
-      const streams = capture();
+      const streams = recordStreams();
       expect(runCommandLine(indexCommandLine, { argv: ["--repo", root], streams, cwd: scratch })).toBe(0);
       const built = SymbolIndexSchema.parse(JSON.parse(readFileSync(symbolIndexPath(root), "utf8")));
       expect(built.files.map((file) => file.path)).toEqual(
@@ -369,17 +356,17 @@ describe("a repository outside TypeScript and JavaScript", () => {
     "prints that answer, writes no index, and exits 0 — nothing is broken here",
     () => {
       const root = repositoryFrom("symbol-index-unsupported");
-      const streams = capture();
+      const streams = recordStreams();
       const code = runCommandLine(indexCommandLine, { argv: ["--repo", root, "--json"], streams, cwd: scratch });
       expect(code).toBe(0);
-      expect(JSON.parse(streams.out())).toEqual({
+      expect(streams.json()).toEqual({
         supported: false,
         reason: expect.stringMatching(/TypeScript|JavaScript/) as unknown as string,
         languages_seen: [".md", ".py", ".toml"],
       });
       expect(() => readFileSync(symbolIndexPath(root), "utf8")).toThrow();
 
-      const plain = capture();
+      const plain = recordStreams();
       expect(runCommandLine(indexCommandLine, { argv: ["--repo", root], streams: plain, cwd: scratch })).toBe(0);
       expect(plain.out()).toMatch(/not indexed|unsupported/i);
       expect(plain.out()).toContain(".py");
@@ -393,11 +380,11 @@ describe("perbo index, the command", () => {
     "writes the index under the store and prints the same record with --json",
     () => {
       const root = repositoryFrom("symbol-index");
-      const streams = capture();
+      const streams = recordStreams();
       const code = runCommandLine(indexCommandLine, { argv: ["--repo", root, "--json"], streams, cwd: scratch });
       expect(code).toBe(0);
 
-      const printed = JSON.parse(streams.out()) as unknown;
+      const printed = streams.json<unknown>();
       const written = JSON.parse(readFileSync(symbolIndexPath(root), "utf8")) as unknown;
       expect(symbolIndexPath(root)).toBe(join(root, ".perbo", "index.json"));
       expect(written).toEqual(printed);
@@ -410,7 +397,7 @@ describe("perbo index, the command", () => {
     "prints a summary rather than the record when --json is not given",
     () => {
       const root = repositoryFrom("symbol-index");
-      const streams = capture();
+      const streams = recordStreams();
       expect(runCommandLine(indexCommandLine, { argv: ["--repo", root], streams, cwd: scratch })).toBe(0);
       const printed = streams.out();
       expect(() => JSON.parse(printed)).toThrow();

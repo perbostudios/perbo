@@ -7,11 +7,11 @@ import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
 import { pollPullRequest, type TicketDeliveryState } from "@perbo/runner";
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * SCP-235/SCP-252 — a closed, unmerged pull request is read as closed, not as
@@ -41,12 +41,6 @@ const gitIdentity = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 /** A `gh` on PATH that answers every invocation from one fixed body. */
 function fakeGh(name: string, stdout: string): string {
@@ -127,7 +121,7 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
       "packages/search/**",
       "--approve",
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   const dir = storeDir(repo, null);
@@ -154,7 +148,7 @@ const NOW = new Date("2026-09-04T10:00:00.000Z");
 describe("sync records a pull request GitHub closed without merging", () => {
   it("prints the closed line instead of \"no longer mergeable\", walks to closed, and records closed_at", async () => {
     const { repo, dir } = publishedTicket("closed-conflicting");
-    const streams = capture();
+    const streams = recordStreams();
     let captured: TicketDeliveryState | undefined;
 
     const code = await withGh(
@@ -183,7 +177,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
     expect(ticket.history.at(-1)?.from).toBe("pr_open");
     expect(captured?.closed_at).toBe("2026-09-03T04:00:00.000Z");
 
-    const said = streams.err.join("");
+    const said = streams.err();
     expect(said).not.toContain("no longer mergeable");
     expect(said).toContain(`#${PR}`);
     expect(said).toContain("closed without merging");
@@ -193,7 +187,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
 
   it("walks to changes_requested when the pull request carries a CHANGES REQUESTED verdict", async () => {
     const { repo, dir } = publishedTicket("closed-changes-requested");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(
       fakeGh(
@@ -215,7 +209,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
     expect(ticket.delivery.state).toBe("closed");
     expect(ticket.history.at(-1)?.from).toBe("pr_open");
 
-    const said = streams.err.join("");
+    const said = streams.err();
     expect(said).toContain("closed without merging");
     expect(said).toContain("is now changes_requested");
     expect(said).toContain("CHANGES REQUESTED");
@@ -223,7 +217,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
 
   it("walks to closed when the only verdict on it is an approval", async () => {
     const { repo, dir } = publishedTicket("closed-approved");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(
       fakeGh(
@@ -241,12 +235,12 @@ describe("sync records a pull request GitHub closed without merging", () => {
     const ticket = readTicket(dir, "PRB-1");
     expect(ticket.state).toBe("closed");
     expect(ticket.delivery.state).toBe("closed");
-    expect(streams.err.join("")).not.toContain("is now changes_requested");
+    expect(streams.err()).not.toContain("is now changes_requested");
   });
 
   it("still says \"no longer mergeable\" for an open pull request that conflicts", async () => {
     const { repo, dir } = publishedTicket("still-open-conflicting");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(fakeGh("still-open-conflicting", ghAnswer("CONFLICTING", "DIRTY")), () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -254,7 +248,7 @@ describe("sync records a pull request GitHub closed without merging", () => {
 
     expect(code).toBe(EXIT_CODES.approve);
     expect(readTicket(dir, "PRB-1").delivery.mergeable).toBe("conflicting");
-    const said = streams.err.join("");
+    const said = streams.err();
     expect(said).toContain("no longer mergeable");
     expect(said).not.toContain("closed without merging");
   });

@@ -17,12 +17,12 @@ import {
   approveCommandLine,
   defaultAdmission,
 } from "../commands/admit.js";
-import type { Streams } from "../streams.js";
 import { editCommandLine } from "../commands/edit/index.js";
 import { TICKET_RUNS } from "../commands/run/index.js";
 import { listTickets, readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
 import { specFolder } from "../store/index.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * SCP-336: the spec folder the plan is kept beside — the page per node, its
@@ -88,12 +88,6 @@ function repository(spec = SPEC): { repo: string; specPath: string; folder: stri
   return { repo, specPath, folder };
 }
 
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (c) => out.push(c), stderr: (c) => err.push(c), isTTY: false };
-}
-
 function scripted(script: Array<Array<{ tool: string; input: unknown }>>): Model {
   let turn = 0;
   return {
@@ -146,10 +140,10 @@ const drafted = {
 };
 
 const redraftFrom = (repo: string, specPath: string, key: string) =>
-  runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", key], streams: capture(), cwd: repo, deps: { model: scripted([submits(drafted)]) } });
+  runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", key], streams: recordStreams(), cwd: repo, deps: { model: scripted([submits(drafted)]) } });
 
 const admitFromSpec = async (repo: string, specPath: string, extra: string[] = [], draft = drafted) => {
-  const streams = capture();
+  const streams = recordStreams();
   const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, ...extra], streams, cwd: repo, deps: { model: scripted([submits(draft)]) } });
   return { code, streams };
 };
@@ -167,7 +161,7 @@ const page = (folder: string, node: string): string =>
 const graphEdit = (repo: string, edit: unknown) =>
   runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo, "--graph-edit", JSON.stringify(edit)],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
 
@@ -206,7 +200,7 @@ describe("the page per node beside the spec", () => {
     await graphEdit(repo, { op: "delete_node", id: "node_2", move_criteria_to: "node_1" });
     expect(pagesIn(folder)).toEqual(["node_1.md"]);
     expect(
-      await runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: capture(), cwd: repo }),
+      await runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: recordStreams(), cwd: repo }),
     ).toBe(EXIT_CODES.approve);
     expect(pagesIn(folder)).toEqual(["node_1.md", "node_2.md"]);
     expect(page(folder, "node_1")).not.toContain("R4:");
@@ -227,7 +221,7 @@ describe("the page per node beside the spec", () => {
     expect(
       await runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo, "--path", "packages/queue/**"],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
       }),
     ).toBe(EXIT_CODES.approve);
@@ -256,7 +250,7 @@ describe("the page per node beside the spec", () => {
     rmSync(folder, { recursive: true, force: true });
     symlinkSync(elsewhere, folder);
     await expect(
-      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath], streams: capture(), cwd: repo, deps: { model: scripted([]) } }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath], streams: recordStreams(), cwd: repo, deps: { model: scripted([]) } }),
     ).rejects.toThrow(/symlink/);
     expect(existsSync(join(elsewhere, "nodes"))).toBe(false);
     expect(listTickets(storeDir(repo, null))).toEqual([]);
@@ -291,7 +285,7 @@ describe("the page per node beside the spec", () => {
     await expect(
       runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo, "--outcome", "Changed behind a linked page."],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
       }),
     ).rejects.toThrow(/symlink/);
@@ -394,7 +388,7 @@ describe("the No-Gos a run's brief carries (D-096, D-100)", () => {
 
 describe("perbo admit --from-spec --start-over", () => {
   const redraft = async (repo: string, specPath: string, extra: string[] = [], draft = drafted) => {
-    const streams = capture();
+    const streams = recordStreams();
     const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-1", ...extra], streams, cwd: repo, deps: { model: scripted([submits(draft)]) } });
     return { code, streams };
   };
@@ -490,7 +484,7 @@ describe("perbo admit --from-spec --start-over", () => {
     expect(readTicket(dir, "PRB-1").admission.edit_count).toBe(0);
 
     await expect(
-      runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: capture(), cwd: repo }),
+      runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: recordStreams(), cwd: repo }),
     ).rejects.toThrow(/re-drafted/);
   });
 
@@ -498,19 +492,19 @@ describe("perbo admit --from-spec --start-over", () => {
     const { repo, specPath } = repository();
     await admitFromSpec(repo, specPath);
     // Approved, and the contract is immutable from then on (ADR-0016).
-    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo })).toBe(
       EXIT_CODES.approve,
     );
     // Refused before a model is asked anything, as a spec outside the
     // repository is: the draft would have been paid for either way.
     const untouched = scriptedWithCount([submits(drafted)]);
     expect(() =>
-      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-1"], streams: capture(), cwd: repo, deps: { model: untouched.model } }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-1"], streams: recordStreams(), cwd: repo, deps: { model: untouched.model } }),
     ).toThrow(/immutable/);
     expect(untouched.turns()).toBe(0);
 
     expect(() =>
-      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-9"], streams: capture(), cwd: repo, deps: { model: scripted([submits(drafted)]) } }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-9"], streams: recordStreams(), cwd: repo, deps: { model: scripted([submits(drafted)]) } }),
     ).toThrow(/PRB-9/);
   });
 
@@ -534,12 +528,12 @@ describe("perbo admit --from-spec --start-over", () => {
         "--repo", repo, "--outcome", "Docs say what is true.",
         "--criterion", "the page exists :: a test reads it", "--path", "docs/**",
       ],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
     });
     // Refused before the model is asked, so the refusal is immediate.
     expect(() =>
-      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-2"], streams: capture(), cwd: repo, deps: { model: scripted([submits(drafted)]) } }),
+      runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, "--start-over", "PRB-2"], streams: recordStreams(), cwd: repo, deps: { model: scripted([submits(drafted)]) } }),
     ).toThrow(/PRB-2 was not drafted from a spec/);
     expect(readTicket(dir, "PRB-2").admission.spec).toBeNull();
     expect(readTicket(dir, "PRB-2").plan_version).toBe(1);
@@ -554,7 +548,7 @@ describe("perbo admit --from-spec --start-over", () => {
         {
           cwd: scratch,
           now: new Date(),
-          diagnostics: capture(),
+          diagnostics: recordStreams(),
           model: scripted([submits(drafted)]),
         },
       ),
@@ -599,7 +593,7 @@ describe("the spec folder a repository configures", () => {
     const { repo, specPath } = repository();
     await admitFromSpec(repo, specPath);
     expect(readContract(storeDir(repo, null), "PRB-1").scope.paths_prohibited).toContain("specs/**");
-    const streams = capture();
+    const streams = recordStreams();
     runCommandLine(admitCommandLine, {
       argv: [
         "--repo", repo, "--outcome", "Docs say what is true.",

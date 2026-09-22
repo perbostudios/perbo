@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { readContract, storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * D-105: the standing prohibited list is a repository agreement, so every
@@ -37,12 +37,6 @@ function repository(name: string, config?: unknown): string {
   return dir;
 }
 
-const streams = (): Streams => ({
-  stdout: () => undefined,
-  stderr: () => undefined,
-  isTTY: false,
-});
-
 const admit = (repo: string, ...extra: string[]): number | Promise<number> =>
   runCommandLine(admitCommandLine, {
     argv: [
@@ -56,7 +50,7 @@ const admit = (repo: string, ...extra: string[]): number | Promise<number> =>
       "packages/auth/**",
       ...extra,
     ],
-    streams: streams(),
+    streams: recordStreams(),
     cwd: repo,
   });
 

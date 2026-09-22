@@ -11,10 +11,10 @@ import {
   type Ticket,
 } from "@perbo/contracts";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { syncCommandLine } from "./sync.js";
 import { readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * SCP-206 criterion 3: which arm produced a delivery record survives the sync
@@ -48,12 +48,6 @@ const gitIdentity = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 const ghAnswer = (
   state = "OPEN",
@@ -129,7 +123,7 @@ function directArmTicket(
       "packages/search/**",
       "--approve",
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   const dir = storeDir(repo, null);
@@ -184,7 +178,7 @@ describe("sync carries the arm across the record it rewrites", () => {
 
       const code = await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
       });
@@ -226,7 +220,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
 
       const code = await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
       });
@@ -252,7 +246,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
       const before = readFileSync(join(dir, "tickets", "PRB-1.json"), "utf8");
       process.env.PATH = `${fakeGh("bin-loop-stranded", ghAnswer("OPEN"))}:${originalPath ?? ""}`;
       process.env.GH_TOKEN = "ghp_scp206syncarmsentinel";
-      const streams = capture();
+      const streams = recordStreams();
 
       const code = await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
@@ -263,7 +257,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
 
       expect(code).toBe(EXIT_CODES.did_not_complete);
       expect(readFileSync(join(dir, "tickets", "PRB-1.json"), "utf8")).toBe(before);
-      expect(streams.err.join("")).toContain("refusing to reconcile it to pr_open");
+      expect(streams.err()).toContain("refusing to reconcile it to pr_open");
     },
     SPAWN_DEADLINE_MS,
   );
@@ -286,7 +280,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
 
       await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
         deps: {
@@ -317,7 +311,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
 
       await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
         deps: {
@@ -346,7 +340,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
 
       await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
         deps: {

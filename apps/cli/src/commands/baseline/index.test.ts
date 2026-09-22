@@ -5,8 +5,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { UsageError } from "../../usage-error.js";
 import { BaselineFileSchema, baselineCommandLine, type BaselineFile } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
-import type { Streams } from "../../streams.js";
 import { makeTicket } from "../../test-support/attempt-fixture.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-baseline-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -21,20 +21,14 @@ function repo(name: string): string {
 }
 
 async function baseline(dir: string, argv: string[], when: Date, isTTY = false) {
-  const out: string[] = [];
-  const err: string[] = [];
-  const streams: Streams = {
-    stdout: (chunk) => out.push(chunk),
-    stderr: (chunk) => err.push(chunk),
-    isTTY,
-  };
+  const streams = recordStreams({ isTTY });
   const code = await runCommandLine(baselineCommandLine, {
     argv: [...argv, "--repo", dir],
     streams,
     cwd: dir,
     now: when,
   });
-  return { code, out: out.join(""), err: err.join("") };
+  return { code, out: streams.out(), err: streams.err() };
 }
 
 const readFile = (dir: string): BaselineFile =>

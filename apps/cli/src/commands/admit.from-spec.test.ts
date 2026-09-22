@@ -13,12 +13,12 @@ import {
 } from "@perbo/model";
 import { UsageError } from "../usage-error.js";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { editCommandLine } from "./edit/index.js";
 import { INTERVIEW_SESSION_FILE } from "./interview/index.js";
 import { specCommitFiles } from "../spec/pages.js";
 import { listTickets, readApproachRecord, readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-spec-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -77,18 +77,6 @@ function repository(spec = SPEC): { repo: string; specPath: string } {
 /** The SHA-256 of a file as the admission record states it. */
 const hashOf = (path: string) =>
   `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    stdout: (chunk: string) => out.push(chunk),
-    stderr: (chunk: string) => err.push(chunk),
-    isTTY: false,
-  };
-}
 
 function scripted(script: Array<Array<{ tool: string; input: unknown }>>): Model & {
   requests: ModelRequest[];
@@ -163,7 +151,7 @@ async function admitFromSpec(
   model: Model,
   extra: string[] = [],
 ) {
-  const streams = capture();
+  const streams = recordStreams();
   const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from-spec", specPath, ...extra], streams, cwd: repo, deps: { model } });
   return { code, streams };
 }
@@ -183,7 +171,7 @@ function citing(name: string, criterion: number, requirementId: string): string 
 const editWith = async (repo: string, editor: string) =>
   runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
     deps: { env: { EDITOR: editor } },
   });
@@ -217,7 +205,7 @@ describe("a citation an undo would put back is checked against the spec", () => 
     const graphEdit = (edits: unknown) =>
       runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo, "--graph-edit", JSON.stringify(edits)],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
       });
     const cited = () => {
@@ -248,7 +236,7 @@ describe("a citation an undo would put back is checked against the spec", () => 
     expect(cited()).toEqual([null, "R2", "R4"]);
 
     const undo = () =>
-      runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: capture(), cwd: repo });
+      runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: recordStreams(), cwd: repo });
     await expect(undo()).rejects.toThrow(/R1/);
     expect(cited()).toEqual([null, "R2", "R4"]);
     expect(readDraftSnapshot(dir, "PRB-1")?.edits.map((edit) => edit.undone)).toEqual([false, false]);
@@ -365,7 +353,7 @@ describe("perbo admit --from-spec", () => {
   it("shows the person the graph and the No-Gos it just recorded", async () => {
     const { repo, specPath } = repository();
     const { streams } = await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
-    const err = streams.err.join("");
+    const err = streams.err();
     expect(err).toContain("node_1  Queue the email");
     expect(err).toContain("ac_1, ac_2");
     expect(err).toContain("node_1 -> node_2");
@@ -433,7 +421,7 @@ describe("perbo admit --from-spec", () => {
 
   it("carries no spec record for a ticket admitted from anything else", async () => {
     const { repo } = repository();
-    const streams = capture();
+    const streams = recordStreams();
     const code = runCommandLine(admitCommandLine, {
       argv: [
         "--repo", repo, "--outcome", "Docs say what is true.",
@@ -470,7 +458,7 @@ describe("perbo admit --from-spec", () => {
 
   it("writes no approach for a flat plan drafted from an issue", async () => {
     const { repo } = repository();
-    const streams = capture();
+    const streams = recordStreams();
     runCommandLine(admitCommandLine, {
       argv: [
         "--repo", repo, "--outcome", "Docs say what is true.",
@@ -573,7 +561,7 @@ describe("perbo admit --from-spec", () => {
     const contract = readContract(dir, "PRB-1");
     expect(contract.outcome).toBe("The activation email arrives.");
     expect((contract as { nodes?: unknown }).nodes).toBeUndefined();
-    expect(streams.err.join("")).toContain("graph");
+    expect(streams.err()).toContain("graph");
     // The No-Gos are the spec's whatever the person typed, so the approach stays.
     expect(readApproachRecord(dir, "PRB-1")?.no_gos).toHaveLength(2);
     expect(readApproachRecord(dir, "PRB-1")?.edges).toEqual([]);

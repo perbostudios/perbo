@@ -13,9 +13,9 @@ import {
 } from "@perbo/model";
 import { UsageError } from "../usage-error.js";
 import { admitCommandLine, readTicket, storeDir } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { nextKey, readDraftSnapshot } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-draft-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -36,18 +36,6 @@ function repository(): string {
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
   execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
   return dir;
-}
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    stdout: (chunk: string) => out.push(chunk),
-    stderr: (chunk: string) => err.push(chunk),
-    isTTY: false,
-  };
 }
 
 const issue = {
@@ -131,13 +119,13 @@ const one = {
 };
 
 async function admitFrom(repo: string, model: Model, extra: string[] = []) {
-  const streams = capture();
+  const streams = recordStreams();
   const code = await runCommandLine(admitCommandLine, { argv: ["--repo", repo, "--from", "o/r#412", ...extra], streams, cwd: repo, deps: { model, fetchIssue } });
   return { code, streams };
 }
 
 function admittedTyped(repo: string, outcome: string, path: string): string {
-  const streams = capture();
+  const streams = recordStreams();
   const code = runCommandLine(admitCommandLine, {
     argv: [
       "--repo", repo, "--outcome", outcome, "--criterion", `${outcome} :: a test asserts it`,
@@ -146,8 +134,8 @@ function admittedTyped(repo: string, outcome: string, path: string): string {
     streams,
     cwd: repo,
   });
-  if (code !== EXIT_CODES.approve) throw new Error(streams.err.join(""));
-  return (JSON.parse(streams.out.join("")) as { ticket: { key: string } }).ticket.key;
+  if (code !== EXIT_CODES.approve) throw new Error(streams.err());
+  return (streams.json<{ ticket: { key: string } }>()).ticket.key;
 }
 
 describe("perbo admit --from: one draft is one ticket", () => {
@@ -163,7 +151,7 @@ describe("perbo admit --from: one draft is one ticket", () => {
     // However many packages it spans, the work drafted as one contract is one ticket.
     const { code, streams } = await admitFrom(repo, scripted([submits(whole)]), ["--json"]);
     expect(code).toBe(EXIT_CODES.approve);
-    const document = JSON.parse(streams.out.join("")) as { ticket: { key: string } };
+    const document = streams.json<{ ticket: { key: string } }>();
     expect(document.ticket.key).toBe("PRB-1");
     expect(readTicket(dir, "PRB-1").title).toBe(whole.outcome);
     expect(existsSync(join(dir, "tickets", "PRB-2.json"))).toBe(false);
@@ -178,7 +166,7 @@ describe("perbo admit --from: one draft is one ticket", () => {
     const { code, streams } = await admitFrom(repo, model);
     expect(code).toBe(EXIT_CODES.approve);
     expect(JSON.stringify(model.requests[0]?.messages[0])).not.toContain(first);
-    expect(streams.err.join("")).toContain(`${first} is in flight but its contract cannot be read; it is left off the board`);
+    expect(streams.err()).toContain(`${first} is in flight but its contract cannot be read; it is left off the board`);
     expect(readTicket(dir, "PRB-2").title).toBe(one.outcome);
   });
 

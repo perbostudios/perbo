@@ -20,6 +20,7 @@ import { COMMAND_NAMES } from "../src/command-line/names.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/built-cli.js";
 import { REPO_ROOT } from "../src/test-support/paths.js";
 import { runCommandLine } from "../src/command-line/terminal.js";
+import { recordStreams } from "../src/test-support/streams.js";
 
 /**
  * The open README's quick start, run rather than read.
@@ -661,16 +662,15 @@ describe("the prerequisites the quick start states before its first command", ()
     // shipped preflight, told a floor this machine does not meet, through the
     // shipped `doctor`. What the README states the floor *is* is checked
     // against the workspace's own `engines` above.
-    const out: string[] = [];
+    const streams = recordStreams({ isTTY: true });
     const status = await runCommandLine(doctorCommandLine, {
       argv: ["--repo", repo],
-      streams: { stdout: (chunk) => out.push(chunk), stderr: () => undefined, isTTY: true },
+      streams,
       cwd: repo,
       deps: { preflight: (request: PreflightRequest) =>
           preflight({ ...request, minNodeMajor: Number(process.versions.node.split(".")[0]) + 1 }) },
     });
-    // eslint-disable-next-line no-control-regex
-    const shown = out.join("").replace(/\u001b\[[0-9;]*m/g, "");
+    const shown = streams.plain();
     expect(shown).toContain("node_too_old");
     expect(shown).toContain(process.versions.node);
     expect(shown).toContain("install Node");

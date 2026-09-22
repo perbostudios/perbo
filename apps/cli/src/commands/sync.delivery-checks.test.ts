@@ -12,10 +12,10 @@ import {
 } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * What the ticket's delivery record says about the checks on its head.
@@ -43,12 +43,6 @@ const gitIdentity = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 /** A `gh` on PATH that answers every invocation from one fixed body. */
 function fakeGh(name: string, stdout: string): string {
@@ -125,7 +119,7 @@ function publishedTicket(
       "packages/search/**",
       "--approve",
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   const dir = storeDir(repo, null);
@@ -189,7 +183,7 @@ describe("the checks the run read, on the ticket", () => {
       state: "checks_failed",
       checks: [{ name: "build", conclusion: "failure" }],
     });
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(
       fakeGh(
@@ -216,7 +210,7 @@ describe("the checks the run read, on the ticket", () => {
 
   it("records a check still going as unchecked beside one that concluded, and a legacy context under its own name", async () => {
     const { repo, dir } = publishedTicket("running", null);
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(
       fakeGh(

@@ -5,7 +5,6 @@ import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import { CODEX_INTERVIEW_ARGV, codexInterviewTransport } from "./codex.js";
 import { INTERVIEW_TOOL_NAMES, interviewCommandLine } from "./index.js";
-import type { Streams } from "../../streams.js";
 import { fakeAppServer, type ServerStep } from "./test-support/fake-app-server.js";
 import {
   drafter,
@@ -16,6 +15,7 @@ import {
   SPEC_FOLDER,
 } from "./test-support/contract.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * The interview on Codex: what only this transport has (SCP-312, D-102).
@@ -30,12 +30,6 @@ import { runCommandLine } from "../../command-line/terminal.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-interview-codex-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (c) => out.push(c), stderr: (c) => err.push(c), isTTY: false };
-}
-
 async function interview(
   steps: readonly ServerStep[],
   extra: { argv?: readonly string[]; threadId?: string; turns?: number; cwd?: string } = {},
@@ -46,7 +40,7 @@ async function interview(
     steps,
     threadId: extra.threadId ?? "thread-0001",
   });
-  const streams = capture();
+  const streams = recordStreams();
   const code = await runCommandLine(interviewCommandLine, {
     argv: ["--repo", repo, "--spec", SPEC_FOLDER, "--provider", "codex", ...(extra.argv ?? [])],
     streams,
@@ -250,7 +244,7 @@ describe("the interview's rules over the app server's approvals", () => {
           "--session",
           "sdk-session-1",
         ],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         deps: {
           transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
@@ -271,7 +265,7 @@ describe("the interview's rules over the app server's approvals", () => {
     // and this one did not, so a session that never opened exited as though it
     // had run and the chat read "the interview ended".
     const repo = repository(scratch);
-    const streams = capture();
+    const streams = recordStreams();
     // A real fake server for the login it keeps, and a binary that refuses the
     // handshake in its place.
     const server = fakeAppServer({
@@ -322,7 +316,7 @@ describe("the interview's rules over the app server's approvals", () => {
     // closing goes with it, and so does anything it started, rather than
     // outliving the interview.
     const repo = repository(scratch);
-    const streams = capture();
+    const streams = recordStreams();
     const server = fakeAppServer({
       root: mkdtempSync(join(scratch, "app-server-lingering-")),
       steps: [],
@@ -384,7 +378,7 @@ describe("the interview's rules over the app server's approvals", () => {
 
   it("says what a child that died mid-turn said, rather than what that left behind", async () => {
     const repo = repository(scratch);
-    const streams = capture();
+    const streams = recordStreams();
     const server = fakeAppServer({
       root: mkdtempSync(join(scratch, "app-server-midturn-")),
       steps: [],
@@ -441,7 +435,7 @@ describe("the interview's rules over the app server's approvals", () => {
 
   it("quotes the end of what a child that died said, rather than all of it", async () => {
     const repo = repository(scratch);
-    const streams = capture();
+    const streams = recordStreams();
     const server = fakeAppServer({
       root: mkdtempSync(join(scratch, "app-server-noisy-")),
       steps: [],
@@ -524,7 +518,7 @@ describe("the interview's rules over the app server's approvals", () => {
 
   it("refuses to run at all without the person's own Codex login", async () => {
     const repo = repository(scratch);
-    const streams = capture();
+    const streams = recordStreams();
     // A home with no `auth.json`: the session runs on the person's login and
     // there is none to run on.
     const refused = await Promise.resolve(
@@ -831,7 +825,7 @@ describe("the interview's rules over the app server's approvals", () => {
       "item/tool/requestUserInput",
       "item/permissions/requestApproval",
     ]);
-    const said = streams.err.join("");
+    const said = streams.err();
     expect(said).not.toContain("Shall I widen the scope?");
     expect(said).not.toContain("?");
   });
@@ -847,7 +841,7 @@ describe("resume (SCP-312 criterion 3)", () => {
       steps: [{ kind: "say", text: "carrying on" }],
       threadId: "a-different-thread",
     });
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(interviewCommandLine, {
       argv: [
         "--repo",

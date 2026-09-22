@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import { admitCommandLine } from "../commands/admit.js";
-import type { Streams } from "../streams.js";
 import { ENDPOINT_FILE, readEndpoint, startEndpoint, type RunningEndpoint } from "./index.js";
 import { ENDPOINT_TOOLS, PERSON_ONLY_ACTS } from "./internal/tools.js";
 import { storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * The tool endpoint the queue hosts: paseo's mechanism, Perbo's authority.
@@ -33,12 +33,6 @@ const gitIdentity = {
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
 
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (c) => out.push(c), stderr: (c) => err.push(c), isTTY: false };
-}
-
 let repos = 0;
 function repository(): string {
   const dir = join(scratch, `repo-${repos++}`);
@@ -51,14 +45,14 @@ function repository(): string {
 }
 
 function admitted(repo: string, outcome: string, path: string): string {
-  const streams = capture();
+  const streams = recordStreams();
   const code = runCommandLine(admitCommandLine, {
     argv: ["--repo", repo, "--outcome", outcome, "--criterion", `${outcome} :: a test asserts it`, "--path", path, "--json"],
     streams,
     cwd: repo,
   });
-  if (code !== EXIT_CODES.approve) throw new Error(streams.err.join(""));
-  return (JSON.parse(streams.out.join("")) as { ticket: { key: string } }).ticket.key;
+  if (code !== EXIT_CODES.approve) throw new Error(streams.err());
+  return (streams.json<{ ticket: { key: string } }>()).ticket.key;
 }
 
 const running: RunningEndpoint[] = [];

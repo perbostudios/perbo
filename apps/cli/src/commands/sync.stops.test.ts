@@ -21,12 +21,12 @@ import {
   type TicketDeliveryState,
 } from "@perbo/runner";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { makeAttempt, makeReview } from "../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * `perbo sync` reads the answers ticked against each stop off the pull
@@ -53,12 +53,6 @@ function repository(name: string): string {
     },
   });
   return dir;
-}
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
 }
 
 const admitArgv = (repo: string) => [
@@ -103,7 +97,7 @@ const observed = (
 
 function delivered(name: string): { repo: string; dir: string; ticket_id: string } {
   const repo = repository(name);
-  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
+  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: recordStreams(), cwd: repo });
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-02T01:00:00.000Z");
   let ticket = recordDelivery(
@@ -128,7 +122,7 @@ const T2 = "2026-09-03T02:00:00.000Z";
 describe("perbo sync writes the stop answers beside the attempt record", () => {
   it("records what gh read off the pull request, keyed by finding", async () => {
     const { repo, dir, ticket_id } = delivered("stops-first");
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
       streams,
@@ -172,7 +166,7 @@ describe("perbo sync writes the stop answers beside the attempt record", () => {
         first_seen_at: T1,
       },
     ]);
-    expect(streams.err.join("")).toContain("stops: 1 of 2 answered");
+    expect(streams.err()).toContain("stops: 1 of 2 answered");
   });
 
   it("keeps answered_at across a re-sync where nothing changed", async () => {
@@ -183,7 +177,7 @@ describe("perbo sync writes the stop answers beside the attempt record", () => {
     const sync = (at: string) =>
       runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date(at),
         deps: {
@@ -206,7 +200,7 @@ describe("perbo sync writes the stop answers beside the attempt record", () => {
     const sync = (answer: "endorse" | "override", at: string) =>
       runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date(at),
         deps: {
@@ -225,7 +219,7 @@ describe("perbo sync writes the stop answers beside the attempt record", () => {
     const { repo, dir, ticket_id } = delivered("stops-none");
     await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: new Date(T1),
       deps: {
@@ -242,7 +236,7 @@ describe("perbo sync writes the stop answers beside the attempt record", () => {
     const { repo, dir, ticket_id } = delivered("stops-unreachable");
     await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: new Date(T1),
       deps: {
@@ -363,7 +357,7 @@ describe("perbo sync records who answered each stop", () => {
 
     await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: new Date(T1),
       deps: {
@@ -397,7 +391,7 @@ describe("perbo sync records who answered each stop", () => {
     const sync = (text: string, at: string) =>
       runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date(at),
         deps: {
@@ -428,7 +422,7 @@ describe("perbo sync records who answered each stop", () => {
     const sync = (text: string, at: string) =>
       runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date(at),
         deps: {
@@ -475,7 +469,7 @@ describe("perbo sync records who answered each stop", () => {
 
     await runCommandLine(syncCommandLine, {
       argv: ["PRB-1", "--repo", repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: new Date(T1),
       deps: {

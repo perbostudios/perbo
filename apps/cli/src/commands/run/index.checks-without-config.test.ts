@@ -7,6 +7,7 @@ import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { type ExecuteDeps, executeCommandLine, proposedChecks } from "./index.js";
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * A first run on a repository that has no `.perbo/config.json` (SCP-259).
@@ -310,8 +311,7 @@ async function loop(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string; json: RunJson }> {
-  const out: string[] = [];
-  const err: string[] = [];
+  const streams = recordStreams();
   const code = await runCommandLine(executeCommandLine, {
     argv: [
         "--repo",
@@ -323,15 +323,11 @@ async function loop(
         "--json",
         ...argv,
       ],
-    streams: {
-        stdout: (chunk: string) => out.push(chunk),
-        stderr: (chunk: string) => err.push(chunk),
-        isTTY: false,
-      },
+    streams,
     cwd: repo,
     deps: { preflight: okPreflight, hooks: { review: reviewer() as never }, ...options },
   });
-  return { code, err: err.join(""), json: JSON.parse(out.join("")) as RunJson };
+  return { code, err: streams.err(), json: streams.json<RunJson>() };
 }
 
 describe("a run on a repository that has no configuration", () => {

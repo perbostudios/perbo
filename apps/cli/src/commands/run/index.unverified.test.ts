@@ -7,6 +7,7 @@ import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { type ExecuteDeps, executeCommandLine } from "./index.js";
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * A run on a repository whose own scripts give a worktree nothing to run: a
@@ -240,8 +241,7 @@ async function loop(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string; out: string }> {
-  const out: string[] = [];
-  const err: string[] = [];
+  const streams = recordStreams();
   const code = await runCommandLine(executeCommandLine, {
     argv: [
         "--repo",
@@ -255,17 +255,13 @@ async function loop(
         "--json",
         ...argv,
       ],
-    streams: {
-        stdout: (chunk: string) => out.push(chunk),
-        stderr: (chunk: string) => err.push(chunk),
-        isTTY: false,
-      },
+    streams,
     cwd: repo,
     deps: { preflight: okPreflight, hooks: { review: reviewer() as never }, ...options },
   });
   // Unparsed: a run that refuses writes nothing to stdout, and a test that
   // parsed eagerly would fail on the JSON rather than on the refusal.
-  return { code, err: err.join(""), out: out.join("") };
+  return { code, err: streams.err(), out: streams.out() };
 }
 
 interface AttemptRecord {

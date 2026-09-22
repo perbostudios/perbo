@@ -9,8 +9,8 @@ import { parseReviewArgs } from "./args.js";
 import { UsageError } from "../../../usage-error.js";
 import { renderReviewMarkdown } from "./markdown.js";
 import { runReviewCommand } from "../index.js";
-import type { Streams } from "../../../streams.js";
 import { FIXTURES } from "../../../test-support/paths.js";
+import { recordStreams } from "../../../test-support/streams.js";
 
 /**
  * `review --format markdown` (SCP-219).
@@ -197,13 +197,7 @@ interface Captured {
  * which stamps the artifact, and `Date.now()`, which measures the latency.
  */
 async function invoke(extra: string[], input: unknown = verdict): Promise<Captured> {
-  let out = "";
-  let err = "";
-  const streams: Streams = {
-    stdout: (chunk) => (out += chunk),
-    stderr: (chunk) => (err += chunk),
-    isTTY: false,
-  };
+  const streams = recordStreams();
   const frozen = new Date("2026-09-04T10:00:00.000Z");
   const realNow = Date.now;
   Date.now = () => frozen.getTime();
@@ -227,7 +221,7 @@ async function invoke(extra: string[], input: unknown = verdict): Promise<Captur
       now: frozen,
       makeModel: () => stubModel(input),
     });
-    return { out, err, code };
+    return { out: streams.out(), err: streams.err(), code };
   } finally {
     Date.now = realNow;
   }

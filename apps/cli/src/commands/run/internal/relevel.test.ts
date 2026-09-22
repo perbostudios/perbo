@@ -7,7 +7,6 @@ import { EXIT_CODES } from "@perbo/contracts";
 import { TicketRunConfigSchema } from "@perbo/runner";
 import { UsageError } from "../../../usage-error.js";
 import { admitCommandLine, listCommandLine } from "../../admit.js";
-import type { Streams } from "../../../streams.js";
 import { TICKET_RUNS, executeCommandLine } from "../index.js";
 import { processDeps } from "../../serve/index.js";
 import { readTicket, storeDir as storeDirOf, writeTicket } from "../../../store/tickets.js";
@@ -16,6 +15,7 @@ import { mergedTicketContext, ticketKeysMergedBetween } from "./relevel.js";
 import { storeDir } from "../../../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../../test-support/spawn-timeout.js";
 import { runCommandLine } from "../../../command-line/terminal.js";
+import { recordStreams } from "../../../test-support/streams.js";
 
 /**
  * SCP-227: what a re-level's conflict round is briefed with, read from the
@@ -37,14 +37,8 @@ const env = {
 };
 const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, ...args], { env, encoding: "utf8" }).trim();
 
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (c) => out.push(c), stderr: (c) => err.push(c), isTTY: false };
-}
-
 function admitted(repo: string, outcome: string, path: string): string {
-  const streams = capture();
+  const streams = recordStreams();
   const code = runCommandLine(admitCommandLine, {
     argv: [
       "--repo", repo,
@@ -57,8 +51,8 @@ function admitted(repo: string, outcome: string, path: string): string {
     streams,
     cwd: repo,
   });
-  if (code !== EXIT_CODES.approve) throw new Error(streams.err.join(""));
-  return (JSON.parse(streams.out.join("")) as { ticket: { key: string } }).ticket.key;
+  if (code !== EXIT_CODES.approve) throw new Error(streams.err());
+  return (streams.json<{ ticket: { key: string } }>()).ticket.key;
 }
 
 /** One commit on the current branch touching `path`. */
@@ -287,9 +281,9 @@ describe("the store's hooks for a re-level", () => {
         reason: "carries 1 commit the loop did not make",
       }),
     );
-    const streams = capture();
+    const streams = recordStreams();
     runCommandLine(listCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
-    expect(streams.out.join("")).toContain(
+    expect(streams.out()).toContain(
       "re-level did not level the branch at cccccccccccc (exit 3: carries 1 commit the loop did not make)",
     );
   });

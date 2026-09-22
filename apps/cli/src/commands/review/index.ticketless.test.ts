@@ -10,9 +10,9 @@ import { parseReviewArgs } from "./internal/args.js";
 import { UsageError } from "../../usage-error.js";
 import { normalisePullRequestReference } from "../../pull-request.js";
 import { runReviewCommand } from "./index.js";
-import type { Streams } from "../../streams.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
 import { FIXTURES, PACKAGE_ROOT, REPO_ROOT } from "../../test-support/paths.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * `perbo review` with no admitted ticket (SCP-179).
@@ -206,13 +206,7 @@ async function review(
     model?: Model;
   },
 ): Promise<Ran> {
-  let out = "";
-  let err = "";
-  const streams: Streams = {
-    stdout: (chunk) => (out += chunk),
-    stderr: (chunk) => (err += chunk),
-    isTTY: options.isTTY ?? false,
-  };
+  const streams = recordStreams({ isTTY: options.isTTY ?? false });
   const seen: Seen = { system: "", prompt: "" };
   const code = await runReviewCommand({
     args: parseReviewArgs(argv),
@@ -230,7 +224,7 @@ async function review(
       return model;
     },
   });
-  return { out, err, code, system: seen.system, prompt: seen.prompt };
+  return { out: streams.out(), err: streams.err(), code, system: seen.system, prompt: seen.prompt };
 }
 
 /** The one bundle in `<repo>/.perbo/reviews`, parsed. */

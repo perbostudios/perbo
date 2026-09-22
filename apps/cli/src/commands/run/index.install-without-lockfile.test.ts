@@ -15,6 +15,7 @@ import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { type ExecuteDeps, doctorCommandLine, executeCommandLine } from "./index.js";
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * A first run on a repository that has no lockfile yet.
@@ -252,8 +253,7 @@ async function loop(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string; out: string }> {
-  const out: string[] = [];
-  const err: string[] = [];
+  const streams = recordStreams();
   const code = await runCommandLine(executeCommandLine, {
     argv: [
         "--repo",
@@ -267,18 +267,14 @@ async function loop(
         "--json",
         ...argv,
       ],
-    streams: {
-        stdout: (chunk: string) => out.push(chunk),
-        stderr: (chunk: string) => err.push(chunk),
-        isTTY: false,
-      },
+    streams,
     cwd: repo,
     deps: { preflight: okPreflight, hooks: { review: reviewer() as never }, ...options },
   });
   // The report is returned unparsed: a run that refuses writes nothing to
   // stdout, and a test that parses eagerly fails on the JSON rather than on
   // the line it is about.
-  return { code, err: err.join(""), out: out.join("") };
+  return { code, err: streams.err(), out: streams.out() };
 }
 
 interface AttemptRecord {
@@ -307,18 +303,6 @@ function sealedPaths(repo: string, one: AttemptRecord): string[] {
     .split("\n")
     .filter((path) => path.length > 0);
 }
-
-const capture = (isTTY: boolean) => {
-  const out: string[] = [];
-  return {
-    out,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: () => undefined,
-      isTTY,
-    },
-  };
-};
 
 describe("a run on a repository with no lockfile", () => {
   it("says the install is unpinned, names what pins it, and runs", async () => {
@@ -376,20 +360,20 @@ describe("doctor on a repository with no lockfile", () => {
   it("reports the install as unpinned, and names the advisory", async () => {
     const repo = repository("doctor");
 
-    const reported = capture(false);
+    const reported = recordStreams();
     const code = await runCommandLine(doctorCommandLine, {
       argv: ["--repo", repo, "--json"],
-      streams: reported.streams,
+      streams: reported,
       cwd: repo,
       deps: { preflight: okPreflight },
     });
 
-    const report = JSON.parse(reported.out.join("")) as {
+    const report = reported.json<{
       materializable: boolean;
       findings: Array<{ reason: string; severity: string; detail: string }>;
       proposed: { install: { command: string[]; pinned: boolean } };
       config: { proposed: { materialization_manifest: { install: { pinned: boolean } } } };
-    };
+    }>();
     expect(code).toBe(0);
     expect(report.materializable).toBe(true);
     expect(report.proposed.install.command).toEqual([
@@ -407,14 +391,14 @@ describe("doctor on a repository with no lockfile", () => {
     expect(advisory?.detail).toContain("npm install --package-lock-only");
 
     // The report a person reads says it too, rather than only the JSON.
-    const shown = capture(true);
+    const shown = recordStreams({ isTTY: true });
     await runCommandLine(doctorCommandLine, {
       argv: ["--repo", repo],
-      streams: shown.streams,
+      streams: shown,
       cwd: repo,
       deps: { preflight: okPreflight },
     });
-    const text = shown.out.join("");
+    const text = shown.out();
     expect(text).toContain("advisory  lockfile_missing");
     expect(text).toContain("unpinned");
   }, 120_000);
@@ -466,7 +450,7 @@ async function doctor(
   repo: string,
   options: { write?: boolean; human?: boolean } = {},
 ): Promise<{ text: string; code: number }> {
-  const shown = capture(options.human === true);
+  const shown = recordStreams({ isTTY: options.human === true });
   const code = await runCommandLine(doctorCommandLine, {
     argv: [
         "--repo",
@@ -474,11 +458,11 @@ async function doctor(
         ...(options.human ? [] : ["--json"]),
         ...(options.write ? ["--write-config"] : []),
       ],
-    streams: shown.streams,
+    streams: shown,
     cwd: repo,
     deps: { preflight: okPreflight },
   });
-  return { text: shown.out.join(""), code };
+  return { text: shown.out(), code };
 }
 
 const reportedBy = async (repo: string, write = false): Promise<DoctorReport> =>

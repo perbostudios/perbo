@@ -2,20 +2,14 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { Streams } from "../streams.js";
 import { principleCommandLine, principlesPath } from "./principle.js";
 import { runCommandLine } from "../command-line/terminal.js";
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
+import { recordStreams } from "../test-support/streams.js";
 
 const add = (repo: string, text: string) =>
   runCommandLine(principleCommandLine, {
     argv: ["add", text, "--repo", repo],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
 
@@ -32,15 +26,15 @@ describe("perbo principle (D-065's ratchet)", () => {
 
   it("prints what is recorded, and says so where nothing is", () => {
     const repo = mkdtempSync(join(tmpdir(), "perbo-principles-list-"));
-    const empty = capture();
+    const empty = recordStreams();
     expect(runCommandLine(principleCommandLine, { argv: ["list", "--repo", repo], streams: empty, cwd: repo })).toBe(0);
-    expect(empty.out.join("")).toBe("");
-    expect(empty.err.join("")).toContain("no principles recorded");
+    expect(empty.out()).toBe("");
+    expect(empty.err()).toContain("no principles recorded");
 
     add(repo, "A refusal is preferred to a guess.");
-    const listed = capture();
+    const listed = recordStreams();
     runCommandLine(principleCommandLine, { argv: ["list", "--repo", repo], streams: listed, cwd: repo });
-    expect(listed.out.join("")).toContain("A refusal is preferred to a guess.");
+    expect(listed.out()).toContain("A refusal is preferred to a guess.");
   });
 
   it("refuses an add with no text", () => {

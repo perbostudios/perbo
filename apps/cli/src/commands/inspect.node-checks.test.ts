@@ -7,6 +7,7 @@ import { BundleStore } from "@perbo/runner";
 import { buildInspectReport, inspectCommandLine, renderInspect } from "./inspect.js";
 import { makeAttempt, makeTicket } from "../test-support/attempt-fixture.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * What `perbo inspect` says about a graphed ticket's checks (D-107).
@@ -22,20 +23,6 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const TICKET_ID = "ticket_graph00001";
 const ATTEMPT = "att_graphed000001";
-
-function capture() {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY: false,
-    },
-  };
-}
 
 const result = (over: Partial<CheckResult>): CheckResult =>
   ({
@@ -448,17 +435,17 @@ describe("a graphed attempt's checks section", () => {
 
   it("names a node's failed check as that node's own", async () => {
     const { repo, store } = storeWithNodeChecks();
-    const streams = capture();
+    const streams = recordStreams();
     expect(
       await runCommandLine(inspectCommandLine, {
         argv: ["AYO-1", "--repo", repo, "--store", store, "--json"],
-        streams: streams.streams,
+        streams,
         cwd: repo,
       }),
     ).toBe(0);
-    const report = JSON.parse(streams.out.join("")) as {
+    const report = streams.json<{
       attempts: Array<{ checks: CheckResult[] | null }>;
-    };
+    }>();
     const checks = report.attempts[0]!.checks!;
     expect(checks.filter((check) => check.node === undefined)).toHaveLength(1);
     const failed = checks.find((check) => check.status === "failed")!;
@@ -502,19 +489,19 @@ describe("a graphed attempt's review section", () => {
 
   it("carries each node's own artifact in the JSON report, and null for the unreviewed one", async () => {
     const { repo, store } = storeWithNodeReviews();
-    const streams = capture();
+    const streams = recordStreams();
     expect(
       await runCommandLine(inspectCommandLine, {
         argv: ["AYO-1", "--repo", repo, "--store", store, "--json"],
-        streams: streams.streams,
+        streams,
         cwd: repo,
       }),
     ).toBe(0);
-    const report = JSON.parse(streams.out.join("")) as {
+    const report = streams.json<{
       attempts: Array<{
         node_reviews: Array<{ node_id: string; review: { decision: string } | null }>;
       }>;
-    };
+    }>();
     const nodeReviews = report.attempts[0]!.node_reviews;
     expect(nodeReviews.map((entry) => entry.node_id)).toEqual(["node_queue", "node_reports"]);
     expect(nodeReviews[0]!.review?.decision).toBe("changes_requested");
@@ -536,17 +523,17 @@ describe("a graphed attempt's review section", () => {
 
   it("reads node_reviews as [] from a review bundle with no node-reviews.json artifact", async () => {
     const { repo, store } = storeWithReviewButNoNodeReviewsArtifact();
-    const streams = capture();
+    const streams = recordStreams();
     expect(
       await runCommandLine(inspectCommandLine, {
         argv: ["AYO-3", "--repo", repo, "--store", store, "--json"],
-        streams: streams.streams,
+        streams,
         cwd: repo,
       }),
     ).toBe(0);
-    const report = JSON.parse(streams.out.join("")) as {
+    const report = streams.json<{
       attempts: Array<{ review: { decision: string } | null; node_reviews: unknown[] }>;
-    };
+    }>();
     expect(report.attempts[0]!.review?.decision).toBe("approve");
     expect(report.attempts[0]!.node_reviews).toEqual([]);
   });

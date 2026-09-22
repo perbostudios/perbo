@@ -17,6 +17,7 @@ import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import { type ExecuteDeps, executeCommandLine } from "./index.js";
 import { inspectCommandLine } from "../inspect.js";
 import { storeDir } from "../../store/index.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * What a person reads when the loop refuses to start.
@@ -149,24 +150,6 @@ const okPreflight = (_request: PreflightRequest): PreflightResult => ({
   github: null,
 });
 
-const capture = (isTTY = false) => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY,
-    },
-  };
-};
-
-/** The rendering without its colours: the words are what is being read. */
-// eslint-disable-next-line no-control-regex
-const uncoloured = (text: string): string => text.replace(/\u001b\[[0-9;]*m/g, "");
-
 /**
  * `perbo run …` as the program runs it: the command, and — for anything that
  * escapes it — `exitForThrown` writing onto the same stderr, which is
@@ -177,19 +160,19 @@ async function program(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string }> {
-  const streams = capture();
+  const streams = recordStreams();
   try {
     const code = await runCommandLine(executeCommandLine, {
       argv: ["--repo", repo, ...argv],
-      streams: streams.streams,
+      streams,
       cwd: repo,
       deps: { preflight: okPreflight, ...options },
     });
-    return { code, err: streams.err.join("") };
+    return { code, err: streams.err() };
   } catch (error) {
     const failure = exitForThrown("run", error);
-    streams.streams.stderr(`error: ${failure.message}\n`);
-    return { code: failure.code, err: streams.err.join("") };
+    streams.stderr(`error: ${failure.message}\n`);
+    return { code: failure.code, err: streams.err() };
   }
 }
 
@@ -283,16 +266,16 @@ describe("a repository the diagnostic refuses", () => {
     // And `inspect` reads it back in the same words the record holds — in the
     // report a script parses, field for field, and in the one a person reads.
     const inspected = async (isTTY: boolean): Promise<string> => {
-      const read = capture(isTTY);
+      const read = recordStreams({ isTTY });
       await runCommandLine(inspectCommandLine, {
         argv: [runId, "--repo", repo],
-        streams: read.streams,
+        streams: read,
         cwd: repo,
           });
-      return read.out.join("");
+      return read.plain();
     };
     expect((JSON.parse(await inspected(false)) as RecordedRefusal).refusal).toEqual(record.refusal);
-    const shown = uncoloured(await inspected(true));
+    const shown = await inspected(true);
     expect(flat(shown)).toContain(flat(record.refusal!.reason));
     for (const finding of record.refusal!.findings) {
       expect(shown).toContain(finding.reason);

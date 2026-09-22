@@ -6,8 +6,8 @@ import { UsageError } from "../../../../usage-error.js";
 import { baselineCommandLine } from "../../index.js";
 import { readE1 } from "./command.js";
 import { runCommandLine } from "../../../../command-line/terminal.js";
-import type { Streams } from "../../../../streams.js";
 import { E1LedgerSchema, type E1Ledger } from "./ledger.js";
+import { recordStreams } from "../../../../test-support/streams.js";
 
 /**
  * `perbo baseline open | time | seal | run | routing | result` end to end
@@ -36,20 +36,14 @@ function repo(name: string): string {
 }
 
 async function cli(dir: string, argv: string[], when: Date = at(10_000), isTTY = false) {
-  const out: string[] = [];
-  const err: string[] = [];
-  const streams: Streams = {
-    stdout: (chunk) => out.push(chunk),
-    stderr: (chunk) => err.push(chunk),
-    isTTY,
-  };
+  const streams = recordStreams({ isTTY });
   const code = await runCommandLine(baselineCommandLine, {
     argv: [...argv, "--repo", dir],
     streams,
     cwd: dir,
     now: when,
   });
-  return { code, out: out.join(""), err: err.join("") };
+  return { code, out: streams.out(), err: streams.err() };
 }
 
 const ledgerOf = (dir: string): E1Ledger =>

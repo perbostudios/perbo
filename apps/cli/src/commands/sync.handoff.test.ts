@@ -6,10 +6,10 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, TicketSchema, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * SCP-157: `perbo sync` on a `failed` ticket whose branch a person delivered
@@ -48,12 +48,6 @@ function repository(name: string): string {
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
   execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
   return dir;
-}
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
 }
 
 const admitArgv = (repo: string) => [
@@ -154,7 +148,7 @@ const ghAnswer = (state: "OPEN" | "CLOSED" | "MERGED"): string =>
  */
 function failedTicket(name: string): { repo: string; dir: string; ticket: Ticket; branch: string } {
   const repo = repository(name);
-  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
+  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: recordStreams(), cwd: repo });
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-01T09:00:00.000Z");
   const branch = branchName({
@@ -184,7 +178,7 @@ describe("ac_3 — a failed ticket with no pull request is left exactly as it is
       code: 1,
     });
     const before = readFileSync(ticketFile(dir), "utf8");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -194,7 +188,7 @@ describe("ac_3 — a failed ticket with no pull request is left exactly as it is
     expect(readFileSync(ticketFile(dir), "utf8")).toBe(before);
     expect(readTicket(dir, "PRB-1").state).toBe("failed");
     expect(readTicket(dir, "PRB-1").history).toHaveLength(4);
-    expect(streams.err.join("")).toContain("left untouched");
+    expect(streams.err()).toContain("left untouched");
   }, 30_000);
 });
 
@@ -202,7 +196,7 @@ describe("ac_2 — a failed ticket whose branch a person merged by hand is walke
   it("records a hand-off row then a merge row, each naming the pull request as reconciled", async () => {
     const { repo, dir, ticket: before } = failedTicket("merged-by-hand");
     const gh = fakeGh("merged-by-hand", { stdout: ghAnswer("MERGED") });
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -235,7 +229,7 @@ describe("ac_2 — a failed ticket whose branch a person merged by hand is walke
     const gh = fakeGh("open-only", { stdout: ghAnswer("OPEN") });
 
     const code = await withGh(gh.bin, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);

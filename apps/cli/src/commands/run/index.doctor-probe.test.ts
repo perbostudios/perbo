@@ -7,6 +7,7 @@ import type { PreflightResult } from "@perbo/runner";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { doctorCommandLine } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * `perbo doctor --probe`: one minimal call at the configured reviewer model,
@@ -215,8 +216,7 @@ async function doctor(
   else process.env.ANTHROPIC_API_KEY = options.key ?? PLANTED_KEY;
   if (options.base !== undefined) process.env.ANTHROPIC_BASE_URL = options.base;
 
-  const out: string[] = [];
-  const err: string[] = [];
+  const streams = recordStreams({ isTTY: options.isTTY ?? true });
   const code = await runCommandLine(doctorCommandLine, {
     argv: doctorArgs(repo, {
         probe: options.probe,
@@ -224,15 +224,11 @@ async function doctor(
         json: options.json ?? false,
         writeConfig: options.writeConfig ?? false,
       }),
-    streams: {
-        stdout: (chunk) => out.push(chunk),
-        stderr: (chunk) => err.push(chunk),
-        isTTY: options.isTTY ?? true,
-      },
+    streams,
     cwd: process.cwd(),
     deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
   });
-  return { stdout: out.join(""), stderr: err.join(""), code };
+  return { stdout: streams.out(), stderr: streams.err(), code };
 }
 
 /** The PROVIDER block, which is what every assertion below is about. */

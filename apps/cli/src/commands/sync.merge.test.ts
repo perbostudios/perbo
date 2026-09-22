@@ -13,6 +13,7 @@ import { stopsCommandLine } from "./stops.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { REPO_ROOT } from "../test-support/paths.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * SCP-202: the loop merges the pull request it opened, behind the `merge`
@@ -54,12 +55,6 @@ const gitIdentity = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 /** The D-073 verdict comment a separate review run leaves, naming the head. */
 const approvalComment = (sha: string, verdict = "APPROVE"): string =>
@@ -207,7 +202,7 @@ function publishedTicket(
       "packages/search/**",
       "--approve",
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   const dir = storeDir(repo, null);
@@ -280,14 +275,14 @@ describe("ac_1 — the switch, and the six conditions", () => {
     // Every other condition here passes.
     const { repo, dir } = publishedTicket("default-person");
     const gh = fakeGh("default-person", {});
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () => syncMerge(repo, streams));
 
     expect(mergeCall(gh.argv())).toBeUndefined();
-    expect(streams.err.join("")).toContain("merge.switch_is_person");
+    expect(streams.err()).toContain("merge.switch_is_person");
     // With the sentence the rule id stands for, in the words a person acts on.
-    expect(streams.err.join("")).toContain(
+    expect(streams.err()).toContain(
       'the `merge` switch is "person", so this merge is a person\'s click: the pull request is open and waiting for one',
     );
     expect(readTicket(dir, "PRB-1").state).toBe("pr_open");
@@ -352,12 +347,12 @@ describe("ac_1 — the switch, and the six conditions", () => {
     it(`stops with ${one.rule} when ${one.name}`, async () => {
       const { repo, dir } = publishedTicket(`stop-${index}`, { merge: "loop" });
       const gh = fakeGh(`stop-${index}`, one.answers);
-      const streams = capture();
+      const streams = recordStreams();
 
       const code = await withGh(gh.bin, () => syncMerge(repo, streams));
 
       expect(mergeCall(gh.argv()), "it merged anyway").toBeUndefined();
-      expect(streams.err.join("")).toContain(one.rule);
+      expect(streams.err()).toContain(one.rule);
       expect(readTicket(dir, "PRB-1").state).toBe("pr_open");
       expect(code).toBe(EXIT_CODES.did_not_complete);
     }, MERGE_TEST_TIMEOUT_MS);
@@ -366,7 +361,7 @@ describe("ac_1 — the switch, and the six conditions", () => {
   it("merges when all six hold", async () => {
     const { repo, dir } = publishedTicket("all-six", { merge: "loop" });
     const gh = fakeGh("all-six", {});
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () => syncMerge(repo, streams));
 
@@ -382,12 +377,12 @@ describe("ac_1 — the refusals that are not one of the six", () => {
     const gh = fakeGh("no-pull-request", {
       viewFails: "no pull requests found for branch\n",
     });
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () => syncMerge(repo, streams));
 
     expect(mergeCall(gh.argv())).toBeUndefined();
-    expect(streams.err.join("")).toContain("merge.no_pull_request");
+    expect(streams.err()).toContain("merge.no_pull_request");
     expect(readTicket(dir, "PRB-1").delivery.merged_by).toBeNull();
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);
@@ -395,12 +390,12 @@ describe("ac_1 — the refusals that are not one of the six", () => {
   it("stops with merge.no_pull_request when the one on the branch is closed", async () => {
     const { repo, dir } = publishedTicket("closed-pull-request", { merge: "loop" });
     const gh = fakeGh("closed-pull-request", { view: view({ state: "CLOSED" }) });
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () => syncMerge(repo, streams));
 
     expect(mergeCall(gh.argv())).toBeUndefined();
-    expect(streams.err.join("")).toContain("merge.no_pull_request");
+    expect(streams.err()).toContain("merge.no_pull_request");
     expect(readTicket(dir, "PRB-1").delivery.merged_by).toBeNull();
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);
@@ -414,14 +409,14 @@ describe("ac_1 — the refusals that are not one of the six", () => {
       mergeFails:
         "X Pull request #202 is not mergeable\nGraphQL: Base branch was modified. Review and try the merge again.\n",
     });
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () => syncMerge(repo, streams));
 
     // The merge was attempted — this is a refusal by GitHub, not a condition
     // the loop could read beforehand.
     expect(mergeCall(gh.argv())).toBeDefined();
-    const said = streams.err.join("");
+    const said = streams.err();
     expect(said).toContain("merge.refused_by_github");
     expect(said).toContain("Pull request #202 is not mergeable");
     expect(said).toContain("Base branch was modified");
@@ -435,7 +430,7 @@ describe("ac_2 — the merge, the trailer, and what is written back", () => {
   it("merges with --merge, carries the attempt id as a trailer, and reads the merge back", async () => {
     const { repo, dir } = publishedTicket("merge-argv", { merge: "loop" });
     const gh = fakeGh("merge-argv", {});
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () => syncMerge(repo, streams));
     expect(code).toBe(EXIT_CODES.approve);
@@ -461,11 +456,11 @@ describe("ac_2 — the merge, the trailer, and what is written back", () => {
     const { repo } = publishedTicket("counted", { merge: "loop" });
     const gh = fakeGh("counted", {});
 
-    await withGh(gh.bin, () => syncMerge(repo, capture()));
+    await withGh(gh.bin, () => syncMerge(repo, recordStreams()));
 
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo, now: NOW });
-    expect(streams.out.join("")).toContain("1 merged ticket with a known answer (1 unattended, 0 attended)");
+    expect(streams.out()).toContain("1 merged ticket with a known answer (1 unattended, 0 attended)");
   }, MERGE_TEST_TIMEOUT_MS);
 });
 
@@ -491,13 +486,13 @@ describe("ac_3 — serial in phase 1", () => {
       )}\n`,
     );
 
-    const streams = capture();
+    const streams = recordStreams();
     const code = await withGh(gh.bin, () => syncMerge(repo, streams));
 
     expect(mergeCall(gh.argv())).toBeUndefined();
-    expect(streams.err.join("")).toContain("merge.in_flight");
+    expect(streams.err()).toContain("merge.in_flight");
     // The refusal names what holds it, the way SCP-193's run lock does.
-    expect(streams.err.join("")).toContain("AYO-2");
+    expect(streams.err()).toContain("AYO-2");
     expect(readTicket(dir, "PRB-1").state).toBe("pr_open");
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);
@@ -510,12 +505,12 @@ describe("ac_3 — serial in phase 1", () => {
     const gh = fakeGh("base-moved", {
       viewAgain: view({ headRefOid: OTHER, mergeable: "CONFLICTING", mergeStateStatus: "DIRTY" }),
     });
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () => syncMerge(repo, streams));
 
     expect(mergeCall(gh.argv())).toBeUndefined();
-    expect(streams.err.join("")).toContain("merge.base_moved");
+    expect(streams.err()).toContain("merge.base_moved");
     expect(readTicket(dir, "PRB-1").state).toBe("pr_open");
     expect(code).toBe(EXIT_CODES.did_not_complete);
   }, MERGE_TEST_TIMEOUT_MS);

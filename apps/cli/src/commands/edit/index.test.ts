@@ -6,11 +6,11 @@ import { afterAll, describe, expect, it } from "vitest";
 import { hasAcceptanceCriteria, planNodes } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
 import { admitCommandLine, approveCommandLine } from "../admit.js";
-import type { Streams } from "../../streams.js";
 import { editCommandLine } from "./index.js";
 import { contractPathFor, readContract, readDraftSnapshot, readTicket, storeDir } from "../../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-edit-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -32,12 +32,6 @@ function repository(name: string): string {
   return dir;
 }
 
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
-
 function admitted(name: string, path = "packages/search/**", ...extra: string[]): { repo: string; dir: string } {
   const repo = repository(name);
   runCommandLine(admitCommandLine, {
@@ -48,7 +42,7 @@ function admitted(name: string, path = "packages/search/**", ...extra: string[])
       "--path", path,
       ...extra,
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   return { repo, dir: storeDir(repo, null) };
@@ -77,7 +71,7 @@ const rewrite = (name: string, mutate: string) =>
 const edit = async (repo: string, editor: string | null, ...argv: string[]) =>
   runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo, ...argv],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
     deps: { env: editor === null ? {} : { EDITOR: editor } },
   });
@@ -229,14 +223,14 @@ describe("perbo edit", () => {
 
   it("lets a person state a P3's decisions in the editor, after which approve signs it", async () => {
     const { repo, dir } = admitted("edit-p3", ".github/workflows/**");
-    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }))
+    expect(() => runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo }))
       .toThrow(/not yet stated/);
     const editor = rewrite(
       "state-p3",
       'c.named_approver = "lian"; c.alternatives = ["leave CI as it is"]; c.contingency = "revert the workflow change";',
     );
     expect(await edit(repo, editor)).toBe(0);
-    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo })).toBe(0);
+    expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo })).toBe(0);
     const contract = readContract(dir, "PRB-1");
     if (contract.level !== "P3") throw new Error(`expected P3, got ${contract.level}`);
     expect(contract.named_approver).toBe("lian");
@@ -245,7 +239,7 @@ describe("perbo edit", () => {
 
   it("edits without an editor: --outcome, --criterion and --path each replace their part", async () => {
     const { repo, dir } = admitted("edit-flags");
-    const streams = capture();
+    const streams = recordStreams();
     const code = await runCommandLine(editCommandLine, {
       argv: [
         "PRB-1", "--repo", repo,
@@ -266,8 +260,8 @@ describe("perbo edit", () => {
     expect(contract.scope.paths_allowed).toEqual(["packages/search/**", "packages/api/**"]);
     // Two packages now: derived P2, said so.
     expect(contract.level).toBe("P2");
-    expect(streams.err.join("")).toContain("P1 -> P2");
-    expect(streams.err.join("")).toContain("perbo approve PRB-1");
+    expect(streams.err()).toContain("P1 -> P2");
+    expect(streams.err()).toContain("perbo approve PRB-1");
   });
 
   it("edits the prohibited paths the explorer marks, replacing the list and leaving the scope alone", async () => {
@@ -279,7 +273,7 @@ describe("perbo edit", () => {
         "--prohibit", "packages/search/src/generated/**",
         "--prohibit", "specs/**",
       ],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       deps: { env: {} },
     });

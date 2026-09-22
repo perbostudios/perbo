@@ -6,6 +6,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts";
 import { doctorCommandLine } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * SCP-200 criterion 2: `perbo doctor` says which credential path GitHub is
@@ -334,14 +335,14 @@ async function doctor(
   if (options.token === null) delete process.env.GH_TOKEN;
   else process.env.GH_TOKEN = options.token;
 
-  const out: string[] = [];
+  const streams = recordStreams({ isTTY: !options.json });
   await runCommandLine(doctorCommandLine, {
     argv: doctorArgs(repo, options.json),
-    streams: { stdout: (chunk) => out.push(chunk), stderr: () => undefined, isTTY: !options.json },
+    streams,
     cwd: process.cwd(),
     deps: { diagnose: () => Promise.resolve(materializable) },
   });
-  return out.join("");
+  return streams.out();
 }
 
 describe("what `perbo doctor` reports about the GitHub credential", () => {

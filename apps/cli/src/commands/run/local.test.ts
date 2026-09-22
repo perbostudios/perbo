@@ -25,7 +25,6 @@ import {
 import { pollPullRequest, type PreflightRequest, type PreflightResult } from "@perbo/runner";
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "../admit.js";
-import type { Streams } from "../../streams.js";
 import { escapesCommandLine } from "../escapes/index.js";
 import { type ExecuteDeps, executeCommandLine } from "./index.js";
 import { buildInspectReport } from "../inspect.js";
@@ -51,6 +50,7 @@ import { makeAttempt } from "../../test-support/attempt-fixture.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "../../test-support/built-cli.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * `perbo run` with nothing admitted behind it (AYO-32).
@@ -318,20 +318,6 @@ function watchOutbound(): { destinations: () => string[] } {
   };
 }
 
-const capture = () => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY: false,
-    },
-  };
-};
-
 /**
  * The repository's own `.perbo/config.json` — the pinned checks, the protected
  * paths and the limits this repository agreed once, which is where a run with
@@ -554,15 +540,15 @@ async function run(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; out: string; err: string; json: RunJson }> {
-  const streams = capture();
+  const streams = recordStreams();
   const code = await runCommandLine(executeCommandLine, {
     argv: ["--repo", repo, ...argv],
-    streams: streams.streams,
+    streams,
     cwd: repo,
     deps: { preflight: okPreflight, ...options },
   });
-  const out = streams.out.join("");
-  return { code, out, err: streams.err.join(""), json: JSON.parse(out) as RunJson };
+  const out = streams.out();
+  return { code, out, err: streams.err(), json: JSON.parse(out) as RunJson };
 }
 
 interface RunJson {
@@ -821,7 +807,7 @@ describe("the write guard a run with nothing admitted enforces", () => {
         "--path", "src/**",
         "--approve",
       ],
-      streams: capture().streams,
+      streams: recordStreams(),
       cwd: ticketed,
     });
     const fromTicket = await run(
@@ -866,7 +852,7 @@ describe("the branch a ticket-backed run works on", () => {
           "--path", "src/**",
           "--approve",
         ],
-        streams: capture().streams,
+        streams: recordStreams(),
         cwd: repo,
       });
     }
@@ -1116,18 +1102,6 @@ describe("a run with nothing admitted, after its pull request is open", () => {
     ...(at ? { GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at } : {}),
   });
 
-  function captureStreams(): Streams & { out: string[]; err: string[] } {
-    const out: string[] = [];
-    const err: string[] = [];
-    return {
-      out,
-      err,
-      stdout: (chunk) => out.push(chunk),
-      stderr: (chunk) => err.push(chunk),
-      isTTY: false,
-    };
-  }
-
   const MERGED_AT = "2026-08-01T00:00:00.000Z";
   /** Well past the fourteen days, so a merged change's window has closed. */
   const NOW = new Date("2026-09-15T00:00:00.000Z");
@@ -1347,7 +1321,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
         },
       });
 
-      const streams = captureStreams();
+      const streams = recordStreams();
       const code = await withGh(bin, () =>
         runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
       );
@@ -1369,18 +1343,18 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       // The same table a ticket's sync prints: the change, where its record now
       // stands, what `gh` said, and the pull request.
-      const printed = streams.out.join("");
+      const printed = streams.out();
       expect(printed).toContain(`${merged.run_id}  merged  merged  https://github.com/o/r/pull/11\n`);
       expect(printed).toContain(`${closed.run_id}  closed  closed  https://github.com/o/r/pull/12\n`);
       expect(printed).toContain("2 local runs: 2 read, 0 unread\n");
-      expect(streams.err.join("")).toContain("pull request #12 closed without merging");
+      expect(streams.err()).toContain("pull request #12 closed without merging");
 
       // The fourteen days after the merge are not read, and the sync says so
       // where a person is reading the merge rather than leaving the row to be
       // misread as a window that found nothing: an escape record's `ticket_key`
       // must be a ticket key, and no run has one.
       expect(existsSync(join(repo.dir, "state", `${merged.run_id}.escapes.json`))).toBe(false);
-      expect(streams.err.join("")).toContain(`escapes: ${merged.run_id} merged, but`);
+      expect(streams.err()).toContain(`escapes: ${merged.run_id} merged, but`);
     });
 
     it("records the review verdict a closed pull request carries", async () => {
@@ -1403,7 +1377,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
         },
       });
 
-      const streams = captureStreams();
+      const streams = recordStreams();
       const code = await withGh(bin, () =>
         runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
       );
@@ -1416,7 +1390,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       ]);
       // A close over a verdict is a rejection of the content, and the row says
       // so in the same word a ticket's would.
-      expect(streams.out.join("")).toContain(`${rejected.run_id}  changes_requested  closed`);
+      expect(streams.out()).toContain(`${rejected.run_id}  changes_requested  closed`);
     });
 
     it("leaves the record alone when `gh` finds no pull request on the branch", async () => {
@@ -1427,7 +1401,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       });
       openBranch(repo, branchOf(run), "queue.ts");
 
-      const streams = captureStreams();
+      const streams = recordStreams();
       const code = await withGh(fakeGh("no-pull-request", {}), () =>
         runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW }),
       );
@@ -1436,10 +1410,10 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       const record = readLocalRunRecord(repo.dir, run.run_id);
       expect(record?.pull_request?.url).toBe("https://github.com/o/r/pull/31");
       expect(record?.pull_request?.state).toBeNull();
-      expect(streams.err.join("")).toContain("unchanged");
+      expect(streams.err()).toContain("unchanged");
       // The sweep counts what it could not read, so a table of nothing is a
       // number a person is told rather than one they have to infer.
-      expect(streams.out.join("")).toContain("1 local run: 0 read, 1 unread\n");
+      expect(streams.out()).toContain("1 local run: 0 read, 1 unread\n");
     });
 
     it("names one run whose read failed and still reads every run after it", async () => {
@@ -1468,7 +1442,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
         },
       });
 
-      const streams = captureStreams();
+      const streams = recordStreams();
       const code = await withGh(bin, () =>
         runCommandLine(syncCommandLine, {
           argv: ["--repo", repo.root],
@@ -1486,10 +1460,10 @@ describe("a run with nothing admitted, after its pull request is open", () => {
 
       expect(code).toBe(EXIT_CODES.approve);
       // The one that failed is named with what went wrong.
-      expect(streams.err.join("")).toContain(`${broken.run_id} unread: gh: the remote end hung up`);
+      expect(streams.err()).toContain(`${broken.run_id} unread: gh: the remote end hung up`);
       // And the one after it was read all the way to its own record.
       expect(readLocalRunRecord(repo.dir, readable.run_id)?.pull_request?.state).toBe("merged");
-      expect(streams.out.join("")).toContain("2 local runs: 1 read, 1 unread\n");
+      expect(streams.out()).toContain("2 local runs: 1 read, 1 unread\n");
     });
 
     it("exits 0 for a run it read and 3 for one it could not, named one at a time", async () => {
@@ -1500,7 +1474,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       });
       openBranch(repo, branchOf(run), "paging.ts");
 
-      const read = captureStreams();
+      const read = recordStreams();
       const readCode = await withGh(
         fakeGh("one-run-at-a-time", {
           [branchOf(run)]: {
@@ -1514,12 +1488,12 @@ describe("a run with nothing admitted, after its pull request is open", () => {
           runCommandLine(syncCommandLine, { argv: [run.run_id, "--repo", repo.root], streams: read, cwd: repo.root, now: NOW }),
       );
       expect(readCode).toBe(EXIT_CODES.approve);
-      expect(read.out.join("")).toContain(`${run.run_id}  pr_open  open`);
+      expect(read.out()).toContain(`${run.run_id}  pr_open  open`);
 
       // The same run with nothing to ask `gh` with. The status is the one the
       // ticket path returns for a read that did not happen, so a script can
       // tell it from a pull request that was read.
-      const unread = captureStreams();
+      const unread = recordStreams();
       process.env.PATH = originalPath;
       delete process.env.GH_TOKEN;
       delete process.env.GITHUB_TOKEN;
@@ -1530,7 +1504,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
         now: NOW,
       });
       expect(unreadCode).toBe(EXIT_CODES.did_not_complete);
-      expect(unread.err.join("")).toContain(`${run.run_id} unchanged`);
+      expect(unread.err()).toContain(`${run.run_id} unchanged`);
     });
   }, SPAWN_TEST_TIMEOUT_MS);
 
@@ -1540,11 +1514,11 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       mkdirSync(root, { recursive: true });
       expect(existsSync(join(root, ".perbo"))).toBe(false);
 
-      const streams = captureStreams();
+      const streams = recordStreams();
       const code = await runCommandLine(syncCommandLine, { argv: ["--repo", root], streams, cwd: root, now: NOW });
 
       expect(code).toBe(EXIT_CODES.approve);
-      const said = [...streams.out, ...streams.err].join("");
+      const said = streams.out() + streams.err();
       expect(said.split("\n").filter((line) => line !== "")).toHaveLength(1);
       expect(said).toContain(join(root, ".perbo"));
       expect(said).not.toMatch(/ENOENT|no such file|error/i);
@@ -1554,12 +1528,12 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       const repo = publishedRepository("empty-store");
       mkdirSync(repo.dir, { recursive: true });
 
-      const streams = captureStreams();
+      const streams = recordStreams();
       const code = await runCommandLine(syncCommandLine, { argv: ["--repo", repo.root], streams, cwd: repo.root, now: NOW });
 
       expect(code).toBe(EXIT_CODES.approve);
       expect(
-        [...streams.out, ...streams.err].join("").split("\n").filter((line) => line !== ""),
+        (streams.out() + streams.err()).split("\n").filter((line) => line !== ""),
       ).toHaveLength(1);
     });
 
@@ -1704,12 +1678,12 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       await withGh(bin, async () => {
         const ticketSync = await runCommandLine(syncCommandLine, {
           argv: ["AYO-1", "--repo", repo.root],
-          streams: captureStreams(),
+          streams: recordStreams(),
           cwd: repo.root,
           now: NOW,
         });
         expect(ticketSync).toBe(EXIT_CODES.approve);
-        const sweep = captureStreams();
+        const sweep = recordStreams();
         const runSync = await runCommandLine(syncCommandLine, {
           argv: ["--repo", repo.root],
           streams: sweep,
@@ -1719,13 +1693,13 @@ describe("a run with nothing admitted, after its pull request is open", () => {
         expect(runSync).toBe(EXIT_CODES.approve);
         // The sweep read the run and said what it did not read, so a store
         // holding both kinds cannot be mistaken for a store holding one.
-        expect(sweep.out.join("")).toContain(run.run_id);
-        expect(sweep.out.join("")).not.toContain("AYO-1");
-        expect(sweep.err.join("")).toContain("1 ticket in");
-        expect(sweep.err.join("")).toContain("perbo sync PRB-1");
+        expect(sweep.out()).toContain(run.run_id);
+        expect(sweep.out()).not.toContain("AYO-1");
+        expect(sweep.err()).toContain("1 ticket in");
+        expect(sweep.err()).toContain("perbo sync PRB-1");
       });
 
-      const escapes = captureStreams();
+      const escapes = recordStreams();
       expect(
         await runCommandLine(escapesCommandLine, {
           argv: ["--repo", repo.root, "--json"],
@@ -1734,10 +1708,10 @@ describe("a run with nothing admitted, after its pull request is open", () => {
           now: NOW,
         }),
       ).toBe(EXIT_CODES.approve);
-      const report = JSON.parse(escapes.out.join("")) as {
+      const report = escapes.json<{
         escapes: { merged: number; closed: number };
         tickets: Array<Record<string, unknown>>;
-      };
+      }>();
       const rows = new Map(report.tickets.map((row) => [row["ticket_key"] as string, row]));
       expect([...rows.keys()].sort()).toEqual(["AYO-1", run.run_id].sort());
       const ticketRow = rows.get("AYO-1")!;
@@ -1757,11 +1731,11 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       // there — the count above is what it is counted in.
       expect(runRow["status"]).toBe("not observed");
       // And on the printed table a person reads, one line each.
-      const printed = captureStreams();
+      const printed = recordStreams();
       await runCommandLine(escapesCommandLine, { argv: ["--repo", repo.root], streams: printed, cwd: repo.root, now: NOW });
-      expect(printed.out.join("")).toContain(run.run_id);
+      expect(printed.out()).toContain(run.run_id);
 
-      const stops = captureStreams();
+      const stops = recordStreams();
       expect(
         await runCommandLine(stopsCommandLine, {
           argv: ["--repo", repo.root, "--json"],
@@ -1770,11 +1744,11 @@ describe("a run with nothing admitted, after its pull request is open", () => {
           now: NOW,
         }),
       ).toBe(EXIT_CODES.approve);
-      const measured = JSON.parse(stops.out.join("")) as {
+      const measured = stops.json<{
         unattended_merges: { tickets: number; merged: number; unattended: number };
         merged_cost: { tickets: number };
         loop_merges: { merged: number };
-      };
+      }>();
       // Both merges are in the populations `stops` measures over the store's
       // own records: D-076's bar, the cost the bar is read beside, and D-077's
       // count of what the loop merged itself.
@@ -1819,7 +1793,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
         async () => {
           const code = await runCommandLine(syncCommandLine, {
             argv: ["AYO-2", "--repo", ticketed.root],
-            streams: captureStreams(),
+            streams: recordStreams(),
             cwd: ticketed.root,
             now: NOW,
           });
@@ -1845,7 +1819,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
         async () => {
           const code = await runCommandLine(syncCommandLine, {
             argv: ["--repo", local.root],
-            streams: captureStreams(),
+            streams: recordStreams(),
             cwd: local.root,
             now: NOW,
           });
@@ -1856,7 +1830,7 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       expect(existsSync(join(local.dir, "tickets"))).toBe(false);
 
       const escapesOf = async (repo: Repo) => {
-        const streams = captureStreams();
+        const streams = recordStreams();
         expect(
           await runCommandLine(escapesCommandLine, {
             argv: ["--repo", repo.root, "--json"],
@@ -1865,10 +1839,10 @@ describe("a run with nothing admitted, after its pull request is open", () => {
             now: NOW,
           }),
         ).toBe(EXIT_CODES.approve);
-        return JSON.parse(streams.out.join("")) as {
+        return streams.json<{
           escapes: { merged: number };
           tickets: Array<Record<string, unknown>>;
-        };
+        }>();
       };
       const ticketRow = (await escapesOf(ticketed)).tickets[0]!;
       const localEscapes = await escapesOf(local);
@@ -1881,13 +1855,13 @@ describe("a run with nothing admitted, after its pull request is open", () => {
       expect(Object.keys(localRow).sort()).toEqual(Object.keys(ticketRow).sort());
       expect(localRow["reverted"]).toBe(ticketRow["reverted"]);
       // And on the printed table, the run gets a line of its own.
-      const printed = captureStreams();
+      const printed = recordStreams();
       await runCommandLine(escapesCommandLine, { argv: ["--repo", local.root], streams: printed, cwd: local.root, now: NOW });
-      expect(printed.out.join("")).toContain(merged.run_id);
-      expect(printed.out.join("")).not.toContain("no merged tickets yet");
+      expect(printed.out()).toContain(merged.run_id);
+      expect(printed.out()).not.toContain("no merged tickets yet");
 
       const stopsOf = async (repo: Repo) => {
-        const streams = captureStreams();
+        const streams = recordStreams();
         expect(
           await runCommandLine(stopsCommandLine, {
             argv: ["--repo", repo.root, "--json"],
@@ -1896,11 +1870,11 @@ describe("a run with nothing admitted, after its pull request is open", () => {
             now: NOW,
           }),
         ).toBe(EXIT_CODES.approve);
-        return JSON.parse(streams.out.join("")) as {
+        return streams.json<{
           unattended_merges: Record<string, unknown>;
           merged_cost: { tickets: number };
           loop_merges: { merged: number };
-        };
+        }>();
       };
       const ticketStops = await stopsOf(ticketed);
       const localStops = await stopsOf(local);

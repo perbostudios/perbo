@@ -7,10 +7,10 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { StoredTicketSchema, type Ticket } from "@perbo/contracts";
 import { TicketRunConfigSchema } from "@perbo/runner";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { TICKET_RUNS } from "./run/index.js";
 import { TicketStoreError, listTickets, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * A ticket file names no machine.
@@ -73,10 +73,6 @@ function cloneRepository(src: string, dest: string): void {
   execFileSync("git", ["clone", "--no-hardlinks", "-q", src, dest], { env: GIT_ENV });
 }
 
-function capture(): Streams {
-  return { stdout: () => undefined, stderr: () => undefined, isTTY: false };
-}
-
 /** Admit and approve one ticket in `repo`, then commit the store it wrote. */
 function admitted(repo: string): void {
   const code = runCommandLine(admitCommandLine, {
@@ -91,7 +87,7 @@ function admitted(repo: string): void {
       "packages/auth/**",
       "--approve",
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   expect(code).toBe(0);
@@ -200,7 +196,7 @@ describe("a ticket admission writes", () => {
         "--path",
         "packages/auth/**",
       ],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
     });
     expect(code).toBe(0);

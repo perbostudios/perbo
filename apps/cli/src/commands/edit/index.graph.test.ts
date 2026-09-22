@@ -6,7 +6,6 @@ import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES, hasAcceptanceCriteria, planNodes } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
 import { admitCommandLine, approveCommandLine } from "../admit.js";
-import type { Streams } from "../../streams.js";
 import { editCommandLine } from "./index.js";
 import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import {
@@ -18,6 +17,7 @@ import {
   readTicket,
   storeDir,
 } from "../../store/tickets.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-edit-graph-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -31,18 +31,6 @@ const gitIdentity = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    stdout: (chunk: string) => out.push(chunk),
-    stderr: (chunk: string) => err.push(chunk),
-    isTTY: false,
-  };
-}
 
 let repos = 0;
 /** A ticket with four criteria over two packages, and no graph yet. */
@@ -63,7 +51,7 @@ function admitted(): { repo: string; dir: string } {
       "--path", "packages/queue/**",
       "--path", "packages/reports/**",
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   if (code !== EXIT_CODES.approve) throw new Error("admission failed");
@@ -71,20 +59,20 @@ function admitted(): { repo: string; dir: string } {
 }
 
 const edit = async (repo: string, argv: string[]) =>
-  runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, ...argv], streams: capture(), cwd: repo });
+  runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, ...argv], streams: recordStreams(), cwd: repo });
 
 /** One graph edit exactly as typed, for the lines that are not JSON at all. */
 const graphEditRaw = async (repo: string, edit: string) =>
   runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo, "--graph-edit", edit],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
 
 const graphEdit = async (repo: string, edits: unknown, extra: string[] = []) =>
   runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo, "--graph-edit", JSON.stringify(edits), ...extra],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
 
@@ -144,7 +132,7 @@ describe("perbo edit --graph-edit", () => {
     // re-seal the altered contract and run would then bind an attempt to it.
     const { repo, dir } = await withTwoNodes();
     expect(
-      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }),
+      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo }),
     ).toBe(EXIT_CODES.approve);
     const path = contractPathFor(dir, "PRB-1");
     const onDisk = JSON.parse(readFileSync(path, "utf8")) as { outcome: string; scope: { paths_allowed: string[] } };
@@ -163,7 +151,7 @@ describe("perbo edit --graph-edit", () => {
     await expect(
       runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo, "--criterion", "one thing is true :: it is checked"],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
       }),
     ).rejects.toThrow(/set_criterion/);
@@ -319,7 +307,7 @@ describe("perbo edit --graph-edit", () => {
     expect(
       await runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo, "--criterion", "one thing is true :: it is checked"],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
       }),
     ).toBe(EXIT_CODES.approve);
@@ -339,7 +327,7 @@ describe("perbo edit --graph-edit", () => {
     expect(
       await runCommandLine(editCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         deps: { env: { EDITOR: `node ${script}` } },
       }),
@@ -519,7 +507,7 @@ describe("an approved plan", () => {
     const { repo, dir } = await withTwoNodes();
     await graphEdit(repo, { op: "add_edge", from: "node_1", to: "node_2" });
     expect(
-      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo }),
+      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo }),
     ).toBe(EXIT_CODES.approve);
 
     // Edges are approach: they may change while the work runs (ADR-0016).

@@ -9,10 +9,10 @@ import {
   type IncompleteReviewPath,
   type Ticket,
 } from "@perbo/contracts";
-import type { Streams } from "../streams.js";
 import { stopsCommandLine } from "./stops.js";
 import { writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * The two ways a review that could not resolve a criterion reaches a person,
@@ -28,12 +28,6 @@ import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-incomplete-review-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 const fixtureTicket = (input: {
   key: string;
@@ -96,11 +90,11 @@ describe("`stops` over a store holding both kinds of incomplete review", () => {
       }),
     );
 
-    const streams = capture();
+    const streams = recordStreams();
     const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: process.cwd() });
 
     expect(code).toBe(EXIT_CODES.approve);
-    const printed = streams.out.join("");
+    const printed = streams.out();
     const remediated = printed
       .split("\n")
       .find((line) => line.includes("AYO-35"));
@@ -119,9 +113,9 @@ describe("`stops` over a store holding both kinds of incomplete review", () => {
     mkdirSync(join(repo, ".perbo", "tickets"), { recursive: true });
     mkdirSync(join(repo, ".perbo", "state"), { recursive: true });
 
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: process.cwd() });
 
-    expect(streams.out.join("")).not.toContain("incomplete review");
+    expect(streams.out()).not.toContain("incomplete review");
   });
 });

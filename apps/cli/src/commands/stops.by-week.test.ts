@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { PARTNER_READING_CAVEAT, STOP_VERDICTS_SCHEMA_VERSION, type StopVerdicts } from "@perbo/contracts";
-import type { Streams } from "../streams.js";
 import { HIDING_WARNING, stopsCommandLine, weekHidingWarning } from "./stops.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * `perbo stops --by-week` over fake stops files: the weeks the table prints,
@@ -19,12 +19,6 @@ import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-stops-week-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 const key = (c: string) => c.repeat(64);
 const stop = (
@@ -64,9 +58,9 @@ function store(name: string, records: readonly StopVerdicts[]): string {
 }
 
 async function run(repo: string, argv: readonly string[], now: string): Promise<{ out: string; err: string; code: number }> {
-  const streams = capture();
+  const streams = recordStreams();
   const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, ...argv], streams, cwd: repo, now: new Date(now) });
-  return { out: streams.out.join(""), err: streams.err.join(""), code };
+  return { out: streams.out(), err: streams.err(), code };
 }
 
 /** The per-week table as cells: the header row, one row per week, then the total. */

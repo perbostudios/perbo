@@ -10,6 +10,7 @@ import { exitForThrown } from "../../command-line/terminal.js";
 import { type ExecuteDeps, doctorCommandLine, executeCommandLine } from "./index.js";
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * What a person reads about a repository whose configuration signs commits with
@@ -122,20 +123,6 @@ const okPreflight = (_request: PreflightRequest): PreflightResult => ({
   github: null,
 });
 
-const capture = () => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY: false,
-    },
-  };
-};
-
 /**
  * `perbo run …` as the program runs it: the command, and — for anything that
  * escapes it — `exitForThrown` writing onto the same stderr.
@@ -145,19 +132,19 @@ async function program(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string }> {
-  const streams = capture();
+  const streams = recordStreams();
   try {
     const code = await runCommandLine(executeCommandLine, {
       argv: ["--repo", repo, ...argv],
-      streams: streams.streams,
+      streams,
       cwd: repo,
       deps: { preflight: okPreflight, ...options },
     });
-    return { code, err: streams.err.join("") };
+    return { code, err: streams.err() };
   } catch (error) {
     const failure = exitForThrown("run", error);
-    streams.streams.stderr(`error: ${failure.message}\n`);
-    return { code: failure.code, err: streams.err.join("") };
+    streams.stderr(`error: ${failure.message}\n`);
+    return { code: failure.code, err: streams.err() };
   }
 }
 
@@ -223,20 +210,20 @@ describe("a repository whose configuration signs commits with a key nothing can 
   it("is reported by doctor, in the same words, in the report a script reads", async () => {
     const key = keypair("locked-doctor", "a-passphrase-no-agent-holds");
     const repo = repository("locked-doctor", key.pub);
-    const read = capture();
+    const read = recordStreams();
 
     const code = await runCommandLine(doctorCommandLine, {
       argv: ["--repo", repo, "--json"],
-      streams: read.streams,
+      streams: read,
       cwd: repo,
       deps: { preflight: okPreflight },
     });
 
     expect(code).toBe(1);
-    const report = JSON.parse(read.out.join("")) as {
+    const report = read.json<{
       materializable: boolean;
       findings: Array<{ reason: string; severity: string; detail: string }>;
-    };
+    }>();
     expect(report.materializable).toBe(false);
     const finding = report.findings.find((candidate) => candidate.reason === SIGNING);
     expect(finding, `findings were ${report.findings.map((f) => f.reason).join(", ")}`).toBeDefined();
@@ -247,20 +234,20 @@ describe("a repository whose configuration signs commits with a key nothing can 
   it("runs a repository whose key does sign exactly as before", async () => {
     const key = keypair("open", "");
     const repo = repository("open-doctor", key.pub);
-    const read = capture();
+    const read = recordStreams();
 
     const code = await runCommandLine(doctorCommandLine, {
       argv: ["--repo", repo, "--json"],
-      streams: read.streams,
+      streams: read,
       cwd: repo,
       deps: { preflight: okPreflight },
     });
 
     expect(code).toBe(0);
-    const report = JSON.parse(read.out.join("")) as {
+    const report = read.json<{
       materializable: boolean;
       findings: Array<{ reason: string }>;
-    };
+    }>();
     expect(report.materializable).toBe(true);
     expect(report.findings.map((finding) => finding.reason)).toEqual([]);
   }, 120_000);

@@ -7,8 +7,8 @@ import type { Model, ModelRequest } from "@perbo/model";
 import { parseReviewArgs } from "./internal/args.js";
 import { exitForThrown } from "../../command-line/terminal.js";
 import { runReviewCommand } from "./index.js";
-import type { Streams } from "../../streams.js";
 import { USAGE } from "../../command-line/usage.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * `perbo review --diff -` and `--checks -`: one of the two read from standard
@@ -159,13 +159,7 @@ beforeEach(() => {
  * mapping kept here.
  */
 async function review(argv: string[], stdin?: string): Promise<Ran> {
-  let out = "";
-  let err = "";
-  const streams: Streams = {
-    stdout: (chunk) => (out += chunk),
-    stderr: (chunk) => (err += chunk),
-    isTTY: false,
-  };
+  const streams = recordStreams();
   const turns = { count: 0 };
   const ran = { models: 0, reads: 0 };
   let code: number;
@@ -190,10 +184,10 @@ async function review(argv: string[], stdin?: string): Promise<Ran> {
     });
   } catch (error) {
     const failure = exitForThrown("review", error);
-    err += `error: ${failure.message}\n`;
+    streams.stderr(`error: ${failure.message}\n`);
     code = failure.code;
   }
-  return { out, err, code, turns: turns.count, ...ran };
+  return { out: streams.out(), err: streams.err(), code, turns: turns.count, ...ran };
 }
 
 /**

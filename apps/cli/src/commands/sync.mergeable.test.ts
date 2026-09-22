@@ -6,11 +6,11 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * SCP-192 criterion 3: a pull request that stopped being mergeable is recorded
@@ -39,12 +39,6 @@ const gitIdentity = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
 };
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 /** A `gh` on PATH that answers every invocation from one fixed body. */
 function fakeGh(name: string, stdout: string): string {
@@ -113,7 +107,7 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
       "packages/search/**",
       "--approve",
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   const dir = storeDir(repo, null);
@@ -140,7 +134,7 @@ const NOW = new Date("2026-09-04T10:00:00.000Z");
 describe("sync records a pull request that stopped being mergeable", () => {
   it("writes `conflicting` onto the delivery record and says a re-run merges up again", async () => {
     const { repo, dir } = publishedTicket("conflicting");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(fakeGh("conflicting", ghAnswer("CONFLICTING", "DIRTY")), () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -148,14 +142,14 @@ describe("sync records a pull request that stopped being mergeable", () => {
 
     expect(code).toBe(EXIT_CODES.approve);
     expect(readTicket(dir, "PRB-1").delivery.mergeable).toBe("conflicting");
-    const said = streams.err.join("");
+    const said = streams.err();
     expect(said).toContain("no longer mergeable");
     expect(said).toContain("perbo run --ticket PRB-1");
   });
 
   it("records a mergeable pull request as mergeable and says nothing about it", async () => {
     const { repo, dir } = publishedTicket("clean");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(fakeGh("clean", ghAnswer("MERGEABLE", "CLEAN")), () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -163,12 +157,12 @@ describe("sync records a pull request that stopped being mergeable", () => {
 
     expect(code).toBe(EXIT_CODES.approve);
     expect(readTicket(dir, "PRB-1").delivery.mergeable).toBe("mergeable");
-    expect(streams.err.join("")).not.toContain("no longer mergeable");
+    expect(streams.err()).not.toContain("no longer mergeable");
   });
 
   it("leaves the answer unknown when GitHub has not computed it yet", async () => {
     const { repo, dir } = publishedTicket("unknown");
-    const streams = capture();
+    const streams = recordStreams();
 
     await withGh(fakeGh("unknown", ghAnswer("UNKNOWN", "UNKNOWN")), () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -178,6 +172,6 @@ describe("sync records a pull request that stopped being mergeable", () => {
     // not "conflicting" — recording it as a conflict would send a person to
     // re-run a ticket whose branch is fine.
     expect(readTicket(dir, "PRB-1").delivery.mergeable).toBe("unknown");
-    expect(streams.err.join("")).not.toContain("no longer mergeable");
+    expect(streams.err()).not.toContain("no longer mergeable");
   });
 }, SPAWN_TEST_TIMEOUT_MS);

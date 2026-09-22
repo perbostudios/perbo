@@ -4,11 +4,11 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES, TICKET_SCHEMA_VERSION, TicketSchema, wilsonInterval, type Ticket } from "@perbo/contracts";
 import { GithubCredentialError, TicketDeliveryStateSchema, type TicketDeliveryState } from "@perbo/runner";
-import type { Streams } from "../streams.js";
 import { stopsCommandLine } from "./stops.js";
 import { syncCommandLine } from "./sync.js";
 import { readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * SCP-203: `perbo sync --all-merged` reads every merged ticket's pull
@@ -25,12 +25,6 @@ import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-sync-all-merged-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 function fixtureStore(name: string): string {
   const repo = join(scratch, name);
@@ -154,7 +148,7 @@ describe("ac_1 — the sweep visits every ticket whose delivery is merged, once,
     const calls: string[] = [];
     const code = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--repo", repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: NOW,
       deps: {
@@ -197,7 +191,7 @@ describe("ac_1 — the sweep visits every ticket whose delivery is merged, once,
 
     const withoutForce = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--repo", repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: NOW,
       deps: {
@@ -210,7 +204,7 @@ describe("ac_1 — the sweep visits every ticket whose delivery is merged, once,
 
     const withForce = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--force", "--repo", repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: NOW,
       deps: {
@@ -240,7 +234,7 @@ describe("ac_1 — the sweep visits every ticket whose delivery is merged, once,
     const calls: string[] = [];
     const code = await runCommandLine(syncCommandLine, {
       argv: ["--repo", repo, "--all-merged"],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: NOW,
       deps: {
@@ -279,7 +273,7 @@ describe("ac_2 — one line per ticket, a closing count, and an unreadable pull 
     });
     for (const ticket of [readable, unreadable]) writeTicket(dir, ticket);
 
-    const streams = capture();
+    const streams = recordStreams();
     const code = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--repo", repo],
       streams,
@@ -296,7 +290,7 @@ describe("ac_2 — one line per ticket, a closing count, and an unreadable pull 
     });
 
     expect(code).toBe(EXIT_CODES.approve);
-    const out = streams.out.join("");
+    const out = streams.out();
     expect(out).toContain("AYO-1  loop  false\n");
     expect(out).toContain("AYO-2  unreadable: gh is not logged in and no GH_TOKEN is set\n");
     expect(out).toContain("2 merged tickets: 1 filled, 0 unchanged, 1 unreadable\n");
@@ -321,7 +315,7 @@ describe("ac_2 — one line per ticket, a closing count, and an unreadable pull 
       }),
     );
 
-    const streams = capture();
+    const streams = recordStreams();
     const code = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--repo", repo],
       streams,
@@ -333,8 +327,8 @@ describe("ac_2 — one line per ticket, a closing count, and an unreadable pull 
     });
 
     expect(code).toBe(EXIT_CODES.approve);
-    expect(streams.out.join("")).toContain("AYO-1  unreadable:");
-    expect(streams.out.join("")).toContain("1 merged ticket: 0 filled, 0 unchanged, 1 unreadable\n");
+    expect(streams.out()).toContain("AYO-1  unreadable:");
+    expect(streams.out()).toContain("1 merged ticket: 0 filled, 0 unchanged, 1 unreadable\n");
     expect(readTicket(dir, "AYO-1").delivery.commits_outside_loop).toBeNull();
   });
 });
@@ -361,7 +355,7 @@ describe("ac_3 — after the sweep, `perbo stops` prints the unattended-merges r
     }
     for (const ticket of tickets) writeTicket(dir, ticket);
 
-    const syncStreams = capture();
+    const syncStreams = recordStreams();
     const syncCode = await runCommandLine(syncCommandLine, {
       argv: ["--all-merged", "--repo", repo],
       streams: syncStreams,
@@ -380,12 +374,12 @@ describe("ac_3 — after the sweep, `perbo stops` prints the unattended-merges r
       },
     });
     expect(syncCode).toBe(EXIT_CODES.approve);
-    expect(syncStreams.out.join("")).toContain("16 merged tickets: 16 filled, 0 unchanged, 0 unreadable\n");
+    expect(syncStreams.out()).toContain("16 merged tickets: 16 filled, 0 unchanged, 0 unreadable\n");
 
-    const stopsStreams = capture();
+    const stopsStreams = recordStreams();
     const stopsCode = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams: stopsStreams, cwd: repo });
     expect(stopsCode).toBe(EXIT_CODES.approve);
-    const out = stopsStreams.out.join("");
+    const out = stopsStreams.out();
 
     expect(out).not.toContain("not yet decided");
     // 5 hand_off (always attended) + 3 loop pull requests with a person's

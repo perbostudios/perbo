@@ -27,6 +27,7 @@ import { LocalVerdictSchema, LocalVerdictsSchema } from "./record.js";
 import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "../../test-support/attempt-fixture.js";
 import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * `perbo verdict` (SCP-181): a person answers a review here instead of on the
@@ -76,12 +77,6 @@ const PULL_REQUEST = "https://github.com/o/r/pull/9";
 const NOW = new Date("2026-09-04T10:11:12.000Z");
 const LATER = new Date("2026-09-05T08:00:00.000Z");
 const AUTHOR = "Lian Matsuo <lian@example.invalid>";
-
-function capture(isTTY = false) {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk: string) => out.push(chunk), stderr: (chunk: string) => err.push(chunk), isTTY };
-}
 
 /* ------------------------------------------------------------------ *
  * The review under decision: three stops and one advisory finding, with
@@ -276,7 +271,7 @@ const readVerdicts = (store: string) =>
 describe("perbo verdict records the decision locally", () => {
   it("writes one row carrying the review, the key, the decision, who, when and the note", async () => {
     const { repo, store } = storeWith("records");
-    const streams = capture();
+    const streams = recordStreams();
     const code = await runCommandLine(verdictCommandLine, {
       argv: ["AYO-7", "--override", STOP_ONE!.slice(0, 12), "--note", "the agent should have fixed this", "--author", AUTHOR, "--repo", repo],
       streams,
@@ -306,7 +301,7 @@ describe("perbo verdict records the decision locally", () => {
       note: "the agent should have fixed this",
       superseded_at: null,
     });
-    expect(streams.err.join("")).toContain("nothing was sent anywhere");
+    expect(streams.err()).toContain("nothing was sent anywhere");
   });
 
   /** Three real `git` spawns setting up the checkout's identity, under the load SCP-191 measures. */
@@ -317,7 +312,7 @@ describe("perbo verdict records the decision locally", () => {
     execFileSync("git", ["init", "-q"], { cwd: repo });
     execFileSync("git", ["config", "user.name", "Ada Lovelace"], { cwd: repo });
     execFileSync("git", ["config", "user.email", "ada@example.invalid"], { cwd: repo });
-    const streams = capture();
+    const streams = recordStreams();
 
     expect(
       await runCommandLine(verdictCommandLine, {
@@ -345,7 +340,7 @@ describe("perbo verdict records the decision locally", () => {
     vi.stubEnv("GIT_CONFIG_GLOBAL", "/dev/null");
     vi.stubEnv("GIT_CONFIG_SYSTEM", "/dev/null");
     try {
-      const streams = capture();
+      const streams = recordStreams();
       const code = await runCommandLine(verdictCommandLine, {
         argv: ["AYO-7", "--override", STOP_ONE!, "--repo", repo],
         streams,
@@ -357,15 +352,15 @@ describe("perbo verdict records the decision locally", () => {
       expect(code).toBe(EXIT_CODES.usage_or_input_error);
       // Nothing written: the store is exactly as it was before the refusal.
       expect(existsSync(join(store, "verdicts.json"))).toBe(false);
-      expect(streams.out.join("")).toBe("");
-      const said = streams.err.join("");
+      expect(streams.out()).toBe("");
+      const said = streams.err();
       expect(said).toContain("git config user.name");
       expect(said).toContain("git config user.email");
       // And the way out that does not need git at all is named too.
       expect(said).toContain("--author");
 
       // A `--json` caller is refused the same way, in the shape it asked for.
-      const asJson = capture();
+      const asJson = recordStreams();
       expect(
         await runCommandLine(verdictCommandLine, {
           argv: ["AYO-7", "--override", STOP_ONE!, "--repo", repo, "--json"],
@@ -375,7 +370,7 @@ describe("perbo verdict records the decision locally", () => {
         }),
       ).toBe(EXIT_CODES.usage_or_input_error);
       expect(existsSync(join(store, "verdicts.json"))).toBe(false);
-      const printed = JSON.parse(asJson.out.join("")) as { refused: boolean; set: string[] };
+      const printed = asJson.json<{ refused: boolean; set: string[] }>();
       expect(printed.refused).toBe(true);
       expect(printed.set.join(" ")).toContain("git config user.name");
       expect(printed.set.join(" ")).toContain("git config user.email");
@@ -384,7 +379,7 @@ describe("perbo verdict records the decision locally", () => {
       expect(
         await runCommandLine(verdictCommandLine, {
           argv: ["AYO-7", "--override", STOP_ONE!, "--author", AUTHOR, "--repo", repo],
-          streams: capture(),
+          streams: recordStreams(),
           cwd: repo,
           now: NOW,
         }),
@@ -405,7 +400,7 @@ describe("perbo verdict records the decision locally", () => {
       expect(
         await runCommandLine(verdictCommandLine, {
           argv: [reference, "--accept", ADVISORY!.slice(0, 12), "--author", AUTHOR, "--repo", repo],
-          streams: capture(),
+          streams: recordStreams(),
           cwd: repo,
           now: NOW,
         }),
@@ -416,7 +411,7 @@ describe("perbo verdict records the decision locally", () => {
 
   it("refuses a key it cannot resolve, a stop answer on a finding that stopped nothing, and two decisions at once", async () => {
     const { repo } = storeWith("refusals");
-    const run = (argv: string[]) => runCommandLine(verdictCommandLine, { argv: [...argv, "--repo", repo], streams: capture(), cwd: repo, now: NOW });
+    const run = (argv: string[]) => runCommandLine(verdictCommandLine, { argv: [...argv, "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW });
 
     expect(() => run(["AYO-7", "--endorse", "ffffff"])).toThrow(/is not a finding on this review/);
     expect(() => run(["AYO-7", "--endorse", ADVISORY!])).toThrow(/stopped nothing/);
@@ -457,7 +452,7 @@ describe("the key is the one the pull-request checkbox carries", () => {
     expect(
       await runCommandLine(verdictCommandLine, {
         argv: ["AYO-7", "--override", STOP_ONE!.slice(0, 12), "--author", AUTHOR, "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: NOW,
       }),
@@ -473,11 +468,11 @@ describe("the key is the one the pull-request checkbox carries", () => {
 
     // And the decision resolves to that stop rather than to a second record:
     // `stops` reads the file the pull request produced and finds it answered.
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
-    const summary = JSON.parse(streams.out.join("")) as {
+    const summary = streams.json<{
       summary: { overridden: number; stops: number; unanswered_stops: number };
-    };
+    }>();
     expect(summary.summary.stops).toBe(checkbox.length);
     expect(summary.summary.overridden).toBe(1);
     expect(summary.summary.unanswered_stops).toBe(checkbox.length - 1);
@@ -486,9 +481,9 @@ describe("the key is the one the pull-request checkbox carries", () => {
 
 describe("stops and inspect read the decisions back", () => {
   const summaryOf = async (repo: string) => {
-    const streams = capture();
+    const streams = recordStreams();
     expect(await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo })).toBe(0);
-    return (JSON.parse(streams.out.join("")) as { summary: unknown }).summary;
+    return (streams.json<{ summary: unknown }>()).summary;
   };
 
   it("counts a decision taken here exactly as one ticked on the pull request", async () => {
@@ -511,7 +506,7 @@ describe("stops and inspect read the decisions back", () => {
       expect(
         await runCommandLine(verdictCommandLine, {
           argv: ["AYO-7", decision, key, "--author", AUTHOR, "--repo", localRepo],
-          streams: capture(),
+          streams: recordStreams(),
           cwd: localRepo,
           now: NOW,
         }),
@@ -537,7 +532,7 @@ describe("stops and inspect read the decisions back", () => {
     expect(
       await runCommandLine(verdictCommandLine, {
         argv: ["AYO-7", "--override", STOP_TWO!, "--author", AUTHOR, "--repo", mixed],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: mixed,
         now: NOW,
       }),
@@ -558,15 +553,15 @@ describe("stops and inspect read the decisions back", () => {
     expect(
       await runCommandLine(verdictCommandLine, {
         argv: ["AYO-7", "--override", STOP_ONE!, "--note", "pagination size is ours to choose", "--author", AUTHOR, "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: NOW,
       }),
     ).toBe(0);
 
-    const streams = capture(true);
+    const streams = recordStreams({ isTTY: true });
     expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-7", "--repo", repo], streams, cwd: repo })).toBe(0);
-    const printed = streams.out.join("");
+    const printed = streams.out();
     const findingLine = printed.indexOf("auth.token_never_expires");
     const decisionLine = printed.indexOf("decision override");
     expect(findingLine).toBeGreaterThan(-1);
@@ -584,15 +579,15 @@ describe("stops and inspect read the decisions back", () => {
     expect(
       await runCommandLine(verdictCommandLine, {
         argv: ["AYO-7", "--endorse", STOP_TWO!, "--note", "mine to decide", "--author", AUTHOR, "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: NOW,
       }),
     ).toBe(0);
 
-    const streams = capture(true);
+    const streams = recordStreams({ isTTY: true });
     expect(await runCommandLine(inspectCommandLine, { argv: ["AYO-7", "--repo", repo], streams, cwd: repo })).toBe(0);
-    const printed = streams.out.join("");
+    const printed = streams.out();
     expect(printed).toContain("DECISIONS");
     expect(printed).toContain(STOP_TWO!.slice(0, 12));
     expect(printed).toContain("decision endorse");
@@ -604,18 +599,18 @@ describe("stops and inspect read the decisions back", () => {
     const decide = (decision: string, extra: string[] = []) =>
       runCommandLine(verdictCommandLine, {
         argv: ["AYO-7", decision, ADVISORY!, "--author", AUTHOR, "--repo", repo, ...extra],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: decision === "--accept" ? NOW : LATER,
       });
     expect(await decide("--accept")).toBe(0);
     expect(await decide("--reject", ["--replace"])).toBe(0);
 
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(inspectCommandLine, { argv: ["AYO-7", "--repo", repo, "--json"], streams, cwd: repo });
-    const report = JSON.parse(streams.out.join("")) as {
+    const report = streams.json<{
       verdicts: Array<{ decision: string; superseded_at: string | null }>;
-    };
+    }>();
     expect(report.verdicts.map((one) => [one.decision, one.superseded_at])).toEqual([
       ["accept", "2026-09-05T08:00:00.000Z"],
       ["reject", null],
@@ -632,7 +627,7 @@ describe("escapes and stops name who decided", () => {
     const decide = (decision: string, key: string, author: string) =>
       runCommandLine(verdictCommandLine, {
         argv: ["AYO-7", decision, key, "--author", author, "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: NOW,
       });
@@ -647,11 +642,11 @@ describe("escapes and stops name who decided", () => {
       ["stops", stopsCommandLine],
       ["escapes", escapesCommandLine],
     ] as const) {
-      const streams = capture();
+      const streams = recordStreams();
       expect(
         await runCommandLine(command, { argv: ["--repo", repo], streams, cwd: repo, now: LATER }),
       ).toBe(0);
-      const lines = streams.out.join("").split("\n");
+      const lines = streams.out().split("\n");
 
       const named = lines.find((line) => line.includes(STOP_ONE!.slice(0, 12)));
       expect(named, `${name} prints the decision`).toBeDefined();
@@ -675,18 +670,18 @@ describe("escapes and stops name who decided", () => {
     expect(
       await runCommandLine(verdictCommandLine, {
         argv: ["AYO-7", "--override", STOP_ONE!, "--author", A_TEAM, "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: NOW,
       }),
     ).toBe(0);
 
     for (const command of [stopsCommandLine, escapesCommandLine]) {
-      const streams = capture();
+      const streams = recordStreams();
       expect(
         await runCommandLine(command, { argv: ["--repo", repo], streams, cwd: repo, now: LATER }),
       ).toBe(0);
-      const printed = streams.out.join("");
+      const printed = streams.out();
       expect(printed).toContain(STOP_ONE!.slice(0, 12));
       expect(printed).not.toContain("decided by");
     }
@@ -695,14 +690,14 @@ describe("escapes and stops name who decided", () => {
   it("prints no decisions at all where none were taken here", async () => {
     const { repo } = storeWith("none-decided", { pullRequest: tick(body(), STOP_ONE!, "endorse") });
     for (const command of [stopsCommandLine, escapesCommandLine]) {
-      const streams = capture();
+      const streams = recordStreams();
       expect(
         await runCommandLine(command, { argv: ["--repo", repo], streams, cwd: repo, now: LATER }),
       ).toBe(0);
       // Not the block's header, not a row: a store answered only on pull
       // requests prints exactly what it printed before this existed.
-      expect(streams.out.join("")).not.toContain("change  finding");
-      expect(streams.out.join("")).not.toContain(STOP_ONE!.slice(0, 12));
+      expect(streams.out()).not.toContain("change  finding");
+      expect(streams.out()).not.toContain(STOP_ONE!.slice(0, 12));
     }
   });
 }, SPAWN_TEST_TIMEOUT_MS);
@@ -712,14 +707,14 @@ describe("a key that has been decided is not decided again by accident", () => {
     const { repo, store } = storeWith("twice");
     const first = await runCommandLine(verdictCommandLine, {
       argv: ["AYO-7", "--endorse", STOP_ONE!, "--note", "I wanted to be asked", "--author", AUTHOR, "--repo", repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: NOW,
     });
     expect(first).toBe(0);
     const before = readFileSync(join(store, "verdicts.json"), "utf8");
 
-    const streams = capture();
+    const streams = recordStreams();
     const second = await runCommandLine(verdictCommandLine, {
       argv: ["AYO-7", "--override", STOP_ONE!, "--author", AUTHOR, "--repo", repo],
       streams,
@@ -728,22 +723,22 @@ describe("a key that has been decided is not decided again by accident", () => {
     });
     expect(second).not.toBe(0);
     expect(readFileSync(join(store, "verdicts.json"), "utf8")).toBe(before);
-    expect(streams.err.join("")).toContain("--replace");
-    expect(streams.err.join("")).toContain("was already decided endorse");
+    expect(streams.err()).toContain("--replace");
+    expect(streams.err()).toContain("was already decided endorse");
   });
 
   it("SCP-189: under --json, refuses the second decision with one JSON object on stdout and nothing on stderr", async () => {
     const { repo, store } = storeWith("twice-json");
     const first = await runCommandLine(verdictCommandLine, {
       argv: ["AYO-7", "--endorse", STOP_ONE!, "--note", "I wanted to be asked", "--author", AUTHOR, "--repo", repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: NOW,
     });
     expect(first).toBe(0);
     const before = readFileSync(join(store, "verdicts.json"), "utf8");
 
-    const streams = capture();
+    const streams = recordStreams();
     const second = await runCommandLine(verdictCommandLine, {
       argv: ["AYO-7", "--accept", STOP_ONE!, "--author", AUTHOR, "--repo", repo, "--json"],
       streams,
@@ -755,14 +750,14 @@ describe("a key that has been decided is not decided again by accident", () => {
     expect(readFileSync(join(store, "verdicts.json"), "utf8")).toBe(before);
     // A `--json` caller gets one JSON object on stdout naming the standing
     // decision, and nothing at all on stderr — the prose path is for a person.
-    expect(streams.err.join("")).toBe("");
-    const printed = JSON.parse(streams.out.join("")) as {
+    expect(streams.err()).toBe("");
+    const printed = streams.json<{
       refused: boolean;
       finding_key: string;
       decision: string;
       author: string;
       decided_at: string;
-    };
+    }>();
     expect(printed).toEqual({
       refused: true,
       finding_key: STOP_ONE,
@@ -777,7 +772,7 @@ describe("a key that has been decided is not decided again by accident", () => {
     expect(
       await runCommandLine(verdictCommandLine, {
         argv: ["AYO-7", "--endorse", STOP_ONE!, "--note", "I wanted to be asked", "--author", AUTHOR, "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: NOW,
       }),
@@ -785,7 +780,7 @@ describe("a key that has been decided is not decided again by accident", () => {
     expect(
       await runCommandLine(verdictCommandLine, {
         argv: ["AYO-7", "--override", STOP_ONE!, "--note", "on reflection, fix it", "--author", AUTHOR, "--repo", repo, "--replace"],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: LATER,
       }),
@@ -806,9 +801,9 @@ describe("a key that has been decided is not decided again by accident", () => {
     });
 
     // And only the decision in force is counted.
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
-    expect((JSON.parse(streams.out.join("")) as { summary: { endorsed: number; overridden: number } }).summary).toMatchObject({
+    expect((streams.json<{ summary: { endorsed: number; overridden: number } }>()).summary).toMatchObject({
       endorsed: 0,
       overridden: 1,
     });
@@ -944,7 +939,7 @@ describe("SCP-189: a decline resolves from the attempts record alone once the re
     const { repo, store } = storeWithPrunedDecline("pruned-decline");
     const code = await runCommandLine(verdictCommandLine, {
       argv: ["AYO-20", "--endorse", FINDING_KEY, "--author", AUTHOR, "--repo", repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: NOW,
     });
@@ -969,7 +964,7 @@ describe("SCP-189: a decline resolves from the attempts record alone once the re
     expect(() =>
       runCommandLine(verdictCommandLine, {
         argv: ["AYO-20", "--endorse", FINDING_KEY, "--author", AUTHOR, "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: NOW,
       }),
@@ -992,7 +987,7 @@ describe("perbo verdict --list reads back what was decided about a change", () =
   const A_TEAM = "the platform team";
 
   const decide = (repo: string, argv: string[], now: Date) =>
-    runCommandLine(verdictCommandLine, { argv: [...argv, "--author", argv.includes("--accept") ? A_TEAM : AUTHOR, "--repo", repo], streams: capture(), cwd: repo, now });
+    runCommandLine(verdictCommandLine, { argv: [...argv, "--author", argv.includes("--accept") ? A_TEAM : AUTHOR, "--repo", repo], streams: recordStreams(), cwd: repo, now });
 
   it("prints both decisions newest first, with the key, the decision, who decided and when", async () => {
     const { repo } = storeWith("listed");
@@ -1001,9 +996,9 @@ describe("perbo verdict --list reads back what was decided about a change", () =
     expect(await decide(repo, ["AYO-7", "--override", STOP_ONE!], NOW)).toBe(0);
     expect(await decide(repo, ["AYO-7", "--accept", ADVISORY!], LATER)).toBe(0);
 
-    const streams = capture();
+    const streams = recordStreams();
     expect(await runCommandLine(verdictCommandLine, { argv: ["AYO-7", "--list", "--repo", repo], streams, cwd: repo })).toBe(0);
-    const lines = streams.out.join("").split("\n").filter((line) => line !== "");
+    const lines = streams.out().split("\n").filter((line) => line !== "");
     expect(lines).toHaveLength(2);
 
     // Newest first, and each line carries the whole answer: when it was taken,
@@ -1017,12 +1012,12 @@ describe("perbo verdict --list reads back what was decided about a change", () =
 
   it("prints `no decisions recorded` and exits 0 for a change nothing has been decided about", async () => {
     const { repo, store } = storeWith("listed-none");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await runCommandLine(verdictCommandLine, { argv: ["AYO-7", "--list", "--repo", repo], streams, cwd: repo });
 
     expect(code).toBe(0);
-    expect(streams.out.join("")).toBe("no decisions recorded\n");
+    expect(streams.out()).toBe("no decisions recorded\n");
     // Reading the record does not start one: nothing at all was written.
     expect(existsSync(join(store, "verdicts.json"))).toBe(false);
   });
@@ -1046,20 +1041,20 @@ describe("perbo verdict --list reads back what was decided about a change", () =
       `${JSON.stringify(LocalVerdictsSchema.parse({ ...file, verdicts: [...file.verdicts, elsewhere] }), null, 2)}\n`,
     );
 
-    const streams = capture();
+    const streams = recordStreams();
     expect(
       await runCommandLine(verdictCommandLine, { argv: ["AYO-7", "--list", "--json", "--repo", repo], streams, cwd: repo }),
     ).toBe(0);
 
     // Read back through the contracts' own schema, and equal to the rows the
     // store holds for this change — same fields, same order, nothing computed.
-    const printed = LocalVerdictsSchema.parse(JSON.parse(streams.out.join("")));
+    const printed = LocalVerdictsSchema.parse(streams.json());
     const stored = readVerdicts(store).verdicts.filter((row) => row.review.ticket_id === TICKET_ID);
     expect(stored).toHaveLength(2);
     expect(printed.verdicts).toEqual(stored);
     expect(printed.schema_version).toBe(file.schema_version);
     // And the other change's decision is not in it.
-    expect(streams.out.join("")).not.toContain("AYO-8");
+    expect(streams.out()).not.toContain("AYO-8");
   });
 
   it("takes no decision and none of the flags that write one", () => {
@@ -1098,16 +1093,16 @@ describe("perbo verdict --stand-in labels the answer dogfood", () => {
   const answer = (repo: string, argv: readonly string[], author: string) =>
     runCommandLine(verdictCommandLine, {
       argv: [...argv, "--author", author, "--repo", repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       now: NOW,
     });
 
   const summaryOf = async (repo: string) => {
-    const streams = capture();
+    const streams = recordStreams();
     expect(await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo })).toBe(0);
     return (
-      JSON.parse(streams.out.join("")) as {
+      streams.json<{
         summary: {
           precision: { n: number };
           endorsed: number;
@@ -1115,7 +1110,7 @@ describe("perbo verdict --stand-in labels the answer dogfood", () => {
           dogfood_stops: number;
           dogfood_changes: number;
         };
-      }
+      }>()
     ).summary;
   };
 
@@ -1130,7 +1125,7 @@ describe("perbo verdict --stand-in labels the answer dogfood", () => {
 
   it("writes answered_by on the stand-in's row and leaves a person's row without it", async () => {
     const { repo, store } = storeWith("stand-in-row");
-    const streams = capture();
+    const streams = recordStreams();
 
     expect(
       await runCommandLine(verdictCommandLine, {
@@ -1150,7 +1145,7 @@ describe("perbo verdict --stand-in labels the answer dogfood", () => {
     expect(unclaimed).toMatchObject({ finding_key: STOP_TWO, decision: "override" });
     expect(Object.hasOwn(unclaimed!, "answered_by")).toBe(false);
     // And the person taking the decision is told what the flag did to it.
-    expect(streams.err.join("")).toContain("recorded as the AI stand-in's answer: dogfood");
+    expect(streams.err()).toContain("recorded as the AI stand-in's answer: dogfood");
   });
 
   it("keeps the stand-in's decision out of the partner reading, and a person's in it", async () => {
@@ -1200,8 +1195,8 @@ describe("perbo verdict --stand-in labels the answer dogfood", () => {
     });
 
     // And the exclusion is on the page rather than folded away.
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
-    expect(streams.out.join("")).toMatch(/dogfood stops excluded\s+1\s+answered by an AI stand-in/);
+    expect(streams.out()).toMatch(/dogfood stops excluded\s+1\s+answered by an AI stand-in/);
   });
 }, SPAWN_TEST_TIMEOUT_MS);

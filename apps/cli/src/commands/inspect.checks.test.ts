@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { stripVTControlCharacters } from "node:util";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
@@ -11,6 +12,7 @@ import {
 import { type ExecuteDeps, executeCommandLine } from "./run/index.js";
 import { inspectCommandLine } from "./inspect.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * What `perbo inspect` says about the checks on the head a run published.
@@ -413,24 +415,6 @@ const reviewer =
 const OUTCOME = "The feature module exports a computed total";
 const CRITERION = "total() returns the sum of its inputs :: total([1,2]) is 3 :: test";
 
-const capture = (isTTY = false) => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY,
-    },
-  };
-};
-
-/** The rendering without its colours: the words are what is being read. */
-// eslint-disable-next-line no-control-regex
-const uncoloured = (text: string): string => text.replace(/\u001b\[[0-9;]*m/g, "");
-
 const originalPath = process.env.PATH;
 const originalToken = process.env.GH_TOKEN;
 
@@ -456,7 +440,7 @@ async function run(
   // On a terminal and without `--json`, the command prints what a person reads
   // rather than the record a script parses; both are the same run.
   const { tty, ...rest } = options;
-  const streams = capture(tty === true);
+  const streams = recordStreams({ isTTY: tty === true });
   const code = await runCommandLine(executeCommandLine, {
     argv: [
         "--repo",
@@ -468,14 +452,14 @@ async function run(
         ...(tty === true ? [] : ["--json"]),
         ...argv,
       ],
-    streams: streams.streams,
+    streams,
     cwd: repo,
     deps: { preflight: okPreflight, hooks: {
         review: reviewer() as never,
         push: (async () => ({ pushed: true, detail: "hooked" })) as never,
       }, ...rest },
   });
-  return { code, out: streams.out.join(""), err: streams.err.join("") };
+  return { code, out: streams.out(), err: streams.err() };
 }
 
 interface RunReport {
@@ -505,21 +489,21 @@ async function inspect(
   report: { delivery_checks: RunReport["delivery_checks"] };
   shown: string;
 }> {
-  const asJson = capture(false);
+  const asJson = recordStreams();
   await runCommandLine(inspectCommandLine, {
     argv: [runId, "--repo", repo],
-    streams: asJson.streams,
+    streams: asJson,
     cwd: repo,
   });
-  const onTty = capture(true);
+  const onTty = recordStreams({ isTTY: true });
   await runCommandLine(inspectCommandLine, {
     argv: [runId, "--repo", repo],
-    streams: onTty.streams,
+    streams: onTty,
     cwd: repo,
   });
   return {
-    report: JSON.parse(asJson.out.join("")) as { delivery_checks: RunReport["delivery_checks"] },
-    shown: uncoloured(onTty.out.join("")),
+    report: asJson.json<{ delivery_checks: RunReport["delivery_checks"] }>(),
+    shown: onTty.plain(),
   };
 }
 
@@ -757,7 +741,7 @@ describe("a run whose head reported no check at all", () => {
       );
 
       const checksBlock = (printed: string): string =>
-        uncoloured(printed)
+        stripVTControlCharacters(printed)
           .split("\n")
           .filter((line) => line.startsWith("CHECKS") || line.startsWith("          "))
           .join("\n");
