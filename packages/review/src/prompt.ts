@@ -42,11 +42,23 @@ export const PROMPT_VERSION = "reviewer_v10";
  */
 const OPEN = (kind: string, trust: TrustTier, attrs: Record<string, string> = {}) => {
   const rendered = Object.entries(attrs)
-    .map(([key, value]) => ` ${key}="${value.replace(/"/g, "'")}"`)
+    .map(([key, value]) => ` ${key}="${value.replace(/"/g, "'").replace(/>/g, "&gt;")}"`)
     .join("");
   return `<perbo:${kind} trust="${trust}"${rendered}>`;
 };
 const CLOSE = (kind: string) => `</perbo:${kind}>`;
+
+/**
+ * `<perbo:` and `</perbo:` inside a body become literal text. A closing tag
+ * carried by a file, a diff, a tree entry or a refusal is exactly how
+ * repository content would reach the instruction position, and the attribute
+ * escaping above is the same defence for the opening tag. `@perbo/planning`
+ * delimits a draft's sources by the same two rules, so both sides of the
+ * product escape the same thing.
+ */
+function defang(body: string): string {
+  return body.replace(/<(?=\/?perbo:)/g, "&lt;");
+}
 
 export class ContextBuilder {
   private readonly items: ContextItem[] = [];
@@ -66,17 +78,20 @@ export class ContextBuilder {
         "system-tier content belongs in the system prompt, not in a delimited data block",
       );
     }
+    // Defanged once, so the manifest attests to the bytes the reviewer was
+    // shown rather than to a body nobody saw.
+    const body = defang(args.body);
     this.items.push({
       id: `ctx_${this.items.length + 1}_${args.kind}`,
       kind: args.kind,
       trust: args.trust,
       provenance: args.provenance,
       selection_reason: args.selection_reason,
-      bytes: Buffer.byteLength(args.body, "utf8"),
-      sha256: createHash("sha256").update(args.body, "utf8").digest("hex"),
+      bytes: Buffer.byteLength(body, "utf8"),
+      sha256: createHash("sha256").update(body, "utf8").digest("hex"),
     });
     this.blocks.push(
-      [OPEN(args.kind, args.trust, args.attrs ?? {}), args.body, CLOSE(args.kind)].join("\n"),
+      [OPEN(args.kind, args.trust, args.attrs ?? {}), body, CLOSE(args.kind)].join("\n"),
     );
   }
 
@@ -337,7 +352,7 @@ export function renderReadFileResult(outcome: {
   if (!outcome.ok) {
     return [
       OPEN("repo_file", "repo", { path: outcome.path, read: "refused" }),
-      outcome.refusal ?? "refused",
+      defang(outcome.refusal ?? "refused"),
       CLOSE("repo_file"),
     ].join("\n");
   }
@@ -346,7 +361,7 @@ export function renderReadFileResult(outcome: {
       path: outcome.path,
       ...(outcome.truncated ? { truncated: "true" } : {}),
     }),
-    outcome.content ?? "",
+    defang(outcome.content ?? ""),
     CLOSE("repo_file"),
   ].join("\n");
 }
