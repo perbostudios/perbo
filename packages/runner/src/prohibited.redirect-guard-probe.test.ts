@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
@@ -376,6 +376,8 @@ const ROWS: Array<[string, Decision, string]> = [
   ["pushd /", "allowed", "root-directory"],
   ["cd / && echo x > y", "refused", "root-directory"],
   ["cd / && echo x > <root>/y", "allowed", "root-directory"],
+  ["echo x > rootlink/etc/y", "refused", "root-directory"],
+  ["echo x > rootlink<root>/y", "allowed", "root-directory"],
 ];
 
 /**
@@ -427,6 +429,9 @@ describe("the probe lists, by round", () => {
   const root = scratch("perbo-scp156-probe-");
   mkdirSync(join(root, "sub"), { recursive: true });
   mkdirSync(join(root, "packages", "runner"), { recursive: true });
+  // A link to the filesystem root, which a walk has to hold as the root itself
+  // for the component after it to name anything.
+  symlinkSync("/", join(root, "rootlink"));
   const scope = { root, home: "/Users/nobody" };
 
   for (const [template, decision, round] of ROWS) {
