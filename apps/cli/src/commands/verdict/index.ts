@@ -19,6 +19,7 @@ import {
   type Grammar,
 } from "../../command-line/grammar.js";
 import {
+  attemptsRecordSubject,
   buildInspectReport,
   buildReportForSubject,
   ticketSubject,
@@ -542,18 +543,31 @@ function one(matches: readonly Ticket[], reference: string, what: string): Ticke
   );
 }
 
-/** The work a reference names, as the report and the record need it. */
-export const ticketReviewSubject: ResolveSubject = (dir, reference): InspectSubject =>
-  ticketSubject(dir, resolveReview(dir, reference).key);
-
-/** What a verdict is given beyond its input. */
-export interface VerdictDeps {
-  /**
-   * How a reference a person typed becomes the work it names.
-   * {@link ticketReviewSubject} unless a caller names another.
-   */
-  resolve: ResolveSubject;
-}
+/**
+ * The work a reference names, as the report and the record need it: the review
+ * a ticket carries, and otherwise the run the id was filed under (SCP-180).
+ *
+ * The ticket store is asked first, so a reference a ticket answers to resolves
+ * exactly as it always did, and a run made with no ticket is named by the id
+ * its own attempts are keyed by — the same name `perbo inspect` takes.
+ */
+export const ticketReviewSubject: ResolveSubject = (dir, reference): InspectSubject => {
+  let reviewed: Ticket;
+  try {
+    reviewed = resolveReview(dir, reference);
+  } catch (noTicket) {
+    if (!(noTicket instanceof UsageError)) throw noTicket;
+    try {
+      return attemptsRecordSubject(dir, reference);
+    } catch (unrecorded) {
+      if (!(unrecorded instanceof UsageError)) throw unrecorded;
+      // Both places, in the order they were asked: a name that is in neither
+      // is refused by naming each, never by the last one that happened to look.
+      throw new UsageError(`${noTicket.message}; ${unrecorded.message}`);
+    }
+  }
+  return ticketSubject(dir, reviewed.key);
+};
 
 /** `--list`: the rows this store holds about one change. */
 export interface VerdictListed {
@@ -591,32 +605,30 @@ export type VerdictReport =
  * The work a reference names: whatever ran here, and then what was reviewed
  * here without running (SCP-249).
  *
- * `resolve` is the store's own record, and it is asked first, so a review an
- * attempt filed resolves exactly as it always did. A review nothing ran for reaches that
- * record as a name it has never heard of, and `<store>/reviews/` is the second
- * place to look before the reference is refused: `perbo review --pr` files no
- * attempt, so the bundle it wrote is the only record its id appears in.
+ * {@link ticketReviewSubject} is the store's own record, and it is asked first,
+ * so a review an attempt filed resolves exactly as it always did. A review
+ * nothing ran for reaches that record as a name it has never heard of, and
+ * `<store>/reviews/` is the second place to look before the reference is
+ * refused: `perbo review --pr` files no attempt, so the bundle it wrote is the
+ * only record its id appears in.
  *
  * Only a {@link UsageError} is caught. A store that cannot be read is a
  * different fault from a name that is not in it, and falling back on one would
  * answer a broken record with a search somewhere else.
  */
-function subjectFor(dir: string, reference: string, resolve: ResolveSubject): InspectSubject {
+function subjectFor(dir: string, reference: string): InspectSubject {
   try {
-    return resolve(dir, reference);
+    return ticketReviewSubject(dir, reference);
   } catch (unresolved) {
     if (!(unresolved instanceof UsageError)) throw unresolved;
     return storedReviewSubject(dir, reference) ?? refuseUnknownReview(dir, reference, unresolved);
   }
 }
 
-export function verdict(
-  input: VerdictInput,
-  context: CommandContext & Partial<VerdictDeps>,
-): VerdictReport {
+export function verdict(input: VerdictInput, context: CommandContext): VerdictReport {
   const repositoryRoot = resolve(context.cwd, input.target.repo);
   const dir = storeDir(repositoryRoot, input.target.store);
-  const subject = subjectFor(dir, input.reference, context.resolve ?? ticketReviewSubject);
+  const subject = subjectFor(dir, input.reference);
   if (input.list) {
     // The strict reader, as the write path uses: reporting "no decisions
     // recorded" for a file this cannot parse would be a lie about the record.
@@ -761,12 +773,7 @@ function renderVerdict(report: VerdictReport, json: boolean): Rendered {
   };
 }
 
-export const verdictCommandLine: ReportCommand<
-  VerdictInput,
-  { json: boolean },
-  VerdictReport,
-  VerdictDeps
-> = {
+export const verdictCommandLine: ReportCommand<VerdictInput, { json: boolean }, VerdictReport> = {
   kind: "report",
   name: "verdict",
   grammars: [VERDICT_GRAMMAR],

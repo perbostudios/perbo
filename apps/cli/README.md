@@ -389,24 +389,24 @@ merged ticket — all runs, priced rows only, unpriced attempts counted and name
 own history says it merged.
 
 `verdict` is the same answer taken here rather than on the pull request (SCP-181), for the times
-there is no pull request yet, no `gh` credential, or no reason to leave the terminal.
-`perbo verdict <review> --endorse|--override <stop key>` answers a stop exactly as the two boxes
-do, and `--accept|--reject <finding key>` judges any finding, stop or not. `<review>` is a ticket
-key, a pull request — url or number — or a review id, and the key is a finding key, whole or by any
-prefix that names one finding: **the same key the checkbox carries**, so a stop answered either way
-is one decision about one finding. The row goes to `<store>/verdicts.json` with who took it, when
-and the note; nothing leaves the machine and nothing on the network is asked. Who took it is this
-repository's own `git config user.name` and `user.email` — the two lines git already asks every
-contributor for, carried on the row as `decided_by`, with no account and no token anywhere in it —
-or `--author` where you are recording somebody else's decision. Where the repository names neither
-and `--author` is absent, nothing is written and the two lines to set are printed: a record that
-names nobody is not evidence of who decided. `stops` and `escapes` print the author beside each
-decision that carries one, and a row written before the field existed keeps being read exactly as
-it was. `stops` counts it beside the answers read off pull requests — the local record fills in a
-stop nobody ticked, and where both exist the later answer stands — and `inspect` prints it beside
-its finding. A key that already carries a decision is refused without `--replace`; with it, the
-earlier decision is superseded on the record rather than overwritten, because "we changed our mind"
-is part of what the file is for.
+there is no pull request yet, no `gh` credential, or no reason to leave the terminal. `perbo
+verdict <review> --endorse|--override <stop key>` answers a stop exactly as the two boxes do, and
+`--accept|--reject <finding key>` judges any finding, stop or not. `<review>` is a ticket key, the
+id a run with no ticket was filed under, a pull request — url or number — or a review id, and the
+key is a finding key, whole or by any prefix that names one finding: **the same key the checkbox
+carries**, so a stop answered either way is one decision about one finding. The row goes to
+`<store>/verdicts.json` with who took it, when and the note; nothing leaves the machine and nothing
+on the network is asked. Who took it is this repository's own `git config user.name` and
+`user.email` — the two lines git already asks every contributor for, carried on the row as
+`decided_by`, with no account and no token anywhere in it — or `--author` where you are recording
+somebody else's decision. Where the repository names neither and `--author` is absent, nothing is
+written and the two lines to set are printed: a record that names nobody is not evidence of who
+decided. `stops` and `escapes` print the author beside each decision that carries one, and a row
+written before the field existed keeps being read exactly as it was. `stops` counts it beside the
+answers read off pull requests — the local record fills in a stop nobody ticked, and where both
+exist the later answer stands — and `inspect` prints it beside its finding. A key that already
+carries a decision is refused without `--replace`; with it, the earlier decision is superseded on
+the record rather than overwritten, because "we changed our mind" is part of what the file is for.
 
 `perbo verdict --list <change>` reads that record back: every decision recorded for one change —
 the finding key, the decision, who decided and when — newest first, a superseded row kept and
