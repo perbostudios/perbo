@@ -95,7 +95,7 @@ describe("discardTicket", () => {
 
   it("waits for the repository's own commands to finish", async () => {
     const repo = repository();
-    await expect(discardTicket(deps({ jobs: [running()] }), repo, "PRB-1")).rejects.toThrow(
+    await expect(discardTicket(deps({ jobs: [running()] }), repo, "PRB-1")).resolves.toBe(
       "Wait for the commands running in this repository to finish before deleting a contract.",
     );
     expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(true);
@@ -104,14 +104,14 @@ describe("discardTicket", () => {
   it("does not wait for a command in another repository", async () => {
     const repo = repository();
     const elsewhere = running({ repoId: "80000000-0000-4000-8000-00000000000b" });
-    await expect(discardTicket(deps({ jobs: [elsewhere] }), repo, "PRB-1")).resolves.toBeUndefined();
+    await expect(discardTicket(deps({ jobs: [elsewhere] }), repo, "PRB-1")).resolves.toBeNull();
   });
 
   it("refuses a ticket the store no longer holds", async () => {
     const repo = repository();
     await expect(
       discardTicket(deps({ ticket: ticket({ key: "PRB-9" }) }), repo, "PRB-1"),
-    ).rejects.toThrow("This task is no longer in the repository's ticket store.");
+    ).resolves.toBe("This task is no longer in the repository's ticket store.");
   });
 
   it("keeps a contract that has moved past the contract stage", async () => {
@@ -119,7 +119,7 @@ describe("discardTicket", () => {
     for (const state of ["executing", "merged", "pr_open"])
       await expect(
         discardTicket(deps({ ticket: ticket({ state: state as Ticket["state"] }) }), repo, "PRB-1"),
-      ).rejects.toThrow("Only a contract that has never run can be deleted.");
+      ).resolves.toMatch(/^Only a contract that has never run can be deleted\./);
     expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(true);
   });
 
@@ -128,7 +128,7 @@ describe("discardTicket", () => {
       const repo = repository();
       await expect(
         discardTicket(deps({ ticket: ticket({ state: state as Ticket["state"] }) }), repo, "PRB-1"),
-      ).resolves.toBeUndefined();
+      ).resolves.toBeNull();
     }
   });
 
@@ -139,8 +139,8 @@ describe("discardTicket", () => {
       attemptsPath(repo, "ticket_1"),
       JSON.stringify({ ticket_id: "ticket_1", attempts: [{ attempt_id: "att_1" }] }),
     );
-    await expect(discardTicket(deps(), repo, "PRB-1")).rejects.toThrow(
-      "This contract has recorded attempts or evidence, so it stays.",
+    await expect(discardTicket(deps(), repo, "PRB-1")).resolves.toMatch(
+      /^This contract has recorded attempts or evidence, so it stays\./,
     );
   });
 
@@ -148,8 +148,8 @@ describe("discardTicket", () => {
     const repo = repository();
     mkdirSync(join(repo.path, ".perbo", "state"), { recursive: true });
     writeFileSync(attemptsPath(repo, "ticket_1"), "{not json");
-    await expect(discardTicket(deps(), repo, "PRB-1")).rejects.toThrow(
-      "This contract has recorded attempts or evidence, so it stays.",
+    await expect(discardTicket(deps(), repo, "PRB-1")).resolves.toMatch(
+      /^This contract has recorded attempts or evidence, so it stays\./,
     );
   });
 
@@ -165,12 +165,12 @@ describe("discardTicket", () => {
         artifacts: [],
       });
     writeFileSync(join(bundlesPath(repo), "other.json"), bundle("ticket_other"));
-    await expect(discardTicket(deps(), repo, "PRB-1")).resolves.toBeUndefined();
+    await expect(discardTicket(deps(), repo, "PRB-1")).resolves.toBeNull();
     const second = repository();
     mkdirSync(bundlesPath(second), { recursive: true });
     writeFileSync(join(bundlesPath(second), "own.json"), bundle("ticket_1"));
-    await expect(discardTicket(deps(), second, "PRB-1")).rejects.toThrow(
-      "This contract has recorded attempts or evidence, so it stays.",
+    await expect(discardTicket(deps(), second, "PRB-1")).resolves.toMatch(
+      /^This contract has recorded attempts or evidence, so it stays\./,
     );
   });
 
@@ -186,7 +186,7 @@ describe("discardTicket", () => {
         repo,
         "PRB-1",
       ),
-    ).rejects.toThrow("This contract has a pull request on record, so it stays.");
+    ).resolves.toBe("This contract has a pull request on record, so it stays.");
   });
 
   it("refuses a ticket store holding a link rather than following it", async () => {

@@ -323,7 +323,7 @@ export const USAGE = `perbo — contract to pull request, locally
       --force re-reads it anyway. A one-time backfill, not a standing sync.
 
   perbo edit PRB-1 [--outcome "..."] [--criterion "..."] [--path "..."]
-                   [--prohibit "..."] [--manual-reviewer <name>]
+                   [--prohibit "..." | --no-prohibit] [--manual-reviewer <name>]
                    [--manual-reason <why>] [--repo .] [--store <dir>] [--json]
   perbo edit PRB-1 --graph-edit '<json>' [--author you|interview]
   perbo edit PRB-1 --undo <n>
@@ -332,6 +332,10 @@ export const USAGE = `perbo — contract to pull request, locally
       issues listed and the file left as edited. With --outcome, --criterion
       or --path, edit without an editor: each replaces the whole of its part.
       Only a ticket in plan_review may be edited.
+
+      --prohibit replaces the prohibited paths; --no-prohibit empties them. An
+      edit naming neither leaves the list as it stands, so the last
+      prohibition can be taken back without the scope around it moving.
 
       --graph-edit applies one edit to the plan's execution graph: add_node,
       split_node, merge_nodes, delete_node, set_criterion, set_node_paths,

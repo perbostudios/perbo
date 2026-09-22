@@ -21,7 +21,11 @@ export type Relayed =
   | { kind: "started"; session: string; note: Line }
   /** A tool ran; `planMoved` where it wrote a plan edit the records now hold. */
   | { kind: "tool"; line: Omit<ToolLine, "edit">; planMoved: boolean }
-  | { kind: "asked"; line: AskedLine };
+  | { kind: "asked"; line: AskedLine }
+  /** The session finished its turn: the next word is the person's (D-119). */
+  | { kind: "idle" }
+  /** The session is over, so nothing further is owed to the person. */
+  | { kind: "ended"; line: Line };
 
 /**
  * The text of one message the interview streamed, or null where it carries
@@ -100,13 +104,12 @@ export function relayed(line: string): Relayed {
     return {
       kind: "started",
       session,
-      // The id as it was recorded, which is the one a later start continues.
+      // The session's own id is of no use to anybody reading the chat, and the
+      // spec's path is in the pane beside it; what is worth saying once is the
+      // folder it may write that is on screen nowhere.
       note: {
         kind: "note",
-        text: redact(`The session is ${session}, writing ${event.spec} and ${event.adr}.`).slice(
-          0,
-          2000,
-        ),
+        text: redact(`Writing ${event.spec} and ${event.adr}.`).slice(0, 2000),
       },
     };
   }
@@ -138,6 +141,7 @@ export function relayed(line: string): Relayed {
       },
       planMoved: event.ok && (event.tool === "edit_plan" || event.tool === "undo_edit"),
     };
+  if (event.type === "idle") return { kind: "idle" };
   if (event.type === "asked")
     return {
       kind: "asked",
@@ -168,7 +172,7 @@ export function relayed(line: string): Relayed {
       },
     };
   return {
-    kind: "line",
+    kind: "ended",
     line: {
       kind: "note",
       text: `The interview ended: ${redact(event.reason).slice(0, 2000)}.`,

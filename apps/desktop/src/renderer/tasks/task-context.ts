@@ -1,5 +1,5 @@
 import { formatUsd } from "@perbo/contracts/browser";
-import type { Detail } from "../../shared/protocol.js";
+import type { Detail, OpenDraft } from "../../shared/protocol.js";
 import type { PageProps, TaskView } from "../shell/route.js";
 import { projectTicket } from "./ticket-workspace.js";
 export interface TaskContext extends PageProps {
@@ -58,3 +58,32 @@ export const costLabel = ({ cost }: Pick<Detail, "cost">): string =>
     : cost.partial && cost.micros > 0
       ? `at least ${formatUsd(cost.micros, 2)}`
       : formatUsd(cost.micros, 2);
+
+/**
+ * The scope a saved editing session holds that this contract does not carry.
+ *
+ * A mark made in the Explorer writes the session's own draft and reaches the
+ * contract only through a compile. Approval freezes the contract's scope and
+ * sends the contract file's digest, which a mark never changes — so without
+ * this the freeze would pass, the marks would be left behind, and the page
+ * would have said nothing about either.
+ *
+ * Null when there is no session for this ticket, or when the two agree. Order
+ * is not part of the comparison: a list the person reordered is the same scope.
+ */
+export function pendingScope(
+  drafts: readonly OpenDraft[] | undefined,
+  repoId: string,
+  key: string,
+  scope: { paths_allowed: readonly string[]; paths_prohibited: readonly string[] },
+): { allowed: readonly string[]; prohibited: readonly string[] } | null {
+  const draft = (drafts ?? []).find(
+    (each) => each.repoId === repoId && each.key === key && each.phase !== "discarded",
+  );
+  if (draft === undefined) return null;
+  const same = (a: readonly string[], b: readonly string[]): boolean =>
+    a.length === b.length && [...a].sort().join("\u0000") === [...b].sort().join("\u0000");
+  if (same(draft.scope.paths, scope.paths_allowed) && same(draft.scope.prohibited, scope.paths_prohibited))
+    return null;
+  return { allowed: draft.scope.paths, prohibited: draft.scope.prohibited };
+}

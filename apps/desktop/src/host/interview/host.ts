@@ -1,4 +1,5 @@
 import { InterviewTurnSchema, encodeInterviewTurn } from "@perbo/contracts/interview-protocol";
+import { planNodes } from "@perbo/contracts/plan";
 import { redact } from "../process.js";
 import { readLatestDraftEdit } from "../records.js";
 import { ticketPath } from "../repository/layout.js";
@@ -12,14 +13,22 @@ import type { Changes } from "../changes.js";
 import type { ContractEditing } from "../../shared/contract-editing.js";
 import type { LineProcess } from "../process.js";
 import type { RegisteredRepository } from "../profile/store.js";
+import type { TicketRecords } from "../tickets/open.js";
 import type { InterviewEdit, InterviewEntry, InterviewStatus } from "../../shared/protocol.js";
 
 export interface InterviewDeps {
   editing: Pick<
     ContractEditing,
-    "read" | "converse" | "recordInterview" | "recordSpec" | "beginAsking" | "answerAsking"
+    | "read"
+    | "converse"
+    | "recordInterview"
+    | "recordSpec"
+    | "beginAsking"
+    | "answerAsking"
+    | "countNodes"
   >;
   repository(id: string): RegisteredRepository;
+  tickets: Pick<TicketRecords, "contract">;
   cli: Pick<Cli, "spawn">;
   changes: Pick<Changes, "changed">;
 }
@@ -36,6 +45,17 @@ export interface InterviewDeps {
 export class InterviewHost {
   private readonly deps: InterviewDeps;
   private readonly live = new Map<string, { repoId: string; child: LineProcess }>();
+  /**
+   * The plannings whose interview is working on what it will say next (D-119).
+   *
+   * Held here rather than on the record: it is about a process running now, and
+   * a session reopened is a session that has said everything it was going to.
+   *
+   * Counted rather than flagged, because turns can be in flight together: a
+   * person who sends a second before the first is answered is owed two, and the
+   * first answer arriving does not mean the session has stopped working.
+   */
+  private readonly owed = new Map<string, number>();
 
   constructor(deps: InterviewDeps) {
     this.deps = deps;
@@ -44,6 +64,11 @@ export class InterviewHost {
   /** The planning sessions whose interview is still there. */
   running(): string[] {
     return [...this.live.keys()];
+  }
+
+  /** The planning sessions whose interview owes the person a turn (D-119). */
+  working(): string[] {
+    return [...this.owed.entries()].flatMap(([id, owed]) => (owed > 0 ? [id] : []));
   }
 
   status(id: string): InterviewStatus {
@@ -78,6 +103,10 @@ export class InterviewHost {
       },
       onClose: ({ code, stopped }) => {
         this.live.delete(id);
+        // Whatever the session owed the person, it is not going to say it now:
+        // a dock still reporting work on a child that has gone is the reading
+        // the indicator exists to prevent.
+        this.owed.delete(id);
         this.converse(
           id,
           code === 0 || stopped
@@ -92,6 +121,7 @@ export class InterviewHost {
       },
       onError: (error) => {
         this.live.delete(id);
+        this.owed.delete(id);
         this.converse(id, { kind: "note", text: redact(error.message).slice(0, 12_000) });
       },
     });
@@ -123,6 +153,10 @@ export class InterviewHost {
       throw new Error(
         "The interview is not listening. Start it again, then send this once it is running.",
       );
+    // The turn is with the session now: it is working until it says otherwise,
+    // so the dock can say so through a pause that would otherwise read as
+    // something having gone wrong.
+    this.owed.set(id, (this.owed.get(id) ?? 0) + 1);
     this.converse(id, { kind: "turn", text: turn.text });
     // Recorded before it is answered, so the asking is judged against a
     // conversation that already holds this turn.
@@ -139,6 +173,10 @@ export class InterviewHost {
    */
   stop(id: string): InterviewStatus {
     this.live.get(id)?.child.stop();
+    // Said now rather than at `onClose`, which is up to eight seconds later:
+    // the person has stopped waiting, so the dock stops saying they should.
+    this.owed.delete(id);
+    this.askingChanged(id);
     return this.status(id);
   }
 
@@ -146,6 +184,7 @@ export class InterviewHost {
   shutdown(): void {
     for (const live of this.live.values()) live.child.stop();
     this.live.clear();
+    this.owed.clear();
   }
 
   /**
@@ -178,11 +217,11 @@ export class InterviewHost {
     this.deps.editing.recordSpec(id, written.slug);
     // The folder is minted once and never moves, so the person is told what it
     // was called while the spec is still empty enough to start again.
+    // That the title can be changed is what an editable field says by being
+    // one, and that a folder keeps its name is how folders work.
     this.converse(id, {
       kind: "note",
-      text:
-        `Named from your first message: ${written.folder}. The folder keeps this name; ` +
-        "the title itself you can change in the Spec pane.",
+      text: `Named ${written.folder} from your first message.`,
     });
   }
 
@@ -191,6 +230,20 @@ export class InterviewHost {
     const read = relayed(line);
     if (read.kind === "nothing") return;
     if (read.kind === "line") {
+      this.converse(id, read.line);
+      return;
+    }
+    if (read.kind === "idle") {
+      // One turn answered. The rest stay owed: a person who sent a second
+      // before the first came back is still waiting on it.
+      const owed = (this.owed.get(id) ?? 0) - 1;
+      if (owed > 0) this.owed.set(id, owed);
+      else this.owed.delete(id);
+      this.askingChanged(id);
+      return;
+    }
+    if (read.kind === "ended") {
+      this.owed.delete(id);
       this.converse(id, read.line);
       return;
     }
@@ -275,6 +328,7 @@ export class InterviewHost {
       running: this.live.has(id),
       entry,
       asking: this.askingOf(id),
+      working: (this.owed.get(id) ?? 0) > 0,
     });
     return entry;
   }
@@ -302,6 +356,7 @@ export class InterviewHost {
       running: this.live.has(id),
       entry: null,
       asking: this.askingOf(id),
+      working: (this.owed.get(id) ?? 0) > 0,
     });
   }
 
@@ -318,6 +373,16 @@ export class InterviewHost {
       const session = this.deps.editing.read(id);
       if (session.key === null) return;
       const repoId = this.live.get(id)?.repoId ?? session.repoId;
+      // An edit can divide a plan that was not divided, or put a divided one
+      // back together, and the rail is drawn where no contract can be read —
+      // it asks this count instead. Settling a job writes it and so does a
+      // contract re-read; an edit reaches neither, so a plan the interview
+      // split would have a graph the rail never offered a way into.
+      this.deps.editing.countNodes(
+        id,
+        planNodes(this.deps.tickets.contract(this.deps.repository(repoId), session.key).contract)
+          .length,
+      );
       this.deps.changes.changed(true, { kind: "records", repoId, key: session.key });
     } catch {
       // A session that has gone has no plan for anything to be drawing.

@@ -285,13 +285,20 @@ export function HomePage({
   const completedRows = all.filter((row) => isArchived(row.ticket.state));
   const attention = all.filter(needsAttention).length;
   const running = all.length - completedRows.length;
-  const open = (row: TaskRow): void =>
+  const open = (row: TaskRow): void => {
+    const { primary, screen } = projectTicket(workspace, row);
     navigate({
       page: "task",
       repoId: row.repoId,
       key: row.ticket.key,
-      ...(!archive ? { view: projectTicket(workspace, row).primary.view } : {}),
+      // Where a ticket belongs is asked for with `auto` and answered once, in
+      // `TaskPage`. Where the primary action only names the page `auto` would
+      // land on anyway, ask for `auto` — so a ticket whose plan was divided
+      // reaches its graph from here exactly as it does from the draft that
+      // made it. Where the two differ, the action still says which it wants.
+      ...(!archive ? { view: primary.view === screen ? ("auto" as const) : primary.view } : {}),
     });
+  };
   const rename = (row: TaskRow, title: string): Promise<unknown> =>
     action.mutateAsync({
       kind: "rename",

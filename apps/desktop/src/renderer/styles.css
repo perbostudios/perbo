@@ -40,10 +40,48 @@ h3 {
 p {
   line-height: 1.6;
 }
-code,
+code {
+  font-family: var(--mono);
+  font-size: calc(12px * var(--text-scale));
+}
+/* The surfaces the browser draws for us still belong to the design: a page
+   that themes its own elements and leaves the selection, the caret and the
+   scrollbars at their defaults is a page assembled rather than built. */
+::selection {
+  background: rgba(var(--amber-rgb), 0.28);
+  color: var(--ink);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
 .mono {
   font-family: var(--mono);
   font-size: calc(12px * var(--text-scale));
+  /* A figure read against the one above it is read by its columns, so the
+     digits are the same width whatever they are. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 .muted {
   color: var(--muted);
@@ -1302,6 +1340,26 @@ textarea {
   border-style: dashed;
   background: transparent;
   color: var(--muted);
+}
+/* What the scope does not cover, on the page that freezes it. Advice, so it
+   reads as a line of the contract rather than as an alarm across it: one rule
+   above it, the same ink as its neighbours, and no colour doing the arguing. */
+.scope-outside {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.5;
+}
+.scope-outside > span {
+  flex: 1;
+}
+.scope-outside .text-button {
+  flex: none;
+  white-space: nowrap;
 }
 .scope-message {
   display: flex;
@@ -3897,6 +3955,137 @@ kbd {
   text-decoration-skip-ink: none;
   text-underline-offset: 3px;
 }
+/* The reading view of a section (`SpecReading.tsx`). Its box is the editor's
+   box — same fill, same radius, same padding — so opening one under the pointer
+   moves nothing but the letters, and the person reading and the person typing
+   are looking at the same shape on the page. What carries colour here is what
+   the writer marked: a reference, a piece of code, their own emphasis, and the
+   id the spec gave a requirement. Nothing is coloured for its meaning. */
+.spec-read {
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  min-height: 52px;
+  line-height: 1.7;
+  color: var(--text);
+  cursor: text;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.spec-read:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+.spec-read--empty {
+  justify-content: center;
+}
+.spec-read-placeholder,
+.spec-read-p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.spec-read-placeholder {
+  color: var(--faint);
+}
+/* A heading inside a section is a heading of a section, so it is small: it
+   groups the lines under it and does not compete with the section's own name. */
+.spec-read-h {
+  margin: 4px 0 -2px;
+  font-size: calc(12px * var(--text-scale));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.spec-read-h-text {
+  min-width: 0;
+}
+.spec-read-h::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.spec-read-h3,
+.spec-read-h4 {
+  text-transform: none;
+  letter-spacing: 0.01em;
+  font-size: calc(12.5px * var(--text-scale));
+  color: var(--ink);
+}
+.spec-read-h4 {
+  font-weight: 500;
+  color: var(--muted);
+}
+.spec-read-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+/* The mark in its own column, so every line's first word starts at the same
+   place however wide its mark is, and a wrapped line hangs under that word
+   rather than under the mark. */
+.spec-read-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 9px;
+}
+.spec-read-text {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+.spec-bullet {
+  color: var(--amber);
+  font-size: 1.05em;
+  line-height: 1;
+  text-align: right;
+  min-width: 1.1em;
+}
+/* The id a criterion cites, kept and shown, but as a quiet chip beside the line
+   rather than as the first four characters of its sentence. */
+.spec-req-id {
+  font: 500 calc(10px * var(--text-scale)) var(--mono);
+  color: var(--amber-text);
+  background: var(--amber-paper);
+  border: 1px solid rgba(var(--amber-rgb), 0.35);
+  border-radius: 999px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  transform: translateY(-1px);
+}
+.spec-code {
+  font: calc(11.5px * var(--text-scale)) var(--mono);
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.5px 4px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+/* Weight and ink, and no wash behind it. A highlighter drawn across a line of
+   a spec fights the text it is meant to lift: the page is already short, and
+   on a short page the heavier word is the loud one without any help. */
+.spec-strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+/* The emphasis a writer typed, in the ink the rest of the page marks with, so
+   a spec is read in one palette rather than two. */
+.spec-em {
+  font-style: italic;
+  color: var(--amber-text);
+}
 .spec-missing {
   color: var(--red);
 }
@@ -4017,21 +4206,42 @@ kbd {
   font-size: 12px;
   color: var(--muted);
 }
-.spec-requirement-text {
-  flex: 1;
-  min-width: 0;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+
+/* The action sits at the end of its block, where a hand goes looking for it,
+   and what it does is read on the way there. */
 .spec-generate {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
   flex-wrap: wrap;
   padding: 20px 30px;
   border-bottom: 1.5px solid var(--line);
+}
+.spec-generate > .small {
+  margin-right: auto;
+  order: -1;
+  max-width: 62ch;
+}
+/* Mounted and out of the way: the composer is what lands on the drafted
+   contract when a job settles, so it is never unmounted — but its steps are
+   not a second way to plan, offered under the first. */
+/* The nodes a graph divided the work into, on the page that freezes them. */
+.contract-nodes ol {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.contract-nodes li {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.spec-typed.spec-typed--away {
+  display: none;
 }
 .spec-typed {
   display: flex;
@@ -4631,8 +4841,29 @@ kbd {
 .approve-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
   flex: none;
+  margin-left: auto;
+}
+/* The way onward from a pane that shows the plan, sitting where every other
+   pane's primary control sits: the bottom right of its own window. It is flex
+   none against panes that scroll, so it stays put rather than scrolling away
+   from the thing it acts on. */
+.pane-confirm {
+  flex: none;
+  padding: 10px 16px 12px;
+  border-top: 1.5px solid var(--line);
+  background: var(--paper);
+  /* `.approve-actions` pushes itself to the end of the Graph's own footer row
+     with `margin-left: auto`, which here — as the last child of a column —
+     would push this bar off to the right at half the pane's width. It is the
+     footer rather than an item in one, so it spans. */
+  margin-left: 0;
+  width: 100%;
+}
+.pane-confirm .small {
+  margin-right: auto;
 }
 .graph-history {
   flex: 1;
@@ -4701,13 +4932,52 @@ kbd {
 }
 /* Wide enough to read a paragraph in, narrow enough to leave the pane the room. It does not collapse: the chat is beside every pane from the first question to the approval. */
 .dock {
-  width: clamp(300px, 28vw, 384px);
+  /* The width is the person's, dragged on `.dock-handle` and remembered, and it
+     arrives as an inline style. No width is stated here: a bound in this file
+     as well as in `dock-size.ts` is a second rule the drag would stop agreeing
+     with, and the edge would stand still under a moving pointer. */
   flex: none;
   min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--soft);
   border-left: 1.5px solid var(--line);
+}
+/* The bar between the pane and the interview. Three pixels of border with a
+   wider reach around it: a person aims at the line they can see, and hits a
+   target their hand can actually hold. */
+.dock-handle {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: 3px;
+  margin-right: -3px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.dock-handle::before {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+}
+.dock-handle-grip {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  transition: background var(--duration-fast, 120ms) ease;
+}
+.dock-handle:hover .dock-handle-grip,
+.dock-handle:focus-visible .dock-handle-grip,
+.dock-handle--dragging .dock-handle-grip {
+  background: var(--accent, var(--line));
+}
+.dock-handle:focus-visible {
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dock-handle-grip {
+    transition: none;
+  }
 }
 .dock-head {
   flex: none;
@@ -4760,8 +5030,11 @@ kbd {
 }
 .msg {
   border-radius: var(--radius);
-  padding: 8px 11px 9px;
-  font-size: calc(12.5px * var(--text-scale));
+  padding: 7px 10px 8px;
+  /* A step down from the pane beside it: the dock is a column of short turns
+     read one after another, not a document. It still scales with the text
+     size a person set, so this narrows the column rather than fixing it. */
+  font-size: calc(11.75px * var(--text-scale));
   line-height: 1.5;
   white-space: pre-wrap;
   margin: 0;
@@ -4789,23 +5062,13 @@ kbd {
   color: var(--muted);
   padding: 0 2px;
 }
-/* The questions as the transcript keeps them, so one moved past is still there
-   to read and answer. */
+/* The transcript says an asking happened and keeps the questions behind its
+   dot, so a group moved past is still there to read without the whole of it
+   sitting in the chat. */
 .asked-said {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0 2px;
-  font-size: calc(11.5px * var(--text-scale));
-  color: var(--muted);
-}
-.asked-said-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.asked-said p {
-  margin: 0;
+  align-items: center;
+  gap: 6px;
 }
 
 /* One group of the interview's questions, put between the conversation and the
@@ -4815,11 +5078,13 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* A group at the size the protocol allows is taller than the dock, and this
-     sits outside the chat's own scroll: without a bound of its own the Send
-     below it cannot be reached. */
-  max-height: 45vh;
-  overflow-y: auto;
+  /* The height is the person's, dragged on `.asked-handle` and remembered, and
+     it arrives as an inline style. It does not change with what is in it: the
+     answers scroll inside `.asked-body`, and the box that opens underneath
+     takes its room from the conversation rather than from the answers. */
+  flex: none;
+  min-height: 0;
+  overflow: hidden;
   padding: 12px 13px;
   border: 1.5px solid var(--line);
   border-radius: 12px 10px 13px 10px;
@@ -4829,6 +5094,33 @@ kbd {
   display: flex;
   align-items: baseline;
   gap: 8px;
+}
+/* With the box for a person's own words open under it, the two are one panel:
+   the card's bottom edge is straightened and its border dropped, and the box
+   below gives up its own, so what divides them is the one line the composer
+   already draws across the dock rather than two curved edges facing each
+   other. */
+.asked-card--joined {
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-bottom: 10px;
+}
+.composer--joined .composer-box {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+/* The mark on the two answers every question carries. */
+.choice-icon {
+  flex: none;
+  color: var(--muted);
+  margin-right: 1px;
+}
+.choice.selected .choice-icon {
+  color: var(--accent);
 }
 .asked-head b {
   font-size: calc(12.5px * var(--text-scale));
@@ -4851,17 +5143,61 @@ kbd {
   font: calc(11px * var(--text-scale)) var(--mono);
   color: var(--muted);
 }
+/* The answers, and the only part of the card that scrolls. What is cut off at
+   its bottom edge is the next answer, which is how a person knows there is
+   one. */
+.asked-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* Below the scroll rather than inside it, so it sits on the bottom edge
+   whatever the group's length and never has to be scrolled to. */
 .asked-foot {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* The card scrolls when a group is long, and Send is the one control in it
-     that must never be the thing below the fold. */
-  position: sticky;
-  bottom: 0;
-  margin-top: auto;
+  flex: none;
   padding-top: 8px;
-  background: var(--paper);
+  border-top: 1px solid var(--line);
+}
+/* The bar on the card's top edge: the dock's own edge turned on its side. */
+.asked-handle {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  height: 3px;
+  margin-bottom: -3px;
+  cursor: row-resize;
+  touch-action: none;
+}
+.asked-handle::before {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+.asked-handle-grip {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  transition: background var(--duration-fast, 120ms) ease;
+}
+.asked-handle:hover .asked-handle-grip,
+.asked-handle:focus-visible .asked-handle-grip,
+.asked-handle--dragging .asked-handle-grip {
+  background: var(--accent, var(--line));
+}
+.asked-handle:focus-visible {
+  outline: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .asked-handle-grip {
+    transition: none;
+  }
 }
 
 /* What the interview is doing, under the last line it wrote: the mark pulses
@@ -4940,6 +5276,91 @@ kbd {
   align-items: baseline;
   gap: 8px;
   font: calc(12px * var(--text-scale)) var(--mono);
+}
+/* The detail a card holds back until it is asked for. The dot sits on the head
+   beside the word it explains, and what it says is laid over the chat rather
+   than pushing it about, so asking costs the reader no place in the page. */
+.info-hint {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+/* On a head row it sits at the end, away from the words it explains. */
+.tool-head .info-hint,
+.refusal-head .info-hint {
+  margin-left: auto;
+}
+.info-hint-dot {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font: italic 600 calc(10px * var(--text-scale)) var(--serif, var(--mono));
+  cursor: help;
+}
+.info-hint-dot:hover,
+.info-hint-dot:focus-visible {
+  border-color: var(--ink, var(--line));
+  color: var(--ink, var(--muted));
+}
+.info-hint-body {
+  /* Against the window, not the card: the chat scrolls, and an absolutely
+     placed panel is clipped by that scroll. Where it goes is worked out when
+     it opens (`InfoHint.tsx`), which is also what keeps it inside the window
+     when the dock is narrower than the panel. */
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 40;
+  /* Stated here as well as placed from `InfoHint.tsx`, so the panel already has
+     its width when its height is measured: a shrink-to-fit box measured across
+     the whole window is shorter than the one that gets drawn, and the first
+     open would be placed from a height it never has. */
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  max-height: 260px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 8px 10px;
+  border: 1.5px solid var(--line);
+  border-radius: 10px 8px 11px 8px;
+  background: var(--paper);
+  box-shadow: 0 10px 26px rgba(var(--shadow-rgb), 0.22);
+  font: calc(11px * var(--text-scale)) var(--mono);
+  color: var(--ink, var(--muted));
+  white-space: pre-wrap;
+  text-align: left;
+  /* Kept in the document for a screen reader to read through
+     `aria-describedby`, and taken out of the pointer's way when shut. */
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--duration-quick, 150ms) var(--ease-out, ease-out),
+    visibility var(--duration-quick, 150ms);
+}
+.info-hint-body--open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .info-hint-body {
+    transition: none;
+  }
+}
+/* Why a tool was refused, which the card shows rather than holds back. */
+.tool-why {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  font-size: calc(11.5px * var(--text-scale));
+  white-space: pre-wrap;
 }
 .tool-detail {
   margin: 0;

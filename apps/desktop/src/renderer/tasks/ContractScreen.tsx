@@ -1,14 +1,16 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button, Dialog, FactList, InkIcon, Notice, SectionLabel } from "../ui/index.js";
 import { WizardHeader } from "./wizard.js";
 import { Rename } from "./Rename.js";
-import { errorMessage, useAction } from "../workspace/index.js";
+import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey } from "./ticket-workspace.js";
-import { costLabel, taskRecords } from "./task-context.js";
+import { planNodes } from "@perbo/contracts/plan";
+import { costLabel, pendingScope, taskRecords } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
 export function ContractScreen(context: TaskContext) {
-  const { detail, repoId, navigate, show } = context;
+  const { detail, repoId, navigate, show, workspace } = context;
   const { contract, ticket, criteria, models, repo, busy, held, title, latest } =
     taskRecords(context);
   const [publish, setPublish] = useState(false),
@@ -17,6 +19,10 @@ export function ContractScreen(context: TaskContext) {
     [deleting, setDeleting] = useState(false);
   const action = useAction();
   const unrun = detail.attempts.length === 0 && !ticket.delivery.pull_request_url;
+  // Marks made in the Explorer live in the saved session until a compile moves
+  // them into the contract, and approval freezes the contract. Approving over
+  // the difference would freeze a scope the person has already changed.
+  const pending = ticket.approved_at === null ? pendingScope(workspace.drafts, repoId, ticket.key, contract.scope) : null;
   const bundle = latest?.bundles.find((bundle) => bundle.kind === "execution");
   const start = (): void => {
     void action
@@ -32,7 +38,24 @@ export function ContractScreen(context: TaskContext) {
       .then(() => show("loop"))
       .catch(() => undefined);
   };
-  useShortcut("approve", busy || action.isPending ? null : start);
+  // What this scope does not cover, asked here because here is where it can
+  // still be acted on: a scope frozen is a scope no warning can move. It is
+  // advice and never a gate — somebody who has read it and is content approves
+  // straight through, and a warning that held the button would be a warning
+  // people learn to click past.
+  const impact = useQuery({
+    queryKey: ["impact-contract", repoId, ticket.key, detail.digest],
+    queryFn: () => bridge.request({ kind: "impactContract", repoId, key: ticket.key }),
+    networkMode: "always",
+    enabled: ticket.approved_at === null,
+    // Keyed by the contract's own digest, so a re-compiled contract is a new
+    // question and an unchanged one is never asked twice.
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const outside = impact.data?.warnings.length ?? 0;
+  useShortcut("approve", busy || action.isPending || pending !== null ? null : start);
   useShortcut("rename", () => setRenaming(true));
   return (
     <section className="screen" data-screen="s11">
@@ -93,6 +116,26 @@ export function ContractScreen(context: TaskContext) {
               ))}
             </div>
           </div>
+          {/* What a graph freezes, on the page that freezes it. A divided plan
+              is approved here and curated on the Graph pane, so the division
+              has to be readable here too — approving what you cannot see is
+              the one thing this screen exists to prevent. */}
+          {planNodes(contract).length > 0 && (
+            <section className="contract-nodes" aria-label="How the work divides">
+              <SectionLabel>How the work divides</SectionLabel>
+              <ol>
+                {planNodes(contract).map((node) => (
+                  <li key={node.id}>
+                    <b>{node.title}</b>
+                    <span className="small muted">
+                      {node.criteria.length} {node.criteria.length === 1 ? "criterion" : "criteria"}
+                      {node.paths.length > 0 ? ` · ${node.paths.join(" · ")}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
           <FactList
             className="boundary-facts"
             rows={[
@@ -115,6 +158,33 @@ export function ContractScreen(context: TaskContext) {
               ],
             ]}
           />
+          {/* The scope reads as globs; the files it reaches are what a person
+              is actually approving. This opens them read-only, beside the
+              contract, rather than asking anyone to hold a glob in their head. */}
+          <button
+            type="button"
+            className="text-button small"
+            onClick={() => show("explorer")}
+          >
+            Browse the files this scope reaches
+          </button>
+          {/* Only where there is something to say. A scope that covers what the
+              work reaches is the ordinary case, and a line reporting nothing is
+              a line in the way of the one that matters. */}
+          {ticket.approved_at === null && outside > 0 && (
+            <p className="scope-outside">
+              <InkIcon name="growth-chart" size={18} />
+              <span>
+                {outside} {outside === 1 ? "file" : "files"} outside this scope{" "}
+                {outside === 1 ? "imports" : "import"} what it changes, or sit in a class worth
+                reading — a migration, a manifest, configuration, CI. Widening the scope is
+                free now and a new contract later.
+              </span>
+              <button type="button" className="text-button small" onClick={() => show("explorer")}>
+                Read them
+              </button>
+            </p>
+          )}
           <div className="scope-message">
             <InkIcon name="locked" size={22} />
             <span>
@@ -204,9 +274,19 @@ export function ContractScreen(context: TaskContext) {
                 request. I will merge it myself.
               </span>
             </label>
+            {pending !== null && (
+              <Notice tone="warning">
+                This planning holds a scope the contract does not carry yet —{" "}
+                {pending.allowed.length} allowed{" "}
+                {pending.allowed.length === 1 ? "path" : "paths"} and{" "}
+                {pending.prohibited.length} prohibited. Approving freezes the
+                contract&rsquo;s scope, not this one, so compile it in first:
+                open the contract again with Back and save it.
+              </Notice>
+            )}
             <Button
               variant="primary"
-              disabled={busy || action.isPending}
+              disabled={busy || action.isPending || pending !== null}
               onClick={start}
             >
               {ticket.approved_at

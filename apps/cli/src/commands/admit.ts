@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import {
   APPROACH_SCHEMA_VERSION,
@@ -95,6 +95,7 @@ import {
   type DraftSnapshotFile,
   type JudgingRule,
 } from "../store/tickets.js";
+import { NEXT_STEPS } from "../next-step.js";
 import { specFolder, storeFor, StoreTargetSchema, type StoreTarget } from "../store/index.js";
 import { describeScheduling } from "./serve/waits.js";
 
@@ -1351,6 +1352,13 @@ function admitting(input: Admitting, started: number): AdmissionReport | Promise
         input.args.startOver,
         relative(repositoryRoot, resolve(input.cwd, input.args.fromSpec!)).split(sep).join("/"),
       );
+    } else if (input.args.fromSpec !== null) {
+      // One spec is one piece of work and one ticket (D-103). Drafting from a
+      // spec that already has one is a second ticket for the same work, whose
+      // records name the same spec and whose plans disagree — and the ticket
+      // asked for is the one already there. Asked before a model is, as the
+      // re-draft check above is, because the cost is the same either way.
+      assertNotAlreadyDrafted(input);
     }
     return resolveDrafted(input).then((resolved) =>
       input.args.startOver === null
@@ -1366,6 +1374,66 @@ const money = (micros: number, basis: string): string =>
 
 const duration = (ms: number): string =>
   ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 60_000)}min`;
+
+/**
+ * The states a ticket can be in and leave its spec free to be drafted from
+ * again: the ones nothing carries on from.
+ *
+ * A ticket at one of these is not the plan this spec has, it is the plan it
+ * did not get — `--start-over` refuses them, and D-103's way out of a spec gone
+ * stale is to admit it again. Anything else is a live ticket, and a second
+ * beside it is two plans for one piece of work.
+ */
+const SPENT_STATES = new Set(["plan_invalid", "cancelled", "failed"]);
+
+/**
+ * Refuse a second ticket from one spec, naming the one that is already there.
+ *
+ * What to do about it is the caller's, so the refusal says which case this is
+ * rather than choosing: a ticket still in `plan_review` is re-drafted with
+ * `--start-over`, and one past that is the plan this spec has. Nothing is
+ * written either way, and this is asked before a model is.
+ */
+function assertNotAlreadyDrafted(input: Admitting): void {
+  const repositoryRoot = resolve(input.cwd, input.args.target.repo);
+  const dir = storeDir(repositoryRoot, input.args.target.store);
+  if (!existsSync(join(dir, "tickets"))) return;
+  const spec = relative(repositoryRoot, resolve(input.cwd, input.args.fromSpec!))
+    .split(sep)
+    .join("/");
+  const live = listTickets(dir).filter(
+    (ticket) => ticket.admission.spec?.path === spec && !SPENT_STATES.has(ticket.state),
+  );
+  // The one the refusal is about is the one the caller would act on: a ticket
+  // still open to a re-draft, or failing that the first that stands.
+  const open = live.find((ticket) => ticket.state === "plan_review");
+  const named = open ?? live[0];
+  if (named === undefined) return;
+  throw new UsageError(
+    `${named.key} was already drafted from ${spec}, and one spec is one piece of work: ` +
+      (open === undefined
+        ? `${named.key} is ${named.state}, which is past re-drafting, so this spec has its plan`
+        : `re-draft it with \`perbo admit --from-spec ${spec} --start-over ${named.key}\``),
+  );
+}
+
+/**
+ * What a ticket is called.
+ *
+ * A ticket drafted from a spec is that spec, so it carries the title the
+ * person gave it: the board, the spec's folder and the planning pane all say
+ * the same thing, and work somebody named is findable under the name they
+ * used. Everything else is called by its outcome, which is the only sentence a
+ * ticket drafted from an issue or a pasted file has to be called by.
+ *
+ * The branch is not affected either way — `branchName` derives from the
+ * outcome, not from this.
+ */
+function ticketTitle(resolved: Resolved, outcome: string): string {
+  if (resolved.spec === null) return outcome;
+  const named = resolved.issue?.title.trim() ?? "";
+  return named.length > 0 ? named : outcome;
+}
 
 function admitted(input: Admitting, started: number, resolved: Resolved): AdmissionReport {
   const { args, now } = input;
@@ -1417,7 +1485,7 @@ function admitted(input: Admitting, started: number, resolved: Resolved): Admiss
     schema_version: TICKET_SCHEMA_VERSION,
     ticket_id,
     key,
-    title: resolved.outcome,
+    title: ticketTitle(resolved, resolved.outcome),
     state: "plan_review",
     priority: args.priority,
     labels: args.labels,
@@ -1811,7 +1879,7 @@ function redraft(
 
   const updated: Ticket = TicketSchema.parse({
     ...ticket,
-    title: contract.outcome,
+    title: ticketTitle(resolved, contract.outcome),
     plan_version: contract.version,
     updated_at: now.toISOString(),
     admission: {
@@ -1911,11 +1979,10 @@ function renderAdmitted(report: AdmissionReport): string {
       `${drafted.model.model_id}, ${money(drafted.model.cost_micros, drafted.model.cost_basis)}\n`
     : `\nadmitted ${key} (${ticket.state}) in ${ticket.admission.elapsed_ms}ms\n`;
   const next = ticket.approved_at
-    ? `\nApproved. The contract is immutable from here.\n  perbo run --ticket ${key}\n`
+    ? `\n${NEXT_STEPS[3]}\n  perbo run --ticket ${key}\n`
     : drafted
-      ? `\nThe model drafted this; nothing runs until you approve it. Edit anything, then approve:\n` +
-        `  perbo edit ${key}\n  perbo approve ${key}\n`
-      : `\nRead the contract, then approve it:\n  perbo edit ${key}\n  perbo approve ${key}\n`;
+      ? `\n${NEXT_STEPS[2]}\n  perbo edit ${key}\n  perbo approve ${key}\n`
+      : `\n${NEXT_STEPS[1]}\n  perbo edit ${key}\n  perbo approve ${key}\n`;
   // The graph as recorded: each node with the criteria it covers and the paths
   // it lands in, then the order and the No-Gos, which are approach and live in
   // their own file. `perbo inspect` says the same with the size beside it.
@@ -1972,7 +2039,7 @@ function renderRedrafted(report: AdmissionReport): string {
     `${resolved.nodes.length === 1 ? "" : "s"}\n` +
     `  The graph edits made to the last version are dropped and kept in the log, marked replaced.\n` +
     report.pages.map((page) => `  ${page}\n`).join("") +
-    `\nRead it once more, then approve it:\n  perbo approve ${key}\n`
+    `\n${NEXT_STEPS[0]}\n  perbo approve ${key}\n`
   );
 }
 

@@ -267,6 +267,9 @@ export function claudeInterviewTransport(
         if (message.type === "result" && typeof message.subtype === "string") {
           reason = message.subtype;
         }
+        // The SDK's `result` is the end of one turn, not of the session: the
+        // query runs on while the person's turns arrive.
+        if (message.type === "result") yield { idle: true };
       }
       yield { reason };
     },

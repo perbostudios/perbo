@@ -136,8 +136,22 @@ describe("the admission commands", () => {
   });
 
   it("edits a ticket by its key and the draft's own fields", () => {
-    expect(editArgs("PRB-1", draft).slice(0, 2)).toEqual(["edit", "PRB-1"]);
-    expect(editArgs("PRB-1", draft).slice(2)).toEqual(draftArgs(draft));
+    const held = { ...draft, prohibited: ["infra/**"] };
+    expect(editArgs("PRB-1", held).slice(0, 2)).toEqual(["edit", "PRB-1"]);
+    expect(editArgs("PRB-1", held).slice(2)).toEqual(draftArgs(held));
+  });
+
+  // An empty list and an absent flag are the same on a command line, and the
+  // edit replaces only what it is given: without the flag, unmarking the last
+  // prohibited path is written and then quietly ignored.
+  it("says 'none' out loud when the last prohibition has been taken back", () => {
+    expect(editArgs("PRB-1", { ...draft, prohibited: [] })).toContain("--no-prohibit");
+    expect(editArgs("PRB-1", { ...draft, prohibited: ["infra/**"] })).not.toContain(
+      "--no-prohibit",
+    );
+    // Admission writes the whole scope rather than replacing part of one, so
+    // it needs no such flag.
+    expect(admitDraftArgs({ ...draft, prohibited: [] })).not.toContain("--no-prohibit");
   });
 });
 

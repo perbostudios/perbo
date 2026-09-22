@@ -17,7 +17,7 @@ import type { Streams } from "../streams.js";
 import { editCommandLine } from "./edit/index.js";
 import { INTERVIEW_SESSION_FILE } from "./interview/index.js";
 import { specCommitFiles } from "../spec/pages.js";
-import { readApproachRecord, readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
+import { listTickets, readApproachRecord, readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-spec-test-"));
@@ -284,6 +284,51 @@ describe("a spec's No-Gos outlive a graph a hand edit drops", () => {
 });
 
 describe("perbo admit --from-spec", () => {
+  it("refuses a second ticket from one spec, and says which one is already there", async () => {
+    // One spec is one piece of work (D-103). Drafting from it again is a second
+    // ticket for the same work, whose records name the same spec — and the
+    // ticket being asked for is the one already drafted.
+    const { repo, specPath } = repository();
+    expect((await admitFromSpec(repo, specPath, scripted([submits(drafted)]))).code).toBe(
+      EXIT_CODES.approve,
+    );
+
+    // Refused before a model is asked, so the second draft costs nothing.
+    const model = scripted([submits(drafted)]);
+    await expect(admitFromSpec(repo, specPath, model)).rejects.toThrow(UsageError);
+    await expect(admitFromSpec(repo, specPath, model)).rejects.toThrow(/PRB-1/);
+    await expect(admitFromSpec(repo, specPath, model)).rejects.toThrow(/--start-over PRB-1/);
+    expect(model.requests).toHaveLength(0);
+    // Refused before a model was asked, and nothing written: still one ticket.
+    expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual(["PRB-1"]);
+  });
+
+  it("lets a spec whose only ticket is spent be drafted from again", async () => {
+    // A ticket at plan_invalid, cancelled or failed is not the plan this spec
+    // has — it is the plan it did not get, and `--start-over` refuses all
+    // three. Admitting again is the way out, so the guard must not be a dead
+    // end.
+    const { repo, specPath } = repository();
+    expect((await admitFromSpec(repo, specPath, scripted([submits(drafted)]))).code).toBe(
+      EXIT_CODES.approve,
+    );
+    const dir = storeDir(repo, null);
+    const ticket = readTicket(dir, "PRB-1");
+    writeFileSync(
+      join(dir, "tickets", "PRB-1.json"),
+      JSON.stringify({ ...ticket, state: "plan_invalid" }, null, 2),
+    );
+
+    expect((await admitFromSpec(repo, specPath, scripted([submits(drafted)]))).code).toBe(
+      EXIT_CODES.approve,
+    );
+    expect(
+      listTickets(dir)
+        .map((each) => each.key)
+        .sort(),
+    ).toEqual(["PRB-1", "PRB-2"]);
+  });
+
   it("admits one ticket at plan_review whose plan carries the drafted nodes", async () => {
     const { repo, specPath } = repository();
     const { code } = await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
@@ -301,6 +346,20 @@ describe("perbo admit --from-spec", () => {
     expect(nodes?.map((node) => node.id)).toEqual(["node_1", "node_2"]);
     expect(nodes?.[0]?.criteria).toEqual(["ac_1", "ac_2"]);
     expect(nodes?.[1]?.paths).toEqual(["packages/queue/**"]);
+  });
+
+  it("calls the ticket what the person called the spec, not what the draft called the outcome", async () => {
+    const { repo, specPath } = repository();
+    const { code } = await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
+    expect(code).toBe(EXIT_CODES.approve);
+
+    // The spec's own title, so the board, the folder and the planning pane all
+    // say the same thing. The outcome is a sentence the drafter wrote, and it
+    // is still the contract's outcome — it is just not the ticket's name.
+    const ticket = readTicket(storeDir(repo, null), "PRB-1");
+    expect(ticket.title).toBe("Activation email");
+    expect(readContract(storeDir(repo, null), "PRB-1").outcome).toBe(drafted.outcome);
+    expect(ticket.title).not.toBe(drafted.outcome);
   });
 
   it("shows the person the graph and the No-Gos it just recorded", async () => {

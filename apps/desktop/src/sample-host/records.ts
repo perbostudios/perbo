@@ -1207,7 +1207,18 @@ editing.recover();
  * and behaves the same when it reaches one.
  */
 export const sampleInterviews = new Set<string>();
+/** The sample sessions working on what they will say next, as the host tracks. */
+export const sampleWorking = new Set<string>();
 const sampleTurns = new Map<string, number>();
+/** Whether this planning is still there to be spoken to. */
+function stillThere(id: string): boolean {
+  try {
+    editing.read(id);
+    return true;
+  } catch {
+    return false;
+  }
+}
 /** The asking this planning is putting, or null where it holds none or has gone. */
 export function askingOf(id: string): { entry: number; answered: number } | null {
   try {
@@ -1218,12 +1229,26 @@ export function askingOf(id: string): { entry: number; answered: number } | null
 }
 /** Say what the asking is now, with no line to add — the host's own push. */
 export function askingChanged(id: string): void {
-  emit({ kind: "interview", sessionId: id, running: sampleInterviews.has(id), entry: null, asking: askingOf(id) });
+  emit({
+    kind: "interview",
+    sessionId: id,
+    running: sampleInterviews.has(id),
+    entry: null,
+    asking: askingOf(id),
+    working: sampleWorking.has(id),
+  });
 }
 /** Kept as the host keeps it, so the conversation survives a reload here too. */
 export function converse(id: string, line: InterviewEntry["line"]): InterviewEntry {
   const entry = editing.converse(id, line, new Date().toISOString());
-  emit({ kind: "interview", sessionId: id, running: sampleInterviews.has(id), entry, asking: askingOf(id) });
+  emit({
+    kind: "interview",
+    sessionId: id,
+    running: sampleInterviews.has(id),
+    entry,
+    asking: askingOf(id),
+    working: sampleWorking.has(id),
+  });
   return entry;
 }
 export function interviewStatus(id: string): InterviewStatus {
@@ -1257,12 +1282,7 @@ export function nameSpecFromTurn(id: string, text: string): void {
     );
   saveSpec(slug, renderSpec({ ...EMPTY_SPEC_TEXT, title }, { highWater: 0, existing: [] }).markdown);
   editing.recordSpec(id, slug);
-  converse(id, {
-    kind: "note",
-    text:
-      `Named from your first message: specs/${slug}. The folder keeps this name; ` +
-      "the title itself you can change in the Spec pane.",
-  });
+  converse(id, { kind: "note", text: `Named specs/${slug} from your first message.` });
 }
 export function startSampleInterview(id: string): InterviewStatus {
   if (sampleInterviews.has(id)) return interviewStatus(id);
@@ -1271,11 +1291,11 @@ export function startSampleInterview(id: string): InterviewStatus {
     throw new Error(INTERVIEW_NEEDS_A_TITLE);
   const provider = interviewProviderFor(session.form.models);
   sampleInterviews.add(id);
-  emit({ kind: "interview", sessionId: id, running: true, entry: null, asking: askingOf(id) });
+  emit({ kind: "interview", sessionId: id, running: true, entry: null, asking: askingOf(id), working: sampleWorking.has(id) });
   editing.recordInterview(id, "sample-session", provider);
   converse(id, {
     kind: "note",
-    text: `The session is sample-session, writing specs/${session.specSlug}/spec.md and docs/adr.`,
+    text: `Writing specs/${session.specSlug}/spec.md and docs/adr.`,
   });
   return interviewStatus(id);
 }
@@ -1286,6 +1306,7 @@ export function startSampleInterview(id: string): InterviewStatus {
  * Graph pane uses and lands in the same history as the interview's.
  */
 export function answerSampleTurn(id: string, text: string): void {
+  if (!stillThere(id)) return;
   const turns = (sampleTurns.get(id) ?? 0) + 1;
   sampleTurns.set(id, turns);
   // Asking with options, as the real session does through ask_options: two
@@ -1333,6 +1354,8 @@ export function answerSampleTurn(id: string, text: string): void {
     // The session closes the turn it asked in, as both transports do: the card
     // has to survive this.
     converse(id, { kind: "said", text: "Questions are with you — the first group is above." });
+    sampleWorking.delete(id);
+    askingChanged(id);
     return;
   }
   if (turns === 1)
@@ -1349,6 +1372,73 @@ export function answerSampleTurn(id: string, text: string): void {
   const plan = key === null ? null : plans.get(key);
   const criterion =
     plan && "acceptance_criteria" in plan ? plan.acceptance_criteria[0] : undefined;
+  // The two tool calls the sample otherwise never makes, each asked for by
+  // name. The dock keeps or drops a card by which tool made it, and a rule with
+  // no way to reach two of its three arms is a rule nothing can check.
+  if (/\bdraft it\b/i.test(text) && key !== null) {
+    // No edit on it: a drafting is the admission, not a change to a plan that
+    // already exists, so `edit` is null exactly as the host reports it.
+    converse(id, {
+      kind: "tool",
+      tool: "generate_plan",
+      ok: true,
+      detail:
+        `admitted ${key} in plan_review from specs/${editing.read(id).specSlug ?? "this spec"}. ` +
+        "A person reads and approves it; this session cannot.\n" +
+        "flagged   1 issue-authored attempt — read as data, not followed",
+      edit: null,
+    });
+    // The turn is over, and saying so is what takes "Working…" off the dock.
+    // A branch that returned without it left the sample saying it was working
+    // for ever, which is the one thing this pane must never do.
+    sampleWorking.delete(id);
+    askingChanged(id);
+    return;
+  }
+  // A tool that was refused. The dock keeps these where it drops the ones that
+  // worked, and shows the reason without asking, because that is the thing to
+  // act on — a rule with no way to reach its refused arm is a rule nothing can
+  // check.
+  if (/\brefuse it\b/i.test(text)) {
+    converse(id, {
+      kind: "tool",
+      tool: "edit_plan",
+      ok: false,
+      detail:
+        "node_404 is not in this plan. read_plan reads the nodes it has, and an edge may only " +
+        "name two of them.",
+      edit: null,
+    });
+    sampleWorking.delete(id);
+    askingChanged(id);
+    return;
+  }
+  if (/\btake it back\b/i.test(text) && key !== null) {
+    const last = graphLog(key).at(-1);
+    if (last !== undefined && last.undoes === null && !last.undone) {
+      undoGraphEditAt(key, last.n);
+      const made = graphLog(key).at(-1)!;
+      converse(id, {
+        kind: "tool",
+        tool: "undo_edit",
+        ok: true,
+        detail: `${key}: edit ${String(made.n)} — ${made.summary}`,
+        edit: {
+          n: made.n,
+          author: made.author,
+          summary: made.summary,
+          undone: made.undone,
+          undoes: made.undoes,
+          before: Object.keys(made.before),
+          after: made.keys,
+        },
+      });
+      emit({ kind: "records", repoId: ticketRow(key).repoId, key });
+      sampleWorking.delete(id);
+      askingChanged(id);
+      return;
+    }
+  }
   if (turns > 1 && key !== null && criterion !== undefined) {
     writeGraphEdit(
       key,
@@ -1385,8 +1475,20 @@ export function answerSampleTurn(id: string, text: string): void {
     });
     emit({ kind: "records", repoId: ticketRow(key).repoId, key });
   }
-  converse(id, {
-    kind: "said",
-    text: `Noted: “${text}”. This is the sample workspace, so nothing here reaches a provider.`,
-  });
+  // A line, then a pause before the rest of the same turn — which is the shape
+  // a real session takes when it reads the repository before answering, and the
+  // pause the dock has to keep saying it is working through.
+  converse(id, { kind: "said", text: "I'll look at what's already here before I answer." });
+  setTimeout(() => {
+    // The rest of a turn can land after the planning it belongs to has gone —
+    // a pane left, a test ended — and a sample session speaking into a session
+    // that is not there throws where nothing is waiting to catch it.
+    if (!stillThere(id)) return;
+    converse(id, {
+      kind: "said",
+      text: `Noted: “${text}”. This is the sample workspace, so nothing here reaches a provider.`,
+    });
+    sampleWorking.delete(id);
+    askingChanged(id);
+  }, 60);
 }

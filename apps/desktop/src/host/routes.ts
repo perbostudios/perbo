@@ -5,7 +5,7 @@ import { discoverModels } from "./model-catalog.js";
 import { listExplorer, readExplorerFile } from "./explorer.js";
 import { exportedNames } from "./symbols.js";
 import { graphView } from "./plan/graph.js";
-import { impactView } from "./plan/impact.js";
+import { contractImpact, impactView } from "./plan/impact.js";
 import { saveSpec, specView, type SpecDeps } from "./plan/spec.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
@@ -141,15 +141,61 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       m.editing.save(request.id, request.revision, request.repoId, request.form),
     editingSubmit: (request) =>
       m.editing.submit(request.id, request.revision, request.operationId, request.intent),
-    explorerMark: (request) =>
-      m.editing.mark(request.id, request.revision, request.path, request.mark, request.always),
+    explorerMark: async (request) => {
+      // Scope is one of the four fields approval freezes, and the freeze is
+      // the CLI's: `perbo edit` refuses every state but plan_review. Nothing
+      // on this path asked, so a mark on an approved ticket was taken, written
+      // to the draft, and could never be compiled in — a mark the person would
+      // have gone on believing in. The standing list is the one exception: it
+      // is the repository's, not this ticket's, and D-105 has the guard read it
+      // again when a run starts, so it binds an approved ticket and is allowed
+      // to be written for one.
+      //
+      // Either way on the list, which is what `always` being set at all means:
+      // true adds the path and false takes back what this draft added, and a
+      // rule that admitted only the adding would let a person put a path on the
+      // repository's list from an approved ticket and never take it off. Null
+      // is the ticket's own scope, and that is what the freeze holds.
+      const session = m.editing.read(request.id);
+      if (session.key !== null && request.always === null) {
+        const repo = repository(session.repoId);
+        const ticket = (await m.tickets.list(repo)).tickets.find(
+          (entry) => entry.key === session.key,
+        );
+        if (ticket?.approved_at)
+          throw new Error(
+            "This contract is approved, so its scope is frozen. Start over from the spec to plan it again.",
+          );
+      }
+      return m.editing.mark(
+        request.id,
+        request.revision,
+        request.path,
+        request.mark,
+        request.always,
+      );
+    },
     explorerUndo: (request) => m.editing.undo(request.id, request.revision, request.edit),
     editingStop: (request) => m.editing.stop(request.id),
-    editingDiscard: (request) => {
+    editingDiscard: async (request) => {
       // The chat goes with the planning it belonged to: there is no longer a
       // spec for the interview to write or a plan for it to change.
+      //
+      // And so does the ticket this planning drafted: throwing the plan away
+      // and leaving the ticket on the board would delete the way in and not
+      // the thing, with no way back to the plan it came from.
+      // A ticket that has run is not a draft, so it stays, and the reason it
+      // stays is the one deleting a contract outright would have given.
+      //
+      // The one it drafted, and never one it was merely opened over: planning
+      // started from a ticket the CLI admitted, or from one another session
+      // made, holds that key from birth. Discarding on the key alone would
+      // throw away work this planning did not do and cannot give back.
+      const session = m.editing.read(request.id);
       const discarded = m.editing.discard(request.id, request.revision);
       m.interviews.stop(request.id);
+      if (session.key !== null && session.admitted)
+        await discardDrafted(m, repository(session.repoId), session.key);
       return discarded;
     },
     // The interview docked beside the panes (D-102). Planning-lane work, like
@@ -176,6 +222,16 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       impactView(
         { editing: m.editing, repository, cli: m.cli, execute: m.execute },
         request.id,
+      ),
+    // The same reading, of a compiled contract's own scope. Impact is only
+    // ever actionable before approval — a scope frozen is a scope no warning
+    // can move — so the count belongs on the page approving happens on, and
+    // that page is reached from a ticket rather than from a planning session.
+    impactContract: (request) =>
+      contractImpact(
+        { tickets: m.ticketRecords, repository, cli: m.cli, execute: m.execute },
+        request.repoId,
+        request.key,
       ),
 
     providers: () => m.providers(),
@@ -225,17 +281,10 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     detail: scoped<"detail">((repo, request) => m.tickets.detail(repo.id, request.key)),
     taskSummary: scoped<"taskSummary">((repo, request) => m.tickets.summary(repo.id, request.key)),
     discard: scoped<"discard">(async (repo, request) => {
-      await discardTicket(
-        {
-          tickets: m.ticketRecords,
-          profile: m.profile,
-          liveJobs: () => m.jobs.live(),
-        },
-        repo,
-        request.key,
-      );
-      m.changes.changed(true, { kind: "records", repoId: repo.id, key: null });
-      m.changes.preferences(m.profile.state);
+      // Deleting a contract outright says the reason it stays, where throwing
+      // away the planning that drafted it carries on past one.
+      const refusal = await discardDrafted(m, repo, request.key);
+      if (refusal !== null) throw new Error(refusal);
       return null;
     }),
     archive: scoped<"archive">(async (repo, request) => {
@@ -360,6 +409,29 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     run: scoped<"run">((repo, request) => loop(m, repo, request)),
     decide: scoped<"decide">((repo, request) => loop(m, repo, request)),
   }) as RequestHandlers<RouteContext>;
+}
+
+/**
+ * Delete a contract that has never run, and say why where it stays.
+ *
+ * Both callers pass through here — the contract page's own delete and the
+ * planning that drafted it being thrown away — so the guards are stated once
+ * and the two differ only in what they do with the reason.
+ */
+async function discardDrafted(
+  m: HostModules,
+  repo: RegisteredRepository,
+  key: string,
+): Promise<string | null> {
+  const refusal = await discardTicket(
+    { tickets: m.ticketRecords, profile: m.profile, liveJobs: () => m.jobs.live() },
+    repo,
+    key,
+  );
+  if (refusal !== null) return refusal;
+  m.changes.changed(true, { kind: "records", repoId: repo.id, key: null });
+  m.changes.preferences(m.profile.state);
+  return null;
 }
 
 /** Applied to a copy, validated whole and recorded with its author by the CLI. */

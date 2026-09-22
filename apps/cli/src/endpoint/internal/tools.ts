@@ -364,6 +364,7 @@ const editTicket = tool({
             // prohibited path is a person's mark in the explorer, not a field
             // a session sets.
             prohibited: [],
+            clearProhibited: false,
             manualReviewer: null,
             manualReason: null,
             graphEdit: null,
