@@ -47,7 +47,7 @@ import {
 } from "../../store/tickets.js";
 import { makeAttempt } from "../../test-support/records.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "../../test-support/built-cli.js";
-import { SPAWN_TEST_TIMEOUT_MS, watchOutbound } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, watchOutbound } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 
@@ -86,23 +86,13 @@ const scratch = mkdtempSync(join(tmpdir(), "perbo-local-run-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => vi.restoreAllMocks());
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /** A repository with one commit and, above all, no ticket store. */
 function repository(name: string): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
   // Repository-local identity, so the seal's commit does not depend on the
   // developer's global Git configuration or on a signing key nobody can unlock.
   git(dir, "config", "user.name", "t");
@@ -1056,10 +1046,8 @@ describe("a run with nothing admitted, after its pull request is open", () => {
    */
   const BUILD_AND_SPAWN_TIMEOUT_MS = 200_000;
 
-  const gitEnvAt = (at?: string): NodeJS.ProcessEnv => ({
-    ...gitEnv,
-    ...(at ? { GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at } : {}),
-  });
+  const gitEnvAt = (at?: string): NodeJS.ProcessEnv =>
+    gitEnvironment(at ? { GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at } : {});
 
   const MERGED_AT = "2026-08-01T00:00:00.000Z";
   /** Well past the fourteen days, so a merged change's window has closed. */

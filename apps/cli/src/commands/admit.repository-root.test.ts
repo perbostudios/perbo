@@ -11,6 +11,7 @@ import { TICKET_RUNS } from "./run/index.js";
 import { TicketStoreError, listTickets, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * A ticket file names no machine.
@@ -37,22 +38,12 @@ import { recordStreams } from "../test-support/streams.js";
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "perbo-repository-root-")));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: GIT_ENV });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 function repository(name: string): string {
   const dir = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: GIT_ENV });
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
   git(dir, "commit", "-q", "--allow-empty", "-m", "base");
   return dir;
 }
@@ -70,7 +61,7 @@ function repository(name: string): string {
  * with it.
  */
 function cloneRepository(src: string, dest: string): void {
-  execFileSync("git", ["clone", "--no-hardlinks", "-q", src, dest], { env: GIT_ENV });
+  execFileSync("git", ["clone", "--no-hardlinks", "-q", src, dest], { env: gitEnvironment() });
 }
 
 /** Admit and approve one ticket in `repo`, then commit the store it wrote. */

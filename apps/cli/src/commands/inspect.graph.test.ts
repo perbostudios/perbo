@@ -10,19 +10,10 @@ import { inspectCommandLine, type InspectReport } from "./inspect.js";
 import { storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-graph-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
 
 let repos = 0;
 /** Twelve tracked files under one package, and one under another. */
@@ -37,8 +28,8 @@ function repository(): string {
   writeFileSync(join(repo, "packages", "queue", "test", "send.test.ts"), "export {};\n");
   mkdirSync(join(repo, "packages", "reports", "src"), { recursive: true });
   writeFileSync(join(repo, "packages", "reports", "src", "daily.ts"), "export const daily = 1;\n");
-  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitIdentity });
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitIdentity });
+  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitEnvironment() });
+  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitEnvironment() });
   return repo;
 }
 

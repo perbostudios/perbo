@@ -35,6 +35,7 @@ import { makeAttempt, makeTicket } from "../../test-support/records.js";
 import { REPO_ROOT } from "../../test-support/paths.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 describe("perbo run / doctor argument parsing", () => {
   it("rejects an unknown flag rather than reviewing something else", () => {
@@ -417,15 +418,7 @@ function repository(name: string): string {
   const dir = mkdtempSync(join(tmpdir(), `perbo-execute-${name}-`));
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
   execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "t",
-      GIT_AUTHOR_EMAIL: "t@t.invalid",
-      GIT_COMMITTER_NAME: "t",
-      GIT_COMMITTER_EMAIL: "t@t.invalid",
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      GIT_CONFIG_SYSTEM: "/dev/null",
-    },
+    env: gitEnvironment(),
   });
   return dir;
 }

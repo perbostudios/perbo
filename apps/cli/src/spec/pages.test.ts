@@ -23,6 +23,7 @@ import { listTickets, readContract, readDraftSnapshot, readTicket, storeDir } fr
 import { specFolder } from "../store/index.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * SCP-336: the spec folder the plan is kept beside — the page per node, its
@@ -33,16 +34,6 @@ import { recordStreams } from "../test-support/streams.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-spec-folder-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
 
 const SPEC = `# Activation email
 
@@ -83,8 +74,8 @@ function repository(spec = SPEC): { repo: string; specPath: string; folder: stri
     mkdirSync(join(repo, "packages", name), { recursive: true });
     writeFileSync(join(repo, "packages", name, "index.ts"), "export const a = 1;\n");
   }
-  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitIdentity });
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitIdentity });
+  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitEnvironment() });
+  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitEnvironment() });
   return { repo, specPath, folder };
 }
 
@@ -571,8 +562,8 @@ describe("the spec folder a repository configures", () => {
     writeFileSync(join(folder, "spec.md"), SPEC);
     mkdirSync(join(repo, "packages", "queue"), { recursive: true });
     writeFileSync(join(repo, "packages", "queue", "index.ts"), "export const a = 1;\n");
-    execFileSync("git", ["-C", repo, "add", "-A"], { env: gitIdentity });
-    execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitIdentity });
+    execFileSync("git", ["-C", repo, "add", "-A"], { env: gitEnvironment() });
+    execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitEnvironment() });
 
     await admitFromSpec(repo, join(folder, "spec.md"));
     expect(pagesIn(folder)).toEqual(["node_1.md", "node_2.md"]);

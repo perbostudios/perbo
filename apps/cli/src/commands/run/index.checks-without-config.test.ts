@@ -8,6 +8,7 @@ import { type ExecuteDeps, executeCommandLine, proposedChecks } from "./index.js
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * A first run on a repository that has no `.perbo/config.json` (SCP-259).
@@ -29,18 +30,8 @@ import { recordStreams } from "../../test-support/streams.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-checks-no-config-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /**
  * A repository with one commit, an npm lockfile, and whatever scripts the test
@@ -48,7 +39,7 @@ const git = (dir: string, ...argv: string[]): string =>
  */
 function repository(name: string, scripts: Record<string, string>): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
   git(dir, "config", "user.name", "t");
   git(dir, "config", "user.email", "t@t.invalid");
   git(dir, "config", "commit.gpgsign", "false");
@@ -87,7 +78,7 @@ const MEMBER_SCRIPTS = {
 
 function monorepo(name: string): { root: string; api: string } {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
   git(dir, "config", "user.name", "t");
   git(dir, "config", "user.email", "t@t.invalid");
   git(dir, "config", "commit.gpgsign", "false");

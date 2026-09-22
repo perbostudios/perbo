@@ -13,6 +13,7 @@ import { type ExecuteDeps, executeCommandLine } from "./run/index.js";
 import { inspectCommandLine } from "./inspect.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * What `perbo inspect` says about the checks on the head a run published.
@@ -32,23 +33,13 @@ import { recordStreams } from "../test-support/streams.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-checks-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /** A repository with one commit, a `test` script, a lockfile and no `.perbo/`. */
 function repository(name: string): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
   git(dir, "config", "user.name", "t");
   git(dir, "config", "user.email", "t@t.invalid");
   git(dir, "config", "commit.gpgsign", "false");

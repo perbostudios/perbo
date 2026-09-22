@@ -14,6 +14,7 @@ import { readContract, readTicket, storeDir, writeTicket } from "../store/ticket
 import { REPO_ROOT } from "../test-support/paths.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * SCP-202: the loop merges the pull request it opened, behind the `merge`
@@ -45,16 +46,6 @@ const US = "\u001f";
  * runs seven stores in one case.
  */
 const MERGE_TEST_TIMEOUT_MS = 120_000;
-
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
 
 /** The D-073 verdict comment a separate review run leaves, naming the head. */
 const approvalComment = (sha: string, verdict = "APPROVE"): string =>
@@ -189,7 +180,7 @@ function publishedTicket(
 ): { repo: string; dir: string; branch: string } {
   const repo = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
+  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitEnvironment() });
   runCommandLine(admitCommandLine, {
     argv: [
       "--repo",

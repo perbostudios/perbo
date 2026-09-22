@@ -21,6 +21,7 @@ import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/b
 import { REPO_ROOT } from "../src/test-support/paths.js";
 import { runCommandLine } from "../src/command-line/terminal.js";
 import { recordStreams } from "../src/test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * The open README's quick start, run rather than read.
@@ -240,18 +241,8 @@ function withOneStepMutated(find: string, replace: string): { text: string; step
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "perbo-readme-")));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /**
  * The repository the quick start is pointed at: one commit, a `test` script the
@@ -261,7 +252,7 @@ const git = (dir: string, ...argv: string[]): string =>
  */
 function repository(name: string): string {
   const dir = realpathSync(mkdtempSync(join(scratch, `${name}-`)));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
   git(dir, "config", "user.name", "t");
   git(dir, "config", "user.email", "t@t.invalid");
   git(dir, "config", "commit.gpgsign", "false");
@@ -280,7 +271,7 @@ function repository(name: string): string {
   git(dir, "add", "-A");
   git(dir, "commit", "-qm", "base");
   const bare = mkdtempSync(join(scratch, `${name}-remote-`));
-  execFileSync("git", ["init", "-q", "--bare", bare], { env: gitEnv });
+  execFileSync("git", ["init", "-q", "--bare", bare], { env: gitEnvironment() });
   git(dir, "remote", "add", "origin", bare);
   git(dir, "push", "-q", "origin", "main");
   return dir;

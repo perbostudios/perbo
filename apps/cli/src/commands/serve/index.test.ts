@@ -10,7 +10,7 @@ import { admitCommandLine } from "../admit.js";
 import { ServeTickSchema, processDeps, serveCommandLine, type ServeDeps } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { readEndpoint } from "../../endpoint/index.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
 import { readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 import { recordStreams } from "../../test-support/streams.js";
 
@@ -28,22 +28,12 @@ import { recordStreams } from "../../test-support/streams.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-serve-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 let repos = 0;
 function repository(config: Record<string, unknown> = {}): string {
   const dir = join(scratch, `repo-${repos++}`);
   mkdirSync(dir, { recursive: true });
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
+  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitEnvironment() });
   mkdirSync(join(dir, ".perbo"), { recursive: true });
   writeFileSync(join(dir, ".perbo", "config.json"), JSON.stringify({ base_ref: "main", ...config }, null, 2));
   return dir;
@@ -900,7 +890,7 @@ describe("processDeps", () => {
   it("names every sealed path of a branch whose diff runs past half a megabyte", async () => {
     const repo = mkdtempSync(join(scratch, "sealed-"));
     const git = (...args: string[]): string =>
-      execFileSync("git", ["-C", repo, ...args], { env: gitIdentity, encoding: "utf8" }).trim();
+      execFileSync("git", ["-C", repo, ...args], { env: gitEnvironment(), encoding: "utf8" }).trim();
     git("init", "-q", "-b", "main");
     writeFileSync(join(repo, "README.md"), "base\n");
     git("add", "-A");

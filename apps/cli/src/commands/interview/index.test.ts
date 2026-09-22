@@ -26,7 +26,6 @@ import {
   describeInterviewContract,
   drafter,
   events,
-  gitIdentity,
   repository as makeRepository,
   SPEC,
   SPEC_FOLDER,
@@ -662,7 +661,7 @@ describe("edit_plan (SCP-311 criterion 3)", () => {
   it("says a plan is approved rather than that none was drafted", async () => {
     const repo = repository();
     await interview(repo, [writeSpec(), generate]);
-    execFileSync(process.execPath, [CLI, "approve", "PRB-1", "--repo", repo], { env: gitIdentity, stdio: "ignore" });
+    execFileSync(process.execPath, [CLI, "approve", "PRB-1", "--repo", repo], { stdio: "ignore" });
     const { sdk } = await interview(repo, [
       { kind: "call", tool: "edit_plan", input: { graph_edit: { op: "remove_edge", from: "node_1", to: "node_2" } } },
       { kind: "call", tool: "read_plan", input: {} },

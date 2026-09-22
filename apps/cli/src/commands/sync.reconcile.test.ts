@@ -9,7 +9,7 @@ import { admitCommandLine } from "./admit.js";
 import { derivedBranch, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { makeAttempt } from "../test-support/records.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
 
@@ -33,20 +33,10 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const OUTCOME = "Search results are paginated.";
 
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 function repository(name: string): string {
   const dir = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
+  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitEnvironment() });
   return dir;
 }
 

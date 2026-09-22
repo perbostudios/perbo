@@ -7,6 +7,7 @@ import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts"
 import { doctorCommandLine } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * SCP-200 criterion 2: `perbo doctor` says which credential path GitHub is
@@ -84,18 +85,8 @@ afterEach(() => {
   else process.env.GITHUB_TOKEN = originalGithubToken;
 });
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /**
  * A checkout on `main` with one commit in it.
@@ -109,7 +100,7 @@ function repository(name: string): string {
   const dir = join(scratch, name);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture" }));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
   git(dir, "config", "user.name", "t");
   git(dir, "config", "user.email", "t@t.invalid");
   git(dir, "config", "commit.gpgsign", "false");

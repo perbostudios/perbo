@@ -7,7 +7,7 @@ import { EXIT_CODES, TICKET_SCHEMA_VERSION, TicketSchema, transition, type Ticke
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
 import { makeAttempt } from "../test-support/records.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import { stopsCommandLine } from "./stops.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
@@ -36,16 +36,6 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 const OUTCOME = "Search results are paginated.";
 const PR = 71;
 const url = `https://github.com/o/r/pull/${PR}`;
-
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
 
 /** A `gh` on PATH that answers every invocation from one fixed body. */
 function fakeGh(name: string, stdout: string): string {
@@ -108,7 +98,7 @@ const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>
 function publishedTicket(name: string): { repo: string; dir: string; branch: string } {
   const repo = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
+  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitEnvironment() });
   runCommandLine(admitCommandLine, {
     argv: [
       "--repo",

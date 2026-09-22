@@ -19,6 +19,7 @@ import { inspectCommandLine } from "../inspect.js";
 import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import { storeDir } from "../../store/index.js";
 import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * The branch a run publishes against, and which of three sources named it.
@@ -44,18 +45,8 @@ import { recordStreams } from "../../test-support/streams.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-base-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /** The commit a ref names, as `git` resolves it in that checkout. */
 const tipOf = (dir: string, ref: string): string => git(dir, "rev-parse", ref).trim();
@@ -92,7 +83,7 @@ interface RepositoryShape {
 /** A repository with one commit, a `test` script, a lockfile and no `.perbo/`. */
 function repository(name: string, shape: RepositoryShape = {}): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
   git(dir, "config", "user.name", "t");
   git(dir, "config", "user.email", "t@t.invalid");
   git(dir, "config", "commit.gpgsign", "false");
@@ -122,7 +113,7 @@ function repository(name: string, shape: RepositoryShape = {}): string {
   const remoteDefault = shape.remoteDefault === true ? "main" : (shape.remoteDefault ?? null);
   if (remoteDefault) {
     const bare = mkdtempSync(join(scratch, `${name}-remote-`));
-    execFileSync("git", ["init", "-q", "--bare", bare], { env: gitEnv });
+    execFileSync("git", ["init", "-q", "--bare", bare], { env: gitEnvironment() });
     git(dir, "remote", "add", "origin", bare);
     git(dir, "push", "-q", "origin", "--all");
     // A default the checkout has no branch for is still a branch on the remote:

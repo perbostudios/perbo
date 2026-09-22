@@ -13,6 +13,7 @@ import {
 import { runCommandLine } from "../command-line/terminal.js";
 import { FIXTURES } from "../test-support/paths.js";
 import { recordStreams } from "../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * `perbo index` over an authored monorepo (SCP-319, D-015).
@@ -38,23 +39,8 @@ const TIMEOUT = 30_000;
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "perbo-symbol-index-")));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-/**
- * An identity of this test's own, and neither the machine's global config nor
- * its system config: a commit here must not depend on whether whoever runs it
- * signs commits, has an identity set, or has hooks configured.
- */
-const GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (cwd: string, ...args: string[]): void => {
-  execFileSync("git", args, { cwd, env: GIT_ENV, stdio: "ignore" });
+  execFileSync("git", args, { cwd, env: gitEnvironment(), stdio: "ignore" });
 };
 
 let made = 0;

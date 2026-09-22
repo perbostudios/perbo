@@ -18,6 +18,7 @@ import { specBaseline, specStaleness } from "./staleness.js";
 import { indexCommandLine } from "../commands/symbol-index.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * Whether a ticket's spec is still the one its contract was drafted from
@@ -35,18 +36,8 @@ import { recordStreams } from "../test-support/streams.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-spec-staleness-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 const hashOf = (path: string): string =>
   `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
@@ -78,7 +69,7 @@ let repos = 0;
 function repository(spec = SPEC, extra: Record<string, string> = {}): { repo: string; specPath: string } {
   const repo = join(scratch, `repo-${repos++}`);
   mkdirSync(join(repo, "specs", "activation-email"), { recursive: true });
-  execFileSync("git", ["init", "-q", "-b", "main", repo], { env: gitEnv });
+  execFileSync("git", ["init", "-q", "-b", "main", repo], { env: gitEnvironment() });
   git(repo, "config", "user.name", "t");
   git(repo, "config", "user.email", "t@t.invalid");
   git(repo, "config", "commit.gpgsign", "false");
@@ -717,7 +708,7 @@ describe("a path is judged where it lands, not where it is spelled", () => {
     // The clone is the reading that would have cost the ticket: same record,
     // same spec bytes, and none of this machine's untracked files.
     const clone = join(scratch, `clone-${repos++}`);
-    execFileSync("git", ["clone", "-q", repo, clone], { env: gitEnv, stdio: ["ignore", "pipe", "pipe"] });
+    execFileSync("git", ["clone", "-q", repo, clone], { env: gitEnvironment(), stdio: ["ignore", "pipe", "pipe"] });
     index(clone);
     expect(check(clone, before)).toEqual({ path: SPEC_PATH, judged_against: "approval", stale: [], unjudged: [] });
   });
@@ -744,7 +735,7 @@ describe("a path is judged where it lands, not where it is spelled", () => {
     expect(before.names_that_resolved).toEqual(["@sendActivation"]);
 
     const clone = join(scratch, `clone-${repos++}`);
-    execFileSync("git", ["clone", "-q", repo, clone], { env: gitEnv, stdio: ["ignore", "pipe", "pipe"] });
+    execFileSync("git", ["clone", "-q", repo, clone], { env: gitEnvironment(), stdio: ["ignore", "pipe", "pipe"] });
     index(clone);
     expect(check(clone, before)).toEqual({ path: SPEC_PATH, judged_against: "approval", stale: [], unjudged: [] });
   }, CHECKOUT_TEST_TIMEOUT_MS);

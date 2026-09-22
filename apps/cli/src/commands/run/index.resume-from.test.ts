@@ -10,7 +10,7 @@ import { executeCommandLine } from "./index.js";
 import { buildInspectReport, renderInspect } from "../inspect.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
 import { makeAttempt, makeTicket } from "../../test-support/records.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 
@@ -60,23 +60,13 @@ afterAll(() => {
 /** The attempt a ceiling cut, in every fixture below. */
 const CUT_ATTEMPT = "att_c07e0f1a2b3c4d5e";
 
-const GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: GIT_ENV });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /** A repository with one commit, the way `perbo admit` expects to find one. */
 function repository(name: string): string {
   const dir = scratch(`perbo-resume-${name}-`);
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: GIT_ENV });
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture" }));
   git(dir, "add", "-A");
   git(dir, "commit", "-qm", "base");

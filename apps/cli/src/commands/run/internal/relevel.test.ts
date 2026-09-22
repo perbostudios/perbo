@@ -13,7 +13,7 @@ import { readTicket, storeDir as storeDirOf, writeTicket } from "../../../store/
 import { TicketSchema, transition, withReconciliation } from "@perbo/contracts";
 import { mergedTicketContext, ticketKeysMergedBetween } from "./relevel.js";
 import { storeDir } from "../../../store/tickets.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
 import { runCommandLine } from "../../../command-line/terminal.js";
 import { recordStreams } from "../../../test-support/streams.js";
 
@@ -26,16 +26,7 @@ import { recordStreams } from "../../../test-support/streams.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-relevel-cli-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const env = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, ...args], { env, encoding: "utf8" }).trim();
+const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, ...args], { env: gitEnvironment(), encoding: "utf8" }).trim();
 
 function admitted(repo: string, outcome: string, path: string): string {
   const streams = recordStreams();
@@ -100,7 +91,7 @@ describe("what merged under a branch", () => {
     writeFileSync(join(repo, "long.md"), "long\n");
     git(repo, "add", "-A");
     execFileSync("git", ["-C", repo, "commit", "-q", "-F", "-"], {
-      env,
+      env: gitEnvironment(),
       input: `a long commit\n\n${"x".repeat(65 * 1024 * 1024)}\n`,
     });
     // The merge the tail does hold, which is the trap: a cut log is shaped
@@ -296,7 +287,7 @@ describe("the queue's reading of a branch", () => {
     mkdirSync(repo, { recursive: true });
     git(repo, "init", "-q", "-b", "main");
     commit(repo, "README.md", "base");
-    execFileSync("git", ["init", "-q", "--bare", remote], { env });
+    execFileSync("git", ["init", "-q", "--bare", remote], { env: gitEnvironment() });
     git(repo, "remote", "add", "origin", remote);
     git(repo, "checkout", "-q", "-b", "ayo/AYO-1/one");
     commit(repo, "one.md", "one");

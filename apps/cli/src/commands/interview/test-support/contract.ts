@@ -12,6 +12,7 @@ import {
 import { INTERVIEW_SESSION_FILE, INTERVIEW_TOOL_NAMES } from "../index.js";
 import { listTickets, readDraftSnapshot, readTicket, storeDir } from "../../../store/tickets.js";
 import type { RecordedStreams } from "../../../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * The interview's behaviour, stated once and run once per transport (SCP-312).
@@ -100,16 +101,6 @@ The queue package already has a sender.
 
 export const SPEC_FOLDER = "specs/activation-email";
 
-export const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 /** A checkout with one package in it, for an interview to read and write beside. */
 export function repository(scratch: string): string {
   const repo = mkdtempSync(join(scratch, "repo-"));
@@ -117,8 +108,8 @@ export function repository(scratch: string): string {
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   writeFileSync(join(repo, "packages", "queue", "send.ts"), "export const send = () => 1;\n");
   writeFileSync(join(repo, "README.md"), "# demo\n");
-  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitIdentity });
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitIdentity });
+  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitEnvironment() });
+  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitEnvironment() });
   return repo;
 }
 

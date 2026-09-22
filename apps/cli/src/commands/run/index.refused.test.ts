@@ -18,6 +18,7 @@ import { type ExecuteDeps, executeCommandLine } from "./index.js";
 import { inspectCommandLine } from "../inspect.js";
 import { storeDir } from "../../store/index.js";
 import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * What a person reads when the loop refuses to start.
@@ -42,18 +43,8 @@ import { recordStreams } from "../../test-support/streams.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-refused-run-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /**
  * A repository with one commit and a test script. A lockfile is not required
@@ -61,7 +52,7 @@ const git = (dir: string, ...argv: string[]): string =>
  */
 function repository(name: string, options: { lockfile: boolean }): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
+  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
   git(dir, "config", "user.name", "t");
   git(dir, "config", "user.email", "t@t.invalid");
   git(dir, "config", "commit.gpgsign", "false");

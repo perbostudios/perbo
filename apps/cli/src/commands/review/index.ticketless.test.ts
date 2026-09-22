@@ -10,7 +10,7 @@ import { parseReviewArgs } from "./internal/args.js";
 import { UsageError } from "../../usage-error.js";
 import { normalisePullRequestReference } from "../../pull-request.js";
 import { runReviewCommand } from "./index.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
 import { FIXTURES, PACKAGE_ROOT, REPO_ROOT } from "../../test-support/paths.js";
 import { recordStreams } from "../../test-support/streams.js";
 
@@ -41,17 +41,6 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => {
   vi.restoreAllMocks();
 });
-
-/** As sync.loop-pull-request.test.ts does it: a committer nobody has to be. */
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
 
 /**
  * A `gh` that replays one pull request and logs every invocation.
@@ -323,7 +312,7 @@ describe("ac_1: a review with no admitted ticket, in both invocation forms", () 
     // way every other git-backed test in this suite does it: whoever runs this
     // may sign their own commits, and a scratch repository must not inherit it.
     const git = (...args: string[]) =>
-      execFileSync("git", args, { cwd: repo, encoding: "utf8", env: gitIdentity }).trim();
+      execFileSync("git", args, { cwd: repo, encoding: "utf8", env: gitEnvironment() }).trim();
     git("init", "--quiet", "--initial-branch", "main");
     mkdirSync(join(repo, "src"), { recursive: true });
     writeFileSync(join(repo, "src/index.ts"), "export const page = 0;\n");

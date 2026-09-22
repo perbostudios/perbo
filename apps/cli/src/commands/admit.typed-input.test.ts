@@ -7,6 +7,7 @@ import { UsageError } from "../usage-error.js";
 import { admitCommandLine, admitDraft, defaultAdmission } from "./admit.js";
 import { collectOutput } from "../diagnostics.js";
 import { readTicket, storeDir } from "../store/tickets.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * What an admission is allowed to be, whoever asks for it.
@@ -24,15 +25,7 @@ function repository(name: string): string {
   const dir = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
   execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "t",
-      GIT_AUTHOR_EMAIL: "t@t.invalid",
-      GIT_COMMITTER_NAME: "t",
-      GIT_COMMITTER_EMAIL: "t@t.invalid",
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      GIT_CONFIG_SYSTEM: "/dev/null",
-    },
+    env: gitEnvironment(),
   });
   return dir;
 }

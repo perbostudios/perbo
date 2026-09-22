@@ -7,6 +7,7 @@ import { admitCommandLine } from "./admit.js";
 import { readContract, storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * D-105: the standing prohibited list is a repository agreement, so every
@@ -20,15 +21,7 @@ function repository(name: string, config?: unknown): string {
   const dir = join(scratch, name);
   execFileSync("git", ["init", "-q", "-b", "main", dir]);
   execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "t",
-      GIT_AUTHOR_EMAIL: "t@t.invalid",
-      GIT_COMMITTER_NAME: "t",
-      GIT_COMMITTER_EMAIL: "t@t.invalid",
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      GIT_CONFIG_SYSTEM: "/dev/null",
-    },
+    env: gitEnvironment(),
   });
   if (config !== undefined) {
     mkdirSync(join(dir, ".perbo"), { recursive: true });
