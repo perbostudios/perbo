@@ -149,6 +149,25 @@ const DESKTOP_LAYERS_MEET =
 const NO_HOST_LAYER = { regex: "(^|/)host/", message: DESKTOP_LAYERS_MEET };
 const NO_RENDERER_LAYER = { regex: "(^|/)renderer/", message: DESKTOP_LAYERS_MEET };
 
+/**
+ * What a browser bundles: the renderer and the preview it runs in, `shared/`,
+ * which the renderer imports, and the planning modules the renderer reaches.
+ * `packages/planning/src/browser.test.ts` and
+ * `apps/desktop/src/renderer/browser-imports.test.ts` hold the same invariant
+ * by bundling; this says it at the import, where it is written.
+ */
+const BROWSER_BUNDLED = [
+  "apps/desktop/src/renderer/**",
+  "apps/desktop/src/shared/**",
+  "apps/desktop/src/sample-host/**",
+  "packages/planning/src/browser.ts",
+  "packages/planning/src/errors.ts",
+  "packages/planning/src/graph-edit.ts",
+  "packages/planning/src/impact.ts",
+  "packages/planning/src/node-page-text.ts",
+  "packages/planning/src/spec-text.ts",
+];
+
 /** Where a package's interface and its modules live. */
 const SOURCE = ["**/src/**"];
 
@@ -307,6 +326,26 @@ export default tseslint.config(
             NO_TEST_MODULE,
             NO_COMMAND_LINE_EDGE,
           ],
+        },
+      ],
+    },
+  },
+  {
+    // A browser bundle takes values from a package's `./browser` surface: the
+    // root entry reaches `node:` modules and would pull them in. A type is
+    // erased, so it crosses. Its own rule, so what every source file is held
+    // to stands unchanged beside it.
+    files: BROWSER_BUNDLED,
+    ...PRODUCTION_SOURCE_ONLY,
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          paths: ["@perbo/contracts", "@perbo/planning"].map((name) => ({
+            name,
+            allowTypeImports: true,
+            message: `A browser bundle takes values from ${name}/browser; the root imports node: modules.`,
+          })),
         },
       ],
     },

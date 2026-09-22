@@ -150,6 +150,47 @@ test("production code reaches no test module, and a test does", async () => {
 });
 
 // --------------------------------------------------------------------------
+// A browser bundle takes values from a package's browser surface
+// --------------------------------------------------------------------------
+
+const USES_TYPE = (from) => `import type { A } from "${from}";\nexport type B = A;\n`;
+const FROM_BROWSER = "takes values from";
+
+const BROWSER_ZONE = [
+  "apps/desktop/src/renderer/tasks/ContractScreen.tsx",
+  "apps/desktop/src/shared/protocol.ts",
+  "apps/desktop/src/sample-host/records.ts",
+  "packages/planning/src/impact.ts",
+];
+
+test("a file a browser bundles takes no value from a package's root", async () => {
+  for (const where of BROWSER_ZONE) {
+    await refuses(where, USES("@perbo/contracts"), FROM_BROWSER);
+    await refuses(where, USES("@perbo/planning"), FROM_BROWSER);
+  }
+});
+
+test("a type crosses, because nothing of it is in the bundle", async () => {
+  for (const where of BROWSER_ZONE) {
+    await allows(where, USES_TYPE("@perbo/contracts"));
+    await allows(where, USES_TYPE("@perbo/planning"));
+  }
+});
+
+test("the browser surface is what it takes values from", async () => {
+  for (const where of BROWSER_ZONE) {
+    await allows(where, USES("@perbo/contracts/browser"));
+    await allows(where, USES("@perbo/planning/browser"));
+  }
+});
+
+test("a file that runs in Node takes the root, values and all", async () => {
+  await allows("apps/desktop/src/host/service.ts", USES("@perbo/contracts"));
+  await allows("packages/planning/src/spec-write.ts", USES("@perbo/contracts"));
+  await allows("packages/runner/src/loop/index.ts", USES("@perbo/contracts"));
+});
+
+// --------------------------------------------------------------------------
 // The desktop's three layers meet in one of them
 // --------------------------------------------------------------------------
 
