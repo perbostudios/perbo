@@ -15,11 +15,11 @@ const RECEIVED = /\s*Received\b[\s\S]*$/;
  *
  * `errors[].message` is written into the run bundle and read by a person, and
  * until SCP-188 it could be the whole prompt: AYO-33's bundle carried the
- * contents of `packages/contracts/src/verdicts.ts`, because the prompt was a
- * command-line argument and Node quoted the argument it refused. Nothing the
- * transport handed the process is quoted back here — the quotation is dropped,
- * what remains is one bounded line, and a line that still opens with text that
- * was sent is withheld entirely.
+ * contents of `apps/cli/src/commands/verdict/record.ts`, because the prompt
+ * was a command-line argument and Node quoted the argument it refused. Nothing
+ * the transport handed the process is quoted back here — the quotation is
+ * dropped, what remains is one bounded line, and a line that still opens with
+ * text that was sent is withheld entirely.
  *
  * An error *about a file* is not this: the reader's refusals name the path and
  * the reason and never carry the bytes, and they reach the model as a read

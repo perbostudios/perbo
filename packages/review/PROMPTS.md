@@ -42,7 +42,7 @@ same value is copied onto `independence.context_builder` (`src/review.ts:870`, s
 be compared for prompt identity from that field alone) and onto the run bundle's own
 `prompt_version` (`src/review.ts:908`, interface at `src/review.ts:114`). The runner writes that
 artifact to `review.json` in the pull request's run bundle (`writeReviewBundle`,
-`packages/runner/src/loop.ts`).
+`packages/runner/src/loop/internal/review.ts`).
 Closure verification stamps its own version the same way, on `ClosureVerification.prompt_version`
 (`src/closure-verify.ts:68`, set throughout `verifyClosures`).
 
