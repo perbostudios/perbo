@@ -35,3 +35,4 @@ A recorded admission result reserves its ticket while the canonical read complet
 - A forced process exit can still lose unacknowledged input.
 - The CLI store and the desktop profile are not one transaction, so an admission without a recorded result is unknown until inspected. Nothing submits it again silently.
 - Polling still costs work in proportion to the connected repositories.
+- A read that a mutation overlaps on every pass is refused after a bounded number of them, rather than taken again for as long as the records keep moving; the refresh that follows takes it again.

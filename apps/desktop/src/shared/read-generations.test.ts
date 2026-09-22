@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ALL_SCOPE, ReadGenerations, SNAPSHOT_SCOPE } from "./read-generations.js";
+import { ALL_SCOPE, READ_ATTEMPTS, ReadGenerations, SNAPSHOT_SCOPE } from "./read-generations.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -54,6 +54,26 @@ describe("the guarded read", () => {
     const load = vi.fn<() => Promise<string>>().mockRejectedValue(new Error("Repository unavailable"));
     await expect(generations.read("repo_a", load)).rejects.toThrow("Repository unavailable");
     expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Records that move faster than they can be read never settle, so the rule
+   * on its own would take the read again for as long as they kept moving. The
+   * ceiling is what makes that a refusal a screen can show and a later refresh
+   * can clear, rather than a read that never comes back.
+   */
+  it("refuses a read that every mutation overlaps", async () => {
+    const generations = new ReadGenerations();
+    let calls = 0;
+    // Mutates for longer than the ceiling allows, then settles: an unbounded
+    // rule reads the settled records and returns them.
+    const load = async (): Promise<string> => {
+      calls += 1;
+      if (calls <= READ_ATTEMPTS + 5) generations.invalidate("repo_a");
+      return "settled";
+    };
+    await expect(generations.read("repo_a", load)).rejects.toThrow(/changed while every attempt to read them/);
+    expect(calls).toBe(READ_ATTEMPTS);
   });
 
   it("holds a scope's token still while another scope is invalidated", () => {

@@ -16,6 +16,18 @@
 export const ALL_SCOPE = "all";
 /** The whole workspace, which every invalidation dirties. */
 export const SNAPSHOT_SCOPE = "snapshot";
+/**
+ * How many passes a read is given before it is refused.
+ *
+ * The rule has no stopping point of its own: it takes the read again while a
+ * mutation overlaps it, and records that move faster than they can be read
+ * never settle, so the read never returns. A screen that never fills and a
+ * request that never answers cannot be told apart from a host that has died.
+ * Past this many passes the reading is not converging, so it is refused and
+ * the refresh that follows — a poll every two seconds while a run is live —
+ * takes it again.
+ */
+export const READ_ATTEMPTS = 20;
 
 export class ReadGenerations {
   private readonly generations = new Map<string, number>();
@@ -32,14 +44,15 @@ export class ReadGenerations {
   }
 
   /**
-   * Runs `load` until no invalidation of `scope` overlapped it.
+   * Runs `load` until no invalidation of `scope` overlapped it, up to
+   * {@link READ_ATTEMPTS} passes.
    *
    * A failure is thrown only where nothing overlapped it; one that raced a
    * mutation is a failure to read records that have since moved, and the read
    * that follows is the account of what is there now.
    */
   async read<T>(scope: string, load: () => Promise<T>): Promise<T> {
-    for (;;) {
+    for (let attempt = 0; attempt < READ_ATTEMPTS; attempt++) {
       const token = this.token(scope);
       try {
         const result = await load();
@@ -48,6 +61,9 @@ export class ReadGenerations {
         if (token === this.token(scope)) throw error;
       }
     }
+    throw new Error(
+      "These records changed while every attempt to read them was in flight. The next refresh reads them again.",
+    );
   }
 
   private bump(scope: string): void {
