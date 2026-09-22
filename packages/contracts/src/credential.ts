@@ -34,12 +34,20 @@ export interface CredentialMatch {
 /** Vendor-issued key formats. The prefix is the signal; length is a guard. */
 const VENDOR_PREFIXES = [
   { rule: "vendor.stripe_like", pattern: /\b[a-z]{0,4}(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{12,}\b/g },
-  { rule: "vendor.github", pattern: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}\b/g },
+  // Twelve rather than a classic personal access token's forty: a
+  // fine-grained, app or refresh token is shorter, and `ghp_` before twelve
+  // alphanumerics is not a shape ordinary code has.
+  { rule: "vendor.github", pattern: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{12,}\b/g },
   { rule: "vendor.github_pat", pattern: /\bgithub_pat_[A-Za-z0-9_]{40,}\b/g },
   { rule: "vendor.aws_access_key", pattern: /\bAKIA[0-9A-Z]{12,20}\b/g },
   { rule: "vendor.google_api", pattern: /\bAIza[0-9A-Za-z_-]{30,}\b/g },
   { rule: "vendor.slack", pattern: /\bxox[baprs]-[0-9A-Za-z-]{10,}\b/g },
   { rule: "vendor.mailer_like", pattern: /\b[a-z]{2,5}_live_[A-Za-z0-9]{12,}\b/g },
+  // The two prefixes the agents this product runs are authenticated with.
+  // Both are specific enough to be a signal on their own; `sk-` alone is not,
+  // because `sk-spinner-container` is a class name.
+  { rule: "vendor.anthropic", pattern: /\bsk-ant-[A-Za-z0-9_-]{12,}\b/g },
+  { rule: "vendor.openai_project", pattern: /\bsk-proj-[A-Za-z0-9_-]{12,}\b/g },
 ];
 
 /** A credential inside a URL authority — scheme://user:password@host */

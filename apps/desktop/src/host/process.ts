@@ -159,13 +159,21 @@ export function childEnvironment(
   return env;
 }
 
-/** Provider key forms the shared detector does not cover; logs only. */
-const PROVIDER_KEY = /\b(?:sk-ant-|sk-proj-|sk-|gh[pousr]_)[A-Za-z0-9_-]{12,}\b/g;
+/**
+ * A bare `sk-` key, the one provider form the shared detector does not cover:
+ * `sk-` before twelve characters is also how `sk-spinner-container` is
+ * written, and the detector is wired into the artifact writer, where a false
+ * positive mangles a finding about nothing sensitive. Here it costs a reader
+ * one over-redacted log line, so the broader rule is worth its price. The
+ * detector's own prefixes — `sk-ant-`, `sk-proj-`, `gh?_` and the rest — are
+ * covered by the pass after this one.
+ */
+const PROVIDER_KEY = /\bsk-[A-Za-z0-9_-]{12,}\b/g;
 
 /**
  * Logs are bounded, and what reaches them carries no credential this app can
  * recognise: first the values of the environment it inherited, longest first
- * so a value that prefixes another leaves no tail; then the provider key forms
+ * so a value that prefixes another leaves no tail; then the bare `sk-` key
  * above; then the shared detector, which knows PEM blocks, JWTs, credentials
  * inside a URL, vendor keys and long values bound to a secret-named identifier;
  * then the terminal's own escapes.

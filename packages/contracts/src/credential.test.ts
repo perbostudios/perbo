@@ -99,3 +99,52 @@ describe("the false positives that a corpus sweep actually found", () => {
     expect(hits('TOKEN_COOKIE_NAME = "session_token"')).toEqual([]);
   });
 });
+
+/**
+ * The prefixes the agents this product runs are authenticated with. A key
+ * bound to a secret-named identifier was already found by the binding rule;
+ * these are the same keys quoted in prose, which is how a reviewer discloses
+ * one while advising rotation and how an agent's own stderr prints one.
+ */
+describe("the provider key prefixes", () => {
+  it("finds an Anthropic key quoted with no binding beside it", () => {
+    expect(hits("The key is sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz")).toEqual([
+      "sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz",
+    ]);
+  });
+
+  it("finds an OpenAI project key quoted with no binding beside it", () => {
+    expect(hits("rotate sk-proj-0123456789abcdefghijklmnop and redeploy")).toEqual([
+      "sk-proj-0123456789abcdefghijklmnop",
+    ]);
+  });
+
+  it("finds a GitHub token shorter than a classic personal access token", () => {
+    // A fine-grained or app token is not forty characters, and a rule written
+    // to the classic length reads the short ones as ordinary words.
+    expect(hits("gh auth said ghp_scp200sentineltokenvalue")).toEqual([
+      "ghp_scp200sentineltokenvalue",
+    ]);
+    expect(hits("ghs_0123456789ab and gho_0123456789ab")).toHaveLength(2);
+  });
+
+  it("names the rule that fired, so a false positive is attributable", () => {
+    expect(findCredentials("sk-ant-api03-0123456789abcdefghij")[0]?.rule).toBe("vendor.anthropic");
+    expect(findCredentials("sk-proj-0123456789abcdefghij")[0]?.rule).toBe("vendor.openai_project");
+  });
+
+  /**
+   * `sk-` on its own is not one of these. `sk-spinner-container` is a class
+   * name, and a detector wired into the artifact writer that mangled it would
+   * be worse than one that missed a key: the desktop keeps that broader rule
+   * for its logs, where a false positive costs a reader nothing.
+   */
+  it("does not fire on an ordinary identifier that starts sk-", () => {
+    expect(hits('<div class="sk-spinner-container sk-fading-circle">')).toEqual([]);
+    expect(hits("see docs/sk-onboarding-checklist.md")).toEqual([]);
+  });
+
+  it("does not fire on a word that merely starts with a token prefix", () => {
+    expect(hits("ghostwriting and ghs_short")).toEqual([]);
+  });
+});
