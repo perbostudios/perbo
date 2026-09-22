@@ -6,7 +6,7 @@ import { Composer } from "./Composer.js";
 import { ExplorerScreen } from "./ExplorerScreen.js";
 import { ContractScreen } from "./ContractScreen.js";
 import { LoopScreen } from "./LoopScreen.js";
-import { planNodes } from "@perbo/contracts/plan";
+import { planNodes } from "@perbo/contracts/browser";
 import { projectTicket } from "./ticket-workspace.js";
 import {
   CompletionScreen,

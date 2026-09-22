@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button, LineIcon, cx } from "../ui/index.js";
 import { bridge } from "../workspace/index.js";
 import { covers, nodesNaming, treeRows } from "../planning/explorer-tree.js";
-import { planNodes } from "@perbo/contracts/plan";
+import { planNodes } from "@perbo/contracts/browser";
 import type { TaskContext } from "./task-context.js";
 
 /**

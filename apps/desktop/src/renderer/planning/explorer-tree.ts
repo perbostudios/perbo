@@ -1,7 +1,9 @@
-import { matchesAny } from "@perbo/contracts/paths";
-import { standingGlob } from "@perbo/contracts/standing";
-import type { PlanNode } from "@perbo/contracts/plan";
-import type { StandingProhibitedEntry } from "@perbo/contracts/standing";
+import {
+  matchesAny,
+  standingGlob,
+  type PlanNode,
+  type StandingProhibitedEntry,
+} from "@perbo/contracts/browser";
 import { markOf, type DraftMark } from "../../shared/contract-editing.js";
 import type { EditingForm } from "../../shared/protocol.js";
 

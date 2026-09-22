@@ -11,8 +11,14 @@ import {
   StoredTicketSchema,
   TICKET_SCHEMA_VERSION,
   TicketKeySchema,
+  approachPath as approachSegments,
+  attemptsPath,
+  contractPath as contractSegments,
+  draftPath as draftSegments,
   isAbsolutePath,
   mergedAt,
+  ticketFilePath as ticketSegments,
+  ticketsDir,
   type ApproachRecord,
   type PlanContract,
   type StoredTicket,
@@ -57,7 +63,6 @@ import { StoreError, repositoryRootOf, storeDir, storedRepositoryRoot } from "./
  *   freeze. Review never reads it.
  */
 
-const TICKETS = "tickets";
 /** Lives beside the tickets and is not one; `listTickets` skips it by name. */
 const SEQUENCE_FILE = "sequence.json";
 
@@ -68,7 +73,6 @@ const SEQUENCE_FILE = "sequence.json";
  */
 export {
   DEFAULT_REPOSITORY_ROOT,
-  DEFAULT_STORE_DIRNAME,
   headCommit,
   repositoryId,
   repositoryRootOf,
@@ -91,10 +95,10 @@ export { TicketStoreError };
 /** The high-water mark per key prefix. Values only ever increase. */
 const SequenceSchema = z.record(z.string().min(1), z.number().int().min(0));
 
-const ticketPath = (dir: string, key: string) => join(dir, TICKETS, `${key}.json`);
-const contractPath = (dir: string, key: string) => join(dir, TICKETS, `${key}.contract.json`);
-const draftPath = (dir: string, key: string) => join(dir, TICKETS, `${key}.draft.json`);
-const approachPath = (dir: string, key: string) => join(dir, TICKETS, `${key}.approach.json`);
+const ticketPath = (dir: string, key: string) => join(dir, ...ticketSegments(key));
+const contractPath = (dir: string, key: string) => join(dir, ...contractSegments(key));
+const draftPath = (dir: string, key: string) => join(dir, ...draftSegments(key));
+const approachPath = (dir: string, key: string) => join(dir, ...approachSegments(key));
 
 /** Where a ticket's contract lives, for `perbo edit` to open it. */
 export const contractPathFor = contractPath;
@@ -202,7 +206,7 @@ function resolvedAgainst<T extends { repository_root?: string | undefined }>(
 }
 
 export function listTickets(dir: string): Ticket[] {
-  const inside = join(dir, TICKETS);
+  const inside = join(dir, ...ticketsDir());
   if (!existsSync(inside)) return [];
   const unreadable: string[] = [];
   const tickets = readdirSync(inside)
@@ -327,7 +331,7 @@ export function writeTicket(dir: string, ticket: Ticket): string {
           .join("; "),
     );
   }
-  mkdirSync(join(dir, TICKETS), { recursive: true });
+  mkdirSync(join(dir, ...ticketsDir()), { recursive: true });
   writeFileSync(path, `${JSON.stringify(stored, null, 2)}\n`);
   return path;
 }
@@ -338,7 +342,7 @@ export function writeTicket(dir: string, ticket: Ticket): string {
  * make execution unbound by the thing review judges it against.
  */
 export function writeContract(dir: string, ticket: Ticket, contract: PlanContract): string {
-  mkdirSync(join(dir, TICKETS), { recursive: true });
+  mkdirSync(join(dir, ...ticketsDir()), { recursive: true });
   const path = contractPath(dir, ticket.key);
   if (ticket.approved_at !== null && existsSync(path)) {
     const existing = readContract(dir, ticket.key);
@@ -363,7 +367,7 @@ export function writeContract(dir: string, ticket: Ticket, contract: PlanContrac
  * path reads it, which is what keeps a No-Go out of a verdict.
  */
 export function writeApproachRecord(dir: string, key: string, approach: ApproachRecord): string {
-  mkdirSync(join(dir, TICKETS), { recursive: true });
+  mkdirSync(join(dir, ...ticketsDir()), { recursive: true });
   const path = approachPath(dir, key);
   writeFileSync(path, `${JSON.stringify(ApproachRecordSchema.parse(approach), null, 2)}\n`);
   return path;
@@ -542,7 +546,7 @@ export const DraftSnapshotSchema = z.strictObject({
 export type DraftSnapshot = z.infer<typeof DraftSnapshotSchema>;
 
 export function writeDraftSnapshot(dir: string, snapshot: DraftSnapshot): string {
-  mkdirSync(join(dir, TICKETS), { recursive: true });
+  mkdirSync(join(dir, ...ticketsDir()), { recursive: true });
   const path = draftPath(dir, snapshot.key);
   writeFileSync(path, `${JSON.stringify(DraftSnapshotSchema.parse(snapshot), null, 2)}\n`);
   return path;
@@ -616,7 +620,7 @@ export function readDraftSnapshot(dir: string, key: string): DraftSnapshot | nul
 export function nextKey(dir: string, prefix: string): string {
   // Filenames, not parsed tickets: a file this cannot read still holds its key,
   // and handing that key to new work would make two things share a name.
-  const inside = join(dir, TICKETS);
+  const inside = join(dir, ...ticketsDir());
   const present = (existsSync(inside) ? readdirSync(inside) : [])
     .filter(isTicketFile)
     .map((name) => name.slice(0, -".json".length))
@@ -627,7 +631,7 @@ export function nextKey(dir: string, prefix: string): string {
   return `${prefix}-${Math.max(recorded, 0, ...present) + 1}`;
 }
 
-const sequencePath = (dir: string) => join(dir, TICKETS, SEQUENCE_FILE);
+const sequencePath = (dir: string) => join(dir, ...ticketsDir(), SEQUENCE_FILE);
 
 function readSequence(dir: string): Record<string, number> {
   const path = sequencePath(dir);
@@ -648,7 +652,7 @@ export function recordIssued(dir: string, key: string): void {
   const [prefix, number] = [key.slice(0, key.lastIndexOf("-")), Number(key.slice(key.lastIndexOf("-") + 1))];
   const sequence = readSequence(dir);
   if ((sequence[prefix] ?? 0) >= number) return;
-  mkdirSync(join(dir, TICKETS), { recursive: true });
+  mkdirSync(join(dir, ...ticketsDir()), { recursive: true });
   writeFileSync(
     sequencePath(dir),
     `${JSON.stringify({ ...sequence, [prefix]: number }, null, 2)}\n`,
@@ -742,7 +746,7 @@ export type SyncedChange = {
  */
 export function latestAttemptBranch(dir: string, ticketId: string): string | null {
   try {
-    return lastAttemptBranch(readAttemptsRecord(join(dir, "state", `${ticketId}.attempts.json`)));
+    return lastAttemptBranch(readAttemptsRecord(join(dir, ...attemptsPath(ticketId))));
   } catch (error) {
     if (error instanceof AttemptsRecordError) return null;
     throw error;

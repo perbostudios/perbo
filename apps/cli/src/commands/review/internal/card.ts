@@ -6,7 +6,7 @@ import type {
   ReviewRouting,
   SourceContract,
 } from "@perbo/contracts";
-import { hasAcceptanceCriteria } from "@perbo/contracts";
+import { costOf, costPhrase, hasAcceptanceCriteria } from "@perbo/contracts";
 import { WIDTH, clip, pad, painter, spread, wrap, type Paint, type Style } from "../../../text.js";
 
 /**
@@ -305,11 +305,10 @@ export function renderArtifact(
     }
   }
 
-  const renderedCost =
-    artifact.model.cost_basis === "unavailable"
-      ? "cost unavailable"
-      : `$${(artifact.cost_micros / 1_000_000).toFixed(3)} ` +
-        (artifact.model.cost_basis === "transport_reported" ? "reported" : "estimated");
+  const renderedCost = costPhrase(
+    costOf({ micros: artifact.cost_micros, basis: artifact.model.cost_basis }),
+    { digits: 3 },
+  );
   lines.push(
     paint(
       `          ${(artifact.latency_ms / 1000).toFixed(1)}s · ` +

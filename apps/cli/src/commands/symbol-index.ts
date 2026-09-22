@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, matchesGlob, posix, resolve } from "node:path";
 // The one import that puts a compiler in what ships: `typescript` is inlined
 // into the single-file bundle, as `zod` is, and it is declared beside `zod` in
@@ -24,7 +23,7 @@ import {
   type SymbolIndex,
   type UnsupportedRepository,
 } from "@perbo/contracts";
-import { CommandFailedError, git } from "@perbo/workspace";
+import { CommandFailedError, git, replaceFile } from "@perbo/workspace";
 import { z } from "zod";
 import { readInput } from "../usage-error.js";
 import {
@@ -718,25 +717,6 @@ export function symbolIndexPath(repositoryRoot: string): string {
   return join(storeDir(repositoryRoot), SYMBOL_INDEX_FILENAME);
 }
 
-/**
- * Replace the file in one step, or leave what is on disk alone.
- *
- * `rename` within a directory is atomic, so an index run killed while it
- * writes leaves the previous index intact rather than a half-written one every
- * later reader refuses.
- */
-function writeAtomically(path: string, contents: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
-  try {
-    writeFileSync(temporary, contents);
-    renameSync(temporary, path);
-  } catch (error) {
-    rmSync(temporary, { force: true });
-    throw error;
-  }
-}
-
 export const IndexInputSchema = z.strictObject({
   /** The repository to index, from the directory the command was run in. */
   repo: z.string(),
@@ -795,7 +775,10 @@ export function buildIndex(input: IndexInput, context: CommandContext): IndexRep
   }
 
   const path = symbolIndexPath(root);
-  writeAtomically(path, document(built));
+  // Replaced whole: an index run killed while it writes leaves the previous
+  // index intact rather than a half-written one every later reader refuses.
+  mkdirSync(dirname(path), { recursive: true });
+  replaceFile(path, document(built));
   return { supported: true, index: built, path };
 }
 

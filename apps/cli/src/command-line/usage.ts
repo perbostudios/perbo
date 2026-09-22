@@ -452,11 +452,12 @@ export const USAGE = `perbo — contract to pull request, locally
               [--author "..."] [--stand-in] [--replace] [--repo .]
               [--store <dir>] [--json]
       Answer a review here instead of on the pull request. <review> is a ticket
-      key, a pull request (url or number) or a review id — including the id
-      \`review --pr\` printed for a change nothing ran here, which is written to
-      <repo>/.perbo/reviews/ and files no attempt; the key is a finding
-      key, whole or by any prefix that names one — the same key the checkbox on
-      the pull request carries, so a stop answered either way is one decision.
+      key, the id a run with no ticket was filed under, a pull request (url or
+      number) or a review id — including the id \`review --pr\` printed for a
+      change nothing ran here, which is written to <repo>/.perbo/reviews/ and
+      files no attempt; the key is a finding key, whole or by any prefix that
+      names one — the same key the checkbox on the pull request carries, so a
+      stop answered either way is one decision.
       --endorse and --override answer a stop, exactly as the two boxes do;
       --accept and --reject judge any finding. The decision is written to
       <store>/verdicts.json with who took it, when and the note; nothing leaves

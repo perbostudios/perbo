@@ -19,8 +19,14 @@ import {
   type GraphEditOutcome,
   type Spec,
 } from "@perbo/planning/browser";
-import { planNodes } from "@perbo/contracts/plan";
-import { planSizeCounts, sizeEstimate } from "@perbo/contracts/size";
+import {
+  isNeverReadPath,
+  planNodes,
+  planSizeCounts,
+  sizeEstimate,
+  type ApproachRecord,
+  type StandingProhibitedEntry,
+} from "@perbo/contracts/browser";
 import { ContractEditing, interviewProviderFor, type EditingOwner } from "../shared/contract-editing.js";
 import { assembleLiveGraph } from "../shared/graph-live.js";
 import { busyMessage, exclusiveJob, lane } from "../shared/jobs.js";
@@ -31,9 +37,6 @@ import type {
   Ticket,
   UnsupportedRepository,
 } from "@perbo/contracts";
-import type { ApproachRecord } from "@perbo/contracts/approach";
-import type { StandingProhibitedEntry } from "@perbo/contracts/standing";
-import { isNeverReadPath } from "@perbo/contracts/paths";
 import { answer } from "./handlers.js";
 import { SettingsSchema } from "../shared/protocol.js";
 import type {

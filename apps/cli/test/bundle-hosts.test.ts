@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { bundleBuild, buildCli, removeStagedBundles, type Bundle } from "../src/test-support/open-build.js";
+import { bundleBuild, buildCli, removeStagedBundles, type Bundle } from "../src/test-support/built-cli.js";
 
 /**
  * What the shipped binary links against.

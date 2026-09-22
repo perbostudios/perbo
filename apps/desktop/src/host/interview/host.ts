@@ -1,5 +1,4 @@
-import { InterviewTurnSchema, encodeInterviewTurn } from "@perbo/contracts/interview-protocol";
-import { planNodes } from "@perbo/contracts/plan";
+import { InterviewTurnSchema, encodeInterviewTurn, planNodes } from "@perbo/contracts";
 import { redact } from "../process.js";
 import { readLatestDraftEdit } from "../records.js";
 import { ticketPath } from "../repository/layout.js";

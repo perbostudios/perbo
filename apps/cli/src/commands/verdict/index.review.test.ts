@@ -15,7 +15,6 @@ import {
   type RunBundle,
 } from "@perbo/contracts";
 import { BundleStore } from "@perbo/runner";
-import { attemptsRecordSubject } from "../inspect.js";
 import { LocalVerdictsSchema } from "./record.js";
 import {
   buildTicketlessBundle,
@@ -33,10 +32,10 @@ import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
  *
  * `perbo review --pr owner/repo#N` writes its bundle into
  * `<repo>/.perbo/reviews/` and files no attempt: there was no run, so there is
- * no attempts record for the id it hands back. Every test here resolves the
- * reference with `attemptsRecordSubject` — the attempts record alone, with no
- * ticket asked for — against a repository holding only what `review` wrote,
- * which is the shape the readiness run met.
+ * no attempts record for the id it hands back. Every test here runs against a
+ * repository holding only what `review` wrote, which is the shape the readiness
+ * run met, so the reference reaches `<store>/reviews/` only after the ticket
+ * store and the attempts record have both said they do not know it.
  *
  * The network is stubbed to throw and every child process but `git` is refused,
  * for the same reason the ticket-store suite does it: a decision is a local
@@ -197,9 +196,6 @@ const verdict = (repo: string, argv: string[], now = NOW) =>
     streams: capture(),
     cwd: repo,
     now,
-    deps: {
-      resolve: attemptsRecordSubject,
-    },
   });
 
 describe("perbo verdict answers a review that `review --pr` wrote", () => {
@@ -212,9 +208,6 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
       streams,
       cwd: repo,
       now: NOW,
-      deps: {
-        resolve: attemptsRecordSubject,
-      },
     });
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -266,9 +259,6 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
         streams,
         cwd: repo,
         now: NOW,
-        deps: {
-          resolve: attemptsRecordSubject,
-        },
       }),
     ).toBe(EXIT_CODES.approve);
     const printed = streams.out.join("");
@@ -290,9 +280,6 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
         streams: refused,
         cwd: repo,
         now: LATER,
-        deps: {
-          resolve: attemptsRecordSubject,
-        },
       }),
     ).toBe(EXIT_CODES.usage_or_input_error);
     expect(refused.err.join("")).toContain("--replace");
@@ -422,9 +409,6 @@ describe("a review an attempt filed still resolves through the attempts record",
         streams,
         cwd: repo,
         now: NOW,
-        deps: {
-          resolve: attemptsRecordSubject,
-        },
       }),
     ).toBe(EXIT_CODES.approve);
     expect(readVerdicts(store).verdicts[0]).toMatchObject({

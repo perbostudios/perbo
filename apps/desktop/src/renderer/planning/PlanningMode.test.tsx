@@ -18,7 +18,7 @@ import {
 import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests } from "../../shared/shortcuts.js";
 import { withDraft } from "../shell/create.js";
 import { SpecSection } from "./SpecSection.js";
-import type { GraphEdit } from "@perbo/contracts/graph-edit";
+import type { GraphEdit } from "@perbo/contracts/browser";
 import type { ExportedName } from "../../shared/protocol.js";
 import * as planningBrowser from "@perbo/planning/browser";
 

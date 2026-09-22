@@ -2,10 +2,13 @@ import { readFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import {
-  DEFAULT_ADR_FOLDER,
-  DEFAULT_SPEC_FOLDER,
-  isRepositoryRelativeFolder,
+  ADR_FOLDER_CONFIG_KEY,
+  ConfiguredFolderError,
+  SPEC_FOLDER_CONFIG_KEY,
+  STORE_DIRNAME,
+  configuredFolder,
   readStandingProhibited,
+  type FolderConfigKey,
   type StandingProhibitedEntry,
 } from "@perbo/contracts";
 import { git } from "@perbo/workspace";
@@ -22,9 +25,6 @@ import { git } from "@perbo/workspace";
  * this file names a ticket file.
  */
 
-/** `<repo>/.perbo`, unless a command was pointed somewhere else. */
-export const DEFAULT_STORE_DIRNAME = ".perbo";
-
 /**
  * Anything a command could not read out of the store, in the words a person can
  * act on. Exported from `tickets.ts` as `TicketStoreError` too: the two names
@@ -33,7 +33,7 @@ export const DEFAULT_STORE_DIRNAME = ".perbo";
 export class StoreError extends Error {}
 
 export function storeDir(repositoryRoot: string, override?: string | null): string {
-  return override ? resolve(override) : join(resolve(repositoryRoot), DEFAULT_STORE_DIRNAME);
+  return override ? resolve(override) : join(resolve(repositoryRoot), STORE_DIRNAME);
 }
 
 /**
@@ -180,12 +180,6 @@ function configValue(dir: string, key: string): unknown {
   return raw === null || typeof raw !== "object" ? undefined : raw[key];
 }
 
-/** The `<store>/config.json` key naming where this repository keeps its specs (D-103). */
-export const SPEC_FOLDER_CONFIG_KEY = "specs";
-
-/** The `<store>/config.json` key naming where this repository keeps its ADRs (D-103). */
-export const ADR_FOLDER_CONFIG_KEY = "adr";
-
 /**
  * The repository-relative folder a repository keeps its specs in: `specs`
  * unless `config.json` names another under `specs` (D-103).
@@ -195,7 +189,7 @@ export const ADR_FOLDER_CONFIG_KEY = "adr";
  * paths a contract puts off limits to the executor.
  */
 export function specFolder(dir: string): string {
-  return configuredFolder(dir, SPEC_FOLDER_CONFIG_KEY, DEFAULT_SPEC_FOLDER, "specs live", '"specs" or "docs/specs"');
+  return folderFrom(dir, SPEC_FOLDER_CONFIG_KEY);
 }
 
 /**
@@ -207,26 +201,25 @@ export function specFolder(dir: string): string {
  * the ADRs changed with it for the loop to commit on the ticket's branch.
  */
 export function adrFolder(dir: string): string {
-  return configuredFolder(dir, ADR_FOLDER_CONFIG_KEY, DEFAULT_ADR_FOLDER, "ADRs live", '"docs/adr" or "adr"');
+  return folderFrom(dir, ADR_FOLDER_CONFIG_KEY);
 }
 
-/** One `config.json` key naming a repository-relative folder, or its default. */
-function configuredFolder(
-  dir: string,
-  key: string,
-  fallback: string,
-  what: string,
-  example: string,
-): string {
-  const named = configValue(dir, key);
-  if (named === undefined) return fallback;
-  if (typeof named !== "string" || !isRepositoryRelativeFolder(named)) {
-    throw new StoreError(
-      `${join(dir, "config.json")} sets '${key}' to something that is not a ` +
-        `repository-relative folder. It names where ${what}, for example ${example}`,
-    );
+/**
+ * One `config.json` key naming a repository-relative folder, or its default.
+ *
+ * The judgement is the layout's, so every process that reads this store
+ * refuses the same values; the file is this reader's own, and naming it is
+ * what makes the refusal actionable.
+ */
+function folderFrom(dir: string, key: FolderConfigKey): string {
+  try {
+    return configuredFolder(configValue(dir, key), key);
+  } catch (error) {
+    if (error instanceof ConfiguredFolderError) {
+      throw new StoreError(`${join(dir, "config.json")} ${error.message}`);
+    }
+    throw error;
   }
-  return named;
 }
 
 /**
@@ -299,7 +292,7 @@ function checkDefinitionOwners(raw: Record<string, unknown> | null): Map<string,
  * undeclared.
  */
 export function judgingPaths(dir: string): JudgingPath[] {
-  const entries: JudgingPath[] = [{ path: ".perbo/**", source: "store", set: true }];
+  const entries: JudgingPath[] = [{ path: `${STORE_DIRNAME}/**`, source: "store", set: true }];
   const seen = new Set(entries.map((entry) => entry.path));
   let raw: Record<string, unknown> | null = null;
   try {

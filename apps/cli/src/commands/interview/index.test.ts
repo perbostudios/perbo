@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { InterviewEventSchema, InterviewTurnSchema } from "@perbo/contracts/interview-protocol";
+import { InterviewEventSchema, InterviewTurnSchema } from "@perbo/contracts";
 import { UsageError } from "../../usage-error.js";
 import { NEXT_STEPS } from "../../next-step.js";
 import { claudeInterviewTransport } from "./claude.js";

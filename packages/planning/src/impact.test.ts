@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SymbolIndexSchema, UnsupportedRepositorySchema } from "@perbo/contracts";
-import { isNeverReadPath } from "@perbo/contracts/paths";
+import { isNeverReadPath } from "@perbo/contracts";
 import type { SymbolIndex, UnsupportedRepository } from "@perbo/contracts";
 import {
   IMPACT_WARNING_CAP,

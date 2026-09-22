@@ -9,6 +9,7 @@ import {
   onePieceOfWork,
   planNodes,
   planSizeCounts,
+  ticketsDir,
   sizeEstimate,
 } from "@perbo/contracts";
 import {
@@ -19,7 +20,7 @@ import {
   encodeInterviewEvent,
   type InterviewEvent,
   type InterviewQuestionGroup,
-} from "@perbo/contracts/interview-protocol";
+} from "@perbo/contracts";
 import {
   ADMISSION_RULES,
   DEFAULT_COMMAND_DENY_LIST,
@@ -1351,7 +1352,7 @@ function ticketFromSpec(context: InterviewContext): string | null {
 function draftedFromSpec(
   context: InterviewContext,
 ): { key: string; state: string; open: string | null } | null {
-  if (!existsSync(join(context.storeDirectory, "tickets"))) return null;
+  if (!existsSync(join(context.storeDirectory, ...ticketsDir()))) return null;
   const found = listTickets(context.storeDirectory).filter(
     (ticket) => ticket.admission.spec?.path === context.spec,
   );

@@ -27,6 +27,7 @@ export {
   isConfigPath,
   isDependencyPath,
   isMigrationPath,
+  isNeverReadPath,
   isSecurityPath,
   matchesAny,
   packageOf,
@@ -41,7 +42,7 @@ export {
 } from "./plan.js";
 export type { AcceptanceCriterion, PlanContract, PlanNode, VerificationKind } from "./plan.js";
 export { isPlannedP3Path } from "./risk.js";
-export { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS, sizeEstimate } from "./size.js";
+export { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS, planSizeCounts, sizeEstimate } from "./size.js";
 export type { SizeEstimate } from "./size.js";
 export { standingGlob, StandingProhibitedEntrySchema } from "./standing.js";
 export type { StandingProhibitedEntry } from "./standing.js";

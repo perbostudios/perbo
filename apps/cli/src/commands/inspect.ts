@@ -4,22 +4,39 @@ import { join } from "node:path";
 import { z } from "zod";
 import {
   CheckResultsFileSchema,
+  CostBasisSchema,
   EXIT_CODES,
   NodeReviewsSchema,
   ReviewArtifactSchema,
   RunBundleSchema,
+  addRolls,
+  attemptsPath,
+  bundleManifestsDir,
+  bundleObjectPath,
+  bundleRoot,
+  costLabel,
+  costOf,
+  costPhrase,
+  formatUsd,
   limitFor,
   limitsForCredential,
   parseUnifiedDiff,
   planNodes,
   planSizeCounts,
   pullRequestAttribution,
+  rollCosts,
+  rollLabel,
   sizeEstimate,
+  stateDir,
+  ticketFilePath,
+  ticketIdOfAttemptsFile,
   ticketSourceLabel,
   wholeChangeChecks,
   type ArtifactRef,
   type AttemptWait,
   type CheckResult,
+  type Cost,
+  type CostRoll,
   type DeliveredCheck,
   type DeliveryChecksState,
   type ExecutionAttempt,
@@ -37,14 +54,13 @@ import {
   type TicketSource,
 } from "@perbo/contracts";
 import { BundleStore, parseDeclines, runNumbers, type Decline } from "@perbo/runner";
+import { formatDuration, formatHumanElapsed } from "../duration.js";
 import { QUEUE_HOLDING_STATES, queueOrder } from "../scheduling.js";
 import { UsageError } from "../usage-error.js";
 import {
   BASE_SOURCE_LABEL,
   ceilingResourceFor,
   effectiveLimits,
-  formatCost,
-  formatDuration,
   limitAtBreach,
   readAttemptsFile,
   readRepoConfig,
@@ -183,7 +199,7 @@ const ClosureVerificationFileSchema = z.object({
   all_closed: z.boolean(),
   open_keys: z.array(z.string()),
   cost_micros: z.number().int().min(0),
-  cost_basis: z.enum(["transport_reported", "provider_list_estimate", "unavailable", "not_incurred"]),
+  cost_basis: CostBasisSchema,
 });
 type ClosureVerificationFile = z.infer<typeof ClosureVerificationFileSchema>;
 
@@ -193,65 +209,6 @@ export interface CeilingUse {
   /** Null where nothing bounds the resource, which is the counters' default. */
   ceiling: number | null;
   hit: boolean;
-}
-
-/**
- * One dollar figure, and what it is. `micros` is null where the basis carries
- * no dollars at all — `$0.00` and "nobody measured this" are different facts,
- * and a terminated attempt used to be printed as the first when it was the
- * second. `partial` says the attempt was stopped before its transport wrote a
- * final accounting line, so the figure covers only what was read by the stop.
- */
-export interface AttemptCost {
-  micros: number | null;
-  basis: ExecutionAttempt["usage"]["cost_basis"];
-  partial: boolean;
-}
-
-/**
- * Costs added up: the round's components, or the ticket's. A component with no
- * dollars is counted rather than dropped, so a subtotal never reads as complete
- * when part of it is missing, and the partial ones are named for the same reason.
- */
-export interface CostRoll {
-  /** Micro-dollars from the components that carry a figure. */
-  micros: number;
-  /** Components that could carry one; `not_incurred` is not among them. */
-  components: number;
-  priced: number;
-  /** Priced by the transport's own dollar total. */
-  reported: number;
-  /** Priced from token usage at the provider's recorded list rates. */
-  estimated: number;
-  unavailable: number;
-  /** Of the priced ones, how many are a charge up to a stop rather than a total. */
-  partial: number;
-}
-
-export function rollCosts(components: readonly AttemptCost[]): CostRoll {
-  const counted = components.filter((cost) => cost.basis !== "not_incurred");
-  const priced = counted.filter((cost) => cost.micros !== null);
-  return {
-    micros: priced.reduce((total, cost) => total + (cost.micros ?? 0), 0),
-    components: counted.length,
-    priced: priced.length,
-    reported: priced.filter((cost) => cost.basis === "transport_reported").length,
-    estimated: priced.filter((cost) => cost.basis === "provider_list_estimate").length,
-    unavailable: counted.length - priced.length,
-    partial: priced.filter((cost) => cost.partial).length,
-  };
-}
-
-export function addRolls(a: CostRoll, b: CostRoll): CostRoll {
-  return {
-    micros: a.micros + b.micros,
-    components: a.components + b.components,
-    priced: a.priced + b.priced,
-    reported: a.reported + b.reported,
-    estimated: a.estimated + b.estimated,
-    unavailable: a.unavailable + b.unavailable,
-    partial: a.partial + b.partial,
-  };
 }
 
 /**
@@ -321,7 +278,7 @@ export interface AttemptReport {
   agent: { model: string; binary_version: string; adapter: string; credential_class: string };
   ceilings: CeilingUse[];
   tokens: { input: number; cache_read: number; output: number };
-  cost: AttemptCost;
+  cost: Cost;
   /** Execution, review and closure verification for this round, added up. */
   round_cost: CostRoll;
   /**
@@ -540,15 +497,13 @@ export type ResolveSubject = (storeDirectory: string, name: string) => InspectSu
 
 /** The ids `<store>/state` holds an attempts record for, in the order it lists them. */
 export function recordedIds(storeDirectory: string): string[] {
-  const state = join(storeDirectory, "state");
+  const state = join(storeDirectory, ...stateDir());
   if (!existsSync(state)) return [];
   return readdirSync(state)
-    .filter((name) => name.endsWith(ATTEMPTS_SUFFIX))
-    .map((name) => name.slice(0, -ATTEMPTS_SUFFIX.length))
+    .map(ticketIdOfAttemptsFile)
+    .filter((id): id is string => id !== null)
     .sort();
 }
-
-const ATTEMPTS_SUFFIX = ".attempts.json";
 
 /**
  * The work an attempts record belongs to, read from the record itself.
@@ -568,7 +523,7 @@ export const attemptsRecordSubject: ResolveSubject = (storeDirectory, name) => {
   // attempts are keyed by, and reading them back must not depend on a second
   // file being there.
   const record = readLocalRunRecord(storeDirectory, name);
-  if (record === null && !existsSync(join(storeDirectory, "state", `${name}${ATTEMPTS_SUFFIX}`))) {
+  if (record === null && !existsSync(join(storeDirectory, ...attemptsPath(name)))) {
     const recorded = recordedIds(storeDirectory);
     const runs = listLocalRuns(storeDirectory).map((run) => run.run_id);
     const known = [...new Set([...recorded, ...runs])];
@@ -830,26 +785,17 @@ export function reportAttempt(
         ? "carried_forward"
         : `carried_forward · ${reached}`;
 
-  // A basis that carries no dollars carries no figure either: null, so nothing
-  // downstream can render "we did not measure this" as "$0.00".
-  const dollars = (
-    micros: number,
-    basis: ExecutionAttempt["usage"]["cost_basis"],
-    partial = false,
-  ): AttemptCost => ({
-    micros: basis === "unavailable" || basis === "not_incurred" ? null : micros,
-    basis,
-    partial,
+  const cost = costOf({
+    micros: attempt.usage.cost_micros,
+    basis: attempt.usage.cost_basis,
+    partial: attempt.usage.cost_partial === true,
   });
-  const cost = dollars(
-    attempt.usage.cost_micros,
-    attempt.usage.cost_basis,
-    attempt.usage.cost_partial === true,
-  );
   const round_cost = rollCosts([
     cost,
-    ...(review ? [dollars(review.cost_micros, review.model.cost_basis)] : []),
-    ...(verification ? [dollars(verification.cost_micros, verification.cost_basis)] : []),
+    ...(review ? [costOf({ micros: review.cost_micros, basis: review.model.cost_basis })] : []),
+    ...(verification
+      ? [costOf({ micros: verification.cost_micros, basis: verification.cost_basis })]
+      : []),
   ]);
 
   const denials: DenialReport[] = attempt.commands
@@ -920,8 +866,8 @@ export function buildReportForSubject(input: {
   /** Where an unreadable verdicts file is named; the report itself is still built. */
   streams?: Diagnostics | undefined;
 }): InspectReport {
-  const attemptsPath = join(input.storeDirectory, "state", `${input.subject.ticket_id}.attempts.json`);
-  const head = { ...input.subject, attempts_path: attemptsPath };
+  const attemptsFile = join(input.storeDirectory, ...attemptsPath(input.subject.ticket_id));
+  const head = { ...input.subject, attempts_path: attemptsFile };
   const verdicts = readLocalVerdictsOrWarn(input.storeDirectory, input.streams ?? null).verdicts.filter(
     (verdict) => verdict.review.ticket_id === input.subject.ticket_id,
   );
@@ -931,14 +877,14 @@ export function buildReportForSubject(input: {
     total_cost: attempts.map((one) => one.round_cost).reduce(addRolls, rollCosts([])),
     verdicts,
   });
-  if (!existsSync(attemptsPath)) return totalled([]);
+  if (!existsSync(attemptsFile)) return totalled([]);
 
-  const record = readAttemptsFile(attemptsPath);
-  const bundleRoot = join(input.storeDirectory, "bundles");
+  const record = readAttemptsFile(attemptsFile);
+  const root = join(input.storeDirectory, ...bundleRoot());
   // Constructed only where the loop already made it: the store creates its
   // directories on construction, and a read must not leave one behind.
-  const store = existsSync(join(bundleRoot, "bundles"))
-    ? new BundleStore({ root: bundleRoot, retainContext: true })
+  const store = existsSync(join(input.storeDirectory, ...bundleManifestsDir()))
+    ? new BundleStore({ root, retainContext: true })
     : null;
   const bundles = store ? store.forTicket(input.subject.ticket_id) : [];
   const limits = effectiveLimits(readRepoConfig(input.storeDirectory), join(input.storeDirectory, "config.json"));
@@ -1026,45 +972,14 @@ const RESOURCE_LABEL: Record<string, string> = {
   attempt_cost_micros: "cost",
 };
 
-/**
- * A cost the way a person reads it. `partial` replaces the basis word rather
- * than joining it: what a reader needs first is that this is not the whole
- * charge. The round and ticket totals retain the reported/estimated split.
- *
- * D-070: a basis carrying no dollars is a word and never an amount, so no
- * reading of this ever produces `$0` for an attempt nobody priced. The word
- * alone, without `formatCost`'s own `cost ` prefix — the label on the line and
- * the column heading above it already say which quantity this is, and the
- * prefix read as "cost cost unavailable" under them.
- */
-function costLabel(cost: AttemptCost): string {
-  if (cost.micros === null) return cost.basis === "not_incurred" ? "not incurred" : "unavailable";
-  const amount = `$${(cost.micros / 1_000_000).toFixed(4)}`;
-  if (cost.partial) return `${amount} partial`;
-  return `${amount} ${cost.basis === "transport_reported" ? "reported" : "estimated"}`;
-}
-
-/** The same, for a subtotal: what it adds up to, and what is missing from it. */
-function rollLabel(roll: CostRoll): string {
-  if (roll.components === 0) return "not incurred";
-  if (roll.priced === 0) return `unavailable — ${roll.unavailable} component(s) unpriced`;
-  const notes = [`${roll.priced} of ${roll.components} priced`];
-  if (roll.estimated > 0) {
-    notes.push(`${roll.reported} reported`, `${roll.estimated} estimated`);
-  }
-  if (roll.partial > 0) notes.push(`${roll.partial} partial`);
-  if (roll.unavailable > 0) notes.push(`${roll.unavailable} unavailable`);
-  return `$${(roll.micros / 1_000_000).toFixed(4)} — ${notes.join(", ")}`;
-}
-
-function renderUse(use: CeilingUse, cost: AttemptCost): string {
+function renderUse(use: CeilingUse, cost: Cost): string {
   const show = (value: number): string => {
     switch (use.resource) {
       case "attempt_stall_ms":
       case "attempt_wall_clock_ms":
         return formatDuration(value);
       case "attempt_cost_micros":
-        return `$${(value / 1_000_000).toFixed(4)}`;
+        return formatUsd(value, 4);
       default:
         return value.toLocaleString("en-US");
     }
@@ -1097,37 +1012,6 @@ const CHECK_MARK: Record<string, string> = { passed: "✓", failed: "✗", error
  * turns "we did not measure this" into "this took no time and no edits".
  */
 const NOT_RECORDED = "not recorded";
-
-/**
- * The units this prints, smallest first, each with the rounded value at which
- * it overflows into the next one. Hours are the last, so nothing overflows out.
- */
-const HUMAN_SCALES = [
-  { unit: "second", ms: 1_000, overflowsAt: 60 },
-  { unit: "minute", ms: 60_000, overflowsAt: 60 },
-  { unit: "hour", ms: 3_600_000, overflowsAt: Infinity },
-] as const;
-
-/**
- * Human time in the unit a person reads it in: seconds, minutes or hours.
- *
- * `human_elapsed_ms` measures somebody reading a contract and deciding, which
- * usually lands in seconds or minutes; `27308ms` is arithmetic homework, not a
- * reading.
- * Distinct from `formatDuration`, which rounds machine time to whole seconds —
- * a tenth of a second is visible to the person being measured here.
- *
- * The unit follows the rounded value, not the raw one: 59_999 ms rounds to
- * `60.0` seconds, which is a minute a person would never write that way, so it
- * reads `1.0 minute` — and 3_599_999 ms reads `1.0 hour` for the same reason.
- */
-export function formatHumanElapsed(ms: number): string {
-  const scale =
-    HUMAN_SCALES.find((candidate) => Number((ms / candidate.ms).toFixed(1)) < candidate.overflowsAt) ??
-    HUMAN_SCALES[HUMAN_SCALES.length - 1]!;
-  const rendered = (ms / scale.ms).toFixed(1);
-  return `${rendered} ${rendered === "1.0" ? scale.unit : `${scale.unit}s`}`;
-}
 
 /**
  * The admission record, above the attempts: how the criteria arrived, what the
@@ -1832,7 +1716,7 @@ export function renderInspect(
       const review = attempt.review;
       const right =
         `${review.findings.length} finding(s) · ` +
-        `${formatCost(review.cost_micros, review.model.cost_basis)}`;
+        `${costPhrase(costOf({ micros: review.cost_micros, basis: review.model.cost_basis }))}`;
       lines.push(spread(paint("  REVIEW", "sect") + `    ${review.review_id}   ${review.decision}`, right, paint, "dim"));
       // A verdict the plan could not accept cost the review, not the change
       // set. Its reason is what says which — so it is printed beside the round,
@@ -1899,7 +1783,10 @@ export function renderInspect(
         );
       }
       lines.push(
-        paint(`    ${formatCost(verification.cost_micros, verification.cost_basis)}`, "dim"),
+        paint(
+          `    ${costPhrase(costOf({ micros: verification.cost_micros, basis: verification.cost_basis }))}`,
+          "dim",
+        ),
         "",
       );
     }
@@ -2048,7 +1935,7 @@ export interface VerifyReport {
  * store it was asked to check.
  */
 function bundlesInStore(storeDirectory: string, ticketId: string): RunBundle[] {
-  const directory = join(storeDirectory, "bundles", "bundles");
+  const directory = join(storeDirectory, ...bundleManifestsDir());
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
     .filter((name) => name.endsWith(".json"))
@@ -2061,7 +1948,7 @@ function bundlesInStore(storeDirectory: string, ticketId: string): RunBundle[] {
 function checkObject(storeDirectory: string, bundle: RunBundle, artifact: ArtifactRef): ObjectCheck {
   const base = { bundle_id: bundle.bundle_id, kind: bundle.kind, name: artifact.name, expected: artifact.sha256 };
   if (!artifact.retained) return { ...base, found: null, status: "not_retained" };
-  const path = join(storeDirectory, "bundles", "objects", artifact.sha256);
+  const path = join(storeDirectory, ...bundleObjectPath(artifact.sha256));
   if (!existsSync(path)) return { ...base, found: null, status: "missing" };
   const found = createHash("sha256").update(readFileSync(path)).digest("hex");
   return { ...base, found, status: found === artifact.sha256 ? "verified" : "mismatch" };
@@ -2081,11 +1968,11 @@ export function verifyAttemptObjects(input: {
   ticket_id: string;
   attempt: string;
 }): VerifyReport {
-  const attemptsPath = join(input.storeDirectory, "state", `${input.ticket_id}.attempts.json`);
-  if (!existsSync(attemptsPath)) {
-    throw new UsageError(`${input.ticket} has no attempts on record in ${attemptsPath}`);
+  const attemptsFile = join(input.storeDirectory, ...attemptsPath(input.ticket_id));
+  if (!existsSync(attemptsFile)) {
+    throw new UsageError(`${input.ticket} has no attempts on record in ${attemptsFile}`);
   }
-  const record = readAttemptsFile(attemptsPath);
+  const record = readAttemptsFile(attemptsFile);
   const attempt = record.attempts.find((one) => one.attempt_id === input.attempt);
   if (attempt === undefined) {
     throw new UsageError(
@@ -2323,7 +2210,7 @@ function queueStanding(storeDirectory: string, ticket: DisplayTicket): QueueStan
  * id", not two.
  */
 export const ticketSubject: ResolveSubject = (storeDirectory, key): InspectSubject => {
-  if (existsSync(join(storeDirectory, "tickets", `${key}.json`))) {
+  if (existsSync(join(storeDirectory, ...ticketFilePath(key)))) {
     return ticketFileSubject(storeDirectory, key);
   }
   try {
@@ -2359,12 +2246,6 @@ export function buildInspectReport(input: {
   });
 }
 
-/** How the name on the command line is resolved to the work it stands for. */
-export interface InspectDeps {
-  /** {@link ticketSubject} unless a caller names another. */
-  subject: ResolveSubject;
-}
-
 /**
  * What `perbo inspect` answers: a reading of one piece of work, or a verdict
  * on the bytes of one attempt.
@@ -2373,14 +2254,10 @@ export type InspectOutcome =
   | { kind: "report"; report: InspectReport; attempt: string | null }
   | { kind: "verification"; verification: VerifyReport };
 
-export function inspect(
-  input: InspectInput,
-  context: CommandContext & Partial<InspectDeps>,
-): InspectOutcome {
+export function inspect(input: InspectInput, context: CommandContext): InspectOutcome {
   const storeDirectory = storeFor(context.cwd, input.target);
-  const resolveSubject = context.subject ?? ticketSubject;
   if (input.verify !== null) {
-    const subject = resolveSubject(storeDirectory, input.key);
+    const subject = ticketSubject(storeDirectory, input.key);
     return {
       kind: "verification",
       verification: verifyAttemptObjects({
@@ -2396,7 +2273,7 @@ export function inspect(
     attempt: input.attempt,
     report: buildReportForSubject({
       storeDirectory,
-      subject: resolveSubject(storeDirectory, input.key),
+      subject: ticketSubject(storeDirectory, input.key),
       attempt: input.attempt,
       streams: context.diagnostics,
     }),
@@ -2428,7 +2305,7 @@ const GRAMMAR: Grammar<typeof FLAGS> = {
  * Reached by the terminal through its line below, and by a caller in this
  * process — the queue's endpoint — over the same typed input.
  */
-export const inspectReport: CommandReport<InspectInput, { json: boolean }, InspectOutcome, InspectDeps> = {
+export const inspectReport: CommandReport<InspectInput, { json: boolean }, InspectOutcome> = {
   run: inspect,
   toJson: (outcome) =>
     outcome.kind === "verification" ? outcome.verification : outcome.report,
@@ -2467,8 +2344,7 @@ export const inspectReport: CommandReport<InspectInput, { json: boolean }, Inspe
 export const inspectCommandLine: ReportCommand<
   InspectInput,
   { json: boolean },
-  InspectOutcome,
-  InspectDeps
+  InspectOutcome
 > = {
   kind: "report",
   name: "inspect",
@@ -2492,6 +2368,6 @@ export const inspectCommandLine: ReportCommand<
 
 /** Exposed for the tests, which build a store by hand and read it back. */
 export function readBundleObject(storeDirectory: string, sha256: string): string | null {
-  const path = join(storeDirectory, "bundles", "objects", sha256);
+  const path = join(storeDirectory, ...bundleObjectPath(sha256));
   return existsSync(path) ? readFileSync(path, "utf8") : null;
 }

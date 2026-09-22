@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { InterviewEventSchema } from "@perbo/contracts/interview-protocol";
+import { InterviewEventSchema } from "@perbo/contracts";
 import { redact } from "../process.js";
 import type { InterviewEntry } from "../../shared/protocol.js";
 

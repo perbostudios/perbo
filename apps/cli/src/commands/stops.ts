@@ -5,7 +5,9 @@ import {
   EXIT_CODES,
   PARTNER_READING_CAVEAT,
   StopVerdictsSchema,
+  formatUsd,
   judgeAgainstD060,
+  stateDir,
   summariseStops,
   summariseUnattendedMerges,
   widenedByHiding,
@@ -123,7 +125,7 @@ export type StopsInput = z.infer<typeof StopsInputSchema>;
 
 /** Every readable stops record in the store; an unreadable one is named and stepped over. */
 export function readStopVerdictFiles(dir: string, diagnostics: Diagnostics): StopVerdicts[] {
-  const inside = join(dir, "state");
+  const inside = join(dir, ...stateDir());
   if (!existsSync(inside)) return [];
   const unreadable: string[] = [];
   const files = readdirSync(inside)
@@ -396,7 +398,7 @@ export function renderD060(reading: D060Reading, summary: StopsSummary, pooled?:
  */
 export function unattendedRows(summary: UnattendedMergesSummary, cost: MergedCostSummary): string[][] {
   const n = summary.unattended + summary.attended;
-  const perTicket = cost.tickets === 0 ? "—" : `$${(cost.micros / cost.tickets / 1_000_000).toFixed(4)}`;
+  const perTicket = cost.tickets === 0 ? "—" : formatUsd(cost.micros / cost.tickets, 4);
   const unpriced =
     cost.unpriced_attempts.length === 0
       ? ""
@@ -966,7 +968,7 @@ export const stopsReport: CommandReport<StopsInput, { json: boolean }, StopsRepo
       stdout: out.join(""),
       stderr:
         report.recordCount === 0
-          ? `nothing recorded in ${join(report.store, "state")} or ${verdictsPath(report.store)} yet: \`perbo sync <KEY>\` ` +
+          ? `nothing recorded in ${join(report.store, ...stateDir())} or ${verdictsPath(report.store)} yet: \`perbo sync <KEY>\` ` +
             "reads the answers off a pull request once one is open, and `perbo verdict <review> " +
             "--endorse|--override <stop key>` records one here without one.\n"
           : "",

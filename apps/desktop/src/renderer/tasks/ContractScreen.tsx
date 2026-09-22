@@ -6,7 +6,7 @@ import { Rename } from "./Rename.js";
 import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey } from "./ticket-workspace.js";
-import { planNodes } from "@perbo/contracts/plan";
+import { planNodes } from "@perbo/contracts/browser";
 import { costLabel, pendingScope, taskRecords } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
 export function ContractScreen(context: TaskContext) {

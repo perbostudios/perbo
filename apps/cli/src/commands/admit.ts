@@ -13,6 +13,8 @@ import {
   TicketSchema,
   VERIFICATION_KINDS,
   compareLevels,
+  costOf,
+  costPhrase,
   derivePlannedRisk,
   isActive,
   isConfigPath,
@@ -54,6 +56,7 @@ import {
 } from "@perbo/planning";
 import { ProviderError, createModel, type Model, type ModelProvider } from "@perbo/model";
 import { RepoReader } from "@perbo/review";
+import { formatDuration, formatHumanElapsed } from "../duration.js";
 import { QUEUE_HOLDING_STATES } from "../scheduling.js";
 import { UsageError, readInput } from "../usage-error.js";
 import {
@@ -1369,12 +1372,6 @@ function admitting(input: Admitting, started: number): AdmissionReport | Promise
   return admitted(input, started, resolveTyped(input));
 }
 
-const money = (micros: number, basis: string): string =>
-  basis === "unavailable" ? "cost unavailable" : `$${(micros / 1_000_000).toFixed(4)}`;
-
-const duration = (ms: number): string =>
-  ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 60_000)}min`;
-
 /**
  * The states a ticket can be in and leave its spec free to be drafted from
  * again: the ones nothing carries on from.
@@ -1975,9 +1972,10 @@ function renderAdmitted(report: AdmissionReport): string {
   const head = drafted
     ? `\ndrafted ${key} (${ticket.state}) from ` +
       `${resolved.sourcePath ?? resolved.issue?.reference} in ` +
-      `${duration(ticket.admission.elapsed_ms)} — ${drafted.model.provider} ` +
-      `${drafted.model.model_id}, ${money(drafted.model.cost_micros, drafted.model.cost_basis)}\n`
-    : `\nadmitted ${key} (${ticket.state}) in ${ticket.admission.elapsed_ms}ms\n`;
+      `${formatDuration(ticket.admission.elapsed_ms)} — ${drafted.model.provider} ` +
+      `${drafted.model.model_id}, ` +
+      `${costPhrase(costOf({ micros: drafted.model.cost_micros, basis: drafted.model.cost_basis }))}\n`
+    : `\nadmitted ${key} (${ticket.state}) in ${formatDuration(ticket.admission.elapsed_ms)}\n`;
   const next = ticket.approved_at
     ? `\n${NEXT_STEPS[3]}\n  perbo run --ticket ${key}\n`
     : drafted
@@ -2211,7 +2209,7 @@ export function approve(input: ApprovalInput, context: CommandContext): number {
   writeTicket(dir, approved);
   context.diagnostics.stderr(
     `${key} approved. ${contract.plan_id} v${contract.version} is immutable from here.\n` +
-      `  ${duration(human_elapsed_ms)} from first rendering to approval, ` +
+      `  ${formatHumanElapsed(human_elapsed_ms)} from first rendering to approval, ` +
       (edits
         ? `${edits.count} edit${edits.count === 1 ? "" : "s"}` +
           (edits.count > 0 ? ` (${edits.changes.join(", ")})` : "")

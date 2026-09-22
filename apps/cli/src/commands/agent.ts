@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { EXIT_CODES } from "@perbo/contracts";
+import { EXIT_CODES, stateDir } from "@perbo/contracts";
 import { UsageError } from "../usage-error.js";
 import { agentOrientation, readEndpoint, type EndpointRecord } from "../endpoint/index.js";
 import { mcpConfig } from "./mcp.js";
@@ -149,7 +149,7 @@ export async function agent(args: AgentArgs, context: AgentContext): Promise<num
     );
     return EXIT_CODES.did_not_complete;
   }
-  const stateRoot = join(dir, "state");
+  const stateRoot = join(dir, ...stateDir());
   const launch = agentLaunch({
     provider: args.provider,
     record,

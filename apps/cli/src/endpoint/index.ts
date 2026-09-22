@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { z } from "zod";
+import { stateDir } from "@perbo/contracts";
 import { VERSION } from "../version.js";
 import { toolsFor, type QueueSurface, type ToolContext, type ToolRole } from "./internal/tools.js";
 
@@ -44,7 +45,7 @@ export const EndpointRecordSchema = z.strictObject({
 });
 export type EndpointRecord = z.infer<typeof EndpointRecordSchema>;
 
-export const endpointPath = (dir: string): string => join(dir, "state", ENDPOINT_FILE);
+export const endpointPath = (dir: string): string => join(dir, ...stateDir(), ENDPOINT_FILE);
 
 /** Whether the process a record names is alive on this host. `EPERM` is a process too. */
 function alive(pid: number): boolean {
@@ -272,7 +273,7 @@ export async function startEndpoint(input: {
   const url = `http://127.0.0.1:${address.port}${ENDPOINT_PATHNAME}`;
 
   const path = endpointPath(input.dir);
-  mkdirSync(join(input.dir, "state"), { recursive: true });
+  mkdirSync(join(input.dir, ...stateDir()), { recursive: true });
   const record: EndpointRecord = { url, pid: process.pid, started_at: now().toISOString(), tokens };
   writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
   chmodSync(path, 0o600);

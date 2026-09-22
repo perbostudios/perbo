@@ -7,7 +7,7 @@ import {
   sizeEstimate,
 } from "@perbo/contracts";
 import type { GraphEdge, PlanContract, Ticket } from "@perbo/contracts";
-import type { PlanNode } from "@perbo/contracts/plan";
+import type { PlanNode } from "@perbo/contracts";
 import { liveGraph, readAttempts, readDraftEdits } from "../records.js";
 import { attemptsPath, objectsPath, ticketPath } from "../repository/layout.js";
 import { safePath } from "../repository/paths.js";

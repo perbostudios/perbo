@@ -13,7 +13,7 @@ import { runReviewCommand, type RunOptions } from "./index.js";
 import { VERSION } from "../../version.js";
 import { describeFailure } from "../../failure.js";
 import type { Streams } from "../../streams.js";
-import { spawnBuilt } from "../../test-support/open-build.js";
+import { spawnBuilt } from "../../test-support/built-cli.js";
 import { BUILT_ENTRY, PACKAGE_ROOT } from "../../test-support/paths.js";
 
 const packageMetadata: unknown = JSON.parse(

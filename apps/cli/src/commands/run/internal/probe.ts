@@ -1,6 +1,11 @@
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
-import { isCredentialEnvName, redactCredentials, scrubEnvironment } from "@perbo/contracts";
+import {
+  credentialValuesOf,
+  redactCredentials,
+  replaceValues,
+  scrubEnvironment,
+} from "@perbo/contracts";
 import {
   CLAUDE_CLI_ENV_ALLOW_LIST,
   codexCliModel,
@@ -102,40 +107,16 @@ const ANTHROPIC_API = "https://api.anthropic.com";
 const ANTHROPIC_VERSION = "2023-06-01";
 
 /**
- * Names whose values authenticate something. `isCredentialEnvName` is the
- * runner's own list of what may never be forwarded to a child; this widens it
- * by shape for the *reading* side, because a value that must not be forwarded
- * must also not be printed.
- */
-const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL/i;
-
-/** Below this a value is a setting, not a credential, and matching it would mangle prose. */
-const MIN_SECRET_LENGTH = 8;
-
-function secretValues(env: NodeJS.ProcessEnv): string[] {
-  const values = new Set<string>();
-  for (const [name, value] of Object.entries(env)) {
-    if (value === undefined || value.length < MIN_SECRET_LENGTH) continue;
-    if (isCredentialEnvName(name) || SECRET_NAME.test(name)) values.add(value);
-  }
-  // Longest first: a key and a prefix of it both present must not leave the
-  // prefix behind after the longer one is replaced.
-  return [...values].sort((a, b) => b.length - a.length);
-}
-
-/**
  * The provider's own words, as this command is allowed to state them: one
  * bounded line with nothing the process was handed quoted back
  * (`providerFailureText`), then every credential this machine holds removed by
  * exact match, then the shared detector over what remains.
  */
 export function probeSaid(raw: string, env: NodeJS.ProcessEnv): string | null {
-  let text = providerFailureText(raw, [PROBE_PROMPT]);
+  const text = providerFailureText(raw, [PROBE_PROMPT]);
   if (text === "no error text") return null;
-  for (const secret of secretValues(env)) {
-    text = text.split(secret).join("[redacted:environment]");
-  }
-  return redactCredentials(text).text;
+  const withoutValues = replaceValues(text, credentialValuesOf(env), "[redacted:environment]").text;
+  return redactCredentials(withoutValues).text;
 }
 
 const AUTHENTICATION =

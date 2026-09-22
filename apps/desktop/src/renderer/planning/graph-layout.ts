@@ -1,4 +1,4 @@
-import type { GraphEdge } from "@perbo/contracts/approach";
+import type { GraphEdge } from "@perbo/contracts/browser";
 
 /**
  * Where a graph's nodes sit: columns, left to right, one column after the

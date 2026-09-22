@@ -11,6 +11,7 @@ import {
   StopVerdictsSchema,
   TicketSchema,
   UNCHECKED,
+  attemptsPath,
   attributePullRequest,
   parsePullRequestReference,
   attributionOnRecord,
@@ -19,6 +20,8 @@ import {
   reconcileStopVerdicts,
   resumeAtPullRequest,
   resumeWithUnrecordedOpener,
+  stateDir,
+  ticketFilePath,
   transition,
   type D073Verdict,
   type DeliveredCheck,
@@ -410,7 +413,7 @@ async function syncTicket(input: {
   // store has. The ticket store is asked first, so a store holding both is
   // read exactly the way it always was — the rule `perbo inspect` follows for
   // the same two kinds of name.
-  const localRun = existsSync(join(dir, "tickets", `${key}.json`)) ? null : readLocalRunRecord(dir, key);
+  const localRun = existsSync(join(dir, ...ticketFilePath(key))) ? null : readLocalRunRecord(dir, key);
   if (localRun !== null) {
     if (merging) {
       throw new UsageError(
@@ -480,7 +483,7 @@ async function syncTicket(input: {
         // `sync` holds a ticket rather than a run configuration, so the base is
         // GitHub's own answer for this pull request.
         base_ref: null,
-        state_root: join(dir, "state"),
+        state_root: join(dir, ...stateDir()),
         ticket_key: ticket.key,
         // SCP-227: what an approval of an earlier head is read against.
         paths_allowed: readContract(dir, key).scope.paths_allowed,
@@ -1242,7 +1245,7 @@ export function derivedBranch(dir: string, key: string, ticket: Ticket): string 
 
 /** The attempts the loop recorded for this ticket. Absent is empty, not a fault. */
 function recordedAttempts(dir: string, ticket: Ticket): ExecutionAttempt[] {
-  const path = join(dir, "state", `${ticket.ticket_id}.attempts.json`);
+  const path = join(dir, ...attemptsPath(ticket.ticket_id));
   if (!existsSync(path)) return [];
   return readAttemptsFile(path).attempts;
 }
@@ -1391,8 +1394,8 @@ export function writeStopVerdicts(args: {
   observed: TicketDeliveryState;
   streams: Streams;
 }): StopVerdicts {
-  const stateDir = join(args.dir, "state");
-  const path = join(stateDir, `${args.ticket.ticket_id}.stops.json`);
+  const state = join(args.dir, ...stateDir());
+  const path = join(state, `${args.ticket.ticket_id}.stops.json`);
   let previous: StopVerdicts | null = null;
   if (existsSync(path)) {
     try {
@@ -1413,7 +1416,7 @@ export function writeStopVerdicts(args: {
     observed: args.observed.stop_answers,
     observed_at: args.observed.observed_at,
   });
-  mkdirSync(stateDir, { recursive: true });
+  mkdirSync(state, { recursive: true });
   writeFileSync(path, `${JSON.stringify(verdicts, null, 2)}\n`);
   return verdicts;
 }

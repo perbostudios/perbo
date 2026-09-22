@@ -1,3 +1,4 @@
+import { costOf, costPhrase } from "@perbo/contracts";
 import type { CheckResult, CriterionEvidenceBinding, Finding, ReviewArtifact } from "@perbo/contracts";
 
 /**
@@ -154,9 +155,10 @@ function tally(findings: readonly Finding[]): string {
 
 /** The cost, in the vocabulary the terminal rendering already uses. */
 function renderedCost(artifact: ReviewArtifact): string {
-  if (artifact.model.cost_basis === "unavailable") return "cost unavailable";
-  const dollars = `$${(artifact.cost_micros / 1_000_000).toFixed(3)}`;
-  return `${dollars} ${artifact.model.cost_basis === "transport_reported" ? "reported" : "estimated"}`;
+  return costPhrase(
+    costOf({ micros: artifact.cost_micros, basis: artifact.model.cost_basis }),
+    { digits: 3 },
+  );
 }
 
 /** The legibility row's own words, or the fact that this artifact has none. */

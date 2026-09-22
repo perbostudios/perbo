@@ -12,7 +12,7 @@
  *
  * It is a ceiling, not a budget. A test that reaches it has not been slow, it
  * has hung — and for the common case the deadline on each individual spawn
- * (`SPAWN_DEADLINE_MS` in `./open-build.ts`) fires first and says what the
+ * (`SPAWN_DEADLINE_MS` in `./built-cli.ts`) fires first and says what the
  * process was doing, which this cannot.
  *
  * Vitest's own default is left where it is: a test that starts no process

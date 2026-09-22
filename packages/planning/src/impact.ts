@@ -3,12 +3,13 @@ import {
   isConfigPath,
   isDependencyPath,
   isMigrationPath,
+  isPlannedP3Path,
   isSecurityPath,
   packageOf,
   resolveRepositoryPath,
-} from "@perbo/contracts/paths";
-import { isPlannedP3Path } from "@perbo/contracts/risk";
-import type { SymbolIndex, UnsupportedRepository } from "@perbo/contracts/symbol-index";
+  type SymbolIndex,
+  type UnsupportedRepository,
+} from "@perbo/contracts/browser";
 import { specSymbolNames } from "./spec-text.js";
 
 /**
