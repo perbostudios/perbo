@@ -360,6 +360,12 @@ const ROWS: Array<[string, Decision, string]> = [
   ["node -e \"console.log(JSON.stringify({a: 1}))\"", "allowed", "scp-190"],
   ["awk '{print $1}' sub/data.csv", "allowed", "scp-190"],
   ["perl -e 'print 1'", "allowed", "scp-190"],
+
+  // ---- the filesystem root is a directory a shell can stand in.
+  ["cd /", "allowed", "root-directory"],
+  ["pushd /", "allowed", "root-directory"],
+  ["cd / && echo x > y", "refused", "root-directory"],
+  ["cd / && echo x > <root>/y", "allowed", "root-directory"],
 ];
 
 /**

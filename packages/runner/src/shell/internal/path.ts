@@ -179,5 +179,9 @@ export function walkPath(base: string, target: string, semantics: PathSemantics,
     if (!followed.ok) return followed;
     current = followed.path;
   }
-  return { ok: true, path: current };
+  // The anchor is held without its separator, so a walk that joins nothing onto
+  // a POSIX root ends holding `""`: `/` itself, and anything that climbs to it.
+  // The root is a directory a shell can stand in and a path a write can name,
+  // so it is answered by the name it has.
+  return { ok: true, path: current === "" ? "/" : current };
 }
