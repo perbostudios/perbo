@@ -1,7 +1,6 @@
-import type { Finding, ReviewArtifact } from "@perbo/contracts";
+import { wilsonInterval, type Finding, type ReviewArtifact } from "@perbo/contracts";
 import { redactReviewArtifact } from "@perbo/review";
 import type { Fixture } from "./fixture.js";
-import { wilson } from "./metrics.js";
 import type { CorpusSummary, MetricSummary } from "./summarise.js";
 
 /**
@@ -505,8 +504,8 @@ function anchorOrSibling(gatedRowName: string, fixtures: readonly FixtureRow[]):
     name: `${gatedRowName} (anchor-OR)`,
     threshold: null,
     direction: null,
-    by_fixture: wilson(fixtureSuccesses, measured.length),
-    by_run: wilson(runSuccesses, runTotal),
+    by_fixture: wilsonInterval(fixtureSuccesses, measured.length),
+    by_run: wilsonInterval(runSuccesses, runTotal),
     resolves: null,
     meets: null,
     stability: {
