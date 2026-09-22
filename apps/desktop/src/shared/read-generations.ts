@@ -28,6 +28,9 @@ export const SNAPSHOT_SCOPE = "snapshot";
  * takes it again.
  */
 export const READ_ATTEMPTS = 20;
+/** What a read stopped by {@link READ_ATTEMPTS} says, wherever the ceiling is applied. */
+export const READ_REFUSED =
+  "These records changed while every attempt to read them was in flight. The next refresh reads them again.";
 
 export class ReadGenerations {
   private readonly generations = new Map<string, number>();
@@ -61,9 +64,7 @@ export class ReadGenerations {
         if (token === this.token(scope)) throw error;
       }
     }
-    throw new Error(
-      "These records changed while every attempt to read them was in flight. The next refresh reads them again.",
-    );
+    throw new Error(READ_REFUSED);
   }
 
   private bump(scope: string): void {
