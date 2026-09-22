@@ -133,6 +133,17 @@ test("production code reaches no `test-support/`, and a test does", async () => 
   await allows("packages/workspace/src/m/test-support/fake-clock.ts", USES("../../test-support/build-run.js"));
 });
 
+test("production code reaches no `@perbo/test-support`, and a test does", async () => {
+  await refuses("packages/x/src/a.ts", USES("@perbo/test-support"), NO_TEST_CODE);
+  await allows("packages/x/src/a.test.ts", USES("@perbo/test-support"));
+  await allows("packages/x/src/test-support/b.ts", USES("@perbo/test-support"));
+  await allows("packages/x/test/support.ts", USES("@perbo/test-support"));
+});
+
+test("a package whose name merely starts with the fakes' is not one of them", async () => {
+  await allows("packages/x/src/a.ts", USES("@perbo/test-supportive"));
+});
+
 test("production code reaches no test module, and a test does", async () => {
   await refuses("packages/workspace/src/m.ts", USES("./n.test.js"), NO_TEST_CODE);
   await allows("packages/workspace/src/m.test.ts", USES("./n.test.js"));

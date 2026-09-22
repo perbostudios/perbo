@@ -122,9 +122,12 @@ const IN_PROCESS_CALLERS = {
   ],
 };
 
-/** A module's fakes are for its tests; the build never emits them. */
+/**
+ * A module's fakes are for its tests, and so is `@perbo/test-support`, the
+ * package of fakes every package's tests share; the build never emits either.
+ */
 const NO_TEST_SUPPORT = {
-  regex: "(^|/)test-support/",
+  regex: "(^|/)test-support(/|$)",
   message: "Production code imports no test code (docs/07 Package layout).",
 };
 
