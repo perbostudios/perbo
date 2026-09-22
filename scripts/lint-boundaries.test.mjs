@@ -259,8 +259,8 @@ test("no process execution in the reviewer, with no exception", async () => {
   await refuses("packages/review/src/m.ts", ARGV, "No process execution in the reviewer");
   await refuses("packages/review/src/index.ts", ARGV, "No process execution in the reviewer");
   await refuses("packages/review/test/m.test.ts", ARGV, "No process execution in the reviewer");
-  // The rule covers a path, not a file: the two names the transports had are
-  // refused like any other, so a transport cannot come back to the reviewer.
+  // The rule covers a path, not a file: a name that reads like a transport's
+  // is refused like any other, so no transport can land in the reviewer.
   await refuses("packages/review/src/provider-cli.ts", ARGV, "No process execution in the reviewer");
   await refuses(
     "packages/review/src/provider-codex-cli.ts",

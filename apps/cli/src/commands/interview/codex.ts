@@ -511,7 +511,7 @@ class AppServer {
    * (`networkApprovalContext`) — is refused whatever the act itself is,
    * because accepting it would answer a second question nobody put to the
    * rules. The runner's own Codex adapter refuses on the same three fields
-   * (`adapter-codex.ts`), and the test drives each of them.
+   * (`packages/runner/src/codex/index.ts`), and the test drives each of them.
    *
    * A proposed amendment beside a command is not one of those. The generated
    * schema offers it as a separate answer: `accept` is "User approved the

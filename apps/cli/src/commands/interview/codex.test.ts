@@ -614,7 +614,7 @@ describe("the interview's rules over the app server's approvals", () => {
 
   // The two fields a command approval carries that would widen the boundary if
   // the command were accepted, which the runner's own Codex adapter refuses on
-  // as well (`adapter-codex.ts`); the third, `grantRoot`, rides on a file
+  // as well (`packages/runner/src/codex/index.ts`); the third, `grantRoot`, rides on a file
   // change and is driven above. One case each, because each starts its own
   // app server and several in one case outrun a test's time.
   it.each(["networkApprovalContext", "additionalPermissions"])(
