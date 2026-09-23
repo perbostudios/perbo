@@ -31,14 +31,13 @@ export interface LedgerRecord {
 }
 
 const USAGE = z.looseObject({
+  attempt_id: z.string().optional(),
   agent: z.looseObject({ credential_class: z.string() }).optional(),
   usage: z.looseObject({
     cost_micros: z.number().int().min(0),
     cost_basis: z.string(),
   }),
 });
-/** A record can name a basis this version cannot price, and an unpriced one is counted. */
-const BASIS = CostBasisSchema.catch("unavailable");
 
 export class Ledger {
   /** The ticket's attempts record on disk. */
@@ -120,6 +119,10 @@ export class Ledger {
    *
    * An attempt on a subscription is left out (D-096): the dollar figure it
    * reports is a measure of work and not a bill, and the budget is a bill.
+   *
+   * A record naming a cost basis this version does not know is refused. It may
+   * carry dollars this cannot tell from none, and counted as unpriced a real
+   * figure would drop out of the sum the budget is held to.
    */
   spend(): TicketSpend {
     const components: Cost[] = [];
@@ -131,12 +134,15 @@ export class Ledger {
         continue;
       }
       if (parsed.data.agent?.credential_class === "subscription") continue;
-      components.push(
-        costOf({
-          micros: parsed.data.usage.cost_micros,
-          basis: BASIS.parse(parsed.data.usage.cost_basis),
-        }),
-      );
+      const basis = CostBasisSchema.safeParse(parsed.data.usage.cost_basis);
+      if (!basis.success) {
+        throw new Error(
+          `${parsed.data.attempt_id ?? "an attempt"} in ${this.path} names a cost basis this version ` +
+            `does not know (${JSON.stringify(parsed.data.usage.cost_basis)}), so what the ticket has ` +
+            "spent cannot be added up",
+        );
+      }
+      components.push(costOf({ micros: parsed.data.usage.cost_micros, basis: basis.data }));
     }
     const roll = rollCosts(components);
     return { micros: roll.micros, priced: roll.priced, unpriced: roll.unavailable };

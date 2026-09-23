@@ -57,6 +57,13 @@ describe("what a ticket has spent", () => {
     });
   });
 
+  it("refuses a record whose cost basis it does not know, rather than count it as unpriced", () => {
+    const known = attempt({ attempt_id: "att_00000000000000d1", cost_micros: 700_000 });
+    const unknown = { ...known, usage: { ...known.usage, cost_basis: "a_basis_from_elsewhere" } };
+
+    expect(() => ledger(record([unknown])).spend()).toThrow(/a_basis_from_elsewhere/);
+  });
+
   it("adds what the ticket's record already holds to what this run has made", () => {
     const run = ledger(record([attempt({ attempt_id: "att_00000000000000b1", cost_micros: 250_000 })]));
     run.addAttempt(attempt({ attempt_id: "att_00000000000000b2", cost_micros: 250_000 }), null);
