@@ -28,6 +28,14 @@ const FROM_STANDARD_INPUT = [
   "xargs -alist.txt rm",
   "xargs -dI rm",
   "xargs -sJ rm",
+  // BSD xargs (macOS) appends its input unless the placeholder stands alone as an operand.
+  "xargs -J % rm",
+  "xargs -J% rm",
+  "echo /etc/x | xargs -J % cp a b",
+  // GNU `-e` and `-l` take a value only attached; the next word is the program,
+  // whose destination the input then appends to.
+  "xargs -l rm sub/x",
+  "xargs -e rm sub/x",
 ];
 
 /**

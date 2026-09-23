@@ -41,6 +41,8 @@ export interface WrapperSpec {
    * runs rather than the option's value.
    */
   attachedValues?: readonly string[];
+  /** Substituting options that replace only an operand equal to the placeholder. */
+  substitutesWholeWord?: readonly string[];
   /** What a substituting option that named no placeholder stands for. */
   defaultPlaceholder?: string;
   /** True where a bare `-5` is an option, as it is for `nice`. */
@@ -76,10 +78,15 @@ export const WRAPPERS = new Map<string, WrapperSpec>([
   }],
   ["xargs", {
     flags: ["-0", "-o", "-p", "-r", "-t", "-x", "--null", "--no-run-if-empty", "--interactive", "--open-tty", "--verbose", "--exit", "--help", "--version"],
-    values: ["-a", "-d", "-E", "-e", "-I", "-J", "-L", "-l", "-n", "-P", "-R", "-s", "--arg-file", "--delimiter", "--eof", "--max-lines", "--max-args", "--max-procs", "--max-chars", "--process-slot-var"],
+    values: ["-a", "-d", "-E", "-I", "-J", "-L", "-n", "-P", "-R", "-s", "--arg-file", "--delimiter", "--eof", "--max-lines", "--max-args", "--max-procs", "--max-chars", "--process-slot-var"],
     appendsOperands: true,
     substitutes: ["-I", "-i", "-J", "--replace"],
-    attachedValues: ["-i", "--replace"],
+    // GNU takes these values only attached (`-i{}`, `-e_`, `-l3`); a separate
+    // word after them is the program.
+    attachedValues: ["-i", "-e", "-l", "--replace"],
+    // BSD's `-J` replaces the placeholder only where it stands alone as an
+    // operand, and appends the input where it does not.
+    substitutesWholeWord: ["-J"],
     defaultPlaceholder: "{}",
   }],
 ]);

@@ -181,6 +181,8 @@ function analyzeWords(words: Word[], context: Context): Analysis {
    * is never taken for a cluster of option letters.
    */
   let placeholder: string | null;
+  /** Whether that placeholder is replaced only as a whole operand. */
+  let placeholderWholeWord: boolean;
 
   const stopHere = (): Analysis => ({
     findings,
@@ -297,10 +299,13 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     const dirs = optionSet(spec.dirs);
     const refused = optionSet(spec.refuse);
     const substitutes = optionSet(spec.substitutes);
+    const wholeWord = optionSet(spec.substitutesWholeWord);
     const attachedValues = optionSet(spec.attachedValues);
     /** The placeholder a substituting option names, or the wrapper's default. */
     const substituted = (option: string, value: string | null) => {
-      if (substitutes.has(option)) placeholder = value ?? spec.defaultPlaceholder ?? null;
+      if (!substitutes.has(option)) return;
+      placeholder = value ?? spec.defaultPlaceholder ?? null;
+      placeholderWholeWord = wholeWord.has(option);
     };
     while (i < words.length) {
       const word = words[i]!;
@@ -453,9 +458,11 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     if (wrapper !== undefined) {
       i += 1;
       placeholder = null;
+      placeholderWholeWord = false;
       const stop = consumeOptions(program, wrapper);
       if (stop !== null) return stop;
-      if (wrapper.appendsOperands === true) supplied = { wrapper: program, placeholder };
+      if (wrapper.appendsOperands === true)
+        supplied = { wrapper: program, placeholder, wholeWord: placeholderWholeWord };
       i += wrapper.operands ?? 0;
       continue;
     }

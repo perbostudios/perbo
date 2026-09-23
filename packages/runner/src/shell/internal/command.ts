@@ -26,6 +26,11 @@ export interface SuppliedOperands {
   wrapper: string;
   /** The placeholder the words replace, or null where they are appended. */
   placeholder: string | null;
+  /**
+   * The placeholder is replaced only where an operand is exactly it; where no
+   * operand is, the words are appended after all (BSD `xargs -J`).
+   */
+  wholeWord: boolean;
 }
 
 export const basename = (word: string) => word.slice(word.lastIndexOf("/") + 1);

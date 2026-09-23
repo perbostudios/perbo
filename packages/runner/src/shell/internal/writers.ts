@@ -228,7 +228,14 @@ export function writerFindings(
   }
 
   const supplied = context.supplied;
-  const placeholder = supplied?.placeholder ?? null;
+  // A whole-word placeholder that stands in no operand is not substituted at
+  // all: the wrapper appends its input, as it does with no placeholder.
+  const placeholder =
+    supplied === undefined || supplied.placeholder === null
+      ? null
+      : supplied.wholeWord && !operands.some((word) => word.value === supplied.placeholder)
+        ? null
+        : supplied.placeholder;
 
   /** A destination the wrapper supplies rather than the line: not a path at all. */
   const unread = (label: string, how: string): WriteFinding => ({
