@@ -534,7 +534,7 @@ describe("which session an interview continues", () => {
   });
 });
 
-describe("whether two readings found the same problems (D-NEW-the-plan-answers-the-spec-and-says-so)", () => {
+describe("whether two readings found the same problems (D-128)", () => {
   const problem = (heading: string, difference: string, label = "Reword it.") => ({
     heading,
     difference,
@@ -562,7 +562,7 @@ describe("whether two readings found the same problems (D-NEW-the-plan-answers-t
   });
 });
 
-describe("a planning that holds nothing (D-NEW-a-spec-outlives-its-planning)", () => {
+describe("a planning that holds nothing (D-129)", () => {
   // What `editingOpen {kind:"fresh"}` mints, which is the one shape that holds
   // nothing; each case below puts one thing into it.
   const born = (over: Record<string, unknown> = {}): EditingSession =>
@@ -641,7 +641,7 @@ describe("a planning that holds nothing (D-NEW-a-spec-outlives-its-planning)", (
   });
 });
 
-describe("the pane a planning was left at (D-NEW-a-planning-reopens-where-it-was-left)", () => {
+describe("the pane a planning was left at (D-130)", () => {
   it("is none at birth, and a record without one is not a session", async () => {
     const f = await fixture();
     const session = await f.editing.open({ kind: "fresh", repoId });

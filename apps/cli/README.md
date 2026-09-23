@@ -168,7 +168,7 @@ either. It reads anything and runs read-only commands; that spec's own folder, `
 ADR folder are the only places it may write, and a write outside them is refused rather than put to
 you — there are no permission prompts, and a refusal is streamed and printed with the rule that
 refused it. It writes the spec's `#` line as a title, named as a ticket is and shown the other tickets' names
-(D-NEW-a-ticket-is-named-apart-from-its-board), and admission rewrites it to the ticket's name. It writes the spec and stops there: drafting one ticket from it is yours, through
+(D-127), and admission rewrites it to the ticket's name. It writes the spec and stops there: drafting one ticket from it is yours, through
 `admit --from-spec` or Generate plan in the app. `edit_plan` and `undo_edit` change that plan
 afterwards through the same validated path `edit --graph-edit` uses, recorded as the interview's and
 undoable; `read_plan` reads it back; `ask_options` puts what it cannot settle itself to you as groups
@@ -242,7 +242,7 @@ the work has, each with an assertion and a kind, a proposed scope of one to eigh
 rationale and, where the work divides, the nodes and edges of an execution graph
 (`@perbo/planning`, prompt `draft_v5`). The draft is written beside the ticket as
 `<KEY>.draft.json` with the model, provider, tokens and cost that produced it, and the contract is
-created in `plan_review`. The ticket is named per D-NEW-a-ticket-is-named-apart-from-its-board.
+created in `plan_review`. The ticket is named per D-127.
 **A draft is never executed; only an approved contract is.** The person's
 `approve` is the authority boundary under ADR-0023 §4 — a scope glob a model proposed becomes an
 action parameter only after a human has confirmed it. `--outcome`, `--criterion` and `--path`
@@ -266,7 +266,7 @@ in the repository (D-103): the same prompt and the same `trust="external"` block
 two things a spec adds. Its requirement ids are the only ones a criterion may cite, and a draft
 citing one the spec does not carry is refused; its No-Gos are read from the `## No-Gos` heading and
 never drafted. The ticket's name becomes the spec's title: its `#` line is rewritten to the name,
-and nothing else in the file or the folder's name moves (D-NEW-a-ticket-is-named-apart-from-its-board).
+and nothing else in the file or the folder's name moves (D-127).
 The ticket records the spec's repository-relative path and the SHA-256 of the spec as admission
 leaves it, and beside them every file the loop commits with the spec, each with its own
 hash: the spec's whole folder but for the interview's session record, and the `CONTEXT.md` and the

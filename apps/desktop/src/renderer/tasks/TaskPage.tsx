@@ -64,12 +64,12 @@ export function TaskPage({
   // with no way into its own editor.
   const plannable = view === "auto" && !edit && awaiting;
   // The contract first where the person was last on it: coming back to the
-  // ticket is coming back there (D-NEW-a-planning-reopens-where-it-was-left).
+  // ticket is coming back there (D-130).
   // Then the problems, whatever the plan's shape: they are what the planning
   // is about until each is resolved or the person goes on past them
-  // (D-NEW-the-plan-answers-the-spec-and-says-so). Then where the planning was
+  // (D-128). Then where the planning was
   // left, where it is the planning curating this plan: coming back to it is
-  // coming back to that pane (D-NEW-a-planning-reopens-where-it-was-left), and
+  // coming back to that pane (D-130), and
   // a session the ticket's own editor made is no such planning, so its ticket
   // stays on this page.
   // Then the division on its graph, not on the page that cannot show it, asked

@@ -20,7 +20,7 @@ type Editor = ReturnType<typeof useContractEditing>;
  * something they were never shown.
  *
  * It goes by way of the reading of the plan against its spec
- * (D-NEW-the-plan-answers-the-spec-and-says-so), as every way from the plan
+ * (D-128), as every way from the plan
  * to the contract does; an approved plan is frozen and goes straight there.
  *
  * The Graph keeps its own footer rather than this one: it says the same thing

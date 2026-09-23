@@ -379,7 +379,7 @@ export interface InspectSubject {
   ticket: string;
   ticket_id: string;
   /**
-   * What a ticket is called (D-NEW-a-ticket-is-named-apart-from-its-board).
+   * What a ticket is called (D-127).
    * `null` for work no ticket describes, which has only an outcome.
    */
   title: string | null;

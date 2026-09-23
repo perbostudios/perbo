@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sameName } from "./ticket-name.js";
 
-describe("sameName (D-NEW-a-ticket-is-named-apart-from-its-board)", () => {
+describe("sameName (D-127)", () => {
   it("is the same name whatever its case and spacing", () => {
     expect(sameName("Snake on a walled board", "Snake on a walled board")).toBe(true);
     expect(sameName("Snake on a walled board", "snake ON A walled BOARD")).toBe(true);

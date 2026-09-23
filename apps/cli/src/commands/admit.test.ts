@@ -236,7 +236,7 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
     expect(readTicket(dir, "PRB-1").admission.criteria_source).toBe("drafted");
   });
 
-  it("calls the ticket what the drafter named it (D-NEW-a-ticket-is-named-apart-from-its-board)", async () => {
+  it("calls the ticket what the drafter named it (D-127)", async () => {
     const repo = repository("admit-from-named");
     const code = await runCommandLine(admitCommandLine, {
       argv: ["--repo", repo, "--from", "o/r#412"],

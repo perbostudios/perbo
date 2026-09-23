@@ -3,7 +3,7 @@ import { cx } from "../ui/index.js";
 import { gatherAdded, type CriterionChange, type DiffPiece } from "./change-marks.js";
 
 /**
- * The last change, drawn (D-NEW-the-plan-answers-the-spec-and-says-so): what
+ * The last change, drawn (D-128): what
  * it added highlighted green, what it took away red and struck through, over
  * the words as they now read. The same two elements wherever a criterion is
  * shown — a node card, the inspector, a row of the Plan pane — so a person

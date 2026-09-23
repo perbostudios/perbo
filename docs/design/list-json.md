@@ -103,7 +103,7 @@ emitting it.
 | `schema_version` | The ticket record's version, `1`. Distinct from the document's. |
 | `ticket_id` | The opaque id every other contract references. |
 | `key` | The human key, `PRB-118`. What the `TICKET` column prints. |
-| `title` | What the ticket is called ([D-NEW-a-ticket-is-named-apart-from-its-board](../11-open-decisions.md)); the outcome is in the plan contract. What the `NAME` column prints. |
+| `title` | What the ticket is called ([D-127](../11-open-decisions.md)); the outcome is in the plan contract. What the `NAME` column prints. |
 | `state` | The stored lifecycle state, verbatim — the same string the `STATE` column prints. |
 | `priority` | `urgent`, `high`, `normal` or `low`. |
 | `labels` | The labels given at admission, as an array. |

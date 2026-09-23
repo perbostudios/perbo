@@ -42,7 +42,7 @@ export interface DriftDeps {
 
 /**
  * The plan read against the spec it was drafted from
- * (D-NEW-the-plan-answers-the-spec-and-says-so): `perbo drift`, which keeps its
+ * (D-128): `perbo drift`, which keeps its
  * verdict beside the ticket keyed by the spec's bytes and the plan's promise
  * texts, and runs a model only where one of the two has moved since the last
  * reading. A job because a model may run; planning-lane, because it is
@@ -62,7 +62,7 @@ export class DriftReadings {
   /**
    * How many times each ticket's problems have been forgotten — dismissed or
    * approved past — so a reading that started before one and lands after it
-   * knows the state it read is gone (D-NEW-the-plan-answers-the-spec-and-says-so).
+   * knows the state it read is gone (D-128).
    */
   private readonly driftEpoch = new Map<string, number>();
 

@@ -25,7 +25,7 @@ const PANES = {
   impact: { id: "impact", label: "Impact", icon: "growth-chart" },
   /**
    * The step between the plan and the contract, where the plan is read against
-   * the spec it was drafted from (D-NEW-the-plan-answers-the-spec-and-says-so).
+   * the spec it was drafted from (D-128).
    * A pane of planning, so the rail stays beside it; in the rail only while the
    * reading has found problems, because until then it is on the way to the
    * contract and nowhere to go to, and once it has, the problems are what the
@@ -75,7 +75,7 @@ export function planPaneFor(
  * has a plan, less the step to the contract — which is a place to go, after
  * Impact, only while the last reading of the plan against its spec has
  * problems open, and otherwise only the step every Confirm passes through
- * (D-NEW-the-plan-answers-the-spec-and-says-so).
+ * (D-128).
  */
 export function panesFor(
   drafts: Snapshot["drafts"],
@@ -89,7 +89,7 @@ export function panesFor(
 /**
  * Whether reaching this pane is leaving the planning there, which every pane
  * is but one: the reading between the plan and the contract
- * (D-NEW-the-plan-answers-the-spec-and-says-so). It is a step on the way to
+ * (D-128). It is a step on the way to
  * the contract, which every Confirm the plan passes through, so recording it
  * would reopen the planning on the step rather than on the pane the person
  * confirmed from, and send the contract's Back to planning to the reading
@@ -102,7 +102,7 @@ export function remembered(pane: PlanningPane): boolean {
 
 /**
  * The pane this planning was left at, where it still offers it
- * (D-NEW-a-planning-reopens-where-it-was-left): null before the person has
+ * (D-130): null before the person has
  * been on one, and null where the pane they left is no longer offered — a
  * Graph the plan was put back together from — which leaves the caller's own
  * landing to apply.
@@ -125,7 +125,7 @@ export function problemsOpen(drafts: Snapshot["drafts"], sessionId: string): boo
 /**
  * Where a planning opens when nothing asks for a pane: its Problems pane while
  * a reading of its plan against its spec has problems open, since they are
- * then what the planning is about (D-NEW-the-plan-answers-the-spec-and-says-so);
+ * then what the planning is about (D-128);
  * else where it was left; else its Spec, which is where a planning starts.
  */
 export function reopenPane(drafts: Snapshot["drafts"], sessionId: string): PlanningPane {

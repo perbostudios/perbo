@@ -57,7 +57,7 @@ export const ProfileStateSchema = z.object({
   archivedSeeded: z.boolean().default(false),
   /**
    * Each repository's unsent answer to "What do you want to build?", by
-   * repository id (D-NEW-a-planning-starts-with-what-to-build).
+   * repository id (D-131).
    */
   asks: z.record(z.string(), z.string()).default({}),
   editingSessions: z.array(EditingSessionSchema).default([]),

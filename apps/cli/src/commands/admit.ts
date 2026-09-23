@@ -1183,7 +1183,7 @@ async function resolveDrafted(input: Admitting): Promise<Resolved> {
     const tickets = listTickets(store);
     // Every ticket in the store, whatever its state, since a person's board
     // shows them all — but the one being drafted again, whose own name is no
-    // name to tell it apart from (D-NEW-a-ticket-is-named-apart-from-its-board).
+    // name to tell it apart from (D-127).
     names = tickets
       .filter((ticket) => ticket.key !== args.startOver)
       .map((ticket) => ticket.title);
@@ -1457,7 +1457,7 @@ function assertNotAlreadyDrafted(input: Admitting): void {
 }
 
 /**
- * What a ticket is called (D-NEW-a-ticket-is-named-apart-from-its-board).
+ * What a ticket is called (D-127).
  *
  * A ticket the drafter named is called that: the fewest words that tell it
  * apart from every other ticket in the store, which the drafter was shown. It
@@ -1487,7 +1487,7 @@ function ticketTitle(resolved: Resolved, outcome: string): string {
 
 /**
  * The spec a ticket was drafted from, titled with the ticket's name, with its
- * hash as it now stands (D-NEW-a-ticket-is-named-apart-from-its-board). Called
+ * hash as it now stands (D-127). Called
  * once everything that can refuse the admission has been asked, so a refused
  * one leaves the spec as it was.
  */
@@ -1642,7 +1642,7 @@ function admitted(input: Admitting, started: number, resolved: Resolved): Admiss
   // A plan just drafted from its spec agrees with it by construction, and the
   // verdict is written beside it so the page between the plan and the
   // contract finds one and calls no model
-  // (D-NEW-the-plan-answers-the-spec-and-says-so).
+  // (D-128).
   if (resolved.spec !== null) seedDrift({ dir, key, repositoryRoot, specPath: resolved.spec.path, contract, now });
   // The approach, where there is one to record: a plan with nodes carries the
   // order between them, suggested or not yet, and a spec carries its No-Gos.
@@ -1947,7 +1947,7 @@ function redraft(
   writeContract(dir, ticket, contract);
   writeDraftSnapshot(dir, snapshot);
   // Drafted again from the spec, so it agrees with it again: whatever the
-  // last verdict found is over (D-NEW-the-plan-answers-the-spec-and-says-so).
+  // last verdict found is over (D-128).
   seedDrift({ dir, key, repositoryRoot, specPath: resolved.spec.path, contract, now });
   const approach: ApproachRecord | null =
     resolved.nodes.length > 0 || resolved.noGos.length > 0

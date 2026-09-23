@@ -41,7 +41,7 @@ export function GraphInspector({
   node: GraphNodeView;
   /**
    * The last change to the plan's promise, or null for none to mark
-   * (D-NEW-the-plan-answers-the-spec-and-says-so). A criterion it took away
+   * (D-128). A criterion it took away
    * belongs to no node now, so it is shown struck through at the end of this
    * list, whichever node is open.
    */

@@ -41,7 +41,7 @@ import { repositoryTree } from "./internal/tree.js";
  * as many criteria as the work has (D-100, D-103), every file the drafter
  * opens delimited by this package, and a name told apart from every other
  * ticket's, which the drafter is shown
- * (D-NEW-a-ticket-is-named-apart-from-its-board).
+ * (D-127).
  */
 export const DRAFT_PROMPT_VERSION = "draft_v5";
 
@@ -86,7 +86,7 @@ export const ContractDraftSchema = z
     /**
      * The ticket's name, for the board and the contract's own head: the fewest
      * words that tell this work apart from every other ticket's name, which
-     * the drafter is shown (D-NEW-a-ticket-is-named-apart-from-its-board).
+     * the drafter is shown (D-127).
      * Display only — never a branch, a path or a pull request's title
      * (ADR-0023 §4).
      *
@@ -444,7 +444,7 @@ export interface DraftInput {
   /**
    * What every other ticket in the repository is called, as data: what the
    * drafted name is told apart from
-   * (D-NEW-a-ticket-is-named-apart-from-its-board). Absent, no names block is
+   * (D-127). Absent, no names block is
    * shown.
    */
   names?: readonly string[];
@@ -657,7 +657,7 @@ export function draftUserMessage(args: {
 
 /**
  * What the repository's other tickets are called, as the `names` block the
- * drafter and the interview are shown (D-NEW-a-ticket-is-named-apart-from-its-board):
+ * drafter and the interview are shown (D-127):
  * repo trust, because a name is a model's words and so data, never an
  * instruction (ADR-0023).
  */

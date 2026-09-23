@@ -58,7 +58,7 @@ export function Composer({
       // walking off to the ticket would take them off the page they came to
       // read. Pressing Next is the one thing that means "on to the contract",
       // by way of the reading of the plan against its spec
-      // (D-NEW-the-plan-answers-the-spec-and-says-so), as every way there goes.
+      // (D-128), as every way there goes.
       if (!compiling.current) return;
       navigate({ page: "planning", sessionId: session.id, pane: "drift" });
       return;
@@ -71,7 +71,7 @@ export function Composer({
     onCancel?.();
   }, [session, navigate, onCancel, plan]);
   // The last change to the plan's promise, marked on the rows
-  // (D-NEW-the-plan-answers-the-spec-and-says-so). The rows carry no ids —
+  // (D-128). The rows carry no ids —
   // the form holds the criteria as text — so each is matched to the change's
   // after-criteria by its words, first unused match first, which is exact
   // where the form shows the plan as the change left it and marks nothing
@@ -433,7 +433,7 @@ export function Composer({
           <Button onClick={() => { void editor.retry(); }}>Retry saved edits</Button>
           {/* From planning, the contract is reached by way of the plan read
               against its spec, as every way there is
-              (D-NEW-the-plan-answers-the-spec-and-says-so); an error here is
+              (D-128); an error here is
               not a reason to skip the reading. */}
           <Button onClick={() => navigate(currentKey
             ? plan && session

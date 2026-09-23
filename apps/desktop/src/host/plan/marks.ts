@@ -24,7 +24,7 @@ export interface MarksDeps {
 /**
  * The last change to what a planning's spec states and its plan promises,
  * marked on the panes that read them
- * (D-NEW-the-plan-answers-the-spec-and-says-so).
+ * (D-128).
  *
  * The spec and the plan's promise are read before and after whatever may move
  * them — a turn of the chat, an edit, a save, a re-draft — and the two readings

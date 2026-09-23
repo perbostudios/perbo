@@ -36,7 +36,7 @@ const DriftPane = lazy(() =>
  * checked once when the plan first arrives and by its button after that; the
  * Problems pane, on the way from the plan to the contract, reads the plan
  * against the spec and puts each place the two have parted, one at a time
- * (D-NEW-the-plan-answers-the-spec-and-says-so).
+ * (D-128).
  *
  * One pane at a time, with the interview docked beside it (D-102) and the
  * plan's history opening as a drawer over the pane, so the chat is there from
@@ -115,7 +115,7 @@ export function PlanningMode({
   }, [planPane, navigate, sessionId, pane]);
   // Where the person is, written down as they get there, so every way back
   // into this planning opens it on the same pane
-  // (D-NEW-a-planning-reopens-where-it-was-left). Once per pane, and nothing
+  // (D-130). Once per pane, and nothing
   // as the page goes: going Home and closing Perbo each find the pane already
   // recorded by the move that reached it. Only a pane that is a place to be
   // left at, and only one this planning offers: an address typed by hand
@@ -187,7 +187,7 @@ export function PlanningMode({
     ) : pane === "drift" ? (
       // The step from the plan to the contract: the plan read against the
       // spec, and each problem put on its own, as a card whose answer is a
-      // turn (D-NEW-the-plan-answers-the-spec-and-says-so).
+      // turn (D-128).
       <Suspense fallback={<Opening what="the problems" />}>
         <DriftPane key={sessionId} workspace={workspace} navigate={navigate} editor={editor} />
       </Suspense>

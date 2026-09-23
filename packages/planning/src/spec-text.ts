@@ -221,7 +221,7 @@ export function specTitleFromMessage(message: string): string {
 /**
  * The spec with its title line set to `title` and every other byte as it was:
  * how a spec takes its ticket's name, so the two are one name
- * (D-NEW-a-ticket-is-named-apart-from-its-board).
+ * (D-127).
  *
  * The title line is the one {@link readSpecSections} reads as the title, the
  * first `#` heading; a spec with none is given one at its head. The name is a

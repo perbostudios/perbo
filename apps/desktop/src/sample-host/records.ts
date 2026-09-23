@@ -976,7 +976,7 @@ const SPECS_KEY = "perbo:preview-specs";
  *
  * Deleting a piece of work deletes all of it, at every stage; the writing is
  * left only where another planning is still writing it or another ticket was
- * drafted from it (D-NEW-a-spec-outlives-its-planning).
+ * drafted from it (D-129).
  */
 export function removeSpecFile(slug: string, except: { sessionId: string | null }): void {
   const held = editingRecords().some(
@@ -1116,7 +1116,7 @@ if (specFiles()[stoppedSlug] === undefined)
 /**
  * The drift verdict kept beside each sample ticket, as `perbo drift` keeps it
  * at `.perbo/tickets/<KEY>.drift.json`
- * (D-NEW-the-plan-answers-the-spec-and-says-so): keyed by the spec and the
+ * (D-128): keyed by the spec and the
  * plan's promise texts, and held while neither moves.
  */
 export const driftRecords = new Map<string, DriftVerdict>();
@@ -1509,7 +1509,7 @@ export function graphView(repoId: string, key: string): GraphView {
  * What a ticket drafted from a spec is called, as `admit` calls it where
  * nothing drafted a name, which is always here because the sample has no
  * drafter: the spec's title, unless another ticket in the repository carries
- * it, else the plan's outcome (D-NEW-a-ticket-is-named-apart-from-its-board).
+ * it, else the plan's outcome (D-127).
  * Read after the plan is drafted, which is where the outcome comes from.
  */
 function specTicketName(repo: string, key: string, markdown: string): string {
@@ -1531,7 +1531,7 @@ export function draftFromSpec(key: string, markdown: string, slug: string): void
   // The spec this plan was drafted from, as the CLI records it on admission.
   // Written here because the picker reads it: a ticket is what says a spec has
   // a plan, and a ticket the CLI admitted has no editing session to say it
-  // instead (D-NEW-a-spec-outlives-its-planning). A sample hash, since nothing
+  // instead (D-129). A sample hash, since nothing
   // here judges staleness — the shape is what is being stood in for.
   const row = snapshot.tasks.find((each) => each.ticket.key === key);
   if (row)
@@ -1581,7 +1581,7 @@ export function draftFromSpec(key: string, markdown: string, slug: string): void
   });
   // Named as `admit` names it, and the spec titled with that name as `admit`
   // titles it, before the verdict below is keyed on the spec
-  // (D-NEW-a-ticket-is-named-apart-from-its-board).
+  // (D-127).
   if (row) {
     row.ticket.title = specTicketName(row.repoId, key, markdown);
     saveSpec(slug, retitleSpec(markdown, row.ticket.title));
@@ -1793,7 +1793,7 @@ export function stopSampleInterview(id: string): void {
  * working, the asking is said as it stands, and — with a record of problems
  * between the plan and the spec on the planning — the plan is read against
  * the spec again, since the turn was the answer to one, or a hand edit after
- * a resolved round (D-NEW-the-plan-answers-the-spec-and-says-so).
+ * a resolved round (D-128).
  */
 function endSampleTurn(id: string): void {
   const owed = (sampleWorking.get(id) ?? 0) - 1;
@@ -1865,7 +1865,7 @@ function saySpecIsDrafted(id: string, before: PromisePair | null | undefined): v
 
 /**
  * The spec and the plan's promise as this planning holds them now, as the
- * host reads them off its files (D-NEW-the-plan-answers-the-spec-and-says-so):
+ * host reads them off its files (D-128):
  * null on a side the planning does not have, and null as a whole where the
  * session has gone, which is then not measured.
  */
@@ -2006,7 +2006,7 @@ export function forgetDrift(key: string, only: string | null): void {
 /**
  * Land a reading on the planning it was of, as the host does: nothing is
  * recorded on a plan the person went past — dismissed or approved — while it
- * was read (D-NEW-the-plan-answers-the-spec-and-says-so).
+ * was read (D-128).
  */
 export function driftLanded(
   id: string,

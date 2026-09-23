@@ -54,7 +54,7 @@ export function homeTone(
  * The tickets Home lists. Home is the board for work the loop is carrying: a
  * plan nobody has approved is still being planned, and it is reached from the
  * Create picker, which is where every pre-loop thing lives — a name, a spec,
- * and a plan drafted and not yet approved (D-NEW-a-spec-outlives-its-planning).
+ * and a plan drafted and not yet approved (D-129).
  */
 export const homeRows = (workspace: Pick<Snapshot, "tasks" | "archived" | "jobs">): TaskRow[] =>
   workspace.tasks.filter((row) => !isFiled(workspace, row) && !isPreLoop(row));

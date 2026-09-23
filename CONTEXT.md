@@ -104,7 +104,7 @@ A spec edited after its Ticket was approved, or one that names code which no lon
 _Avoid_: Broken spec.
 
 **Drift**:
-Where a plan's promise and its spec's words have parted after a hand edit, or a chat turn that wrote the spec and left the plan; read by a model on the way to the contract, and each difference put to the person as a problem; advice, never a gate ([D-NEW-the-plan-answers-the-spec-and-says-so](docs/11-open-decisions.md)).
+Where a plan's promise and its spec's words have parted after a hand edit, or a chat turn that wrote the spec and left the plan; read by a model on the way to the contract, and each difference put to the person as a problem; advice, never a gate ([D-128](docs/11-open-decisions.md)).
 _Avoid_: Finding (findings come from review), Stale spec (bytes after approval), Impact warning (scope, not promise), Divergence.
 
 **Size estimate**:

@@ -1302,7 +1302,7 @@ export interface InterviewContext {
   specWrittenThisTurn: () => boolean;
   /**
    * The plan's verdict, brought forward past this session's own edits and
-   * past nothing else (D-NEW-the-plan-answers-the-spec-and-says-so).
+   * past nothing else (D-128).
    *
    * An edit this session makes goes through the guard above, so a clean
    * verdict from before the turn still holds after it. A hand's does not, so
@@ -1469,7 +1469,7 @@ const undoEdit = tool({
  *
  * A `set_criterion` that leaves the text where it is is a change of proof and
  * not of promise, so the text is compared rather than assumed: refusing it
- * would refuse the one edit D-NEW-the-plan-answers-the-spec-and-says-so
+ * would refuse the one edit D-128
  * explicitly leaves alone.
  */
 function changesWhatIsPromised(
@@ -1578,7 +1578,7 @@ async function applyEdit(
   // only editor that holds both (D-102): a criterion reworded here and left
   // unsaid there is the one way the plan and its spec can part while every
   // citation still lines up, and no reading of ids afterwards can see it
-  // (D-NEW-the-plan-answers-the-spec-and-says-so).
+  // (D-128).
   //
   // Asked of the turn and not of the session, so one spec write covers every
   // edit made alongside it and the next change has to say so again.
@@ -1752,7 +1752,7 @@ export const INTERVIEW_TOOLS: readonly InterviewTool[] = [
  *
  * The other tickets' names travel in the drafter's {@link namesBlock}, so the
  * spec's title is named apart from them by the drafter's rule
- * (D-NEW-a-ticket-is-named-apart-from-its-board).
+ * (D-127).
  */
 export function interviewOrientation(input: {
   repositoryRoot: string;
@@ -2004,7 +2004,7 @@ export async function interview(
   });
 
   // The plan's verdict, carried past a turn that moved the plan under the
-  // guard and past nothing else (D-NEW-the-plan-answers-the-spec-and-says-so).
+  // guard and past nothing else (D-128).
   //
   // `before` is what a clean verdict is carried from: the pair as the turn
   // began. `expected` is where this session's own acts have left the pair

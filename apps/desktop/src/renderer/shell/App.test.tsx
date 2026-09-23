@@ -280,7 +280,7 @@ describe("UI v2", () => {
     // Answered in the app and not by the browser: a native modal takes the
     // pointer out of the panel, and a panel opened by hover closes when the
     // pointer leaves it — so answering would shut the list being answered about
-    // (D-NEW-a-spec-outlives-its-planning).
+    // (D-129).
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Create" }));
     const picker = await screen.findByRole("dialog", { name: "Plan a piece of work" });
@@ -436,7 +436,7 @@ describe("UI v2", () => {
   it("deletes a never-run contract for good, behind a confirmation", async () => {
     // Reached through the Create picker and not through Home. A plan nobody has
     // approved is pre-loop work, which the picker holds and Home does not
-    // (D-NEW-a-spec-outlives-its-planning), so the contract page it is deleted
+    // (D-129), so the contract page it is deleted
     // from is opened from there.
     await openTheContract();
     fireEvent.click(await screen.findByRole("button", { name: "Delete this contract" }, { timeout: 5000 }));

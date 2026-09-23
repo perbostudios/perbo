@@ -185,7 +185,7 @@ export function Rail({
   const planning = route.page === "planning";
   // A repository's question page is Create's own page: Create is lit there,
   // and there is no planning, so no panes under it, until it is answered
-  // (D-NEW-a-planning-starts-with-what-to-build).
+  // (D-131).
   const asking = route.page === "ask";
   // Create, Home and Archive bind in the shell so they work with the rail collapsed; ⌘4 is the rail's because it raises the pill.
   useShortcut("settings", () => {

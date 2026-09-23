@@ -166,7 +166,7 @@ describe("perbo edit", () => {
     expect(after.base.context_manifest_hash).not.toBe(before.base.context_manifest_hash);
     expect(after.base.base_commit).toBe(before.base.base_commit);
 
-    // An edit never renames the ticket (D-NEW-a-ticket-is-named-apart-from-its-board):
+    // An edit never renames the ticket (D-127):
     // it keeps the name it was admitted with, though that was the old outcome.
     const ticket = readTicket(dir, "PRB-1");
     expect(named).toBe(before.outcome);

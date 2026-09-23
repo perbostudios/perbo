@@ -501,7 +501,7 @@ export async function edit(
   // What the plan cites and what the spec states are not held to each other
   // here. Editing either is free: the disagreements are read on the contract
   // page before the button that freezes them, and approval refuses a citation
-  // pointing at nothing (D-NEW-the-plan-answers-the-spec-and-says-so).
+  // pointing at nothing (D-128).
   //
   // A refusal here would have no remedy the desktop can follow: `--criterion`
   // carries no ids, so rewording a criterion loses its citation, and the

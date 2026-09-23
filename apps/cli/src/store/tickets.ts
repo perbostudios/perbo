@@ -66,7 +66,7 @@ import { StoreError, repositoryRootOf, storeDir, storedRepositoryRoot } from "./
  *   plan's promise texts so it holds while neither moves. Written by `admit`,
  *   by the interview and by `perbo drift`, which is the one reader; it is
  *   advice on the way to the contract and nothing gates on it
- *   ([D-NEW-the-plan-answers-the-spec-and-says-so](../../../../docs/11-open-decisions.md)).
+ *   ([D-128](../../../../docs/11-open-decisions.md)).
  */
 
 /** Lives beside the tickets and is not one; `listTickets` skips it by name. */

@@ -10,7 +10,7 @@ export const isArchived = (state: string): boolean =>
  *
  * These belong to the Create picker and not to Home: a plan nobody has
  * approved is work still being planned, and Home is the board for work the
- * loop is carrying (D-NEW-a-spec-outlives-its-planning). Declared here, beside
+ * loop is carrying (D-129). Declared here, beside
  * the other rule about what Home shows, because both readers are that split.
  */
 const PRE_LOOP_STATES: readonly string[] = ["draft", "specifying", "plan_review"];

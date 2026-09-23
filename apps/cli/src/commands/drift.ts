@@ -36,7 +36,7 @@ import { ModelIdSchema } from "./admit.js";
 
 /**
  * `perbo drift` — the plan read against the spec it was drafted from
- * (D-NEW-the-plan-answers-the-spec-and-says-so), and the one reader of the
+ * (D-128), and the one reader of the
  * record `store/drift.ts` keeps.
  *
  * The interview cannot part the two: its edit of a promise is held to the

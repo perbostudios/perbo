@@ -18,7 +18,7 @@ export interface DiscardDeps {
  * reason it stays where it does.
  *
  * A piece of work is deleted whole at every stage, the loop included, and the
- * evidence goes with it (D-NEW-a-spec-outlives-its-planning): the ticket, its
+ * evidence goes with it (D-129): the ticket, its
  * contract, its draft, its approach, the reading of its plan against its spec,
  * the attempts it recorded and the bundles those attempts sealed. Keeping the
  * record of a run nobody wants any more is keeping a row on the board that the

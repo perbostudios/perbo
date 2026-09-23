@@ -228,7 +228,7 @@ describe("a citation on a spec-drafted contract is settled where it is frozen", 
   it("lets an edit write a citation the spec does not carry, and refuses to freeze it", async () => {
     // Editing is free: a citation the spec does not carry is written, and read
     // on the contract page, and refused at approval — which is where the
-    // contract is frozen (D-NEW-the-plan-answers-the-spec-and-says-so).
+    // contract is frozen (D-128).
     const { repo, specPath } = repository();
     await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
     expect(await editWith(repo, citing("cite-r9", 1, "R9"))).toBe(EXIT_CODES.approve);
@@ -465,7 +465,7 @@ describe("perbo admit --from-spec", () => {
   });
 
   it("shows the drafter every other ticket's name, whatever its state", async () => {
-    // D-NEW-a-ticket-is-named-apart-from-its-board: the name is told apart
+    // D-127: the name is told apart
     // from every row a person's board shows, and that is more than the
     // tickets in flight.
     const { repo, specPath } = repository();
@@ -870,7 +870,7 @@ describe("the files the loop commits with the spec", () => {
 });
 
 describe("the spec takes the ticket's name", () => {
-  // D-NEW-a-ticket-is-named-apart-from-its-board: the Spec pane, the picker
+  // D-127: the Spec pane, the picker
   // and the contract's head show one name, so the spec's title line is
   // rewritten to the ticket's. The folder keeps its slug, which the record's
   // path names (ADR-0023 §4).

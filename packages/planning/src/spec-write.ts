@@ -205,7 +205,7 @@ export function writeSpecFile(args: {
 
 /**
  * Set a spec's title to its ticket's name, in the file, leaving every other
- * byte and the folder as they are (D-NEW-a-ticket-is-named-apart-from-its-board).
+ * byte and the folder as they are (D-127).
  *
  * The one writer of that rule: admission calls it when the drafter names the
  * ticket, and the desktop when a person renames one still being planned. The

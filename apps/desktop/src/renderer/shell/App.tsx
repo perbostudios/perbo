@@ -148,7 +148,7 @@ export function App() {
     return () => window.removeEventListener("hashchange", changed);
   }, []);
   // Leaving planning throws away a planning nothing was put into
-  // (D-NEW-a-spec-outlives-its-planning).
+  // (D-129).
   //
   // Read off the route rather than off PlanningMode's unmount: the route moves
   // once per leave, while an unmount also fires for StrictMode's double mount

@@ -2,7 +2,7 @@ import type { EditingChange, PlanPromise } from "../../shared/protocol.js";
 
 /**
  * How the last change to the spec and the plan is marked on the panes
- * (D-NEW-the-plan-answers-the-spec-and-says-so): what it added is shown
+ * (D-128): what it added is shown
  * green, what it took away is shown red and struck through, where each stood.
  *
  * Pure functions over text, so the same diff serves a criterion on a node

@@ -259,7 +259,7 @@ export function SpecPane({
   const sections: SpecSections = { ...(view?.sections ?? EMPTY), ...edited };
   const shownTitle = title ?? view?.title ?? "";
   // The last change to the spec, as marks placed in each section's after-text
-  // (D-NEW-the-plan-answers-the-spec-and-says-so). Diffed once per change
+  // (D-128). Diffed once per change
   // rather than per render or per session read: a keystroke in one section
   // re-renders the others, a re-read hands over a fresh object for the same
   // change, and a diff of a long section is not free. Shown on a section only
@@ -334,7 +334,7 @@ export function SpecPane({
   // What is typed and not yet saved goes to the file as the pane goes away:
   // leaving planning from inside a field, by a shortcut, never blurs it, and a
   // title typed there is a planning somebody put something into
-  // (D-NEW-a-spec-outlives-its-planning). Sent straight over the bridge rather
+  // (D-129). Sent straight over the bridge rather
   // than through the mutation, which reaches its request only after a
   // microtask: this way it is ahead of the leave's own read of the planning,
   // which App sends in the same commit. Nothing is sent over an open conflict,
@@ -629,7 +629,7 @@ export function SpecPane({
                 <>
                   {/* One button, whatever the spec has done. What the chat
                       changes it is held to writing here in the same turn
-                      (D-NEW-the-plan-answers-the-spec-and-says-so), so nothing
+                      (D-128), so nothing
                       it did needs reporting. A person's own edit is not held to
                       it, so the way to the contract reads the plan against this
                       spec first, as every way there does. And it waits for a

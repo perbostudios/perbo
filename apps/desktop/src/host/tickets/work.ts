@@ -12,7 +12,7 @@ import type { EditingSession } from "../../shared/protocol.js";
 /**
  * What deleting a piece of work needs of the rest of the host: the planning,
  * the ticket drafted from its spec, and the spec they came from are one thing,
- * and deleting it deletes all three (D-NEW-a-spec-outlives-its-planning).
+ * and deleting it deletes all three (D-129).
  */
 export interface WorkDeps {
   tickets: { list(repo: RegisteredRepository): Promise<{ tickets: Ticket[] }> };

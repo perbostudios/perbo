@@ -12,7 +12,7 @@ import { DraftModelRecordSchema, type DraftModelRecord } from "./model-record.js
 
 /**
  * A model reads the spec against the plan drafted from it and says where the
- * two no longer promise the same thing (D-NEW-the-plan-answers-the-spec-and-says-so).
+ * two no longer promise the same thing (D-128).
  *
  * The interview cannot part them: its edit of a promise is refused unless the
  * spec was written in the same turn. A person's own edit is held to nothing,

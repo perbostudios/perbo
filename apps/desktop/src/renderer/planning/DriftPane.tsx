@@ -23,7 +23,7 @@ const problemKey = (open: readonly DriftFinding[]): string =>
 
 /**
  * The Problems pane, between the plan and the contract
- * (D-NEW-the-plan-answers-the-spec-and-says-so): a model reads the spec
+ * (D-128): a model reads the spec
  * against the plan and says where the two no longer promise the same thing,
  * and each place is a problem put to the person here, one at a time.
  *

@@ -27,12 +27,12 @@ export type Route =
     }
   /**
    * A repository's question page, "What do you want to build?", where a
-   * planning starts (D-NEW-a-planning-starts-with-what-to-build).
+   * planning starts (D-131).
    */
   | { page: "ask"; repoId: string }
   /**
    * A pane of a planning, or null for the planning itself, which opens where
-   * it was left (D-NEW-a-planning-reopens-where-it-was-left).
+   * it was left (D-130).
    */
   | { page: "planning"; sessionId: string; pane: PlanningPane | null }
   | {

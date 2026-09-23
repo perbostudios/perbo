@@ -26,7 +26,7 @@ import { specBlocks, type SpecItem, type SpecRun } from "./spec-format.js";
  * the nearest thing to the pointer that is text.
  *
  * The last change to the section is marked on it
- * (D-NEW-the-plan-answers-the-spec-and-says-so): what it added is green, and
+ * (D-128): what it added is green, and
  * what it took away is put back where it stood, red and struck through. The
  * marks are over the same runs, split where a mark begins or ends, so an
  * added stretch keeps its own source offsets and a click on it lands where

@@ -57,7 +57,7 @@ export function ContractScreen(context: TaskContext) {
   const curating = (workspace.drafts ?? []).find(
     (draft) => draft.repoId === repoId && draft.key === detail.ticket.key && curates(draft),
   );
-  // The pane that planning was left at (D-NEW-a-planning-reopens-where-it-was-left);
+  // The pane that planning was left at (D-130);
   // where it no longer offers that pane, the one holding the plan, by the same
   // rule the rail uses. Problems still open do not hold this way back: it goes
   // where the person was, and the rail offers the Problems pane from there.
@@ -235,7 +235,7 @@ export function ContractScreen(context: TaskContext) {
               frozen: this is the last moment either can still move. Beside the
               impact count and in its manner — advice, never a gate, because a
               warning that held the button is one people learn to click past
-              (D-NEW-the-plan-answers-the-spec-and-says-so). */}
+              (D-128). */}
           {ticket.approved_at === null && detail.specFindings.length > 0 && (
             <div className="spec-findings">
               {detail.specFindings.map((finding) => (
@@ -424,7 +424,7 @@ export function ContractScreen(context: TaskContext) {
             </div>
             {/* Offered at every stage, the loop included: a piece of work is
                 deleted whole and the evidence goes with it
-                (D-NEW-a-spec-outlives-its-planning). One stage is not: a ticket
+                (D-129). One stage is not: a ticket
                 whose pull request is open has a record on GitHub that this
                 machine does not own, and the host refuses it there too. */}
             {ticket.state !== "pr_open" && (

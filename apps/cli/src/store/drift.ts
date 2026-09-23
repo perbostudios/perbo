@@ -10,7 +10,7 @@ import { readContract } from "./tickets.js";
  * `<KEY>.drift.json`: the plan read against the spec it was drafted from, kept
  * beside the ticket against two hashes — the spec's bytes and the plan's
  * promise texts — so it holds while neither moves
- * ([D-NEW-the-plan-answers-the-spec-and-says-so](../../../../docs/11-open-decisions.md)).
+ * ([D-128](../../../../docs/11-open-decisions.md)).
  *
  * Admission seeds it, because a plan just drafted agrees with its spec by
  * construction; a chat turn that moved the plan under the interview's guard

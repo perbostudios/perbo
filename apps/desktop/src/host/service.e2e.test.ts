@@ -93,7 +93,7 @@ describe("the spec a planning session holds", () => {
     // A piece of work is one thing and is deleted as one. Leaving the writing
     // behind put a row back in the picker under the same title the moment the
     // delete finished, which reads as the delete having made a copy of the
-    // thing it removed (D-NEW-a-spec-outlives-its-planning).
+    // thing it removed (D-129).
     const { service, repo } = fixture();
     const registered = await service.registerRepository(repo);
     const session = await service.request({
@@ -381,7 +381,7 @@ describe("each role's effort, beside its model", () => {
   });
 });
 
-describe("the pane a planning was left at (D-NEW-a-planning-reopens-where-it-was-left)", () => {
+describe("the pane a planning was left at (D-130)", () => {
   it("records the pane without moving the revision, and keeps it through a restart", async () => {
     const { service, repo, options } = fixture();
     const opened = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: (await service.registerRepository(repo)).id } });
@@ -468,7 +468,7 @@ describe("the pane a planning was left at (D-NEW-a-planning-reopens-where-it-was
   });
 });
 
-describe("each repository's unsent ask (D-NEW-a-planning-starts-with-what-to-build)", () => {
+describe("each repository's unsent ask (D-131)", () => {
   it("keeps each repository's text through a restart without a change event, and removes it on an empty text", async () => {
     const changes: { kind: string; asks?: Record<string, string> }[] = [];
     const { service, repo, options } = fixture(undefined, undefined, { changed: (change) => changes.push(change) });
@@ -3102,7 +3102,7 @@ readline.createInterface({ input: process.stdin })
   });
 
   it("records what a turn changed of the spec and the plan as the last change, each turn replacing the one before", async () => {
-    // The panes mark the last change to the pair (D-NEW-the-plan-answers-the-spec-and-says-so):
+    // The panes mark the last change to the pair (D-128):
     // what the turn wrote in the spec, and what it edited in the plan
     // through the CLI's edit path, compared before and after the turn.
     const { service, repoId, id } = await planning();
@@ -3154,7 +3154,7 @@ readline.createInterface({ input: process.stdin })
 
   it("records an edit by hand, the Plan pane's Next and a spec save as the last change, and nothing where nothing differs", async () => {
     // Each way a person moves the pair by hand lands as the one change the
-    // panes mark (D-NEW-the-plan-answers-the-spec-and-says-so), replacing
+    // panes mark (D-128), replacing
     // the one before it whole; an edit that moves no promise and a save of
     // the same words leave the last change standing.
     const { service, repoId, id } = await planning();
@@ -4312,7 +4312,7 @@ describe("planning beside a run (SCP-335)", () => {
   });
 });
 
-describe("the plan read against the spec (D-NEW-the-plan-answers-the-spec-and-says-so)", () => {
+describe("the plan read against the spec (D-128)", () => {
   /** What `perbo drift KEY --json` prints, as the canned CLI answers it. */
   const verdict = (findings: unknown[], dismissed = false) => ({
     key: "PRB-1",
@@ -5039,7 +5039,7 @@ readline.createInterface({ input: process.stdin })
  * The approved contract is frozen (ADR-0016), so there is no editing a stopped
  * plan back into shape: the work is planned again from the spec it was drafted
  * from, which mints a second ticket beside the stopped one, or it is deleted
- * whole (D-NEW-a-spec-outlives-its-planning).
+ * whole (D-129).
  */
 describe("a stopped run's ticket", () => {
   const slug = "retire-the-legacy-csv-importer";
@@ -5304,7 +5304,7 @@ describe("a stopped run's ticket", () => {
   it("refuses to delete work whose pull request is open, and deletes it once that is settled", async () => {
     // The one stage a delete does not reach: the pull request is on GitHub, and
     // deleting the ticket would leave it standing with nothing here to read it
-    // against (D-NEW-a-spec-outlives-its-planning).
+    // against (D-129).
     const made = await stopped();
     const held = JSON.parse(readFileSync(made.at, "utf8")) as { state: string };
     writeFileSync(made.at, JSON.stringify({ ...held, state: "pr_open" }));
@@ -5404,7 +5404,7 @@ describe("a stopped run's ticket", () => {
   });
 });
 
-describe("a ticket renamed while it is planned renames its spec (D-NEW-a-ticket-is-named-apart-from-its-board)", () => {
+describe("a ticket renamed while it is planned renames its spec (D-127)", () => {
   const SPEC_MD =
     "# a simple snake game that eats apples to grow longer and gets\n\n## Outcome\n\nA snake eats apples and grows.\n";
 
@@ -5682,7 +5682,7 @@ describe("deleting a filed ticket", () => {
     );
     // A recorded attempt is not a reason for the work to stay: a piece of work
     // is deleted whole at every stage, the loop included, and the evidence
-    // goes with it (D-NEW-a-spec-outlives-its-planning).
+    // goes with it (D-129).
     await service.request({ kind: "discard", repoId: registered.id, key: "PRB-2" });
     expect(
       existsSync(join(repo, ".perbo", "state", `${ticket_id}.attempts.json`)),

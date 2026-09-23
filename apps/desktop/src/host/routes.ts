@@ -235,7 +235,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       // and leaving the ticket on the board would delete the way in and not
       // the thing, with no way back to the plan it came from. Whatever stage it
       // had reached: a piece of work is deleted whole
-      // (D-NEW-a-spec-outlives-its-planning).
+      // (D-129).
       //
       // The one it drafted, and never one it was merely opened over: planning
       // started from a ticket the CLI admitted, or from one another session
@@ -712,9 +712,9 @@ async function replan(
   // The stopped ticket goes, and everything recorded after its contract with
   // it — the attempts and the bundles they sealed — while the spec it was
   // drafted from stays, because the new plan is drafted from it
-  // (D-NEW-a-spec-outlives-its-planning). Deleted first, so the new plan is
+  // (D-129). Deleted first, so the new plan is
   // named as the only plan this spec has rather than apart from the one it
-  // replaces (D-NEW-a-ticket-is-named-apart-from-its-board).
+  // replaces (D-127).
   const refusal = await discardDrafted(m, repo, request.key);
   if (refusal !== null) throw new Error(refusal);
   // A fresh admission, not a move: the approved contract is frozen

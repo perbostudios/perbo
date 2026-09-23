@@ -247,7 +247,7 @@ describe("the draft schema", () => {
   });
 });
 
-describe("the name (D-NEW-a-ticket-is-named-apart-from-its-board)", () => {
+describe("the name (D-127)", () => {
   const schemaDescription = (): string =>
     (CONTRACT_DRAFT_JSON_SCHEMA as { properties: Record<string, { description: string }> }).properties["name"]!
       .description;

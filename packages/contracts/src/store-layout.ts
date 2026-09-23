@@ -91,7 +91,7 @@ export function draftPath(key: string): StorePath {
 
 /**
  * The plan read against the spec it was drafted from, kept against the spec's
- * and the plan's hashes (D-NEW-the-plan-answers-the-spec-and-says-so).
+ * and the plan's hashes (D-128).
  */
 export function driftPath(key: string): StorePath {
   return [TICKETS_DIR, `${key}.drift.json`];

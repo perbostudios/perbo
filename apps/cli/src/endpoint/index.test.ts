@@ -258,7 +258,7 @@ describe("the endpoint", () => {
     const report = (after.json?.result as { structuredContent: { title: string; outcome: string | null } })
       .structuredContent;
     expect(report.outcome).toBe("--repo=/nowhere");
-    // The ticket's name stays what it was (D-NEW-a-ticket-is-named-apart-from-its-board).
+    // The ticket's name stays what it was (D-127).
     expect(report.title).toBe(first!.title);
   });
 

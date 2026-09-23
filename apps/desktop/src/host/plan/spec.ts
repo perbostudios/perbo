@@ -69,7 +69,7 @@ export function specSectionsAt(repo: RegisteredRepository, slug: string): SpecSe
  * offering are the ones no record names, and nothing else enumerates this
  * folder. Deleting a piece of work takes its spec with it, so what is left here
  * was written some other way: committed by somebody else or written at the
- * command line (D-NEW-a-spec-outlives-its-planning).
+ * command line (D-129).
  *
  * A folder this cannot make sense of is skipped rather than refused: the picker
  * is a way back in, and one unreadable spec is not a reason to offer none of
@@ -121,7 +121,7 @@ export function specSlugOf(
 /**
  * The spec a ticket still being planned was drafted from, titled with the name
  * the person just gave the ticket, so the Spec pane, the picker and the
- * contract's head show one name (D-NEW-a-ticket-is-named-apart-from-its-board).
+ * contract's head show one name (D-127).
  * True where the spec was renamed.
  *
  * Written through `retitleSpecFile`, the one writer of that rule, and only its
@@ -132,7 +132,7 @@ export function specSlugOf(
  *
  * The verdict the plan was read against its spec with is carried to the
  * renamed bytes where it was keyed on the bytes before: the title line is not
- * what the reading reads (D-NEW-the-plan-answers-the-spec-and-says-so).
+ * what the reading reads (D-128).
  */
 export async function nameSpecAfterRename(
   tickets: { list(repo: RegisteredRepository): Promise<{ tickets: Ticket[] }> },
@@ -263,7 +263,7 @@ export function saveSpec(
     throw new Error("This planning belongs to another repository.");
   // Saved as written. What the spec states and what the plan cites are settled
   // on the contract page and at approval, not here
-  // (D-NEW-the-plan-answers-the-spec-and-says-so).
+  // (D-128).
   //
   // What the file said before, for the marks on what this save changed of it:
   // nothing at all where there is no file yet, so a first save is a change from

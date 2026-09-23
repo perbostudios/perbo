@@ -99,7 +99,7 @@ const pending = (operation: EditingOperation | null): boolean =>
 /**
  * Whether two readings found the same problems: the same places, saying the
  * same difference, in any order. What a re-read is compared by before the
- * first is put to the person again (D-NEW-the-plan-answers-the-spec-and-says-so).
+ * first is put to the person again (D-128).
  * The options are not compared: a model may word the ways to close it afresh
  * each reading, and that is not a new problem; nor is the order, which a
  * model may also give afresh, and a list the same but for its order is the
@@ -201,7 +201,7 @@ const EMPTY_SECTIONS: SpecSections = { outcome: "", requirements: "", no_gos: ""
 
 /**
  * The change between two readings of the pair, or null where nothing moved
- * (D-NEW-the-plan-answers-the-spec-and-says-so). Each side is compared by its
+ * (D-128). Each side is compared by its
  * text: a save that wrote the same words, or an edit that rearranged a plan
  * without touching a promise, is not a change to mark. The first writing of
  * a thing is not a change to it either: a spec section written where it was
@@ -233,7 +233,7 @@ function specChange(was: SpecSections, now: SpecSections): NonNullable<EditingCh
 
 /**
  * A planning that holds nothing: opened fresh, and nothing put into it
- * (D-NEW-a-spec-outlives-its-planning).
+ * (D-129).
  *
  * `revision` is the count of edits, so zero is "nothing edited" and covers the
  * form, the history, the nodes and the drift without naming any of them. The
@@ -613,7 +613,7 @@ export class ContractEditing {
 
   /**
    * Write down the pane the person is now on, which is where the planning
-   * reopens (D-NEW-a-planning-reopens-where-it-was-left).
+   * reopens (D-130).
    *
    * Leaves `revision` where it stands, as {@link converse} does: moving
    * between panes puts nothing into the planning, so a planning opened fresh
@@ -634,7 +634,7 @@ export class ContractEditing {
 
   /**
    * Write down that the person is now on this planning's contract, which is
-   * where its ticket reopens (D-NEW-a-planning-reopens-where-it-was-left),
+   * where its ticket reopens (D-130),
    * as {@link visit} writes a pane: no revision moves, `lastPane` stays for
    * the contract's way back, and a discarded planning records nothing.
    */
@@ -668,7 +668,7 @@ export class ContractEditing {
 
   /**
    * What the last reading of the plan against its spec found
-   * (D-NEW-the-plan-answers-the-spec-and-says-so): the problems still open,
+   * (D-128): the problems still open,
    * or none. None after problems were open is the reading that resolved them,
    * which is recorded as such so the page can offer the contract; none where
    * none were ever open is nothing to record, and the session stays without a
@@ -695,7 +695,7 @@ export class ContractEditing {
 
   /**
    * What a reading does to the planning it was of
-   * (D-NEW-the-plan-answers-the-spec-and-says-so): the problems it found go
+   * (D-128): the problems it found go
    * on the session, and the first of them is put to the person as a question
    * of the interview's own shape, so the Problems pane and the chat show the
    * same card and either answers it with a turn. None found, after some were,
@@ -789,7 +789,7 @@ export class ContractEditing {
 
   /**
    * The last change to the spec and the plan's promise
-   * (D-NEW-the-plan-answers-the-spec-and-says-so): what the panes mark, until
+   * (D-128): what the panes mark, until
    * the next change replaces it whole. The previous change is gone the moment
    * this one lands — nothing accumulates, because the marks are for the last
    * thing that happened and not a history. Leaves `revision` where it stands,

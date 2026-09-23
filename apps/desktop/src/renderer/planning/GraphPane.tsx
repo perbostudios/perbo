@@ -124,7 +124,7 @@ export function GraphPane({
     [selected, view],
   );
   // The last change to the plan's promise, by criterion, for the marks on
-  // the node cards and in the inspector (D-NEW-the-plan-answers-the-spec-and-says-so).
+  // the node cards and in the inspector (D-128).
   // Diffed once per change rather than once per session read, which hands
   // over a fresh object for the same change.
   const planChange = session?.change?.plan ?? null;
@@ -140,7 +140,7 @@ export function GraphPane({
   // one approval, on the screen that states what is being approved.
   //
   // By way of the reading of the plan against its spec
-  // (D-NEW-the-plan-answers-the-spec-and-says-so), which is the one step
+  // (D-128), which is the one step
   // between the two and lands on the contract by itself where there is
   // nothing to say. An approved plan is frozen and goes straight there; the
   // shortcut takes the same way, so it cannot skip the reading.

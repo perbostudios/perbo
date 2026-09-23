@@ -474,7 +474,7 @@ export const InterviewEntrySchema = z.strictObject({
       /**
        * Set where the question is one of the host's, not the session's: a
        * place the plan and the spec have parted, put to the person as the
-       * problem in hand (D-NEW-the-plan-answers-the-spec-and-says-so). `open`
+       * problem in hand (D-128). `open`
        * is how many problems stood open as this one was put, so the card can
        * say which it is of how many. The answer goes down as a turn like any
        * other, which is how the interview closes it.
@@ -550,7 +550,7 @@ export type PlanPromise = z.infer<typeof PlanPromiseSchema>;
  * interview's turn, an edit by hand on the Graph or the Plan pane, a spec
  * save, an answer that closed a problem. The panes mark what it added and
  * what it took away, and the marks stand until the next change, which
- * replaces this whole (D-NEW-the-plan-answers-the-spec-and-says-so). A side
+ * replaces this whole (D-128). A side
  * the change did not move is null, so the panes on it mark nothing.
  */
 const EditingChangeSchema = z.strictObject({
@@ -618,7 +618,7 @@ export const EditingSessionSchema = z.strictObject({
   nodes: z.number().int().nonnegative().default(0),
   /**
    * Where the plan and the spec have parted, as the last reading of the two
-   * left it (D-NEW-the-plan-answers-the-spec-and-says-so): the problems still
+   * left it (D-128): the problems still
    * open, oldest first, and whether a reading has since found none. Null
    * where no reading has found a problem, which is what a planning without
    * the Problems pane means.
@@ -643,7 +643,7 @@ export const EditingSessionSchema = z.strictObject({
   /**
    * The pane the person was last on in this planning, or null before they
    * have been on one: every way back into the planning opens it there
-   * (D-NEW-a-planning-reopens-where-it-was-left). Recorded as the pane
+   * (D-130). Recorded as the pane
    * changes, so going Home and closing Perbo each find it already written.
    */
   lastPane: PlanningPaneSchema.nullable(),
@@ -653,7 +653,7 @@ export const EditingSessionSchema = z.strictObject({
    * mode records a pane, else null. The ticket's own page opens on the contract
    * while it says so and the plan waits for approval, where it would
    * otherwise send the person into the planning
-   * (D-NEW-a-planning-reopens-where-it-was-left). `lastPane` is kept, so the
+   * (D-130). `lastPane` is kept, so the
    * contract's way back goes to the pane it was left from.
    */
   lastView: z.literal("contract").nullable(),
@@ -701,7 +701,7 @@ export interface OpenDraft {
    * How many problems between its plan and its spec stand open, and whether
    * a reading has since resolved them; null where no reading found any. The
    * rail offers the Problems pane on it, and the ticket lands there while it
-   * is open (D-NEW-the-plan-answers-the-spec-and-says-so).
+   * is open (D-128).
    */
   drift: { open: number; resolved: boolean } | null;
   /** The pane the person was last on, which the planning reopens on where it still offers it. */
@@ -735,7 +735,7 @@ export interface OpenDraft {
  * spec no record names: a planning discarded takes its session and the ticket
  * it drafted, and the folder it wrote stays. Nothing else in the app enumerates
  * the spec folder, so without this a spec whose planning is gone is unreachable
- * while still holding its own title against a new one (D-NEW-a-spec-outlives-its-planning).
+ * while still holding its own title against a new one (D-129).
  */
 export interface SpecRow {
   repoId: string;
@@ -761,7 +761,7 @@ export const EditingTargetSchema = z.discriminatedUnion("kind", [
    *
    * The way back into a spec whose planning was discarded. It carries no key:
    * the ticket that spec drafted is gone, and what is reopened is the writing,
-   * which Generate plan drafts from again (D-NEW-a-spec-outlives-its-planning).
+   * which Generate plan drafts from again (D-129).
    */
   z.strictObject({ kind: z.literal("spec"), repoId: identifier, slug: specSlugText }),
 ]);
@@ -1013,14 +1013,14 @@ export const RequestSchema = z.discriminatedUnion("kind", [
   /**
    * The person is now on this pane of this planning. Recorded on the session
    * as its `lastPane`, which is where the planning reopens
-   * (D-NEW-a-planning-reopens-where-it-was-left); not an edit, so it moves no
+   * (D-130); not an edit, so it moves no
    * revision.
    */
   z.strictObject({ kind: z.literal("editingVisited"), id: identifier, pane: PlanningPaneSchema }),
   /**
    * The person is now on this planning's contract. Recorded on the session
    * as its `lastView`, which is where its ticket reopens
-   * (D-NEW-a-planning-reopens-where-it-was-left); not an edit, so it moves no
+   * (D-130); not an edit, so it moves no
    * revision.
    */
   z.strictObject({ kind: z.literal("editingContractVisited"), id: identifier }),
@@ -1048,7 +1048,7 @@ export const RequestSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("impactContract"), repoId: identifier, key }),
   /**
    * The plan read against the spec it was drafted from, on the way from the
-   * plan to the contract (D-NEW-the-plan-answers-the-spec-and-says-so): where
+   * plan to the contract (D-128): where
    * the two no longer promise the same thing, and the ways to close each
    * difference. Advice, never a gate. `driftDismiss` records that the person
    * went on with the findings open, so the same reading is not put to them
@@ -1171,13 +1171,13 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    * the page a stopped run lands on: the ticket's own files, the reading of its
    * plan against its spec, the attempts it recorded, the bundles those attempts
    * sealed and the spec folder it was drafted from
-   * (D-NEW-a-spec-outlives-its-planning). Refused at one stage only — a ticket
+   * (D-129). Refused at one stage only — a ticket
    * at `pr_open`, whose pull request is a record this machine does not own.
    */
   z.strictObject({ kind: z.literal("discard"), ...reference }),
   /**
    * What is typed on a repository's question page and not yet sent
-   * (D-NEW-a-planning-starts-with-what-to-build); a desktop preference, and an
+   * (D-131); a desktop preference, and an
    * empty text removes it.
    */
   z.strictObject({ kind: z.literal("askSave"), repoId: identifier, text: z.string().max(12_000) }),
@@ -1472,7 +1472,7 @@ export interface Detail {
    * Approving freezes the contract and starts the loop, so this is the last
    * moment either can still move. Advice and never a gate: a warning that held
    * the button is one people learn to click past, as the impact count beside it
-   * is not (D-NEW-the-plan-answers-the-spec-and-says-so).
+   * is not (D-128).
    *
    * Empty for a plan drafted from no spec, and for one whose spec cannot be
    * read — what cannot be judged is not asserted.

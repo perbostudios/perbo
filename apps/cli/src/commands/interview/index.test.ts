@@ -497,7 +497,7 @@ describe("edit_plan (SCP-311 criterion 3)", () => {
     it("leaves an edit that only rearranges the plan alone", async () => {
       // A plan may be arranged any way at all without touching the spec: what
       // the work is for did not change
-      // (D-NEW-the-plan-answers-the-spec-and-says-so).
+      // (D-128).
       const repo = repository();
       await interview(repo, [writeSpec(), generate(repo)]);
       await interview(repo, [
@@ -758,7 +758,7 @@ describe("edit_plan (SCP-311 criterion 3)", () => {
 
 /**
  * The plan's verdict across a chat turn
- * (D-NEW-the-plan-answers-the-spec-and-says-so).
+ * (D-128).
  *
  * A chat edit is held to the spec, so a clean verdict from before the turn
  * still holds after it and is carried to the new hashes; nothing else moves
@@ -1301,7 +1301,7 @@ describe("the directory a call is judged against", () => {
 });
 
 describe("the orientation asks for the spec's title as a title", () => {
-  // D-118, D-NEW-a-ticket-is-named-apart-from-its-board: the folder is named
+  // D-118, D-127: the folder is named
   // from the first message, and the title line is the interview's to make a
   // title of, named apart from the board as the drafter names a ticket.
   const oriented = interviewOrientation({

@@ -184,7 +184,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // The ticket this planning drafted goes with it, as it does on the real
     // host: a plan thrown away must not leave its ticket on the board with no
     // way back to the plan, whatever stage it had reached
-    // (D-NEW-a-spec-outlives-its-planning). One this planning was merely
+    // (D-129). One this planning was merely
     // opened over was never its to throw away.
     const held = editing.read(request.id);
     const session = editing.discard(request.id, request.revision);
@@ -542,7 +542,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     drafts: openDrafts(editingRecords()),
     // The specs this sample workspace holds, as the host reads its own folder:
     // the picker subtracts the ones a planning or a ticket names and offers
-    // what is left (D-NEW-a-spec-outlives-its-planning).
+    // what is left (D-129).
     specs: Object.entries(specFiles()).flatMap(([slug, markdown]) => {
       const repoId = snapshot.repositories[0]?.id;
       if (repoId === undefined) return [];

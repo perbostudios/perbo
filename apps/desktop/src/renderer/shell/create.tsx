@@ -254,7 +254,7 @@ export function withDraft(snapshot: Snapshot, session: EditingSession): Snapshot
  * and neither is the one worth offering, because nothing else in the app
  * enumerates the spec folder. Deleting a piece of work here takes its spec
  * with it, so these are the ones written some other way: a folder committed by
- * somebody else, or one the command line wrote (D-NEW-a-spec-outlives-its-planning).
+ * somebody else, or one the command line wrote (D-129).
  *
  * Both claims are read, and they are not the same claim. A session says which
  * spec it writes; a ticket the CLI admitted has no session at all and says it
@@ -307,7 +307,7 @@ interface Row {
 type Bin = { label: string; confirm: string; remove: () => Promise<void> };
 /**
  * What to call a planning: its ticket's name, else the title of the spec it is
- * writing (D-NEW-a-ticket-is-named-apart-from-its-board). The spec's title is
+ * writing (D-127). The spec's title is
  * looked up on the snapshot, which already carries it for the rows that offer
  * a spec with no planning at all (D-103).
  */
@@ -358,7 +358,7 @@ const shortKey = (key: string): string => "#" + key.replace(/^PRB-/, "");
  * put a row back under the same title the moment the delete finished, which reads
  * as the delete having made a copy of the thing it removed — a piece of work
  * is one thing and is deleted as one (D-101, D-103,
- * D-NEW-a-spec-outlives-its-planning).
+ * D-129).
  */
 function confirmDelete(stage: "name" | "spec" | "plan", title: string): string {
   const named = title.trim().length > 0 ? `“${title.trim()}”` : "this planning";
@@ -426,7 +426,7 @@ function Picker({
           : draft.phase === "working"
             ? "drafting the plan"
             : "draft in progress"),
-      // Where it was left (D-NEW-a-planning-reopens-where-it-was-left): its
+      // Where it was left (D-130): its
       // ticket's page where that was its contract, which that page opens on;
       // else its problems while they are open, else the pane it was left at.
       run: () =>
@@ -481,7 +481,7 @@ function Picker({
     }),
     // A spec nothing else points at is work in progress with its plan still to
     // come, and this is the only way back into it: nothing else in the app
-    // enumerates the spec folder (D-NEW-a-spec-outlives-its-planning). Last,
+    // enumerates the spec folder (D-129). Last,
     // because a plan already drafted is further along than a spec with none.
     ...orphaned.map((spec) => ({
       id: "spec:" + spec.repoId + "/" + spec.slug,
@@ -506,13 +506,13 @@ function Picker({
    * first, and go to a pane of it. Only a planning no row stands for
    * yet is opened this way — a ticket or a spec that some planning already
    * holds is listed as that planning's row, which reopens where it was left
-   * (D-NEW-a-planning-reopens-where-it-was-left) — so there is no pane left
+   * (D-130) — so there is no pane left
    * at to ask for here.
    *
    * `"plan"` asks for whichever pane holds its plan, which is not known until
    * the session is open: the Problems pane while a reading of the plan
    * against its spec has found problems still open, since they are what the
-   * planning is about until they are resolved (D-NEW-the-plan-answers-the-spec-and-says-so);
+   * planning is about until they are resolved (D-128);
    * else a graph for work the drafter divided, the criteria for work it did
    * not, and the spec where there is no plan yet. A ticket row carries none
    * of this, and opening a flat plan on a Graph the rail does not offer is a
@@ -550,7 +550,7 @@ function Picker({
     detail: repo.path,
     // On the repository's question page, "What do you want to build?", which
     // creates nothing: the planning is made when its answer is sent
-    // (D-NEW-a-planning-starts-with-what-to-build).
+    // (D-131).
     run: () => navigate({ page: "ask", repoId: repo.id }),
   }));
   const rows = [...start, ...resume];

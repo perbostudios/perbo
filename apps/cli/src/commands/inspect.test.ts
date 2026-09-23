@@ -1029,7 +1029,7 @@ describe("perbo inspect", () => {
         "ticket",
         "ticket_id",
         // What the ticket is called, apart from the outcome it runs against
-        // (D-NEW-a-ticket-is-named-apart-from-its-board).
+        // (D-127).
         "title",
         "total_cost",
         "verdicts",

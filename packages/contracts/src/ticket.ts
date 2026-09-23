@@ -426,7 +426,7 @@ export const TicketSchema = z.strictObject({
   ticket_id: TicketIdSchema,
   key: TicketKeySchema,
   /**
-   * What the ticket is called (D-NEW-a-ticket-is-named-apart-from-its-board).
+   * What the ticket is called (D-127).
    * Display only: the plan contract's `outcome` is its own.
    */
   title: z.string().min(1),

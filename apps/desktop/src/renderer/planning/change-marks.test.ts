@@ -22,7 +22,7 @@ const before = (pieces: ReturnType<typeof wordDiff>): string =>
 const texts = (pieces: ReturnType<typeof wordDiff>, kind: "same" | "added" | "removed"): string[] =>
   pieces.filter((piece) => piece.kind === kind).map((piece) => piece.text);
 
-describe("the marks on the last change (D-NEW-the-plan-answers-the-spec-and-says-so)", () => {
+describe("the marks on the last change (D-128)", () => {
   it("diffs by word, keeps the joins exact, and collapses a changed phrase into one mark", () => {
     const pieces = wordDiff(
       "The person can choose Light or Dark, after a restart.",
@@ -308,7 +308,7 @@ describe("the marks on the last change (D-NEW-the-plan-answers-the-spec-and-says
   });
 });
 
-describe("words added together are one highlight (D-NEW-the-plan-answers-the-spec-and-says-so)", () => {
+describe("words added together are one highlight (D-128)", () => {
   /** The text of every added mark in some markup, one entry a mark. */
   const addedIn = (html: string): string[] =>
     [...html.matchAll(/<mark class="change change--added"[^>]*>(.*?)<\/mark>/g)].map((match) =>

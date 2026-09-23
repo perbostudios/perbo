@@ -87,7 +87,7 @@ async function openPicker(): Promise<HTMLElement> {
   fireEvent.click(await screen.findByRole("button", { name: "Create" }));
   return await screen.findByRole("dialog", { name: "Plan a piece of work" });
 }
-/** The question a repository row in the picker lands on (D-NEW-a-planning-starts-with-what-to-build). */
+/** The question a repository row in the picker lands on (D-131). */
 const ASK = "What do you want to build?";
 /**
  * A fresh planning in one repository, open on its Spec pane with nothing put
@@ -288,7 +288,7 @@ describe("Create in the rail (SCP-334)", () => {
   it("offers a spec nothing points at, and not one a planning is already writing", async () => {
     // A spec whose planning was discarded: the folder stays, and the picker is
     // what leads back to it, where otherwise it would go on holding its own
-    // title against a new one (D-NEW-a-spec-outlives-its-planning).
+    // title against a new one (D-129).
     const markdown = planningBrowser.renderSpec(
       { ...planningBrowser.EMPTY_SPEC_TEXT, title: "Play tic tac toe" },
       { highWater: 0, existing: [] },
@@ -330,7 +330,7 @@ describe("Create in the rail (SCP-334)", () => {
     // Named by the interview from a first turn, or by the person in the Spec
     // pane, and nothing written yet. Home is for tickets; until a plan makes
     // one, the picker is the only place this lives
-    // (D-NEW-a-spec-outlives-its-planning).
+    // (D-129).
     const named = planningBrowser.renderSpec(
       { ...planningBrowser.EMPTY_SPEC_TEXT, title: "Have a dark mode" },
       { highWater: 0, existing: [] },
@@ -689,7 +689,7 @@ async function select(query: string, name: RegExp | string): Promise<void> {
   await waitFor(() => expect(row.getAttribute("aria-selected")).toBe("true"));
 }
 
-describe("clicking away from a planning nothing was put into (D-NEW-a-spec-outlives-its-planning)", () => {
+describe("clicking away from a planning nothing was put into (D-129)", () => {
   const phaseOf = async (id: string): Promise<string> => (await editingRead(id)).phase;
   /** What Create offers, which is where a planning kept is offered back. */
   async function pickerRows(): Promise<HTMLElement> {
@@ -793,7 +793,7 @@ describe("clicking away from a planning nothing was put into (D-NEW-a-spec-outli
   });
 });
 
-describe("a planning reopens where it was left (D-NEW-a-planning-reopens-where-it-was-left)", () => {
+describe("a planning reopens where it was left (D-130)", () => {
   const panes = (): HTMLElement => screen.getByRole("group", { name: "Planning panes" });
   /** The pane the rail marks as the one open. */
   const current = (): string | null =>
@@ -3034,7 +3034,7 @@ describe("the Graph pane (SCP-316)", () => {
 
   it("calls a drafted sample ticket by its spec's title, and an edit to its graph does not rename it", async () => {
     // The sample has no drafter, so its ticket takes what `admit` falls back
-    // to, and keeps it through every edit (D-NEW-a-ticket-is-named-apart-from-its-board).
+    // to, and keeps it through every edit (D-127).
     // A title no other ticket carries, since the plans above are called theirs.
     const plan = await planned("A high-contrast colour mode");
     const title = async () =>
@@ -3085,7 +3085,7 @@ describe("the Graph pane (SCP-316)", () => {
     expect((await detail()).ticket.approved_at).toBeNull();
   });
 
-  it("reopens from the picker on the contract it was left at, whose way back is the Graph it was confirmed from, not the reading on the way (D-NEW-a-planning-reopens-where-it-was-left)", async () => {
+  it("reopens from the picker on the contract it was left at, whose way back is the Graph it was confirmed from, not the reading on the way (D-130)", async () => {
     const plan = await openGraph();
     await waitFor(async () => expect(await lastPane(plan.id)).toBe("graph"));
     await waitFor(() =>
@@ -3115,7 +3115,7 @@ describe("the Graph pane (SCP-316)", () => {
     await screen.findByRole("heading", { name: "Execution graph" });
   });
 
-  describe("the plan read against the spec (D-NEW-the-plan-answers-the-spec-and-says-so)", () => {
+  describe("the plan read against the spec (D-128)", () => {
     /**
      * That planning, with two criteria reworded by hand, which is the one way
      * the plan and the spec can part: the chat's edits are held to the spec.
@@ -3172,7 +3172,7 @@ describe("the Graph pane (SCP-316)", () => {
       return plan;
     }
 
-    it("goes Back to planning from the contract to the plan, not to the reading, after a resolved round (D-NEW-a-planning-reopens-where-it-was-left)", async () => {
+    it("goes Back to planning from the contract to the plan, not to the reading, after a resolved round (D-130)", async () => {
       const plan = await confirmedIntoProblems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
       answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
@@ -3185,7 +3185,7 @@ describe("the Graph pane (SCP-316)", () => {
       await screen.findByRole("heading", { name: "Execution graph" });
     });
 
-    it("goes Back to planning from the contract to the pane the plan was confirmed from, where that is not the plan's own (D-NEW-a-planning-reopens-where-it-was-left)", async () => {
+    it("goes Back to planning from the contract to the pane the plan was confirmed from, where that is not the plan's own (D-130)", async () => {
       const plan = await problems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
       answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
@@ -3204,7 +3204,7 @@ describe("the Graph pane (SCP-316)", () => {
       await screen.findByRole("tree", { name: "Tracked files" });
     });
 
-    it("reopens on the Problems page while problems are open, by that rule and not by a record of the page (D-NEW-a-planning-reopens-where-it-was-left)", async () => {
+    it("reopens on the Problems page while problems are open, by that rule and not by a record of the page (D-130)", async () => {
       const plan = await confirmedIntoProblems();
       fireEvent.click(screen.getByRole("button", { name: "Home" }));
       await screen.findByRole("heading", { name: /Hi, / });
@@ -3486,7 +3486,7 @@ describe("the Graph pane (SCP-316)", () => {
       // The picker's row for this planning, which would otherwise open the spec.
       location.hash = "home";
       const picker = await openPicker();
-      // Named by its ticket's name (D-NEW-a-ticket-is-named-apart-from-its-board).
+      // Named by its ticket's name (D-127).
       const { title } = (await sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key })).ticket;
       fireEvent.click(within(picker).getByRole("button", { name: (name) => name.startsWith(title) }));
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
@@ -3611,7 +3611,7 @@ describe("the Graph pane (SCP-316)", () => {
       // lands it on the graph, and though the record stands the rail no
       // longer offers the Problems pane. The resolved page is not where the
       // planning was left, since the reading is never remembered
-      // (D-NEW-a-planning-reopens-where-it-was-left).
+      // (D-130).
       expect(await lastPane(plan.id)).toBeNull();
       location.hash = `task/${plan.repoId}/${plan.key}`;
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 5000 });
@@ -3790,7 +3790,7 @@ describe("the Graph pane (SCP-316)", () => {
       }
     });
 
-    it("marks what an answer sent from the Problems page changed of the plan (D-NEW-the-plan-answers-the-spec-and-says-so)", async () => {
+    it("marks what an answer sent from the Problems page changed of the plan (D-128)", async () => {
       const plan = await problems();
       // The reading's recommendation, which rewords criterion 1 to the
       // spec's words through the interview's edit path.
@@ -4143,7 +4143,7 @@ describe("the Graph pane (SCP-316)", () => {
 
   /**
    * The last change to the spec and the plan, marked where it stands
-   * (D-NEW-the-plan-answers-the-spec-and-says-so): green for what came, red
+   * (D-128): green for what came, red
    * and struck through for what went, and only the last change — the next
    * one turns the previous marks back to plain text.
    */
@@ -6505,7 +6505,7 @@ describe("the Impact pane (SCP-320)", () => {
   });
 });
 
-describe("the name of a ticket drafted again from its spec (D-NEW-a-ticket-is-named-apart-from-its-board)", () => {
+describe("the name of a ticket drafted again from its spec (D-127)", () => {
   it("takes the stopped ticket's name, which is its spec's title, because the stopped ticket is deleted first", async () => {
     // A sample workspace of its own, because this deletes the stopped sample,
     // the one approved ticket with a spec the tests beside it read.
@@ -6713,7 +6713,7 @@ describe("a picker delete the host refuses, or that settles behind a closed pick
     });
 });
 
-describe("the first writing of a spec is not a change (D-NEW-the-plan-answers-the-spec-and-says-so)", () => {
+describe("the first writing of a spec is not a change (D-128)", () => {
   const marks = (root: ParentNode = document): string[] =>
     [...root.querySelectorAll(".change--added, .change--removed, ins, del")].map((mark) => mark.textContent ?? "");
 
@@ -6762,7 +6762,7 @@ describe("the first writing of a spec is not a change (D-NEW-the-plan-answers-th
   });
 });
 
-describe("the sample host's spec takes its ticket's name, as the host's does (D-NEW-a-ticket-is-named-apart-from-its-board)", () => {
+describe("the sample host's spec takes its ticket's name, as the host's does (D-127)", () => {
   it("titles the spec with the name the plan is drafted under, and with a name given while it is planned", async () => {
     const workspace = await sampleBridge.request({ kind: "snapshot" });
     const repoId = workspace.repositories[0]!.id;
@@ -6811,7 +6811,7 @@ describe("the sample host's spec takes its ticket's name, as the host's does (D-
   });
 });
 
-describe("a repository's question page, where a planning starts (D-NEW-a-planning-starts-with-what-to-build)", () => {
+describe("a repository's question page, where a planning starts (D-131)", () => {
   const question = (): HTMLTextAreaElement => screen.getByRole("textbox", { name: ASK }) as HTMLTextAreaElement;
   const page = (): HTMLElement => screen.getByRole("region", { name: "Start planning" });
   const send = (): HTMLButtonElement => within(page()).getByRole("button", { name: "Send" }) as HTMLButtonElement;

@@ -12,7 +12,7 @@ const SAVE_AFTER_MS = 300;
 
 /**
  * A repository's question page, "What do you want to build?", with one box
- * for the answer (D-NEW-a-planning-starts-with-what-to-build). The repository
+ * for the answer (D-131). The repository
  * row in the Create picker opens it, and it creates nothing: a planning is
  * made when the answer is sent.
  *

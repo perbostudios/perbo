@@ -245,7 +245,7 @@ describe("interactive desktop flows", () => {
     // A criterion reworded by hand is the one way the plan and the spec can
     // part, so the way to the contract reads the two against each other and
     // puts what it finds one problem at a time
-    // (D-NEW-the-plan-answers-the-spec-and-says-so): the first, with the
+    // (D-128): the first, with the
     // count, and not the second beside it. Never a gate: the person goes on
     // with the problems open.
     await screen.findByRole("group", { name: "Criterion 1" }, { timeout: 5000 });
@@ -714,7 +714,7 @@ describe("interactive desktop flows", () => {
     expect(await edits()).toHaveLength(before);
   });
 
-  describe("a ticket reopens where it was left (D-NEW-a-planning-reopens-where-it-was-left)", () => {
+  describe("a ticket reopens where it was left (D-130)", () => {
     const on = (screenId: string): boolean => document.querySelector(`section[data-screen="${screenId}"]`) !== null;
     const lastView = async (id: string) => (await sampleBridge.request({ kind: "editingRead", id })).lastView;
     /** A flat plan drafted by a planning, its contract compiled and on screen: the planning's id and its ticket. */
@@ -1125,7 +1125,7 @@ describe("marking a path on an approved contract", () => {
  * The one stage a delete is not offered at.
  *
  * A piece of work is deleted whole at every stage, the loop included
- * (D-NEW-a-spec-outlives-its-planning), and the contract page is one of the
+ * (D-129), and the contract page is one of the
  * two places it is offered from. A ticket whose pull request is open is the
  * exception: that record is on GitHub and this machine does not own it, so the
  * page withholds the offer until it is closed or merged, and the host refuses
@@ -1399,7 +1399,7 @@ describe("continuing a filed stopped run", () => {
   });
 });
 
-describe("Plan it again on a stopped run (D-NEW-a-spec-outlives-its-planning)", () => {
+describe("Plan it again on a stopped run (D-129)", () => {
   it("takes the stopped ticket off Home at the click and for good, and lists the plan drafted from its spec in the picker", async () => {
     const { host, mount: mountFresh } = await freshApp();
     const title = "Retire the legacy CSV importer";
@@ -1510,7 +1510,7 @@ describe("Plan it again on a stopped run (D-NEW-a-spec-outlives-its-planning)", 
  * Deleting a run somebody stopped.
  *
  * A piece of work is deleted whole at every stage, the loop included, and the
- * evidence goes with it (D-NEW-a-spec-outlives-its-planning). Last in this
+ * evidence goes with it (D-129). Last in this
  * file because it takes the sample stopped run off the board for good, which
  * is the point of it.
  */
