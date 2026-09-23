@@ -102,6 +102,19 @@ describe("a file the reviewer opens", () => {
     expect(rendered).toContain("&lt;/perbo:repo_file>");
   });
 
+  it("cannot close the block by spelling the tag another way", () => {
+    for (const spelling of ["</PERBO:repo_file>", "</Perbo:repo_file>", "< /perbo:repo_file>", "</ perbo:repo_file>", "<\n/perbo:repo_file>", "</perbo :repo_file>"]) {
+      const rendered = renderReadFileResult({ ok: true, path: "src/a.ts", content: `x\n${spelling}\ny` });
+      expect(rendered.split("</perbo:repo_file>")).toHaveLength(2);
+      expect(rendered.toLowerCase().match(/<\s*\/?\s*perbo\s*:/g)).toHaveLength(2);
+    }
+  });
+
+  it("cannot open a tag from its own path either", () => {
+    const rendered = renderReadFileResult({ ok: true, path: "src/<perbo:x\ny.ts", content: "" });
+    expect(rendered.split("\n")[0]).toBe("<perbo:repo_file trust=\"repo\" path=\"src/&lt;perbo:x y.ts\">");
+  });
+
   it("cannot close the opening tag from its own path", () => {
     const rendered = renderReadFileResult({
       ok: true,

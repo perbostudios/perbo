@@ -42,7 +42,7 @@ export const PROMPT_VERSION = "reviewer_v10";
  */
 const OPEN = (kind: string, trust: TrustTier, attrs: Record<string, string> = {}) => {
   const rendered = Object.entries(attrs)
-    .map(([key, value]) => ` ${key}="${value.replace(/"/g, "'").replace(/>/g, "&gt;")}"`)
+    .map(([key, value]) => ` ${key}="${attribute(value)}"`)
     .join("");
   return `<perbo:${kind} trust="${trust}"${rendered}>`;
 };
@@ -57,7 +57,22 @@ const CLOSE = (kind: string) => `</perbo:${kind}>`;
  * product escape the same thing.
  */
 function defang(body: string): string {
-  return body.replace(/<(?=\/?perbo:)/g, "&lt;");
+  return body.replace(DELIMITER_OPENING, "&lt;");
+}
+
+/**
+ * Where a delimiter begins, in any spelling a reader might take for one: any
+ * case, and whitespace anywhere between the bracket, the slash and the colon.
+ */
+const DELIMITER_OPENING = /<(?=\s*\/?\s*perbo\s*:)/gi;
+
+/**
+ * An attribute value stays on the opening line and inside its quotes: the
+ * quote and the closing bracket are escaped, a delimiter it carries is
+ * defanged, and a line break becomes a space.
+ */
+function attribute(value: string): string {
+  return defang(value.replace(/"/g, "'").replace(/>/g, "&gt;")).replace(/[\r\n]+/g, " ");
 }
 
 export class ContextBuilder {
