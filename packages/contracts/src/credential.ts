@@ -36,8 +36,10 @@ const VENDOR_PREFIXES = [
   { rule: "vendor.stripe_like", pattern: /\b[a-z]{0,4}(?:sk|pk)_(?:live|test)_[A-Za-z0-9]{12,}\b/g },
   // Twelve rather than a classic personal access token's forty: a
   // fine-grained, app or refresh token is shorter, and `ghp_` before twelve
-  // alphanumerics is not a shape ordinary code has.
-  { rule: "vendor.github", pattern: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{12,}\b/g },
+  // of these is not a shape ordinary code has. The class is the token's own,
+  // underscores and dashes included, because a value read to its first one is
+  // a value published from there on.
+  { rule: "vendor.github", pattern: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_-]{12,}\b/g },
   { rule: "vendor.github_pat", pattern: /\bgithub_pat_[A-Za-z0-9_]{40,}\b/g },
   { rule: "vendor.aws_access_key", pattern: /\bAKIA[0-9A-Z]{12,20}\b/g },
   { rule: "vendor.google_api", pattern: /\bAIza[0-9A-Za-z_-]{30,}\b/g },

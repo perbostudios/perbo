@@ -128,6 +128,16 @@ describe("the provider key prefixes", () => {
     expect(hits("ghs_0123456789ab and gho_0123456789ab")).toHaveLength(2);
   });
 
+  it("finds a GitHub token whose tail carries an underscore or a dash", () => {
+    // The token's own alphabet. Read as alphanumerics only, a value is found
+    // up to its first `_` or `-` and published from there on, or — where the
+    // twelfth character is followed by one — not found at all.
+    expect(hits("gh auth said ghp_scp200sentinel_token-value")).toEqual([
+      "ghp_scp200sentinel_token-value",
+    ]);
+    expect(hits("gho_0123456789ab-cdef_gh")).toEqual(["gho_0123456789ab-cdef_gh"]);
+  });
+
   it("names the rule that fired, so a false positive is attributable", () => {
     expect(findCredentials("sk-ant-api03-0123456789abcdefghij")[0]?.rule).toBe("vendor.anthropic");
     expect(findCredentials("sk-proj-0123456789abcdefghij")[0]?.rule).toBe("vendor.openai_project");

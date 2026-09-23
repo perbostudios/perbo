@@ -331,11 +331,15 @@ describe("desktop process supervision", () => {
     // detector knows the two vendor prefixes; the rule here knows `sk-` on its
     // own, which is too broad for a detector that rewrites findings.
     const cleaned = redact(
-      "rotate sk-ant-api03-0123456789abcdefghij, ghp_scp200sentineltokenvalue and sk-0123456789abcdef",
+      "rotate sk-ant-api03-0123456789abcdefghij, ghp_scp200sentineltokenvalue, " +
+        "ghp_scp200sentinel_token-value and sk-0123456789abcdef",
       {},
     );
     expect(cleaned).not.toContain("sk-ant-api03-0123456789abcdefghij");
     expect(cleaned).not.toContain("ghp_scp200sentineltokenvalue");
+    // A token carrying an underscore or a dash is one value, not a prefix to
+    // redact and a tail to print.
+    expect(cleaned).not.toContain("ghp_scp200sentinel_token-value");
     expect(cleaned).not.toContain("sk-0123456789abcdef");
   });
 
