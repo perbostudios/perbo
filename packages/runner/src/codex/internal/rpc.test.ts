@@ -92,12 +92,27 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     usageThreads,
     turnStarted: turnStarted.promise,
     environment: () => JSON.parse(readFileSync(environmentFile, "utf8")) as Record<string, string>,
-    messages: () =>
-      readFileSync(log, "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as Record<string, unknown>),
+    messages,
+    // The fake appends what the runner answers it on its own clock, so a reply
+    // is waited for rather than read off the log the instant the turn ends.
+    message: async (
+      matches: (message: Record<string, unknown>) => boolean,
+    ): Promise<Record<string, unknown> | undefined> => {
+      const deadline = Date.now() + 5000;
+      let found = messages().find(matches);
+      while (found === undefined && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        found = messages().find(matches);
+      }
+      return found;
+    },
   };
+  function messages(): Record<string, unknown>[] {
+    return readFileSync(log, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  }
 }
 
 describe("Codex native execution protocol", () => {
@@ -137,16 +152,13 @@ describe("Codex native execution protocol", () => {
     expect(f.session.credentialClass).toBe("subscription");
     expect(f.usage).toEqual([20]);
     expect(f.usageThreads).toEqual(["thread"]);
-    const messages = f.messages();
-    expect(messages.find((message) => message.id === "approval")).toMatchObject(
-      { result: { decision: "decline" } },
-    );
-    expect(
-      messages.find((message) => message.id === "capability"),
-    ).toMatchObject({ error: { code: -32601 } });
-    expect(
-      messages.find((message) => message.method === "thread/start"),
-    ).toMatchObject({
+    expect(await f.message((message) => message.id === "approval")).toMatchObject({
+      result: { decision: "decline" },
+    });
+    expect(await f.message((message) => message.id === "capability")).toMatchObject({
+      error: { code: -32601 },
+    });
+    expect(await f.message((message) => message.method === "thread/start")).toMatchObject({
       params: {
         cwd: f.root,
         sandbox: "read-only",
