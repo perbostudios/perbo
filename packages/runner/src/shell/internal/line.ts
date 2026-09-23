@@ -1178,9 +1178,7 @@ export function inspectSegments(
       segments: [],
     };
   }
-  const { texts, separators, balanced, bodies, unreadable } = scanSegments(command, {
-    comments: true,
-  });
+  const { texts, separators, balanced, bodies, unreadable } = scanSegments(command);
   const heredocs = heredocQueue(bodies);
   const findings: WriteFinding[] = [];
   if (unreadable !== null) {

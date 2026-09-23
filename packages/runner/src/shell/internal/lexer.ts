@@ -331,21 +331,97 @@ function readArithmeticCommand(text: string, from: number): number | null {
   return inner !== null && text[inner] === ")" ? inner + 1 : null;
 }
 
+/** The reason a line with a `#` this guard cannot read as a character is refused. */
+const COMMENT = "a comment cannot be told from an argument here";
+
 /**
- * What a `(` the scan stands inside opened: a list of commands (a subshell, a
- * group), a process substitution `<(…)`, or a parenthesis inside a word, as an
- * array assignment's `x=(…)` is. It decides what a `#` straight after the `)`
- * that closes it is: a comment after a list, a character after a process
- * substitution, and after a word's parenthesis a character to bash and a
- * comment to zsh.
+ * A character that, straight before a `#`, joins the `#` to the word it
+ * stands in, whatever surrounds them: a letter, a quote, a backslash, a `$`, a
+ * brace. A `#` after one is a character to bash and to zsh — part of a word,
+ * the parameter `$#`, a quoted or an escaped `#` — because a comment starts
+ * only where a `#` begins a word. After a blank, an operator, a parenthesis or
+ * a backtick, or at the start of the text, a `#` may begin one.
  */
-type Paren = "list" | "substitution" | "word";
+const JOINS_A_WORD = /[^\s;&|()<>`]/;
 
-/** Whether the next character starts a word, continues one, or is in dispute. */
-type Position = "start" | "inside" | "disputed";
+/** The first `#` from `from` to `end` that no character joins to a word, or -1. */
+function looseHash(text: string, from: number, end = text.length): number {
+  for (let i = text.indexOf("#", from); i !== -1 && i < end; i = text.indexOf("#", i + 1)) {
+    if (i === 0 || !JOINS_A_WORD.test(text[i - 1]!)) return i;
+  }
+  return -1;
+}
 
 /**
- * The same line with every heredoc body removed.
+ * What can make bash or zsh end an expansion somewhere other than where the
+ * readers above end it: a quote, an escape or a newline inside it, a nested
+ * expansion, a heredoc, a `case` pattern's lone `)`.
+ */
+const UNSURE_INSIDE = /["'`\\\n]|\$[({['"]|<<|\bcase\b/;
+
+/**
+ * Whether the inside of an expansion, `from` to `end`, is one whose end the
+ * readers above find where bash and zsh do: nothing in it is `UNSURE_INSIDE`,
+ * no bracket in it that `nested` names, and no `#` in it may start a comment.
+ */
+function certain(text: string, from: number, end: number, nested: RegExp | null): boolean {
+  const inside = text.slice(from, end);
+  return (
+    !UNSURE_INSIDE.test(inside) &&
+    (nested === null || !nested.test(inside)) &&
+    looseHash(text, from, end) === -1
+  );
+}
+
+/**
+ * Read the `$(…)`, `$((…))`, backtick pair, `${…}` or `$[…]` at `from`: where
+ * bash ends it, where zsh does, and whether that end is `certain`. Null where
+ * it has no end.
+ */
+function readExpansion(
+  text: string,
+  from: number,
+): { end: number; zsh: number; certain: boolean } | null {
+  if (text[from] === "`" || text.startsWith("$(", from)) {
+    const read = readSubstitution(text, from);
+    if (read === null) return null;
+    const backtick = text[from] === "`";
+    // Arithmetic's parentheses group, and the reader counts them.
+    const nested = backtick || text.startsWith("$((", from) ? null : /[()]/;
+    const sure = certain(text, from + (backtick ? 1 : 2), read.end - 1, nested);
+    return { end: read.end, zsh: read.end, certain: sure };
+  }
+  if (text.startsWith("${", from)) {
+    const read = readParameterExpansion(text, from);
+    if (read === null) return null;
+    const sure = read.zsh === read.bash && certain(text, from + 2, read.bash - 1, /[{}()]/);
+    return { end: read.bash, zsh: read.zsh, certain: sure };
+  }
+  const end = readBalanced(text, from + 1, "[", "]");
+  if (end === null) return null;
+  return { end, zsh: end, certain: certain(text, from + 2, end - 1, /[[\]]/) };
+}
+
+/** Whether an expansion `readExpansion` reads starts at `at`. */
+const opensExpansion = (text: string, at: number): boolean =>
+  text[at] === "`" || (text[at] === "$" && "([{".includes(text[at + 1] ?? "\0"));
+
+/**
+ * Whether the `$'…'` at `from` ends where a plain single quote does. In one, a
+ * backslash escapes the next character, a `'` among them; read as a single
+ * quote it ends at an escaped `'`, and what follows is quoted differently.
+ */
+function ansiQuoteReadsPlain(text: string, from: number): boolean {
+  const close = text.indexOf("'", from + 2);
+  if (close === -1) return true;
+  let escapes = 0;
+  while (text[close - 1 - escapes] === "\\") escapes += 1;
+  return escapes % 2 === 0;
+}
+
+/**
+ * The same line with every heredoc body removed, and why the line cannot be
+ * read, where it cannot.
  *
  * `cat >> file <<'EOF'` feeds the lines that follow to the command's standard
  * input. They are its data: a `>` or a `cd` written inside one redirects and
@@ -364,39 +440,59 @@ type Position = "start" | "inside" | "disputed";
  * where the command is an interpreter or a shell, that data **is** its program,
  * and the guard reads it as such (SCP-177).
  *
- * With `comments`, a comment comes out too: an unquoted `#` that starts a word
- * runs to the end of its line, and the shell runs none of it — not the words
- * after it, not an operator, and not a `<<` that would otherwise take the lines
- * after it as a body. A `#` inside a word, a quoted one and an escaped one are
- * characters, and so is one inside `${…}`, `$[…]` or `((…))`, or straight after
- * a process substitution's `)`. A backslash at the end of a comment continues
- * nothing, so the newline after it still ends the command.
+ * A comment is not taken out. Its words, read as a command's, can hide a write
+ * (`cp a /etc/x # -t out`), and where one starts is not something this can
+ * read with certainty: bash and zsh disagree on some, and an expansion misread
+ * before a `#` moves it. So a `#` that may start a comment makes the line
+ * `unreadable`, and a `#` is read as a character only where this proves it one:
+ * inside a quote, or continuing a word, as this reads them. That reading holds
+ * up to the first expansion or `$'…'` this cannot prove ends where the shells
+ * end it (`certain`); after one, a `#` is a character only where the character
+ * before it joins it to a word (`JOINS_A_WORD`).
  *
- * Where bash and zsh disagree whether a `#` opens a comment — straight after an
- * array's `)`, inside `[[ … ]]`, after the `}` bash ends a `${…}` at and zsh
- * does not — or whether a `<<` opens a heredoc, nothing is taken out and
- * `unreadable` says why: the line cannot be read the same way under both.
+ * Where bash and zsh disagree whether a `<<` opens a heredoc — after the `}`
+ * bash ends a `${…}` at and zsh does not — the line is `unreadable` too.
  */
-export function withoutHeredocBodies(
-  command: string,
-  options: { comments?: boolean } = {},
-): { text: string; bodies: HeredocBody[]; unreadable: string | null } {
+export function withoutHeredocBodies(command: string): {
+  text: string;
+  bodies: HeredocBody[];
+  unreadable: string | null;
+} {
   const bodies: HeredocBody[] = [];
-  const comments = options.comments === true;
-  if (!command.includes("<<") && !(comments && command.includes("#"))) {
+  if (!command.includes("<<") && !command.includes("#")) {
     return { text: command, bodies, unreadable: null };
   }
   let kept = "";
   let start = 0;
   let opened: Heredoc[] = [];
   let quote: string | null = null;
-  let at: Position = "start";
-  const parens: Paren[] = [];
-  /** True inside `[[ … ]]`. */
-  let condition = false;
+  /** Whether the next character starts a word or continues one. */
+  let at: "start" | "inside" = "start";
+  /** Where what is quoted stopped being certain, or -1. */
+  let unsure = -1;
   /** Where zsh ends the last `${…}` that bash ended sooner. */
   let zshUntil = -1;
   let unreadable: string | null = null;
+  const comment = (hash: number): string => {
+    const excerpt = JSON.stringify(command.slice(hash, hash + 24).split("\n")[0]);
+    if (unsure === -1) {
+      return `the # in ${excerpt} starts a word, so it may open a comment, and ${COMMENT}`;
+    }
+    const opener = JSON.stringify(
+      command.slice(unsure, command[unsure] === "`" ? unsure + 1 : unsure + 2),
+    );
+    return (
+      `the # in ${excerpt} may open a comment — what is quoted after the ${opener} before it ` +
+      `cannot be read with certainty — and ${COMMENT}`
+    );
+  };
+  /** From `from` on, only the character before a `#` proves it a character. */
+  const lose = (from: number) => {
+    if (unsure !== -1) return;
+    unsure = from;
+    const hash = looseHash(command, from);
+    if (hash !== -1) unreadable ??= comment(hash);
+  };
   let i = 0;
   while (i < command.length) {
     const ch = command[i]!;
@@ -414,6 +510,9 @@ export function withoutHeredocBodies(
       continue;
     }
     if (quote === null && (ch === '"' || ch === "'")) {
+      if (ch === "'" && command[i - 1] === "$" && !ansiQuoteReadsPlain(command, i - 1)) {
+        lose(i - 1);
+      }
       quote = ch;
       at = "inside";
       i += 1;
@@ -421,53 +520,34 @@ export function withoutHeredocBodies(
     }
     if (quote === '"') {
       if (ch === '"') quote = null;
+      else if (unsure === -1 && opensExpansion(command, i)) {
+        // The shells read an expansion inside double quotes whole, a `"` in it
+        // included, and this reads on to the next `"`: the same place only
+        // where the expansion's end is certain.
+        const read = readExpansion(command, i);
+        if (read === null || !read.certain) lose(i);
+      }
       i += 1;
       continue;
     }
-    if (ch === "`" || (ch === "$" && command[i + 1] === "(")) {
+    if (opensExpansion(command, i)) {
       // A heredoc inside a substitution belongs to the command the substitution
       // runs, which is read on its own.
-      const read = readSubstitution(command, i);
-      if (read === null) break;
+      const read = readExpansion(command, i);
+      if (read === null) {
+        lose(i);
+        break;
+      }
+      if (read.zsh > read.end) zshUntil = Math.max(zshUntil, read.zsh);
+      if (!read.certain) lose(i);
       at = "inside";
       i = read.end;
       continue;
     }
-    if (ch === "$" && command[i + 1] === "{") {
-      const read = readParameterExpansion(command, i);
-      if (read === null) break;
-      if (read.zsh > read.bash) zshUntil = Math.max(zshUntil, read.zsh);
+    if (ch === "#" && at === "start") {
+      if (unsure === -1) unreadable ??= comment(i);
       at = "inside";
-      i = read.bash;
-      continue;
-    }
-    if (ch === "$" && command[i + 1] === "[") {
-      const end = readBalanced(command, i + 1, "[", "]");
-      if (end === null) break;
-      at = "inside";
-      i = end;
-      continue;
-    }
-    if (comments && ch === "#" && at !== "inside") {
-      const disputed =
-        at === "disputed"
-          ? "a # straight after a ) that closes an array, a function's name or a case pattern"
-          : condition
-            ? "a # that starts a word inside [[ … ]]"
-            : i < zshUntil
-              ? "a # after the } that bash ends a ${…} at and zsh does not"
-              : null;
-      if (disputed !== null) {
-        unreadable ??= `${disputed} is a comment to one shell and a character to another`;
-        at = "inside";
-        i += 1;
-        continue;
-      }
-      const newline = command.indexOf("\n", i);
-      const end = newline === -1 ? command.length : newline;
-      kept += command.slice(start, i);
-      start = end;
-      i = end;
+      i += 1;
       continue;
     }
     if (ch === "<" && command[i + 1] === "<") {
@@ -502,48 +582,14 @@ export function withoutHeredocBodies(
       at = "start";
       continue;
     }
-    if (ch === "(") {
-      if (at !== "inside" && command[i + 1] === "(") {
-        const end = readArithmeticCommand(command, i);
-        if (end !== null) {
-          at = "start";
-          i = end;
-          continue;
-        }
+    if (ch === "(" && at !== "inside" && command[i + 1] === "(") {
+      const end = readArithmeticCommand(command, i);
+      if (end !== null) {
+        if (!certain(command, i + 2, end - 2, null)) lose(i);
+        at = "start";
+        i = end;
+        continue;
       }
-      const before = command[i - 1];
-      parens.push(
-        at === "inside" ? "word" : before === "<" || before === ">" ? "substitution" : "list",
-      );
-      at = "start";
-      i += 1;
-      continue;
-    }
-    if (ch === ")") {
-      // A `)` that closes nothing this scan opened — a `case` pattern's, or
-      // one a misread `case` inside a substitution left over — closes what
-      // this cannot name.
-      const closed = parens.pop();
-      at = closed === "list" ? "start" : closed === "substitution" ? "inside" : "disputed";
-      i += 1;
-      continue;
-    }
-    if (at !== "inside" && command.startsWith("[[", i) && /\s/.test(command[i + 2] ?? "")) {
-      condition = true;
-      at = "inside";
-      i += 2;
-      continue;
-    }
-    if (
-      condition &&
-      at !== "inside" &&
-      command.startsWith("]]", i) &&
-      /^(?:$|[\s;&|)])/.test(command.slice(i + 2, i + 3))
-    ) {
-      condition = false;
-      at = "inside";
-      i += 2;
-      continue;
     }
     at = /\s/.test(ch) || WORD_BREAK.has(ch) ? "start" : "inside";
     i += 1;
@@ -575,22 +621,18 @@ export function heredocQueue(bodies: readonly HeredocBody[]): Map<string, Heredo
  * Splitting is quote-aware: a separator inside `"…"`, `'…'`, a `$(…)`, a
  * backtick pair or a subshell is part of a command, not a boundary. Heredoc
  * bodies come out before anything else is read, because they are input rather
- * than command text (SCP-174), and so do comments where `comments` is set. Line
- * continuations are joined next, because `git branch \<newline> -D main`
- * deletes a branch.
+ * than command text (SCP-174). Line continuations are joined next, because
+ * `git branch \<newline> -D main` deletes a branch.
  */
-export function scanSegments(
-  command: string,
-  options: { comments?: boolean } = {},
-): {
+export function scanSegments(command: string): {
   texts: string[];
   separators: string[];
   balanced: boolean;
   bodies: HeredocBody[];
-  /** Why the shells disagree on what the line runs, where they do. */
+  /** Why the line cannot be read, where it cannot (`withoutHeredocBodies`). */
   unreadable: string | null;
 } {
-  const read = withoutHeredocBodies(command, options);
+  const read = withoutHeredocBodies(command);
   const bodies = read.bodies;
   const text = read.text.replace(/\\\r?\n/g, " ");
   const texts: string[] = [];

@@ -45,8 +45,15 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
   "xargs -i rm {}",
 ];
 
-/** The same wrapper where the line spells the destination, on both paths. */
-const DESTINATION_ON_THE_LINE = ["xargs -I{} cp {} sub", "xargs -0 -n1 cp -t sub"];
+/**
+ * The same wrapper where the line spells the destination, and a `#` read as a
+ * character, on both paths.
+ */
+const DESTINATION_ON_THE_LINE = [
+  "xargs -I{} cp {} sub",
+  "xargs -0 -n1 cp -t sub",
+  "cp a b#c '#' sub",
+];
 
 /** Writes outside the worktree that a misreading of the line would hide, on both paths. */
 const MISREAD = [
@@ -58,6 +65,9 @@ const MISREAD = [
   "(( 1 #)); cp a /etc/x",
   // A `#` bash and zsh disagree on.
   "cp a /etc/x ${x:+{a} #} -t sub",
+  // A `"` inside an expansion inside double quotes, read as closing them.
+  'echo "$(echo " #")"; cp a /etc/x',
+  `cp a "$(echo '"')/../../etc" #' b'`,
   // A `find -exec` terminator read as the end of a writer's operands.
   "cp a sub + /etc",
   "cp a sub ';' /etc",
