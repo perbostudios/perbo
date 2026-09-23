@@ -33,6 +33,7 @@ A new ADR is written on its branch as `NEW-<label>.md`, with the heading `# ADR-
 | [0038](0038-subagents.md) | The executor may delegate to subagents (not built) |
 | [NEW-command-line-edge](NEW-command-line-edge.md) | A command is a typed function; argv lives at the edge |
 | [NEW-package-interface](NEW-package-interface.md) | Every package states its interface and keeps an interior |
+| [NEW-git-and-gh-module](NEW-git-and-gh-module.md) | One module starts every git and gh process |
 
 ## Template
 

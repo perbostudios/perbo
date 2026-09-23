@@ -112,7 +112,7 @@ export function rowMark(
     standing: standing.find((entry) => covers(entry.path, path)) ?? null,
     via:
       form.draft.prohibited.find(
-        (entry) => entry !== glob && entry.endsWith("/**") && path.startsWith(entry.slice(0, -2)),
+        (entry) => entry !== glob && entry.endsWith("/**") && matchesAny(probe(path), [entry]),
       ) ?? null,
   };
 }

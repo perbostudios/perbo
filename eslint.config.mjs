@@ -34,6 +34,34 @@ const NO_TRANSPORT_PROCESS_EXECUTION = {
 };
 
 /**
+ * One module starts every git and gh process (D-NEW-one-git-module,
+ * ADR-NEW-git-and-gh-module). A call here takes one of two forms — a binary
+ * followed by its arguments, or one array of words — so the ban reads the
+ * first word of each. A binary a variable names is out of its reach, and the
+ * module is where a variable that holds one lives.
+ */
+const NO_GIT_OR_GH_PROCESS = {
+  selector:
+    "CallExpression[callee.name=/^(execFile|execFileSync|spawn|spawnSync|run|runOrThrow|runSync)$/]" +
+    ":matches([arguments.0.value=/^(git|gh)$/], [arguments.0.elements.0.value=/^(git|gh)$/])",
+  message:
+    "git and gh go through @perbo/workspace's repository module: argv only, in the runner's " +
+    "allow-listed environment, with prompts off (D-NEW-one-git-module).",
+};
+
+/**
+ * Where one starts instead: the module itself, and the write guard's replay of
+ * the agent's own push, which repeats the agent's global flags in the agent's
+ * environment and so cannot be said through the typed interface. The fixture
+ * repositories the tests build are a test's own git, and the rule reaches no
+ * test or `test-support/` file to begin with.
+ */
+const STARTS_GIT_OR_GH = [
+  "packages/workspace/src/repository/**",
+  "packages/runner/src/push-remote.ts",
+];
+
+/**
  * A package states its interface by name, and a module keeps an interior
  * (ADR-NEW-package-interface; the layout is in docs/07 "Package layout").
  * `export *` re-exports whatever a file happens to hold, so the interface is
@@ -94,9 +122,12 @@ const IN_PROCESS_CALLERS = {
   ],
 };
 
-/** A module's fakes are for its tests; the build never emits them. */
+/**
+ * A module's fakes are for its tests, and so is `@perbo/test-support`, the
+ * package of fakes every package's tests share; the build never emits either.
+ */
 const NO_TEST_SUPPORT = {
-  regex: "(^|/)test-support/",
+  regex: "(^|/)test-support(/|$)",
   message: "Production code imports no test code (docs/07 Package layout).",
 };
 
@@ -104,6 +135,38 @@ const NO_TEST_MODULE = {
   regex: "\\.test\\.js$",
   message: "Production code imports no test code (docs/07 Package layout).",
 };
+
+/**
+ * `apps/desktop/src` is three layers: the host, which has Node and the
+ * person's credentials; the renderer, which is a browser; and `shared/`, the
+ * protocol and the readings both of them hold. The first two reach each other
+ * only through the third, and the third reaches neither, so what crosses is
+ * what the protocol says and nothing else (docs/07 "Package layout").
+ */
+const DESKTOP_LAYERS_MEET =
+  "The host and the renderer meet in `shared/`, which imports neither (docs/07 Package layout).";
+
+const NO_HOST_LAYER = { regex: "(^|/)host/", message: DESKTOP_LAYERS_MEET };
+const NO_RENDERER_LAYER = { regex: "(^|/)renderer/", message: DESKTOP_LAYERS_MEET };
+
+/**
+ * What a browser bundles: the renderer and the preview it runs in, `shared/`,
+ * which the renderer imports, and the planning modules the renderer reaches.
+ * `packages/planning/src/browser.test.ts` and
+ * `apps/desktop/src/renderer/browser-imports.test.ts` hold the same invariant
+ * by bundling; this says it at the import, where it is written.
+ */
+const BROWSER_BUNDLED = [
+  "apps/desktop/src/renderer/**",
+  "apps/desktop/src/shared/**",
+  "apps/desktop/src/sample-host/**",
+  "packages/planning/src/browser.ts",
+  "packages/planning/src/errors.ts",
+  "packages/planning/src/graph-edit.ts",
+  "packages/planning/src/impact.ts",
+  "packages/planning/src/node-page-text.ts",
+  "packages/planning/src/spec-text.ts",
+];
 
 /** Where a package's interface and its modules live. */
 const SOURCE = ["**/src/**"];
@@ -121,6 +184,17 @@ const PRODUCTION_SOURCE_ONLY = {
 export const EXPORT_ALL_BURN_DOWN = [
   "packages/review/src/index.ts",
 ];
+
+/**
+ * The git and gh ban, over one zone's production source. It repeats the bans
+ * that zone already carries, because this object replaces the rule's options
+ * for the files it names.
+ */
+const startsNoGitOrGh = (files, ...syntax) => ({
+  files,
+  ignores: [...PRODUCTION_SOURCE_ONLY.ignores, ...STARTS_GIT_OR_GH, ...EXPORT_ALL_BURN_DOWN],
+  rules: { "no-restricted-syntax": ["error", ...syntax, NO_GIT_OR_GH_PROCESS] },
+});
 
 export default tseslint.config(
   {
@@ -196,6 +270,17 @@ export default tseslint.config(
       "no-restricted-syntax": ["error", NO_SHELL_STRING, NO_EXPORT_ALL],
     },
   },
+  // One module starts every git and gh process, in every zone: the source at
+  // large, the reviewer's, the model's and the two transports', each keeping
+  // what it already refused.
+  startsNoGitOrGh(SOURCE, NO_SHELL_STRING, NO_EXPORT_ALL),
+  startsNoGitOrGh(["packages/review/src/**"], NO_PROCESS_EXECUTION, NO_EXPORT_ALL),
+  startsNoGitOrGh(["packages/model/src/**"], NO_TRANSPORT_PROCESS_EXECUTION, NO_EXPORT_ALL),
+  startsNoGitOrGh(
+    ["packages/model/src/claude-cli.ts", "packages/model/src/codex-cli.ts"],
+    NO_SHELL_STRING,
+    NO_EXPORT_ALL,
+  ),
   {
     // A package is imported by its name, and a module's interior is its own.
     files: SOURCE,
@@ -240,6 +325,85 @@ export default tseslint.config(
             NO_TEST_SUPPORT,
             NO_TEST_MODULE,
             NO_COMMAND_LINE_EDGE,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // A browser bundle takes values from a package's `./browser` surface: the
+    // root entry reaches `node:` modules and would pull them in. A type is
+    // erased, so it crosses. Its own rule, so what every source file is held
+    // to stands unchanged beside it.
+    files: BROWSER_BUNDLED,
+    ...PRODUCTION_SOURCE_ONLY,
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          paths: ["@perbo/contracts", "@perbo/planning"].map((name) => ({
+            name,
+            allowTypeImports: true,
+            message: `A browser bundle takes values from ${name}/browser; the root imports node: modules.`,
+          })),
+        },
+      ],
+    },
+  },
+  // The desktop's three layers. Each repeats what every source file is held
+  // to, because this object replaces the rule's options for the files it
+  // names, and each ignores the tests and fakes that drive one layer from
+  // another.
+  {
+    files: ["apps/desktop/src/renderer/**"],
+    ...PRODUCTION_SOURCE_ONLY,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            NO_FOREIGN_INTERIOR,
+            NO_DEEP_PACKAGE_IMPORT,
+            NO_TEST_SUPPORT,
+            NO_TEST_MODULE,
+            NO_HOST_LAYER,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["apps/desktop/src/host/**"],
+    ...PRODUCTION_SOURCE_ONLY,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            NO_FOREIGN_INTERIOR,
+            NO_DEEP_PACKAGE_IMPORT,
+            NO_TEST_SUPPORT,
+            NO_TEST_MODULE,
+            NO_RENDERER_LAYER,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["apps/desktop/src/shared/**"],
+    ...PRODUCTION_SOURCE_ONLY,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            NO_FOREIGN_INTERIOR,
+            NO_DEEP_PACKAGE_IMPORT,
+            NO_TEST_SUPPORT,
+            NO_TEST_MODULE,
+            NO_HOST_LAYER,
+            NO_RENDERER_LAYER,
           ],
         },
       ],
