@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { findCredentials } from "./credential.js";
 
 /**
  * The A2b permission profile and the prohibited-action list
@@ -196,7 +197,7 @@ export function isCredentialEnvName(name: string): boolean {
  * *reading* side, because a value that must not be forwarded must also not be
  * printed.
  */
-const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL/i;
+const SECRET_NAME = /API_?KEY|KEY$|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL/i;
 
 /** Below this a value is a setting, not a credential, and matching it would mangle prose. */
 const MIN_SECRET_LENGTH = 8;
@@ -214,7 +215,8 @@ export function credentialValuesOf(env: NodeJS.ProcessEnv): string[] {
   const values = new Set<string>();
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined || value.length < MIN_SECRET_LENGTH) continue;
-    if (isCredentialEnvName(name) || SECRET_NAME.test(name)) values.add(value);
+    if (SECRET_NAME.test(name)) values.add(value);
+    else if (isCredentialEnvName(name) && findCredentials(value).length > 0) values.add(value);
   }
   return [...values].sort((a, b) => b.length - a.length);
 }
