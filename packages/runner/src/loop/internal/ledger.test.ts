@@ -64,6 +64,24 @@ describe("what a ticket has spent", () => {
     expect(() => ledger(record([unknown])).spend()).toThrow(/a_basis_from_elsewhere/);
   });
 
+  it("refuses that record when the ledger is built, before the run spends anything", () => {
+    const known = attempt({ attempt_id: "att_00000000000000d2", cost_micros: 700_000 });
+    const unknown = { ...known, usage: { ...known.usage, cost_basis: "a_basis_from_elsewhere" } };
+
+    expect(() => ledger(record([unknown]))).toThrow(/att_00000000000000d2.*a_basis_from_elsewhere/);
+  });
+
+  it("leaves a subscription attempt's cost basis alone, known or not", () => {
+    const known = attempt({
+      attempt_id: "att_00000000000000d3",
+      credential_class: "subscription",
+      cost_micros: 700_000,
+    });
+    const unknown = { ...known, usage: { ...known.usage, cost_basis: "a_basis_from_elsewhere" } };
+
+    expect(ledger(record([unknown])).spend()).toEqual({ micros: 0, priced: 0, unpriced: 0 });
+  });
+
   it("adds what the ticket's record already holds to what this run has made", () => {
     const run = ledger(record([attempt({ attempt_id: "att_00000000000000b1", cost_micros: 250_000 })]));
     run.addAttempt(attempt({ attempt_id: "att_00000000000000b2", cost_micros: 250_000 }), null);
