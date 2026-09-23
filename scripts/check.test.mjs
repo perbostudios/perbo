@@ -231,6 +231,14 @@ test("--base and --head override the range and skip git entirely", () => {
   assert.equal(runner.calls.filter((call) => call.kind === "capture").length, 0);
 });
 
+test("a value flag given twice is refused rather than the last one winning", () => {
+  assert.throws(
+    () => parseArgs(["--filter", "@perbo/cli", "--filter", "@perbo/desktop"]),
+    /--filter is given once; run the gate once per package/,
+  );
+  assert.throws(() => parseArgs(["--corpus", "a", "--corpus=b"]), /--corpus is given once/);
+});
+
 test("--base without --head, and a base that is not a SHA, are refused", () => {
   assert.equal(gate(["protected-paths", "--base", "aaaaaaa"]).code, 2);
   assert.equal(gate(["protected-paths", "--base", "origin/main", "--head", "HEAD"]).code, 2);

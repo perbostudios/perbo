@@ -354,6 +354,14 @@ export function parseArgs(argv) {
     } else if (takesValue.has(arg)) {
       const value = inline ?? argv[(i += 1)];
       if (value === undefined) throw new UsageError(`${arg} needs a value`, stageHelp());
+      // One value each: a second `--filter` would otherwise replace the first
+      // and gate one package while the command line names two.
+      if (options[arg.slice(2)] !== null) {
+        throw new UsageError(
+          `${arg} is given once; run the gate once per ${arg === "--filter" ? "package" : "value"}`,
+          stageHelp(),
+        );
+      }
       options[arg.slice(2)] = value;
     } else if (arg.startsWith("-")) {
       throw new UsageError(`Unknown flag: ${arg}`, stageHelp());
