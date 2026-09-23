@@ -63,12 +63,24 @@ const SUBSTITUTED_INTO_A_NESTED_COMMAND = [
   "echo 'rm /etc/x' | xargs -J % sh -c %",
 ];
 
+/**
+ * Destinations outside the writer table, on both paths. `sudo -D` is left to
+ * the shell module's own tests: the deny list refuses `sudo` before the write
+ * guard reads it.
+ */
+const BEYOND_THE_WRITER_TABLE = [
+  "echo /etc/x | xargs ln -s a",
+  "echo /etc | xargs -J % git -C % clean -fdx",
+  "time -o /etc/x ls",
+];
+
 describe("a write neither executor can see the destination of", () => {
   for (const command of [
     ...FROM_STANDARD_INPUT,
     ...SUBSTITUTED_FOR_THE_DESTINATION,
     ...MISREAD,
     ...SUBSTITUTED_INTO_A_NESTED_COMMAND,
+    ...BEYOND_THE_WRITER_TABLE,
   ]) {
     it(`is refused by the hook and by Codex — ${command}`, () => {
       const hook = judgePreToolCall(

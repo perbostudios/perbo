@@ -1,3 +1,4 @@
+import type { WriteFinding } from "./destination.js";
 import type { StdinSource, Word } from "./lexer.js";
 import type { Cwd, ResolvedScope } from "./scope.js";
 
@@ -31,6 +32,33 @@ export interface SuppliedOperands {
    * operand is, the words are appended after all (BSD `xargs -J`).
    */
   wholeWord: boolean;
+}
+
+/** Whether the wrapper in front substitutes the words it reads into this one. */
+export const carries = (supplied: SuppliedOperands | undefined, value: string): boolean =>
+  supplied !== undefined &&
+  supplied.placeholder !== null &&
+  (supplied.wholeWord ? value === supplied.placeholder : value.includes(supplied.placeholder));
+
+/**
+ * A destination the wrapper in front supplies rather than the line — appended
+ * to the command or substituted for its placeholder — which is not a path this
+ * guard can resolve.
+ */
+export function suppliedDestination(
+  label: string,
+  supplied: SuppliedOperands,
+  segment: string,
+): WriteFinding {
+  const how =
+    supplied.placeholder === null
+      ? `${supplied.wrapper} appends the words it reads from standard input to this command`
+      : `${supplied.wrapper} substitutes the words it reads from standard input for ${supplied.placeholder}`;
+  return {
+    detail: `${label} cannot be resolved — ${how}, and they are not on the line: ${segment.slice(0, 200)}`,
+    target: null,
+    resolved: null,
+  };
 }
 
 export const basename = (word: string) => word.slice(word.lastIndexOf("/") + 1);

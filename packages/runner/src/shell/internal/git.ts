@@ -1,4 +1,4 @@
-import type { Context } from "./command.js";
+import { carries, suppliedDestination, type Context } from "./command.js";
 import { judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
 import type { Word } from "./lexer.js";
 
@@ -28,7 +28,14 @@ const GIT_GLOBAL_VALUES = new Set([
   "-c", "--exec-path", "--namespace", "--super-prefix", "--config-env", "--attr-source",
 ]);
 
-/** Judge the directories a `git` command writes into. */
+/**
+ * Judge the directories a `git` command writes into.
+ *
+ * Behind a wrapper that supplies words from its standard input, a directory
+ * those words fill — a `-C` its placeholder stands in, or the destination of a
+ * `clone`, an `init` or a `worktree add` the line leaves for appended words —
+ * is a path the line does not spell, and is refused as one.
+ */
 export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
   const directories: Word[] = [];
   let i = 0;
@@ -60,13 +67,21 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
     .slice(i + 1)
     .filter((word) => word.value.length > 0 && !word.value.startsWith("-"));
 
+  const supplied = context.supplied;
   const judge = (word: Word, label: string): WriteFinding[] =>
-    pathFinding(
-      label,
-      word,
-      judgeTarget(word.value, context.scope, context.cwd, true),
-      context.segment,
-    );
+    supplied !== undefined && carries(supplied, word.value)
+      ? [suppliedDestination(label, supplied, context.segment)]
+      : pathFinding(
+          label,
+          word,
+          judgeTarget(word.value, context.scope, context.cwd, true),
+          context.segment,
+        );
+  /** Where the line leaves the destination to words a wrapper appends. */
+  const appended = (label: string): WriteFinding[] =>
+    supplied !== undefined && supplied.placeholder === null
+      ? [suppliedDestination(label, supplied, context.segment)]
+      : [];
 
   const findings = directories.flatMap((directory) =>
     judge(directory, `the directory git ${verb} works in`),
@@ -74,14 +89,26 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
   // The verbs that name where a repository or a worktree lands. A `clone` with
   // one operand puts it under the directory the command runs in, which the
   // walk below has already judged.
-  if (verb === "clone" && operands.length >= 2) {
-    findings.push(...judge(operands[operands.length - 1]!, "the git clone destination"));
+  if (verb === "clone") {
+    findings.push(
+      ...(operands.length >= 2
+        ? judge(operands[operands.length - 1]!, "the git clone destination")
+        : appended("the git clone destination")),
+    );
   }
-  if (verb === "init" && operands.length >= 1) {
-    findings.push(...judge(operands[0]!, "the git init destination"));
+  if (verb === "init") {
+    findings.push(
+      ...(operands.length >= 1
+        ? judge(operands[0]!, "the git init destination")
+        : appended("the git init destination")),
+    );
   }
-  if (verb === "worktree" && operands[0]?.value === "add" && operands[1] !== undefined) {
-    findings.push(...judge(operands[1]!, "the git worktree destination"));
+  if (verb === "worktree" && operands[0]?.value === "add") {
+    findings.push(
+      ...(operands[1] !== undefined
+        ? judge(operands[1], "the git worktree destination")
+        : appended("the git worktree destination")),
+    );
   }
   return findings;
 }

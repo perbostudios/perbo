@@ -234,3 +234,60 @@ describe("a placeholder substituted into a nested command", () => {
     });
   }
 });
+
+/**
+ * The destinations a line reaches outside the writer table: a link, a `git`
+ * directory, the file `time -o` writes and the directory `sudo -D` runs in.
+ * Each is judged where the line spells it and refused where a wrapper in front
+ * fills it from its standard input, as a writer's operand is.
+ */
+const BEYOND_THE_WRITER_TABLE = [
+  "echo /etc/x | xargs ln -s a",
+  "echo /etc/x | xargs ln a",
+  "xargs ln -s -t links",
+  "xargs -I{} ln -s {} links/x",
+  "xargs -I{} ln -s a {}",
+  "echo /etc | xargs -J % git -C % clean -fdx",
+  "xargs -I{} git -C {} commit -m x",
+  "echo /etc/repo | xargs git init",
+  "echo https://example.com/x.git | xargs git clone",
+  "echo /etc/tree | xargs git worktree add",
+  "time -o /etc/x ls",
+  "time --output=/etc/x ls",
+  "xargs -I{} time -o {} ls",
+  "echo /etc/x | xargs -J % time -o % ls",
+  "sudo -D /etc rm x",
+  "sudo --chdir=/etc rm x",
+  "xargs -I{} sudo -D {} rm x",
+];
+
+/** The same shapes where what the line writes is inside, or is only read. */
+const WITHIN_OR_READ = [
+  // A hard link's target is read, not written through.
+  "xargs -I{} ln {} links/",
+  "xargs ln -t links",
+  "xargs -J % git -C % log",
+  "xargs git clean -fdx",
+  "time -o out/timing.txt ls",
+  "sudo -D src rm x",
+];
+
+describe("a destination the writer table does not name", () => {
+  for (const command of BEYOND_THE_WRITER_TABLE) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+    });
+  }
+
+  for (const command of WITHIN_OR_READ) {
+    it(`allows ${command}`, () => {
+      expect(decision(command), command).toBe("allowed");
+    });
+  }
+
+  it("names the wrapper that fills one from its standard input", () => {
+    for (const command of BEYOND_THE_WRITER_TABLE.filter((line) => line.includes("xargs"))) {
+      expect(sentence(command), command).toContain("xargs");
+    }
+  });
+});

@@ -1,7 +1,9 @@
 import {
   basename,
+  carries as carriesInto,
   isAssignment,
   optionSet,
+  suppliedDestination,
   type Context,
   type SuppliedOperands,
 } from "./command.js";
@@ -313,12 +315,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   };
 
   /** Whether the wrapper in front substitutes its input into this word. */
-  const carries = (word: Word): boolean =>
-    supplied !== undefined &&
-    supplied.placeholder !== null &&
-    (supplied.wholeWord
-      ? word.value === supplied.placeholder
-      : word.value.includes(supplied.placeholder));
+  const carries = (word: Word): boolean => carriesInto(supplied, word.value);
 
   /**
    * A command line a nested shell runs, with the wrapper in front substituting
@@ -380,6 +377,17 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     return null;
   };
 
+  /** A file the wrapper itself writes — `time -o` — judged as any destination is. */
+  const wrote = (operand: Word, option: string, wrapper: string): void => {
+    const label = `the file ${wrapper} ${option} writes`;
+    if (supplied !== undefined && carries(operand)) {
+      findings.push(suppliedDestination(label, supplied, context.segment));
+      return;
+    }
+    const destination = judgeTarget(operand.value, context.scope, cwd, true);
+    findings.push(...pathFinding(label, operand, destination, context.segment));
+  };
+
   /**
    * Consume a wrapper's leading options. Returns an Analysis when the wrapper
    * cannot be seen through, and null when the next word names the program.
@@ -389,6 +397,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     const values = optionSet(spec.values);
     const commands = optionSet(spec.commands);
     const dirs = optionSet(spec.dirs);
+    const destinations = optionSet(spec.destinations);
     const refused = optionSet(spec.refuse);
     const substitutes = optionSet(spec.substitutes);
     const wholeWord = optionSet(spec.substitutesWholeWord);
@@ -416,6 +425,13 @@ function analyzeWords(words: Word[], context: Context): Analysis {
           const operand = attached === null ? words[i + 1] : { ...word, raw: attached, value: attached };
           const stop = moveInto(operand, name, wrapper);
           if (stop !== null) return stop;
+          i += attached === null ? 2 : 1;
+          continue;
+        }
+        if (destinations.has(name)) {
+          const operand = attached === null ? words[i + 1] : { ...word, raw: attached, value: attached };
+          if (operand === undefined) return unknownOption(raw, wrapper);
+          wrote(operand, name, wrapper);
           i += attached === null ? 2 : 1;
           continue;
         }
@@ -487,6 +503,13 @@ function analyzeWords(words: Word[], context: Context): Analysis {
           const operand = inline.length > 0 ? { ...word, raw: inline, value: inline } : words[i + 1];
           const stop = moveInto(operand, option, wrapper);
           if (stop !== null) return stop;
+          separate = inline.length === 0;
+          break;
+        }
+        if (destinations.has(option)) {
+          const operand = inline.length > 0 ? { ...word, raw: inline, value: inline } : words[i + 1];
+          if (operand === undefined) return unknownOption(option, wrapper);
+          wrote(operand, option, wrapper);
           separate = inline.length === 0;
           break;
         }
@@ -716,10 +739,10 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     } else if (verb === "ln") {
       programs.push(verb);
       mutating = true;
-      findings.push(...linkFindings(rest, { ...context, cwd }));
+      findings.push(...linkFindings(rest, { ...context, cwd, supplied }));
     } else if (verb === "git") {
       programs.push(verb);
-      findings.push(...gitFindings(rest, { ...context, cwd }));
+      findings.push(...gitFindings(rest, { ...context, cwd, supplied }));
     } else if (INTERPRETERS.has(verb)) {
       programs.push(verb);
       const inner = { ...context, cwd };

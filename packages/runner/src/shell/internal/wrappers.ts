@@ -20,6 +20,8 @@ export interface WrapperSpec {
   commands?: readonly string[];
   /** Options whose value is a directory the wrapped command runs in. */
   dirs?: readonly string[];
+  /** Options whose value is a file the wrapper itself writes, as `time -o`. */
+  destinations?: readonly string[];
   /** Options refused by name, because their operand hides a command. */
   refuse?: readonly string[];
   /**
@@ -61,14 +63,15 @@ export const WRAPPERS = new Map<string, WrapperSpec>([
   ["nice", { flags: ["--help", "--version"], values: ["-n", "--adjustment"], numeric: true }],
   ["ionice", { flags: ["-t", "-h", "--help"], values: ["-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid"] }],
   ["stdbuf", { flags: ["--help", "--version"], values: ["-i", "-o", "-e", "--input", "--output", "--error"] }],
-  ["time", { flags: ["-p", "-a", "-v", "-q", "--portability", "--append", "--verbose", "--quiet", "--help", "--version"], values: ["-o", "-f", "--output", "--format"] }],
+  ["time", { flags: ["-p", "-a", "-v", "-q", "--portability", "--append", "--verbose", "--quiet", "--help", "--version"], values: ["-f", "--format"], destinations: ["-o", "--output"] }],
   ["command", { flags: ["-p", "-v", "-V"] }],
   ["builtin", {}],
   ["exec", { flags: ["-c", "-l"], values: ["-a"] }],
   ["nohup", { flags: ["--help", "--version"] }],
   ["sudo", {
     flags: ["-b", "-E", "-e", "-H", "-i", "-K", "-k", "-l", "-n", "-P", "-S", "-s", "-V", "-v", "-A", "--background", "--edit", "--set-home", "--login", "--remove-timestamp", "--list", "--non-interactive", "--preserve-groups", "--stdin", "--shell", "--version", "--validate", "--askpass", "--reset-timestamp"],
-    values: ["-C", "-D", "-g", "-h", "-p", "-R", "-r", "-T", "-t", "-U", "-u", "-c", "--close-from", "--chdir", "--group", "--host", "--prompt", "--chroot", "--role", "--command-timeout", "--type", "--other-user", "--user"],
+    values: ["-C", "-g", "-h", "-p", "-R", "-r", "-T", "-t", "-U", "-u", "-c", "--close-from", "--group", "--host", "--prompt", "--chroot", "--role", "--command-timeout", "--type", "--other-user", "--user"],
+    dirs: ["-D", "--chdir"],
   }],
   ["doas", { flags: ["-n", "-s", "-L"], values: ["-a", "-C", "-u"] }],
   ["timeout", {

@@ -1,6 +1,6 @@
 import { lstatSync } from "node:fs";
 import { dirname } from "node:path";
-import { optionsPresent, type Context } from "./command.js";
+import { carries, optionsPresent, suppliedDestination, type Context } from "./command.js";
 import { judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
 import type { Word } from "./lexer.js";
 import type { Cwd } from "./scope.js";
@@ -15,6 +15,10 @@ import type { Cwd } from "./scope.js";
  * along a path, and this refuses the line that plants it. A relative target
  * resolves against the directory the link itself sits in, which is how the
  * kernel reads it.
+ *
+ * Behind a wrapper that supplies words from its standard input, a link name or
+ * a symbolic link's target that those words fill is a path the line does not
+ * spell, and is refused as one; a hard link's target is only read.
  */
 export function linkFindings(rest: Word[], context: Context): WriteFinding[] {
   const present = optionsPresent(rest);
@@ -52,8 +56,11 @@ export function linkFindings(rest: Word[], context: Context): WriteFinding[] {
     if (value.length > 0) operands.push(word);
   }
 
+  const supplied = context.supplied;
   const judge = (word: Word, label: string, cwd: Cwd): WriteFinding[] =>
-    pathFinding(label, word, judgeTarget(word.value, context.scope, cwd, true), context.segment);
+    supplied !== undefined && carries(supplied, word.value)
+      ? [suppliedDestination(label, supplied, context.segment)]
+      : pathFinding(label, word, judgeTarget(word.value, context.scope, cwd, true), context.segment);
 
   const findings: WriteFinding[] = [];
   // Where the link is made: the `-t` directory, the last operand of a two-part
@@ -62,6 +69,15 @@ export function linkFindings(rest: Word[], context: Context): WriteFinding[] {
   const targets =
     link === null || link === targetDirectory ? operands : operands.slice(0, -1);
   if (link !== null) findings.push(...judge(link, "the ln destination", context.cwd));
+  // Words a wrapper appends come last: the link itself, unless a `-t`
+  // directory holds it, and then more targets.
+  if (supplied !== undefined && supplied.placeholder === null) {
+    if (targetDirectory === null) {
+      findings.push(suppliedDestination("the ln destination", supplied, context.segment));
+    } else if (symbolic) {
+      findings.push(suppliedDestination("the ln -s target", supplied, context.segment));
+    }
+  }
 
   if (!symbolic) return findings;
   // A relative target resolves against the directory holding the link, which is
