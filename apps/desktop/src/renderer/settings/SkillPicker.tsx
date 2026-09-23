@@ -13,10 +13,6 @@ export function SkillPicker({
   return (
     <details className="skill-picker">
       <summary>Engineering skills · {selected.length} selected</summary>
-      <p className="small muted">
-        Matt Pocock’s skills. Choose up to three for the executor. Each run
-        records the version used.
-      </p>
       <div className="skill-options">
         {EXECUTOR_SKILLS.map((skill) => (
           <label key={skill.id} title={skill.description}>
@@ -32,10 +28,7 @@ export function SkillPicker({
                 )
               }
             />
-            <span>
-              <strong>{skill.label}</strong>
-              <span className="small muted">{skill.description}</span>
-            </span>
+            <strong>{skill.label}</strong>
           </label>
         ))}
       </div>

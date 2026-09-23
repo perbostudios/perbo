@@ -26,7 +26,7 @@
 
 **Credentials** stay owned by the provider CLIs, and the renderer never asks for them.
 
-**Merge and publication.** The person merges by default ([D-041](../11-open-decisions.md)), and publishing a branch or pull request needs the person's permission for that run.
+**Merge and publication.** The person merges by default ([D-041](../11-open-decisions.md)), and publishing a branch or pull request needs the person's permission for that run, carried from one run to the next only as [D-NEW-a-spec-outlives-its-planning](../11-open-decisions.md) says.
 
 ## Consequences and limits
 

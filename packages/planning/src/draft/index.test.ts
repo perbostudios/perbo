@@ -30,7 +30,7 @@ describe("draftContract", () => {
     const result = await draftContract(input(model));
     expect(result.draft).toEqual(validDraft);
     expect(result.model.prompt_version).toBe(DRAFT_PROMPT_VERSION);
-    expect(DRAFT_PROMPT_VERSION).toBe("draft_v4");
+    expect(DRAFT_PROMPT_VERSION).toBe("draft_v5");
     expect(result.model.provider).toBe("double");
     expect(result.model.model_id).toBe("scripted");
     expect(result.model.turns).toBe(1);
@@ -219,6 +219,7 @@ describe("the draft schema", () => {
         "acceptance_criteria",
         "depends_on",
         "edges",
+        "name",
         "nodes",
         "outcome",
         "proposed_scope",
@@ -227,8 +228,67 @@ describe("the draft schema", () => {
     );
     // One contract, whatever the size of the work: nothing to split it into.
     expect(schema.properties["children"]).toBeUndefined();
+    // A bound the parse holds must be a bound the transport states, or a draft
+    // the model was allowed to produce is one this throws away after the turn
+    // has been paid for.
+    const named = schema.properties["name"] as { minLength?: number; maxLength?: number };
+    expect(named.maxLength, "the cap ContractDraftSchema parses to").toBe(60);
+    expect(named.minLength).toBe(1);
+    expect(
+      ContractDraftSchema.safeParse({ ...validDraft, name: "x".repeat(named.maxLength!) }).success,
+      "a name exactly at the cap",
+    ).toBe(true);
+    expect(
+      ContractDraftSchema.safeParse({ ...validDraft, name: "x".repeat(named.maxLength! + 1) }).success,
+      "one past it",
+    ).toBe(false);
     const kinds = schema.properties["acceptance_criteria"]?.items?.properties?.["kind"]?.enum;
     expect(kinds).toEqual(["test", "artifact", "query", "metric"]);
+  });
+});
+
+describe("the name (D-NEW-a-ticket-is-named-apart-from-its-board)", () => {
+  const schemaDescription = (): string =>
+    (CONTRACT_DRAFT_JSON_SCHEMA as { properties: Record<string, { description: string }> }).properties["name"]!
+      .description;
+
+  it("asks for the fewest words that tell the work apart from every listed name, with no set length", async () => {
+    const model = scriptedDrafter([submits(validDraft)]);
+    await draftContract(input(model));
+    const system = model.requests[0]!.system;
+    for (const said of [system.replace(/\s+/g, " "), schemaDescription()]) {
+      expect(said).toMatch(/the fewest words that tell this work apart from every name/i);
+      expect(said).toContain("What it is, not what is being done to make it");
+      expect(said).toMatch(/the file or folder it lands in, ["']a single file["'], ["']app["'], ["']page["'], the repository/);
+      expect(said).toContain("No set length");
+      expect(said).toContain("Never a name already listed");
+      expect(said).not.toMatch(/two to five/i);
+    }
+    // Where it is told what the names block is.
+    expect(system.replace(/\s+/g, " ")).toContain(
+      'trust="repo" the names: what every other ticket in this repository is called',
+    );
+  });
+
+  it("shows every name given as repository data, one a line, and says so when there are none", async () => {
+    const model = scriptedDrafter([submits(validDraft)]);
+    await draftContract({ ...input(model), names: ["Snake on a walled board", "Twin-dial\nclock"] });
+    const user = String(model.requests[0]!.messages[0]!.content);
+    expect(user).toContain(
+      '<perbo:names trust="repo" repository="repo_webstore">\nSnake on a walled board\nTwin-dial clock\n</perbo:names>',
+    );
+
+    const none = scriptedDrafter([submits(validDraft)]);
+    await draftContract({ ...input(none), names: [] });
+    expect(String(none.requests[0]!.messages[0]!.content)).toContain(
+      '<perbo:names trust="repo" repository="repo_webstore">\n(no other ticket)\n</perbo:names>',
+    );
+  });
+
+  it("shows no names block where none was given", async () => {
+    const model = scriptedDrafter([submits(validDraft)]);
+    await draftContract(input(model));
+    expect(String(model.requests[0]!.messages[0]!.content)).not.toContain("perbo:names");
   });
 });
 

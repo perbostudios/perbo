@@ -11,9 +11,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { App } from "../shell/App.js";
 import { ContractScreen } from "./ContractScreen.js";
+import { LoopScreen } from "./LoopScreen.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import { setPlatformForTests } from "../../shared/shortcuts.js";
 import type { TaskContext } from "./task-context.js";
+import type { Job } from "../../shared/protocol.js";
 
 /**
  * What the desktop says stops a run (SCP-323, D-096).
@@ -126,5 +128,53 @@ describe("the moment General offers to interrupt you on", () => {
     expect(
       await screen.findByText("A run stops short — it stalls, or hits a ceiling you set"),
     ).toBeTruthy();
+  });
+});
+
+/** A run job scheduled and still going, as the moment after Approve leaves it. */
+function running(repoId: string, key: string): Job {
+  return {
+    id: "job-" + key,
+    repoId,
+    key,
+    kind: "run",
+    label: "Run engineering loop",
+    state: "running",
+    startedAt: "2026-01-01T00:00:00.000Z",
+    endedAt: null,
+    log: "",
+    resultKey: null,
+    error: null,
+    result: null,
+  };
+}
+
+/**
+ * SCP-336: the window between pressing Approve and the loop having anything
+ * to show. Approving runs a command, and the page opens while it is still
+ * running.
+ */
+describe("the wait while a contract is being approved", () => {
+  it("says what is happening instead of an empty loop at nothing per cent", async () => {
+    const context = await contractContext();
+    const { ticket } = context.detail;
+    // As the ticket stands the moment Approve is pressed: still in
+    // plan_review, with the run job scheduled and live.
+    context.detail.ticket = { ...ticket, state: "plan_review", approved_at: null };
+    context.workspace.jobs = [running(context.repoId, ticket.key)];
+    mount(<LoopScreen {...context} />);
+    expect(screen.getByText("Approving the contract")).toBeTruthy();
+    expect(screen.getByText(/Freezing the outcome/)).toBeTruthy();
+    // The page underneath says this, over a bar at nothing per cent.
+    expect(screen.queryByText("Ready to start the loop")).toBeNull();
+  });
+
+  it("gives way to the loop once the run is under way", async () => {
+    const context = await contractContext();
+    const { ticket } = context.detail;
+    context.detail.ticket = { ...ticket, state: "executing" };
+    context.workspace.jobs = [running(context.repoId, ticket.key)];
+    mount(<LoopScreen {...context} />);
+    expect(screen.queryByText("Approving the contract")).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ import {
   mergeSpecText,
   readSpecSections,
   renderSpec,
+  retitleSpec,
   SpecConflict,
   specSlug,
   type SpecRequirement,
@@ -200,4 +201,30 @@ export function writeSpecFile(args: {
     requirements: rendered.requirements,
     created: !existed,
   };
+}
+
+/**
+ * Set a spec's title to its ticket's name, in the file, leaving every other
+ * byte and the folder as they are (D-NEW-a-ticket-is-named-apart-from-its-board).
+ *
+ * The one writer of that rule: admission calls it when the drafter names the
+ * ticket, and the desktop when a person renames one still being planned. The
+ * name is display text, so it reaches the file's first heading and nothing
+ * else; the folder keeps the slug it was minted with
+ * ([ADR-0023](../../../docs/adr/0023-untrusted-context-boundary.md) §4).
+ * Returns the file as it now stands, so a caller recording its hash hashes
+ * what was written.
+ */
+export function retitleSpecFile(args: {
+  repositoryRoot: string;
+  /** The `spec.md`, repository-relative, as the admission record carries it. */
+  path: string;
+  title: string;
+}): string {
+  assertNoSymlink(args.repositoryRoot, args.path);
+  const absolute = join(resolve(args.repositoryRoot), ...args.path.split("/"));
+  const { markdown } = readSpecText(absolute);
+  const named = retitleSpec(markdown, args.title);
+  if (named !== markdown) writeFileSync(absolute, named);
+  return named;
 }

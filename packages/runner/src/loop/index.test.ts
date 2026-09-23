@@ -1865,6 +1865,78 @@ describe("the pull request the loop publishes", () => {
   }, 60_000);
 });
 
+describe("the reviewer's effort", () => {
+  it("reaches the claude CLI as --effort for the review and for the verifier", async () => {
+    const repo = runnerRepository(scratch);
+    const contract = makeContract();
+    contract.base.base_commit = repo.head;
+    const config = TicketRunConfigSchema.parse({
+      ...makeConfig(repo.dir),
+      reviewer_provider: "claude-cli",
+      reviewer_effort: "xhigh",
+    });
+
+    // A `claude` that records the argv of every call and fails it: what is
+    // under test is what the loop's transport asks for, not a verdict.
+    const bin = scratch("perbo-claude-");
+    const argvFile = join(bin, "argv.txt");
+    writeFileSync(
+      join(bin, "claude"),
+      ["#!/bin/sh", `printf '%s\\n' "$@" --- >> ${JSON.stringify(argvFile)}`, "exit 1", ""].join("\n"),
+      { mode: 0o755 },
+    );
+    const turnOnce = async (model: Model): Promise<void> => {
+      await model.turn({ system: "s", messages: [{ role: "user", content: "x" }], forceSubmit: false }).catch(() => undefined);
+      await model.dispose?.();
+    };
+
+    const agent = agentDouble((worktree, round) => {
+      mkdirSync(join(worktree, "src"), { recursive: true });
+      writeFileSync(join(worktree, "src", `feature${round}.ts`), "export const total = 1;\n");
+    });
+    const path = process.env.PATH;
+    let result;
+    try {
+      process.env.PATH = `${bin}:${path ?? ""}`;
+      result = await runTicket({
+        config,
+        contract,
+        hooks: {
+          agent: agent.run as never,
+          review: (async (input: { model: Model }) => {
+            await turnOnce(input.model);
+            return {
+              artifact: makeReview({ review_id: "rev_0000000000000001", decision: "remediable", findings: [finding()] }),
+              bundle: { prompt_version: "reviewer_v2", system_prompt: "s", turns: [], files_read: [], rejected_verdicts: [] },
+            };
+          }) as never,
+          verify: (async (input: { model: Model; findings: Array<{ key: string }> }) => {
+            await turnOnce(input.model);
+            return {
+              prompt_version: "closure_verify_v1",
+              per_finding: input.findings.map(({ key }) => ({ finding_key: key, status: "closed", pointer: "src/feature1.ts" })),
+              deterministic_failure: null,
+              all_closed: true,
+              open_keys: [],
+              usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+              cost_micros: 30,
+              cost_basis: "provider_list_estimate",
+            };
+          }) as never,
+        },
+      });
+    } finally {
+      process.env.PATH = path;
+    }
+
+    expect(result.outcome).toBe("approved");
+    const calls = readFileSync(argvFile, "utf8").split("---\n").filter((call) => call !== "");
+    // One call for the review and one for the verifier, each at the level set.
+    expect(calls).toHaveLength(2);
+    for (const call of calls) expect(call).toContain("--effort\nxhigh\n");
+  }, 60_000);
+});
+
 /**
  * SCP-172, end to end: what the loop does about a model transport that gave up.
  *

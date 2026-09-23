@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { Detail, Snapshot, TaskRow } from "../../shared/protocol.js";
 import type { TaskView } from "../shell/route.js";
 import { runnerProgress } from "../../shared/runner-progress.js";
-import { exclusiveJob, heldRepository, isLive } from "../../shared/jobs.js";
+import { exclusiveJob, heldRepository, isRun, ticketRun } from "../../shared/jobs.js";
+import { GIVEN_UP_STATES, JOURNEY_END_STATES, isFiled, isPreLoop } from "../../shared/archive.js";
 
 export const displayKey = (key: string): string => "#" + key.replace(/^PRB-/, "");
 export const stageName = (stage: number): string =>
@@ -10,11 +11,66 @@ export const stageName = (stage: number): string =>
 const stageOf = (state: string): number =>
   ["pr_open", "independent_review"].includes(state) ? 6 : state === "changes_requested" ? 4 :
   state === "verifying" ? 3 : ["executing", "provisioning"].includes(state) ? 2 : 1;
-const inProgress = ["provisioning", "executing", "verifying", "independent_review"];
 const closureSchema = z.object({
   all_closed: z.boolean(), deterministic_failure: z.string().nullable(), open_keys: z.array(z.string()),
   per_finding: z.array(z.object({ finding_key: z.string(), status: z.enum(["closed", "not_closed", "cannot_tell"]), pointer: z.string() })),
 });
+
+/** Where a Home ticket stands, in the order the rail's Home badge shows them. */
+export const HOME_TONES = ["yellow", "red", "green"] as const;
+export type HomeTone = (typeof HOME_TONES)[number];
+/** What a count of Home tickets at each tone says, on the rail's Home badge and in Home's header. */
+export const HOME_TONE_LABELS: Record<HomeTone, (count: number) => string> = {
+  yellow: (count) => `${count} ${count === 1 ? "ticket needs" : "tickets need"} action`,
+  red: (count) => `${count} stopped`,
+  green: (count) => `${count} completed`,
+};
+
+/**
+ * Where a Home ticket stands (S4), the one answer its card's colour, the
+ * header's counts and the rail's Home badge all read: yellow where a finding
+ * waits on the person's answer mid-loop; red where the loop stopped and will
+ * not reach the end on its own; green where the journey ended — a pull request
+ * opened, merged or closed without merge, or a local run finished with no pull
+ * request to merge; none for every other part of the loop.
+ *
+ * A repository's records being read again does not move it, so nothing that
+ * shows it blinks while they are: a run that completed while its ticket still
+ * reads mid-loop is the record not yet read, and is not taken for a stop.
+ */
+export function homeTone(
+  workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
+  row: Pick<TaskRow, "repoId" | "ticket">,
+): HomeTone | null {
+  const { ticket } = row;
+  const { jobs, active, stoppedShort } = ticketRun(workspace, row);
+  const settling = jobs.filter(isRun).at(-1)?.state === "completed" && workspace.refreshingRepos?.includes(row.repoId);
+  if ((active?.state === "stopping" && isRun(active)) || (stoppedShort && !settling) || (!active && GIVEN_UP_STATES.includes(ticket.state))) return "red";
+  if (!active && ticket.state === "changes_requested") return "yellow";
+  return JOURNEY_END_STATES.includes(ticket.state) ? "green" : null;
+}
+
+/**
+ * The tickets Home lists. Home is the board for work the loop is carrying: a
+ * plan nobody has approved is still being planned, and it is reached from the
+ * Create picker, which is where every pre-loop thing lives — a name, a spec,
+ * and a plan drafted and not yet approved (D-NEW-a-spec-outlives-its-planning).
+ */
+export const homeRows = (workspace: Pick<Snapshot, "tasks" | "archived" | "jobs">): TaskRow[] =>
+  workspace.tasks.filter((row) => !isFiled(workspace, row) && !isPreLoop(row));
+
+/** How many Home tickets stand at each tone. */
+export function homeTally(
+  workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
+  rows: readonly Pick<TaskRow, "repoId" | "ticket">[],
+): Record<HomeTone, number> {
+  const tally = { yellow: 0, red: 0, green: 0 };
+  for (const row of rows) {
+    const tone = homeTone(workspace, row);
+    if (tone) tally[tone]++;
+  }
+  return tally;
+}
 
 /** A read-only projection of one repository-qualified Ticket. It performs no reads or writes. */
 export function projectTicket(
@@ -25,16 +81,16 @@ export function projectTicket(
   refreshing = workspace.refreshingRepos?.includes(row.repoId) ?? false,
 ) {
   const { ticket, repoId } = row;
-  const jobs = workspace.jobs.filter((job) => job.repoId === repoId && (job.key === ticket.key || job.resultKey === ticket.key));
-  // The loop is what a ticket's screens watch and stop, so it wins over planning running beside it.
-  const active = exclusiveJob(jobs) ?? jobs.find((job) => isLive(job));
+  const { jobs, active, stoppedShort } = ticketRun(workspace, row);
   // A run, a decision or a publication takes its turn; planning elsewhere does not hold it up (D-101).
   const busy = Boolean(exclusiveJob(workspace.jobs));
   // Deleting this contract waits for every command running in its repository, as the host does.
   const held = heldRepository(workspace.jobs, repoId);
-  const lastRun = jobs.filter((job) => ["run", "decide"].includes(job.kind)).at(-1);
-  const recoverable = !active && !refreshing && (inProgress.includes(ticket.state) || ["failed", "cancelled"].includes(ticket.state)) &&
-    (["interrupted", "failed", "cancelled"].includes(lastRun?.state ?? "") || inProgress.includes(ticket.state));
+  const recoverable = stoppedShort && !refreshing;
+  // A stop the host has taken for this ticket's run and not yet finished: the
+  // person has said the run is over, so it reads as stopped while the process
+  // goes and the record it leaves is written.
+  const stopped = recoverable || (active?.state === "stopping" && isRun(active));
   const currentDetail = detail?.ticket.ticket_id === ticket.ticket_id && detail.contract.plan_id === ticket.plan_id && detail.contract.version === ticket.plan_version;
   const latest = currentDetail ? detail.attempts.at(-1) : undefined;
   const review = currentDetail ? [...detail.attempts].reverse().find((attempt) => attempt.review)?.review : undefined;
@@ -55,6 +111,7 @@ export function projectTicket(
   const observed = active ? runnerProgress(active.log) : null;
   const stage = observed?.stage ?? stageOf(ticket.state);
   const attention = !active && !refreshing && (recoverable || ["changes_requested", "pr_open", "failed", "blocked", "plan_invalid"].includes(ticket.state));
+  const tone = homeTone(workspace, row);
   let screen: Exclude<TaskView, "auto">;
   if (requested === "output") screen = "output";
   else if (["merge", "called-off"].includes(requested)) screen = ticket.delivery.pull_request_url ? requested as "merge" | "called-off" : "review";
@@ -65,9 +122,20 @@ export function projectTicket(
   else if (requested === "explorer") screen = "explorer";
   else if (requested === "review" || ((requested === "auto" || requested === "loop") && resultReady)) screen = "review";
   else if (requested === "auto" && ["plan_review", "ready", "draft", "specifying"].includes(ticket.state) && !active) screen = "contract";
+  // A run stopped, before the record it left is read as a result. A stop seals
+  // to `failed` inside the executor's window and strands the ticket where it
+  // stood outside it, and `recoverable` is the one flag that covers both — so
+  // this stands ahead of the line that would send the failed one to the review
+  // screen, whose only offer is the frozen contract it cannot change.
+  //
+  // Asked for by name, the page also holds while the stop is on its way and
+  // while the record it leaves is read, since Stop the loop lands here at once:
+  // the run is still live, then briefly neither live nor read, and neither is
+  // somewhere else to send the person.
+  else if (requested === "stopped" ? stopped || active || refreshing : requested === "auto" && stopped) screen = "stopped";
   else if (requested === "auto" && ["merged", "closed", "failed", "cancelled", "inconclusive"].includes(ticket.state) && !active) screen = "review";
   else screen = requested === "decisions" ? "decisions" : "loop";
-  const primary = recoverable ? { label: "Review and recover", view: "contract" as const } :
+  const primary = stopped ? { label: "See the stopped run", view: "stopped" as const } :
     active || refreshing ? { label: "Watch", view: "loop" as const } :
     resultReady ? { label: ticket.delivery.pull_request_url ? "Merge" : "Review result", view: "review" as const } :
     ticket.state === "changes_requested" ? { label: "Answer", view: "decisions" as const } :
@@ -84,8 +152,8 @@ export function projectTicket(
     independent_review: "The reviewer is checking the diff against the approved criteria, without the executor’s narrative.",
     failed: "The loop stopped. Its work and evidence have been retained. Open the task to inspect the cause.",
   };
-  const description = recoverable ? "This task needs recovery. Review the contract and retained changes before another attempt." :
+  const description = stopped ? "The run stopped. Its work and evidence have been retained — carry on with the task, plan it again, or delete it." :
     refreshing ? "Reading the task's recorded outcome…" :
     descriptions[observed?.state ?? ticket.state] ?? "Open the ticket to see its contract, latest state and retained evidence.";
-  return { jobs, active, busy, held, recoverable, resultReady, refreshing, attention, primary, screen, stage, description, observed, latest, review, evidence };
+  return { jobs, active, busy, held, recoverable, resultReady, refreshing, attention, tone, primary, screen, stage, description, observed, latest, review, evidence };
 }

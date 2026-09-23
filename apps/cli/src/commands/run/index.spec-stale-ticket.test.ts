@@ -169,6 +169,7 @@ const EMPTY_REPORT: InspectReport = {
   kind: "ticket",
   ticket: "PRB-1",
   ticket_id: "ticket_01abcdef",
+  title: "New users receive an activation email.",
   outcome: "New users receive an activation email.",
   contract_source: null,
   refusal: null,

@@ -1,14 +1,22 @@
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Dialog, FactList, InkIcon, Notice, SectionLabel } from "../ui/index.js";
 import { WizardHeader } from "./wizard.js";
 import { Rename } from "./Rename.js";
 import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { useShortcut } from "../shell/shortcuts.js";
+import { useDiscardTicket } from "../shell/create.js";
 import { displayKey } from "./ticket-workspace.js";
-import { planNodes } from "@perbo/contracts/browser";
+import { EFFORT_LABELS, planNodes, type EffortLevel } from "@perbo/contracts/browser";
+import { curates, leftAt } from "../planning/panes.js";
+import { ModelPicker, useProviders } from "../settings/ConnectionScreens.js";
+import { TaskModelsSchema, type PlanningPane, type TaskModels } from "../../shared/protocol.js";
 import { costLabel, pendingScope, taskRecords } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
+/** An approved contract's effort, where one was chosen; the provider's own default says nothing. */
+const effortText = (effort: EffortLevel | null): string =>
+  effort === null ? "" : " · " + EFFORT_LABELS[effort] + " effort";
 export function ContractScreen(context: TaskContext) {
   const { detail, repoId, navigate, show, workspace } = context;
   const { contract, ticket, criteria, models, repo, busy, held, title, latest } =
@@ -18,7 +26,55 @@ export function ContractScreen(context: TaskContext) {
     [renaming, setRenaming] = useState(false),
     [deleting, setDeleting] = useState(false);
   const action = useAction();
-  const unrun = detail.attempts.length === 0 && !ticket.delivery.pull_request_url;
+  const discard = useDiscardTicket(action.mutateAsync, navigate);
+  const providers = useProviders();
+  const [modelError, setModelError] = useState<string | null>(null);
+  // Written straight to the ticket rather than through a contract edit: the
+  // models are not part of the contract, and nothing about changing them
+  // touches what approving freezes.
+  const setModels = (next: TaskModels): void => {
+    setModelError(null);
+    try {
+      // Narrowed before it is sent. What the picker hands back is what it was
+      // given plus the change, and what it was given is the person's whole
+      // settings object wherever this ticket has no models of its own — which
+      // is every plan the interview drafted. `TaskModels` is a strict pick of
+      // those settings, so the extra keys are refused at the boundary and the
+      // choice is lost.
+      const models = TaskModelsSchema.strip().parse(next);
+      void bridge
+        .request({ kind: "taskModels", repoId, key: detail.ticket.key, models })
+        .catch((failure: unknown) => setModelError(errorMessage(failure)));
+    } catch (failure) {
+      // A bridge can refuse before it returns a promise, so this catches both.
+      setModelError(errorMessage(failure));
+    }
+  };
+  // The planning curating this ticket, where one is still open. Read from the
+  // drafts rather than remembered from the way in: a page reached again from
+  // Home is the same page, and it should not send somebody somewhere else for
+  // having taken a different route to it.
+  const curating = (workspace.drafts ?? []).find(
+    (draft) => draft.repoId === repoId && draft.key === detail.ticket.key && curates(draft),
+  );
+  // The pane that planning was left at (D-NEW-a-planning-reopens-where-it-was-left);
+  // where it no longer offers that pane, the one holding the plan, by the same
+  // rule the rail uses. Problems still open do not hold this way back: it goes
+  // where the person was, and the rail offers the Problems pane from there.
+  const curatingPane: PlanningPane =
+    (curating && leftAt(workspace.drafts, curating.id)) ??
+    ((curating?.nodes ?? 0) > 0 ? "graph" : "criteria");
+  // Which criteria are proven differently from how the draft proposed. A
+  // criterion whose assertion moved reads exactly as it did, because the claim
+  // is untouched, so nothing else on this page would show it.
+  const moved = new Set(detail.changedAssertions);
+  // Read-only once approved: what runs is settled with the approval.
+  const model = (role: "executor" | "reviewer", approved: string): ReactNode =>
+    ticket.approved_at === null ? (
+      <ModelPicker role={role} models={models} onChange={setModels} connections={providers.data} compact />
+    ) : (
+      approved
+    );
   // Marks made in the Explorer live in the saved session until a compile moves
   // them into the contract, and approval freezes the contract. Approving over
   // the difference would freeze a scope the person has already changed.
@@ -59,7 +115,7 @@ export function ContractScreen(context: TaskContext) {
   useShortcut("rename", () => setRenaming(true));
   return (
     <section className="screen" data-screen="s11">
-      <WizardHeader step={3}>
+      <WizardHeader>
         <span className="mono muted small">{costLabel(detail)} spent</span>
       </WizardHeader>
       <div className="contract-layout">
@@ -98,6 +154,13 @@ export function ContractScreen(context: TaskContext) {
                     <p className="criterion-note">
                       Expected {criterion.expected_verification.kind}:{" "}
                       {criterion.expected_verification.assertion}
+                      {/* Approving freezes this, so the eye goes to what moved
+                          rather than evenly over every line. An assertion
+                          changed on purpose is the ordinary case — this is an
+                          invitation to read one line, not a warning. */}
+                      {moved.has(criterion.id) && (
+                        <span className="criterion-moved"> · changed since the draft</span>
+                      )}
                     </p>
                     {criterion.expected_verification.kind === "manual" && (
                       <>
@@ -168,6 +231,37 @@ export function ContractScreen(context: TaskContext) {
           >
             Browse the files this scope reaches
           </button>
+          {/* Where the plan and the spec disagree, read before the contract is
+              frozen: this is the last moment either can still move. Beside the
+              impact count and in its manner — advice, never a gate, because a
+              warning that held the button is one people learn to click past
+              (D-NEW-the-plan-answers-the-spec-and-says-so). */}
+          {ticket.approved_at === null && detail.specFindings.length > 0 && (
+            <div className="spec-findings">
+              {detail.specFindings.map((finding) => (
+                <p className="scope-outside" key={`${finding.kind}:${finding.requirementId}`}>
+                  <InkIcon name="document" size={18} />
+                  <span>
+                    {finding.kind === "uncited" ? (
+                      <>
+                        <b>{finding.requirementId}</b> is in the spec and nothing in this plan
+                        answers it{finding.text === null ? "" : `: “${finding.text}”`}. Add a
+                        criterion for it, or ask the chat to take it out of the spec.
+                      </>
+                    ) : (
+                      <>
+                        {finding.criteria.length === 1 ? "A criterion" : "Criteria"}{" "}
+                        <span className="mono">{finding.criteria.join(", ")}</span> cite{" "}
+                        <b>{finding.requirementId}</b>, which the spec no longer states. Point them
+                        at a requirement it does carry, or ask the chat to put it back —
+                        approving is refused while a citation points at nothing.
+                      </>
+                    )}
+                  </span>
+                </p>
+              ))}
+            </div>
+          )}
           {/* Only where there is something to say. A scope that covers what the
               work reaches is the ordinary case, and a line reporting nothing is
               a line in the way of the one that matters. */}
@@ -209,20 +303,27 @@ export function ContractScreen(context: TaskContext) {
           </section>
           <section>
             <SectionLabel>Computation</SectionLabel>
+            {/* Chosen here, on the last page before the loop starts. The
+                models are not among the four fields approving freezes
+                (ADR-0016), so they stay a choice right up to that moment. */}
             <FactList
               className="run-facts"
               rows={[
-                ["Executor", models.executorModel],
-                ["Reviewer", models.reviewerModel + " · independent"],
+                ["Executor", model("executor", models.executorModel + effortText(models.executorEffort))],
+                [
+                  "Reviewer",
+                  model("reviewer", models.reviewerModel + effortText(models.reviewerEffort) + " · independent"),
+                ],
                 ["Plan level", contract.level],
                 ...(models.executorSkills.length
                   ? ([["Skills", models.executorSkills.join(" · ")]] as [
                       string,
-                      string,
+                      ReactNode,
                     ][])
                   : []),
               ]}
             />
+            {modelError !== null && <Notice tone="danger">{modelError}</Notice>}
           </section>
           <section>
             <SectionLabel>This run</SectionLabel>
@@ -295,29 +396,43 @@ export function ContractScreen(context: TaskContext) {
             </Button>
             <div className="row">
               <Button
+                // Shut only where it leads to the ticket's own editor: a
+                // contract with named manual reviewers is edited with the CLI
+                // so the assignments survive, and an approved one is frozen
+                // (ADR-0016). Neither is a reason not to go back to a planning
+                // — a person not ready to approve has nowhere else to go.
                 disabled={
-                  criteria.some(
-                    (criterion) =>
-                      criterion.expected_verification.kind === "manual",
-                  ) || ticket.approved_at !== null
+                  curating === undefined &&
+                  (criteria.some(
+                    (criterion) => criterion.expected_verification.kind === "manual",
+                  ) ||
+                    ticket.approved_at !== null)
                 }
                 onClick={() =>
-                  navigate({
-                    page: "task",
-                    repoId,
-                    key: ticket.key,
-                    edit: true,
-                  })
+                  // The contract states what freezes; changing it is done in
+                  // the planning curating it, or else the ticket's own editor.
+                  curating === undefined
+                    ? navigate({ page: "task", repoId, key: ticket.key, edit: true })
+                    : navigate({ page: "planning", sessionId: curating.id, pane: curatingPane })
                 }
               >
-                Back
+                Back to planning
               </Button>
               <Button onClick={() => navigate({ page: "home" })}>
                 Save draft
               </Button>
             </div>
-            {unrun && (
-              <button className="text-button small muted contract-delete" disabled={held} onClick={() => setDeleting(true)}>
+            {/* Offered at every stage, the loop included: a piece of work is
+                deleted whole and the evidence goes with it
+                (D-NEW-a-spec-outlives-its-planning). One stage is not: a ticket
+                whose pull request is open has a record on GitHub that this
+                machine does not own, and the host refuses it there too. */}
+            {ticket.state !== "pr_open" && (
+              <button
+                className="text-button small muted contract-delete"
+                disabled={held}
+                onClick={() => setDeleting(true)}
+              >
                 Delete this contract
               </button>
             )}
@@ -327,20 +442,16 @@ export function ContractScreen(context: TaskContext) {
       {deleting && (
         <Dialog title={"Delete " + displayKey(ticket.key) + "?"} onClose={() => setDeleting(false)}>
           <p>
-            This contract has never run, so nothing else refers to it. Deleting it removes the ticket, its
-            contract and its draft from the repository’s ticket store for good.
+            This removes the ticket, its contract and plan, the reading of that plan against its
+            spec, every attempt it recorded and the evidence those attempts sealed, and the spec
+            folder they came from. A piece of work is deleted whole. It cannot be undone.
           </p>
           <div className="dialog-actions">
             <Button onClick={() => setDeleting(false)}>Keep it</Button>
             <Button
               variant="danger"
               disabled={busy || action.isPending}
-              onClick={() => {
-                void action
-                  .mutateAsync({ kind: "discard", repoId, key: ticket.key })
-                  .then(() => navigate({ page: "home" }))
-                  .catch(() => setDeleting(false));
-              }}
+              onClick={() => discard(repoId, ticket.key, () => setDeleting(false))}
             >
               Delete permanently
             </Button>

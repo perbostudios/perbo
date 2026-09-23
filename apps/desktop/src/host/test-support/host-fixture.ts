@@ -33,7 +33,12 @@ export function trackService<T extends DesktopService>(service: T): T {
  * asked of the machine recorded: the notifications it put, the sleep it held,
  * the theme it applied and every change it told.
  */
-export function fixture(process?: typeof runProcess, startProcess?: typeof startLineProcess) {
+export function fixture(
+  process?: typeof runProcess,
+  startProcess?: typeof startLineProcess,
+  /** Whatever else this fixture's service is to be built with. */
+  also?: Partial<ServiceOptions>,
+) {
   const root = scratchDirectory();
   // The folder name holds a space, because a path this host hands to a command
   // is one argument whatever it holds.
@@ -70,13 +75,29 @@ export function fixture(process?: typeof runProcess, startProcess?: typeof start
         themes.push(theme);
       },
     },
-    usageProbe: async () => ({
-      plan: "Pro",
-      windows: [{ label: "Session · 5-hour window", usedPercent: 23, resetsAt: null }],
-      detail: "Injected.",
+    usageProbe: {
+      claude: async () => ({
+        plan: "Max",
+        windows: [{ label: "5-hour limit", usedPercent: 9, resetsAt: null }],
+        detail: "Injected Claude.",
+      }),
+      codex: async () => ({
+        plan: "Pro",
+        windows: [{ label: "5-hour limit", usedPercent: 23, resetsAt: null }],
+        detail: "Injected.",
+      }),
+    },
+    // No provider CLI is asked for its catalog: one that lists nothing, which
+    // leaves the chat on the planning's own model.
+    modelCatalog: async (provider) => ({
+      provider,
+      models: [],
+      discoveredAt: new Date().toISOString(),
+      source: "sample",
     }),
     ...(process ? { process } : {}),
     ...(startProcess ? { startProcess } : {}),
+    ...(also ?? {}),
   };
   const service = trackService(new DesktopService(options));
   return {

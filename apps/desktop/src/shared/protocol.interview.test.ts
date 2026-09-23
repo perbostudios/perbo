@@ -109,10 +109,15 @@ describe("the conversation an editing session keeps", () => {
     digest: null,
     revision: 0,
     resumeNew: false,
+    lastPane: null,
+    lastView: null,
+    drift: null,
+    change: null,
     form: editingForm(TaskModelsSchema.strip().parse(SettingsSchema.parse({}))),
     phase: "editing" as const,
     error: null,
     operation: null,
+    interviewModel: null,
   };
   const entry = (n: number) => ({
     n,
@@ -163,5 +168,39 @@ describe("the conversation an editing session keeps", () => {
       EditingSessionSchema.safeParse({ ...base, conversation: [...many, entry(INTERVIEW_CONVERSATION_CAP + 1)] })
         .success,
     ).toBe(false);
+  });
+});
+
+/**
+ * SCP-336: a ticket's own models, chosen on the contract page — the last page
+ * before the loop starts, and the one that states what approving freezes.
+ */
+describe("the models one ticket runs on", () => {
+  it("takes a narrowed payload and refuses the whole settings object", () => {
+    // What the picker hands back is what it was given plus the change, and
+    // what it is given on the contract page is the person's whole settings
+    // wherever this ticket has no models of its own — which is every plan the
+    // interview drafted. `TaskModels` is a strict pick of those settings, so
+    // the extra keys are refused at the boundary: sent as they come, the
+    // choice is lost with a schema error instead of being saved.
+    const settings = SettingsSchema.parse({});
+    expect(
+      RequestSchema.safeParse({
+        kind: "taskModels",
+        repoId: "repo-1",
+        key: "PRB-1",
+        models: settings,
+      }).success,
+      "the settings object as the picker hands it back",
+    ).toBe(false);
+    expect(
+      RequestSchema.safeParse({
+        kind: "taskModels",
+        repoId: "repo-1",
+        key: "PRB-1",
+        models: TaskModelsSchema.strip().parse(settings),
+      }).success,
+      "narrowed to the fields a ticket carries",
+    ).toBe(true);
   });
 });

@@ -69,6 +69,8 @@ export type {
   UsdDigits,
 } from "./cost.js";
 export { findCredentials, redactCredentials } from "./credential.js";
+export { EFFORT_LABELS, EFFORT_LEVELS, effortFits, EffortLevelSchema } from "./effort.js";
+export type { EffortLevel, EffortProvider, ProviderEffort } from "./effort.js";
 export {
   EXECUTOR_SKILL_REVISION,
   EXECUTOR_SKILLS,
@@ -326,6 +328,7 @@ export {
   ConfiguredFolderError,
   contractPath,
   draftPath,
+  driftPath,
   PRINCIPLES_FILENAME,
   principlesPath,
   SPEC_FOLDER_CONFIG_KEY,
@@ -373,6 +376,7 @@ export {
   StoredTicketSchema,
   TICKET_PRIORITIES,
   TICKET_SCHEMA_VERSION,
+  TICKET_STATES,
   TICKET_TRANSITIONS,
   TicketKeySchema,
   TicketSchema,
@@ -397,6 +401,7 @@ export type {
   TicketState,
   Wait,
 } from "./ticket.js";
+export { sameName } from "./ticket-name.js";
 export {
   commitCarriesArm,
   mergedAt,

@@ -14,6 +14,7 @@
     "preview": "vite --host 127.0.0.1 --port 51859 --strictPort --open /preview.html",
     "start": "electron .",
     "package": "electron-builder --dir",
+    "launch": "node scripts/launch.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint src"

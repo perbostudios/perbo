@@ -126,6 +126,7 @@ export function storedReviewSubject(storeDirectory: string, name: string): Inspe
     // and otherwise the identity the plan was filed under.
     ticket: review.target.reference ?? review.plan.ticket_id.replace(/^ticket_/, ""),
     ticket_id: review.plan.ticket_id,
+    title: null,
     outcome: review.plan.outcome,
     contract_source: review.contract,
     refusal: null,

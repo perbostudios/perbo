@@ -739,7 +739,9 @@ function mergedTicketSubject(ticket: Ticket): InspectSubject {
     kind: "ticket",
     ticket: ticket.key,
     ticket_id: ticket.ticket_id,
-    outcome: ticket.title,
+    title: ticket.title,
+    // Only the cost is read off this subject, and it reads no contract.
+    outcome: null,
     contract_source: null,
     refusal: null,
     state: ticket.state,

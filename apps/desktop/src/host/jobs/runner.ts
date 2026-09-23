@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { busyMessage, exclusiveJob, isLive, lane } from "../../shared/jobs.js";
+import { busyMessage, exclusiveJob, isLive, journal, lane } from "../../shared/jobs.js";
 import { redact, requireSuccess } from "../process.js";
 import type { Cli } from "../cli.js";
 import type { Changes } from "../changes.js";
@@ -30,8 +30,6 @@ export interface JobRunnerDeps {
   settled(job: Job): Promise<void>;
 }
 
-/** The journal keeps the last forty records, and never drops a live command. */
-const JOURNAL = 39;
 /** Long enough for a loop that runs overnight; the ceilings that matter are the runner's. */
 const COMMAND_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 /** Progress is persisted at most this often; every progress change is still told. */
@@ -69,6 +67,11 @@ export class JobRunner {
     return [...this.active.values()].map((entry) => entry.job);
   }
 
+  /** Settles when this job has, however it ends; at once for one no longer tracked. */
+  settled(jobId: string): Promise<void> {
+    return this.active.get(jobId)?.done ?? Promise.resolve();
+  }
+
   start(
     options: {
       repo: RegisteredRepository;
@@ -76,10 +79,16 @@ export class JobRunner {
       kind: string;
       label: string;
       owner?: EditingOwner | undefined;
+      /**
+       * On the job from the moment it exists, so the attempt that carries on
+       * after a stop publishes as this one was going to, even when the stop
+       * came before the operation started.
+       */
+      publish?: boolean | undefined;
     },
     operation: JobOperation,
   ): Job {
-    const { repo, key, kind, label, owner } = options;
+    const { repo, key, kind, label, owner, publish } = options;
     const blocking = lane(kind) === "exclusive" ? exclusiveJob(this.live()) : undefined;
     if (blocking) throw new Error(busyMessage(blocking.label));
     const controller = new AbortController();
@@ -97,15 +106,13 @@ export class JobRunner {
       resultKey: null,
       result: null,
       ...(owner ? { editing: owner } : {}),
+      ...(publish === undefined ? {} : { publish }),
     };
-    // The journal keeps the last forty records, and never drops a live command:
-    // cancelling one and saving its editing receipt both need its record.
-    const journal = this.deps.profile.state.jobs;
-    this.deps.profile.state.jobs = [
-      ...journal.slice(0, -JOURNAL).filter((entry) => this.active.has(entry.id)),
-      ...journal.slice(-JOURNAL),
-      job,
-    ];
+    // The journal never drops a live command: cancelling one and saving its
+    // editing receipt both need its record.
+    this.deps.profile.state.jobs = journal([...this.deps.profile.state.jobs, job], (entry) =>
+      this.active.has(entry.id),
+    );
     const admits = kind === "draft" || kind === "admit";
     const ahead = admits ? this.admissions.get(repo.id) : undefined;
     // Reserve the job's place synchronously, before operation can yield or another IPC request can enter.

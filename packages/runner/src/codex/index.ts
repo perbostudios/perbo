@@ -607,7 +607,7 @@ export async function runCodexAgent(
     // awaits or reads.
     if (!stopped)
       finalMessage = redact(
-        await session.turn(thread, request.model, request.prompt),
+        await session.turn(thread, request.model, request.prompt, request.effort),
       );
     if (!stopped) termination = { reason: "completed", detail: "" };
   } catch (error) {

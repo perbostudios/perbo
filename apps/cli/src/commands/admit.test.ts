@@ -179,7 +179,7 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
 
     // The snapshot is what the person was shown, with the model that drafted it.
     const snapshot = readDraftSnapshot(dir, "PRB-1");
-    expect(snapshot?.draft?.model.prompt_version).toBe("draft_v4");
+    expect(snapshot?.draft?.model.prompt_version).toBe("draft_v5");
     expect(snapshot?.draft?.model.provider).toBe("double");
     // As returned, plus the fields the schema fills when a draft names no
     // dependency and proposes no graph.
@@ -234,6 +234,55 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
     expect(criteriaOf(contract)).toHaveLength(2);
     expect(contract.level).toBe("P1");
     expect(readTicket(dir, "PRB-1").admission.criteria_source).toBe("drafted");
+  });
+
+  it("calls the ticket what the drafter named it (D-NEW-a-ticket-is-named-apart-from-its-board)", async () => {
+    const repo = repository("admit-from-named");
+    const code = await runCommandLine(admitCommandLine, {
+      argv: ["--repo", repo, "--from", "o/r#412"],
+      streams: recordStreams(),
+      cwd: repo,
+      deps: { model: drafter({ ...draft, name: "Activation email" }), fetchIssue },
+    });
+    expect(code).toBe(0);
+    const dir = storeDir(repo, null);
+    expect(readTicket(dir, "PRB-1").title).toBe("Activation email");
+    expect(readContract(dir, "PRB-1").outcome).toBe(draft.outcome);
+  });
+
+  it("keeps the drafted name when --outcome overrides the drafted outcome", async () => {
+    const repo = repository("admit-from-named-override");
+    await runCommandLine(admitCommandLine, {
+      argv: ["--repo", repo, "--from", "o/r#412", "--outcome", "Typed outcome."],
+      streams: recordStreams(),
+      cwd: repo,
+      deps: { model: drafter({ ...draft, name: "Activation email" }), fetchIssue },
+    });
+    const dir = storeDir(repo, null);
+    expect(readContract(dir, "PRB-1").outcome).toBe("Typed outcome.");
+    expect(readTicket(dir, "PRB-1").title).toBe("Activation email");
+  });
+
+  it("shows the drafter each ticket in flight by its contract's outcome, not by its name", async () => {
+    const repo = repository("admit-from-board");
+    await runCommandLine(admitCommandLine, {
+      argv: ["--repo", repo, "--from", "o/r#412"],
+      streams: recordStreams(),
+      cwd: repo,
+      deps: { model: drafter({ ...draft, name: "Activation email" }), fetchIssue },
+    });
+    const model = recordingDrafter();
+    await runCommandLine(admitCommandLine, {
+      argv: ["--repo", repo, "--from", "o/r#412"],
+      streams: recordStreams(),
+      cwd: repo,
+      deps: { model, fetchIssue },
+    });
+    const user = String(model.requests[0]!.messages[0]!.content);
+    const board = /<perbo:board trust="repo"[^>]*>\n([\s\S]*?)\n<\/perbo:board>/.exec(user)?.[1];
+    expect(board).toBe(
+      `PRB-1 [plan_review, normal, draft] ${draft.outcome} — scope: ${draft.proposed_scope.paths_allowed.join(", ")}`,
+    );
   });
 
   it("turns a failure to read the issue into one sentence", async () => {
@@ -350,14 +399,18 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     expect(fromFileRequest.forceSubmit).toBe(fromRequest.forceSubmit);
     expect(fromFileRequest.forceSubmit).toBe(true);
     // And the issue block differs only in the provenance a file genuinely has:
-    // its reference, and no URL. The board is set aside: the first admission
-    // put a ticket on it, which the second call is rightly shown.
-    const withoutBoard = (content: unknown) => String(content).replace(/<perbo:board[^>]*>[\s\S]*?<\/perbo:board>\n?/, "");
-    const swapped = withoutBoard(fromFileRequest.messages[0]!.content).replace(
+    // its reference, and no URL. The board and the names are set aside: the
+    // first admission put a ticket on both, which the second call is rightly
+    // shown.
+    const withoutTheStore = (content: unknown) =>
+      String(content)
+        .replace(/<perbo:board[^>]*>[\s\S]*?<\/perbo:board>\n?/, "")
+        .replace(/<perbo:names[^>]*>[\s\S]*?<\/perbo:names>\n?/, "");
+    const swapped = withoutTheStore(fromFileRequest.messages[0]!.content).replace(
       'reference="file:SCP-150.md"',
       `reference="o/r#412" url="${issue.url}"`,
     );
-    expect(swapped).toBe(withoutBoard(fromRequest.messages[0]!.content));
+    expect(swapped).toBe(withoutTheStore(fromRequest.messages[0]!.content));
   });
 
   it("produces a candidate only: nothing is executed or admitted from it (D-072)", async () => {
@@ -1315,7 +1368,7 @@ describe("perbo list --json", () => {
     const heading = table.split("\n")[0]!;
     expect(heading).toContain("TICKET");
     expect(json.out).not.toContain(heading);
-    for (const column of ["TICKET", "STATE", "OUTCOME"]) {
+    for (const column of ["TICKET", "STATE", "NAME"]) {
       expect(table).toContain(column);
       expect(json.out).not.toContain(column);
     }

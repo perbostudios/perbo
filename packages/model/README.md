@@ -37,6 +37,14 @@ environment allow-list, every customisation suppressed, and no tool, hook, plugi
 from anywhere but the user's own settings
 ([ADR-0030](../../docs/adr/0030-neutralise-repository-supplied-agent-configuration.md)).
 
+## How hard a model thinks
+
+`createModel` takes an effort in the provider's own words (`EFFORT_LEVELS` in `@perbo/contracts`)
+and refuses one the provider does not take rather than send it. Claude Code receives it as
+`--effort` and, with none, is passed nothing, so the CLI's own default applies; Codex sends it as the
+`turn/start` effort and starts at `medium`; the API sends it as `output_config.effort` and starts at
+`high`.
+
 ## What a turn costs
 
 A transport that reports its own dollars is believed, because it knows the harness overhead the

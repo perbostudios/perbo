@@ -1028,6 +1028,9 @@ describe("perbo inspect", () => {
         "state",
         "ticket",
         "ticket_id",
+        // What the ticket is called, apart from the outcome it runs against
+        // (D-NEW-a-ticket-is-named-apart-from-its-board).
+        "title",
         "total_cost",
         "verdicts",
       ].sort(),

@@ -9,21 +9,29 @@ import {
   PageHeader,
   PaginationButton,
   cx,
+  type InkIconName,
 } from "../ui/index.js";
 import { Rename } from "./Rename.js";
-import { isArchived } from "../../shared/archive.js";
 import { timeAgo } from "../time-ago.js";
 import { errorMessage, useAction, useTaskSummary } from "../workspace/index.js";
-import { useCreate } from "../shell/create.js";
+import { useCreate, withoutDeleting } from "../shell/create.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/route.js";
 import type { Snapshot, TaskRow, TaskSummary } from "../../shared/protocol.js";
-import { archiveRows, isFiled } from "../../shared/archive.js";
-import { displayKey, projectTicket, stageName } from "./ticket-workspace.js";
+import { archiveRows, isArchivable, isArchived, isFiled } from "../../shared/archive.js";
+import { HOME_TONES, HOME_TONE_LABELS, displayKey, homeRows, homeTally, homeTone, projectTicket, stageName, type HomeTone } from "./ticket-workspace.js";
 const countWord = (number: number): string =>
   ["No", "One", "Two", "Three", "Four", "Five"][number] ?? String(number);
 const lower = (word: string): string => word.toLowerCase();
+/** The tone each Show filter but "all" keeps; "running" is every ticket with none. */
+const SHOW_TONE = { needs: "yellow", running: null, stopped: "red", completed: "green" } as const;
+/** Each tone's count in Home's header: its class and its icon. */
+const HEADER_COUNT: Record<HomeTone, [className: string, icon: InkIconName, size: number]> = {
+  yellow: ["attention-count", "alert", 13],
+  red: ["stopped-count", "locked", 12],
+  green: ["completed-count", "approve", 12],
+};
 
 /** `+added −removed · files`, or the honest reason there is none (S4, S5). */
 export function DiffLabel({
@@ -51,24 +59,22 @@ export function DiffLabel({
 
 function StageRing({
   stage,
-  attention = false,
+  tone = null,
   complete = false,
 }: {
   stage: number;
-  attention?: boolean;
+  /** The row's colour, which the ring's centre takes and a completed ring is drawn in. */
+  tone?: "green" | "yellow" | "red" | null;
   complete?: boolean;
 }) {
   const share = complete ? 100 : (stage / 6) * 100;
+  const fill = complete ? (tone === "red" ? "var(--red)" : "var(--green)") : "var(--ink)";
   return (
     <span
-      className={cx(
-        "stage-ring",
-        attention && "stage-ring--attention",
-        complete && "stage-ring--complete",
-      )}
+      className={cx("stage-ring", tone && "stage-ring--" + tone)}
       aria-label={complete ? "Completed" : `Stage ${stage} of 6`}
       style={{
-        background: `conic-gradient(${complete ? "var(--green)" : "var(--ink)"} 0 ${share}%,rgba(var(--ink-rgb),.16) ${share}% 100%)`,
+        background: `conic-gradient(${fill} 0 ${share}%,rgba(var(--ink-rgb),.16) ${share}% 100%)`,
       }}
     >
       <span />
@@ -95,7 +101,7 @@ function TaskCard({
   renaming: boolean;
   onRenameChange: (open: boolean) => void;
 }) {
-  const { stage, attention, primary, description } = projectTicket(workspace, row);
+  const { stage, attention, tone, primary, description } = projectTicket(workspace, row);
   const completed = isArchived(row.ticket.state);
   const summary = useTaskSummary(row.repoId, row.ticket.key);
   const branch = summary.data ? summary.data.branch : (row.ticket.delivery.branch ?? null);
@@ -110,6 +116,11 @@ function TaskCard({
         : row.ticket.state === "cancelled"
           ? "cancelled"
           : row.ticket.state.replaceAll("_", " ");
+  // A click on the card opens it, so a control on the card keeps its click to itself.
+  const own = (act: (row: TaskRow) => void) => (event: { stopPropagation: () => void }) => {
+    event.stopPropagation();
+    act(row);
+  };
   return (
     <article
       role="button"
@@ -117,7 +128,7 @@ function TaskCard({
       aria-label={title}
       className={cx(
         "task-card",
-        attention && "task-card--attention",
+        tone && "task-card--" + tone,
         completed && "task-card--complete",
       )}
       onClick={() => open(row)}
@@ -132,7 +143,7 @@ function TaskCard({
       }}
     >
       <div className="task-card-header">
-        <StageRing stage={stage} attention={attention} complete={completed} />
+        <StageRing stage={stage} tone={tone} complete={completed} />
         <span className="stage-pill">{completed ? "completed" : stageName(stage)}</span>
         <span className="task-key" title={row.ticket.key}>
           {displayKey(row.ticket.key)}
@@ -156,39 +167,22 @@ function TaskCard({
       </div>
       <div className="task-card-description">
         <span>{finished ?? description}</span>
-        {completed ? (
-          <span className="row">
-            <button
-              className="text-button small"
-              onClick={(event) => {
-                event.stopPropagation();
-                open(row);
-              }}
-            >
+        <span className="row task-card-actions">
+          {completed ? (
+            <button className="text-button small" onClick={own(open)}>
               Report
             </button>
-            <Button
-              className="small"
-              onClick={(event) => {
-                event.stopPropagation();
-                archive(row);
-              }}
-            >
-              <InkIcon name="folder" size={14} />
-              Archive
+          ) : (
+            <Button variant={attention ? "primary" : "secondary"} onClick={own(open)}>
+              {primary.label}
             </Button>
-          </span>
-        ) : (
-          <Button
-            variant={attention ? "primary" : "secondary"}
-            onClick={(event) => {
-              event.stopPropagation();
-              open(row);
-            }}
-          >
-            {primary.label}
-          </Button>
-        )}
+          )}
+          {(completed || isArchivable(workspace, row)) && (
+            <Button className="small task-card-archive" aria-label="Archive" title="Archive" onClick={own(archive)}>
+              <InkIcon name="folder" size={14} />
+            </Button>
+          )}
+        </span>
       </div>
     </article>
   );
@@ -262,16 +256,18 @@ function ArchiveRow({
 }
 
 export function HomePage({
-  workspace,
+  workspace: read,
   navigate,
   archive,
 }: PageProps & { archive: boolean }) {
   const action = useAction();
   const toast = useToast();
   const create = useCreate();
+  // Work being deleted is off Home from the click, as it is off the picker.
+  const workspace = withoutDeleting(read, create.deleting);
   const [search, setSearch] = useState(""),
     [repoFilter, setRepoFilter] = useState("all"),
-    [homeFilter, setHomeFilter] = useState<"all" | "needs" | "running" | "completed">("all"),
+    [homeFilter, setHomeFilter] = useState<"all" | keyof typeof SHOW_TONE>("all"),
     [outcome, setOutcome] = useState<"all" | "merged" | "closed" | "cancelled">(
       "all",
     ),
@@ -280,12 +276,13 @@ export function HomePage({
     [renaming, setRenaming] = useState<string | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   useShortcut(archive ? "archiveSearch" : "search", () => searchInput.current?.focus());
-  const all = workspace.tasks.filter((row) => !isFiled(workspace, row));
-  const needsAttention = (row: TaskRow): boolean =>
-    projectTicket(workspace, row).attention;
-  const completedRows = all.filter((row) => isArchived(row.ticket.state));
-  const attention = all.filter(needsAttention).length;
-  const running = all.length - completedRows.length;
+  const all = homeRows(workspace);
+  // The greeting, the filters and the sort read the three colours the header's
+  // counts and the rail's Home badge read (S4), so no two of them disagree.
+  const tally = homeTally(workspace, all);
+  const toneOf = (row: TaskRow) => homeTone(workspace, row);
+  const running = all.length - tally.green - tally.red;
+  const archivable = all.filter((row) => isArchivable(workspace, row));
   const open = (row: TaskRow): void => {
     const { primary, screen } = projectTicket(workspace, row);
     navigate({
@@ -342,20 +339,13 @@ export function HomePage({
     : all
         .filter(matches)
         .filter((row) => repoFilter === "all" || row.repoId === repoFilter)
-        .filter((row) =>
-          homeFilter === "all"
-            ? true
-            : homeFilter === "needs"
-              ? needsAttention(row)
-              : homeFilter === "completed"
-                ? isArchived(row.ticket.state)
-                : !isArchived(row.ticket.state) && !needsAttention(row),
-        )
+        .filter((row) => homeFilter === "all" || toneOf(row) === SHOW_TONE[homeFilter])
         .sort((a, b) => {
           if (sort === "title") return titleOf(a).localeCompare(titleOf(b));
           if (sort === "stage")
             return projectTicket(workspace, b).stage - projectTicket(workspace, a).stage;
-          const rank = (row: TaskRow): number => (needsAttention(row) ? 0 : isArchived(row.ticket.state) ? 1 : 2);
+          // Yellow first, then red, then the rest.
+          const rank = (row: TaskRow): number => ["yellow", "red"].indexOf(toneOf(row) ?? "") + 1 || 3;
           return (
             rank(a) - rank(b) ||
             (sort === "oldest"
@@ -370,41 +360,20 @@ export function HomePage({
   return (
     <section className="screen" data-screen={archive ? "s5" : "s4"}>
       <PageHeader
-        title={
-          archive ? (
-            "Archive"
-          ) : (
-            <>
-              <span className="header-wordmark">perbo</span>
-              {repository && (
-                <span className="repo-tag">
-                  {repository.name} · {repository.branch}
-                </span>
-              )}
-            </>
-          )
-        }
-        subtitle={archive ? filed.length + " completed" : undefined}
+        title={archive ? "Archive" : <span className="header-wordmark">perbo</span>}
+        subtitle={archive ? filed.length + " archived" : undefined}
       >
-        {!archive && (
-          <>
-            {attention > 0 && (
-              <span className="attention-count">
-                <InkIcon name="alert" size={13} />
-                {attention} {attention === 1 ? "ticket needs" : "tickets need"}{" "}
-                action
+        {/* The rail's Home badge's three counts, in its order (S4). */}
+        {!archive &&
+          HOME_TONES.map((tone) => {
+            const [className, icon, size] = HEADER_COUNT[tone];
+            return tally[tone] > 0 && (
+              <span key={tone} className={className}>
+                <InkIcon name={icon} size={size} />
+                {HOME_TONE_LABELS[tone](tally[tone])}
               </span>
-            )}
-            {completedRows.length > 0 && (
-              <span className="completed-count">
-                <InkIcon name="approve" size={12} />
-                {completedRows.length} completed
-              </span>
-            )}
-            <span className="runner-label">runner · this machine</span>
-            <span className="live-dot" />
-          </>
-        )}
+            );
+          })}
         {archive && (
           <button
             className="text-button mono small"
@@ -422,11 +391,11 @@ export function HomePage({
               <h1>Hi, {workspace.settings.name || "there"}</h1>
               <p>
                 {countWord(running)} {running === 1 ? "ticket" : "tickets"} running ·{" "}
-                {attention
-                  ? lower(countWord(attention)) + " waiting on you"
+                {tally.yellow
+                  ? lower(countWord(tally.yellow)) + " waiting on you"
                   : "nothing waiting on you"}
-                {completedRows.length
-                  ? ` · ${lower(countWord(completedRows.length))} completed`
+                {tally.green
+                  ? ` · ${lower(countWord(tally.green))} completed`
                   : ""}
               </p>
             </div>
@@ -450,6 +419,7 @@ export function HomePage({
               <option value="all">Show · all</option>
               <option value="needs">Show · needs you</option>
               <option value="running">Show · running</option>
+              <option value="stopped">Show · stopped</option>
               <option value="completed">Show · completed</option>
             </Dropdown>
             {workspace.repositories.length > 1 && (
@@ -476,9 +446,9 @@ export function HomePage({
               <option value="title">Task title</option>
               <option value="stage">Furthest along</option>
             </Dropdown>
-            {completedRows.length > 1 && (
-              <button className="text-button small muted" onClick={() => file(completedRows, true)}>
-                Archive all {completedRows.length} completed
+            {archivable.length > 1 && (
+              <button className="text-button small muted" onClick={() => file(archivable, true)}>
+                Archive all {archivable.length}
               </button>
             )}
           </div>
@@ -552,7 +522,7 @@ export function HomePage({
           <div
             className="archive-table"
             role="table"
-            aria-label="Completed tickets"
+            aria-label="Archived tickets"
           >
             <div className="archive-row archive-head" role="row">
               {["ID", "Ticket name", "Repo", "Diff", "Criteria", "Cost", "Merged", ""].map(
@@ -594,34 +564,24 @@ export function HomePage({
             />
             <div className="archive-total">
               <strong>{filed.length}</strong>
-              <small>tickets completed in total</small>
+              <small>tickets archived in total</small>
             </div>
           </div>
         </>
       )}
-      {tasks.length === 0 && (
-        <EmptyState
-          title={
-            archive
-              ? "No completed tickets here yet"
-              : all.length
-                ? "Nothing matches"
-                : "Nothing admitted yet"
-          }
-          action={
-            !archive && !all.length ? (
-              <Button onClick={create.open}>
-                Create a task
-              </Button>
-            ) : undefined
-          }
-        >
-          {archive
-            ? "Change the filters, or return after a ticket has finished and been archived."
-            : all.length
-              ? "Clear the search or the filter to see every running ticket."
-              : "Set up and waiting. Create the task you were about to work on anyway."}
+      {!archive && tasks.length === 0 && all.length > 0 && (
+        <EmptyState title="Nothing matches">
+          Clear the search or the filter to see every running ticket.
         </EmptyState>
+      )}
+      {!archive && all.length === 0 && (
+        <div className="home-empty">
+          <h2>Nothing admitted yet</h2>
+          <span className="spacer" />
+          <Button variant="primary" onClick={create.openUnselected}>
+            Create a task
+          </Button>
+        </div>
       )}
       {action.error && (
         <div className="workspace-errors">

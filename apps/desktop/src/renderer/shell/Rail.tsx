@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { InkIcon, cx } from "../ui/index.js";
 import { panesFor } from "../planning/panes.js";
 import type { Snapshot } from "../../shared/protocol.js";
-import { useCreate } from "./create.js";
+import { HOME_TONES, HOME_TONE_LABELS, homeRows, homeTally, type HomeTone } from "../tasks/ticket-workspace.js";
+import { useCreate, withoutDeleting } from "./create.js";
 import { useShortcut } from "./shortcuts.js";
 import { RAIL_WIDTH, setRailSize, useRailSize } from "./rail-size.js";
 import type { Route } from "./route.js";
@@ -71,6 +72,59 @@ export function RailToggle() {
   );
 }
 
+/** How long the Home badge holds each colour before it gives way to the next. */
+const BADGE_HOLD: Record<HomeTone, number> = { yellow: 7000, red: 4000, green: 4000 };
+/** How long the badge takes to shrink away before it reappears in the next colour. */
+const BADGE_SWAP = 180;
+
+/**
+ * The count on Home's rail icon, one colour at a time (S4): the tickets
+ * waiting on a decision in yellow, those whose loop stopped in red, those at
+ * the journey's end in green, each in that order for as long as it has any.
+ * Each holds a while — a decision longest — then shrinks away and reappears
+ * as the next; with one colour it stays, and with none there is no badge.
+ */
+function HomeBadge({ tally }: { tally: Record<HomeTone, number> }) {
+  const shown = HOME_TONES.filter((tone) => tally[tone] > 0);
+  const [state, setState] = useState<{ tone: HomeTone; leaving: boolean; swapped: boolean }>(() => ({
+    tone: shown[0] ?? "yellow",
+    leaving: false,
+    swapped: false,
+  }));
+  // A colour whose count went to none gives way to the next one that has any.
+  const tone = shown.includes(state.tone)
+    ? state.tone
+    : (shown.find((each) => HOME_TONES.indexOf(each) > HOME_TONES.indexOf(state.tone)) ?? shown[0] ?? null);
+  // The colours with a count, as one value: `shown` is a new array every render.
+  const cycle = shown.join(" ");
+  useEffect(() => {
+    if (tone === null || (!state.leaving && shown.length < 2)) return undefined;
+    const next = shown[(shown.indexOf(tone) + 1) % shown.length] ?? tone;
+    const timer = state.leaving
+      ? setTimeout(() => setState({ tone: next, leaving: false, swapped: true }), BADGE_SWAP)
+      : setTimeout(() => setState({ tone, leaving: true, swapped: state.swapped }), BADGE_HOLD[tone] - BADGE_SWAP);
+    return () => clearTimeout(timer);
+  }, [tone, state.leaving, cycle]);
+  return (
+    <span className="t-badge rail-badge" data-open={String(tone !== null)}>
+      <span
+        // A new dot at each change of colour, so the one taking over grows in afresh.
+        key={state.swapped ? state.tone : "dot"}
+        className={cx(
+          "t-badge-dot",
+          tone !== null && "rail-badge--" + tone,
+          state.leaving && "rail-badge--leaving",
+          state.swapped && "rail-badge--swapped",
+        )}
+        aria-label={tone === null ? undefined : HOME_TONE_LABELS[tone](tally[tone])}
+        aria-hidden={tone === null || undefined}
+      >
+        {tone && tally[tone]}
+      </span>
+    </span>
+  );
+}
+
 /**
  * The rail: Create first (D-101), with planning's panes under it while a
  * piece of work is being planned, then Home, Archive, and a settings icon
@@ -82,14 +136,12 @@ export function RailToggle() {
 export function Rail({
   route,
   navigate,
-  attention,
-  drafts,
+  workspace,
 }: {
   route: Route;
   navigate: (route: Route) => void;
-  attention: number;
-  /** The open plannings, which say which of them has a graph to offer. */
-  drafts: Snapshot["drafts"];
+  /** What Home lists, which the Home badge counts, and the open plannings, which say which of them has a graph to offer. */
+  workspace: Snapshot;
 }) {
   const inSettings = (SETTINGS_PAGES as readonly string[]).includes(route.page);
   const [hover, setHover] = useState(false);
@@ -127,7 +179,14 @@ export function Rail({
     return undefined;
   }, [open]);
   const create = useCreate();
+  // Counted over what Home lists, work being deleted left out as Home leaves it.
+  const visible = withoutDeleting(workspace, create.deleting);
+  const tally = homeTally(visible, homeRows(visible));
   const planning = route.page === "planning";
+  // A repository's question page is Create's own page: Create is lit there,
+  // and there is no planning, so no panes under it, until it is answered
+  // (D-NEW-a-planning-starts-with-what-to-build).
+  const asking = route.page === "ask";
   // Create, Home and Archive bind in the shell so they work with the rail collapsed; ⌘4 is the rail's because it raises the pill.
   useShortcut("settings", () => {
     setHover(true);
@@ -145,12 +204,13 @@ export function Rail({
         <button
           className={cx(
             "rail-item",
-            create.isOpen && "selected",
+            (create.isOpen || asking) && "selected",
             planning && !create.isOpen && "parent",
           )}
           aria-label="Create"
           title="Create — plan a piece of work"
           aria-expanded={create.isOpen}
+          aria-current={asking ? "page" : undefined}
           onClick={create.toggle}
           onMouseEnter={create.enter}
           onMouseLeave={create.leave}
@@ -161,7 +221,7 @@ export function Rail({
         </button>
         {planning && (
           <div className="rail-children" role="group" aria-label="Planning panes">
-            {panesFor(drafts, route.sessionId).map((pane) => (
+            {panesFor(workspace.drafts, route.sessionId).map((pane) => (
               <button
                 key={pane.id}
                 className={cx("rail-item", "rail-child", route.pane === pane.id && "selected")}
@@ -193,19 +253,7 @@ export function Rail({
         >
           <span className="rail-icon">
             <InkIcon name={icon} size={22} />
-            {page === "home" && (
-              <span
-                className="t-badge rail-badge"
-                data-open={attention > 0 ? "true" : "false"}
-              >
-                <span
-                  className="t-badge-dot"
-                  aria-label={attention + " tickets need action"}
-                >
-                  {attention}
-                </span>
-              </span>
-            )}
+            {page === "home" && <HomeBadge tally={tally} />}
           </span>
         </button>
       ))}

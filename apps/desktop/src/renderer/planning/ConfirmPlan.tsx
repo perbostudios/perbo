@@ -19,6 +19,10 @@ type Editor = ReturnType<typeof useContractEditing>;
  * pane that does not say what it is freezing would be a person agreeing to
  * something they were never shown.
  *
+ * It goes by way of the reading of the plan against its spec
+ * (D-NEW-the-plan-answers-the-spec-and-says-so), as every way from the plan
+ * to the contract does; an approved plan is frozen and goes straight there.
+ *
  * The Graph keeps its own footer rather than this one: it says the same thing
  * with the division's file count and the run queued ahead of it, which are
  * facts that pane has and these two do not.
@@ -41,17 +45,27 @@ export function ConfirmPlan({
     workspace.tasks.find(
       (row) => row.repoId === editor.repoId && row.ticket.key === key,
     )?.ticket.approved_at != null;
+  // A turn in flight may still move this plan, and what approving freezes is
+  // what the contract holds when it is read (ADR-0016). The way onward waits
+  // for the turn, and says so rather than going quiet.
+  const thinking = !approved && (workspace.working ?? []).includes(editor.session?.id ?? "");
   return (
     <div className="approve-actions pane-confirm">
       <span className="small muted">
         {approved
           ? "This contract is approved; what it froze is on its own page."
-          : "The contract is where approving freezes this."}
+          : thinking
+            ? "Waiting for the chat to finish this turn…"
+            : "The contract is where approving freezes this."}
       </span>
       <Button
         variant="primary"
-        disabled={busy}
-        onClick={() => navigate({ page: "task", repoId: editor.repoId, key, view: "contract" })}
+        disabled={busy || thinking}
+        onClick={() =>
+          approved || editor.session === null
+            ? navigate({ page: "task", repoId: editor.repoId, key, view: "contract" })
+            : navigate({ page: "planning", sessionId: editor.session.id, pane: "drift" })
+        }
       >
         {approved ? "Open the contract" : "Confirm the plan"}
       </Button>

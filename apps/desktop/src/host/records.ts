@@ -147,6 +147,22 @@ const AppliedEditSchema = z.looseObject({
 });
 const DraftSnapshotSchema = z.looseObject({ edits: z.array(AppliedEditSchema).default([]) });
 
+/**
+ * The same records, for a reader to whom they are advice rather than evidence.
+ *
+ * A draft record that cannot be read is worth refusing an edit over — it is
+ * what says who changed the plan. It is not worth refusing to show the
+ * contract over: the page that approves would fail to load entirely, and
+ * Approve would be unreachable rather than merely unadvised.
+ */
+export function readDraftEditRecordsOrNone(path: string): z.infer<typeof AppliedEditSchema>[] {
+  try {
+    return readDraftEditRecords(path);
+  } catch {
+    return [];
+  }
+}
+
 function readDraftEditRecords(path: string): z.infer<typeof AppliedEditSchema>[] {
   if (!existsSync(path)) return [];
   let raw: unknown;
@@ -219,16 +235,26 @@ const entityKeys = (side: Record<string, unknown>): string[] =>
     .slice(0, 200)
     .map((key) => key.slice(0, 200));
 
-export function listBundles(directory: string): BundleManifest[] {
+/**
+ * The bundle manifests in a directory, each carrying the name of the file it
+ * was read from.
+ *
+ * `file` is the name `readdirSync` gave, never the recorded `bundle_id`: a
+ * manifest is repository content and its id is whatever the file says, so a
+ * caller that wants the file back — deleting one with its ticket — would
+ * otherwise rebuild a path out of content and reach whatever that content
+ * names.
+ */
+export function listBundles(directory: string): Array<BundleManifest & { file: string }> {
   if (!existsSync(directory)) return [];
-  const manifests: BundleManifest[] = [];
+  const manifests: Array<BundleManifest & { file: string }> = [];
   for (const name of readdirSync(directory)) {
     if (!name.endsWith(".json")) continue;
     try {
       const parsed = BundleManifestSchema.safeParse(
         JSON.parse(readFileSync(join(directory, name), "utf8")),
       );
-      if (parsed.success) manifests.push(parsed.data);
+      if (parsed.success) manifests.push({ ...parsed.data, file: name });
     } catch {
       // A manifest that is not JSON is stepped over, as the CLI steps over it.
     }

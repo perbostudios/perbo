@@ -25,6 +25,11 @@ const session = (over: Record<string, unknown>): Record<string, unknown> => ({
   phase: "editing",
   error: null,
   operation: null,
+  drift: null,
+  change: null,
+  lastPane: null,
+  lastView: null,
+  interviewModel: null,
   ...over,
 });
 function profile(over: Record<string, unknown> = {}): ProfileState {

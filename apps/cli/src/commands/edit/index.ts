@@ -17,8 +17,8 @@ import {
   type Scope,
   type Ticket,
 } from "@perbo/contracts";
-import { PlanningError, blockingEdit, contractEditCount, readSpecFile } from "@perbo/planning";
-import { assembleContract, assertContractSealed, assertRequirementsCarried, chooseLevel, parseCriterion, recordedEdits, type ManualVerifier } from "../admit.js";
+import { blockingEdit, contractEditCount } from "@perbo/planning";
+import { assembleContract, assertContractSealed, chooseLevel, parseCriterion, recordedEdits, type ManualVerifier } from "../admit.js";
 import { z } from "zod";
 import type { Streams } from "../../streams.js";
 import {
@@ -390,10 +390,52 @@ export async function edit(
     }
     const manual: ManualVerifier = { reviewer: args.manualReviewer, reason: args.manualReason };
     outcome = args.outcome ?? before.outcome;
+    // A criterion keeps the requirement it answers across a flag edit. The
+    // flags carry text, verification and nothing else, and the desktop's
+    // compile sends one for every criterion whether it changed or not — so
+    // without this every citation is dropped on every compile, silently, and
+    // the plan stops recording what it was drafted from (D-103).
+    //
+    // By its words, and by nothing else. Not by id: `parseCriterion` numbers
+    // what it is given, `ac_1` upward, so dropping one shifts every id after
+    // it and the requirement would land on whichever criterion now holds that
+    // number. Not by position either, for the same reason under a reorder.
+    // Both produce a citation that is wrong rather than missing, and since
+    // every id still exists in the spec nothing downstream could ever catch it.
+    //
+    // Two criteria that read alike cannot be told apart, so neither is carried:
+    // a citation that goes is visible and can be put back, and one that moves
+    // is neither. A criterion whose text this edit changed loses its citation
+    // for the same reason — nothing here can say it is still the same
+    // criterion — and that is the case the person is asked about.
+    const held = before.acceptance_criteria;
+    const parsed = args.criteria.map((raw, index) => parseCriterion(raw, index, manual));
+    // Every criterion, cited or not. Counting only the cited ones would read
+    // two criteria sharing a text as one whenever its twin cites nothing, and
+    // stamp the requirement onto whichever of them survived — the citation
+    // would be wrong rather than missing, which is the one outcome this must
+    // not have.
+    const byText = new Map<string, (string | undefined)[]>();
+    for (const criterion of held)
+      byText.set(criterion.text, [
+        ...(byText.get(criterion.text) ?? []),
+        criterion.requirement_id,
+      ]);
+    // And how many of the criteria being written say each of those things: two
+    // new criteria sharing one old text are a claim split into two proofs, and
+    // giving both the requirement would leave it answered twice by halves and
+    // the next edit unable to tell which.
+    const writing = new Map<string, number>();
+    for (const { text } of parsed) writing.set(text, (writing.get(text) ?? 0) + 1);
     criteria =
-      args.criteria.length > 0
-        ? args.criteria.map((raw, index) => parseCriterion(raw, index, manual))
-        : before.acceptance_criteria;
+      parsed.length > 0
+        ? parsed.map((criterion) => {
+            const was = byText.get(criterion.text);
+            const cited =
+              was?.length === 1 && writing.get(criterion.text) === 1 ? was[0] : undefined;
+            return cited === undefined ? criterion : { ...criterion, requirement_id: cited };
+          })
+        : held;
     scope = {
       ...before.scope,
       ...(args.paths.length > 0 ? { paths_allowed: args.paths } : {}),
@@ -456,17 +498,15 @@ export async function edit(
         `'{"op":"set_node_paths",...}', or keep those paths in --path`,
     );
   }
-  // A criterion records the requirement it was drafted from (D-103). What a
-  // spec carries is read from the spec itself, at the path admission recorded,
-  // never from a contract file this command has just rewritten: a refused edit
-  // is left on disk for the person to fix, and a second run refuses it again.
-  // A contract with no spec behind it cites nothing.
-  assertRequirementsCarried(
-    contract,
-    specRequirementIds(resolve(context.cwd, args.repo), ticket),
-    ticket.admission.spec?.path ?? null,
-    `. The file is left as you edited it: drop the citation, then run perbo edit ${key} again`,
-  );
+  // What the plan cites and what the spec states are not held to each other
+  // here. Editing either is free: the disagreements are read on the contract
+  // page before the button that freezes them, and approval refuses a citation
+  // pointing at nothing (D-NEW-the-plan-answers-the-spec-and-says-so).
+  //
+  // A refusal here would have no remedy the desktop can follow: `--criterion`
+  // carries no ids, so rewording a criterion loses its citation, and the
+  // desktop's Save sends every criterion with no way to write a citation back.
+  // A plan would be left unsavable by an edit the person was invited to make.
   // Read before anything is written, as the graph edit reads it: a record
   // that is not JSON or names another plan refuses the edit here, with the
   // pair untouched, rather than after the contract has been rewritten.
@@ -530,7 +570,6 @@ export async function edit(
 
   const updated: Ticket = TicketSchema.parse({
     ...ticket,
-    title: contract.outcome,
     updated_at: now.toISOString(),
     admission: {
       ...ticket.admission,
@@ -625,20 +664,6 @@ async function runGraphEdit(input: {
         "left. A change to the contract is new work: admit it",
     );
   }
-  // An undo puts whole criteria back from the log, citations included, so what
-  // it restores is held to the spec as a hand edit is (D-103). The eight
-  // operations carry no citation and need no check; an edge's undo moves no
-  // criterion.
-  if (applied.undoes !== null && !outcome.approachOnly) {
-    assertRequirementsCarried(
-      outcome.contract,
-      specRequirementIds(resolve(input.cwd, args.repo), ticket),
-      ticket.admission.spec?.path ?? null,
-      `. Nothing is changed: leave edit ${applied.undoes} as it is, or restore the criterion by hand ` +
-        `with perbo edit ${key}`,
-    );
-  }
-
   const changes = [
     ...contractEditCount(state.contract, outcome.contract).changes,
     ...graphChanges(state, outcome),
@@ -838,27 +863,6 @@ function flagEdit(at: string, changes: readonly string[], author: EditAuthor): A
     replaced: false,
     undoes: null,
   };
-}
-
-/**
- * The requirement ids a criterion of this ticket may cite: the ones its spec
- * carries, read from the repository at the path admission recorded, or none
- * where nothing was drafted from a spec.
- */
-function specRequirementIds(repositoryRoot: string, ticket: Ticket): string[] {
-  const spec = ticket.admission.spec;
-  if (spec === null) return [];
-  try {
-    return readSpecFile(resolve(repositoryRoot, spec.path)).spec.requirements.map(
-      (requirement) => requirement.id,
-    );
-  } catch (error) {
-    const reason = error instanceof PlanningError ? error.message : String(error);
-    throw new UsageError(
-      `${ticket.key} was drafted from ${spec.path}, and a criterion's requirement id is checked ` +
-        `against that spec, which cannot be read now: ${reason}`,
-    );
-  }
 }
 
 const FLAGS = {

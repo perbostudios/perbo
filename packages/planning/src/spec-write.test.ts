@@ -9,12 +9,13 @@ import {
   MAX_SPEC_SLUG_LENGTH,
   readSpecSections,
   renderSpec,
+  retitleSpec,
   SpecConflict,
   specSlug,
   specTitleFromMessage,
   type SpecText,
 } from "./spec-text.js";
-import { readSpecText, writeSpecFile, type WrittenSpec } from "./spec-write.js";
+import { readSpecText, retitleSpecFile, writeSpecFile, type WrittenSpec } from "./spec-write.js";
 import { parseSpec } from "./spec.js";
 
 const scratch = scratchDirectories("perbo-spec-write-");
@@ -607,10 +608,46 @@ describe("a write against a spec that has moved", () => {
 describe("the title taken from the first thing a person said", () => {
   it("is their own first sentence, with the opening dropped", () => {
     expect(specTitleFromMessage("I want a poem about technology")).toBe("A poem about technology");
-    expect(specTitleFromMessage("Can you add a dark mode toggle")).toBe("Add a dark mode toggle");
+    expect(specTitleFromMessage("Can you add a dark mode toggle")).toBe("Dark mode toggle");
     expect(specTitleFromMessage("Please fix the login redirect. It loops.")).toBe("Fix the login redirect");
     // No opening to drop is left alone.
     expect(specTitleFromMessage("Split the queue node")).toBe("Split the queue node");
+  });
+
+  it("names the thing rather than the making of it", () => {
+    // Every piece of work here is something being made, so "Create an app
+    // that…" distinguishes nothing and has to be read to the end before two
+    // titles can be told apart. This name is the board's, the spec folder's
+    // and the planning pane's, so it is cut to the work itself.
+    expect(specTitleFromMessage("Create an app that allows me to play tic tac toe")).toBe(
+      "Play tic tac toe",
+    );
+    expect(specTitleFromMessage("build a clock app")).toBe("Clock app");
+    // Only what the making left is cut back: "I want a tool that…" never said
+    // the tool was being made, and its container may be the subject.
+    expect(specTitleFromMessage("I want a tool that lets me rename files")).toBe(
+      "A tool that lets me rename files",
+    );
+    expect(specTitleFromMessage("The page that lets you edit the title is broken")).toBe(
+      "The page that lets you edit the title is broken",
+    );
+    // The container word is only hollow in front of what the work does. On its
+    // own it is the whole of the name and it stays.
+    expect(specTitleFromMessage("Make an app")).toBe("App");
+    // And a cut that would take the whole sentence takes none of it, because
+    // `specSlug` refuses a name with no letters and the folder has to exist.
+    expect(specTitleFromMessage("Create a .")).toBe("Create a");
+    // A verb that is not the making of a thing is the work, and is left alone.
+    expect(specTitleFromMessage("Fix the login bug")).toBe("Fix the login bug");
+    expect(specTitleFromMessage("Rename the queue node")).toBe("Rename the queue node");
+    // And which one is named decides whether the verb is the work. "A" thing
+    // is a new thing, so the making of it says nothing; "the" thing is one
+    // already there, and the verb is what is being done to it.
+    expect(specTitleFromMessage("Build the parser")).toBe("Build the parser");
+    expect(specTitleFromMessage("Make the login form responsive")).toBe(
+      "Make the login form responsive",
+    );
+    expect(specTitleFromMessage("Add the missing tests")).toBe("Add the missing tests");
   });
 
   it("keeps an abbreviation whole rather than ending the sentence on it", () => {
@@ -618,7 +655,7 @@ describe("the title taken from the first thing a person said", () => {
     // the folder `fix-dr`, and a folder is minted once.
     expect(specTitleFromMessage("Fix Dr. Smith's login redirect")).toBe("Fix Dr. Smith's login redirect");
     expect(specTitleFromMessage("Handle e.g. the parser edge cases")).toBe("Handle e.g. the parser edge cases");
-    expect(specTitleFromMessage("Add a toggle vs. a switch")).toBe("Add a toggle vs. a switch");
+    expect(specTitleFromMessage("Add a toggle vs. a switch")).toBe("Toggle vs. a switch");
     // An ordinary word still ends one.
     expect(specTitleFromMessage("Update the README. Also fix tests")).toBe("Update the README");
     expect(specTitleFromMessage("Fix the bug! It crashes.")).toBe("Fix the bug");
@@ -931,5 +968,53 @@ describe("a line that quotes the requirement-id mark", () => {
       requirements: "- The line mentions <!-- perbo:requirement-ids through R9 --> and nothing else.",
     });
     expect(highWater).toBe(1);
+  });
+});
+
+describe("a spec takes its ticket's name", () => {
+  it("rewrites the title line and nothing else, and the folder stays", () => {
+    const root = repository();
+    const written = write({ repositoryRoot: root, text: text({ title: "a simple snake game that eats apples" }) });
+    const before = readFileSync(written.path, "utf8");
+
+    const after = retitleSpecFile({
+      repositoryRoot: root,
+      path: `specs/${written.slug}/spec.md`,
+      title: "Snake game",
+    });
+
+    expect(readFileSync(written.path, "utf8")).toBe(after);
+    expect(after.split("\n")[0]).toBe("# Snake game");
+    expect(readSpecSections(after).text.title).toBe("Snake game");
+    expect(after.split("\n").slice(1)).toEqual(before.split("\n").slice(1));
+    expect(existsSync(join(root, "specs", "a-simple-snake-game-that-eats-apples", "spec.md"))).toBe(true);
+    expect(existsSync(join(root, "specs", "snake-game"))).toBe(false);
+  });
+
+  it("flattens a name across lines to one heading, and leaves the other headings alone", () => {
+    const markdown = "# Old\r\n\n## Outcome\n\nIt works.\n\n# Second top heading\n";
+    const named = retitleSpec(markdown, "Snake\n## Outcome  game");
+    expect(named).toBe("# Snake ## Outcome game\r\n\n## Outcome\n\nIt works.\n\n# Second top heading\n");
+    expect(readSpecSections(named).text.outcome).toBe("It works.");
+  });
+
+  it("gives a spec with no title line one at its head, and refuses an empty name", () => {
+    expect(retitleSpec("## Outcome\n\nIt works.\n", "Snake game")).toBe(
+      "# Snake game\n\n## Outcome\n\nIt works.\n",
+    );
+    expect(() => retitleSpec("# Old\n", "  \n ")).toThrow(PlanningError);
+  });
+
+  it("refuses a spec reached through a link", () => {
+    const root = repository();
+    const elsewhere = repository();
+    mkdirSync(join(elsewhere, "snake"), { recursive: true });
+    writeFileSync(join(elsewhere, "snake", "spec.md"), "# Old\n");
+    mkdirSync(join(root, "specs"), { recursive: true });
+    symlinkSync(join(elsewhere, "snake"), join(root, "specs", "snake"));
+    expect(() => retitleSpecFile({ repositoryRoot: root, path: "specs/snake/spec.md", title: "New" })).toThrow(
+      PlanningError,
+    );
+    expect(readFileSync(join(elsewhere, "snake", "spec.md"), "utf8")).toBe("# Old\n");
   });
 });

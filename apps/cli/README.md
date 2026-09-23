@@ -94,7 +94,7 @@ what leaves the machine, uninstall — is [`docs/install.md`](../../docs/install
 | `verdict` | Records your endorse or override on a stop, or accept or reject on a finding |
 | `run` | Runs the loop end to end: write, check, review, fix, and — with `--publish` — open the pull request |
 
-`admit`, `approve`, `edit`, `list`, `sync`, `serve`, `agent`, `interview`, `mcp`, `stops`, `escapes` and `principle` build a ticket queue across many repositories on top of the same loop. `index` is the one command that reads your code rather than your records. `perbo --help` has every command and flag; [docs/04](../../docs/04-ticket-workspace-and-review.md) is the specification.
+`admit`, `approve`, `edit`, `list`, `sync`, `serve`, `agent`, `interview`, `drift`, `mcp`, `stops`, `escapes` and `principle` build a ticket queue across many repositories on top of the same loop. `index` is the one command that reads your code rather than your records. `perbo --help` has every command and flag; [docs/04](../../docs/04-ticket-workspace-and-review.md) is the specification.
 
 ## Commands
 
@@ -119,6 +119,7 @@ perbo serve [--publish] [--interval 60s] [--once] [--json] [--no-endpoint]
 perbo mcp [--drafter] [--json]
 perbo agent [--provider claude|codex] [-- <provider args>]
 perbo interview --repo . --spec specs/<slug> [--session <id>] [--model <id>] [--provider claude|codex]
+perbo drift PRB-1 --repo . [--provider anthropic|claude-cli|codex-cli] [--model <id>] [--dismiss] [--json]
 perbo stops [--json] [--since <ISO date>] [--by-week]
 perbo verdict <review> --endorse|--override <stop key> [--note "..."] [--replace]
 perbo verdict <review> --accept|--reject <finding key> [--note "..."] [--replace]
@@ -166,8 +167,9 @@ components as an ADR. `--provider claude` runs Claude Code through the Claude Ag
 either. It reads anything and runs read-only commands; that spec's own folder, `CONTEXT.md` and the
 ADR folder are the only places it may write, and a write outside them is refused rather than put to
 you — there are no permission prompts, and a refusal is streamed and printed with the rule that
-refused it. Its `generate_plan` tool drafts one ticket from the spec once you have written it,
-re-drafting that ticket rather than admitting a second; `edit_plan` and `undo_edit` change the plan
+refused it. It writes the spec's `#` line as a title, named as a ticket is and shown the other tickets' names
+(D-NEW-a-ticket-is-named-apart-from-its-board), and admission rewrites it to the ticket's name. It writes the spec and stops there: drafting one ticket from it is yours, through
+`admit --from-spec` or Generate plan in the app. `edit_plan` and `undo_edit` change that plan
 afterwards through the same validated path `edit --graph-edit` uses, recorded as the interview's and
 undoable; `read_plan` reads it back; `ask_options` puts what it cannot settle itself to you as groups
 of questions with the answers to pick from, and returns rather than waiting, so your pick arrives as
@@ -238,9 +240,10 @@ through local `gh`, hands its title and body to a model as delimited `trust="ext
 alongside the repository's tree, and takes back a constrained draft: one outcome, the criteria
 the work has, each with an assertion and a kind, a proposed scope of one to eight globs, a
 rationale and, where the work divides, the nodes and edges of an execution graph
-(`@perbo/planning`, prompt `draft_v4`). The draft is written beside the ticket as
+(`@perbo/planning`, prompt `draft_v5`). The draft is written beside the ticket as
 `<KEY>.draft.json` with the model, provider, tokens and cost that produced it, and the contract is
-created in `plan_review`. **A draft is never executed; only an approved contract is.** The person's
+created in `plan_review`. The ticket is named per D-NEW-a-ticket-is-named-apart-from-its-board.
+**A draft is never executed; only an approved contract is.** The person's
 `approve` is the authority boundary under ADR-0023 §4 — a scope glob a model proposed becomes an
 action parameter only after a human has confirmed it. `--outcome`, `--criterion` and `--path`
 given with `--from` override the draft's corresponding part; without `--from`, admission calls no
@@ -262,8 +265,10 @@ the draft lists is reported by its full count, with the listing saying how many 
 in the repository (D-103): the same prompt and the same `trust="external"` block as an issue, with
 two things a spec adds. Its requirement ids are the only ones a criterion may cite, and a draft
 citing one the spec does not carry is refused; its No-Gos are read from the `## No-Gos` heading and
-never drafted. The ticket records the spec's repository-relative path and the SHA-256 of the bytes
-the drafter saw, and beside them every file the loop commits with the spec, each with its own
+never drafted. The ticket's name becomes the spec's title: its `#` line is rewritten to the name,
+and nothing else in the file or the folder's name moves (D-NEW-a-ticket-is-named-apart-from-its-board).
+The ticket records the spec's repository-relative path and the SHA-256 of the spec as admission
+leaves it, and beside them every file the loop commits with the spec, each with its own
 hash: the spec's whole folder but for the interview's session record, and the `CONTEXT.md` and the
 files under the ADR folder that the checkout has changed since its last commit. A spec lives in a
 folder of its own under the spec folder, because that folder is what is recorded and committed, and
@@ -290,7 +295,8 @@ spec while the pull request carries it.
 **Starting over from the spec.** `perbo admit --from-spec <path> --start-over PRB-1` drafts that
 ticket's plan again: the same key, `ticket_id` and `plan_id`, a new plan version, and the drafted
 graph, criteria and scope replacing what stood, so the graph edits made since the last draft go with
-them. The spec's edits and its No-Gos survive because they are in the file. The replaced edits stay
+them. The spec's edits and its No-Gos survive because they are in the file, and its title is
+rewritten to the name drafted again. The replaced edits stay
 in `PRB-1.draft.json` marked replaced — they stop counting towards `edit_count`, and `--undo` cannot
 reach across the re-draft. It admits no other ticket, refuses a ticket that is not in `plan_review`,
 and, like every other drafting flag, cannot approve in the same command.

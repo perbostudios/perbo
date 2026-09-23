@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, Notice, cx } from "../ui/index.js";
 import { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS, type GraphEdit } from "@perbo/contracts/browser";
@@ -6,6 +6,8 @@ import { bridge, errorMessage, useAction, useGraph } from "../workspace/index.js
 import { isLive } from "../../shared/jobs.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { GraphInspector, SplitDialog } from "./GraphInspector.js";
+import { MarkedCriterion } from "./ChangeMarks.js";
+import { changeKey, criteriaChange, type CriteriaChange } from "./change-marks.js";
 import { graphColumns } from "./graph-layout.js";
 import { graphHistory, latestUndoable } from "./history.js";
 import type {
@@ -29,7 +31,7 @@ import type { Route } from "../shell/route.js";
  * host, which runs `perbo edit --graph-edit` — the same command the interview
  * uses — so each edit is validated whole, recorded with its author and
  * undoable, and the contract and the approach record are only ever written by
- * that command. What the pane holds is a selection and a pan offset.
+ * that command. What the pane holds is a selection, a pan offset and a zoom.
  *
  * The drawing is its own: positioned nodes and an SVG layer of edges, because
  * the renderer runs under a policy that allows no worker and no remote origin
@@ -121,16 +123,41 @@ export function GraphPane({
     () => selected.filter((id) => (view?.nodes ?? []).some((node) => node.id === id)),
     [selected, view],
   );
+  // The last change to the plan's promise, by criterion, for the marks on
+  // the node cards and in the inspector (D-NEW-the-plan-answers-the-spec-and-says-so).
+  // Diffed once per change rather than once per session read, which hands
+  // over a fresh object for the same change.
+  const planChange = session?.change?.plan ?? null;
+  const changed = changeKey(session?.change ?? null);
+  const changes = useMemo(
+    () => (planChange === null ? null : criteriaChange(planChange.before.criteria, planChange.after.criteria)),
+    [changed],
+  );
   const one = held.length === 1 ? view?.nodes.find((node) => node.id === held[0]) : undefined;
   // Confirming the plan is saying the division is right, and it leads to the
   // page where what freezes is shown — the outcome, the criteria, the scope
   // and the base. Approval happens there and nowhere else: one contract has
   // one approval, on the screen that states what is being approved.
+  //
+  // By way of the reading of the plan against its spec
+  // (D-NEW-the-plan-answers-the-spec-and-says-so), which is the one step
+  // between the two and lands on the contract by itself where there is
+  // nothing to say. An approved plan is frozen and goes straight there; the
+  // shortcut takes the same way, so it cannot skip the reading.
+  //
+  // Not while the chat is mid-turn on a plan not yet approved: what approving
+  // freezes is what the contract holds when it is read (ADR-0016), and a turn
+  // in flight may still be moving this plan. Checked here rather than only on
+  // the button, because the shortcut reaches this without passing one.
+  const thinking = !view?.approved && (workspace.working ?? []).includes(session?.id ?? "");
   const confirm = (): void => {
-    if (view === undefined || busy || action.isPending) return;
-    navigate({ page: "task", repoId, key: view.key, view: "contract" });
+    if (view === undefined || busy || action.isPending || thinking) return;
+    const sessionId = session?.id;
+    if (view.approved || sessionId === undefined)
+      navigate({ page: "task", repoId, key: view.key, view: "contract" });
+    else navigate({ page: "planning", sessionId, pane: "drift" });
   };
-  useShortcut("approve", view === undefined || busy || action.isPending ? null : confirm);
+  useShortcut("approve", view === undefined || busy || action.isPending || thinking ? null : confirm);
 
   if (!session)
     return (
@@ -240,11 +267,16 @@ export function GraphPane({
                 Delete
               </Button>
             </div>
-            <span className="small muted">
-              {held.length > 1
-                ? `${held.length} selected`
-                : "shift-click two to merge · drag from ○ for an edge · drag the canvas to pan"}
-            </span>
+            {held.length > 1 ? (
+              <span className="small muted">{held.length} selected</span>
+            ) : (
+              <GraphPopover
+                label="How to work the canvas"
+                trigger={{ className: "info-hint-dot", label: "How to work the canvas", body: "i" }}
+              >
+                shift-click two to merge · drag from ○ for an edge · drag the canvas to pan
+              </GraphPopover>
+            )}
             <span className="spacer" />
             <SizeEstimate size={view.size} />
           </>
@@ -270,6 +302,7 @@ export function GraphPane({
         <>
           <Canvas
             view={view}
+            changes={changes}
             selected={held}
             onSelect={setSelected}
             onEdge={(from, to) => void apply({ kind: "graphEdit", edit: { op: "add_edge", from, to } })}
@@ -283,6 +316,7 @@ export function GraphPane({
               key={one.id}
               view={view}
               node={one}
+              changes={changes}
               live={view.live.nodes.find((node) => node.id === one.id)}
               busy={busy}
               apply={(edit) => apply({ kind: "graphEdit", edit })}
@@ -299,6 +333,7 @@ export function GraphPane({
             workspace={workspace}
             history={view.history}
             busy={busy || action.isPending}
+            thinking={thinking}
             onApprove={confirm}
             onUndo={(n) => void apply({ kind: "graphUndo", edit: n })}
             onStartOver={() => setStartingOver(true)}
@@ -330,7 +365,7 @@ export function GraphPane({
             </Button>
             <Button
               variant="danger"
-              disabled={busy || editor.submitting}
+              disabled={busy || editor.submitting !== null}
               onClick={() => {
                 setStartingOver(false);
                 editor.submit("startOver");
@@ -345,9 +380,59 @@ export function GraphPane({
   );
 }
 
+/**
+ * A button and the panel it opens under it, which Close at the panel's right
+ * edge shuts, and so does a press anywhere outside the two; the button's own
+ * press is inside, so its click still toggles. The panel lines up with the
+ * button's right edge and opens leftwards, which keeps it inside the pane the
+ * button sits in.
+ */
+function GraphPopover({
+  label,
+  trigger,
+  children,
+}: {
+  label: string;
+  trigger: { className: string; label: string; body: ReactNode };
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const holder = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: MouseEvent): void => {
+      if (!holder.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+  return (
+    <div className="graph-pop-holder" ref={holder}>
+      <button
+        type="button"
+        className={trigger.className}
+        aria-expanded={open}
+        aria-label={trigger.label}
+        onClick={() => setOpen(!open)}
+      >
+        {trigger.body}
+      </button>
+      {open && (
+        <div className="graph-pop" role="dialog" aria-label={label}>
+          {children}
+          <div className="graph-pop-foot">
+            <Button className="small" onClick={() => setOpen(false)}>
+              Close
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The size, S to XL, with the counts it came from and the ones that set it (D-104). */
 function SizeEstimate({ size }: { size: GraphView["size"] }) {
-  const [open, setOpen] = useState(false);
   const word = {
     nodes: size.counts.nodes === 1 ? "node" : "nodes",
     criteria: size.counts.criteria === 1 ? "criterion" : "criteria",
@@ -355,74 +440,72 @@ function SizeEstimate({ size }: { size: GraphView["size"] }) {
     packages: size.counts.packages === 1 ? "package" : "packages",
   };
   return (
-    <div className="size-holder">
-      <button
-        type="button"
-        className="size"
-        aria-expanded={open}
-        aria-label={`Size ${size.name}: how it is worked out`}
-        onClick={() => setOpen(!open)}
-      >
-        <span className="size-scale" aria-hidden="true">
-          {SIZE_NAMES.map((name) => (
-            <span key={name} className={cx(name === size.name && "on")}>
-              {name}
-            </span>
-          ))}
-        </span>
-        <span className="size-counts">
-          {SIZE_COUNTS.map((count, index) => (
-            <span key={count}>
-              {index > 0 ? " · " : ""}
-              <b className={cx(size.drivers.includes(count) && "drv")}>{size.counts[count]}</b>{" "}
-              {word[count]}
-            </span>
-          ))}
-        </span>
-      </button>
-      {open && (
-        <div className="size-pop" role="dialog" aria-label="How the size is worked out">
-          <strong>Size {size.name}</strong>, from fixed thresholds on four counts. The plan takes
-          the largest size any count reaches; the underlined counts set it. It describes the graph
-          and predicts nothing.
-          <table>
-            <thead>
-              <tr>
-                <th />
-                {SIZE_NAMES.map((name) => (
-                  <th key={name}>{name}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {SIZE_COUNTS.map((count) => (
-                <tr key={count}>
-                  <td>
-                    {count} · {size.counts[count]}
-                  </td>
-                  {SIZE_THRESHOLDS.map((row) => (
-                    <td key={row.name}>≤{row[count]}</td>
-                  ))}
-                  <td>&gt;{SIZE_THRESHOLDS.at(-1)![count]}</td>
-                </tr>
+    <GraphPopover
+      label="How the size is worked out"
+      trigger={{
+        className: "size",
+        label: `Size ${size.name}: how it is worked out`,
+        body: (
+          <>
+            <span className="size-scale" aria-hidden="true">
+              {SIZE_NAMES.map((name) => (
+                <span key={name} className={cx(name === size.name && "on")}>
+                  {name}
+                </span>
               ))}
-            </tbody>
-          </table>
-          <Button className="small" onClick={() => setOpen(false)}>
-            Close
-          </Button>
-        </div>
-      )}
-    </div>
+            </span>
+            <span className="size-counts">
+              {SIZE_COUNTS.map((count, index) => (
+                <span key={count}>
+                  {index > 0 ? " · " : ""}
+                  <b className={cx(size.drivers.includes(count) && "drv")}>{size.counts[count]}</b>{" "}
+                  {word[count]}
+                </span>
+              ))}
+            </span>
+          </>
+        ),
+      }}
+    >
+      <strong>Size {size.name}</strong>, from fixed thresholds on four counts. The plan takes the
+      largest size any count reaches; the underlined counts set it. It describes the graph and
+      predicts nothing.
+      <table>
+        <thead>
+          <tr>
+            <th />
+            {SIZE_NAMES.map((name) => (
+              <th key={name}>{name}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {SIZE_COUNTS.map((count) => (
+            <tr key={count}>
+              <td>
+                {count} · {size.counts[count]}
+              </td>
+              {SIZE_THRESHOLDS.map((row) => (
+                <td key={row.name}>≤{row[count]}</td>
+              ))}
+              <td>&gt;{SIZE_THRESHOLDS.at(-1)![count]}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </GraphPopover>
   );
 }
 
 /**
  * What one node's state reads as, and the record it came from (SCP-317). The
  * record is on the chip because a state nobody can trace is a claim, and every
- * one of these is a reading of a file the loop wrote.
+ * one of these is a reading of a file the loop wrote. A node with nothing on
+ * record — `untouched` — carries no chip: that is every node before the plan
+ * has run, and a word on each of them says nothing.
  */
-const NODE_STATE: Record<GraphNodeState, { label: string; from: string }> = {
+type ShownState = Exclude<GraphNodeState, "untouched">;
+const NODE_STATE: Record<ShownState, { label: string; from: string }> = {
   finding_open: { label: "a finding open", from: "From the review artifact's findings." },
   checks_failed: {
     label: "checks failed",
@@ -434,10 +517,9 @@ const NODE_STATE: Record<GraphNodeState, { label: string; from: string }> = {
     from: "From the pinned checks narrowed to this node's own changed test files.",
   },
   changed: { label: "changed", from: "From the sealed change set." },
-  untouched: { label: "untouched", from: "From the sealed change set: no path here matches." },
 };
 
-function NodeState({ state }: { state: GraphNodeState }) {
+function NodeState({ state }: { state: ShownState }) {
   return (
     <span className={cx("state", `state--${state}`)} title={NODE_STATE[state].from}>
       {NODE_STATE[state].label}
@@ -491,20 +573,29 @@ interface Box {
   height: number;
 }
 
+/** How far the canvas zooms out and in. */
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2.5;
+
 /**
  * The canvas: a clipping frame, and one layer inside it that moves. Dragging
  * the background or scrolling pans the layer, so a large graph is reachable
  * with the node panel open; dragging a node does not, because that is how an
- * edge is drawn.
+ * edge is drawn. A trackpad pinch, which Chromium delivers as a wheel event
+ * with `ctrlKey` set, and the scroll wheel with ⌃ or ⌘ held zoom the layer
+ * about the pointer, between {@link ZOOM_MIN} and {@link ZOOM_MAX}.
  */
 function Canvas({
   view,
+  changes,
   selected,
   onSelect,
   onEdge,
   onRemoveEdge,
 }: {
   view: GraphView;
+  /** The last change to the plan's promise, or null for none to mark. */
+  changes: CriteriaChange | null;
   selected: readonly string[];
   onSelect: (ids: string[]) => void;
   onEdge: (from: string, to: string) => void;
@@ -516,6 +607,9 @@ function Canvas({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const at = useRef(pan);
   at.current = pan;
+  const [zoom, setZoom] = useState(1);
+  const scaled = useRef(zoom);
+  scaled.current = zoom;
   const [grabbing, setGrabbing] = useState(false);
   const grab = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const moved = useRef(false);
@@ -529,10 +623,32 @@ function Canvas({
   useEffect(() => {
     const element = frame.current;
     if (!element) return undefined;
-    // Not passive: the canvas pans rather than the page scrolling behind it.
+    // Not passive: the canvas pans or zooms rather than the page scrolling or
+    // the window zooming behind it.
     const wheel = (event: WheelEvent): void => {
       event.preventDefault();
-      panTo(at.current.x - event.deltaX, at.current.y - event.deltaY);
+      if (!event.ctrlKey && !event.metaKey) {
+        panTo(at.current.x - event.deltaX, at.current.y - event.deltaY);
+        return;
+      }
+      // A pinch arrives as many small deltas and a wheel notch as one large
+      // one, so a notch is capped to a step of about a quarter.
+      const step = Math.max(-25, Math.min(25, event.deltaY));
+      const from = scaled.current;
+      const to = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, from * Math.exp(-step * 0.01)));
+      if (to === from) return;
+      // The layer point under the pointer stays under it. The layer is scaled
+      // from its top-left corner, which sits at the pan offset from where it
+      // is laid out; read from the refs, which are set here before the render,
+      // so pinch events faster than the frames each start from the last one.
+      const box = element.getBoundingClientRect();
+      const x = event.clientX - (box.left + element.clientLeft + (layer.current?.offsetLeft ?? 0) + at.current.x);
+      const y = event.clientY - (box.top + element.clientTop + (layer.current?.offsetTop ?? 0) + at.current.y);
+      const keep = 1 - to / from;
+      at.current = { x: at.current.x + x * keep, y: at.current.y + y * keep };
+      scaled.current = to;
+      setPan(at.current);
+      setZoom(to);
     };
     element.addEventListener("wheel", wheel, { passive: false });
     return () => element.removeEventListener("wheel", wheel);
@@ -560,9 +676,10 @@ function Canvas({
     const move = (event: MouseEvent): void => {
       const box = layer.current?.getBoundingClientRect();
       if (!box) return;
-      setDrawing((current) =>
-        current ? { ...current, x: event.clientX - box.left, y: event.clientY - box.top } : current,
-      );
+      // In the layer's own coordinates, which the edges are drawn in.
+      const x = (event.clientX - box.left) / scaled.current;
+      const y = (event.clientY - box.top) / scaled.current;
+      setDrawing((current) => (current ? { ...current, x, y } : current));
     };
     const up = (event: MouseEvent): void => {
       const held = drawn.current;
@@ -663,7 +780,7 @@ function Canvas({
       <div
         className="canvas-inner"
         ref={layer}
-        style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}
+        style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transformOrigin: "0 0" }}
       >
         <svg className="edges" width="100%" height="100%" aria-hidden="true">
           <defs>
@@ -717,6 +834,7 @@ function Canvas({
                     <Node
                       key={id}
                       node={node}
+                      changes={changes}
                       live={view.live.nodes.find((each) => each.id === id)}
                       selected={selected}
                       onChoose={choose}
@@ -750,6 +868,7 @@ function Canvas({
 
 function Node({
   node,
+  changes,
   live,
   selected,
   onChoose,
@@ -757,6 +876,8 @@ function Node({
   boxes,
 }: {
   node: GraphNodeView;
+  /** The last change to the plan's promise, or null for none to mark. */
+  changes: CriteriaChange | null;
   live: GraphNodeLive | undefined;
   selected: readonly string[];
   onChoose: (id: string, event: { shiftKey: boolean }) => void;
@@ -787,15 +908,19 @@ function Node({
       <div className="node-head">
         <span className="node-label">{node.id}</span>
         <span className="node-title">{node.title}</span>
-        {live && <NodeState state={live.state} />}
+        {live && live.state !== "untouched" && <NodeState state={live.state} />}
       </div>
       {node.criteria.map((criterion) => (
         <div className="crit" key={criterion.id}>
           <span className={`kind kind--${criterion.kind}`}>{criterion.kind}</span>
-          <span>{criterion.text}</span>
+          {/* Marked as the last change left it. A criterion the change took
+              away belongs to no node now, so no card shows it; the inspector
+              does, at the end of its list. */}
+          <span>
+            <MarkedCriterion text={criterion.text} change={changes?.of.get(criterion.id)} />
+          </span>
         </div>
       ))}
-      <div className="node-paths">{node.paths.join(" · ")}</div>
       {live && live.changed.length > 0 && (
         <div className="node-changed" aria-label={`Changed under ${node.id}`}>
           {live.changed.map((path) => (
@@ -832,6 +957,7 @@ function ApproveBar({
   workspace,
   history,
   busy,
+  thinking,
   onApprove,
   onUndo,
   onStartOver,
@@ -840,6 +966,8 @@ function ApproveBar({
   workspace: Snapshot;
   history: GraphView["history"];
   busy: boolean;
+  /** Whether the way onward waits for a turn in flight, which may still be moving this plan. */
+  thinking: boolean;
   onApprove: () => void;
   onUndo: (n: number) => void;
   onStartOver: () => void;
@@ -852,18 +980,29 @@ function ApproveBar({
       <section className="graph-history" aria-label="Edits to this plan">
         <span className="section-label">
           Edits to this plan · {view.editCount} counted against admission
+          {history.length > 6 ? ` · ${history.length - 6} more in History` : ""}
+          {/* The two facts a person acts on: how much is in scope, and what is
+              ahead of this in the queue. What approving freezes is stated on
+              the contract, the page that freezes it and the page Confirm leads
+              to, and repeating it here would cost a third of the canvas the
+              plan is drawn on. */}
+          {" · "}
+          {files} {files === 1 ? "file" : "files"} in scope
+          {running ? ` · starts after ${running.ticket.key}` : ""}
         </span>
         {history.length === 0 ? (
           <p className="small muted">Nothing has changed since the drafter proposed it.</p>
         ) : (
           <ol>
-            {history.map((edit) => (
+            {/* The last six, which is the two columns of three this bar is,
+                rather than a scrollbox, which over columns fragments them
+                sideways — more than two columns, and a bar a person has to
+                scroll to read at a glance. History holds the whole record, and
+                the count beside the label says how much of it is not here. */}
+            {history.slice(-6).map((edit) => (
               <li key={edit.n} className={cx((edit.undone || edit.replaced) && "is-undone")}>
                 <span className="hist-n">{edit.n}</span>
                 <span className="hist-line">{edit.summary}</span>
-                <small className={`author author--${edit.author}`}>
-                  {edit.author === "you" ? "you" : "the interview"}
-                </small>
                 {edit.n === undoable?.n && (
                   <button
                     type="button"
@@ -880,18 +1019,13 @@ function ApproveBar({
           </ol>
         )}
       </section>
-      <p>
-        Confirming takes you to the contract, where <b>approving freezes</b> the outcome, each
-        node&rsquo;s criteria and paths ({files} {files === 1 ? "file" : "files"} in scope) and the
-        base. The order between nodes and the spec&rsquo;s No-Gos stay approach, and may still
-        change while the work runs.
-        {running ? ` Runs go one at a time; this one starts after ${running.ticket.key}.` : ""}
-      </p>
       <div className="approve-actions">
         <button type="button" className="text-button small" disabled={busy} onClick={onStartOver}>
           Start over from the spec…
         </button>
-        <Button variant="primary" disabled={busy} onClick={onApprove}>
+        {/* The way onward says it is waiting rather than going quiet. */}
+        {thinking && <span className="small muted">Waiting for the chat to finish this turn…</span>}
+        <Button variant="primary" disabled={busy || thinking} onClick={onApprove}>
           {view.approved ? "Open the contract" : "Confirm the plan"}
         </Button>
       </div>

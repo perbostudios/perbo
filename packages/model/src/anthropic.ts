@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { ProviderEffort } from "@perbo/contracts";
 import { DEFAULT_CLAUDE_MODEL } from "./defaults.js";
 import { ProviderError } from "./failure.js";
 import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL, type Model, type ModelRequest, type ModelTurn } from "./turn.js";
@@ -15,7 +16,7 @@ export interface AnthropicModelOptions {
   maxTokens?: number;
   maxRetries?: number;
   timeoutMs?: number;
-  effort?: "low" | "medium" | "high" | "xhigh" | "max";
+  effort?: ProviderEffort<"anthropic">;
   modelId?: string;
   /** Injected by tests. Production uses the global fetch. */
   fetch?: typeof globalThis.fetch;

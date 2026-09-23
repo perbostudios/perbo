@@ -9,6 +9,7 @@ import {
   standingGlob,
   type StandingProhibitedEntry,
 } from "@perbo/contracts/browser";
+import type { DriftFinding, DriftVerdict } from "@perbo/planning/browser";
 import {
   DraftSchema,
   EditingFormSchema,
@@ -16,16 +17,18 @@ import {
   INTERVIEW_CONVERSATION_CAP,
   InterviewEntrySchema,
   RequestSchema,
+  SPEC_SLUG,
   TaskModelsSchema,
 } from "./protocol.js";
 import type {
-  Detail, Draft, DraftEdit, EditingForm, EditingOperation, EditingSession,
-  EditingTarget, InterviewEntry, Job, LegacyEditing, OpenDraft, Request, TaskModels,
+  Detail, Draft, DraftEdit, EditingChange, EditingForm, EditingOperation, EditingSession,
+  EditingTarget, InterviewEntry, Job, LegacyEditing, OpenDraft, PlanningPane, PlanPromise, Request,
+  SpecSections, TaskModels,
 } from "./protocol.js";
 
 type EditingRequest = Extract<
   Request,
-  { kind: "draft" | "admit" | "edit" | "generatePlan" | "startOver" }
+  { kind: "admit" | "edit" | "generatePlan" | "startOver" }
 >;
 export interface EditingOwner { sessionId: string; operationId: string }
 
@@ -84,7 +87,6 @@ export function editingForm(models: TaskModels, detail?: Detail): EditingForm {
   return {
     draft: detail ? contractDraft(detail) : { outcome: "", criteria: [], paths: ["src/**", "test/**"], prohibited: [] },
     models: TaskModelsSchema.strip().parse(models),
-    step: detail ? 2 : 1,
     editing: null,
     criterion: { text: "", assertion: "", kind: "test" },
     newPath: null,
@@ -94,6 +96,167 @@ export function editingForm(models: TaskModels, detail?: Detail): EditingForm {
 const pending = (operation: EditingOperation | null): boolean =>
   operation !== null && ["accepted", "running", "stopping"].includes(operation.state);
 
+/**
+ * Whether two readings found the same problems: the same places, saying the
+ * same difference, in any order. What a re-read is compared by before the
+ * first is put to the person again (D-NEW-the-plan-answers-the-spec-and-says-so).
+ * The options are not compared: a model may word the ways to close it afresh
+ * each reading, and that is not a new problem; nor is the order, which a
+ * model may also give afresh, and a list the same but for its order is the
+ * same list.
+ */
+export function sameProblems(
+  left: readonly DriftFinding[],
+  right: readonly DriftFinding[],
+): boolean {
+  const name = (finding: DriftFinding): string => `${finding.heading}\0${finding.difference}`;
+  const named = new Set(left.map(name));
+  const other = new Set(right.map(name));
+  return named.size === other.size && [...named].every((entry) => other.has(entry));
+}
+
+/**
+ * How a re-read that could not be started is said in the chat, with the
+ * reason after it: the Problems pane matches the note by this sentence, since
+ * the chat is not beside it and there is no job to read the failure off.
+ */
+export const REREAD_COULD_NOT_START = "The plan could not be read against the spec again";
+
+/**
+ * Where a planning's interview stood as a reading of its plan started: whether
+ * a turn was in flight, and the last turn the person sent, by its entry's
+ * number, or 0 before any.
+ */
+export interface TurnMark {
+  working: boolean;
+  turn: number;
+}
+const lastTurnSent = (session: EditingSession): number =>
+  session.conversation.findLast((entry) => entry.line.kind === "turn")?.n ?? 0;
+export const turnMark = (session: EditingSession, working: boolean): TurnMark => ({ working, turn: lastTurnSent(session) });
+/**
+ * Whether an interview turn overlapped a reading that started at `mark`: in
+ * flight as it started or as it lands, or sent between the two
+ * ({@link ContractEditing.landDrift}).
+ */
+export const turnOverlapped = (mark: TurnMark, session: EditingSession, working: boolean): boolean =>
+  mark.working || working || lastTurnSent(session) !== mark.turn;
+
+/**
+ * The spec and the plan's promise as they stand at one moment, as both hosts
+ * read them before and after whatever may move them: null on a side the
+ * planning does not have — no spec folder yet, no plan drafted.
+ */
+export interface PromisePair {
+  spec: SpecSections | null;
+  plan: PlanPromise | null;
+}
+
+/** What a plan promises, read off its contract: the outcome and each criterion's words. */
+export function promiseOf(contract: Detail["contract"]): PlanPromise {
+  return {
+    outcome: contract.outcome,
+    criteria:
+      "acceptance_criteria" in contract
+        ? contract.acceptance_criteria.map((criterion) => ({ id: criterion.id, text: criterion.text }))
+        : [],
+  };
+}
+
+/** The five sections of a spec, without its title: what a change to the spec is measured by. */
+export function sectionsOf({ outcome, requirements, no_gos, rabbit_holes, notes }: SpecSections): SpecSections {
+  return { outcome, requirements, no_gos, rabbit_holes, notes };
+}
+
+/**
+ * Where this plan and the spec it was drafted from disagree.
+ *
+ * Two questions, both answerable from ids alone and neither needing a model:
+ * a requirement the spec states that no criterion answers, and a criterion
+ * citing a requirement the spec no longer states. Read on the contract page,
+ * which is where approving freezes both. Each host reads the spec's
+ * requirements its own way and hands them here.
+ */
+export function specFindings(
+  requirements: readonly { id: string | null; text: string }[],
+  criteria: readonly { id: string; requirement_id?: string | undefined }[],
+): Detail["specFindings"] {
+  const stated = requirements.flatMap((each) => (each.id === null ? [] : [{ id: each.id, text: each.text }]));
+  const states = new Map(stated.map((each) => [each.id, each.text]));
+  const cited = new Map<string, string[]>();
+  for (const criterion of criteria)
+    if (criterion.requirement_id !== undefined)
+      cited.set(criterion.requirement_id, [...(cited.get(criterion.requirement_id) ?? []), criterion.id]);
+  return [
+    ...stated
+      .filter((each) => !cited.has(each.id))
+      .map((each) => ({ kind: "uncited" as const, requirementId: each.id, criteria: [], text: each.text })),
+    ...[...cited]
+      .filter(([id]) => !states.has(id))
+      .map(([id, criteria]) => ({ kind: "dangling" as const, requirementId: id, criteria, text: null })),
+  ];
+}
+
+const EMPTY_SECTIONS: SpecSections = { outcome: "", requirements: "", no_gos: "", rabbit_holes: "", notes: "" };
+
+/**
+ * The change between two readings of the pair, or null where nothing moved
+ * (D-NEW-the-plan-answers-the-spec-and-says-so). Each side is compared by its
+ * text: a save that wrote the same words, or an edit that rearranged a plan
+ * without touching a promise, is not a change to mark. The first writing of
+ * a thing is not a change to it either: a spec section written where it was
+ * empty, or no spec at all, is read as unchanged, and a plan drafted where
+ * there was none is not recorded, because the first words put into an empty
+ * box are not an edit, and marking the whole of them green says nothing. A
+ * later edit of those words is a change, and marked.
+ */
+export function changeBetween(before: PromisePair, after: PromisePair, at: string): EditingChange | null {
+  const spec = after.spec === null ? null : specChange(before.spec ?? EMPTY_SECTIONS, after.spec);
+  const plan =
+    before.plan !== null && after.plan !== null && JSON.stringify(before.plan) !== JSON.stringify(after.plan)
+      ? { before: before.plan, after: after.plan }
+      : null;
+  return spec === null && plan === null ? null : { at, spec, plan };
+}
+
+/**
+ * The spec's side of a change, or null where no section moved. A section
+ * that was empty takes its new words as its before, so the two sides agree
+ * on it and nothing in it is marked.
+ */
+function specChange(was: SpecSections, now: SpecSections): NonNullable<EditingChange["spec"]> | null {
+  const before = { ...now };
+  for (const field of Object.keys(EMPTY_SECTIONS) as (keyof SpecSections)[])
+    if (was[field].trim().length > 0) before[field] = was[field];
+  return JSON.stringify(before) === JSON.stringify(now) ? null : { before, after: now };
+}
+
+/**
+ * A planning that holds nothing: opened fresh, and nothing put into it
+ * (D-NEW-a-spec-outlives-its-planning).
+ *
+ * `revision` is the count of edits, so zero is "nothing edited" and covers the
+ * form, the history, the nodes and the drift without naming any of them. The
+ * rest are the things that are true at birth for a session opened over
+ * something that already existed — a ticket carries `key`, a spec carries
+ * `specSlug`, both at revision 0 — and the conversation, which is deliberately
+ * not an edit and so never bumps `revision` (see `converse`): a turn the person
+ * sent is writing, and `revision` alone cannot see it. The pane the person was
+ * last on is not asked about: looking around a planning puts nothing into it
+ * (see `visit`).
+ */
+export function untouchedPlanning(session: EditingSession): boolean {
+  return (
+    session.phase === "editing" &&
+    session.revision === 0 &&
+    session.key === null &&
+    session.specSlug === null &&
+    session.operation === null &&
+    session.conversation.length === 0 &&
+    !session.resumeNew
+  );
+}
+
 /** The sessions a person can pick up again, newest first. Both hosts put this on the snapshot. */
 export function openDrafts(records: readonly EditingSession[]): OpenDraft[] {
   return records
@@ -102,10 +265,18 @@ export function openDrafts(records: readonly EditingSession[]): OpenDraft[] {
       id: record.id,
       repoId: record.repoId,
       key: record.key,
+      admitted: record.admitted,
       outcome: record.form.draft.outcome,
       phase: record.phase,
       nodes: record.nodes,
+      drift:
+        record.drift === null
+          ? null
+          : { open: record.drift.open.length, resolved: record.drift.resolved },
       scope: { paths: [...record.form.draft.paths], prohibited: [...record.form.draft.prohibited] },
+      specSlug: record.specSlug,
+      lastPane: record.lastPane,
+      lastView: record.lastView,
     }))
     .reverse();
 }
@@ -167,6 +338,16 @@ export class ContractEditing {
       if (target.kind === "session") return records.find((entry) => entry.id === target.id);
       if (target.kind === "new") return records.find((entry) => entry.resumeNew && entry.phase !== "discarded");
       if (target.kind === "fresh") return undefined;
+      // A spec has one planning at a time, which is the whole of what D-103's
+      // one-folder-one-spec rule is protecting: opening a spec already being
+      // written returns that planning rather than starting a second beside it.
+      if (target.kind === "spec")
+        return records.find(
+          (entry) =>
+            entry.repoId === target.repoId &&
+            entry.specSlug === target.slug &&
+            entry.phase !== "discarded",
+        );
       const candidates = records.filter((entry) => entry.repoId === target.repoId && entry.phase !== "discarded");
       // A durable result reserves its Ticket before the asynchronous canonical read.
       return candidates.find((entry) => entry.key === target.key) ??
@@ -192,9 +373,18 @@ export class ContractEditing {
           revision: 0, resumeNew: target.kind === "new", history: [],
           form: legacy?.form ?? editingForm(this.io.defaults(repoId, key), detail),
           nodes: detail ? planNodes(detail.contract).length : 0,
+          // Named from birth for a spec being reopened, so the first save
+          // writes the folder that is already there rather than minting a
+          // second from the same title.
+          specSlug: target.kind === "spec" ? target.slug : null,
+          lastPane: null,
+          lastView: null,
+          drift: null,
+          change: null,
           phase: legacy?.pending ? "outcome-unknown" : "editing",
           error: legacy?.pending ? "An older draft has an unconfirmed job. Your text is preserved; check Home before submitting again." : null,
           operation: null,
+          interviewModel: null,
         });
         this.io.persist([...records, existing]);
       }
@@ -226,6 +416,19 @@ export class ContractEditing {
         // rather than only where a session is made: a planning resumed for a
         // ticket already in plan_review never saw the job that drafted it.
         next.nodes = planNodes(detail.contract).length;
+        // And which spec it was drafted from, for the same reason: a planning
+        // opened over a ticket — from the picker, or one the command line
+        // admitted — never saw the save that named the folder, so without this
+        // its Spec pane has nothing to read while its Graph shows the plan
+        // drafted from that very file (D-103).
+        //
+        // The ticket is where the answer is: admission records the spec's path,
+        // and the slug is the folder it names. Only filled in, never corrected,
+        // because a session already writing a spec is writing the one it knows.
+        if (next.specSlug === null) {
+          const drafted = detail.ticket.admission.spec?.path?.split("/").at(-2);
+          if (drafted !== undefined && SPEC_SLUG.test(drafted)) next.specSlug = drafted;
+        }
         if (detail.digest !== next.digest || detail.ticket.approved_at || manual) {
           next.phase = "conflict";
           next.error = manual
@@ -300,6 +503,57 @@ export class ContractEditing {
   }
 
   /**
+   * End the asking without a turn: what it put no longer waits on the person
+   * — a problem between the plan and the spec that a reading found closed,
+   * because they moved the plan or the spec by hand rather than answering.
+   * The line stays in the conversation to be read.
+   */
+  endAsking(id: string): void {
+    this.update(id, (session) => {
+      session.asking = null;
+    });
+  }
+
+  /**
+   * Take the ticket already drafted from this planning's spec.
+   *
+   * A ticket admitted at the command line is reconciled by nothing, so the
+   * planning that wrote its spec still holds no ticket: the rail offers no
+   * Graph over a plan that exists, and the plan is reachable only as a second
+   * row in the picker, which makes one piece of work look like two (D-101,
+   * D-103). This is the planning finding it.
+   *
+   * Only ever fills a session holding none. One already on a ticket re-drafted
+   * its own plan, and the key it has is the key to keep.
+   *
+   * Leaves `revision` where it stands, as {@link countNodes} does and for the
+   * same reason: this is not an edit of what the person is editing, and a bump
+   * would make a spec save in flight stale for a change they did not make.
+   */
+  adopt(id: string, detail: Detail, nodes: number): EditingSession {
+    return this.update(id, (session) => {
+      if (session.key !== null || session.phase === "discarded") return;
+      session.key = detail.ticket.key;
+      session.digest = detail.digest;
+      session.nodes = nodes;
+      // And the contract's own fields, exactly as {@link reconcile} takes them
+      // when it adopts one: the form still holds `editingForm`'s placeholder
+      // scope, and a session carrying a scope the contract does not is a
+      // planning the contract page reads as having unsaved paths — which
+      // blocks approving it and points at an editor this planning never used.
+      session.form = { ...session.form, draft: contractDraft(detail), editing: null, newPath: null };
+      // Not this planning's ticket to have made: whether it was is what lets a
+      // planning's own discard take its ticket with it, and a planning that
+      // finds a ticket already drafted from its spec — one the command line
+      // admitted — is opening somebody else's work. Claimed only where a
+      // caller watched the admission happen, which is {@link settled}'s job
+      // and never this one's.
+      session.admitted = false;
+      session.resumeNew = false;
+    });
+  }
+
+  /**
    * Write down how many nodes this planning's plan has.
    *
    * The rail is drawn where a contract cannot be read, so it asks this rather
@@ -308,9 +562,30 @@ export class ContractEditing {
    * again, and an edit — an edit divides a plan or puts one back together just
    * as a draft does.
    */
-  countNodes(id: string, nodes: number): void {
+  countNodes(id: string, nodes: number, digest?: string, plan?: Detail): void {
     this.update(id, (session) => {
       session.nodes = nodes;
+      // And the plan as it now reads, where the caller had it.
+      //
+      // The form is what the criteria pane draws and what its Next sends back:
+      // left at the contract this session last saw, the pane shows the plan as
+      // it was before the interview's edit, and moving on writes that stale
+      // copy over an edit that really happened — against a digest that has
+      // since caught up, so nothing refuses it.
+      //
+      // Not while a criterion is open: that text is being typed, and a session
+      // is allowed to lose a race it is not in the middle of.
+      if (plan !== undefined && session.form.editing === null)
+        session.form = { ...session.form, draft: contractDraft(plan), newPath: null };
+      // And the contract this planning is now on, where the caller read one.
+      //
+      // The interview writes the contract through `perbo edit`, in its own
+      // process, so a session that did not follow it still holds the digest of
+      // the contract as it was: reopening the planning finds the file changed
+      // and calls it somebody else's edit, which is the conflict {@link open}
+      // is there to catch and this is not one. It only mattered once a session
+      // drafted by the interview started holding a ticket at all ({@link adopt}).
+      if (digest !== undefined) session.digest = digest;
     });
   }
 
@@ -337,19 +612,193 @@ export class ContractEditing {
   }
 
   /**
+   * Write down the pane the person is now on, which is where the planning
+   * reopens (D-NEW-a-planning-reopens-where-it-was-left).
+   *
+   * Leaves `revision` where it stands, as {@link converse} does: moving
+   * between panes puts nothing into the planning, so a planning opened fresh
+   * and only looked around in is still one {@link untouchedPlanning} throws
+   * away, and a save in flight is not made stale by the person looking
+   * elsewhere. A pane reached is the last place, so it clears the contract
+   * as `lastView`. Where the person already is writes nothing, and a
+   * discarded planning is reopened nowhere.
+   */
+  visit(id: string, pane: PlanningPane): EditingSession {
+    const session = this.read(id);
+    if ((session.lastPane === pane && session.lastView === null) || session.phase === "discarded") return session;
+    return this.update(id, (next) => {
+      next.lastPane = pane;
+      next.lastView = null;
+    });
+  }
+
+  /**
+   * Write down that the person is now on this planning's contract, which is
+   * where its ticket reopens (D-NEW-a-planning-reopens-where-it-was-left),
+   * as {@link visit} writes a pane: no revision moves, `lastPane` stays for
+   * the contract's way back, and a discarded planning records nothing.
+   */
+  visitContract(id: string): EditingSession {
+    const session = this.read(id);
+    if (session.lastView === "contract" || session.phase === "discarded") return session;
+    return this.update(id, (next) => {
+      next.lastView = "contract";
+    });
+  }
+
+  /**
    * The interview's own session id, as its `started` event reported it, so a
    * later start on the same provider continues the same conversation with
    * `--session`. An id names a session of the provider that reported it, so a
-   * start on the other provider begins a new conversation instead.
+   * start on the other provider begins a new conversation instead. The model
+   * the session was started on is recorded beside it, for the chat to name.
    */
   recordInterview(
     id: string,
     interviewSession: string,
     interviewProvider: EditingSession["interviewProvider"],
+    interviewModel: string | null,
   ): EditingSession {
     return this.update(id, (session) => {
       session.interviewSession = interviewSession;
       session.interviewProvider = interviewProvider;
+      session.interviewModel = interviewModel;
+    });
+  }
+
+  /**
+   * What the last reading of the plan against its spec found
+   * (D-NEW-the-plan-answers-the-spec-and-says-so): the problems still open,
+   * or none. None after problems were open is the reading that resolved them,
+   * which is recorded as such so the page can offer the contract; none where
+   * none were ever open is nothing to record, and the session stays without a
+   * Problems pane. Leaves `revision` where it stands, as {@link converse}
+   * does: nothing the person is editing has changed.
+   */
+  recordDrift(id: string, open: readonly DriftFinding[]): void {
+    this.update(id, (session) => {
+      const previous = session.drift;
+      if (open.length === 0 && previous === null) return;
+      session.drift = { open: [...open], resolved: open.length === 0 && previous !== null };
+    });
+  }
+
+  /**
+   * Forget the problems: the person went on to the contract with them open,
+   * or approved the plan, and either way there is nothing left to put to them.
+   */
+  clearDrift(id: string): void {
+    this.update(id, (session) => {
+      session.drift = null;
+    });
+  }
+
+  /**
+   * What a reading does to the planning it was of
+   * (D-NEW-the-plan-answers-the-spec-and-says-so): the problems it found go
+   * on the session, and the first of them is put to the person as a question
+   * of the interview's own shape, so the Problems pane and the chat show the
+   * same card and either answers it with a turn. None found, after some were,
+   * is the reading that resolved them: recorded so, and said as the note that
+   * offers the contract — once, since a reading that finds none after that is
+   * nothing new. A reading the person went on past clears them, and problems
+   * found again after a resolved round re-open them: a hand rewording after
+   * the round is what that is.
+   *
+   * One problem at a time, and never the same one twice while its card is
+   * up: a re-read that finds the same list — the interview's turn did not
+   * close the one in hand — leaves the record as it is, and puts the first
+   * again only where no question stands, because an answer that was not one
+   * took the card down and the person is left with nothing to answer.
+   *
+   * Nothing is put, and nothing resolved, by a reading the interview's turn
+   * overlapped — one in flight as it started or as it landed, or sent between
+   * the two — because it read a plan that turn may still be moving, and an
+   * answer it has not applied yet would find its problem put straight back.
+   * The turn's end owes the planning a reading that did not overlap it — or,
+   * where the turn had ended as this one landed, this one's settling does —
+   * which puts or resolves; this one leaves the record as it stands, and
+   * writes one only where there was none, so the owed reading has a record to
+   * read against.
+   *
+   * Both hosts land a reading here, once they have checked the plan is still
+   * one the person has not gone past; `say` is the host's own relay into the
+   * chat, and `askingChanged` tells the dock.
+   */
+  landDrift(
+    id: string,
+    verdict: DriftVerdict,
+    overlapped: boolean,
+    say: (line: InterviewEntry["line"]) => InterviewEntry | null,
+    askingChanged: () => void,
+  ): void {
+    const session = this.read(id);
+    if (verdict.dismissed) {
+      if (session.drift !== null) this.clearDrift(id);
+      return;
+    }
+    if (overlapped) {
+      if (session.drift === null && verdict.findings.length > 0) this.recordDrift(id, verdict.findings);
+      return;
+    }
+    // The line the question in front of the person arrived on, if one stands:
+    // the interview's own, or one of the problems put by a reading.
+    const standing =
+      session.asking === null
+        ? undefined
+        : session.conversation.find((entry) => entry.n === session.asking!.entry)?.line;
+    if (verdict.findings.length === 0) {
+      if (session.drift === null || session.drift.resolved) return;
+      // A problem's card still up was closed by hand rather than answered —
+      // the person moved the plan or the spec themselves, and this reading
+      // found nothing — so the card comes down with the problems: left
+      // standing, the chat would keep it and withhold the way on for it.
+      if (standing?.kind === "asked" && standing.drift !== undefined) {
+        this.endAsking(id);
+        askingChanged();
+      }
+      this.recordDrift(id, []);
+      say({
+        kind: "note",
+        text: "Every problem is resolved: the plan and the spec promise the same thing again.",
+        notable: true,
+        offers: "contract",
+      });
+      return;
+    }
+    const same = session.drift !== null && !session.drift.resolved && sameProblems(session.drift.open, verdict.findings);
+    if (same && session.asking !== null) return;
+    if (!same) this.recordDrift(id, verdict.findings);
+    // A question the interview is asking of its own stands ahead of the
+    // problems: it is waiting on the answer, and a problem put over it would
+    // be answered as if it were that question. The record holds the problems
+    // meanwhile, and the reading after the interview's answer puts the first.
+    if (standing?.kind === "asked" && standing.drift === undefined) return;
+    const open = same ? session.drift!.open : verdict.findings;
+    const first = open[0]!;
+    const asked = say({
+      kind: "asked",
+      groups: [{ title: first.heading, parts: [{ question: first.difference, options: first.options }] }],
+      drift: { open: open.length },
+    });
+    if (asked !== null && asked.line.kind === "asked") {
+      this.beginAsking(id, asked.n);
+      askingChanged();
+    }
+  }
+
+  /**
+   * The last change to the spec and the plan's promise
+   * (D-NEW-the-plan-answers-the-spec-and-says-so): what the panes mark, until
+   * the next change replaces it whole. The previous change is gone the moment
+   * this one lands — nothing accumulates, because the marks are for the last
+   * thing that happened and not a history. Leaves `revision` where it stands,
+   * as {@link converse} does: nothing the person is editing has changed by
+   * the record of it.
+   */
+  recordChange(id: string, change: EditingChange): void {
+    this.update(id, (session) => {
+      session.change = change;
     });
   }
 
@@ -523,23 +972,21 @@ export class ContractEditing {
     }
     if (session.revision !== revision || session.phase !== "editing" || pending(session.operation))
       throw new Error("Restore the current saved edits before submitting this contract.");
-    if (session.form.editing !== null && (intent === "draft" || intent === "compile"))
+    if (session.form.editing !== null && intent === "compile")
       throw new Error("Save or discard the unfinished criterion before compiling.");
-    if ((intent === "draft" || intent === "generate") && session.key)
+    if (intent === "generate" && session.key)
       throw new Error("This session already has a Ticket. Start over from the spec to draft its plan again.");
-    if (intent !== "draft" && intent !== "compile" && !session.specSlug)
+    if (intent !== "compile" && !session.specSlug)
       throw new Error("Write the spec before generating a plan from it.");
     if (intent === "startOver" && !session.key)
       throw new Error("There is no plan to start over from yet. Generate one from the spec first.");
-    const request: EditingRequest = intent === "draft"
-      ? { kind: "draft", repoId: session.repoId, outcome: session.form.draft.outcome, models: session.form.models }
-      : intent === "generate"
-        ? { kind: "generatePlan", repoId: session.repoId, id, models: session.form.models }
-        : intent === "startOver"
-          ? { kind: "startOver", repoId: session.repoId, id, key: session.key!, models: session.form.models }
-          : session.key && session.digest
-            ? { kind: "edit", repoId: session.repoId, key: session.key, digest: session.digest, draft: DraftSchema.parse(session.form.draft), models: session.form.models }
-            : { kind: "admit", repoId: session.repoId, draft: DraftSchema.parse(session.form.draft), models: session.form.models };
+    const request: EditingRequest = intent === "generate"
+      ? { kind: "generatePlan", repoId: session.repoId, id, models: session.form.models }
+      : intent === "startOver"
+        ? { kind: "startOver", repoId: session.repoId, id, key: session.key!, models: session.form.models }
+        : session.key && session.digest
+          ? { kind: "edit", repoId: session.repoId, key: session.key, digest: session.digest, draft: DraftSchema.parse(session.form.draft), models: session.form.models }
+          : { kind: "admit", repoId: session.repoId, draft: DraftSchema.parse(session.form.draft), models: session.form.models };
     RequestSchema.parse(request);
     this.update(id, (next) => {
       next.revision++;
@@ -621,16 +1068,23 @@ export class ContractEditing {
               // Whether this plan has a graph, for the rail that cannot read a
               // contract from where it is drawn.
               next.nodes = planNodes(detail.contract).length;
-              next.form = { ...next.form, draft: contractDraft(detail), step: 2, editing: null, newPath: null };
-              next.phase = operation.intent === "draft" ? "editing" : "ready";
-              // Generating a plan and starting over both land on a contract, as
-              // compiling one does: the session now holds a Ticket.
-              if (operation.intent !== "draft") next.resumeNew = false;
+              next.form = { ...next.form, draft: contractDraft(detail), editing: null, newPath: null };
+              // Every operation lands on a contract: the session now holds a Ticket.
+              next.phase = "ready";
+              next.resumeNew = false;
               next.error = null;
             }
           } else {
-            next.phase = detail && detail.digest === next.digest && !detail.ticket.approved_at ? "editing" : "outcome-unknown";
-            next.error = operation.error ?? "The operation stopped without a confirmed result. Check Home and the canonical contract before submitting again.";
+            // A first draft from the spec that failed, was cancelled or was
+            // interrupted before any ticket was read back leaves the planning
+            // editable with the operation's error, since `submit` refuses to
+            // generate for a session that holds a key and `admit --from-spec`
+            // refuses a second live ticket from one spec.
+            const draftStopped = detail === null && operation.intent === "generate" &&
+              ["failed", "cancelled", "interrupted"].includes(operation.state);
+            next.phase = draftStopped || (detail && detail.digest === next.digest && !detail.ticket.approved_at) ? "editing" : "outcome-unknown";
+            next.error = operation.error ?? (draftStopped && operation.state === "cancelled" ? null :
+              "The operation stopped without a confirmed result. Check Home and the canonical contract before submitting again.");
           }
           next.operation.reconciled = true;
           next.revision++;
@@ -673,6 +1127,27 @@ export class ContractEditing {
 }
 
 export { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS, answersGroup };
+
+/**
+ * The model the chat runs on wherever its provider offers it (D-102): Claude
+ * Opus 5.5, on Claude Code.
+ */
+export const CHAT_MODEL = "claude-opus-5-5";
+
+/**
+ * The model `perbo interview` is started on: {@link CHAT_MODEL} where this
+ * planning drafts on Claude Code and that provider's catalog lists it, under
+ * its own id or its 1M-context one, and otherwise the model this planning
+ * drafts with, which is the person's own default executor. `offered` is the
+ * catalog's ids, or null where none could be read, which offers nothing.
+ */
+export function interviewModelFor(
+  models: { draftingProvider: string; executorModel: string },
+  offered: readonly string[] | null,
+): string {
+  if (models.draftingProvider !== "claude-cli" || offered === null) return models.executorModel;
+  return [CHAT_MODEL, CHAT_MODEL + "[1m]"].find((id) => offered.includes(id)) ?? models.executorModel;
+}
 
 /** Which session a planning's interview runs on, from the models it drafts with. */
 export function interviewProviderFor(models: { draftingProvider: string }): "claude" | "codex" {

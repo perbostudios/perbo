@@ -20,6 +20,7 @@ export function forgetRepository(state: ProfileState, repoId: string): void {
   for (const entry of Object.keys(state.taskModels))
     if (entry.startsWith(prefix)) delete state.taskModels[entry];
   state.archived = state.archived.filter((entry) => !entry.startsWith(prefix));
+  delete state.asks[repoId];
 }
 
 /** What a deleted contract leaves behind on this machine. */
@@ -28,6 +29,15 @@ export function forgetTicket(state: ProfileState, repoId: string, key: string): 
   delete state.titles[entry];
   delete state.taskModels[entry];
   state.archived = state.archived.filter((item) => item !== entry);
+}
+
+/**
+ * This repository's unsent answer to "What do you want to build?", kept as the
+ * person types it; an empty one removes it.
+ */
+export function saveAsk(state: ProfileState, repoId: string, text: string): void {
+  if (text.length === 0) delete state.asks[repoId];
+  else state.asks[repoId] = text;
 }
 
 /** Filing tickets away from Home by hand, or putting them back (S4). */

@@ -1,47 +1,134 @@
 import type { InkIconName } from "../ui/index.js";
-import type { Snapshot } from "../../shared/protocol.js";
+import type { OpenDraft, PlanningPane, Snapshot } from "../../shared/protocol.js";
 
 /**
- * The panes planning mode has, in rail order. Each pane's ticket adds its
- * entry here.
+ * The panes planning mode has, in rail order, each by an id the protocol's
+ * `PlanningPaneSchema` names. Each pane's ticket adds its entry here and
+ * its id there; an id there with no entry here fails to compile, naming it.
  *
- * Graph is not among them until there is a graph. A plan the drafter divided
- * gets one, second, under the spec it came from; a flat plan never does,
- * because "one piece of work, not divided" is a page with nothing on it, and
- * an empty pane offered as a stage is a stage a person goes looking into.
+ * Second, under the spec it came from, is the plan — and which pane that is
+ * depends on what the drafter made. Work it divided has a Graph: the nodes,
+ * the order between them and the paths each reaches. Work it did not is one
+ * piece, and there is no division to curate; its plan is the criteria it will
+ * be judged against, which is the whole of what a person checks before
+ * confirming. Neither is offered before there is a plan at all.
+ *
  * Files and Impact are there from the first turn: both are about the draft's
  * scope, which is what the spec is being written against.
  */
-const SPEC = { id: "spec", label: "Spec", icon: "document" } as const;
-const GRAPH = { id: "graph", label: "Graph", icon: "share" } as const;
-const REST = [
-  // The artwork Archive used to carry: what it draws is a folder of files.
-  { id: "explorer", label: "Explorer", icon: "folder" },
-  { id: "impact", label: "Impact", icon: "growth-chart" },
-] as const;
+const PANES = {
+  spec: { id: "spec", label: "Spec", icon: "document" },
+  graph: { id: "graph", label: "Graph", icon: "share" },
+  criteria: { id: "criteria", label: "Plan", icon: "clipboard" },
+  // Drawn as a folder, since what it lists is the repository's files.
+  explorer: { id: "explorer", label: "Explorer", icon: "folder" },
+  impact: { id: "impact", label: "Impact", icon: "growth-chart" },
+  /**
+   * The step between the plan and the contract, where the plan is read against
+   * the spec it was drafted from (D-NEW-the-plan-answers-the-spec-and-says-so).
+   * A pane of planning, so the rail stays beside it; in the rail only while the
+   * reading has found problems, because until then it is on the way to the
+   * contract and nowhere to go to, and once it has, the problems are what the
+   * planning is about until each is resolved or the person goes on past them.
+   * Its id is "drift", which every route to it names.
+   */
+  drift: { id: "drift", label: "Problems", icon: "alert" },
+} as const satisfies { [Id in PlanningPane]: { id: Id; label: string; icon: InkIconName } };
+const REST = [PANES.explorer, PANES.impact] as const;
+export const PLANNING_PANES = Object.values(PANES);
 
-export const PLANNING_PANES = [SPEC, GRAPH, ...REST] as const satisfies readonly {
-  id: string;
-  label: string;
-  icon: InkIconName;
-}[];
-export type PlanningPane = (typeof PLANNING_PANES)[number]["id"];
-export const isPlanningPane = (value: string | undefined): value is PlanningPane =>
-  PLANNING_PANES.some((pane) => pane.id === value);
+/** This planning's entry in the drafts list, where the list holds it. */
+const draftOf = (drafts: Snapshot["drafts"], sessionId: string): OpenDraft | undefined =>
+  (drafts ?? []).find((entry) => entry.id === sessionId);
 
-/** Whether this planning drafted a plan the drafter divided into nodes. */
-export function planningIsDivided(
-  drafts: Snapshot["drafts"],
-  sessionId: string,
-): boolean {
-  const draft = (drafts ?? []).find((entry) => entry.id === sessionId);
-  return (draft?.nodes ?? 0) > 0;
+/**
+ * Whether this planning is the one curating its ticket's plan, which a session
+ * alone does not make it: opening the ticket's own editor makes one too, and
+ * sending that ticket into planning mode would put an interview dock over a
+ * ticket with no spec and leave the editor unreachable. What marks a planning
+ * is a plan to show there — a graph it was divided into, or the spec it was
+ * drafted from, which is the pane its criteria are read on.
+ */
+export function curates(draft: OpenDraft): boolean {
+  return draft.nodes > 0 || draft.specSlug !== null;
 }
 
-/** The panes to offer this planning, which is all of them once it has a graph. */
+/**
+ * Which pane holds this planning's plan, or null before there is one, which
+ * is before it holds a ticket.
+ *
+ * The Graph for work the drafter divided, the criteria for work it did not.
+ * One or the other, never both: they are two drawings of the same plan, and
+ * offering the empty one as a stage is a stage a person goes looking into.
+ */
+export function planPaneFor(
+  drafts: Snapshot["drafts"],
+  sessionId: string,
+): "graph" | "criteria" | null {
+  const draft = draftOf(drafts, sessionId);
+  if (draft === undefined || draft.key === null) return null;
+  return draft.nodes > 0 ? "graph" : "criteria";
+}
+
+/**
+ * The panes to offer this planning in the rail, which is all of them once it
+ * has a plan, less the step to the contract — which is a place to go, after
+ * Impact, only while the last reading of the plan against its spec has
+ * problems open, and otherwise only the step every Confirm passes through
+ * (D-NEW-the-plan-answers-the-spec-and-says-so).
+ */
 export function panesFor(
   drafts: Snapshot["drafts"],
   sessionId: string,
 ): readonly (typeof PLANNING_PANES)[number][] {
-  return planningIsDivided(drafts, sessionId) ? PLANNING_PANES : [SPEC, ...REST];
+  const plan = planPaneFor(drafts, sessionId);
+  const problems = problemsOpen(drafts, sessionId) ? [PANES.drift] : [];
+  return [PANES.spec, ...(plan === null ? [] : [PANES[plan]]), ...REST, ...problems];
+}
+
+/**
+ * Whether reaching this pane is leaving the planning there, which every pane
+ * is but one: the reading between the plan and the contract
+ * (D-NEW-the-plan-answers-the-spec-and-says-so). It is a step on the way to
+ * the contract, which every Confirm the plan passes through, so recording it
+ * would reopen the planning on the step rather than on the pane the person
+ * confirmed from, and send the contract's Back to planning to the reading
+ * rather than to the plan. Where the reading has left problems open, it is a
+ * place to go, and {@link reopenPane} already lands the planning there.
+ */
+export function remembered(pane: PlanningPane): boolean {
+  return pane !== "drift";
+}
+
+/**
+ * The pane this planning was left at, where it still offers it
+ * (D-NEW-a-planning-reopens-where-it-was-left): null before the person has
+ * been on one, and null where the pane they left is no longer offered — a
+ * Graph the plan was put back together from — which leaves the caller's own
+ * landing to apply.
+ *
+ * Asked by every way into a planning: the picker's rows, the ticket's own
+ * page, a link that names no pane and the contract's way back.
+ */
+export function leftAt(drafts: Snapshot["drafts"], sessionId: string): PlanningPane | null {
+  const pane = draftOf(drafts, sessionId)?.lastPane ?? null;
+  return pane !== null && panesFor(drafts, sessionId).some((offered) => offered.id === pane)
+    ? pane
+    : null;
+}
+
+/** Whether a reading of this planning's plan against its spec has problems still open. */
+export function problemsOpen(drafts: Snapshot["drafts"], sessionId: string): boolean {
+  return (draftOf(drafts, sessionId)?.drift?.open ?? 0) > 0;
+}
+
+/**
+ * Where a planning opens when nothing asks for a pane: its Problems pane while
+ * a reading of its plan against its spec has problems open, since they are
+ * then what the planning is about (D-NEW-the-plan-answers-the-spec-and-says-so);
+ * else where it was left; else its Spec, which is where a planning starts.
+ */
+export function reopenPane(drafts: Snapshot["drafts"], sessionId: string): PlanningPane {
+  if (problemsOpen(drafts, sessionId)) return "drift";
+  return leftAt(drafts, sessionId) ?? "spec";
 }

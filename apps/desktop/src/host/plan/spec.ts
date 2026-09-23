@@ -1,22 +1,31 @@
-import { readFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
+  DriftRecordSchema,
   EMPTY_SPEC_TEXT,
   PlanningError,
   SpecConflict,
   parseSpec,
   readSpecText,
   requirementNodes,
+  retitleSpecFile,
   writeNodePages,
   writeSpecFile,
 } from "@perbo/planning";
+import type { Ticket } from "@perbo/contracts";
 import { specFolder } from "../repository/config.js";
+import { ticketPath } from "../repository/layout.js";
 import { safePath } from "../repository/paths.js";
+import { sectionsOf } from "../../shared/contract-editing.js";
+import { SPEC_SLUG } from "../../shared/protocol.js";
 import type { ContractEditing } from "../../shared/contract-editing.js";
+import type { ChangeMarks } from "./marks.js";
 import type { RegisteredRepository } from "../profile/store.js";
 import type {
   Detail,
   RequestOf,
+  SpecRow,
   SpecSaveReply,
   SpecSections,
   SpecView,
@@ -27,6 +36,7 @@ export interface SpecDeps {
   editing: Pick<ContractEditing, "read" | "recordSpec">;
   repository(id: string): RegisteredRepository;
   contract(repo: RegisteredRepository, key: string): { contract: Detail["contract"] };
+  marks: Pick<ChangeMarks, "markChangeOn">;
 }
 
 const EMPTY_SECTIONS: SpecSections = {
@@ -38,8 +48,121 @@ const EMPTY_SECTIONS: SpecSections = {
 };
 
 /** The file this planning's spec is written to, inside the repository's spec folder. */
-function specPath(repo: RegisteredRepository, slug: string): string {
+export function specPath(repo: RegisteredRepository, slug: string): string {
   return safePath(repo, ...`${specFolder(repo)}/${slug}/spec.md`.split("/"));
+}
+
+/**
+ * The five sections of a spec as its file says them, or null where there is
+ * no file. A file that is there and cannot be read is thrown, since a reading
+ * that failed is not an empty spec.
+ */
+export function specSectionsAt(repo: RegisteredRepository, slug: string): SpecSections | null {
+  const path = specPath(repo, slug);
+  return existsSync(path) ? sectionsOf(readSpecText(path).text) : null;
+}
+
+/**
+ * Every spec this repository holds, by slug, with the title it states.
+ *
+ * Read from the folder rather than from the records, because the specs worth
+ * offering are the ones no record names, and nothing else enumerates this
+ * folder. Deleting a piece of work takes its spec with it, so what is left here
+ * was written some other way: committed by somebody else or written at the
+ * command line (D-NEW-a-spec-outlives-its-planning).
+ *
+ * A folder this cannot make sense of is skipped rather than refused: the picker
+ * is a way back in, and one unreadable spec is not a reason to offer none of
+ * the others. A symlinked entry is not a directory to `readdirSync`, so it is
+ * never followed, and a name outside the slug's own shape is left alone
+ * because nothing could record it.
+ */
+export function repositorySpecs(repo: RegisteredRepository): SpecRow[] {
+  let root: string;
+  try {
+    root = safePath(repo, ...specFolder(repo).split("/"));
+  } catch {
+    return [];
+  }
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    if (!entry.isDirectory() || !SPEC_SLUG.test(entry.name)) return [];
+    try {
+      const { text } = readSpecText(join(root, entry.name, "spec.md"));
+      const title = text.title.trim();
+      return title.length > 0 ? [{ repoId: repo.id, slug: entry.name, title }] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/**
+ * The spec folder a ticket was drafted from, by name, or null where it was not
+ * drafted from one this repository keeps.
+ *
+ * Read against the folder the repository uses now rather than by taking the
+ * last-but-one segment of whatever was recorded: a repository that moved its
+ * spec folder would otherwise have `specs/foo/spec.md` answer "foo" and a
+ * delete reach `docs/specs/foo`, a live spec that ticket never named.
+ */
+export function specSlugOf(
+  ticket: { admission: { spec?: { path?: string } | null } },
+  folder: string,
+): string | null {
+  const path = ticket.admission.spec?.path;
+  if (path === undefined || path === null) return null;
+  const parts = path.split("/");
+  const slug = parts.at(-2);
+  if (parts.at(-1) !== "spec.md" || slug === undefined || !SPEC_SLUG.test(slug)) return null;
+  return parts.slice(0, -2).join("/") === folder ? slug : null;
+}
+
+/**
+ * The spec a ticket still being planned was drafted from, titled with the name
+ * the person just gave the ticket, so the Spec pane, the picker and the
+ * contract's head show one name (D-NEW-a-ticket-is-named-apart-from-its-board).
+ * True where the spec was renamed.
+ *
+ * Written through `retitleSpecFile`, the one writer of that rule, and only its
+ * title line: the folder keeps its slug. Not for an approved ticket, whose spec
+ * is what the run commits and checks against the hash approval recorded
+ * (D-103), so renaming it there would stop the run; nor for a ticket whose
+ * spec is not where its record says.
+ *
+ * The verdict the plan was read against its spec with is carried to the
+ * renamed bytes where it was keyed on the bytes before: the title line is not
+ * what the reading reads (D-NEW-the-plan-answers-the-spec-and-says-so).
+ */
+export async function nameSpecAfterRename(
+  tickets: { list(repo: RegisteredRepository): Promise<{ tickets: Ticket[] }> },
+  repo: RegisteredRepository,
+  key: string,
+  title: string,
+): Promise<boolean> {
+  const ticket = (await tickets.list(repo)).tickets.find((entry) => entry.key === key);
+  if (ticket === undefined || ticket.approved_at) return false;
+  const folder = specFolder(repo);
+  const slug = specSlugOf(ticket, folder);
+  if (slug === null) return false;
+  const path = `${folder}/${slug}/spec.md`;
+  const at = safePath(repo, ...path.split("/"));
+  if (!existsSync(at)) return false;
+  const digest = (): string => "sha256:" + createHash("sha256").update(readFileSync(at)).digest("hex");
+  const before = digest();
+  retitleSpecFile({ repositoryRoot: repo.path, path, title });
+  const after = digest();
+  const drift = ticketPath(repo, key, ".drift.json");
+  if (after === before || !existsSync(drift) || lstatSync(drift).isSymbolicLink()) return true;
+  let record;
+  try {
+    record = DriftRecordSchema.parse(JSON.parse(readFileSync(drift, "utf8")));
+  } catch {
+    // A record that does not read is left for `perbo drift` to name.
+    return true;
+  }
+  if (record.spec === before) writeFileSync(drift, `${JSON.stringify({ ...record, spec: after }, null, 2)}\n`);
+  return true;
 }
 
 /**
@@ -138,6 +261,20 @@ export function saveSpec(
   const session = deps.editing.read(request.id);
   if (session.repoId !== repo.id)
     throw new Error("This planning belongs to another repository.");
+  // Saved as written. What the spec states and what the plan cites are settled
+  // on the contract page and at approval, not here
+  // (D-NEW-the-plan-answers-the-spec-and-says-so).
+  //
+  // What the file said before, for the marks on what this save changed of it:
+  // nothing at all where there is no file yet, so a first save is a change from
+  // nothing, and no reading where the file will not read, so the save is not
+  // measured.
+  let before: SpecSections | null | undefined;
+  try {
+    before = session.specSlug === null ? null : specSectionsAt(repo, session.specSlug);
+  } catch {
+    before = undefined;
+  }
   let written;
   try {
     written = writeSpecFile({
@@ -154,6 +291,24 @@ export function saveSpec(
   }
   deps.editing.recordSpec(request.id, written.slug);
   refreshNodePages(deps, repo, request.id, written.path);
+  // The change this save made, on every planning writing this spec: a save of
+  // the same words changes nothing and marks nothing. The save has landed
+  // whatever the marking does, so a file that will not read back marks nothing
+  // rather than failing it.
+  if (before !== undefined) {
+    let after: SpecSections | null | undefined;
+    try {
+      after = specSectionsAt(repo, written.slug);
+    } catch {
+      after = undefined;
+    }
+    if (after !== undefined)
+      deps.marks.markChangeOn(
+        { spec: before, plan: null },
+        { spec: after, plan: null },
+        (each) => each.repoId === repo.id && each.specSlug === written.slug,
+      );
+  }
   return { view: specView(deps, request.id), conflicting: [] };
 }
 

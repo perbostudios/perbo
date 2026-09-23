@@ -12,7 +12,7 @@ import { TaskModelsSchema, type EditingSession } from "./protocol.js";
  */
 
 const repoId = "10000000-0000-4000-8000-000000000001";
-const models = TaskModelsSchema.parse({});
+const models = TaskModelsSchema.parse({ executorEffort: null, reviewerEffort: null });
 
 function fixture(standing: StandingProhibitedEntry[] = []) {
   let records: EditingSession[] = [];

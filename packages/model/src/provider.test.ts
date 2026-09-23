@@ -53,3 +53,18 @@ describe("createModel", () => {
     }
   });
 });
+
+describe("createModel's effort", () => {
+  it("builds a transport for an effort its provider takes, and for none", () => {
+    expect(createModel("codex-cli", { submitSchema, effort: "ultra" }).provider).toBe("codex-cli");
+    expect(createModel("claude-cli", { submitSchema, effort: "xhigh" }).provider).toBe("claude-cli");
+    expect(createModel("anthropic", { submitSchema, effort: null }).provider).toBe("anthropic");
+  });
+
+  it("refuses an effort its provider does not take rather than send it", () => {
+    expect(() => createModel("claude-cli", { submitSchema, effort: "ultra" })).toThrow(
+      /claude-cli takes low, medium, high, xhigh, max, not ultra/,
+    );
+    expect(() => createModel("anthropic", { submitSchema, effort: "ultra" })).toThrow(/anthropic takes/);
+  });
+});

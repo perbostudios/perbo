@@ -1,23 +1,29 @@
-import { openDrafts } from "../shared/contract-editing.js";
-import { DraftSchema, HELP_LINKS, RequestSchema } from "../shared/protocol.js";
+import { existsSync } from "node:fs";
+import { openDrafts, promiseOf } from "../shared/contract-editing.js";
+import { DraftSchema, HELP_LINKS, RequestSchema, TaskModelsSchema } from "../shared/protocol.js";
 import { heldRepository } from "../shared/jobs.js";
-import { discoverModels } from "./model-catalog.js";
+import { isArchivable, notArchivable } from "../shared/archive.js";
 import { listExplorer, readExplorerFile } from "./explorer.js";
 import { exportedNames } from "./symbols.js";
 import { graphView } from "./plan/graph.js";
 import { contractImpact, impactView } from "./plan/impact.js";
-import { saveSpec, specView, type SpecDeps } from "./plan/spec.js";
+import { nameSpecAfterRename, saveSpec, specPath, specSlugOf, specView, type SpecDeps } from "./plan/spec.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
+import {
+  deleteDraftedFromSpec,
+  deleteSpec,
+  removeSpecFolder,
+  type WorkDeps,
+} from "./tickets/work.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { effectiveLimits, readManifest, saveManifest, specFolder } from "./repository/config.js";
-import { setArchived } from "./profile/preferences.js";
+import { saveAsk, setArchived } from "./profile/preferences.js";
 import { openLogin } from "./providers/status.js";
 import { usageReport } from "./providers/usage.js";
 import {
   admitDraftArgs,
-  admitFromFileArgs,
   admitFromSpecArgs,
   approveArgs,
   assertEditable,
@@ -39,12 +45,15 @@ import type { ContractEditing, EditingOwner } from "../shared/contract-editing.j
 import type { Execute } from "./repository/git.js";
 import type { InterviewHost } from "./interview/host.js";
 import type { JobRunner } from "./jobs/runner.js";
+import type { ChangeMarks } from "./plan/marks.js";
+import type { DriftReadings } from "./plan/drift.js";
+import type { ModelCatalogs } from "./providers/catalogs.js";
 import type { PowerHold } from "./power.js";
 import type { Profile, RegisteredRepository } from "./profile/store.js";
 import type { RepositoryRegistry } from "./repository/registry.js";
 import type { TicketReads } from "./tickets/reads.js";
 import type { WorkspaceReads } from "./workspace-reads.js";
-import type { codexUsage } from "./usage-probe.js";
+import type { claudeUsage, codexUsage } from "./usage-probe.js";
 import type { probeProviders } from "./providers/status.js";
 import type { HostIO } from "./service.js";
 import type {
@@ -81,7 +90,10 @@ export interface HostModules {
   interviews: InterviewHost;
   jobs: JobRunner;
   power: PowerHold;
-  usageProbe: typeof codexUsage;
+  marks: ChangeMarks;
+  drift: DriftReadings;
+  catalogs: ModelCatalogs;
+  usageProbe: { claude: typeof claudeUsage; codex: typeof codexUsage };
   snapshot(): Promise<Snapshot>;
   providers(): ReturnType<typeof probeProviders>;
   /** The key admission handed back, and the models the person chose for it. */
@@ -132,9 +144,45 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     ) => Promise<ReplyMap[K]> | ReplyMap[K],
   ): RequestHandlers<RouteContext>[K] => inRepository<K>(repository, handler);
 
+  const work: WorkDeps = {
+    tickets: m.ticketRecords,
+    reads: m.reads,
+    changes: m.changes,
+    repository,
+    sessions: () => m.profile.state.editingSessions,
+    discard: (repo, key) => discardDrafted(m, repo, key),
+  };
+
   return Object.freeze({
     // Planning's own records, which never leave this machine.
-    editingOpen: (request) => m.editing.open(request.target, request.legacy),
+    editingOpen: async (request) => {
+      // A spec is opened by the slug that names its folder, so the folder has to
+      // be there: the schema holds the slug to a path segment, and this holds it
+      // to one this repository actually wrote. A session pointing at nothing
+      // would be a planning whose first save mints the folder back, which is a
+      // spec created by opening a spec that had gone.
+      if (request.target.kind === "spec" && !existsSync(specPath(repository(request.target.repoId), request.target.slug)))
+        throw new Error(
+          "That spec is no longer in the repository. It may have been renamed or removed " +
+            "since this list was read.",
+        );
+      const opened = await m.editing.open(request.target, request.legacy);
+      // A planning writing a spec that already has a plan takes that plan.
+      //
+      // The planning and the ticket were split — the session holds the spec,
+      // the ticket holds the same spec, and nothing joins them. Left split, the
+      // picker lists one piece of work twice, opening the ticket starts a
+      // second planning beside the first, and deleting either leaves the other
+      // (D-101, D-103).
+      if (opened.key === null && opened.specSlug !== null) {
+        // Not as its maker: this planning is finding a ticket already drafted
+        // from its spec, which the command line may have admitted, and deleting
+        // the planning must not delete work it did not do.
+        await m.interviews.planDrafted(opened.id);
+        return m.editing.read(opened.id);
+      }
+      return opened;
+    },
     editingRead: (request) => m.editing.read(request.id),
     drafts: () => openDrafts(m.profile.state.editingSessions),
     editingSave: (request) =>
@@ -177,15 +225,17 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     },
     explorerUndo: (request) => m.editing.undo(request.id, request.revision, request.edit),
     editingStop: (request) => m.editing.stop(request.id),
+    editingVisited: (request) => m.editing.visit(request.id, request.pane),
+    editingContractVisited: (request) => m.editing.visitContract(request.id),
     editingDiscard: async (request) => {
       // The chat goes with the planning it belonged to: there is no longer a
       // spec for the interview to write or a plan for it to change.
       //
       // And so does the ticket this planning drafted: throwing the plan away
       // and leaving the ticket on the board would delete the way in and not
-      // the thing, with no way back to the plan it came from.
-      // A ticket that has run is not a draft, so it stays, and the reason it
-      // stays is the one deleting a contract outright would have given.
+      // the thing, with no way back to the plan it came from. Whatever stage it
+      // had reached: a piece of work is deleted whole
+      // (D-NEW-a-spec-outlives-its-planning).
       //
       // The one it drafted, and never one it was merely opened over: planning
       // started from a ticket the CLI admitted, or from one another session
@@ -194,8 +244,29 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       const session = m.editing.read(request.id);
       const discarded = m.editing.discard(request.id, request.revision);
       m.interviews.stop(request.id);
+      let refused: string | null = null;
       if (session.key !== null && session.admitted)
-        await discardDrafted(m, repository(session.repoId), session.key);
+        refused = await discardDrafted(m, repository(session.repoId), session.key);
+      // A planning that never took the ticket its own spec was drafted into
+      // still deletes it. The bin does not open the session, so nothing has
+      // joined the two (`editingOpen` heals a planning that is opened); left
+      // here, the delete removes the planning and the picker puts the ticket
+      // back under the same title, which is the copy this was reported as.
+      //
+      // Only a plan still in plan_review, and only where no other planning is
+      // curating it: a plan this planning's spec was drafted into and then ran
+      // is work standing on its own, and one another session holds is that
+      // session's to throw away.
+      if (session.key === null && session.specSlug !== null)
+        refused = await deleteDraftedFromSpec(work, session.repoId, session.specSlug, request.id);
+      // And the spec they came from, once nothing is left holding it. Not where
+      // the ticket refused to go: a plan still standing is read against the
+      // spec it names (D-103).
+      if (session.specSlug !== null && refused === null)
+        await removeSpecFolder(work, session.repoId, session.specSlug, {
+          sessionId: request.id,
+          claims: session.key,
+        });
       return discarded;
     },
     // The interview docked beside the panes (D-102). Planning-lane work, like
@@ -218,6 +289,9 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
         repository(request.repoId),
       ),
     specRead: (request) => specView(m.planDeps, request.id),
+    driftCheck: (request) => m.drift.check(request.id),
+    driftDismiss: (request) => m.drift.dismiss(request.id),
+    specDelete: (request) => deleteSpec(work, request.repoId, request.slug),
     impactRead: (request) =>
       impactView(
         { editing: m.editing, repository, cli: m.cli, execute: m.execute },
@@ -236,7 +310,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
 
     providers: () => m.providers(),
     login: (request) => openLogin(m.io, request.provider),
-    models: (request) => discoverModels(request.provider),
+    models: (request) => m.catalogs.read(request.provider),
     usage: () =>
       usageReport({
         repositories: () => m.registry.all(),
@@ -268,6 +342,15 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       return m.io.saveFile(name, content);
     },
     cancel: (request) => m.jobs.cancel(request.jobId),
+    askSave: (request) => {
+      if (!m.profile.state.repositories.some((entry) => entry.id === request.repoId))
+        throw new Error("This repository is no longer connected. Choose it again in Settings.");
+      saveAsk(m.profile.state, request.repoId, request.text);
+      // Saved with no change event: this comes at every pause in typing, and
+      // the page that sent it already holds the text.
+      m.profile.save();
+      return null;
+    },
 
     forgetRepository: scoped<"forgetRepository">((repo) => m.registry.forget(repo.id)),
     graphRead: scoped<"graphRead">((repo, request) =>
@@ -280,11 +363,46 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     graphUndo: scoped<"graphUndo">((repo, request) => graphEdit(m, repo, request)),
     detail: scoped<"detail">((repo, request) => m.tickets.detail(repo.id, request.key)),
     taskSummary: scoped<"taskSummary">((repo, request) => m.tickets.summary(repo.id, request.key)),
+    taskModels: scoped<"taskModels">(async (repo, request) => {
+      // The models this one ticket runs on. Held beside the ticket rather than
+      // on the contract, because they are not among the four fields approving
+      // freezes (ADR-0016) — and refused once it is approved, because what runs
+      // is settled when the loop is started.
+      const ticket = (await m.tickets.list(repo)).tickets.find((entry) => entry.key === request.key);
+      if (ticket === undefined) throw new Error(`${request.key} is not in this repository.`);
+      if (ticket.approved_at !== null)
+        throw new Error(
+          `${request.key} is approved, and what it runs on was settled with it. Its models are ` +
+            "no longer this page's to change.",
+        );
+      m.profile.state.taskModels[repo.id + ":" + request.key] = TaskModelsSchema.strip().parse(
+        request.models,
+      );
+      m.changes.preferences(m.profile.state);
+      return null;
+    }),
     discard: scoped<"discard">(async (repo, request) => {
-      // Deleting a contract outright says the reason it stays, where throwing
-      // away the planning that drafted it carries on past one.
+      // Which spec this plan was drafted from, read before it goes: after the
+      // delete there is no record left to ask. Read through the check rather
+      // than by cutting the recorded string, because what it names is about to
+      // be deleted recursively.
+      const held = (await m.tickets.list(repo)).tickets.find((ticket) => ticket.key === request.key);
+      // Reading the spec folder can refuse a repository whose config names one
+      // it may not have. That is not a reason to refuse the delete.
+      const slug = (() => {
+        try {
+          return held === undefined ? null : specSlugOf(held, specFolder(repo));
+        } catch {
+          return null;
+        }
+      })();
+      // Deleting work outright says the reason it stays, where throwing away
+      // the planning that drafted it carries on past one.
       const refusal = await discardDrafted(m, repo, request.key);
       if (refusal !== null) throw new Error(refusal);
+      // The spec goes with the plan it drafted, as it does when a planning is
+      // thrown away: one piece of work is deleted as one thing.
+      if (slug !== null) await removeSpecFolder(work, repo.id, slug, { sessionId: null, claims: null });
       return null;
     }),
     archive: scoped<"archive">(async (repo, request) => {
@@ -292,6 +410,13 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       const keys = [...new Set(request.keys)];
       if (keys.some((key) => !list.tickets.some((ticket) => ticket.key === key)))
         throw new Error("A ticket to file is not in the repository's ticket store.");
+      const carried = list.tickets.find(
+        (ticket) =>
+          request.archived &&
+          keys.includes(ticket.key) &&
+          !isArchivable({ jobs: m.profile.state.jobs as Job[] }, { repoId: repo.id, ticket }),
+      );
+      if (carried !== undefined) throw new Error(notArchivable(carried.key));
       setArchived(m.profile.state, repo.id, keys, request.archived);
       m.changes.preferences(m.profile.state);
       return null;
@@ -312,10 +437,13 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       m.changes.changed(true, { kind: "records", repoId: repo.id, key: null });
       return null;
     }),
-    rename: scoped<"rename">((repo, request) => {
+    rename: scoped<"rename">(async (repo, request) => {
       m.tickets.contract(repo, request.key);
+      // The name first, so a spec that cannot be retitled refuses only that.
       m.profile.state.titles[repo.id + ":" + request.key] = request.title;
       m.changes.preferences(m.profile.state);
+      if (await nameSpecAfterRename(m.tickets, repo, request.key, request.title))
+        m.changes.changed(true, { kind: "records", repoId: repo.id, key: request.key });
       return null;
     }),
     openRepository: scoped<"openRepository">(async (repo) => {
@@ -342,6 +470,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       return m.io.saveFile(name, content);
     }),
     specSave: scoped<"specSave">((repo, request) => saveSpec(m.planDeps, repo, request)),
+    replan: scoped<"replan">((repo, request) => replan(m, repo, request)),
 
     doctor: scoped<"doctor">((repo, request) =>
       m.jobs.start(
@@ -365,16 +494,19 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     ),
     generatePlan: scoped<"generatePlan">((repo, request, context) => fromSpec(m, repo, request, context)),
     startOver: scoped<"startOver">((repo, request, context) => fromSpec(m, repo, request, context)),
-    draft: scoped<"draft">((repo, request, context) => admit(m, repo, request, context)),
     admit: scoped<"admit">((repo, request, context) => admit(m, repo, request, context)),
     edit: scoped<"edit">((repo, request, context) =>
       m.jobs.start(
         { repo, key: request.key, kind: request.kind, owner: context.owner, label: "Update task contract" },
         async (job, run) => {
           m.tickets.assertDigest(repo, request.key, request.digest);
-          assertEditable(m.tickets.contract(repo, request.key).contract);
+          const current = m.tickets.contract(repo, request.key).contract;
+          assertEditable(current);
+          // What the plan promised before this edit, for the marks on it.
+          const before = promiseOf(current);
           await run.invoke(editArgs(request.key, request.draft));
           job.resultKey = request.key;
+          m.marks.recordPlanChange(repo, request.key, before);
           if (request.models) {
             m.profile.state.taskModels[repo.id + ":" + request.key] = request.models;
             m.changes.preferences(m.profile.state);
@@ -412,11 +544,12 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
 }
 
 /**
- * Delete a contract that has never run, and say why where it stays.
+ * Delete a piece of work, and say why where it stays.
  *
- * Both callers pass through here — the contract page's own delete and the
- * planning that drafted it being thrown away — so the guards are stated once
- * and the two differ only in what they do with the reason.
+ * Every caller passes through here — the contract page's own delete, the
+ * planning that drafted it being thrown away, and a stopped plan drafted again
+ * from its spec — so the guards are stated once and the callers differ only in
+ * what they do with the reason.
  */
 async function discardDrafted(
   m: HostModules,
@@ -448,8 +581,13 @@ function graphEdit(
       label: request.kind === "graphUndo" ? "Undo a plan edit" : "Change the plan's graph",
     },
     async (job, run) => {
+      // What the plan promised before, so what the edit changed of it can be
+      // marked on every planning over the ticket; an edit that only rearranged
+      // the graph changes nothing here and marks nothing.
+      const before = m.marks.promiseAt(repo, request.key);
       await run.invoke(graphEditArgs(request.key, request));
       job.resultKey = request.key;
+      m.marks.recordPlanChange(repo, request.key, before);
     },
   );
 }
@@ -478,6 +616,31 @@ function fromSpec(
         throw new Error("This planning belongs to another repository.");
       if (session.specSlug === null)
         throw new Error("Write the spec before generating a plan from it.");
+      // A group of questions the interview has put and the person has not
+      // answered is a spec still moving: drafting over it turns a spec the
+      // answers were about to change into a plan (D-117). The Spec pane and the
+      // chat's note both withhold the press, and this is the line behind both
+      // of them, so neither surface can be the one that counts for itself. Not
+      // on a re-draft: `startOver` is the way back from a plan that is already
+      // wrong, and holding it behind a question would strand the person on it.
+      if (request.kind === "generatePlan" && session.asking !== null)
+        throw new Error(
+          "Answer the chat's questions first — its answers change the spec this drafts from.",
+        );
+      // One press does both. The interview is still talking for as long as it
+      // is writing, and a person who wants the plan from what it has written
+      // should not have to end the conversation by hand first and then press
+      // again: this press ends it. The stop winds the turn up — what was held
+      // is said, the change is recorded, and the note handing the spec over is
+      // put — so the draft reads the file that turn left behind. Behind the
+      // refusal above, so a standing question still stops this: its answers are
+      // what would change the spec (D-102). Not on a re-draft, where the
+      // conversation is a chat about a plan that exists and ending it is no
+      // part of drafting it again.
+      if (request.kind === "generatePlan") m.interviews.stop(request.id);
+      // What the plan promised before it is drafted again, for the marks on the
+      // re-draft. A first draft has no before, and records nothing.
+      const before = request.kind === "startOver" ? m.marks.promiseAt(repo, request.key) : null;
       const settings = m.profile.state.settings;
       await run.invoke(
         admitFromSpecArgs(
@@ -488,36 +651,121 @@ function fromSpec(
         ),
       );
       m.recordAdmitted(job, repo, request.models);
+      if (request.kind === "startOver") {
+        // A name the person gave the ticket outlives the re-draft: the board
+        // keeps it, so the spec the re-draft titled takes it back.
+        const given = m.profile.state.titles[repo.id + ":" + request.key];
+        if (given !== undefined) await nameSpecAfterRename(m.tickets, repo, request.key, given);
+        m.marks.recordPlanChange(repo, request.key, before);
+      }
     },
   );
 }
 
-/** A contract drafted from the person's own words, or saved from the form. */
+/**
+ * A stopped plan drafted again from the spec it was drafted from: the stopped
+ * ticket goes, and a fresh admission drafts the plan, which the page lands on.
+ */
+async function replan(
+  m: HostModules,
+  repo: RegisteredRepository,
+  request: RequestOf<"replan">,
+): Promise<ReplyMap["replan"]> {
+  const ticket = (await m.tickets.list(repo)).tickets.find((entry) => entry.key === request.key);
+  if (!ticket) throw new Error("This task is no longer in the repository's ticket store.");
+  // The spec the stopped plan was drafted from, in the words the CLI refuses
+  // in, because this is the same question `admit --start-over` asks and a
+  // person should not meet two sentences for one answer.
+  //
+  // Built from the repository's spec folder and the slug the record names,
+  // never from the recorded string itself: `specSlugOf` is the guard for that
+  // field, and a recorded path that leaves this repository's spec folder is a
+  // spec this admission has no business reading.
+  const folder = specFolder(repo);
+  const slug = specSlugOf(ticket, folder);
+  if (slug === null)
+    throw new Error(
+      `${request.key} was not drafted from a spec, so there is no spec to start over from. A plan ` +
+        "drafted from a spec is admitted with perbo admit --from-spec",
+    );
+  const spec = `${folder}/${slug}/spec.md`;
+  // And the file has to be there. `admit` says this itself, but only after a
+  // job has been started and a model asked, so it is asked here first in the
+  // CLI's own sentence: a spec deleted in the person's own editor is the
+  // reachable way to press this with nothing to draft from.
+  const at = specPath(repo, slug);
+  if (!existsSync(at)) throw new Error(`no spec at ${at}`);
+  // Only a spent record, in `admit`'s own words: a spent ticket is not the plan
+  // its spec has, it is the plan it did not get, and a run killed outside the
+  // executor's window leaves one saying `executing`, which is still the plan
+  // this spec has. Asked here rather than left to `admit`, because the stopped
+  // ticket is deleted before the admission runs.
+  if (!["failed", "plan_invalid", "cancelled"].includes(ticket.state))
+    throw new Error(
+      `${request.key} was already drafted from ${spec}, and one spec is one piece of work: ` +
+        `${request.key} is ${ticket.state}, which is past re-drafting, so this spec has its plan`,
+    );
+  // On this ticket's own models, and the new plan keeps them: it is the same
+  // work, and a person who chose what drafts it did not choose again by
+  // pressing this. Read before the delete below takes them.
+  const models = m.profile.state.taskModels[repo.id + ":" + request.key];
+  // The stopped ticket goes, and everything recorded after its contract with
+  // it — the attempts and the bundles they sealed — while the spec it was
+  // drafted from stays, because the new plan is drafted from it
+  // (D-NEW-a-spec-outlives-its-planning). Deleted first, so the new plan is
+  // named as the only plan this spec has rather than apart from the one it
+  // replaces (D-NEW-a-ticket-is-named-apart-from-its-board).
+  const refusal = await discardDrafted(m, repo, request.key);
+  if (refusal !== null) throw new Error(refusal);
+  // A fresh admission, not a move: the approved contract is frozen
+  // (ADR-0016), so the plan is drafted again from the spec.
+  //
+  // Run as a job and waited on, rather than called straight: an admission
+  // takes its turn behind the others in this repository, and the page it was
+  // pressed on has nowhere to go until there is a planning to name.
+  const settings = m.profile.state.settings;
+  const job = m.jobs.start(
+    { repo, key: null, kind: "admit", label: "Draft a plan from the spec" },
+    async (job, run) => {
+      await run.invoke(
+        admitFromSpecArgs(
+          spec,
+          null,
+          models?.draftingProvider ?? settings.draftingProvider,
+          models?.executorModel ?? settings.executorModel,
+        ),
+      );
+      m.recordAdmitted(job, repo, models);
+    },
+  );
+  await m.jobs.settled(job.id);
+  // The stopped ticket is already gone, so a refusal from here on says so and
+  // names where the spec it leaves is drafted from.
+  const lost = (): Error =>
+    new Error(
+      `${request.key} was deleted and its plan could not be drafted again: ${job.error ?? "the admission failed"}. ` +
+        "Its spec is in Create's picker; draft the plan from there.",
+    );
+  if (job.state !== "completed" || job.resultKey === null) throw lost();
+  const opened = await m.editing
+    .open({ kind: "planning", repoId: repo.id, key: job.resultKey }, undefined)
+    .catch(() => {
+      throw lost();
+    });
+  return { sessionId: opened.id, pane: opened.nodes > 0 ? "graph" : "criteria" };
+}
+
+/** A contract saved from the form. */
 function admit(
   m: HostModules,
   repo: RegisteredRepository,
-  request: RequestOf<"draft"> | RequestOf<"admit">,
+  request: RequestOf<"admit">,
   context: RouteContext,
 ): Job {
   return m.jobs.start(
-    {
-      repo,
-      key: null,
-      kind: request.kind,
-      owner: context.owner,
-      label: request.kind === "draft" ? "Draft a task contract" : "Save task contract",
-    },
+    { repo, key: null, kind: request.kind, owner: context.owner, label: "Save task contract" },
     async (job, run) => {
-      const settings = m.profile.state.settings;
-      const args =
-        request.kind === "draft"
-          ? admitFromFileArgs(
-              writePrivate(m.dataDirectory, `source-${job.id}.md`, request.outcome),
-              request.models?.draftingProvider ?? settings.draftingProvider,
-              request.models?.executorModel ?? settings.executorModel,
-            )
-          : admitDraftArgs(DraftSchema.parse(request.draft));
-      await run.invoke(args);
+      await run.invoke(admitDraftArgs(DraftSchema.parse(request.draft)));
       m.recordAdmitted(job, repo, request.models);
     },
   );
@@ -529,8 +777,14 @@ function loop(
   repo: RegisteredRepository,
   request: RequestOf<"run"> | RequestOf<"decide">,
 ): Job {
-  return m.jobs.start(
-    { repo, key: request.key, kind: request.kind, label: "Run engineering loop" },
+  const job = m.jobs.start(
+    {
+      repo,
+      key: request.key,
+      kind: request.kind,
+      label: "Run engineering loop",
+      publish: request.kind === "run" ? request.publish : false,
+    },
     async (job, run) => {
       m.tickets.assertDigest(repo, request.key, request.digest);
       const resumeFrom = request.kind === "run" ? request.resumeFrom : null;
@@ -552,12 +806,24 @@ function loop(
           ),
         ),
       );
-      if (request.kind === "run" && request.approve)
+      if (request.kind === "run" && request.approve) {
         await run.invoke(approveArgs(request.key));
+        // What it promises was settled with the approval, and a card offering
+        // to change it would offer what the interview may not do (ADR-0016).
+        m.drift.forget(repo.id, request.key, null);
+      }
       if (run.signal.aborted) return;
       await run.invoke(runArgs(request.key, path, resumeFrom));
     },
   );
+  // A filed ticket whose loop starts again is back on Home, and stays there
+  // when that run ends until it is filed again (S4).
+  const entry = repo.id + ":" + request.key;
+  if (m.profile.state.archived.includes(entry)) {
+    setArchived(m.profile.state, repo.id, [request.key], false);
+    m.changes.preferences(m.profile.state);
+  }
+  return job;
 }
 
 /**

@@ -1,8 +1,8 @@
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import { desktop, layout, packaged, productName } from "./package-layout.mjs";
 
 /**
  * The packaged app, checked the way it will be run: by its own binary.
@@ -18,40 +18,7 @@ import { fileURLToPath } from "node:url";
  * With no argument, the one package `pnpm desktop:package` wrote under
  * `release/` for this host.
  */
-const desktop = fileURLToPath(new URL("../", import.meta.url));
-const manifest = JSON.parse(readFileSync(join(desktop, "package.json"), "utf8"));
-const productName = manifest.productName;
-
-/** The package to check: the argument, or the single one under `release/`. */
-function packaged() {
-  if (process.argv[2]) return resolve(process.argv[2]);
-  const release = join(desktop, "release");
-  assert.ok(existsSync(release), "No release/ directory: run `pnpm desktop:package` first.");
-  const found = readdirSync(release)
-    .map((name) => join(release, name))
-    .filter((path) => statSync(path).isDirectory())
-    .flatMap((dir) =>
-      readdirSync(dir)
-        .filter((name) => name.endsWith(".app"))
-        .map((name) => join(dir, name))
-        .concat(/-unpacked$/.test(dir) ? [dir] : []),
-    );
-  assert.equal(found.length, 1, `Expected one package under release/, found: ${found.join(", ") || "none"}`);
-  return found[0];
-}
-
-/** The app's own binary, and the directory its `extraResources` land in. */
-function layout(app) {
-  if (app.endsWith(".app")) {
-    return { binary: join(app, "Contents", "MacOS", productName), resources: join(app, "Contents", "Resources") };
-  }
-  const exe = process.platform === "win32" ? `${productName}.exe` : manifest.name.replace(/^@.*\//, "");
-  const binary = [join(app, exe), join(app, productName)].find((path) => existsSync(path));
-  assert.ok(binary, `No app binary in ${app}`);
-  return { binary, resources: join(app, "resources") };
-}
-
-const app = packaged();
+const app = packaged(process.argv[2]);
 const { binary, resources } = layout(app);
 const entry = join(resources, "cli", "dist", "perbo.js");
 const options = { encoding: "utf8", timeout: 30_000, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } };
@@ -98,6 +65,16 @@ function claudeBinaries(dir) {
 // would be about 198 MB of an executable nothing starts.
 assert.deepEqual(claudeBinaries(join(resources, "cli")), []);
 
+// The Dock and Finder name a macOS app from its bundle, not the running app.
+if (app.endsWith(".app")) {
+  const plist = (key) =>
+    spawnSync("plutil", ["-extract", key, "raw", join(app, "Contents", "Info.plist")], { encoding: "utf8" }).stdout.trim();
+  for (const key of ["CFBundleName", "CFBundleDisplayName", "CFBundleExecutable"])
+    assert.equal(plist(key), productName, `${key} in the bundle's Info.plist`);
+  const icon = plist("CFBundleIconFile");
+  assert.ok(icon && existsSync(join(resources, icon)), `The bundle names an icon it does not carry: ${icon}`);
+}
+
 console.log(
-  `${basename(app)}: CLI v${cli.version} ran on the app's own binary, and the Agent SDK loaded from inside the package.`,
+  `${basename(app)}: CLI v${cli.version} ran on the app's own binary, the Agent SDK loaded from inside the package, and the bundle is named ${productName}.`,
 );

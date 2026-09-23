@@ -18,6 +18,12 @@ import {
   TaskModelsSchema,
 } from "../shared/protocol.js";
 import { runProcess, startLineProcess } from "./process.js";
+import { discoverModels } from "./model-catalog.js";
+import { ModelCatalogs } from "./providers/catalogs.js";
+import { ChangeMarks } from "./plan/marks.js";
+import { DriftReadings } from "./plan/drift.js";
+import { repositorySpecs } from "./plan/spec.js";
+import { draftedFrom } from "./tickets/work.js";
 import { probeProviders } from "./providers/status.js";
 import { seedArchived } from "./profile/preferences.js";
 import { readStanding, writeStanding } from "./repository/config.js";
@@ -40,7 +46,7 @@ import { PowerHold } from "./power.js";
 import { Notices } from "./notifications.js";
 import { createRoutes, route, type RouteContext } from "./routes.js";
 import type { ProfileState, RegisteredRepository } from "./profile/store.js";
-import { codexUsage } from "./usage-probe.js";
+import { claudeUsage, codexUsage } from "./usage-probe.js";
 
 export interface HostIO {
   chooseDirectory(): Promise<string | null>;
@@ -66,8 +72,16 @@ export interface ServiceOptions {
   process?: typeof runProcess;
   /** The long-lived spawn the interview runs through; injected by tests. */
   startProcess?: typeof startLineProcess;
-  /** The provider's own account of its plan windows; injected by tests. */
-  usageProbe?: typeof codexUsage;
+  /** The provider's own model catalog; injected by tests. */
+  modelCatalog?: typeof discoverModels;
+  /** Each provider's own account of its plan windows; injected by tests. */
+  usageProbe?: { claude: typeof claudeUsage; codex: typeof codexUsage };
+  /**
+   * The gap between a spec write being admitted and the bytes being read;
+   * injected by tests, which need that reading to fall provably before or
+   * provably after the ending they are asserting about.
+   */
+  specSettleMs?: number;
 }
 
 /**
@@ -90,6 +104,9 @@ export class DesktopService {
   private readonly notices: Notices;
   private readonly routes: RequestHandlers<RouteContext>;
   private readonly interviews: InterviewHost;
+  private readonly catalogs: ModelCatalogs;
+  private readonly marks: ChangeMarks;
+  private readonly drift: DriftReadings;
 
   /** The profile's own record, which every module mutating a preference is handed. */
   private get state(): ProfileState {
@@ -145,21 +162,67 @@ export class DesktopService {
       progressed: (job) => this.notices.stage(job),
       settled: (job) => this.notices.outcome(job),
     });
+    this.catalogs = new ModelCatalogs((provider) =>
+      (this.options.modelCatalog ?? discoverModels)(provider),
+    );
+    this.marks = new ChangeMarks({
+      editing: {
+        read: (id) => this.editing.read(id),
+        recordChange: (id, change) => this.editing.recordChange(id, change),
+      },
+      sessions: () => this.state.editingSessions,
+      repository: (id) => this.repository(id),
+      contract: (repo, key) => this.tickets.contract(repo, key),
+      say: (id, line) => {
+        this.interviews.say(id, line);
+      },
+    });
     this.interviews = new InterviewHost({
       editing: {
         read: (id) => this.editing.read(id),
         converse: (id, line, at) => this.editing.converse(id, line, at),
-        recordInterview: (id, session, provider) =>
-          this.editing.recordInterview(id, session, provider),
+        recordInterview: (id, session, provider, model) =>
+          this.editing.recordInterview(id, session, provider, model),
         recordSpec: (id, slug) => this.editing.recordSpec(id, slug),
         beginAsking: (id, entry) => this.editing.beginAsking(id, entry),
         answerAsking: (id, text) => this.editing.answerAsking(id, text),
-        countNodes: (id, nodes) => this.editing.countNodes(id, nodes),
+        countNodes: (id, nodes, digest, plan) => this.editing.countNodes(id, nodes, digest, plan),
+        adopt: (id, detail, nodes) => this.editing.adopt(id, detail, nodes),
       },
       repository: (id) => this.repository(id),
       tickets: { contract: (repo, key) => this.tickets.contract(repo, key) },
+      detail: (repoId, key) => this.tickets.detail(repoId, key),
       cli: this.cli,
       changes: this.changes,
+      marks: this.marks,
+      catalogs: this.catalogs,
+      sessions: () => this.state.editingSessions,
+      draftedFrom: (repo, slug) =>
+        draftedFrom({ tickets: this.ticketRecords(), reads: this.reads }, repo, slug),
+      reread: (id) => {
+        void this.drift.reread(id);
+      },
+      specSettleMs: options.specSettleMs,
+    });
+    this.drift = new DriftReadings({
+      editing: {
+        read: (id) => this.editing.read(id),
+        landDrift: (id, verdict, overlapped, say, asking) =>
+          this.editing.landDrift(id, verdict, overlapped, say, asking),
+        clearDrift: (id) => this.editing.clearDrift(id),
+      },
+      sessions: () => this.state.editingSessions,
+      repository: (id) => this.repository(id),
+      tickets: this.ticketRecords(),
+      reads: this.reads,
+      jobs: this.jobs,
+      cli: this.cli,
+      models: (repoId, key) => this.state.taskModels[repoId + ":" + key] ?? this.state.settings,
+      interview: {
+        working: (id) => this.interviews.isWorking(id),
+        say: (id, line) => this.interviews.say(id, line),
+        askingChanged: (id) => this.interviews.askingChanged(id),
+      },
     });
     this.tickets = new TicketReads({
       reads: this.reads,
@@ -219,7 +282,14 @@ export class DesktopService {
       interviews: this.interviews,
       jobs: this.jobs,
       power: this.power,
-      usageProbe: options.usageProbe ?? codexUsage,
+      marks: this.marks,
+      drift: this.drift,
+      catalogs: this.catalogs,
+      // Read as each is asked, as the injected catalog is.
+      usageProbe: {
+        claude: (probe) => (this.options.usageProbe?.claude ?? claudeUsage)(probe),
+        codex: (probe) => (this.options.usageProbe?.codex ?? codexUsage)(probe),
+      },
       snapshot: () => this.snapshot(),
       providers: () => this.providers(),
       recordAdmitted: (job, repo, models) => this.recordAdmitted(job, repo, models),
@@ -262,11 +332,20 @@ export class DesktopService {
         taskModels: this.state.taskModels,
         sequence: this.changes.sequence,
         archived: this.state.archived,
+        asks: this.state.asks,
         power: this.power.state,
         repositoryErrors: Object.fromEntries(
           records.map((entry) => [entry.repository.id, entry.errors]),
         ),
         drafts: openDrafts(this.state.editingSessions),
+        specs: this.state.repositories.flatMap((repo) => {
+          try {
+            return repositorySpecs(this.repository(repo.id));
+          } catch {
+            // A repository that has gone offers no specs and stops nothing.
+            return [];
+          }
+        }),
       };
     });
     return { ...workspace, interviews, working };
@@ -294,6 +373,7 @@ export class DesktopService {
       editing: this.editing,
       repository: (id) => this.repository(id),
       contract: (repo, key) => this.tickets.contract(repo, key),
+      marks: this.marks,
     };
   }
   /** The key admission handed back, and the models the person chose for it. */

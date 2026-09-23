@@ -64,6 +64,11 @@ const planning = (key: string): Record<string, unknown> => ({
   phase: "editing",
   error: null,
   operation: null,
+  drift: null,
+  change: null,
+  lastPane: null,
+  lastView: null,
+  interviewModel: null,
 });
 const running = (over: Partial<Job> = {}): Job =>
   ({
@@ -83,11 +88,13 @@ const running = (over: Partial<Job> = {}): Job =>
   }) as Job;
 
 describe("discardTicket", () => {
-  it("removes the ticket's three records and its preferences", async () => {
+  it("removes the ticket's records and its preferences", async () => {
     const repo = repository();
+    for (const suffix of [".approach.json", ".drift.json"] as const)
+      writeFileSync(ticketPath(repo, "PRB-1", suffix), "{}\n");
     const profile = state();
     await discardTicket(deps({ profile }), repo, "PRB-1");
-    for (const suffix of [".json", ".contract.json", ".draft.json"] as const)
+    for (const suffix of [".json", ".contract.json", ".draft.json", ".approach.json", ".drift.json"] as const)
       expect(existsSync(ticketPath(repo, "PRB-1", suffix))).toBe(false);
     expect(profile.titles).toEqual({});
     expect(profile.archived).toEqual([]);
@@ -114,79 +121,85 @@ describe("discardTicket", () => {
     ).resolves.toBe("This task is no longer in the repository's ticket store.");
   });
 
-  it("keeps a contract that has moved past the contract stage", async () => {
+  it("keeps work whose pull request is open, in the words that say why", async () => {
     const repo = repository();
-    for (const state of ["executing", "merged", "pr_open"])
-      await expect(
-        discardTicket(deps({ ticket: ticket({ state: state as Ticket["state"] }) }), repo, "PRB-1"),
-      ).resolves.toMatch(/^Only a contract that has never run can be deleted\./);
+    await expect(
+      discardTicket(deps({ ticket: ticket({ state: "pr_open" }) }), repo, "PRB-1"),
+    ).resolves.toBe(
+      "PRB-1 has a pull request open, and that is a record this machine does not own. Close " +
+        "or merge it on GitHub first, then delete the work.",
+    );
     expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(true);
   });
 
-  it("deletes from every state a contract can still be in", async () => {
-    for (const state of ["draft", "specifying", "plan_review", "ready", "plan_invalid"]) {
+  it("deletes work from every other stage, the loop included", async () => {
+    for (const state of [
+      "draft",
+      "specifying",
+      "plan_review",
+      "ready",
+      "plan_invalid",
+      "executing",
+      "failed",
+      "cancelled",
+      "merged",
+      "closed",
+    ]) {
       const repo = repository();
       await expect(
         discardTicket(deps({ ticket: ticket({ state: state as Ticket["state"] }) }), repo, "PRB-1"),
       ).resolves.toBeNull();
+      expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(false);
     }
   });
 
-  it("keeps a contract with a recorded attempt", async () => {
-    const repo = repository();
-    mkdirSync(join(repo.path, ".perbo", "state"), { recursive: true });
-    writeFileSync(
-      attemptsPath(repo, "ticket_1"),
+  it("deletes the attempts the ticket recorded, readable or not", async () => {
+    for (const record of [
       JSON.stringify({ ticket_id: "ticket_1", attempts: [{ attempt_id: "att_1" }] }),
-    );
-    await expect(discardTicket(deps(), repo, "PRB-1")).resolves.toMatch(
-      /^This contract has recorded attempts or evidence, so it stays\./,
-    );
+      "{not json",
+    ]) {
+      const repo = repository();
+      mkdirSync(join(repo.path, ".perbo", "state"), { recursive: true });
+      writeFileSync(attemptsPath(repo, "ticket_1"), record);
+      await expect(discardTicket(deps(), repo, "PRB-1")).resolves.toBeNull();
+      expect(existsSync(attemptsPath(repo, "ticket_1"))).toBe(false);
+    }
   });
 
-  it("keeps a contract whose attempts record could not be read", async () => {
-    const repo = repository();
-    mkdirSync(join(repo.path, ".perbo", "state"), { recursive: true });
-    writeFileSync(attemptsPath(repo, "ticket_1"), "{not json");
-    await expect(discardTicket(deps(), repo, "PRB-1")).resolves.toMatch(
-      /^This contract has recorded attempts or evidence, so it stays\./,
-    );
-  });
-
-  it("keeps a contract with a bundle on record, and ignores another ticket's", async () => {
+  it("deletes the bundles the ticket sealed by their files, and leaves another ticket's", async () => {
     const repo = repository();
     mkdirSync(bundlesPath(repo), { recursive: true });
-    const bundle = (ticketId: string): string =>
+    const bundle = (ticketId: string, id: string): string =>
       JSON.stringify({
-        bundle_id: "bundle_0000000000000001",
+        // The recorded id names another file: the delete goes by the file the
+        // manifest was read from, never by what it says.
+        bundle_id: id,
         kind: "execution",
         ticket_id: ticketId,
         subject_id: "att_1",
         artifacts: [],
       });
-    writeFileSync(join(bundlesPath(repo), "other.json"), bundle("ticket_other"));
+    writeFileSync(join(bundlesPath(repo), "other.json"), bundle("ticket_other", "own"));
+    writeFileSync(join(bundlesPath(repo), "own.json"), bundle("ticket_1", "other"));
     await expect(discardTicket(deps(), repo, "PRB-1")).resolves.toBeNull();
-    const second = repository();
-    mkdirSync(bundlesPath(second), { recursive: true });
-    writeFileSync(join(bundlesPath(second), "own.json"), bundle("ticket_1"));
-    await expect(discardTicket(deps(), second, "PRB-1")).resolves.toMatch(
-      /^This contract has recorded attempts or evidence, so it stays\./,
-    );
+    expect(existsSync(join(bundlesPath(repo), "own.json"))).toBe(false);
+    expect(existsSync(join(bundlesPath(repo), "other.json"))).toBe(true);
   });
 
-  it("keeps a contract with a pull request on record", async () => {
+  it("deletes work whose pull request is closed or merged", async () => {
     const repo = repository();
     await expect(
       discardTicket(
         deps({
           ticket: ticket({
+            state: "merged",
             delivery: { pull_request_url: "https://github.com/perbo/perbo/pull/1" } as Ticket["delivery"],
           }),
         }),
         repo,
         "PRB-1",
       ),
-    ).resolves.toBe("This contract has a pull request on record, so it stays.");
+    ).resolves.toBeNull();
   });
 
   it("refuses a ticket store holding a link rather than following it", async () => {

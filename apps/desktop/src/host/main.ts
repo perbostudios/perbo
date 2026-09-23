@@ -28,7 +28,14 @@ import {
 import { DesktopService } from "./service.js";
 import { redact } from "./process.js";
 
+// Perbo, not Electron. `app.name` names the application menu's About, Hide
+// and Quit items. The process title is what macOS shows as the application's
+// name in the menu bar and the process list: it sets the process's
+// LaunchServices display name, which otherwise comes from the running bundle
+// and is "Electron" for `electron .`. The package electron-builder writes is
+// Perbo.app, named from `productName`, and needs neither.
 app.setName("Perbo");
+process.title = "Perbo";
 app.setPath("userData", join(app.getPath("appData"), "Perbo"));
 if (!app.requestSingleInstanceLock()) app.quit();
 else
@@ -47,6 +54,15 @@ async function start(): Promise<void> {
   const indexPath = join(__dirname, "../renderer/index.html");
   const iconPath = join(__dirname, "../renderer/brand/perbo-app-icon.png");
   app.dock?.setIcon(iconPath);
+  // The About panel, not Electron's: named and versioned from package.json. The
+  // build version is left out because an unpackaged run would report
+  // Electron's own there.
+  app.setAboutPanelOptions({
+    applicationName: "Perbo",
+    applicationVersion: app.getVersion(),
+    version: "",
+    iconPath,
+  });
   const allowedURL = devURL ?? pathToFileURL(indexPath).href;
   const trustedURL = (candidate: string): boolean => {
     try {

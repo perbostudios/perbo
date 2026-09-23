@@ -9,7 +9,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import readline from "node:readline";
-import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
+import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment, type ProviderEffort } from "@perbo/contracts";
 import { DEFAULT_CODEX_MODEL } from "./defaults.js";
 import { ProviderError, providerFailureText } from "./failure.js";
 import {
@@ -63,7 +63,7 @@ export interface CodexCliOptions {
   modelId?: string;
   binary?: string;
   timeoutMs?: number;
-  effort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+  effort?: ProviderEffort<"codex-cli">;
   /** Source Codex home. Only auth.json is linked into an isolated temporary home. */
   codexHome?: string;
 }

@@ -8,7 +8,6 @@ import { codexInterviewTransport } from "../codex.js";
 import { interviewCommandLine } from "../index.js";
 import { fakeAppServer, type ServerStep } from "./fake-app-server.js";
 import {
-  drafter,
   refusals,
   SPEC_FOLDER,
   type ContractDecision,
@@ -67,7 +66,6 @@ export function claudeHarness(): InterviewHarness {
         cwd: input.repo,
         deps: {
           transport: claudeInterviewTransport(sdk, CLAUDE),
-          model: drafter(),
           turns: oneTurn(),
         },
       });
@@ -120,7 +118,6 @@ export function codexHarness(scratch: () => string): InterviewHarness {
         cwd: input.repo,
         deps: {
           transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
-          model: drafter(),
           turns: oneTurn(),
         },
       });

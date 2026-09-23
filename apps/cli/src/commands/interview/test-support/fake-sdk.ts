@@ -37,7 +37,13 @@ export type ScriptStep =
    * script without this runs end to end inside the first turn, which cannot
    * tell "asked, then drafted" from "asked and drafted in one breath".
    */
-  | { kind: "await" };
+  | { kind: "await" }
+  /**
+   * Something that is not the session's, done while the turn runs: a hand at
+   * the plan or the spec between two of the session's steps. The callback
+   * runs where the step stands, and the session is told nothing of it.
+   */
+  | { kind: "act"; act: () => void | Promise<void> };
 
 /** What the script's tool calls were answered with. */
 export interface ScriptedCall {
@@ -114,6 +120,10 @@ export function scriptedSdk(args: {
       }
       if (step.kind === "await") {
         await waitForTurn();
+        continue;
+      }
+      if (step.kind === "act") {
+        await step.act();
         continue;
       }
       const name = step.kind === "call" ? qualified(step.tool, params.options) : step.tool;

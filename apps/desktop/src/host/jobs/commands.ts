@@ -90,21 +90,6 @@ export function admitFromSpecArgs(
   ];
 }
 
-export function admitFromFileArgs(path: string, provider: string, model: string): string[] {
-  return [
-    "admit",
-    "--prefix",
-    "PRB",
-    "--from-file",
-    path,
-    "--provider",
-    provider,
-    "--model",
-    model,
-    "--json",
-  ];
-}
-
 export function admitDraftArgs(draft: Draft): string[] {
   return ["admit", "--prefix", "PRB", ...draftArgs(draft)];
 }
@@ -164,8 +149,10 @@ export function runConfig(
     agent_provider: models.executorProvider,
     executor_skills: models.executorSkills,
     model: models.executorModel,
+    effort: models.executorEffort,
     reviewer_provider: models.reviewerProvider,
     reviewer_model: models.reviewerModel,
+    reviewer_effort: models.reviewerEffort,
     limits,
     publish,
     merge: "person",

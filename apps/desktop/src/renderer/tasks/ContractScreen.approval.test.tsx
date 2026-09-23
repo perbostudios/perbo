@@ -66,8 +66,8 @@ function captureEdits(context: TaskContext) {
   const original = bridge.request.bind(bridge);
   let session = EditingSessionSchema.parse({
     version: 1, id: crypto.randomUUID(), repoId: context.repoId, key: context.detail.ticket.key,
-    digest: context.detail.digest, revision: 0, resumeNew: false, phase: "editing", error: null,
-    operation: null, form: editingForm(context.workspace.settings, context.detail),
+    digest: context.detail.digest, revision: 0, resumeNew: false, lastPane: null, lastView: null, drift: null, change: null, phase: "editing", error: null,
+    operation: null, interviewModel: null, form: editingForm(context.workspace.settings, context.detail),
   });
   return vi.spyOn(bridge, "request").mockImplementation(
     async <T extends Request>(request: T): Promise<ReplyMap[T["kind"]]> => {
@@ -150,6 +150,57 @@ describe("what the scope does not cover, where it is approved", () => {
 });
 
 describe("contract verification approval", () => {
+  it("says where the plan and the spec disagree, and never holds the button for it", async () => {
+    // Read before the contract is frozen, because this is the last moment
+    // either can still move. Advice and not a gate: a warning that held Approve
+    // is one people learn to click past, as the impact count beside it is not.
+    const context = await contextFor([
+      { id: "ac_1", text: "The queue retries.", expected_verification: { kind: "test", assertion: "a" } },
+    ]);
+    context.detail.specFindings = [
+      { kind: "uncited", requirementId: "R2", criteria: [], text: "The queue gives up." },
+      { kind: "dangling", requirementId: "R9", criteria: ["ac_1"], text: null },
+    ];
+    mount(<ContractScreen {...context} />);
+
+    expect((await screen.findByText(/nothing in this plan/)).textContent).toContain("R2");
+    expect(screen.getByText(/no longer states/).textContent).toContain("R9");
+    expect(
+      (screen.getByRole("button", { name: "Approve · start the loop" }) as HTMLButtonElement)
+        .disabled,
+      "advice, not a gate",
+    ).toBe(false);
+  });
+
+  it("says nothing where the plan and the spec agree", async () => {
+    const context = await contextFor([
+      { id: "ac_1", text: "The queue retries.", expected_verification: { kind: "test", assertion: "a" } },
+    ]);
+    context.detail.specFindings = [];
+    mount(<ContractScreen {...context} />);
+    await screen.findByRole("button", { name: "Approve · start the loop" });
+    expect(document.querySelectorAll(".spec-findings")).toHaveLength(0);
+  });
+
+  it("marks an assertion the draft did not propose, and leaves the others unmarked", async () => {
+    // Approving freezes the criteria and their verification, so this is the
+    // last place a changed assertion can be read. When one moves the claim is
+    // untouched, so nothing else on the page would show it.
+    const context = await contextFor([
+      { id: "ac_1", text: "The queue retries.", expected_verification: { kind: "test", assertion: "retry.test.ts covers the backoff" } },
+      { id: "ac_2", text: "The queue gives up.", expected_verification: { kind: "test", assertion: "give-up.test.ts covers the cap" } },
+    ]);
+    context.detail.changedAssertions = ["ac_2"];
+    mount(<ContractScreen {...context} />);
+
+    const marked = await screen.findByText(/give-up\.test\.ts covers the cap/);
+    expect(marked.textContent).toContain("changed since the draft");
+    const untouched = screen.getByText(/retry\.test\.ts covers the backoff/);
+    expect(untouched.textContent).not.toContain("changed since the draft");
+    // A pointer for the eye, not a banner over the page.
+    expect(document.querySelectorAll(".criterion-moved")).toHaveLength(1);
+  });
+
   it("shows the assertion, evidence kind and named manual reviewer before approval", async () => {
     const context = await contextFor([
       {
@@ -189,7 +240,7 @@ describe("contract verification approval", () => {
       }) as HTMLButtonElement).disabled,
     ).toBe(false);
     expect(
-      (screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled,
+      (screen.getByRole("button", { name: "Back to planning" }) as HTMLButtonElement).disabled,
     ).toBe(true);
   });
 

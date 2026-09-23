@@ -2,7 +2,7 @@ import { currentMonth, ledgerFor, readAttempts } from "../records.js";
 import type { StoredAttempt } from "../records.js";
 import { redact } from "../process.js";
 import { attemptsPath } from "../repository/layout.js";
-import type { codexUsage } from "../usage-probe.js";
+import { noWindows, type claudeUsage, type codexUsage, type ProviderUsage } from "../usage-probe.js";
 import type { TicketReads } from "../tickets/reads.js";
 import type { RegisteredRepository } from "../profile/store.js";
 import type { Provider, Settings, UsageReport } from "../../shared/protocol.js";
@@ -14,8 +14,8 @@ export interface UsageDeps {
   tickets: Pick<TicketReads, "list">;
   settings(): Settings;
   providers(): Promise<Provider[]>;
-  /** The provider's own account of its plan windows; a fake in tests. */
-  probe: typeof codexUsage;
+  /** Each provider's own account of its plan windows; a fake in tests. */
+  probe: { claude: typeof claudeUsage; codex: typeof codexUsage };
 }
 
 /** The month's ledger from retained attempts, and each provider's own account of its plan (S6E). */
@@ -50,32 +50,24 @@ export async function usageReport(deps: UsageDeps): Promise<UsageReport> {
   const providers = await deps.providers();
   const signedIn = (id: Provider["id"]): boolean =>
     providers.find((provider) => provider.id === id)?.authenticated ?? false;
-  const codex = signedIn("codex")
-    ? await deps.probe()
-    : {
-        plan: null,
-        windows: null,
-        detail: "Codex is not signed in on this machine.",
-      };
+  const ask = async (id: "claude" | "codex", name: string): Promise<ProviderUsage> =>
+    signedIn(id)
+      ? deps.probe[id]()
+      : noWindows(
+          `${name} is not ${providers.find((provider) => provider.id === id)?.installed ? "signed in" : "installed"} on this machine.`,
+        );
+  const [claude, codex] = await Promise.all([ask("claude", "Claude Code"), ask("codex", "Codex")]);
   return {
     readAt: new Date().toISOString(),
     ledger: ledgerFor(records, currentMonth()),
     providers: [
-      {
-        id: "claude",
-        name: "Claude Code",
-        role: roleOf("claude-cli"),
-        plan: null,
-        windows: null,
-        detail: signedIn("claude")
-          ? "Claude Code reports a limit only when a run meets one; there is no window to read without spending a turn."
-          : "Claude Code is not signed in on this machine.",
-      },
-      { id: "codex", name: "Codex", role: roleOf("codex-cli"), ...codex },
+      { id: "claude", name: "Claude Code", role: roleOf("claude-cli"), connected: signedIn("claude"), ...claude },
+      { id: "codex", name: "Codex", role: roleOf("codex-cli"), connected: signedIn("codex"), ...codex },
       {
         id: "anthropic",
         name: "Anthropic API",
         role: roleOf("anthropic"),
+        connected: signedIn("anthropic"),
         plan: null,
         windows: null,
         detail: signedIn("anthropic")

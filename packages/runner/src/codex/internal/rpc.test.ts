@@ -168,6 +168,15 @@ describe("Codex native execution protocol", () => {
       },
     });
   });
+  it("starts the turn at the run's effort, and at medium where the run chose none", async () => {
+    const f = fixture();
+    const thread = await f.session.start("test-model", "Approved instructions");
+    await f.session.turn(thread, "test-model", "Approved contract", "ultra");
+    await f.session.turn(thread, "test-model", "Approved contract", null);
+    expect(
+      f.messages().filter((message) => message.method === "turn/start").map((message) => (message.params as { effort?: string }).effort),
+    ).toEqual(["ultra", "medium"]);
+  });
   it("reads a child thread's own role, and null where Codex reports none (D-106)", async () => {
     const f = fixture();
     await f.session.start("test-model", "Approved instructions");

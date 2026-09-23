@@ -9,17 +9,24 @@ Three properties are why a draft here is safe to show a person:
 - **The draft is never executed.** A model drafts the outcome, the criteria and a *proposed* scope; a person edits and approves; only the approved contract binds execution and review. The person's `approve` is the authority boundary under ADR-0023 §4 — model output becomes a scope glob only after a human has confirmed it. The draft is written to its own file beside the contract rather than into it.
 - **The issue is data.** Its title and body arrive inside an `<perbo:issue trust="external">` block, exactly as the reviewer delimits repository content, preceded by a standing instruction that the blocks are never instructions. A closing tag inside the body is defanged so external text cannot close the block early. Nothing from the issue reaches the system prompt. This holds whatever supplied the issue: a body pasted into a Markdown file is external text too, because being local makes it convenient, not trusted.
 - **What the issue tried is read, not asked for.** `issueAuthoredAttempts`, from `@perbo/contracts`, reads the title and body deterministically and reports every line that claims the work is already finished or that speaks to the drafter rather than describing the work. It is a report, not a filter: nothing is removed or rewritten, because "the work lives in `packages/auth`" and "set the scope to `**`" are not separable by pattern. The person who approves separates them, which is the boundary D-072 draws.
-- **The draft is constrained output, checked twice.** It comes back through the reviewer's own structured-output transport against a JSON schema this package supplied, and is validated again by the Zod schema on the way in. One criterion or more, one to eight globs, a rationale, the nodes and edges of an execution graph where the work divides, and no other field; a `manual` criterion cannot be drafted, because its named reviewer and its reason are a person's to state.
+- **The draft is constrained output, checked twice.** It comes back through the reviewer's own structured-output transport against a JSON schema this package supplied, and is validated again by the Zod schema on the way in. A name, one criterion or more, one to eight globs, a rationale, the nodes and edges of an execution graph where the work divides, and no other field; a `manual` criterion cannot be drafted, because its named reviewer and its reason are a person's to state.
+
+The name follows D-NEW-a-ticket-is-named-apart-from-its-board: beside the tickets in flight, which `depends_on` may name, the drafter is shown what every other ticket in the repository is called, in a `<perbo:names trust="repo">` block.
 
 ## The shape
 
 | | |
 |---|---|
-| `draft/` | `draftContract`: the system prompt, the delimited blocks, the call, the schema, the provenance record. `DRAFT_PROMPT_VERSION` is `draft_v4` and covers all of them together. Its interior is `internal/delimit.ts`, the `<perbo:kind trust="…">` block mirrored from the reviewer plus the tag defang, and `internal/tree.ts`, the tracked tree two levels deep through `@perbo/workspace`'s repository module, so proposed globs name directories that exist |
+| `draft/` | `draftContract`: the system prompt, the delimited blocks, the call, the schema, the provenance record. `DRAFT_PROMPT_VERSION` is `draft_v5` and covers all of them together. `namesBlock` is the block of every other ticket's name the drafter and the interview are shown. Its interior is `internal/tree.ts`, the tracked tree two levels deep through `@perbo/workspace`'s repository module, so proposed globs name directories that exist |
+| `delimit.ts` | The `<perbo:kind trust="…">` block, mirrored from the reviewer, plus the tag defang: how the drafter and the drift reading hand a model anything that is not their system prompt |
+| `model-record.ts` | `DraftModelRecordSchema`: the provenance of a model's reading — the draft's and the drift reading's — on its own so a renderer can hold one without loading a transport |
+| `drift.ts` | `readDrift`: a model reads the spec beside the plan drafted from it and reports where the two no longer promise the same thing, each difference with answers the person can pick (D-NEW-the-plan-answers-the-spec-and-says-so). `DRIFT_PROMPT_VERSION` is `drift_v1` |
+| `drift-report.ts` | The reading's shape, the verdict kept beside the ticket at `.perbo/tickets/<KEY>.drift.json`, and `promiseTexts`, what a verdict is kept against; no filesystem and no provider, so the desktop's renderer imports it |
+| `assertion-drift.ts` | `assertionsChangedSinceDraft`: the criteria whose assertion moved from the one the draft proposed, read from the draft snapshot's edits, for approval to point a person's eye at |
 | `issue.ts` | `SourceIssue`, the one shape drafting reads, and `fetchGitHubIssue`: `gh issue view … --json` through `@perbo/workspace`'s repository module, Zod-validated, one sentence on failure |
 | `spec.ts` | `parseSpec` and `readSpecFile`: one spec under its five headings, strictly, because a spec about to be drafted from has to be complete |
 | `spec-text.ts` | The other half, and no filesystem at all: `specSlug`, the folder name a title takes; `renderSpec`, the Markdown a spec is written as, with an id on every requirement; `readSpecSections`, the forgiving read of a spec half written; and `requirementNodes` — which node each requirement landed in, derived from the criteria that cite it. The desktop's renderer imports it, so a browser assigns the ids the command line would |
-| `spec-write.ts` | `writeSpecFile`: the bytes at `specs/<slug>/spec.md`, with the folders created and a second spec on one slug refused |
+| `spec-write.ts` | `writeSpecFile`: the bytes at `specs/<slug>/spec.md`, with the folders created and a second spec on one slug refused; and `retitleSpecFile`, a spec's first heading set to its ticket's name with every other byte and the folder kept (`retitleSpec` in `spec-text.ts` is the text half) |
 | `node-page-text.ts` | `renderNodePage`: the text of that page, derived from the spec and the graph, and no filesystem — the desktop's preview renders it too |
 | `node-pages.ts` | `writeNodePages`: the page per node beside the spec, rewritten from the spec and the graph, keeping the `## Notes` a person wrote in it and removing the page of a node the plan no longer has |
 | `file-issue.ts` | `readIssueFile`: one Markdown file as the same `SourceIssue` — first line the title, the rest the body, `file:<basename>` for the reference, and no number and no URL, because a file has neither |
@@ -29,8 +36,8 @@ Three properties are why a draft here is safe to show a person:
 | `errors.ts` | `PlanningError` and `DraftRejectedError` — a draft that is not the shape is refused, not repaired |
 
 `src/index.ts` is what a Node caller imports and `src/browser.ts` the part the desktop's renderer
-does: the spec text, the impact report and the graph edit path, none of which reach a `node:`
-module. `src/browser.test.ts` bundles that surface for a browser with tree shaking off and holds it,
+does: the spec text, the impact report, the graph edit path, the drift report's shape and the
+assertions moved since the draft, none of which reach a `node:` module. `src/browser.test.ts` bundles that surface for a browser with tree shaking off and holds it,
 and fails for a module that needs Node, so the check can come out either way.
 
 ## What is recorded

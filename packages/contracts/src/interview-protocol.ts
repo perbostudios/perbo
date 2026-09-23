@@ -77,6 +77,22 @@ export const InterviewToolSchema = z.strictObject({
 });
 
 /**
+ * The session wrote the spec it is here to write.
+ *
+ * Said as the write is admitted rather than after the turn, because the spec
+ * is on a pane the person may not be on and the writing is the one thing they
+ * are waiting through. The session's own words cannot carry it: a line saying
+ * what it is about to do is the line the chat's hold-and-drop rule swallows,
+ * and by construction this one is followed by work.
+ *
+ * It carries nothing but the fact. What was written is on the Spec pane, which
+ * reads the file, and a copy of it here would be a second telling that drifts.
+ */
+export const InterviewWroteSpecSchema = z.strictObject({
+  type: z.literal("wrote_spec"),
+});
+
+/**
  * The most groups one asking carries, and the most parts and options in each.
  *
  * A limit rather than an allowance. A person sees only what needs them
@@ -163,6 +179,7 @@ export const InterviewEventSchema = z.discriminatedUnion("type", [
   InterviewMessageSchema,
   InterviewRefusedSchema,
   InterviewToolSchema,
+  InterviewWroteSpecSchema,
   InterviewAskedSchema,
   InterviewIdleSchema,
   InterviewEndedSchema,
@@ -198,37 +215,43 @@ export function decodeInterviewTurn(line: string): InterviewTurn | null {
  * back and the interview counts it, so it is declared once, here, beside the
  * shape of the question it is always added to.
  */
-export const LEAVE_IT_TO_THE_INTERVIEW = "Let the interview decide";
+export const LEAVE_IT_TO_THE_INTERVIEW = "Architect's call";
 
 /** The letters a group's parts are read and answered under: 1a, 1b, 1c. */
 export const PART_LETTERS = "abcdefghijklmnopqrstuvwxyz";
 
 /**
- * Whether one turn is this group's answer, in the shape the dock sends: the
- * option's own words for a single part, and the parts lettered as they were
- * read for more than one.
+ * Whether one turn is this group's answer, in the shape the card sends: the
+ * option's own words for a single part, and one lettered line a part, in the
+ * order they were read, for more than one.
  *
  * Read back rather than flagged on the way in, so a person who types the
  * wording out themselves is answering as much as one who picked it, and so
- * nothing has to be threaded through the turn the host writes down.
+ * nothing has to be threaded through the turn the host writes down. A part
+ * answered in the person's own words has no offered label to match, so a
+ * lettered line counts on anything said under its letter. A single part has no
+ * letter to hang that on: its own words are a sentence like any other, and a
+ * sentence the card cannot tell from talking past the question ends the asking,
+ * which is what puts an unclosed problem between the plan and the spec again.
  *
- * It lives here, in the protocol, because two sides count on it and a second
- * copy would drift: the desktop host moves its record of the asking on by it,
- * and `perbo interview` refuses to draft a plan while a group it asked is
- * still unanswered. A CLI that counted answers its own way would let a plan be
- * drafted around a question the person can still see on screen.
+ * It lives here, beside the shape of the question it reads, because more than
+ * one surface counts on it and a second copy would drift: the desktop host
+ * moves its record of the asking on by it, and the Spec pane withholds
+ * Generate plan while a group the interview asked still stands. A surface that
+ * counted answers its own way would let a plan be drafted around a question
+ * the person can still see on screen.
  */
 export function answersGroup(group: InterviewQuestionGroup, text: string): boolean {
-  const offered = (part: InterviewQuestionGroup["parts"][number]): string[] => [
-    ...part.options.map((option) => option.label),
-    LEAVE_IT_TO_THE_INTERVIEW,
-  ];
-  if (group.parts.length === 1) return offered(group.parts[0]!).includes(text.trim());
+  if (group.parts.length === 1)
+    return [
+      ...group.parts[0]!.options.map((option) => option.label),
+      LEAVE_IT_TO_THE_INTERVIEW,
+    ].includes(text.trim());
   const lines = text.trim().split("\n");
   if (lines.length !== group.parts.length) return false;
-  return group.parts.every((part, index) =>
-    offered(part).some(
-      (label) => lines[index]!.trim() === `${PART_LETTERS[index] ?? index + 1}) ${label}`,
-    ),
-  );
+  return group.parts.every((_part, index) => {
+    const prefix = `${PART_LETTERS[index] ?? index + 1})`;
+    const line = lines[index]!.trim();
+    return line.startsWith(prefix) && line.slice(prefix.length).trim().length > 0;
+  });
 }

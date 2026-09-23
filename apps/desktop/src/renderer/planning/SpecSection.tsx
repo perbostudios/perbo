@@ -9,6 +9,7 @@ import {
   symbolOptions,
 } from "@perbo/planning/browser";
 import { caretPoint } from "./caret.js";
+import type { TextMarks } from "./change-marks.js";
 import { SpecReading } from "./SpecReading.js";
 import type { ExportedName } from "../../shared/protocol.js";
 
@@ -62,6 +63,8 @@ export function SpecSection({
   hint,
   value,
   symbols,
+  nodes,
+  marks = null,
   onChange,
   onCommit,
   children,
@@ -77,6 +80,22 @@ export function SpecSection({
    * because "not checked" is not "not found".
    */
   symbols: ExportedName[] | null;
+  /**
+   * Which nodes each requirement's criteria landed in, by requirement id, for
+   * the Requirements section and nothing else.
+   *
+   * Beside the id it belongs to rather than in a table under the section: a
+   * table would repeat every id to say one thing about it, a column of text to
+   * read against a list of requirements already on the page (D-103).
+   */
+  nodes?: Map<string, string[]> | undefined;
+  /**
+   * The last change to this section, placed in `value`, for the reading view
+   * to mark; null where there is none. Never shown while the section is being
+   * edited: the editor shows the text as it is being typed, and marks over a
+   * text that is moving would mark the wrong characters.
+   */
+  marks?: TextMarks | null;
   onChange: (value: string) => void;
   /** Save now, with this section's text, rather than waiting for the next render. */
   onCommit: (text?: string) => void;
@@ -214,6 +233,8 @@ export function SpecSection({
           label={`Spec ${name}`}
           placeholder={placeholder}
           known={known}
+          nodes={nodes}
+          marks={marks}
           onOpen={open}
         />
       ) : (

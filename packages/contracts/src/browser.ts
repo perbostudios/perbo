@@ -9,12 +9,16 @@
 export { APPROACH_SCHEMA_VERSION, approachProblems, ApproachRecordSchema } from "./approach.js";
 export type { ApproachRecord, GraphEdge } from "./approach.js";
 export { formatUsd } from "./cost.js";
+export { EFFORT_LABELS, EFFORT_LEVELS, EffortLevelSchema } from "./effort.js";
+export type { EffortLevel } from "./effort.js";
 export { EXECUTOR_SKILLS, ExecutorSkillsSchema } from "./executor-skills.js";
 export type { ExecutorSkillId } from "./executor-skills.js";
 export { GraphEditSchema } from "./graph-edit.js";
 export type { GraphEdit } from "./graph-edit.js";
+export { CriterionIdSchema } from "./ids.js";
 export {
   answersGroup,
+  InterviewOptionSchema,
   LEAVE_IT_TO_THE_INTERVIEW,
   MAX_QUESTION_GROUPS,
   MAX_QUESTION_OPTIONS,
@@ -47,3 +51,4 @@ export type { SizeEstimate } from "./size.js";
 export { standingGlob, StandingProhibitedEntrySchema } from "./standing.js";
 export type { StandingProhibitedEntry } from "./standing.js";
 export type { SymbolIndex, UnsupportedRepository } from "./symbol-index.js";
+export { sameName } from "./ticket-name.js";

@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { Button, InkIcon, Notice, NumberPop, PageHeader, SectionLabel, cx } from "../ui/index.js";
 import { bridge, errorMessage, useAction } from "../workspace/index.js";
-import { exclusiveJob } from "../../shared/jobs.js";
+import { exclusiveJob, isRun } from "../../shared/jobs.js";
 import { decisionQuestions } from "../../shared/decisions.js";
+import { WaitScreen } from "./wizard.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey, stageName } from "./ticket-workspace.js";
 import { costLabel, taskRecords } from "./task-context.js";
@@ -79,8 +80,31 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
   const commands = latest?.ceilings.find(
     (ceiling) => ceiling.resource === "attempt_commands",
   );
+  // A stop lands on the stopped page at once, without waiting for the record
+  // the stop leaves: the page holds while the host finishes it. Only the run
+  // is what that page is about, so stopping any other command stays here.
+  const stop = (): void => {
+    if (!active) return;
+    action.mutate({ kind: "cancel", jobId: active.id });
+    if (isRun(active)) show("stopped");
+  };
   useShortcut("output", () => show("output"));
-  useShortcut("stop", active && active.state !== "stopping" ? () => action.mutate({ kind: "cancel", jobId: active.id }) : null);
+  useShortcut("stop", active && active.state !== "stopping" ? stop : null);
+  // Between pressing Approve and the loop having anything to show.
+  //
+  // Approving runs a command: the request returns as soon as the job is
+  // scheduled, so this page opens while `perbo approve` is still reading the
+  // contract and settling its checks. Underneath, it says "Ready to start the
+  // loop" over an empty progress bar — which reads as nothing having happened
+  // to a person who just pressed the one button that freezes their work.
+  if (active && !recoverable && ["plan_review", "ready"].includes(ticket.state))
+    return (
+      <WaitScreen
+        title="Approving the contract"
+        description="Freezing the outcome, the criteria, the scope and the base, and settling the checks that hold the plan to its spec. The loop starts once they pass."
+        status={active.label}
+      />
+    );
   return (
     <section className="screen" data-screen="s12">
       <TaskHeader {...context} />
@@ -99,7 +123,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
             </h1>
             <p>
               {recoverable
-                ? "This desktop session has no running command for the task. Review the contract and retained changes before starting another attempt."
+                ? "This desktop session has no running command for the task. The run was stopped, and its work and evidence have been retained."
                 : paused
                 ? "The loop stops here until you answer. Nothing is spending while it waits."
                 : "The agent owns the approach. You will only be interrupted if it reaches a real choice."}
@@ -224,9 +248,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
           </Button>
           <Button
             disabled={!active || active.state === "stopping"}
-            onClick={() => {
-              if (active) action.mutate({ kind: "cancel", jobId: active.id });
-            }}
+            onClick={stop}
           >
             Stop the loop
           </Button>
@@ -236,8 +258,8 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
           </Button>
           <span className="spacer" />
           {recoverable && (
-            <Button disabled={busy} onClick={() => show("contract")}>
-              Review and recover
+            <Button disabled={busy} onClick={() => show("stopped")}>
+              See the stopped run
             </Button>
           )}
           {!active &&

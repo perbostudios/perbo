@@ -161,3 +161,23 @@ describe("perbo inspect on a plan with a graph", () => {
     expect(report.size?.counts.files).toBe(12);
   });
 });
+
+describe("perbo inspect on a ticket whose contract cannot be read", () => {
+  it("reports the ticket's name, and no outcome, graph or size, rather than failing", async () => {
+    const repo = admitted(1, ["packages/queue/**"]);
+    const tickets = join(storeDir(repo, null), "tickets");
+    const ticket = JSON.parse(readFileSync(join(tickets, "PRB-1.json"), "utf8")) as { title: string };
+    const read = async () => (await inspectJson(repo)) as Awaited<ReturnType<typeof inspectJson>> & {
+      title: string;
+      outcome: string | null;
+    };
+    expect((await read()).outcome).toBe("New users receive an activation email.");
+    rmSync(join(tickets, "PRB-1.contract.json"));
+    const report = await read();
+    expect(report.outcome).toBeNull();
+    expect(report.title).toBe(ticket.title);
+    expect(report.nodes).toBeNull();
+    expect(report.edges).toBeNull();
+    expect(report.size).toBeNull();
+  });
+});

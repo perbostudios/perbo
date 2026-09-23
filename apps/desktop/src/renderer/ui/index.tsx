@@ -176,6 +176,14 @@ export function Dialog({
   );
 }
 
+/** What a dismissed notice that is not plain text is remembered as. */
+const DISMISSED = Symbol("dismissed");
+
+/**
+ * A line of news above the work. An error carries a × that takes it off the
+ * screen; it comes back when the page shows an error again, which is a
+ * different message or the same one after the error had cleared.
+ */
 export function Notice({
   children,
   tone = "warning",
@@ -183,12 +191,29 @@ export function Notice({
   children: ReactNode;
   tone?: "warning" | "danger" | "success";
 }): ReactNode {
+  const said = typeof children === "string" ? children : DISMISSED;
+  const [dismissed, setDismissed] = useState<string | symbol | null>(null);
+  if (tone === "danger" && dismissed === said) return null;
   return (
     <div
       className={`notice notice--${tone}`}
       role={tone === "danger" ? "alert" : "status"}
     >
-      {children}
+      {tone === "danger" ? (
+        <>
+          <div className="notice-body">{children}</div>
+          <button
+            type="button"
+            className="notice-dismiss"
+            aria-label="Dismiss"
+            onClick={() => setDismissed(said)}
+          >
+            ×
+          </button>
+        </>
+      ) : (
+        children
+      )}
     </div>
   );
 }

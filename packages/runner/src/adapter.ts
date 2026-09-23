@@ -9,6 +9,7 @@ import {
   type CostBasis,
   type BriefReinjection,
   type CommandRecord,
+  type EffortLevel,
   type NeutralisationRecord,
   type PermissionProfile,
   type TerminationReason,
@@ -134,6 +135,12 @@ export interface AgentRequest {
    */
   brief_records?: BriefRecords;
   model: string;
+  /**
+   * How hard the model thinks, in its provider's words; null sends nothing on
+   * Claude Code, and Codex starts at medium. The run configuration has already
+   * refused a level the provider does not take.
+   */
+  effort?: EffortLevel | null;
   profile: PermissionProfile;
   ceilings: AttemptCeilings;
   env: NodeJS.ProcessEnv;
@@ -245,6 +252,7 @@ export function buildArgv(request: {
   worktree: string;
   prompt: string;
   model: string;
+  effort?: EffortLevel | null;
   profile: PermissionProfile;
   tools?: readonly string[];
   /**
@@ -279,6 +287,7 @@ export function buildArgv(request: {
     request.profile.command_deny_list.join(","),
     "--model",
     request.model,
+    ...(request.effort ? ["--effort", request.effort] : []),
     // The roles the executor may start a subagent from (D-106). Passing them
     // is half the enforcement: the guard's hook refuses a `subagent_type`
     // outside this set, so a definition from the repository or from the
@@ -513,6 +522,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
     worktree: request.worktree,
     prompt: request.prompt,
     model: request.model,
+    effort: request.effort ?? null,
     profile: request.profile,
     settingsPath: guard.settingsPath,
     ...(request.tools ? { tools: request.tools } : {}),

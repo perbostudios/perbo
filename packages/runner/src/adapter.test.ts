@@ -544,3 +544,23 @@ describe("a finding the transcript reading could not place", () => {
     expect(result.commands[0]?.denial_rule).toBe(ADMISSION_RULES.write);
   }, 60_000);
 });
+
+describe("the executor's effort", () => {
+  it("follows the model as --effort where the run configured one, and is absent where it did not", () => {
+    const { argv } = buildArgv({
+      worktree,
+      prompt: "do the thing",
+      model: "claude-opus-5",
+      effort: "max",
+      profile,
+      settingsPath: "/tmp/perbo-guard/settings.json",
+    });
+    expect(argv.slice(argv.indexOf("--model"), argv.indexOf("--model") + 4)).toEqual([
+      "--model",
+      "claude-opus-5",
+      "--effort",
+      "max",
+    ]);
+    expect(argvFor().argv).not.toContain("--effort");
+  });
+});
