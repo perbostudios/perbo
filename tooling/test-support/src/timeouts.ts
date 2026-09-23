@@ -5,8 +5,8 @@
  * fake `gh`, a fake `claude` or `codex`, or a built entry point, several times
  * each. With the machine to themselves the slowest take two to three seconds;
  * with a second gate of the same tree beside them the same tests were measured
- * between four and ten, which is how they came to fail against vitest's
- * five-second default while passing alone and in CI. Thirty seconds sits above
+ * between four and ten, so they fail against vitest's five-second default
+ * while passing alone and in CI. Thirty seconds sits above
  * that measured range with room for a busier machine, and is still low enough
  * that a process which never exits fails the run in bounded time rather than
  * holding it open.

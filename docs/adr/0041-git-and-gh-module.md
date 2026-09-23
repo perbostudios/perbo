@@ -24,7 +24,7 @@ Running git is not one call. It is a set of facts that have to agree: which envi
 
 - A person behind a proxy or a private certificate authority gets the same answer from every command, because one allow-list decides what git sees.
 - A hang becomes a failure: nothing Perbo starts can sit on a credential prompt.
-- A timeout is now a refusal where several callers used to read it as "no" — a merge base that could not be computed says so instead of quietly meaning "not an ancestor".
+- A timeout is a refusal and never a "no": a merge base that could not be computed says so instead of quietly meaning "not an ancestor".
 - A new git question is added to the module's interface rather than to a caller, so the next caller finds it by name.
 - The module is a seam: `GitProcess` is a port, so the desktop host runs git through its own executor and a test runs it through a fake without spawning anything.
 - `gh` needs a token or a machine login, and a command that needs GitHub refuses to start with neither; records name which path served, never the value.

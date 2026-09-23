@@ -31,7 +31,7 @@ A caller inside the process that builds a command line is building a sentence ou
 
 - **A parsing library.** Generated help would replace the authored prose that documents what each flag means, and the product has to guarantee last-wins and verbatim values, which a dependency decides rather than this repository.
 - **Sanitising values before building a line.** An escaping rule is a rule someone forgets at one call site, and the fault is silent when they do.
-- **Leaving each command its own parser.** Seventeen loops answered the same line seventeen ways, and a caller could not know what a line would mean without reading the command it was going to.
+- **Leaving each command its own parser.** Each parser answers the same line its own way, and a caller cannot know what a line means without reading the command it is going to.
 
 ## Reversal trigger
 
