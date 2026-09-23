@@ -51,8 +51,8 @@ async function fixture() {
   return { snapshot, row, detail, requests, client, refresh, job, observeDetail, emit: (change: Change) => listener!(change), override: (next: typeof reply) => { const old = reply; reply = next; return old; } };
 }
 
-const graphView = (note: string): GraphView => ({
-  key: "PRB-901", state: "planning", approved: false, outcome: "A sample plan", nodes: [], criteria: [],
+const graphView = (key: string, note: string): GraphView => ({
+  key, state: "planning", approved: false, outcome: "A sample plan", nodes: [], criteria: [],
   edges: [], pathsAllowed: [], size: sizeEstimate({ nodes: 0, criteria: 0, files: 0, packages: 0 }),
   editCount: 0, history: [], digest: "0".repeat(64),
   live: { attempt: null, nodes: [], outside: [], note },
@@ -147,11 +147,12 @@ describe("workspace refresh interface", () => {
   it("polling refreshes an open graph even without a host event", async () => {
     const f = await fixture();
     let note = "read on mount";
-    const original = f.override(async (request) => request.kind === "graphRead" ? graphView(note) : original(request));
-    const observer = new QueryObserver(f.client, { queryKey: ["graph", f.row.repoId, f.row.ticket.key], queryFn: () => f.refresh.graph(f.row.repoId, f.row.ticket.key), initialData: graphView(note), staleTime: Infinity });
+    const original = f.override(async (request) => request.kind === "graphRead" ? graphView(f.row.ticket.key, note) : original(request));
+    const observer = new QueryObserver(f.client, { queryKey: ["graph", f.row.repoId, f.row.ticket.key], queryFn: () => f.refresh.graph(f.row.repoId, f.row.ticket.key), initialData: graphView(f.row.ticket.key, note), staleTime: Infinity });
     cleanups.push(observer.subscribe(() => undefined));
     note = "read on the poll";
     await f.refresh.snapshot();
+    expect(observer.getCurrentResult().data!.key).toBe(f.row.ticket.key);
     expect(observer.getCurrentResult().data!.live.note).toBe("read on the poll");
     expect(f.requests.map((request) => request.kind)).toEqual(["snapshot", "graphRead"]);
   });
@@ -288,14 +289,14 @@ describe("hooks read through the guard", () => {
     const held = deferred<GraphView>();
     let reads = 0;
     f.request.mockImplementation(async (input) => {
-      if (input.kind === "graphRead") return (++reads === 1 ? await held.promise : graphView("new")) as never;
+      if (input.kind === "graphRead") return (++reads === 1 ? await held.promise : graphView(hookKey, "new")) as never;
       if (answered(input.kind)) return { repository: null, tasks: [], errors: [] } as never;
       throw new Error("Unexpected request " + input.kind);
     });
     const view = renderHook(() => useGraph(hookRepo, hookKey), { wrapper: f.wrapper });
     await waitFor(() => { expect(reads).toBe(1); });
     f.emit({ kind: "records", sequence: 1, repoId: hookRepo, key: hookKey });
-    held.resolve(graphView("old"));
+    held.resolve(graphView(hookKey, "old"));
     await waitFor(() => { expect(view.result.current.data?.live.note).toBe("new"); });
     expect(reads).toBe(2);
   });
