@@ -136,6 +136,8 @@ const A_CHARACTER_INSIDE = [
   "cp a b\\\n#c sub/x",
   'git commit -m "Fix #12"',
   'echo "$(pwd) #1" "${HOME} #2" "$((1 + 2)) #3" > sub/x',
+  // A single quote inside an expansion is read as the shells read it.
+  `echo "$(printf '%s' a) #1" $(printf '%s)' b) \\#2 > sub/x`,
   "grep -n ' #' src/a.ts",
   "sed -i 's/ #.*//' src/a.ts",
   "cat > src/a.py <<'EOF'\n# a comment in a heredoc body is data\nEOF",

@@ -354,10 +354,12 @@ function looseHash(text: string, from: number, end = text.length): number {
 
 /**
  * What can make bash or zsh end an expansion somewhere other than where the
- * readers above end it: a quote, an escape or a newline inside it, a nested
- * expansion, a heredoc, a `case` pattern's lone `)`.
+ * readers above end it: a double quote, which the shells read as nested and
+ * this may not, an escape or a newline inside it, a nested expansion, a
+ * heredoc, a `case` pattern's lone `)`. A single quote is read the same way by
+ * all three.
  */
-const UNSURE_INSIDE = /["'`\\\n]|\$[({['"]|<<|\bcase\b/;
+const UNSURE_INSIDE = /["`\\\n]|\$[({['"]|<<|\bcase\b/;
 
 /**
  * Whether the inside of an expansion, `from` to `end`, is one whose end the
@@ -385,10 +387,10 @@ function readExpansion(
   if (text[from] === "`" || text.startsWith("$(", from)) {
     const read = readSubstitution(text, from);
     if (read === null) return null;
+    // The reader counts parentheses, and the only lone `)` a command holds is
+    // a `case` pattern's.
     const backtick = text[from] === "`";
-    // Arithmetic's parentheses group, and the reader counts them.
-    const nested = backtick || text.startsWith("$((", from) ? null : /[()]/;
-    const sure = certain(text, from + (backtick ? 1 : 2), read.end - 1, nested);
+    const sure = certain(text, from + (backtick ? 1 : 2), read.end - 1, null);
     return { end: read.end, zsh: read.end, certain: sure };
   }
   if (text.startsWith("${", from)) {
