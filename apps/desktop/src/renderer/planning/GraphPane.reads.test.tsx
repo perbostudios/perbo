@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { sizeEstimate } from "@perbo/contracts/size";
+import { sizeEstimate } from "@perbo/contracts/browser";
 import { GraphPane } from "./GraphPane.js";
 import { bridge } from "../workspace/index.js";
 import { editingForm } from "../../shared/contract-editing.js";
