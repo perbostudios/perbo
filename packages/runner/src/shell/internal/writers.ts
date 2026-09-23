@@ -263,13 +263,41 @@ export function writerFindings(
   };
 
   const findings = written.flatMap(({ word, label }) => judge(word, label));
+  const skip = spec.skip !== undefined && !anyPresent(spec.skipUnless, present) ? spec.skip : 0;
+  const remaining = operands.slice(skip);
+  // Under BSD `xargs -J` the placeholder is every word the wrapper reads, so it
+  // is readable in one place only: among the sources of a writer whose
+  // destination the line spells — a literal last operand, or a literal target
+  // directory. Anywhere else — an option's value, an operand the writer skips
+  // such as a mode or a script, the last or the lone operand — what the input
+  // holds reaches something this cannot read.
+  if (supplied !== undefined && supplied.wholeWord && placeholder !== null) {
+    const sources =
+      targetDirectory !== null && !carries(targetDirectory.value)
+        ? operands
+        : spec.operands === "last" &&
+            remaining.length >= 2 &&
+            !carries(remaining[remaining.length - 1]!.value)
+          ? remaining.slice(0, -1)
+          : [];
+    const safe = new Set(sources);
+    const astray = rest.find((word) => carries(word.value) && !safe.has(word));
+    if (astray !== undefined) {
+      return [
+        ...findings,
+        unread(
+          `the ${verb} destination`,
+          `${supplied.wrapper} substitutes every word it reads from standard input for ` +
+            `${placeholder}, and ${astray.raw} stands where more than a source is read`,
+        ),
+      ];
+    }
+  }
   if (targetDirectory !== null) {
     // The operands are written into the directory this option names, so what a
     // wrapper supplies from its standard input is a source.
     return [...findings, ...judge(targetDirectory, `the ${verb} destination`)];
   }
-  const skip = spec.skip !== undefined && !anyPresent(spec.skipUnless, present) ? spec.skip : 0;
-  const remaining = operands.slice(skip);
   // Where the operands are destinations and a wrapper appends more of them from
   // its standard input, the write lands somewhere the line never spelled.
   const appended: WriteFinding[] =

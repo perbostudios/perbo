@@ -67,6 +67,9 @@ const DESTINATION_ON_THE_LINE = [
   "find . -print0 | xargs -0 -J {} cp {} out",
   "xargs -J {} cp {} out",
   "xargs -J '~' cp a '~' b",
+  // The placeholder among a writer's sources, with the destination on the line.
+  "xargs -J % cp a % out",
+  "xargs -J % cp -t out %",
 ];
 
 /**
@@ -127,6 +130,24 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
   "echo /etc | xargs -J a curl -o [a] https://x",
   // A tilde the shell expands never reaches xargs, whatever is quoted after it.
   "echo /etc | xargs -J '~/x' cp a ~/'x' b",
+  // BSD `-J` puts every word it reads where the placeholder stands, so the
+  // placeholder is any number of words: readable only among the sources of a
+  // writer whose destination the line spells. Anywhere else — the last or lone
+  // operand, a skipped operand, an option's value, a wrapper's word, the
+  // program — the input reaches something the guard cannot read.
+  "echo /etc/passwd /etc/x | xargs -J % cp %",
+  "echo /etc/passwd /etc/x | xargs -J % mv %",
+  "echo /etc/passwd /etc/x | xargs -n2 -J % cp -r %",
+  "echo 777 /etc/x | xargs -J % chmod % x",
+  "echo root /etc/x | xargs -J % chown % x",
+  "echo /etc/x | xargs -J % sed -i '' % x",
+  "echo 755 /etc/x | xargs -J % mkdir -m % x",
+  "echo /etc/x | xargs -J % touch -r % x",
+  "echo 0 /etc/x | xargs -J % truncate -s % x",
+  "echo 5 | xargs -J % timeout % cp a b",
+  "echo 5 | xargs -J % nice -n % cp a b",
+  "echo 'rm /etc/x' | xargs -J then then cp a b",
+  "echo rm | xargs -J % % a /etc/x",
 ];
 
 /** Run `body` with the xargs entry no longer saying it appends operands. */

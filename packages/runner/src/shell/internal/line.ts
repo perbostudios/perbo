@@ -481,9 +481,36 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     return null;
   };
 
+  /**
+   * A refusal for a placeholder standing where the wrapper's input would be
+   * read as something other than a source: the program, a keyword, an
+   * assignment, or a wrapper's own option or operand.
+   */
+  const placeholderStands = (word: Word, where: string): Analysis | null => {
+    if (
+      supplied === undefined ||
+      !supplied.wholeWord ||
+      supplied.placeholder === null ||
+      !literal(word) ||
+      word.value !== supplied.placeholder
+    ) {
+      return null;
+    }
+    findings.push({
+      detail:
+        `${word.raw} is what ${supplied.wrapper} substitutes its input for, and it stands as ${where}, ` +
+        `so what runs cannot be read: ${context.segment.slice(0, 200)}`,
+      target: null,
+      resolved: null,
+    });
+    return stopHere();
+  };
+
   while (i < words.length) {
     const value = words[i]!.value;
     if (value === "" || value === "--" || isAssignment(value) || KEYWORDS.has(value)) {
+      const stands = placeholderStands(words[i]!, "a word the shell reads before the command");
+      if (stands !== null) return stands;
       i += 1;
       continue;
     }
@@ -525,11 +552,16 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     }
     const wrapper = WRAPPERS.get(program);
     if (wrapper !== undefined) {
+      const from = i;
       i += 1;
       placeholder = null;
       placeholderWholeWord = false;
       const stop = consumeOptions(program, wrapper);
       if (stop !== null) return stop;
+      for (const word of words.slice(from, i + (wrapper.operands ?? 0))) {
+        const stands = placeholderStands(word, `a word of ${program}, which runs the command`);
+        if (stands !== null) return stands;
+      }
       // Set inside the option consumer, which the narrowing above cannot see.
       const named = placeholder as string | null;
       if (named !== null && named.startsWith("-")) {
@@ -627,6 +659,8 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   if (command !== undefined) {
     const verb = basename(command.value);
     const rest = words.slice(i + 1);
+    const stands = placeholderStands(command, "the program itself");
+    if (stands !== null) return stands;
     if (command.variable || command.substitutions.length > 0) {
       // `$(…)`, a backtick, or a bare `$name` stands where the verb should —
       // `exec`'s own leading flags are already consumed by the time this word
