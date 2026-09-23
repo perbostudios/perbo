@@ -2830,10 +2830,17 @@ describe("planning beside a run (SCP-335)", () => {
     await Promise.all(
       submitted.map((session) => finished(service, session.operation!.jobId!)),
     );
+    // The job finishing and the key landing on the session are two steps, so
+    // the read waits for the second rather than catching the moment between.
     const landed = await Promise.all(
-      sessions.map((session) =>
-        service.request({ kind: "editingRead", id: session.id }),
-      ),
+      sessions.map(async (session) => {
+        let read = await service.request({ kind: "editingRead", id: session.id });
+        for (let tries = 0; tries < 400 && read.key === null; tries += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          read = await service.request({ kind: "editingRead", id: session.id });
+        }
+        return read;
+      }),
     );
     expect(landed.map((session) => session.operation?.state)).toEqual([
       "completed",
