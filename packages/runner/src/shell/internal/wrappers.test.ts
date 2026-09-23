@@ -291,3 +291,26 @@ describe("a destination the writer table does not name", () => {
     }
   });
 });
+
+/**
+ * One `xargs` behind another whose input reaches it: the command the inner one
+ * runs is built from two inputs, and the refusal names the outer wrapper.
+ */
+const BEHIND_ANOTHER_WRAPPER = [
+  "xargs -I{} xargs -a list -I@ cp a @ {}",
+  "xargs -J % xargs -I@ cp @ %",
+  "echo /etc | xargs xargs -I@ cp @ out",
+];
+
+describe("an xargs behind another", () => {
+  for (const command of BEHIND_ANOTHER_WRAPPER) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("stands behind xargs");
+    });
+  }
+
+  it("reads the inner one where the outer one's input reaches nothing", () => {
+    expect(decision("xargs -I{} xargs cp -t out")).toBe("allowed");
+  });
+});

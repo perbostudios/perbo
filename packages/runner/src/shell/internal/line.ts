@@ -627,6 +627,24 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         return stopHere();
       }
       if (wrapper.appendsOperands === true) {
+        // A second wrapper that puts its input into the command, behind one
+        // whose input reaches it — appended to its words, or substituted into
+        // one of them — builds that command out of two inputs, and this guard
+        // reads one.
+        if (
+          supplied !== undefined &&
+          (supplied.placeholder === null || words.slice(from + 1).some((word) => carries(word)))
+        ) {
+          findings.push({
+            detail:
+              `${program} stands behind ${supplied.wrapper}, which puts the words it reads from ` +
+              `standard input into the command ${program} runs, so what runs cannot be read: ` +
+              `${context.segment.slice(0, 200)}`,
+            target: null,
+            resolved: null,
+          });
+          return stopHere();
+        }
         const rest = words.slice(i + (wrapper.operands ?? 0));
         const expanded =
           named !== null && placeholderWholeWord
