@@ -10,7 +10,6 @@
 //   node --test scripts/lint-boundaries.test.mjs
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -74,20 +73,9 @@ test("`export *` outside a package's source is not this rule's business", async 
   await allows("packages/workspace/test/m.test.ts", EXPORT_ALL);
 });
 
-test("an entry on the burn-down list may still `export *`", async () => {
-  for (const entry of EXPORT_ALL_BURN_DOWN) await allows(entry, EXPORT_ALL);
-});
-
-test("the burn-down list carries no entry that has already been curated", () => {
-  for (const entry of EXPORT_ALL_BURN_DOWN) {
-    const path = join(REPO_ROOT, entry);
-    assert.ok(existsSync(path), `${entry} is on the burn-down list and does not exist`);
-    assert.match(
-      readFileSync(path, "utf8"),
-      /^\s*export \*/m,
-      `${entry} no longer exports with \`*\`; take it off the burn-down list`,
-    );
-  }
+test("the burn-down list is empty, so every package entry names what it exports", async () => {
+  assert.deepEqual(EXPORT_ALL_BURN_DOWN, []);
+  await refuses("packages/review/src/index.ts", EXPORT_ALL, NAME_WHAT);
 });
 
 // --------------------------------------------------------------------------
@@ -393,7 +381,7 @@ test("a package running `eslint src test` from its own directory gets the same r
   const inside = new ESLint({ cwd: join(REPO_ROOT, "packages/review") });
   await refuses("packages/review/src/m.ts", EXPORT_ALL, NAME_WHAT, inside);
   await refuses("packages/review/src/m.ts", ARGV, "No process execution in the reviewer", inside);
-  await allows("packages/review/src/index.ts", EXPORT_ALL, inside);
+  await refuses("packages/review/src/index.ts", EXPORT_ALL, NAME_WHAT, inside);
 
   const model = new ESLint({ cwd: join(REPO_ROOT, "packages/model") });
   await refuses("packages/model/src/m.ts", EXPORT_ALL, NAME_WHAT, model);
