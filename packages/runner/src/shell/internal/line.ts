@@ -283,6 +283,25 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   /** A `-C <dir>`: the directory the wrapped command runs in. */
   const moveInto = (operand: Word | undefined, option: string, wrapper: string): Analysis | null => {
     if (operand === undefined) return unknownOption(option, wrapper);
+    // A directory the wrapper in front supplies from its standard input is a
+    // destination the line never spelled, as an operand carrying it would be.
+    if (
+      supplied !== undefined &&
+      supplied.placeholder !== null &&
+      (supplied.wholeWord
+        ? operand.value === supplied.placeholder
+        : operand.value.includes(supplied.placeholder))
+    ) {
+      findings.push({
+        detail:
+          `the directory ${wrapper} ${option} runs in cannot be resolved — ${supplied.wrapper} ` +
+          `substitutes the words it reads from standard input for ${supplied.placeholder}, and ` +
+          `they are not on the line: ${context.segment.slice(0, 200)}`,
+        target: operand.raw,
+        resolved: null,
+      });
+      return stopHere();
+    }
     const destination = judgeTarget(operand.value, context.scope, cwd, true);
     cwd = moved(destination, operand.raw, `the directory ${wrapper} ${option} runs in`);
     return null;
@@ -468,7 +487,8 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         const rest = words.slice(i + (wrapper.operands ?? 0));
         const substituted =
           placeholder !== null &&
-          (!placeholderWholeWord || rest.some((word) => word.value === placeholder));
+          (!placeholderWholeWord ||
+            rest.some((word) => word.redirect !== true && word.value === placeholder));
         supplied = {
           wrapper: program,
           placeholder: substituted ? placeholder : null,

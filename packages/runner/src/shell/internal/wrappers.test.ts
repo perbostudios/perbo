@@ -36,6 +36,9 @@ const FROM_STANDARD_INPUT = [
   // whose destination the input then appends to.
   "xargs -l rm sub/x",
   "xargs -e rm sub/x",
+  // A redirect target is the shell's word, not xargs's: the placeholder stands
+  // nowhere xargs looks, so the input is appended.
+  "echo /etc | xargs -J % cp > % a b",
 ];
 
 /**
@@ -79,6 +82,10 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
   // BSD `-J` substitutes wherever the placeholder stands alone, an option's value included.
   "echo /etc/x | xargs -J % curl -o % https://example.com/x",
   "xargs -J % cp -t % a",
+  // The directory a wrapper moves into is a destination too.
+  "echo /etc | xargs -J % env -C % rm x",
+  "xargs -I{} env -C {} rm x",
+  "xargs -J % pnpm -C % exec rm x",
 ];
 
 /** Run `body` with the xargs entry no longer saying it appends operands. */
