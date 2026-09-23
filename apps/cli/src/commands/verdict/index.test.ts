@@ -25,7 +25,7 @@ import { stopsCommandLine } from "../stops.js";
 import { verdictCommandLine } from "./index.js";
 import { LocalVerdictSchema, LocalVerdictsSchema } from "./record.js";
 import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "../../test-support/records.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 
@@ -309,9 +309,9 @@ describe("perbo verdict records the decision locally", () => {
 
   it("records who decided from this repository's two git config lines when none is given", async () => {
     const { repo, store } = storeWith("author");
-    execFileSync("git", ["init", "-q"], { cwd: repo });
-    execFileSync("git", ["config", "user.name", "Ada Lovelace"], { cwd: repo });
-    execFileSync("git", ["config", "user.email", "ada@example.invalid"], { cwd: repo });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo, env: gitEnvironment() });
+    execFileSync("git", ["config", "user.name", "Ada Lovelace"], { cwd: repo, env: gitEnvironment() });
+    execFileSync("git", ["config", "user.email", "ada@example.invalid"], { cwd: repo, env: gitEnvironment() });
     const streams = recordStreams();
 
     expect(
@@ -332,7 +332,7 @@ describe("perbo verdict records the decision locally", () => {
 
   it("refuses when the repository names nobody, naming the two config lines to run", async () => {
     const { repo, store } = storeWith("unnamed");
-    execFileSync("git", ["init", "-q"], { cwd: repo });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo, env: gitEnvironment() });
     // A repository configured with neither. `git config --get` falls back to
     // the machine's own global and system files, and this is a test about a
     // repository that names nobody rather than about whoever runs it, so both

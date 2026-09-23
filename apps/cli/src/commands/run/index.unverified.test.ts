@@ -1,14 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { type ExecuteDeps, executeCommandLine } from "./index.js";
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * A run on a repository whose own scripts give a worktree nothing to run: a
@@ -37,18 +37,7 @@ const git = (dir: string, ...argv: string[]): string =>
 /** A checkout of exactly the files it is given, committed once. */
 function checkout(name: string, files: Record<string, string>): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  for (const [path, body] of Object.entries(files)) {
-    const target = join(dir, path);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, body);
-  }
-  writeFileSync(join(dir, ".gitignore"), "node_modules/\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  initRepository(dir, { files: { ...files, ".gitignore": "node_modules/\n" } });
   return dir;
 }
 

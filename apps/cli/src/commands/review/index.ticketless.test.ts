@@ -10,7 +10,7 @@ import { parseReviewArgs } from "./internal/args.js";
 import { UsageError } from "../../usage-error.js";
 import { normalisePullRequestReference } from "../../pull-request.js";
 import { runReviewCommand } from "./index.js";
-import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, initRepository } from "@perbo/test-support";
 import { FIXTURES, PACKAGE_ROOT, REPO_ROOT } from "../../test-support/paths.js";
 import { recordStreams } from "../../test-support/streams.js";
 
@@ -313,11 +313,7 @@ describe("ac_1: a review with no admitted ticket, in both invocation forms", () 
     // may sign their own commits, and a scratch repository must not inherit it.
     const git = (...args: string[]) =>
       execFileSync("git", args, { cwd: repo, encoding: "utf8", env: gitEnvironment() }).trim();
-    git("init", "--quiet", "--initial-branch", "main");
-    mkdirSync(join(repo, "src"), { recursive: true });
-    writeFileSync(join(repo, "src/index.ts"), "export const page = 0;\n");
-    git("add", "-A");
-    git("commit", "--quiet", "-m", "before");
+    initRepository(repo, { files: { "src/index.ts": "export const page = 0;\n" }, message: "before" });
     git("checkout", "--quiet", "-b", "paginate");
     writeFileSync(join(repo, "src/index.ts"), "export const page = 25;\n");
     git("add", "-A");

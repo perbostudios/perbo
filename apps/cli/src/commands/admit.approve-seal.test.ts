@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -8,9 +7,10 @@ import { admitCommandLine, approveCommandLine, loadAdmitted } from "./admit.js";
 import { editCommandLine } from "./edit/index.js";
 import { executeCommandLine } from "./run/index.js";
 import { readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
-import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * The two contracts a ticket carries, and what happens when they part company.
@@ -34,10 +34,7 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function repository(name: string): string {
   const dir = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: gitEnvironment(),
-  });
+  emptyRepository(dir);
   return dir;
 }
 

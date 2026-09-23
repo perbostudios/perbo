@@ -12,6 +12,7 @@ import { TicketStoreError, listTickets, readTicket, storeDir, writeTicket } from
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
 import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * A ticket file names no machine.
@@ -43,8 +44,7 @@ const git = (dir: string, ...argv: string[]): string =>
 
 function repository(name: string): string {
   const dir = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "commit", "-q", "--allow-empty", "-m", "base");
+  emptyRepository(dir);
   return dir;
 }
 

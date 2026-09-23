@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -9,14 +8,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { type ExecuteDeps, doctorCommandLine, executeCommandLine } from "./index.js";
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
+import { npmRepository } from "../../test-support/repository.js";
 
 /**
  * A first run on a repository that has no lockfile yet.
@@ -56,30 +56,11 @@ const git = (dir: string, ...argv: string[]): string =>
  * ignored because the worktree's install writes it and it is not the change.
  */
 function repository(name: string, manifest: Record<string, unknown> = {}): string {
-  const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify(
-      {
-        name: "fixture",
-        private: true,
-        scripts: { test: 'node -e "process.exit(0)"' },
-        ...manifest,
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeFileSync(join(dir, ".gitignore"), "node_modules/\n");
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
-  return dir;
+  return npmRepository(mkdtempSync(join(scratch, `${name}-`)), {
+    manifest,
+    lockfile: false,
+    files: { ".gitignore": "node_modules/\n" },
+  }).dir;
 }
 
 /** An executor that writes one file, as a real program the runner spawns. */
@@ -757,18 +738,7 @@ describe("the install binary a run checks the machine for", () => {
  */
 function checkout(name: string, files: Record<string, string>): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  for (const [path, body] of Object.entries(files)) {
-    const target = join(dir, path);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, body);
-  }
-  writeFileSync(join(dir, ".gitignore"), "node_modules/\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  initRepository(dir, { files: { ...files, ".gitignore": "node_modules/\n" } });
   return dir;
 }
 

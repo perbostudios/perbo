@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +9,7 @@ import { ENDPOINT_TOOLS, PERSON_ONLY_ACTS } from "./internal/tools.js";
 import { storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * The tool endpoint the queue hosts: paseo's mechanism, Perbo's authority.
@@ -28,8 +27,7 @@ let repos = 0;
 function repository(): string {
   const dir = join(scratch, `repo-${repos++}`);
   mkdirSync(dir, { recursive: true });
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitEnvironment() });
+  emptyRepository(dir);
   mkdirSync(join(dir, ".perbo"), { recursive: true });
   writeFileSync(join(dir, ".perbo", "config.json"), JSON.stringify({ base_ref: "main" }));
   return dir;

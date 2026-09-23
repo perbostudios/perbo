@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,9 +8,10 @@ import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
-import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * SCP-235/SCP-252 — a closed, unmerged pull request is read as closed, not as
@@ -97,8 +97,7 @@ const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>
 /** A ticket sitting at `pr_open` behind a pull request the loop published. */
 function publishedTicket(name: string): { repo: string; dir: string; branch: string } {
   const repo = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitEnvironment() });
+  emptyRepository(repo);
   runCommandLine(admitCommandLine, {
     argv: [
       "--repo",

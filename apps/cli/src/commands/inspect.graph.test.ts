@@ -1,5 +1,4 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -10,7 +9,7 @@ import { inspectCommandLine, type InspectReport } from "./inspect.js";
 import { storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { initRepository } from "@perbo/test-support";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-graph-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -19,17 +18,18 @@ let repos = 0;
 /** Twelve tracked files under one package, and one under another. */
 function repository(): string {
   const repo = join(scratch, `repo-${repos++}`);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  mkdirSync(join(repo, "packages", "queue", "src"), { recursive: true });
-  for (let i = 1; i <= 12; i += 1) {
-    writeFileSync(join(repo, "packages", "queue", "src", `f${i}.ts`), `export const f${i} = ${i};\n`);
-  }
-  mkdirSync(join(repo, "packages", "queue", "test"), { recursive: true });
-  writeFileSync(join(repo, "packages", "queue", "test", "send.test.ts"), "export {};\n");
-  mkdirSync(join(repo, "packages", "reports", "src"), { recursive: true });
-  writeFileSync(join(repo, "packages", "reports", "src", "daily.ts"), "export const daily = 1;\n");
-  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitEnvironment() });
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitEnvironment() });
+  initRepository(repo, {
+    files: {
+      ...Object.fromEntries(
+        Array.from({ length: 12 }, (_, i) => [
+          `packages/queue/src/f${i + 1}.ts`,
+          `export const f${i + 1} = ${i + 1};\n`,
+        ]),
+      ),
+      "packages/queue/test/send.test.ts": "export {};\n",
+      "packages/reports/src/daily.ts": "export const daily = 1;\n",
+    },
+  });
   return repo;
 }
 

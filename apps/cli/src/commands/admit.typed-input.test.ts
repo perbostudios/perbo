@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +6,7 @@ import { UsageError } from "../usage-error.js";
 import { admitCommandLine, admitDraft, defaultAdmission } from "./admit.js";
 import { collectOutput } from "../diagnostics.js";
 import { readTicket, storeDir } from "../store/tickets.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * What an admission is allowed to be, whoever asks for it.
@@ -23,10 +22,7 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function repository(name: string): string {
   const dir = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: gitEnvironment(),
-  });
+  emptyRepository(dir);
   return dir;
 }
 

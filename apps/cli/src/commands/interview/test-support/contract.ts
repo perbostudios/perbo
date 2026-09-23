@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,7 +11,7 @@ import {
 import { INTERVIEW_SESSION_FILE, INTERVIEW_TOOL_NAMES } from "../index.js";
 import { listTickets, readDraftSnapshot, readTicket, storeDir } from "../../../store/tickets.js";
 import type { RecordedStreams } from "../../../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { initRepository } from "@perbo/test-support";
 
 /**
  * The interview's behaviour, stated once and run once per transport (SCP-312).
@@ -103,14 +102,12 @@ export const SPEC_FOLDER = "specs/activation-email";
 
 /** A checkout with one package in it, for an interview to read and write beside. */
 export function repository(scratch: string): string {
-  const repo = mkdtempSync(join(scratch, "repo-"));
-  mkdirSync(join(repo, "packages", "queue"), { recursive: true });
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  writeFileSync(join(repo, "packages", "queue", "send.ts"), "export const send = () => 1;\n");
-  writeFileSync(join(repo, "README.md"), "# demo\n");
-  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitEnvironment() });
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitEnvironment() });
-  return repo;
+  return initRepository(mkdtempSync(join(scratch, "repo-")), {
+    files: {
+      "packages/queue/send.ts": "export const send = () => 1;\n",
+      "README.md": "# demo\n",
+    },
+  }).dir;
 }
 
 /** The drafter `admit --from-spec` runs, scripted to one draft. */

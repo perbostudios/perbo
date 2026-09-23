@@ -12,13 +12,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { specBaseline, specStaleness } from "./staleness.js";
 import { indexCommandLine } from "../commands/symbol-index.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * Whether a ticket's spec is still the one its contract was drafted from
@@ -68,26 +68,15 @@ let repos = 0;
  */
 function repository(spec = SPEC, extra: Record<string, string> = {}): { repo: string; specPath: string } {
   const repo = join(scratch, `repo-${repos++}`);
-  mkdirSync(join(repo, "specs", "activation-email"), { recursive: true });
-  execFileSync("git", ["init", "-q", "-b", "main", repo], { env: gitEnvironment() });
-  git(repo, "config", "user.name", "t");
-  git(repo, "config", "user.email", "t@t.invalid");
-  git(repo, "config", "commit.gpgsign", "false");
   const specPath = join(repo, "specs", "activation-email", "spec.md");
-  writeFileSync(specPath, spec);
-  mkdirSync(join(repo, "packages", "queue"), { recursive: true });
-  writeFileSync(
-    join(repo, "packages", "queue", "send.ts"),
-    "export function sendActivation(): number {\n  return 1;\n}\n",
-  );
-  writeFileSync(join(repo, "packages", "queue", "retry.ts"), "export const retries = 3;\n");
-  for (const [path, content] of Object.entries(extra)) {
-    const at = join(repo, path);
-    mkdirSync(dirname(at), { recursive: true });
-    writeFileSync(at, content);
-  }
-  git(repo, "add", "-A");
-  git(repo, "commit", "-q", "-m", "base");
+  initRepository(repo, {
+    files: {
+      "specs/activation-email/spec.md": spec,
+      "packages/queue/send.ts": "export function sendActivation(): number {\n  return 1;\n}\n",
+      "packages/queue/retry.ts": "export const retries = 3;\n",
+      ...extra,
+    },
+  });
   index(repo);
   return { repo, specPath };
 }

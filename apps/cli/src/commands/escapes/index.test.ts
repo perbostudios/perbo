@@ -16,6 +16,7 @@ import { syncCommandLine } from "../sync.js";
 import { idsFor, readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * `perbo escapes` (SCP-145) over a real git history: one merge reverted, one
@@ -33,16 +34,9 @@ const GIT_FIXTURE_TIMEOUT_MS = 60_000;
 const scratch = mkdtempSync(join(tmpdir(), "perbo-escapes-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = (at?: string) => ({
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-  ...(at ? { GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at } : {}),
-});
+/** Fixture git, with the commit dates this suite's merge windows are measured from. */
+const gitEnv = (at?: string): NodeJS.ProcessEnv =>
+  gitEnvironment(at ? { GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at } : {});
 
 interface Fixture {
   repo: string;

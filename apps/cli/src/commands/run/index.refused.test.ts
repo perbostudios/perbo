@@ -18,7 +18,7 @@ import { type ExecuteDeps, executeCommandLine } from "./index.js";
 import { inspectCommandLine } from "../inspect.js";
 import { storeDir } from "../../store/index.js";
 import { recordStreams } from "../../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * What a person reads when the loop refuses to start.
@@ -52,19 +52,13 @@ const git = (dir: string, ...argv: string[]): string =>
  */
 function repository(name: string, options: { lockfile: boolean }): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify({ name: "fixture", scripts: { test: "node --test" } }, null, 2)}\n`,
-  );
-  if (options.lockfile) writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  initRepository(dir, {
+    files: {
+      "package.json": `${JSON.stringify({ name: "fixture", scripts: { test: "node --test" } }, null, 2)}\n`,
+      ...(options.lockfile ? { "pnpm-lock.yaml": "lockfileVersion: '9.0'\n" } : {}),
+      "src/index.ts": "export const version = 1;\n",
+    },
+  });
   return dir;
 }
 

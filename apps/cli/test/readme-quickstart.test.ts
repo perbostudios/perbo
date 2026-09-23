@@ -21,7 +21,7 @@ import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/b
 import { REPO_ROOT } from "../src/test-support/paths.js";
 import { runCommandLine } from "../src/command-line/terminal.js";
 import { recordStreams } from "../src/test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { gitEnvironment, initBareRepository, initRepository } from "@perbo/test-support";
 
 /**
  * The open README's quick start, run rather than read.
@@ -252,26 +252,18 @@ const git = (dir: string, ...argv: string[]): string =>
  */
 function repository(name: string): string {
   const dir = realpathSync(mkdtempSync(join(scratch, `${name}-`)));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify(
-      { name: "quickstart-fixture", private: true, scripts: { test: 'node -e "process.exit(0)"' } },
-      null,
-      2,
-    )}\n`,
-  );
-  mkdirSync(join(dir, "src"), { recursive: true });
-  mkdirSync(join(dir, "test"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.js"), "export const version = 1;\n");
-  writeFileSync(join(dir, "test", "index.test.js"), "// the suite this repository already has\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
-  const bare = mkdtempSync(join(scratch, `${name}-remote-`));
-  execFileSync("git", ["init", "-q", "--bare", bare], { env: gitEnvironment() });
+  initRepository(dir, {
+    files: {
+      "package.json": `${JSON.stringify(
+        { name: "quickstart-fixture", private: true, scripts: { test: 'node -e "process.exit(0)"' } },
+        null,
+        2,
+      )}\n`,
+      "src/index.js": "export const version = 1;\n",
+      "test/index.test.js": "// the suite this repository already has\n",
+    },
+  });
+  const bare = initBareRepository(mkdtempSync(join(scratch, `${name}-remote-`)));
   git(dir, "remote", "add", "origin", bare);
   git(dir, "push", "-q", "origin", "main");
   return dir;

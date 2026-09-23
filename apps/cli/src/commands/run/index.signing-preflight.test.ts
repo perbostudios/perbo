@@ -11,7 +11,7 @@ import { type ExecuteDeps, doctorCommandLine, executeCommandLine } from "./index
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * What a person reads about a repository whose configuration signs commits with
@@ -49,23 +49,17 @@ function keypair(name: string, passphrase: string): { pub: string; secret: strin
  */
 function repository(name: string, pub: string | null): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify({ name: "fixture", scripts: { test: "node --test" } }, null, 2)}\n`,
-  );
-  writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  const repo = initRepository(dir, {
+    files: {
+      "package.json": `${JSON.stringify({ name: "fixture", scripts: { test: "node --test" } }, null, 2)}\n`,
+      "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+      "src/index.ts": "export const version = 1;\n",
+    },
+  });
   if (pub !== null) {
-    git(dir, "config", "commit.gpgsign", "true");
-    git(dir, "config", "gpg.format", "ssh");
-    git(dir, "config", "user.signingkey", pub);
+    repo.git("config", "commit.gpgsign", "true");
+    repo.git("config", "gpg.format", "ssh");
+    repo.git("config", "user.signingkey", pub);
   }
   return dir;
 }

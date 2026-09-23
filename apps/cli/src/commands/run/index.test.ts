@@ -35,7 +35,7 @@ import { makeAttempt, makeTicket } from "../../test-support/records.js";
 import { REPO_ROOT } from "../../test-support/paths.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../../test-support/repository.js";
 
 describe("perbo run / doctor argument parsing", () => {
   it("rejects an unknown flag rather than reviewing something else", () => {
@@ -416,10 +416,7 @@ const doctorArgs = (
 
 function repository(name: string): string {
   const dir = mkdtempSync(join(tmpdir(), `perbo-execute-${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: gitEnvironment(),
-  });
+  emptyRepository(dir);
   return dir;
 }
 
@@ -696,7 +693,6 @@ describe("a partner's first hour", () => {
   it("uses explicit Codex choices for readiness and retains the complete proposed configuration", async () => {
     const repo = repository("codex-first-hour");
     try {
-      execFileSync("git", ["-C", repo, "config", "commit.gpgsign", "false"]);
       writeFileSync(
         join(repo, "package.json"),
         JSON.stringify({ name: "x", scripts: { test: "vitest run", lint: "eslint ." } }),
@@ -796,7 +792,6 @@ describe("a partner's first hour", () => {
   it("overlays provider choices for readiness while preserving an existing repository agreement", async () => {
     const repo = repository("codex-existing-config");
     try {
-      execFileSync("git", ["-C", repo, "config", "commit.gpgsign", "false"]);
       const store = join(repo, ".perbo");
       mkdirSync(store);
       const configPath = join(store, "config.json");

@@ -20,7 +20,7 @@ import { indexCommandLine } from "../symbol-index.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * What a stale spec does to the ticket it was drafted for (D-103), over a real
@@ -68,17 +68,13 @@ let repos = 0;
 
 function repository(spec = SPEC): { repo: string; specPath: string } {
   const repo = join(scratch, `repo-${repos++}`);
-  mkdirSync(join(repo, "specs", "activation-email"), { recursive: true });
-  execFileSync("git", ["init", "-q", "-b", "main", repo], { env: gitEnvironment() });
   const specPath = join(repo, "specs", "activation-email", "spec.md");
-  writeFileSync(specPath, spec);
-  mkdirSync(join(repo, "packages", "queue"), { recursive: true });
-  writeFileSync(
-    join(repo, "packages", "queue", "send.ts"),
-    "export function sendActivation(): number {\n  return 1;\n}\n",
-  );
-  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitEnvironment() });
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitEnvironment() });
+  initRepository(repo, {
+    files: {
+      "specs/activation-email/spec.md": spec,
+      "packages/queue/send.ts": "export function sendActivation(): number {\n  return 1;\n}\n",
+    },
+  });
   runCommandLine(indexCommandLine, { argv: ["--repo", repo], streams: recordStreams(), cwd: repo });
   return { repo, specPath };
 }
@@ -253,14 +249,6 @@ describe("a run starting a ticket that has not started", () => {
     "commits the spec the loop is fed after an edit made while the draft was being read",
     async () => {
       const { repo, specPath, dir } = await admitted();
-      // Repository-local identity, so the commit `commitSpec` makes below does
-      // not depend on this machine's global Git configuration — and does not
-      // hang on a machine that signs commits with a key this process cannot
-      // unlock.
-      execFileSync("git", ["-C", repo, "config", "user.name", "t"], { env: gitEnvironment() });
-      execFileSync("git", ["-C", repo, "config", "user.email", "t@t.invalid"], { env: gitEnvironment() });
-      execFileSync("git", ["-C", repo, "config", "commit.gpgsign", "false"], { env: gitEnvironment() });
-
       writeFileSync(specPath, SPEC.replace("60 seconds", "45 seconds"));
       expect(runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo })).toBe(0);
 

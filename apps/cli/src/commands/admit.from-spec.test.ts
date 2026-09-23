@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,7 +18,7 @@ import { specCommitFiles } from "../spec/pages.js";
 import { listTickets, readApproachRecord, readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { initRepository } from "@perbo/test-support";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-spec-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -49,19 +48,16 @@ The queue package already has a sender.
 let repos = 0;
 function repository(spec = SPEC): { repo: string; specPath: string } {
   const repo = join(scratch, `repo-${repos++}`);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  mkdirSync(join(repo, "specs", "activation-email"), { recursive: true });
   const specPath = join(repo, "specs", "activation-email", "spec.md");
-  writeFileSync(specPath, spec);
-  mkdirSync(join(repo, "packages", "queue"), { recursive: true });
-  writeFileSync(join(repo, "packages", "queue", "send.ts"), "export const send = () => 1;\n");
-  mkdirSync(join(repo, "packages", "auth"), { recursive: true });
-  writeFileSync(join(repo, "packages", "auth", "signup.ts"), "export const signup = () => 1;\n");
-  writeFileSync(join(repo, "CONTEXT.md"), "# Terms\n\nA signup is a person asking for an account.\n");
-  mkdirSync(join(repo, "docs", "adr"), { recursive: true });
-  writeFileSync(join(repo, "docs", "adr", "0001-queue.md"), "# ADR-0001: A queue\n");
-  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitEnvironment() });
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitEnvironment() });
+  initRepository(repo, {
+    files: {
+      "specs/activation-email/spec.md": spec,
+      "packages/queue/send.ts": "export const send = () => 1;\n",
+      "packages/auth/signup.ts": "export const signup = () => 1;\n",
+      "CONTEXT.md": "# Terms\n\nA signup is a person asking for an account.\n",
+      "docs/adr/0001-queue.md": "# ADR-0001: A queue\n",
+    },
+  });
   return { repo, specPath };
 }
 

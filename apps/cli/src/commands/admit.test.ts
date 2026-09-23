@@ -31,7 +31,7 @@ import {
   type TicketDeliveryState,
 } from "@perbo/runner";
 import { makeReview } from "../test-support/records.js";
-import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { mergeRunConfig } from "./run/index.js";
 
 /**
@@ -59,16 +59,14 @@ import {
 } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
+import { emptyRepository } from "../test-support/repository.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function repository(name: string): string {
   const dir = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: gitEnvironment(),
-  });
+  emptyRepository(dir);
   return dir;
 }
 

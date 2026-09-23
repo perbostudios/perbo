@@ -47,7 +47,7 @@ import {
 } from "../../store/tickets.js";
 import { makeAttempt } from "../../test-support/records.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "../../test-support/built-cli.js";
-import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, watchOutbound } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, initRepository, watchOutbound } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 
@@ -92,18 +92,13 @@ const git = (dir: string, ...argv: string[]): string =>
 /** A repository with one commit and, above all, no ticket store. */
 function repository(name: string): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  // Repository-local identity, so the seal's commit does not depend on the
-  // developer's global Git configuration or on a signing key nobody can unlock.
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture" }));
-  writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  initRepository(dir, {
+    files: {
+      "package.json": JSON.stringify({ name: "fixture" }),
+      "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+      "src/index.ts": "export const version = 1;\n",
+    },
+  });
   return dir;
 }
 

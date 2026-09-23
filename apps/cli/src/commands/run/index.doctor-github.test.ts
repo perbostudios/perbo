@@ -8,6 +8,7 @@ import { doctorCommandLine } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../../test-support/repository.js";
 
 /**
  * SCP-200 criterion 2: `perbo doctor` says which credential path GitHub is
@@ -100,12 +101,7 @@ function repository(name: string): string {
   const dir = join(scratch, name);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture" }));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  emptyRepository(dir);
   return dir;
 }
 

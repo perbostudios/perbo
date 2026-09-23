@@ -1,14 +1,14 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { type ExecuteDeps, executeCommandLine, proposedChecks } from "./index.js";
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { initRepository } from "@perbo/test-support";
+import { npmRepository } from "../../test-support/repository.js";
 
 /**
  * A first run on a repository that has no `.perbo/config.json` (SCP-259).
@@ -30,32 +30,12 @@ import { gitEnvironment } from "@perbo/test-support";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-checks-no-config-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
-
 /**
  * A repository with one commit, an npm lockfile, and whatever scripts the test
  * gives it — and, above all, no `.perbo/` at all.
  */
 function repository(name: string, scripts: Record<string, string>): string {
-  const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify({ name: "fixture", private: true, scripts }, null, 2)}\n`,
-  );
-  writeFileSync(
-    join(dir, "package-lock.json"),
-    `${JSON.stringify({ name: "fixture", lockfileVersion: 3, packages: {} }, null, 2)}\n`,
-  );
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
-  return dir;
+  return npmRepository(mkdtempSync(join(scratch, `${name}-`)), { manifest: { scripts } }).dir;
 }
 
 /**
@@ -78,10 +58,6 @@ const MEMBER_SCRIPTS = {
 
 function monorepo(name: string): { root: string; api: string } {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
   const files: Record<string, string> = {
     "pnpm-workspace.yaml": "packages:\n  - 'services/*'\n",
     "package.json": `${JSON.stringify({ name: "monorepo", private: true, scripts: ROOT_SCRIPTS }, null, 2)}\n`,
@@ -90,13 +66,7 @@ function monorepo(name: string): { root: string; api: string } {
     "services/api/src/index.ts": "export const version = 1;\n",
     "services/web/package.json": `${JSON.stringify({ name: "@fixture/web", scripts: MEMBER_SCRIPTS }, null, 2)}\n`,
   };
-  for (const [path, body] of Object.entries(files)) {
-    const target = join(dir, path);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, body);
-  }
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  initRepository(dir, { files });
   return { root: dir, api: join(dir, "services", "api") };
 }
 

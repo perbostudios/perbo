@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +14,7 @@ import { syncCommandLine } from "./sync.js";
 import { readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * SCP-206 criterion 3: which arm produced a delivery record survives the sync
@@ -98,10 +97,7 @@ function directArmTicket(
   options: { state?: "executing" | "pr_open"; arm?: "loop" | "direct" } = {},
 ): { repo: string; dir: string } {
   const repo = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: gitEnvironment(),
-  });
+  emptyRepository(repo);
   runCommandLine(admitCommandLine, {
     argv: [
       "--repo",

@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +7,7 @@ import { type ExecuteDeps, executeCommandLine } from "./run/index.js";
 import { inspectCommandLine } from "./inspect.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { npmRepository } from "../test-support/repository.js";
 
 /**
  * What `perbo inspect` says about the pull request a run with no ticket
@@ -28,33 +27,9 @@ import { gitEnvironment } from "@perbo/test-support";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-pr-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
-
 /** A repository with one commit, a `test` script, a lockfile and no `.perbo/`. */
 function repository(name: string): string {
-  const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify(
-      { name: "fixture", private: true, scripts: { test: 'node -e "process.exit(0)"' } },
-      null,
-      2,
-    )}\n`,
-  );
-  writeFileSync(
-    join(dir, "package-lock.json"),
-    `${JSON.stringify({ name: "fixture", lockfileVersion: 3, packages: {} }, null, 2)}\n`,
-  );
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
-  return dir;
+  return npmRepository(mkdtempSync(join(scratch, `${name}-`))).dir;
 }
 
 /** An executor that writes one file, as a real program the runner spawns. */

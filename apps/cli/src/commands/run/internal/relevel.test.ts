@@ -13,7 +13,7 @@ import { readTicket, storeDir as storeDirOf, writeTicket } from "../../../store/
 import { TicketSchema, transition, withReconciliation } from "@perbo/contracts";
 import { mergedTicketContext, ticketKeysMergedBetween } from "./relevel.js";
 import { storeDir } from "../../../store/tickets.js";
-import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, initBareRepository, initRepository } from "@perbo/test-support";
 import { runCommandLine } from "../../../command-line/terminal.js";
 import { recordStreams } from "../../../test-support/streams.js";
 
@@ -58,9 +58,7 @@ function commit(dir: string, path: string, message: string): string {
 describe("what merged under a branch", () => {
   it("reads the loop's own merge shapes out of the base's history, and nothing else", () => {
     const repo = join(scratch, "history");
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
     const from = git(repo, "rev-parse", "HEAD");
     // The runner's own merge subject.
     git(repo, "checkout", "-q", "-b", "ayo/AYO-1/one");
@@ -82,9 +80,7 @@ describe("what merged under a branch", () => {
 
   it("names no key at all where the log it read arrived cut", async () => {
     const repo = join(scratch, "history-cut");
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
     const from = git(repo, "rev-parse", "HEAD");
     // One commit whose message alone is longer than a `git log` may say, so
     // what the read holds is the tail of the log and not the log.
@@ -108,9 +104,7 @@ describe("what merged under a branch", () => {
 
   it("reads a merge of an prb/ branch the way it reads an ayo/ one, and no other namespace's", () => {
     const repo = join(scratch, "history-prb");
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
     const from = git(repo, "rev-parse", "HEAD");
     // A person's merge of the loop's pull request, which names the branch.
     git(repo, "checkout", "-q", "-b", "prb/PRB-3/three");
@@ -130,9 +124,7 @@ describe("what merged under a branch", () => {
 
   it("briefs with the store's approved contracts for those keys, never the branch's own", async () => {
     const repo = join(scratch, "context");
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
     mkdirSync(join(repo, ".perbo"), { recursive: true });
     writeFileSync(join(repo, ".perbo", "config.json"), JSON.stringify({ base_ref: "main" }));
     const one = admitted(repo, "One is done.", "one/**");
@@ -169,9 +161,7 @@ describe("what merged under a branch", () => {
 describe("the store's hooks for a re-level", () => {
   function admittedRepo(): { repo: string; key: string } {
     const repo = join(scratch, `hooks-${Math.random().toString(16).slice(2)}`);
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
     mkdirSync(join(repo, ".perbo"), { recursive: true });
     writeFileSync(join(repo, ".perbo", "config.json"), JSON.stringify({ base_ref: "main" }));
     return { repo, key: admitted(repo, "Mine is done.", "mine/**") };
@@ -284,10 +274,8 @@ describe("the queue's reading of a branch", () => {
   it("judges by the pushed branch, so an unpushed merge commit does not read as level", async () => {
     const repo = join(scratch, "pushed");
     const remote = join(scratch, "pushed-remote.git");
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
-    execFileSync("git", ["init", "-q", "--bare", remote], { env: gitEnvironment() });
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
+    initBareRepository(remote);
     git(repo, "remote", "add", "origin", remote);
     git(repo, "checkout", "-q", "-b", "ayo/AYO-1/one");
     commit(repo, "one.md", "one");

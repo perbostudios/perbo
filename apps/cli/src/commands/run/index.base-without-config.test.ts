@@ -19,7 +19,8 @@ import { inspectCommandLine } from "../inspect.js";
 import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import { storeDir } from "../../store/index.js";
 import { recordStreams } from "../../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { gitEnvironment, initBareRepository } from "@perbo/test-support";
+import { npmRepository } from "../../test-support/repository.js";
 
 /**
  * The branch a run publishes against, and which of three sources named it.
@@ -82,27 +83,7 @@ interface RepositoryShape {
 
 /** A repository with one commit, a `test` script, a lockfile and no `.perbo/`. */
 function repository(name: string, shape: RepositoryShape = {}): string {
-  const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify(
-      { name: "fixture", private: true, scripts: { test: 'node -e "process.exit(0)"' } },
-      null,
-      2,
-    )}\n`,
-  );
-  writeFileSync(
-    join(dir, "package-lock.json"),
-    `${JSON.stringify({ name: "fixture", lockfileVersion: 3, packages: {} }, null, 2)}\n`,
-  );
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  const dir = npmRepository(mkdtempSync(join(scratch, `${name}-`))).dir;
   for (const branch of shape.branches ?? []) {
     git(dir, "checkout", "-q", "-b", branch);
     writeFileSync(join(dir, "src", `${branch.replace(/[^a-z0-9]/gi, "-")}.ts`), "export const on = 1;\n");
@@ -113,7 +94,7 @@ function repository(name: string, shape: RepositoryShape = {}): string {
   const remoteDefault = shape.remoteDefault === true ? "main" : (shape.remoteDefault ?? null);
   if (remoteDefault) {
     const bare = mkdtempSync(join(scratch, `${name}-remote-`));
-    execFileSync("git", ["init", "-q", "--bare", bare], { env: gitEnvironment() });
+    initBareRepository(bare);
     git(dir, "remote", "add", "origin", bare);
     git(dir, "push", "-q", "origin", "--all");
     // A default the checkout has no branch for is still a branch on the remote:

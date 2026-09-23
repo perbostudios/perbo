@@ -13,7 +13,7 @@ import {
 import { runCommandLine } from "../command-line/terminal.js";
 import { FIXTURES } from "../test-support/paths.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * `perbo index` over an authored monorepo (SCP-319, D-015).
@@ -39,10 +39,6 @@ const TIMEOUT = 30_000;
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "perbo-symbol-index-")));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const git = (cwd: string, ...args: string[]): void => {
-  execFileSync("git", args, { cwd, env: gitEnvironment(), stdio: "ignore" });
-};
-
 let made = 0;
 
 /**
@@ -56,9 +52,7 @@ function repositoryFrom(fixture: string, edit?: (root: string) => void): string 
   const root = join(scratch, `${fixture}-${(made += 1)}`);
   cpSync(join(FIXTURES, fixture), root, { recursive: true });
   edit?.(root);
-  git(root, "init", "--initial-branch", "main");
-  git(root, "add", "-A");
-  git(root, "commit", "-m", "the fixture");
+  initRepository(root, { message: "the fixture" });
   return root;
 }
 
@@ -168,7 +162,7 @@ describe("the index of an authored monorepo", () => {
     () => {
       const root = repositoryFrom("symbol-index");
       const built = SymbolIndexSchema.parse(buildSymbolIndex({ repositoryRoot: root }));
-      const head = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+      const head = execFileSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", env: gitEnvironment() }).trim();
       expect(built.head_commit).toBe(head);
       expect(built.working_tree).toBe("clean");
       expect(built.schema_version).toBe(SYMBOL_INDEX_SCHEMA_VERSION);
@@ -236,7 +230,7 @@ describe("the index of an authored monorepo", () => {
           writeFileSync(join(at, path), "export const excluded = 1;\n");
         }
       });
-      const tracked = execFileSync("git", ["-C", root, "ls-files"], { encoding: "utf8" });
+      const tracked = execFileSync("git", ["-C", root, "ls-files"], { encoding: "utf8", env: gitEnvironment() });
       // The premise: git really is carrying all three, so a pass means the
       // indexer left them out rather than that they were never there.
       expect(tracked).toContain("packages/ui/dist/index.ts");

@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +10,7 @@ import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * SCP-173: `perbo sync` on a `failed` ticket whose branch carries a pull
@@ -39,8 +38,7 @@ const OUTCOME = "Search results are paginated.";
 
 function repository(name: string): string {
   const dir = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitEnvironment() });
+  emptyRepository(dir);
   return dir;
 }
 

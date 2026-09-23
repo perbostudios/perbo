@@ -10,9 +10,10 @@ import { admitCommandLine } from "../admit.js";
 import { ServeTickSchema, processDeps, serveCommandLine, type ServeDeps } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { readEndpoint } from "../../endpoint/index.js";
-import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, initRepository } from "@perbo/test-support";
 import { readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 import { recordStreams } from "../../test-support/streams.js";
+import { emptyRepository } from "../../test-support/repository.js";
 
 /**
  * `perbo serve` (SCP-008 criterion 5, SCP-227): the queue over one store.
@@ -32,8 +33,7 @@ let repos = 0;
 function repository(config: Record<string, unknown> = {}): string {
   const dir = join(scratch, `repo-${repos++}`);
   mkdirSync(dir, { recursive: true });
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitEnvironment() });
+  emptyRepository(dir);
   mkdirSync(join(dir, ".perbo"), { recursive: true });
   writeFileSync(join(dir, ".perbo", "config.json"), JSON.stringify({ base_ref: "main", ...config }, null, 2));
   return dir;
@@ -891,10 +891,7 @@ describe("processDeps", () => {
     const repo = mkdtempSync(join(scratch, "sealed-"));
     const git = (...args: string[]): string =>
       execFileSync("git", ["-C", repo, ...args], { env: gitEnvironment(), encoding: "utf8" }).trim();
-    git("init", "-q", "-b", "main");
-    writeFileSync(join(repo, "README.md"), "base\n");
-    git("add", "-A");
-    git("commit", "-qm", "base");
+    initRepository(repo, { files: { "README.md": "base\n" } });
     git("checkout", "-q", "-b", "sealed");
     mkdirSync(join(repo, "wide"));
     for (let n = 0; n < 3000; n += 1) {

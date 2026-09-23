@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +15,7 @@ import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * What the ticket's delivery record says about the checks on its head.
@@ -96,8 +95,7 @@ function publishedTicket(
   read: { checks: DeliveredCheck[]; state: DeliveryChecksState } | null,
 ): { repo: string; dir: string; ticket: Ticket } {
   const repo = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitEnvironment() });
+  emptyRepository(repo);
   runCommandLine(admitCommandLine, {
     argv: [
       "--repo",

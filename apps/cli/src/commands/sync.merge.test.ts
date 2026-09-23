@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +13,7 @@ import { readContract, readTicket, storeDir, writeTicket } from "../store/ticket
 import { REPO_ROOT } from "../test-support/paths.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * SCP-202: the loop merges the pull request it opened, behind the `merge`
@@ -179,8 +178,7 @@ function publishedTicket(
   config: Record<string, unknown> | null = null,
 ): { repo: string; dir: string; branch: string } {
   const repo = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitEnvironment() });
+  emptyRepository(repo);
   runCommandLine(admitCommandLine, {
     argv: [
       "--repo",

@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +15,7 @@ import { admitCommandLine, readTicket, storeDir } from "./admit.js";
 import { nextKey, readDraftSnapshot } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../test-support/repository.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-admit-draft-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -24,8 +23,7 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 let repos = 0;
 function repository(): string {
   const dir = join(scratch, `repo-${repos++}`);
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitEnvironment() });
+  emptyRepository(dir);
   return dir;
 }
 

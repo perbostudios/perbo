@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,7 +17,7 @@ import {
   storeDir,
 } from "../../store/tickets.js";
 import { recordStreams } from "../../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../../test-support/repository.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-edit-graph-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -27,10 +26,7 @@ let repos = 0;
 /** A ticket with four criteria over two packages, and no graph yet. */
 function admitted(): { repo: string; dir: string } {
   const repo = join(scratch, `repo-${repos++}`);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: gitEnvironment(),
-  });
+  emptyRepository(repo);
   const code = runCommandLine(admitCommandLine, {
     argv: [
       "--repo", repo,

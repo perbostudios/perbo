@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +6,7 @@ import { admitCommandLine } from "./admit.js";
 import { readContract, storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * D-105: the standing prohibited list is a repository agreement, so every
@@ -19,10 +18,7 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function repository(name: string, config?: unknown): string {
   const dir = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: gitEnvironment(),
-  });
+  emptyRepository(dir);
   if (config !== undefined) {
     mkdirSync(join(dir, ".perbo"), { recursive: true });
     writeFileSync(join(dir, ".perbo", "config.json"), JSON.stringify(config, null, 2));

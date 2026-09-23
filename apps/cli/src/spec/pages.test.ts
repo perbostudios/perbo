@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,7 +22,7 @@ import { listTickets, readContract, readDraftSnapshot, readTicket, storeDir } fr
 import { specFolder } from "../store/index.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
-import { gitEnvironment } from "@perbo/test-support";
+import { initRepository } from "@perbo/test-support";
 
 /**
  * SCP-336: the spec folder the plan is kept beside — the page per node, its
@@ -65,17 +64,15 @@ The queue package already has a sender.
 let repos = 0;
 function repository(spec = SPEC): { repo: string; specPath: string; folder: string } {
   const repo = join(scratch, `repo-${repos++}`);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
   const folder = join(repo, "specs", "activation-email");
-  mkdirSync(folder, { recursive: true });
   const specPath = join(folder, "spec.md");
-  writeFileSync(specPath, spec);
-  for (const name of ["queue", "auth"]) {
-    mkdirSync(join(repo, "packages", name), { recursive: true });
-    writeFileSync(join(repo, "packages", name, "index.ts"), "export const a = 1;\n");
-  }
-  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitEnvironment() });
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitEnvironment() });
+  initRepository(repo, {
+    files: {
+      "specs/activation-email/spec.md": spec,
+      "packages/queue/index.ts": "export const a = 1;\n",
+      "packages/auth/index.ts": "export const a = 1;\n",
+    },
+  });
   return { repo, specPath, folder };
 }
 
@@ -554,16 +551,14 @@ describe("perbo admit --from-spec --start-over", () => {
 describe("the spec folder a repository configures", () => {
   it("is read from .perbo/config.json and is where a spec's pages are written", async () => {
     const repo = join(scratch, `repo-config-${repos++}`);
-    execFileSync("git", ["init", "-q", "-b", "main", repo]);
-    mkdirSync(join(repo, ".perbo"), { recursive: true });
-    writeFileSync(join(repo, ".perbo", "config.json"), JSON.stringify({ specs: "docs/specs" }));
     const folder = join(repo, "docs", "specs", "activation-email");
-    mkdirSync(folder, { recursive: true });
-    writeFileSync(join(folder, "spec.md"), SPEC);
-    mkdirSync(join(repo, "packages", "queue"), { recursive: true });
-    writeFileSync(join(repo, "packages", "queue", "index.ts"), "export const a = 1;\n");
-    execFileSync("git", ["-C", repo, "add", "-A"], { env: gitEnvironment() });
-    execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitEnvironment() });
+    initRepository(repo, {
+      files: {
+        ".perbo/config.json": JSON.stringify({ specs: "docs/specs" }),
+        "docs/specs/activation-email/spec.md": SPEC,
+        "packages/queue/index.ts": "export const a = 1;\n",
+      },
+    });
 
     await admitFromSpec(repo, join(folder, "spec.md"));
     expect(pagesIn(folder)).toEqual(["node_1.md", "node_2.md"]);

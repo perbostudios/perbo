@@ -10,7 +10,7 @@ import { executeCommandLine } from "./index.js";
 import { buildInspectReport, renderInspect } from "../inspect.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
 import { makeAttempt, makeTicket } from "../../test-support/records.js";
-import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, initRepository } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 
@@ -66,10 +66,7 @@ const git = (dir: string, ...argv: string[]): string =>
 /** A repository with one commit, the way `perbo admit` expects to find one. */
 function repository(name: string): string {
   const dir = scratch(`perbo-resume-${name}-`);
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnvironment() });
-  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture" }));
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  initRepository(dir, { files: { "package.json": JSON.stringify({ name: "fixture" }) } });
   return dir;
 }
 

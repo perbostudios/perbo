@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { UsageError } from "./usage-error.js";
 import { readPullRequest, readPullRequestChecks, readRefRange } from "./pull-request.js";
-import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * What these reads do with an answer that arrived cut.
@@ -64,10 +64,7 @@ describe("a range of local refs whose change is larger than the read holds", () 
     const repo = mkdtempSync(join(scratch, "range-"));
     const git = (...args: string[]): string =>
       execFileSync("git", ["-C", repo, ...args], { env: gitEnvironment(), encoding: "utf8" }).trim();
-    git("init", "-q", "-b", "main");
-    writeFileSync(join(repo, "README.md"), "base\n");
-    git("add", "-A");
-    git("commit", "-qm", "base");
+    initRepository(repo, { files: { "README.md": "base\n" } });
     git("checkout", "-q", "-b", "change");
     writeFileSync(join(repo, "wide.txt"), Buffer.alloc(65 * 1024 * 1024, "xxxxxxx\n"));
     git("add", "-A");
