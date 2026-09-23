@@ -167,18 +167,24 @@ const EXPANSION_BUDGET_REFUSAL = "--expansion-budget must be a whole number of f
  */
 export const IssueReferenceSchema = z
   .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*#[1-9][0-9]*$/, {
+  .regex(/^[A-Za-z0-9_.][A-Za-z0-9_.-]*\/[A-Za-z0-9_.][A-Za-z0-9_.-]*#[1-9][0-9]*$/, {
     error: (issue) =>
       `--from must be a GitHub issue like owner/repo#412. Got '${String(issue.input)}'`,
   });
 
 /**
- * The drafting model's id. It is what a provider's own CLI is started with,
- * which is an action parameter (ADR-0023 §4), so what it may hold is a rule
- * about the value and every caller is held to it.
+ * The drafting model's id, as a person typed or picked it. It is what a
+ * provider's own CLI is started with, which is an action parameter (ADR-0023
+ * §4), so the rule is about its shape as an argument: no whitespace, so it
+ * stays one argv element, and no leading dash, so it cannot be read as a flag.
+ * The characters inside are the provider's business — a context marker such
+ * as `[1m]` or a Bedrock ARN are ids a provider answers to. The endpoint holds
+ * the id a session hands it to the narrower shape it always had.
  */
-export const ModelIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, {
-  error: (issue) => `--model must be a model id like claude-opus-5. Got '${String(issue.input)}'`,
+export const ModelIdSchema = z.string().regex(/^[^\s-]\S*$/, {
+  error: (issue) =>
+    `--model must be a model id like claude-opus-5, with no spaces and not starting with -. ` +
+    `Got '${String(issue.input)}'`,
 });
 
 /**

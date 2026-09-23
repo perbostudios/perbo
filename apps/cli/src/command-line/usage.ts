@@ -158,8 +158,8 @@ export const USAGE = `perbo — contract to pull request, locally
       is never migrated.
 
   perbo approve PRB-1 [--repo .] [--store <dir>] [--json]
-      Approve the contract; --json writes it on stdout and nothing else.
-      It is immutable from that moment. Records the
+      Approve the contract. It is immutable from that moment; --json is
+      accepted and writes nothing, since approving prints no record. Records the
       person's time from first rendering to approval and how many fields they
       changed, which is the admission-friction instrument. For work admitted
       from a spec it also records what that spec said at this moment: its bytes'

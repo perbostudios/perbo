@@ -4,7 +4,6 @@ import { MODEL_PROVIDERS } from "@perbo/model";
 import { isAbsolute } from "node:path";
 import {
   IssueReferenceSchema,
-  ModelIdSchema,
   admitDraftReport,
   defaultAdmission,
   listReport,
@@ -281,7 +280,13 @@ const admitTicket = tool({
     from: IssueReferenceSchema.optional().describe("owner/repo#N: draft the contract from that issue."),
     from_file: AbsoluteFileSchema.optional().describe("An absolute path: draft the contract from that file."),
     provider: z.enum(MODEL_PROVIDERS).optional().describe("The drafting provider."),
-    model: ModelIdSchema.optional().describe("The drafting model id."),
+    // A session's own choice reaches a provider's argv, so it is held to the
+    // narrow shape a model id has, not to what a person may type at the terminal.
+    model: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
+      .optional()
+      .describe("The drafting model id, e.g. claude-opus-5."),
     priority: z.enum(["urgent", "high", "normal", "low"]).optional(),
     labels: z.array(z.string()).optional(),
     depends_on: z.array(KeySchema).optional().describe("Tickets that must merge first."),
