@@ -54,6 +54,7 @@ function placed(word: Word, found: Word): Word {
     value: word.value.split("{}").join(found.value),
     substitutions: [...word.substitutions, ...found.substitutions],
     variable: word.variable || found.variable,
+    found: true,
   };
 }
 
@@ -334,16 +335,23 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   const carries = (word: Word): boolean => carriesInto(supplied, word.value);
 
   /**
-   * A command line a nested shell runs, with the wrapper in front substituting
-   * its input into it. The words land inside a line this guard reads as
-   * written, so what runs cannot be read.
+   * A command line a nested shell runs, with words the line does not spell put
+   * into it: the input of the wrapper in front, or the paths a `find` finds.
+   * They land inside a line this guard reads as written, and a file's name is
+   * read there as shell code, so what runs cannot be read.
    */
   const substitutedInto = (operand: Word, by: string): Analysis | null => {
-    if (supplied === undefined || !carries(operand)) return null;
+    const how =
+      operand.found === true
+        ? "find puts each path it finds where {} stands in it"
+        : supplied !== undefined && carries(operand)
+          ? `${supplied.wrapper} substitutes the words it reads from standard input for ` +
+            `${supplied.placeholder} in it`
+          : null;
+    if (how === null) return null;
     findings.push({
       detail:
-        `the command ${operand.raw} passed to ${by} cannot be read — ${supplied.wrapper} ` +
-        `substitutes the words it reads from standard input for ${supplied.placeholder} in it: ` +
+        `the command ${operand.raw} passed to ${by} cannot be read — ${how}: ` +
         `${context.segment.slice(0, 200)}`,
       target: null,
       resolved: null,

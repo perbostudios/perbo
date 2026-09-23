@@ -15,6 +15,11 @@ export interface Word {
    * option-only with `> log.txt` or `2>&1` after it (SCP-186).
    */
   redirect?: boolean;
+  /**
+   * True for a word of a `find` body that holds the path the walk finds, where
+   * the body spells `{}`: a name the files on disk give, not the line.
+   */
+  found?: boolean;
 }
 
 interface Redirect {

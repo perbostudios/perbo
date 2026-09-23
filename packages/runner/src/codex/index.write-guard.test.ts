@@ -63,10 +63,14 @@ const MISREAD = [
   "cp a sub ';' /etc",
 ];
 
-/** A placeholder `xargs` substitutes into a line a nested shell runs, on both paths. */
+/**
+ * A placeholder `xargs` substitutes, or a path `find` finds, in a line a nested
+ * shell runs, on both paths.
+ */
 const SUBSTITUTED_INTO_A_NESTED_COMMAND = [
   "echo /etc/passwd | xargs -I{} sh -c 'rm {}'",
   "echo 'rm /etc/x' | xargs -J % sh -c %",
+  "find . -exec sh -c 'rm {}' \\;",
 ];
 
 /** Writes under a `find` starting point outside the worktree, on both paths. */

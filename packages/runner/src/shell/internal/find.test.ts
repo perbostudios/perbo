@@ -85,6 +85,23 @@ const AN_ARGUMENT = [
   "xargs -I{} find . -exec echo {} \\;",
 ];
 
+/**
+ * A body whose nested shell line holds `{}`: each path the walk finds lands
+ * in that line, where the shell reads a file's name as code.
+ */
+const FOUND_IN_A_NESTED_LINE = [
+  "find . -exec sh -c 'rm {}' \\;",
+  "find . -execdir bash -c 'mv {} {}.bak' \\;",
+  "find -L src -exec sh -c 'cd {} && cp a ../../x' \\;",
+  "find . -exec pnpm exec -c 'rm {}' \\;",
+];
+
+/** The same bodies with the path handed to the shell as an argument. */
+const FOUND_AS_AN_ARGUMENT = [
+  "find . -exec sh -c 'wc -l \"$1\"' _ {} \\;",
+  "find . -name '*.tmp' -exec sh -c 'echo found' \\;",
+];
+
 describe("a find's starting point", () => {
   for (const command of WRITES_OUTSIDE) {
     it(`is where ${command} writes`, () => {
@@ -120,6 +137,21 @@ describe("a find's starting point", () => {
 
   for (const command of AN_ARGUMENT) {
     it(`is read where the wrapper's input is only an argument in ${command}`, () => {
+      expect(decision(command), command).toBe("allowed");
+    });
+  }
+});
+
+describe("a path find puts into a body", () => {
+  for (const command of FOUND_IN_A_NESTED_LINE) {
+    it(`makes the nested line unreadable in ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("find puts each path it finds where {} stands");
+    });
+  }
+
+  for (const command of FOUND_AS_AN_ARGUMENT) {
+    it(`leaves the nested line readable in ${command}`, () => {
       expect(decision(command), command).toBe("allowed");
     });
   }
