@@ -51,8 +51,9 @@ Absence is still not a failure for the suites whose subject is the corpus. They 
 directory exists first and skip, naming what is missing — `test/corpus-present.ts` is the one place
 that decides it, `test/corpus-absence.test.ts` proves the skip by pointing the variable at a
 directory that is not there, and `test/corpus-read-guard.test.ts` keeps any other test file from
-reading the corpus behind the gate's back. It scans `test/` and everything under it, which is what
-vitest itself collects, so a suite in a subdirectory is held to the same rule. And it parses the
+reading the corpus behind the gate's back. It scans every tree vitest collects a suite from, taken
+from `vitest.config.ts` — `test/` and `src/`, each with everything under it — so a suite in a
+subdirectory, or one sitting beside the loader, is held to the same rule. And it parses the
 files it scans rather than searching them for a name: it follows the loader from the module that
 exports it — `src/corpus.ts` — through any re-export to whatever local name it arrives under, so an
 import under an alias, off a namespace, or out of a dynamic `import()` is the

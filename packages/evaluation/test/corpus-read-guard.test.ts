@@ -14,16 +14,20 @@ import { createScratch } from "@perbo/test-support";
  * that — it reads while collecting, before a skip can apply, and the absence
  * gate never sees the read. `expectation-reachability.test.ts` was that suite.
  *
- * So the rule this scans for, in the one directory tree it applies to — `test/`
- * and everything under it, since that is what vitest's `include` collects:
+ * So the rule this scans for, over every tree vitest collects a suite from —
+ * `test/` and `src/`, each with everything under it, taken from this package's
+ * own `vitest.config.ts` so that a widened `include` widens the scan:
  *
  *   - no `.test.ts` file holds the loader at all; the corpus arrives as
  *     `corpus`, and the sample as `sample`;
- *   - among the helper modules beside them, only `corpus-present.ts` calls it
- *     with no directory, since a call that names its own directory is a read
- *     the reader can see (`sample-fixtures.ts` names `sample/fixtures`);
+ *   - among the modules beside them, only `corpus-present.ts` calls it with no
+ *     directory, since a call that names its own directory is a read the reader
+ *     can see (`sample-fixtures.ts` names `sample/fixtures`);
  *   - and no file but the gate hands the loader on, since a re-export would put
  *     it within reach of a suite under a name that is not its own.
+ *
+ * The module that declares the loader is exempt: `src/corpus.ts` is where the
+ * loader lives, not a file that reaches around the gate to reach it.
  *
  * The scan is two halves that catch different things. The textual half looks
  * for the loader's name against its parenthesis, which is the spelling anyone
@@ -35,7 +39,8 @@ import { createScratch } from "@perbo/test-support";
  */
 
 const TEST_DIR = import.meta.dirname;
-const SRC_DIR = resolve(TEST_DIR, "..", "src");
+const PACKAGE_DIR = resolve(TEST_DIR, "..");
+const SRC_DIR = resolve(PACKAGE_DIR, "src");
 
 /** The single file allowed to leave the corpus directory to the loader. */
 const GATE = "corpus-present.ts";
@@ -466,6 +471,38 @@ interface Offence {
 }
 
 /**
+ * The directories vitest collects a suite from, read out of this package's
+ * `vitest.config.ts`.
+ *
+ * The guard's subject is what vitest runs, and the config is what decides that,
+ * so the trees are taken from it rather than written here: a widened `include`
+ * widens the scan instead of leaving a tree nobody guards. A glob's leading
+ * literal segments are its tree: one that starts `src/` collects from `src`.
+ */
+function collectedRoots(): string[] {
+  const config = parseFile(join(PACKAGE_DIR, "vitest.config.ts"));
+  const globs: string[] = [];
+
+  forEachNode(config, (node) => {
+    if (!ts.isPropertyAssignment(node)) return;
+    const name = node.name;
+    if (!ts.isIdentifier(name) || name.text !== "include") return;
+    if (!ts.isArrayLiteralExpression(node.initializer)) return;
+    for (const element of node.initializer.elements) {
+      if (ts.isStringLiteralLike(element)) globs.push(element.text);
+    }
+  });
+
+  const roots = globs.map((glob) => {
+    const parts = glob.split("/");
+    const literal = parts.slice(0, parts.findIndex((part) => part.includes("*")));
+    return resolve(PACKAGE_DIR, ...literal);
+  });
+
+  return [...new Set(roots)].filter((dir) => existsSync(dir)).sort();
+}
+
+/**
  * Every `.ts` file under `dir`, named by its path relative to `dir`.
  *
  * The walk goes down, because vitest's own `include` does: it collects a suite
@@ -487,22 +524,34 @@ const SUITE_REMEDY =
 
 const HELPER_REMEDY = `Name the directory, or take the corpus from ${GATE}.`;
 
+/** The files in `dir` the loader is allowed to reach: the gate, and its own module. */
+function exemptIn(dir: string): Set<string> {
+  const exempt = new Set(
+    tsFilesUnder(dir)
+      .filter((path) => srcFacts(path).declaresLoader)
+      .map((path) => relative(dir, path).replaceAll("\\", "/")),
+  );
+  if (existsSync(join(dir, GATE))) exempt.add(GATE);
+  return exempt;
+}
+
 /**
  * Every file in `dir` that reads the corpus outside the gate, named, with the
  * sentence a reader needs to fix it.
  *
- * `gate` is a parameter so the scan can be run with nothing exempt, which is how
- * a test shows it is reading these files rather than reporting an empty list.
+ * `exempt` is a parameter so the scan can be run with nothing exempt, which is
+ * how a test shows it is reading these files rather than reporting an empty
+ * list.
  */
 function unguardedCorpusReads(
   dir: string,
-  options: { modules: Map<string, Exposure>; gate?: string },
+  options: { modules: Map<string, Exposure>; exempt?: ReadonlySet<string> },
 ): Offence[] {
-  const gate = options.gate ?? GATE;
+  const exempt = options.exempt ?? exemptIn(dir);
   const offences: Offence[] = [];
 
   for (const file of tsFiles(dir)) {
-    if (file === gate) continue;
+    if (exempt.has(file)) continue;
     const path = join(dir, file);
     const source = readFileSync(path, "utf8");
     const suite = file.endsWith(".test.ts");
@@ -551,6 +600,7 @@ function unguardedCorpusReads(
 
 describe("no suite reads the corpus outside the gate", () => {
   const modules = loaderModules(SRC_DIR);
+  const collected = collectedRoots();
 
   /** A directory of planted files, removed after each test that asks for one. */
   const scratchDirectory = createScratch("perbo-corpus-guard-");
@@ -615,17 +665,30 @@ describe("no suite reads the corpus outside the gate", () => {
     expect(planted.get(join(dir, "barrel.ts"))?.names).toEqual(new Set(["load"]));
   });
 
-  it("scans every test file in this package", () => {
-    const files = tsFiles(TEST_DIR);
+  /**
+   * The files the scan below claims to have cleared, across both trees. `src/`
+   * is in the list because vitest collects a `.test.ts` there too, and a suite
+   * sitting beside the loader is the shortest way around the gate there is.
+   */
+  it("scans every file in every tree vitest collects from", () => {
+    expect(collected).toEqual([SRC_DIR, TEST_DIR]);
+
+    const files = collected.flatMap((dir) =>
+      tsFiles(dir).map((file) => `${relative(PACKAGE_DIR, dir)}/${file}`),
+    );
 
     expect(files.filter((file) => file.endsWith(".test.ts")).length).toBeGreaterThan(30);
-    expect(files).toContain(GATE);
+    expect(files).toContain(`test/${GATE}`);
+    expect(files).toContain("src/corpus.ts");
   });
 
-  it("finds no unguarded read in the suite as it stands", () => {
-    expect(unguardedCorpusReads(TEST_DIR, { modules }).map((offence) => offence.message)).toEqual(
-      [],
-    );
+  it("finds no unguarded read in the trees as they stand", () => {
+    for (const dir of collected) {
+      expect(
+        unguardedCorpusReads(dir, { modules }).map((offence) => offence.message),
+        relative(PACKAGE_DIR, dir),
+      ).toEqual([]);
+    }
   });
 
   /**
@@ -636,11 +699,23 @@ describe("no suite reads the corpus outside the gate", () => {
    * fail this one.
    */
   it("names the gate as the one bare read here, when nothing is exempt", () => {
-    const offences = unguardedCorpusReads(TEST_DIR, { modules, gate: "" });
+    const offences = unguardedCorpusReads(TEST_DIR, { modules, exempt: new Set() });
 
     expect(offences.map((offence) => offence.file)).toEqual([GATE]);
     expect(offences[0]?.message).toContain(GATE);
     expect(offences[0]?.message).toContain(CALL_TEXT);
+  });
+
+  /**
+   * The same proof for `src/`, which has no gate: run with nothing exempt, the
+   * module that declares the loader is the one file named there. A scan that
+   * never opened `src/` would report an empty list for it and pass the
+   * assertion above just as happily.
+   */
+  it("names the loader's own module as the one read in src, when nothing is exempt", () => {
+    const offences = unguardedCorpusReads(SRC_DIR, { modules, exempt: new Set() });
+
+    expect(offences.map((offence) => offence.file)).toEqual(["corpus.ts"]);
   });
 
   it("names a suite that reads the corpus, however the loader is spelled there", () => {
