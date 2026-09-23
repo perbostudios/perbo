@@ -17,13 +17,13 @@ it("loads renderer modules in the browser even without production tree shaking",
 
 /**
  * A test sits beside the module it covers, so nothing about where a file lives
- * keeps it out of the app: only the module graph does. The two entries
+ * keeps it out of the app: only the module graph does. The three entries
  * `scripts/build.mjs` builds from are read here rather than in `dist/`,
  * because a minified bundle shows only the names that survived it.
  */
 const TEST_CODE = /\.test\.tsx?$|\/test-support\//;
 
-it("ships neither a test nor its support from either build entry", async () => {
+it("ships neither a test nor its support from any build entry", async () => {
   const renderer = await build({
     entryPoints: ["src/renderer/main.tsx"],
     platform: "browser",
@@ -49,6 +49,20 @@ it("ships neither a test nor its support from either build entry", async () => {
     external: ["electron"],
     logLevel: "silent",
   });
-  for (const result of [renderer, host])
+  // The bridge the renderer is handed runs with the host's privileges, so what
+  // it pulls in is read on the same terms as the other two.
+  const preload = await build({
+    entryPoints: ["src/host/preload.ts"],
+    platform: "node",
+    target: "node22",
+    bundle: true,
+    write: false,
+    outdir: "dist/host",
+    metafile: true,
+    format: "cjs",
+    external: ["electron"],
+    logLevel: "silent",
+  });
+  for (const result of [renderer, host, preload])
     expect(Object.keys(result.metafile.inputs).filter((input) => TEST_CODE.test(input))).toEqual([]);
 });

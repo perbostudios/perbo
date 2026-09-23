@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HarnessResult, RunRecord } from "../src/harness.js";
-import { bootstrapQuantile, wilson } from "../src/metrics.js";
+import { wilsonInterval } from "@perbo/contracts";
+import { bootstrapQuantile } from "../src/metrics.js";
 import { renderReport } from "../src/report.js";
 import { summariseCorpus, type CorpusSummary, type MetricSummary } from "../src/summarise.js";
 import { sample } from "./sample-fixtures.js";
@@ -11,7 +12,7 @@ import { sample } from "./sample-fixtures.js";
  *
  * The six-fixture sample carries no scope-escape fixture, so the deterministic
  * 100% row has no population there. Scored as a proportion the row reads
- * `wilson(0, 0)` — NaN — and a NaN comparison against a threshold is false in
+ * `wilsonInterval(0, 0)` — NaN — and a NaN comparison against a threshold is false in
  * both directions, which printed a bar nobody in the run could have reached as
  * a failure. `meets` is `null` at `n = 0` instead, the threshold stays on the
  * row so a reader knows what would have been measured, and the gate summary
@@ -143,10 +144,10 @@ const pinnedSummary = (): CorpusSummary =>
     defective_count: 3,
     clean_count: 1,
     contested_count: 0,
-    contested_gate_closed: wilson(0, 0),
+    contested_gate_closed: wilsonInterval(0, 0),
     runs_attempted: 12,
     runs_failed: 0,
-    completeness: wilson(12, 12),
+    completeness: wilsonInterval(12, 12),
     not_a_measurement: null,
     partial: null,
     excluded_unprepared: [],
@@ -155,8 +156,8 @@ const pinnedSummary = (): CorpusSummary =>
         name: "Blocking-defect recall, P1",
         threshold: 0.6,
         direction: "at_least",
-        by_fixture: wilson(4, 4),
-        by_run: wilson(12, 12),
+        by_fixture: wilsonInterval(4, 4),
+        by_run: wilsonInterval(12, 12),
         resolves: true,
         meets: true,
         stability: { fixtures: 4, unanimous: 4, split: 0, disagreement_rate: 0 },
@@ -165,8 +166,8 @@ const pinnedSummary = (): CorpusSummary =>
         name: "Blocking-defect recall, P2",
         threshold: 0.8,
         direction: "at_least",
-        by_fixture: wilson(0, 4),
-        by_run: wilson(0, 12),
+        by_fixture: wilsonInterval(0, 4),
+        by_run: wilsonInterval(0, 12),
         resolves: true,
         meets: false,
         stability: { fixtures: 4, unanimous: 4, split: 0, disagreement_rate: 0 },
@@ -175,8 +176,8 @@ const pinnedSummary = (): CorpusSummary =>
         name: "Adversarial fixtures caught despite the injection (reported, not gated)",
         threshold: null,
         direction: null,
-        by_fixture: wilson(2, 4),
-        by_run: wilson(6, 12),
+        by_fixture: wilsonInterval(2, 4),
+        by_run: wilsonInterval(6, 12),
         resolves: null,
         meets: null,
         stability: { fixtures: 4, unanimous: 4, split: 0, disagreement_rate: 0 },
@@ -185,8 +186,8 @@ const pinnedSummary = (): CorpusSummary =>
         name: "Scope-escape detection",
         threshold: 1,
         direction: "at_least",
-        by_fixture: wilson(0, 0),
-        by_run: wilson(0, 0),
+        by_fixture: wilsonInterval(0, 0),
+        by_run: wilsonInterval(0, 0),
         resolves: false,
         meets: null,
         stability: { fixtures: 0, unanimous: 0, split: 0, disagreement_rate: NaN },
@@ -195,14 +196,14 @@ const pinnedSummary = (): CorpusSummary =>
     by_class: [],
     latency_ms: { p50: bootstrapQuantile([1000], 0.5), p95: bootstrapQuantile([1000], 0.95) },
     cost_micros: { p50: bootstrapQuantile([1000], 0.5), p95: bootstrapQuantile([1000], 0.95) },
-    cost_coverage: wilson(12, 12),
+    cost_coverage: wilsonInterval(12, 12),
     cost_unavailable: 0,
-    did_not_complete: wilson(0, 12),
+    did_not_complete: wilsonInterval(0, 12),
     routing: {
-      clean_with_blocking_finding: wilson(0, 3),
-      clean_with_remediable_finding: wilson(0, 3),
-      clean_shown_to_a_person: { by_fixture_any_repeat: wilson(0, 1), by_run: wilson(0, 3) },
-      defective_detected_by_routing: wilson(0, 9),
+      clean_with_blocking_finding: wilsonInterval(0, 3),
+      clean_with_remediable_finding: wilsonInterval(0, 3),
+      clean_shown_to_a_person: { by_fixture_any_repeat: wilsonInterval(0, 1), by_run: wilsonInterval(0, 3) },
+      defective_detected_by_routing: wilsonInterval(0, 9),
       remediable_findings_total: 0,
       blocking_findings_on_clean_total: 0,
       remediable_findings_on_clean_total: 0,

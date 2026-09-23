@@ -227,7 +227,30 @@ export function writerFindings(
     if (value.length > 0) operands.push(word);
   }
 
+  const supplied = context.supplied;
+  const placeholder = supplied?.placeholder ?? null;
+
+  /** A destination the wrapper supplies rather than the line: not a path at all. */
+  const unread = (label: string, how: string): WriteFinding => ({
+    detail:
+      `${label} cannot be resolved — ${how}, and they are not on the line: ` +
+      `${context.segment.slice(0, 200)}`,
+    target: null,
+    resolved: null,
+  });
+
   const judge = (word: Word, label: string): WriteFinding[] => {
+    // The placeholder stands where this destination goes, so what is written is
+    // whatever the wrapper reads, not the word on the line.
+    if (supplied !== undefined && placeholder !== null && word.value.includes(placeholder)) {
+      return [
+        unread(
+          label,
+          `${supplied.wrapper} substitutes the words it reads from standard input ` +
+            `for ${placeholder}`,
+        ),
+      ];
+    }
     const destination: Destination =
       spec.remote === true && REMOTE_DESTINATION.test(word.value)
         ? { kind: "unresolvable", reason: "it names a destination on another host" }
@@ -237,15 +260,36 @@ export function writerFindings(
 
   const findings = written.flatMap(({ word, label }) => judge(word, label));
   if (targetDirectory !== null) {
+    // The operands are written into the directory this option names, so what a
+    // wrapper supplies from its standard input is a source.
     return [...findings, ...judge(targetDirectory, `the ${verb} destination`)];
   }
   const skip = spec.skip !== undefined && !anyPresent(spec.skipUnless, present) ? spec.skip : 0;
   const remaining = operands.slice(skip);
+  // Where the operands are destinations and a wrapper appends more of them from
+  // its standard input, the write lands somewhere the line never spelled.
+  const appended: WriteFinding[] =
+    supplied !== undefined && placeholder === null && (everyOperand || spec.operands !== "none")
+      ? [
+          unread(
+            `the ${verb} destination`,
+            `${supplied.wrapper} appends the words it reads from standard input to this command`,
+          ),
+        ]
+      : [];
   if (everyOperand || spec.operands === "all") {
-    return [...findings, ...remaining.flatMap((operand) => judge(operand, `the ${verb} target`))];
+    return [
+      ...findings,
+      ...appended,
+      ...remaining.flatMap((operand) => judge(operand, `the ${verb} target`)),
+    ];
   }
   if (spec.operands === "last" && remaining.length >= (spec.least ?? 2)) {
-    return [...findings, ...judge(remaining[remaining.length - 1]!, `the ${verb} destination`)];
+    return [
+      ...findings,
+      ...appended,
+      ...judge(remaining[remaining.length - 1]!, `the ${verb} destination`),
+    ];
   }
-  return findings;
+  return [...findings, ...appended];
 }

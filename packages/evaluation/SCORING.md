@@ -120,8 +120,9 @@ what a run answers.
 Every proportion carries `(point, low, high, n)`. The interval is a **Wilson
 score interval** at 95%, chosen over the normal approximation because at these
 sample sizes the normal one produces bounds outside `[0, 1]` and is wrong near
-the extremes — which is where a corpus this size mostly lives. `src/metrics.ts`
-is the whole of it, in about fifteen lines.
+the extremes — which is where a corpus this size mostly lives. `wilsonInterval`
+in [`@perbo/contracts`](../contracts/src/wilson.ts) is the whole of it, in about
+fifteen lines.
 
 Beside each threshold the harness reports `resolves`: whether the interval sits
 wholly on one side of it. **If the interval straddles the threshold, the run is

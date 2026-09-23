@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { wilsonInterval } from "@perbo/contracts";
 import {
   bootstrapQuantile,
   majority,
   percentile,
   resolvesAgainst,
   stability,
-  wilson,
 } from "../src/metrics.js";
 import { renderReport } from "../src/report.js";
 import type { CorpusSummary } from "../src/summarise.js";
 
-describe("wilson intervals", () => {
+describe("the Wilson interval the corpus reports", () => {
   it("brackets the point estimate", () => {
-    const result = wilson(15, 24);
+    const result = wilsonInterval(15, 24);
     expect(result.point).toBeCloseTo(0.625, 5);
     expect(result.low).toBeLessThan(result.point);
     expect(result.high).toBeGreaterThan(result.point);
@@ -24,20 +24,20 @@ describe("wilson intervals", () => {
       [10, 10],
       [1, 3],
     ] as const) {
-      const result = wilson(successes, n);
+      const result = wilsonInterval(successes, n);
       expect(result.low).toBeGreaterThanOrEqual(0);
       expect(result.high).toBeLessThanOrEqual(1);
     }
   });
 
   it("narrows as n grows", () => {
-    const small = wilson(15, 24);
-    const large = wilson(150, 240);
+    const small = wilsonInterval(15, 24);
+    const large = wilsonInterval(150, 240);
     expect(large.high - large.low).toBeLessThan(small.high - small.low);
   });
 
   it("reports nothing for an empty sample rather than zero", () => {
-    expect(Number.isNaN(wilson(0, 0).point)).toBe(true);
+    expect(Number.isNaN(wilsonInterval(0, 0).point)).toBe(true);
   });
 });
 
@@ -46,23 +46,23 @@ describe("whether a threshold is resolved", () => {
   // interval wide enough to straddle 0.60, and a number that straddles its
   // threshold is not a gate.
   it("is false when the interval straddles the threshold", () => {
-    const straddling = wilson(15, 24); // 0.625, interval roughly 0.42–0.79
+    const straddling = wilsonInterval(15, 24); // 0.625, interval roughly 0.42–0.79
     expect(straddling.low).toBeLessThan(0.6);
     expect(straddling.high).toBeGreaterThan(0.6);
     expect(resolvesAgainst(straddling, 0.6, "at_least")).toBe(false);
   });
 
   it("is true when the interval sits wholly above the threshold", () => {
-    expect(resolvesAgainst(wilson(240, 240), 0.6, "at_least")).toBe(true);
+    expect(resolvesAgainst(wilsonInterval(240, 240), 0.6, "at_least")).toBe(true);
   });
 
   it("is true when the interval sits wholly below the threshold", () => {
-    expect(resolvesAgainst(wilson(0, 40), 0.6, "at_least")).toBe(true);
+    expect(resolvesAgainst(wilsonInterval(0, 40), 0.6, "at_least")).toBe(true);
   });
 
   it("handles an at-most threshold in the same way", () => {
-    expect(resolvesAgainst(wilson(0, 40), 0.25, "at_most")).toBe(true);
-    expect(resolvesAgainst(wilson(3, 10), 0.25, "at_most")).toBe(false);
+    expect(resolvesAgainst(wilsonInterval(0, 40), 0.25, "at_most")).toBe(true);
+    expect(resolvesAgainst(wilsonInterval(3, 10), 0.25, "at_most")).toBe(false);
   });
 });
 
@@ -124,18 +124,18 @@ describe("a run that lost most of its sample", () => {
       defective_count: 2,
       clean_count: 1,
       contested_count: 0,
-      contested_gate_closed: wilson(0, 0),
+      contested_gate_closed: wilsonInterval(0, 0),
       runs_attempted: attempted,
       runs_failed: attempted - withArtifact,
-      completeness: wilson(withArtifact, attempted),
+      completeness: wilsonInterval(withArtifact, attempted),
       excluded_unprepared: [],
       metrics: [
         {
           name: "Clean changes passing the gate (false blocks ≤ 25%)",
           threshold: 0.75,
           direction: "at_least",
-          by_fixture: wilson(1, 1),
-          by_run: wilson(1, 1),
+          by_fixture: wilsonInterval(1, 1),
+          by_run: wilsonInterval(1, 1),
           // `resolves: true` so `verdict()` can actually return "met". With
           // false it returns "**met, but unresolved**" in both branches, and
           // the assertion below could not fail either way.
@@ -147,17 +147,17 @@ describe("a run that lost most of its sample", () => {
       by_class: [],
       latency_ms: { p50: bootstrapQuantile([1], 0.5), p95: bootstrapQuantile([1], 0.95) },
       cost_micros: { p50: bootstrapQuantile([1], 0.5), p95: bootstrapQuantile([1], 0.95) },
-      cost_coverage: wilson(1, 1),
+      cost_coverage: wilsonInterval(1, 1),
       cost_unavailable: 0,
-      did_not_complete: wilson(0, 1),
+      did_not_complete: wilsonInterval(0, 1),
       routing: {
-        clean_with_blocking_finding: wilson(0, 1),
-        clean_with_remediable_finding: wilson(0, 1),
+        clean_with_blocking_finding: wilsonInterval(0, 1),
+        clean_with_remediable_finding: wilsonInterval(0, 1),
         clean_shown_to_a_person: {
-          by_fixture_any_repeat: wilson(0, 1),
-          by_run: wilson(0, 1),
+          by_fixture_any_repeat: wilsonInterval(0, 1),
+          by_run: wilsonInterval(0, 1),
         },
-        defective_detected_by_routing: wilson(0, 1),
+        defective_detected_by_routing: wilsonInterval(0, 1),
         remediable_findings_total: 0,
         blocking_findings_on_clean_total: 0,
         remediable_findings_on_clean_total: 0,
@@ -199,7 +199,7 @@ describe("a run that lost most of its sample", () => {
       p95: bootstrapQuantile([], 0.95),
     };
     unavailable.cost_unavailable = 3;
-    unavailable.cost_coverage = wilson(0, 3);
+    unavailable.cost_coverage = wilsonInterval(0, 3);
     const rendered = renderReport(unavailable, { model: "gpt-5.6-terra" });
     expect(rendered).toContain("| Review cost | — | — | not measured |");
     expect(rendered).toContain("Dollar cost unavailable for **3** completed review(s)");
@@ -213,7 +213,7 @@ describe("a run that lost most of its sample", () => {
       p95: bootstrapQuantile([], 0.95),
     };
     mixed.cost_unavailable = 1;
-    mixed.cost_coverage = wilson(2, 3);
+    mixed.cost_coverage = wilsonInterval(2, 3);
 
     const rendered = renderReport(mixed, { model: "mixed" });
     expect(rendered).toContain("| Review cost | — | — | not measured |");

@@ -6,6 +6,9 @@
  * little it has settled. Wilson rather than the normal approximation because
  * the normal one produces bounds outside [0, 1] near the extremes, which is
  * where these populations mostly sit.
+ *
+ * The corpus scorer reports its numbers through this one too, so a share read
+ * live and the same share read off the corpus cannot differ in the arithmetic.
  */
 
 export interface WilsonInterval {

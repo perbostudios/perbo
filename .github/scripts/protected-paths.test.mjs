@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { matchesGlob } from "./protected-paths.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, "protected-paths.mjs");
@@ -64,6 +65,7 @@ function baseRepo() {
  * pull request meets rather than what a config written to suit the test does.
  */
 const SHIPPED_CONFIG = join(HERE, "..", "protected-paths.json");
+const CONFORMANCE = join(HERE, "..", "..", "packages", "contracts", "test", "glob-conformance.json");
 
 function writeConfig(dir, { protected_tests = [], protected_paths = [] } = {}) {
   const path = join(dir, "protected-paths.json");
@@ -179,4 +181,18 @@ test("corpus-pin.json parses and its commit is forty hex characters", () => {
   assert.equal(typeof pin.repository, "string");
   assert.ok(pin.repository.startsWith("https://"));
   assert.match(pin.date, /^\d{4}-\d{2}-\d{2}$/);
+});
+
+/**
+ * The glob this check matches with is a copy: it runs before anything is
+ * built, so it cannot import `@perbo/contracts`. The conformance table is what
+ * keeps the copy honest, and a row it answers differently is a rule two parts
+ * of this repository disagree about.
+ */
+test("answers every case of the glob conformance table as @perbo/contracts does", () => {
+  const { cases } = JSON.parse(readFileSync(CONFORMANCE, "utf8"));
+  assert.ok(cases.length > 0);
+  for (const { pattern, path, matches } of cases) {
+    assert.equal(matchesGlob(path, pattern), matches, `${pattern} ~ ${path}`);
+  }
 });

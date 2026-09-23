@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
@@ -360,6 +360,30 @@ const ROWS: Array<[string, Decision, string]> = [
   ["node -e \"console.log(JSON.stringify({a: 1}))\"", "allowed", "scp-190"],
   ["awk '{print $1}' sub/data.csv", "allowed", "scp-190"],
   ["perl -e 'print 1'", "allowed", "scp-190"],
+
+  // ---- the operands `xargs` appends from its standard input are destinations
+  // the line does not spell, unless it names where the write goes.
+  ["echo /etc/x | xargs touch", "refused", "xargs-stdin"],
+  ["xargs -0 rm -rf < list.txt", "refused", "xargs-stdin"],
+  ["find . -name '*.log' | xargs rm -f", "refused", "xargs-stdin"],
+  ["xargs cp a", "refused", "xargs-stdin"],
+  ["ls sub | xargs -I{} cp {} <root>/out", "allowed", "xargs-stdin"],
+  ["ls sub | xargs -0 -n1 cp -t <root>/out", "allowed", "xargs-stdin"],
+  ["ls sub | xargs grep TODO", "allowed", "xargs-stdin"],
+  // A placeholder standing where the destination goes is a word the line does
+  // not spell either.
+  ["ls sub | xargs -I{} rm {}", "refused", "xargs-stdin"],
+  ["ls sub | xargs -I{} tee {}", "refused", "xargs-stdin"],
+  ["ls sub | xargs -i mkdir {}", "refused", "xargs-stdin"],
+  ["ls sub | xargs -I{} rm sub/generated", "allowed", "xargs-stdin"],
+
+  // ---- the filesystem root is a directory a shell can stand in.
+  ["cd /", "allowed", "root-directory"],
+  ["pushd /", "allowed", "root-directory"],
+  ["cd / && echo x > y", "refused", "root-directory"],
+  ["cd / && echo x > <root>/y", "allowed", "root-directory"],
+  ["echo x > rootlink/etc/y", "refused", "root-directory"],
+  ["echo x > rootlink<root>/y", "allowed", "root-directory"],
 ];
 
 /**
@@ -411,6 +435,9 @@ describe("the probe lists, by round", () => {
   const root = scratch("perbo-scp156-probe-");
   mkdirSync(join(root, "sub"), { recursive: true });
   mkdirSync(join(root, "packages", "runner"), { recursive: true });
+  // A link to the filesystem root, which a walk has to hold as the root itself
+  // for the component after it to name anything.
+  symlinkSync("/", join(root, "rootlink"));
   const scope = { root, home: "/Users/nobody" };
 
   for (const [template, decision, round] of ROWS) {

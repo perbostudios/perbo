@@ -177,7 +177,14 @@ export function walkPath(base: string, target: string, semantics: PathSemantics,
     }
     const followed = walkPath(posix.dirname(next), link, semantics, depth + 1);
     if (!followed.ok) return followed;
-    current = followed.path;
+    // Held the way the anchor is, without its trailing separator: a link that
+    // lands on the root answers `/`, which the next component would otherwise
+    // join to `//etc`.
+    current = followed.path.replace(/\/$/, "");
   }
-  return { ok: true, path: current };
+  // The anchor is held without its separator, so a walk that joins nothing onto
+  // a POSIX root ends holding `""`: `/` itself, and anything that climbs to it.
+  // The root is a directory a shell can stand in and a path a write can name,
+  // so it is answered by the name it has.
+  return { ok: true, path: current === "" ? "/" : current };
 }

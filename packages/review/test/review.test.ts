@@ -955,8 +955,8 @@ describe("the review releases its transport", () => {
  * A source file carrying a NUL byte (SCP-188).
  *
  * AYO-33, 2026-09-04: the executor wrote two NUL bytes into
- * `packages/contracts/src/verdicts.ts`, the reviewer asked to read it, and the
- * transport died on `The argument 'args[22]' must be a string without null
+ * `apps/cli/src/commands/verdict/record.ts`, the reviewer asked to read it, and
+ * the transport died on `The argument 'args[22]' must be a string without null
  * bytes` -- one review bundle, the ticket `failed`, and a re-run over the same
  * sealed commit would have died the same way. The file is a finding on the
  * change now, and the review that reports it finishes.

@@ -1,6 +1,7 @@
 import { BUNDLE_DIRNAME, BUNDLE_FILENAME } from "./bundle.js";
 import { MINIMUM_COMPLETENESS, type CorpusSummary, type MetricSummary } from "./summarise.js";
-import type { Proportion, Quantile } from "./metrics.js";
+import type { WilsonInterval } from "@perbo/contracts";
+import type { Quantile } from "./metrics.js";
 
 /**
  * Re-exported from where the rule is applied. The floor belonged here when the
@@ -14,7 +15,7 @@ export { MINIMUM_COMPLETENESS };
 
 const pct = (value: number) => (Number.isNaN(value) ? "—" : `${(value * 100).toFixed(0)}%`);
 
-const proportion = (value: Proportion) =>
+const proportion = (value: WilsonInterval) =>
   value.n === 0
     ? "— (n=0)"
     : `${pct(value.point)} [${pct(value.low)}–${pct(value.high)}] n=${value.n}`;

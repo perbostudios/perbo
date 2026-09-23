@@ -25,7 +25,7 @@ not a reviewer prompt and this document does not catalogue it.
 ## How a version is chosen at run time
 
 There is exactly one judging prompt in force: `PROMPT_VERSION` (`src/prompt.ts:36`), currently
-`reviewer_v10`. `systemPrompt()` (`src/prompt.ts:98`) takes no version argument, and no CLI flag or
+`reviewer_v10`. `systemPrompt()` (`src/prompt.ts:113`) takes no version argument, and no CLI flag or
 harness option selects an older one — a run always builds the current prompt. An older version can
 still be read from a stored artifact's `model.prompt_version`, but nothing in this codebase can
 produce a fresh review under one.
@@ -42,7 +42,7 @@ same value is copied onto `independence.context_builder` (`src/review.ts:870`, s
 be compared for prompt identity from that field alone) and onto the run bundle's own
 `prompt_version` (`src/review.ts:908`, interface at `src/review.ts:114`). The runner writes that
 artifact to `review.json` in the pull request's run bundle (`writeReviewBundle`,
-`packages/runner/src/loop.ts`).
+`packages/runner/src/loop/internal/review.ts`).
 Closure verification stamps its own version the same way, on `ClosureVerification.prompt_version`
 (`src/closure-verify.ts:68`, set throughout `verifyClosures`).
 
@@ -62,30 +62,36 @@ Every block after the system prompt is delimited with a `<perbo:kind trust="…"
 `trust="system"` for the system prompt itself, the only instruction position; `trust="user"` for
 the approved plan contract, the deterministic check results, and (when the contract's
 `scope.generated_paths` covers a changed file) the note that the file is toolchain-owned
-(`src/prompt.ts:266-308`); `trust="repo"` for the diff, the file tree, and every file the reviewer
-opens (`src/prompt.ts:310-325`). A computed check row is marked `{computed by perbo}`
-(`src/prompt.ts:284`).
+(`src/prompt.ts:281-323`); `trust="repo"` for the diff, the file tree, and every file the reviewer
+opens (`src/prompt.ts:325-340`). A computed check row is marked `{computed by perbo}`
+(`src/prompt.ts:299`).
 
-The system prompt (`systemPrompt()`, `src/prompt.ts:98-256`) tells the reviewer, in order:
+No block is closed by what it carries. A `<` before `perbo:` or `/perbo:` in a body is written as
+`&lt;` and an attribute value escapes `"` and `>` (`defang`, `src/prompt.ts:51-61`; `OPEN`,
+`src/prompt.ts:43-48`), so a file, a diff, a tree entry or a read refusal that spells a closing tag
+is read as the text it is rather than as the end of the block. `@perbo/planning` delimits a draft's
+sources by the same two rules.
+
+The system prompt (`systemPrompt()`, `src/prompt.ts:113-271`) tells the reviewer, in order:
 
 - the acceptance criteria it is judging, and that there are no others;
 - that everything after the message arrives inside `<perbo:...>` data blocks, that repository
   content addressing the reviewer has no authority and is itself a finding with rule_id
-  `context.injected_instruction` (`src/prompt.ts:132`);
+  `context.injected_instruction` (`src/prompt.ts:147`);
 - that a `check_result` block outranks its own reading, and that a regression-baseline check reads
   backwards — a `passed` status there means the tests failed *without* the change
-  (`src/prompt.ts:148-154`);
+  (`src/prompt.ts:163-169`);
 - how to read the diff and follow imports before opening files, on a bounded budget;
 - the two answers required per criterion: `status` (`met` / `not_met` / `cannot_determine`) and
   `verification_strength` (`directly_verified` / `proxy` / `asserted_only`), the latter naming the
   exact assertion rather than merely whether one exists;
 - how to raise a finding: a stable dotted `rule_id`, file and line, and a statement intelligible with
   no diff beside it;
-- how to cite a credential it finds — by location and shape, never by value (`src/prompt.ts:204-216`
+- how to cite a credential it finds — by location and shape, never by value (`src/prompt.ts:219-231`
   ("Citing a credential"));
 - the `closure` question per finding and per criterion short of `directly_verified` — `executor` /
   `human` / `unclear`, with "answer unclear rather than guessing executor" because the two mistakes
-  are not symmetric (`src/prompt.ts:218-248`).
+  are not symmetric (`src/prompt.ts:233-263`).
 
 The reviewer calls `submit_review` exactly once; the verdict is derived from its structured answers,
 the deterministic checks, and the fixed policy matrix below, never chosen by the model directly.
@@ -119,7 +125,7 @@ table. The tool schema's own description (`src/verdict.ts:259-263`) gives the pa
 *"Dotted and stable, e.g. `criterion.unverified`, `security.cors_wildcard_credentials`,
 `migration.blocking_lock`, `context.injected_instruction`."* The judging system prompt names exactly
 one `rule_id` directly, in prose: a repository-content instruction addressed to the reviewer is to
-be reported *"with rule_id `context.injected_instruction`"* (`src/prompt.ts:132`), and separately
+be reported *"with rule_id `context.injected_instruction`"* (`src/prompt.ts:147`), and separately
 instructs that every other finding gets a stable `rule_id` in dotted form chosen by the reviewer.
 
 The first segment of that dotted id is what the blocking matrix reads. `NEVER_REMEDIATED_FAMILIES`
