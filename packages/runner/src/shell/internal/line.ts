@@ -1,11 +1,4 @@
-import {
-  anyPresent,
-  basename,
-  isAssignment,
-  optionSet,
-  optionsPresent,
-  type Context,
-} from "./command.js";
+import { basename, isAssignment, optionSet, type Context } from "./command.js";
 import {
   destinationSentence,
   judgeTarget,
@@ -175,6 +168,13 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   let nestedRunsHere = false;
   /** The wrapper standing in front of the command that appends its operands. */
   let appendsOperands: string | undefined;
+  /**
+   * The placeholder the wrapper standing in front substitutes the words it
+   * reads for, where one of its options names one. It is read as that option's
+   * value is read, so a value attached to a short option — the `list.txt` of
+   * `xargs -alist.txt` — is never taken for a cluster of option letters.
+   */
+  let placeholder: string | null;
 
   const stopHere = (): Analysis => ({
     findings,
@@ -290,6 +290,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     const commands = optionSet(spec.commands);
     const dirs = optionSet(spec.dirs);
     const refused = optionSet(spec.refuse);
+    const substitutes = optionSet(spec.substitutes);
     while (i < words.length) {
       const word = words[i]!;
       const raw = word.value;
@@ -321,6 +322,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
           continue;
         }
         if (values.has(name)) {
+          if (substitutes.has(name)) placeholder = attached ?? words[i + 1]?.value ?? null;
           i += attached === null ? 2 : 1;
           continue;
         }
@@ -373,6 +375,9 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         }
         if (values.has(option)) {
           separate = raw.length === at + 1;
+          if (substitutes.has(option)) {
+            placeholder = separate ? (words[i + 1]?.value ?? null) : raw.slice(at + 1);
+          }
           break;
         }
         unknown = option;
@@ -428,16 +433,11 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     }
     const wrapper = WRAPPERS.get(program);
     if (wrapper !== undefined) {
-      const at = i;
       i += 1;
+      placeholder = null;
       const stop = consumeOptions(program, wrapper);
       if (stop !== null) return stop;
-      if (
-        wrapper.appendsOperands === true &&
-        !anyPresent(wrapper.substitutes, optionsPresent(words.slice(at + 1, i)))
-      ) {
-        appendsOperands = program;
-      }
+      if (wrapper.appendsOperands === true && placeholder === null) appendsOperands = program;
       i += wrapper.operands ?? 0;
       continue;
     }

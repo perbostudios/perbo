@@ -22,6 +22,12 @@ const FROM_STANDARD_INPUT = [
   "xargs -0 install -d",
   // Every operand of an `rm` is a destination, so the appended ones are too.
   "xargs rm sub/generated",
+  // A value attached to a short option is that option's value: `-a`, `-d` and
+  // `-s` each take one, so the `i`, `I` and `J` inside these lines name no
+  // substitution and the words still arrive as operands.
+  "xargs -alist.txt rm",
+  "xargs -dI rm",
+  "xargs -sJ rm",
 ];
 
 /**
