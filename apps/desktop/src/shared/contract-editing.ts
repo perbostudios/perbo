@@ -17,9 +17,9 @@ import {
   INTERVIEW_CONVERSATION_CAP,
   InterviewEntrySchema,
   RequestSchema,
-  SPEC_SLUG,
   TaskModelsSchema,
 } from "./protocol.js";
+import { specSlugOf } from "./spec-slug.js";
 import type {
   Detail, Draft, DraftEdit, EditingChange, EditingForm, EditingOperation, EditingSession,
   EditingTarget, InterviewEntry, Job, LegacyEditing, OpenDraft, PlanningPane, PlanPromise, Request,
@@ -42,6 +42,11 @@ export interface EditingIO {
   start(request: EditingRequest, owner: EditingOwner): Promise<Job>;
   stop(jobId: string): Promise<void>;
   id(): string;
+  /**
+   * The folder this repository keeps specs in (D-103), which a ticket's
+   * recorded spec path is read against. Throws where it cannot be read.
+   */
+  specFolder(repoId: string): string;
   /** The repository's standing prohibited list (D-105), which the always box writes. */
   standing(repoId: string): StandingProhibitedEntry[];
   setStanding(repoId: string, entries: StandingProhibitedEntry[]): void;
@@ -406,6 +411,13 @@ export class ContractEditing {
     }
     if (current.key && !pending(current.operation) && current.phase !== "discarded") {
       const detail = await this.io.detail(current.repoId, current.key);
+      // A spec folder the configuration cannot name is no slug to fill in.
+      let drafted: string | null;
+      try {
+        drafted = specSlugOf(detail.ticket.admission.spec?.path, this.io.specFolder(current.repoId));
+      } catch {
+        drafted = null;
+      }
       return this.update(current.id, (next) => {
         if (pending(next.operation) || next.phase === "discarded" || next.revision !== current.revision) return;
         const manual = "acceptance_criteria" in detail.contract && detail.contract.acceptance_criteria.some(
@@ -423,12 +435,11 @@ export class ContractEditing {
         // drafted from that very file (D-103).
         //
         // The ticket is where the answer is: admission records the spec's path,
-        // and the slug is the folder it names. Only filled in, never corrected,
-        // because a session already writing a spec is writing the one it knows.
-        if (next.specSlug === null) {
-          const drafted = detail.ticket.admission.spec?.path?.split("/").at(-2);
-          if (drafted !== undefined && SPEC_SLUG.test(drafted)) next.specSlug = drafted;
-        }
+        // and the slug is the folder it names inside this repository's spec
+        // folder, as `specSlugOf` reads it for the host. Only filled in, never
+        // corrected, because a session already writing a spec is writing the
+        // one it knows.
+        if (next.specSlug === null && drafted !== null) next.specSlug = drafted;
         if (detail.digest !== next.digest || detail.ticket.approved_at || manual) {
           next.phase = "conflict";
           next.error = manual
@@ -583,8 +594,8 @@ export class ContractEditing {
       // process, so a session that did not follow it still holds the digest of
       // the contract as it was: reopening the planning finds the file changed
       // and calls it somebody else's edit, which is the conflict {@link open}
-      // is there to catch and this is not one. It only mattered once a session
-      // drafted by the interview started holding a ticket at all ({@link adopt}).
+      // is there to catch and this is not one. A session the interview drafted
+      // holds a ticket from {@link adopt} on, so this holds for it too.
       if (digest !== undefined) session.digest = digest;
     });
   }

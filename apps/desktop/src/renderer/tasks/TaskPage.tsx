@@ -9,7 +9,7 @@ import { LoopScreen } from "./LoopScreen.js";
 import { StoppedScreen } from "./StoppedScreen.js";
 import { planNodes } from "@perbo/contracts/browser";
 import { projectTicket } from "./ticket-workspace.js";
-import { curates, leftAt, problemsOpen } from "../planning/panes.js";
+import { curates, leftAt, planApproved, problemsOpen } from "../planning/panes.js";
 import type { PlanningPane } from "../../shared/protocol.js";
 import {
   CompletionScreen,
@@ -95,17 +95,32 @@ export function TaskPage({
     if (atContract && planning.lastView !== "contract")
       void bridge.request({ kind: "editingContractVisited", id: planning.id }).catch(() => undefined);
   }, [atContract, planning?.id, planning?.lastView]);
+  // Confirming a plan lands on its contract while `perbo inspect` reads the
+  // ticket, which is the step between the plan and the page that freezes it:
+  // the contract of a plan still in planning and not yet approved, asked for
+  // by name, by a person arriving from planning rather than coming back to a
+  // contract they were last on. Every other way onto a ticket's page is only
+  // reading the ticket.
+  const confirming =
+    view === "contract" &&
+    !edit &&
+    planning !== undefined &&
+    planning.lastView !== "contract" &&
+    !planApproved(workspace, repoId, taskKey);
   if (query.isPending)
-    // The same waiting the drafting screens use, because the wait is the same
-    // kind: a command is running and there is nothing to read until it
-    // answers. Confirming a plan lands here while `perbo inspect` reads the
-    // ticket, which is the step between the plan and the page that freezes it.
-    return (
+    return confirming ? (
+      // The same waiting the drafting screens use, because the wait is the
+      // same kind: a command is running and there is nothing to read until it
+      // answers.
       <WaitScreen
         title="Compiling the contract"
         description="Reading the plan, its scope and the base it will run from, so the page that freezes them states what it is freezing."
         status="Reading the ticket and its evidence…"
       />
+    ) : (
+      <div className="launch">
+        <p>Reading the task and its evidence…</p>
+      </div>
     );
   if ((query.error && !(deleting && detail)) || !detail)
     return (

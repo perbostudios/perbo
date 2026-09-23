@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { disposingDrafter, scriptedDrafter, submits } from "./draft/test-support/drafter.js";
+import { disposingDrafter, scriptedDrafter, submits } from "./test-support/drafter.js";
 import { DRIFT_PROMPT_VERSION, readDrift } from "./drift.js";
 import type { DriftFinding, DriftPlan, DriftSpec } from "./drift-report.js";
 import { DraftRejectedError, PlanningError } from "./errors.js";

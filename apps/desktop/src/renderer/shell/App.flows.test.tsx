@@ -30,6 +30,14 @@ configure({ asyncUtilTimeout: 5000 });
 let client: QueryClient;
 let decisionDetail: Detail;
 beforeAll(async () => {
+  // Planning mode loads its panes lazily, and the first test to open one would
+  // otherwise spend its `findBy` budget on the module load, which on a CI
+  // runner takes longer than the wait allows.
+  await Promise.all([
+    import("../planning/SpecPane.js"),
+    import("../planning/GraphPane.js"),
+    import("../tasks/Composer.js"),
+  ]);
   // Keep the recorded review independent of earlier flows that finish this sample run.
   const workspace = await sampleBridge.request({ kind: "snapshot" });
   const row = workspace.tasks.find((task) => task.ticket.key === "PRB-412")!;
@@ -171,7 +179,7 @@ async function runInProgress(key: string, approve = true) {
 
 /** Presses Generate plan once the planning offers it. */
 async function generatePlan(): Promise<void> {
-  const generate = await screen.findByRole("button", { name: "Generate plan" }, { timeout: 5000 });
+  const generate = await screen.findByRole("button", { name: "Generate plan" }, { timeout: 15_000 });
   await waitFor(() => expect((generate as HTMLButtonElement).disabled).toBe(false), { timeout: 5000 });
   fireEvent.click(generate);
 }

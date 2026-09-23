@@ -22,6 +22,7 @@ The name follows D-127: beside the tickets in flight, which `depends_on` may nam
 | `model-record.ts` | `DraftModelRecordSchema`: the provenance of a model's reading — the draft's and the drift reading's — on its own so a renderer can hold one without loading a transport |
 | `drift.ts` | `readDrift`: a model reads the spec beside the plan drafted from it and reports where the two no longer promise the same thing, each difference with answers the person can pick (D-128). `DRIFT_PROMPT_VERSION` is `drift_v1` |
 | `drift-report.ts` | The reading's shape, the verdict kept beside the ticket at `.perbo/tickets/<KEY>.drift.json`, and `promiseTexts`, what a verdict is kept against; no filesystem and no provider, so the desktop's renderer imports it |
+| `drift-record.ts` | `readDriftRecord` and `writeDriftRecord`: that verdict on disk, the one reader and writer the command line and the desktop host both go through, refusing a symlink on the way to it |
 | `assertion-drift.ts` | `assertionsChangedSinceDraft`: the criteria whose assertion moved from the one the draft proposed, read from the draft snapshot's edits, for approval to point a person's eye at |
 | `issue.ts` | `SourceIssue`, the one shape drafting reads, and `fetchGitHubIssue`: `gh issue view … --json` through `@perbo/workspace`'s repository module, Zod-validated, one sentence on failure |
 | `spec.ts` | `parseSpec` and `readSpecFile`: one spec under its five headings, strictly, because a spec about to be drafted from has to be complete |

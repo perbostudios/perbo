@@ -92,11 +92,9 @@ export const ContractDraftSchema = z
      *
      * The spec's title names the work before any plan was drafted; this is
      * named by what the plan turned out to be, and the spec then takes it as
-     * its title. Optional in the parse and asked for in the schema: a
-     * record without one reads, and its ticket is called by what `admit`
-     * falls back to.
+     * its title.
      */
-    name: z.string().min(1).max(60).optional(),
+    name: z.string().min(1).max(60),
     outcome: z.string().min(1),
     /**
      * One or more. The cap of four went with the graph: work too large for four

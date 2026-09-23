@@ -21,6 +21,7 @@ import type {
 } from "../../shared/protocol.js";
 import type { useContractEditing } from "../contract-editor.js";
 import type { Route } from "../shell/route.js";
+import { confirmRoute } from "./panes.js";
 
 /**
  * The Graph pane (D-100, D-101, SCP-316): the plan's execution graph, the size
@@ -139,11 +140,8 @@ export function GraphPane({
   // and the base. Approval happens there and nowhere else: one contract has
   // one approval, on the screen that states what is being approved.
   //
-  // By way of the reading of the plan against its spec
-  // (D-128), which is the one step
-  // between the two and lands on the contract by itself where there is
-  // nothing to say. An approved plan is frozen and goes straight there; the
-  // shortcut takes the same way, so it cannot skip the reading.
+  // Where {@link confirmRoute} says every way there goes; the shortcut takes
+  // the same way, so it cannot skip the reading.
   //
   // Not while the chat is mid-turn on a plan not yet approved: what approving
   // freezes is what the contract holds when it is read (ADR-0016), and a turn
@@ -152,10 +150,7 @@ export function GraphPane({
   const thinking = !view?.approved && (workspace.working ?? []).includes(session?.id ?? "");
   const confirm = (): void => {
     if (view === undefined || busy || action.isPending || thinking) return;
-    const sessionId = session?.id;
-    if (view.approved || sessionId === undefined)
-      navigate({ page: "task", repoId, key: view.key, view: "contract" });
-    else navigate({ page: "planning", sessionId, pane: "drift" });
+    navigate(confirmRoute({ repoId, key: view.key, sessionId: session?.id, approved: view.approved }));
   };
   useShortcut("approve", view === undefined || busy || action.isPending || thinking ? null : confirm);
 

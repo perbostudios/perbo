@@ -33,6 +33,7 @@ const state = ProfileStateSchema.parse({
   settings: SettingsSchema.parse({}),
   repositories: [],
   jobs: [],
+  asks: {},
   titles: { "repo:PRB-1": "Renamed" },
   archived: ["repo:PRB-1"],
 });

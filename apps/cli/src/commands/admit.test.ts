@@ -97,6 +97,7 @@ const issue = {
 const fetchIssue = () => Promise.resolve(issue);
 
 const draft = {
+  name: "Activation email",
   outcome: "New users receive an activation email within 60 seconds of signing up.",
   acceptance_criteria: [
     {
@@ -879,6 +880,22 @@ describe("level is derived, not chosen", () => {
     // A `**` after literal text reaches only what that text matches.
     expect(overlaps("pack**", "packages/review/**")).toBe(true);
     expect(overlaps("apps**", "packages/review/**")).toBe(false);
+    expect(overlaps("**", "packages/review/**")).toBe(true);
+    expect(overlaps("packages/**", "packages/review/**")).toBe(true);
+    expect(overlaps("packages/cli/**", "packages/review/**")).toBe(false);
+    // A scope that ends where the place does or before it, with no `**`,
+    // matches only paths as deep as itself: never one inside the place.
+    expect(overlaps("*", ".perbo/**")).toBe(false);
+    expect(overlaps("docs/*", "docs/adr/**")).toBe(false);
+    expect(overlaps("packages", "packages/review/**")).toBe(false);
+    expect(overlaps("packages/review", "packages/review/**")).toBe(false);
+    // One that goes deeper than the place, inside it, reaches it.
+    expect(overlaps("packages/review/prompt.ts", "packages/review/**")).toBe(true);
+    // A judging glob with no wildcard is one path, and the scope reaches it
+    // only by matching that path.
+    expect(overlaps("SECURITY.md", "SECURITY.md")).toBe(true);
+    expect(overlaps("**.ts", "SECURITY.md")).toBe(false);
+    expect(overlaps("SECURITY.md/notes", "SECURITY.md")).toBe(false);
 
     // End to end: the founder's `*.md` scope is approved beside the store.
     const markdown = repository("judging-root-markdown");

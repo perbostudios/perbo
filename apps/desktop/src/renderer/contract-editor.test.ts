@@ -49,7 +49,7 @@ async function fixture() {
     await editing.settled(job);
   });
   let standing: StandingProhibitedEntry[] = [];
-  const io = { records: () => records, persist, repository: (id: string) => { if (!repositories.has(id)) throw new Error("Disconnected"); }, defaults: () => models, detail, start, stop, id: () => crypto.randomUUID(), standing: () => [...standing], setStanding: (_id: string, entries: StandingProhibitedEntry[]) => { standing = [...entries]; } };
+  const io = { records: () => records, persist, repository: (id: string) => { if (!repositories.has(id)) throw new Error("Disconnected"); }, defaults: () => models, detail, start, stop, id: () => crypto.randomUUID(), specFolder: () => "specs", standing: () => [...standing], setStanding: (_id: string, entries: StandingProhibitedEntry[]) => { standing = [...entries]; } };
   const editing = new ContractEditing(io);
   const request = vi.fn(async <T extends Request>(input: T): Promise<ReplyMap[T["kind"]]> => {
     let result: unknown;

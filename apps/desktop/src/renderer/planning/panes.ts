@@ -1,5 +1,6 @@
 import type { InkIconName } from "../ui/index.js";
 import type { OpenDraft, PlanningPane, Snapshot } from "../../shared/protocol.js";
+import type { Route } from "../shell/route.js";
 
 /**
  * The panes planning mode has, in rail order, each by an id the protocol's
@@ -131,4 +132,33 @@ export function problemsOpen(drafts: Snapshot["drafts"], sessionId: string): boo
 export function reopenPane(drafts: Snapshot["drafts"], sessionId: string): PlanningPane {
   if (problemsOpen(drafts, sessionId)) return "drift";
   return leftAt(drafts, sessionId) ?? "spec";
+}
+
+/** Whether this ticket's plan is approved, as the snapshot's own row for it says. */
+export function planApproved(workspace: Snapshot, repoId: string, key: string): boolean {
+  return workspace.tasks.some(
+    (row) => row.repoId === repoId && row.ticket.key === key && row.ticket.approved_at !== null,
+  );
+}
+
+/**
+ * Where confirming a plan goes, from every place that offers it: the Graph's
+ * footer and its shortcut, the pane footer the other panes share, the Spec's
+ * way to the plan, the criteria's Next and the chat's note.
+ *
+ * By way of the reading of the plan against its spec (D-128), which is the
+ * one step between the plan and the contract and lands on the contract by
+ * itself where there is nothing to say. An approved plan is frozen and goes
+ * straight to its contract, and so does a plan with no planning to read it
+ * in.
+ */
+export function confirmRoute(way: {
+  repoId: string;
+  key: string;
+  sessionId: string | null | undefined;
+  approved: boolean;
+}): Route {
+  return way.approved || way.sessionId == null
+    ? { page: "task", repoId: way.repoId, key: way.key, view: "contract" }
+    : { page: "planning", sessionId: way.sessionId, pane: "drift" };
 }

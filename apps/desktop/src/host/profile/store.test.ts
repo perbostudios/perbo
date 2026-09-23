@@ -49,6 +49,7 @@ const stored = {
   settings: SettingsSchema.parse({}),
   repositories: [],
   jobs: [],
+  asks: {},
 };
 
 describe("the profile's record", () => {
@@ -61,6 +62,12 @@ describe("the profile's record", () => {
     // A profile from before the archive preference has not been seeded, so the
     // first complete listing files what had already finished.
     expect(state.archivedSeeded).toBe(false);
+  });
+
+  it("refuses a record without each repository's unsent ask", () => {
+    const without: Record<string, unknown> = { ...stored };
+    delete without["asks"];
+    expect(() => ProfileStateSchema.parse(without)).toThrow(/asks/);
   });
 
   it("refuses a repository the app could not have registered", () => {
@@ -134,6 +141,7 @@ describe("opening the profile", () => {
     delete settings["notifyOn"];
     const root = directory({
       version: 1,
+      asks: {},
       settings,
       repositories: [],
       jobs: [],
@@ -150,6 +158,7 @@ describe("opening the profile", () => {
     const notifyOn = { decision: true, review: false, ceiling: true, stage: false };
     const root = directory({
       version: 1,
+      asks: {},
       settings: { ...SettingsSchema.parse({}), notifications: false, notifyOn },
       repositories: [],
       jobs: [],
@@ -160,6 +169,7 @@ describe("opening the profile", () => {
   it("marks a job the app closed on interrupted, and says where its outcome is", () => {
     const root = directory({
       version: 1,
+      asks: {},
       settings: SettingsSchema.parse({}),
       repositories: [],
       jobs: [job(), job({ id: "80000000-0000-4000-8000-000000000003", state: "stopping" })],
@@ -175,6 +185,7 @@ describe("opening the profile", () => {
   it("leaves a job that had already finished as it was recorded", () => {
     const root = directory({
       version: 1,
+      asks: {},
       settings: SettingsSchema.parse({}),
       repositories: [],
       jobs: [job({ state: "completed", endedAt: "2026-09-19T09:01:00.000Z", error: null })],
@@ -202,6 +213,7 @@ describe("opening the profile", () => {
   it("carries the record's own bytes, so a save writes what was read", () => {
     const root = directory({
       version: 1,
+      asks: {},
       settings: SettingsSchema.parse({}),
       repositories: [{ id: "80000000-0000-4000-8000-000000000002", name: "a", path: "/a" }],
       jobs: [],

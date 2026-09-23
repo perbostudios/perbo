@@ -6,7 +6,7 @@ import {
   DRAFT_PROMPT_VERSION,
   draftContract,
 } from "./index.js";
-import { graphedDraft, scriptedDrafter, submits, validDraft } from "./test-support/drafter.js";
+import { graphedDraft, scriptedDrafter, submits, validDraft } from "../test-support/drafter.js";
 
 const tree = ["packages/", "packages/auth/", "packages/queue/", "docs/", "README.md"];
 

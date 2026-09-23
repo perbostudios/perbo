@@ -7,7 +7,7 @@ import {
   DRAFT_PROMPT_VERSION,
   draftContract,
 } from "./index.js";
-import { disposingDrafter, scriptedDrafter, submits, validDraft } from "./test-support/drafter.js";
+import { disposingDrafter, scriptedDrafter, submits, validDraft } from "../test-support/drafter.js";
 
 const tree = ["packages/", "packages/auth/", "packages/queue/", "docs/", "README.md"];
 
@@ -242,6 +242,9 @@ describe("the draft schema", () => {
       ContractDraftSchema.safeParse({ ...validDraft, name: "x".repeat(named.maxLength! + 1) }).success,
       "one past it",
     ).toBe(false);
+    const { name, ...unnamed } = validDraft;
+    void name;
+    expect(ContractDraftSchema.safeParse(unnamed).success, "a draft with no name").toBe(false);
     const kinds = schema.properties["acceptance_criteria"]?.items?.properties?.["kind"]?.enum;
     expect(kinds).toEqual(["test", "artifact", "query", "metric"]);
   });
@@ -289,6 +292,13 @@ describe("the name (D-127)", () => {
     const model = scriptedDrafter([submits(validDraft)]);
     await draftContract(input(model));
     expect(String(model.requests[0]!.messages[0]!.content)).not.toContain("perbo:names");
+  });
+
+  it("refuses a draft that comes back without one", async () => {
+    const { name, ...unnamed } = validDraft;
+    void name;
+    const model = scriptedDrafter([submits(unnamed)]);
+    await expect(draftContract(input(model))).rejects.toThrow(DraftRejectedError);
   });
 });
 

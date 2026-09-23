@@ -87,7 +87,10 @@ export interface InterviewDeps {
  */
 export class InterviewHost {
   private readonly deps: InterviewDeps;
-  private readonly live = new Map<string, { repoId: string; child: LineProcess; model: string }>();
+  private readonly live = new Map<
+    string,
+    { repoId: string; child: LineProcess; model: string; exited: Promise<void> }
+  >();
   /**
    * The plannings whose interview is working on what it will say next (D-119).
    *
@@ -232,6 +235,10 @@ export class InterviewHost {
     const repo = this.deps.repository(session.repoId);
     const args = interviewArgv(repo, session, model);
     let stderr = "";
+    let gone: () => void = () => undefined;
+    const exited = new Promise<void>((resolve) => {
+      gone = resolve;
+    });
     const child = this.deps.cli.spawn(args, repo, {
       onLine: (line) => this.relay(id, line),
       // What the chat shows comes off the events; stderr is the same refusals
@@ -242,6 +249,7 @@ export class InterviewHost {
       },
       onClose: ({ code, stopped }) => {
         this.live.delete(id);
+        gone();
         // Whatever the session owed the person, it is not going to say it now:
         // a dock still reporting work on a child that has gone is the reading
         // the indicator exists to prevent.
@@ -267,11 +275,12 @@ export class InterviewHost {
       },
       onError: (error) => {
         this.live.delete(id);
+        gone();
         this.owed.delete(id);
         this.say(id, { kind: "note", text: redact(error.message).slice(0, 12_000) });
       },
     });
-    this.live.set(id, { repoId: repo.id, child, model });
+    this.live.set(id, { repoId: repo.id, child, model, exited });
     // Nothing is said yet: the interview's own `started` event is what says it
     // is there, and until then the only honest word is that it is starting,
     // which is what `running` on this change carries.
@@ -356,6 +365,16 @@ export class InterviewHost {
     this.deps.reread(id);
     this.askingChanged(id);
     return this.status(id);
+  }
+
+  /**
+   * Settled once this planning's interview has gone, and at once where none is
+   * running. A stop ends stdin and the session finishes the turn it is in, so
+   * the child can still write the spec between the stop and its exit: whatever
+   * reads or deletes the spec after a stop waits for this first.
+   */
+  exited(id: string): Promise<void> {
+    return this.live.get(id)?.exited ?? Promise.resolve();
   }
 
   /** Every interview goes when the app closes; each ends through its own stdin. */

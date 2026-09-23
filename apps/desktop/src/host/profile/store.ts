@@ -59,7 +59,7 @@ export const ProfileStateSchema = z.object({
    * Each repository's unsent answer to "What do you want to build?", by
    * repository id (D-131).
    */
-  asks: z.record(z.string(), z.string()).default({}),
+  asks: z.record(z.string(), z.string()),
   editingSessions: z.array(EditingSessionSchema).default([]),
 });
 export type ProfileState = z.infer<typeof ProfileStateSchema>;

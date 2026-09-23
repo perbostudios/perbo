@@ -54,17 +54,20 @@ export function setArchived(
 }
 
 /**
- * The planning sessions that were drafting this ticket, marked discarded in
- * place: the contract they were editing has gone, so there is nothing for a
- * resume to open.
+ * The planning sessions drafting this ticket, marked discarded in place: the
+ * contract they edit has gone, so there is nothing for a resume to open.
+ * Answers with the ids it marked, whose chats go with them.
  */
-export function discardEditingFor(state: ProfileState, repoId: string, key: string): void {
+export function discardEditingFor(state: ProfileState, repoId: string, key: string): string[] {
+  const marked: string[] = [];
   for (const session of state.editingSessions)
     if (session.repoId === repoId && session.key === key && session.phase !== "discarded") {
       session.phase = "discarded";
       session.resumeNew = false;
       session.revision++;
+      marked.push(session.id);
     }
+  return marked;
 }
 
 /**

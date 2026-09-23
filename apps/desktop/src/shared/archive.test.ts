@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { TicketStateSchema } from "@perbo/contracts";
-import { isArchivable, isFiled } from "./archive.js";
+import { TICKET_STATES, TicketStateSchema } from "@perbo/contracts";
+import { isArchivable, isFiled, isPreLoop } from "./archive.js";
 import type { Job, TaskRow } from "./protocol.js";
 
 const row = (state: string): Pick<TaskRow, "repoId" | "ticket"> =>
@@ -51,5 +51,43 @@ describe("what may be archived", () => {
     const snapshot = { archived: ["repo:PRB-1"] };
     expect(isFiled({ ...snapshot, jobs: [] }, row("failed"))).toBe(true);
     expect(isFiled({ ...snapshot, jobs: [job("running")] }, row("executing"))).toBe(false);
+  });
+});
+
+describe("what Home shows and what the picker shows", () => {
+  const row = (state: string) =>
+    ({ repoId: "repo-1", repository: "test", ticket: { key: "PRB-1", state } }) as unknown as Parameters<
+      typeof isPreLoop
+    >[0];
+
+  it("keeps a plan nobody has approved off Home, because it is still being planned", () => {
+    expect(isPreLoop(row("plan_review"))).toBe(true);
+    expect(isPreLoop(row("draft"))).toBe(true);
+    expect(isPreLoop(row("specifying"))).toBe(true);
+  });
+
+  it("keeps the loop's own work on Home, from the moment approval starts it", () => {
+    // `ready` is approved and queued, which is the loop carrying it. If this
+    // ever reads true, Home has hidden work that is actually running.
+    for (const state of ["ready", "provisioning", "executing", "verifying", "pr_open", "merged", "done"])
+      expect(isPreLoop(row(state)), state).toBe(false);
+  });
+
+  it("puts every state Home refuses into the picker, so no ticket is nowhere", () => {
+    // Home and the picker are one split, not two filters: a state absent from
+    // both is a ticket a person cannot reach at all. The picker lists what
+    // isPreLoop says Home does not.
+    const refused = TICKET_STATES.filter((state) => isPreLoop(row(state)));
+    // Exactly the states the picker restores. Widen PRE_LOOP_STATES without
+    // widening what the picker lists and this fails, which is the only way a
+    // ticket ends up on neither surface.
+    expect([...refused]).toEqual(["draft", "specifying", "plan_review"]);
+    expect(refused.length).toBeLessThan(TICKET_STATES.length);
+  });
+
+  it("leaves a ticket that died before it ran on Home, which is the only place it is visible", () => {
+    // `plan_invalid` is terminal and was approved, so it is not planning to
+    // resume; hiding it would leave a dead ticket nowhere (D-103).
+    expect(isPreLoop(row("plan_invalid"))).toBe(false);
   });
 });

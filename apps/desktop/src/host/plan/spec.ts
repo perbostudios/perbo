@@ -1,24 +1,26 @@
-import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-  DriftRecordSchema,
   EMPTY_SPEC_TEXT,
   PlanningError,
   SpecConflict,
+  driftHash,
   parseSpec,
+  readDriftRecord,
   readSpecText,
   requirementNodes,
   retitleSpecFile,
+  writeDriftRecord,
   writeNodePages,
   writeSpecFile,
 } from "@perbo/planning";
 import type { Ticket } from "@perbo/contracts";
 import { specFolder } from "../repository/config.js";
-import { ticketPath } from "../repository/layout.js";
+import { perboPath } from "../repository/layout.js";
 import { safePath } from "../repository/paths.js";
 import { sectionsOf } from "../../shared/contract-editing.js";
 import { SPEC_SLUG } from "../../shared/protocol.js";
+import { specSlugOf } from "../../shared/spec-slug.js";
 import type { ContractEditing } from "../../shared/contract-editing.js";
 import type { ChangeMarks } from "./marks.js";
 import type { RegisteredRepository } from "../profile/store.js";
@@ -98,24 +100,16 @@ export function repositorySpecs(repo: RegisteredRepository): SpecRow[] {
 }
 
 /**
- * The spec folder a ticket was drafted from, by name, or null where it was not
- * drafted from one this repository keeps.
- *
- * Read against the folder the repository uses now rather than by taking the
- * last-but-one segment of whatever was recorded: a repository that moved its
- * spec folder would otherwise have `specs/foo/spec.md` answer "foo" and a
- * delete reach `docs/specs/foo`, a live spec that ticket never named.
+ * The slug of the spec a ticket was drafted from, in the folder this
+ * repository keeps specs in now, or null where its record names none there:
+ * `specSlugOf`'s answer, with the folder read. Throws where the repository's
+ * configured spec folder cannot be read.
  */
-export function specSlugOf(
+export function ticketSpecSlug(
+  repo: RegisteredRepository,
   ticket: { admission: { spec?: { path?: string } | null } },
-  folder: string,
 ): string | null {
-  const path = ticket.admission.spec?.path;
-  if (path === undefined || path === null) return null;
-  const parts = path.split("/");
-  const slug = parts.at(-2);
-  if (parts.at(-1) !== "spec.md" || slug === undefined || !SPEC_SLUG.test(slug)) return null;
-  return parts.slice(0, -2).join("/") === folder ? slug : null;
+  return specSlugOf(ticket.admission.spec?.path, specFolder(repo));
 }
 
 /**
@@ -143,25 +137,25 @@ export async function nameSpecAfterRename(
   const ticket = (await tickets.list(repo)).tickets.find((entry) => entry.key === key);
   if (ticket === undefined || ticket.approved_at) return false;
   const folder = specFolder(repo);
-  const slug = specSlugOf(ticket, folder);
+  const slug = specSlugOf(ticket.admission.spec?.path, folder);
   if (slug === null) return false;
   const path = `${folder}/${slug}/spec.md`;
   const at = safePath(repo, ...path.split("/"));
   if (!existsSync(at)) return false;
-  const digest = (): string => "sha256:" + createHash("sha256").update(readFileSync(at)).digest("hex");
-  const before = digest();
+  const before = driftHash(readFileSync(at));
   retitleSpecFile({ repositoryRoot: repo.path, path, title });
-  const after = digest();
-  const drift = ticketPath(repo, key, ".drift.json");
-  if (after === before || !existsSync(drift) || lstatSync(drift).isSymbolicLink()) return true;
+  const after = driftHash(readFileSync(at));
+  if (after === before) return true;
+  const store = perboPath(repo);
   let record;
   try {
-    record = DriftRecordSchema.parse(JSON.parse(readFileSync(drift, "utf8")));
-  } catch {
+    record = readDriftRecord(store, key);
+  } catch (error) {
     // A record that does not read is left for `perbo drift` to name.
-    return true;
+    if (error instanceof PlanningError) return true;
+    throw error;
   }
-  if (record.spec === before) writeFileSync(drift, `${JSON.stringify({ ...record, spec: after }, null, 2)}\n`);
+  if (record !== null && record.spec === before) writeDriftRecord(store, key, { ...record, spec: after });
   return true;
 }
 

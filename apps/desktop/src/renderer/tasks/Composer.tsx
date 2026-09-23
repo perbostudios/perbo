@@ -12,6 +12,7 @@ import { useContractEditing } from "../contract-editor.js";
 import type { PageProps } from "../shell/route.js";
 import { isLive } from "../../shared/jobs.js";
 import { contractDraft } from "../../shared/contract-editing.js";
+import { confirmRoute, planApproved } from "../planning/panes.js";
 export function Composer({
   workspace, navigate, existing, existingRepoId, onCancel, target: chosen, plan = false,
 }: PageProps & {
@@ -57,10 +58,14 @@ export function Composer({
       // planning decides where that lands, and it has a pane for it — and
       // walking off to the ticket would take them off the page they came to
       // read. Pressing Next is the one thing that means "on to the contract",
-      // by way of the reading of the plan against its spec
-      // (D-128), as every way there goes.
+      // the way every way there goes.
       if (!compiling.current) return;
-      navigate({ page: "planning", sessionId: session.id, pane: "drift" });
+      navigate(confirmRoute({
+        repoId: session.repoId,
+        key: session.key,
+        sessionId: session.id,
+        approved: planApproved(workspace, session.repoId, session.key),
+      }));
       return;
     }
     // Otherwise, always the ticket. Where a drafted ticket belongs — the graph
@@ -431,14 +436,15 @@ export function Composer({
         <div className="workspace-errors">
           <Notice tone="danger">{readError ?? currentJob?.error}</Notice>
           <Button onClick={() => { void editor.retry(); }}>Retry saved edits</Button>
-          {/* From planning, the contract is reached by way of the plan read
-              against its spec, as every way there is
-              (D-128); an error here is
-              not a reason to skip the reading. */}
+          {/* From planning, the contract is reached the way every way there
+              goes; an error here is not a reason to skip the reading. */}
           <Button onClick={() => navigate(currentKey
-            ? plan && session
-              ? { page: "planning", sessionId: session.id, pane: "drift" }
-              : { page: "task", repoId, key: currentKey, view: "contract" }
+            ? confirmRoute({
+                repoId,
+                key: currentKey,
+                sessionId: plan ? session?.id : null,
+                approved: planApproved(workspace, repoId, currentKey),
+              })
             : { page: "home" })}>
             {currentKey ? "Open the current contract" : "Check saved tasks"}
           </Button>
@@ -467,7 +473,13 @@ export function Composer({
           variant="primary"
           disabled={!valid || pending}
           onClick={() => {
-            if (plan && !changed && currentKey && session) navigate({ page: "planning", sessionId: session.id, pane: "drift" });
+            if (plan && !changed && currentKey && session)
+              navigate(confirmRoute({
+                repoId,
+                key: currentKey,
+                sessionId: session.id,
+                approved: planApproved(workspace, repoId, currentKey),
+              }));
             else compile();
           }}
         >

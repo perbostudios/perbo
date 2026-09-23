@@ -1,6 +1,7 @@
 import { Button } from "../ui/index.js";
 import type { PageProps } from "../shell/route.js";
 import type { useContractEditing } from "../contract-editor.js";
+import { confirmRoute, planApproved } from "./panes.js";
 
 type Editor = ReturnType<typeof useContractEditing>;
 
@@ -19,9 +20,8 @@ type Editor = ReturnType<typeof useContractEditing>;
  * pane that does not say what it is freezing would be a person agreeing to
  * something they were never shown.
  *
- * It goes by way of the reading of the plan against its spec
- * (D-128), as every way from the plan
- * to the contract does; an approved plan is frozen and goes straight there.
+ * It goes where {@link confirmRoute} says every way from the plan to the
+ * contract goes.
  *
  * The Graph keeps its own footer rather than this one: it says the same thing
  * with the division's file count and the run queued ahead of it, which are
@@ -41,10 +41,7 @@ export function ConfirmPlan({
   // No plan, nothing to confirm: during the spec these panes are read while the
   // work is still being described, and there is no contract to go to yet.
   if (key === null) return null;
-  const approved =
-    workspace.tasks.find(
-      (row) => row.repoId === editor.repoId && row.ticket.key === key,
-    )?.ticket.approved_at != null;
+  const approved = planApproved(workspace, editor.repoId, key);
   // A turn in flight may still move this plan, and what approving freezes is
   // what the contract holds when it is read (ADR-0016). The way onward waits
   // for the turn, and says so rather than going quiet.
@@ -62,9 +59,7 @@ export function ConfirmPlan({
         variant="primary"
         disabled={busy || thinking}
         onClick={() =>
-          approved || editor.session === null
-            ? navigate({ page: "task", repoId: editor.repoId, key, view: "contract" })
-            : navigate({ page: "planning", sessionId: editor.session.id, pane: "drift" })
+          navigate(confirmRoute({ repoId: editor.repoId, key, sessionId: editor.session?.id, approved }))
         }
       >
         {approved ? "Open the contract" : "Confirm the plan"}

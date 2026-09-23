@@ -1,6 +1,11 @@
 import { existsSync, lstatSync, rmSync } from "node:fs";
 import type { Ticket } from "@perbo/contracts";
 import { heldRepository } from "../../shared/jobs.js";
+import {
+  DELETE_TICKET_GONE,
+  DELETE_WAITS_FOR_COMMANDS,
+  deletePullRequestOpen,
+} from "../../shared/discard.js";
 import { listBundles } from "../records.js";
 import { attemptsPath, bundleManifestPath, bundlesPath, ticketPath } from "../repository/layout.js";
 import { discardEditingFor, forgetTicket } from "../profile/preferences.js";
@@ -11,6 +16,11 @@ export interface DiscardDeps {
   tickets: { list(repo: RegisteredRepository): Promise<{ tickets: Ticket[] }> };
   profile: { state: ProfileState };
   liveJobs(): Job[];
+  /**
+   * Stop the chats of these plannings and settle once each child has exited,
+   * so no turn is still in flight when the delete removes what it writes.
+   */
+  stopChats(ids: readonly string[]): Promise<void>;
 }
 
 /**
@@ -40,18 +50,19 @@ export async function discardTicket(
   repo: RegisteredRepository,
   key: string,
 ): Promise<string | null> {
-  if (heldRepository(deps.liveJobs(), repo.id))
-    return "Wait for the commands running in this repository to finish before deleting a contract.";
+  if (heldRepository(deps.liveJobs(), repo.id)) return DELETE_WAITS_FOR_COMMANDS;
   const ticket = (await deps.tickets.list(repo)).tickets.find((entry) => entry.key === key);
-  if (!ticket) return "This task is no longer in the repository's ticket store.";
+  if (!ticket) return DELETE_TICKET_GONE;
   // The one stage a delete does not reach: the pull request is on GitHub and
   // this machine does not own it, so taking the ticket would leave it open
   // with nothing here to read it against.
-  if (ticket.state === "pr_open")
-    return (
-      `${key} has a pull request open, and that is a record this machine does not own. Close ` +
-      "or merge it on GitHub first, then delete the work."
-    );
+  if (ticket.state === "pr_open") return deletePullRequestOpen(key);
+  // A planning discarded here takes its chat with it (D-102), and nothing is
+  // removed until that chat has gone: a turn in flight finishes after its
+  // stdin closes, writing the spec back and running `perbo edit` against this
+  // ticket, so a file taken from under it is a turn that fails half-written
+  // and a folder taken from under it is written again.
+  await deps.stopChats(discardEditingFor(deps.profile.state, repo.id, key));
   const remove = (path: string): void => {
     if (existsSync(path) && !lstatSync(path).isSymbolicLink()) rmSync(path);
   };
@@ -71,6 +82,5 @@ export async function discardTicket(
   for (const bundle of listBundles(bundlesPath(repo)))
     if (bundle.ticket_id === ticket.ticket_id) remove(bundleManifestPath(repo, bundle.file));
   forgetTicket(deps.profile.state, repo.id, key);
-  discardEditingFor(deps.profile.state, repo.id, key);
   return null;
 }

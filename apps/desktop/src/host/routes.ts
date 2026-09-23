@@ -3,11 +3,12 @@ import { openDrafts, promiseOf } from "../shared/contract-editing.js";
 import { DraftSchema, HELP_LINKS, RequestSchema, TaskModelsSchema } from "../shared/protocol.js";
 import { heldRepository } from "../shared/jobs.js";
 import { isArchivable, notArchivable } from "../shared/archive.js";
+import { specSlugOf } from "../shared/spec-slug.js";
 import { listExplorer, readExplorerFile } from "./explorer.js";
 import { exportedNames } from "./symbols.js";
 import { graphView } from "./plan/graph.js";
 import { contractImpact, impactView } from "./plan/impact.js";
-import { nameSpecAfterRename, saveSpec, specPath, specSlugOf, specView, type SpecDeps } from "./plan/spec.js";
+import { nameSpecAfterRename, saveSpec, specPath, specView, type SpecDeps } from "./plan/spec.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
@@ -228,8 +229,8 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     editingVisited: (request) => m.editing.visit(request.id, request.pane),
     editingContractVisited: (request) => m.editing.visitContract(request.id),
     editingDiscard: async (request) => {
-      // The chat goes with the planning it belonged to: there is no longer a
-      // spec for the interview to write or a plan for it to change.
+      // The chat goes with the planning it belongs to: a discarded planning has
+      // no spec for the interview to write and no plan for it to change.
       //
       // And so does the ticket this planning drafted: throwing the plan away
       // and leaving the ticket on the board would delete the way in and not
@@ -243,15 +244,19 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       // throw away work this planning did not do and cannot give back.
       const session = m.editing.read(request.id);
       const discarded = m.editing.discard(request.id, request.revision);
+      // Waited out before anything is deleted: a session whose stdin has closed
+      // finishes the turn it is in, and a turn that writes the spec after the
+      // folder has gone writes it back.
       m.interviews.stop(request.id);
+      await m.interviews.exited(request.id);
       let refused: string | null = null;
       if (session.key !== null && session.admitted)
         refused = await discardDrafted(m, repository(session.repoId), session.key);
       // A planning that never took the ticket its own spec was drafted into
       // still deletes it. The bin does not open the session, so nothing has
-      // joined the two (`editingOpen` heals a planning that is opened); left
-      // here, the delete removes the planning and the picker puts the ticket
-      // back under the same title, which is the copy this was reported as.
+      // joined the two (`editingOpen` heals a planning that is opened); a
+      // ticket left here would put a row back in the picker under the same
+      // title, which reads as the delete having made a copy.
       //
       // Only a plan still in plan_review, and only where no other planning is
       // curating it: a plan this planning's spec was drafted into and then ran
@@ -391,7 +396,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       // it may not have. That is not a reason to refuse the delete.
       const slug = (() => {
         try {
-          return held === undefined ? null : specSlugOf(held, specFolder(repo));
+          return held === undefined ? null : specSlugOf(held.admission.spec?.path, specFolder(repo));
         } catch {
           return null;
         }
@@ -557,7 +562,22 @@ async function discardDrafted(
   key: string,
 ): Promise<string | null> {
   const refusal = await discardTicket(
-    { tickets: m.ticketRecords, profile: m.profile, liveJobs: () => m.jobs.live() },
+    {
+      tickets: m.ticketRecords,
+      profile: m.profile,
+      liveJobs: () => m.jobs.live(),
+      stopChats: async (ids) => {
+        const running = new Set(m.interviews.running());
+        await Promise.all(
+          ids
+            .filter((id) => running.has(id))
+            .map((id) => {
+              m.interviews.stop(id);
+              return m.interviews.exited(id);
+            }),
+        );
+      },
+    },
     repo,
     key,
   );
@@ -632,12 +652,17 @@ function fromSpec(
       // should not have to end the conversation by hand first and then press
       // again: this press ends it. The stop winds the turn up — what was held
       // is said, the change is recorded, and the note handing the spec over is
-      // put — so the draft reads the file that turn left behind. Behind the
-      // refusal above, so a standing question still stops this: its answers are
-      // what would change the spec (D-102). Not on a re-draft, where the
-      // conversation is a chat about a plan that exists and ending it is no
-      // part of drafting it again.
-      if (request.kind === "generatePlan") m.interviews.stop(request.id);
+      // put — and the draft waits for the child to exit, because a session
+      // whose stdin has closed finishes the turn it is in and can write the
+      // spec until it goes: the draft reads the file that turn left behind.
+      // Behind the refusal above, so a standing question still stops this: its
+      // answers are what would change the spec (D-102). Not on a re-draft,
+      // where the conversation is a chat about a plan that exists and ending it
+      // is no part of drafting it again.
+      if (request.kind === "generatePlan") {
+        m.interviews.stop(request.id);
+        await m.interviews.exited(request.id);
+      }
       // What the plan promised before it is drafted again, for the marks on the
       // re-draft. A first draft has no before, and records nothing.
       const before = request.kind === "startOver" ? m.marks.promiseAt(repo, request.key) : null;
@@ -682,7 +707,7 @@ async function replan(
   // field, and a recorded path that leaves this repository's spec folder is a
   // spec this admission has no business reading.
   const folder = specFolder(repo);
-  const slug = specSlugOf(ticket, folder);
+  const slug = specSlugOf(ticket.admission.spec?.path, folder);
   if (slug === null)
     throw new Error(
       `${request.key} was not drafted from a spec, so there is no spec to start over from. A plan ` +

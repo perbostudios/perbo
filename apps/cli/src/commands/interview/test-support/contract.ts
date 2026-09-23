@@ -142,6 +142,7 @@ export function drafter(): Model {
 }
 
 export const drafted = {
+  name: "Activation email",
   outcome: "New users receive an activation email within 60 seconds of signing up.",
   acceptance_criteria: [
     {

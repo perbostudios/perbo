@@ -78,6 +78,7 @@ function host(repo: RegisteredRepository) {
     },
     stop: () => Promise.resolve(),
     id: () => crypto.randomUUID(),
+    specFolder: () => "specs",
     standing: () => [],
     setStanding: () => undefined,
   });

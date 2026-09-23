@@ -28,6 +28,7 @@ function fixture(standing: StandingProhibitedEntry[] = []) {
     start: () => Promise.reject(new Error("nothing runs in this test")),
     stop: () => Promise.resolve(),
     id: () => crypto.randomUUID(),
+    specFolder: () => "specs",
     standing: () => [...list],
     setStanding: (_repo, entries) => {
       list = [...entries];

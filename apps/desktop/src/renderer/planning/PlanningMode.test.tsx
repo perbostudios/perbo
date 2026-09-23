@@ -17,28 +17,15 @@ import {
   resetDockWidth,
 } from "../shell/dock-size.js";
 import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests } from "../../shared/shortcuts.js";
-import {
-  ticketsNoDraftStandsFor,
-  titleOfDraft,
-  unclaimedSpecs,
-  withDraft,
-} from "../shell/create.js";
-import { isPreLoop } from "../../shared/archive.js";
+import { withDraft } from "../shell/create.js";
 import { untouchedPlanning } from "../../shared/contract-editing.js";
 import { isLive } from "../../shared/jobs.js";
-import { TICKET_STATES } from "@perbo/contracts";
 import { SpecSection } from "./SpecSection.js";
-import {
-  firstSentence,
-  foldAllowList,
-  handedOver,
-  sayWorking,
-  waitsOnWords,
-} from "./InterviewDock.js";
+import { firstSentence } from "./InterviewDock.js";
 import { GraphInspector } from "./GraphInspector.js";
 import type { GraphEdit } from "@perbo/contracts/browser";
 import { INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
-import type { ExportedName, OpenDraft, Snapshot } from "../../shared/protocol.js";
+import type { ExportedName, Snapshot } from "../../shared/protocol.js";
 import * as planningBrowser from "@perbo/planning/browser";
 
 let client: QueryClient;
@@ -342,266 +329,6 @@ describe("Create in the rail (SCP-334)", () => {
     expect(
       within(picker).getByRole("button", { name: /^Have a dark mode/ }).textContent,
     ).toContain("spec written, no plan yet");
-  });
-
-  describe("what the dock says the session is doing", () => {
-    it("names the work in hand rather than calling every pause thinking", () => {
-      // "Thinking…" is true of every pause and says nothing about any of them.
-      expect(sayWorking({ kind: "tool", tool: "read_plan", ok: true, detail: "", edit: null } as never)).toBe(
-        "Reading the plan…",
-      );
-      expect(sayWorking({ kind: "tool", tool: "edit_plan", ok: true, detail: "", edit: null } as never)).toBe(
-        "Changing the plan…",
-      );
-      expect(sayWorking({ kind: "turn", text: "do it" } as never)).toBe("Reading what you said…");
-      expect(sayWorking({ kind: "refused", tool: "Bash", rule: "r", target: null, reason: "x" } as never)).toBe(
-        "Trying another way…",
-      );
-      expect(sayWorking(undefined)).toBe("Reading the repository…");
-    });
-
-    it("says nothing under the note that is already the whole status", () => {
-      // The spec is written, the note says so and names the three ways on. A
-      // line under it saying the session is working reads as more being owed
-      // before the person may act, and nothing is: the spec is readable now
-      // (D-102).
-      expect(
-        sayWorking({ kind: "note", text: INTERVIEW_WROTE_THE_SPEC, notable: true } as never),
-      ).toBeNull();
-      // Any other note is not that note, and the pause under it is still a
-      // pause.
-      expect(
-        sayWorking({ kind: "note", text: "Writing the spec…" } as never),
-      ).toBe("Thinking…");
-    });
-
-    it("says something for a tool it does not know, rather than its argument name", () => {
-      // A tool added later reads as work rather than as nothing.
-      expect(sayWorking({ kind: "tool", tool: "some_new_tool", ok: true, detail: "", edit: null } as never)).toBe(
-        "Working…",
-      );
-      // And one that failed is being answered, not repeated.
-      expect(sayWorking({ kind: "tool", tool: "edit_plan", ok: false, detail: "", edit: null } as never)).toBe(
-        "Reading what came back…",
-      );
-    });
-  });
-
-  describe("a command the session may not run", () => {
-    const refused = (n: number, rule: string) =>
-      ({ n, at: "2026-01-01T00:00:00.000Z", line: { kind: "refused", tool: "Bash", rule, target: null, reason: "r" } }) as never;
-    const said = (n: number) =>
-      ({ n, at: "2026-01-01T00:00:00.000Z", line: { kind: "said", text: "hello" } }) as never;
-
-    it("folds a run of them into one, because it is one thing that happened", () => {
-      const folded = foldAllowList([
-        refused(1, "command_allow_list"),
-        refused(2, "command_allow_list"),
-        refused(3, "command_allow_list"),
-      ]);
-      expect(folded).toHaveLength(1);
-      expect(folded[0]!.tried).toBe(3);
-    });
-
-    it("folds every rule where nothing shows a write, not only the allow list", () => {
-      // The runner's own rules split this way: a shape the guard cannot vouch
-      // for is recorded and the attempt runs on, where a write rule ends it.
-      for (const rule of ["command_allow_list", "unreadable_program", "unreadable_inline_program"])
-        expect(foldAllowList([refused(1, rule)])[0]!.tried, rule).toBe(1);
-    });
-
-    it("keeps the card for every rule that does show a write", () => {
-      // These are the ones a person should act on, and the red belongs to them.
-      for (const rule of [
-        "write_outside_worktree",
-        "write_outside_scope",
-        "write_prohibited_path",
-        "command_deny_list",
-        "git_credential_config",
-      ])
-        expect(foldAllowList([refused(1, rule)])[0]!.tried, rule).toBeUndefined();
-    });
-
-    it("keeps a refusal that matters as its own line, whatever it sits beside", () => {
-      // A write it may not make is not the session finding the edge of what it
-      // can read: it is the thing to act on, and it keeps its own card.
-      const folded = foldAllowList([
-        refused(1, "command_allow_list"),
-        refused(2, "write_outside_scope"),
-        refused(3, "command_allow_list"),
-      ]);
-      expect(folded.map((each) => each.tried)).toEqual([1, undefined, 1]);
-    });
-
-    it("does not fold across anything else, since those are separate events", () => {
-      const folded = foldAllowList([
-        refused(1, "command_allow_list"),
-        said(2),
-        refused(3, "command_allow_list"),
-      ]);
-      expect(folded).toHaveLength(3);
-      expect(folded.map((each) => each.tried)).toEqual([1, undefined, 1]);
-    });
-
-    it("leaves a conversation with none of them alone", () => {
-      expect(foldAllowList([said(1), said(2)]).map((each) => each.tried)).toEqual([
-        undefined,
-        undefined,
-      ]);
-    });
-  });
-
-  describe("what Home shows and what the picker shows", () => {
-    const row = (state: string) =>
-      ({ repoId: "repo-1", repository: "test", ticket: { key: "PRB-1", state } }) as unknown as Parameters<
-        typeof isPreLoop
-      >[0];
-
-    it("keeps a plan nobody has approved off Home, because it is still being planned", () => {
-      expect(isPreLoop(row("plan_review"))).toBe(true);
-      expect(isPreLoop(row("draft"))).toBe(true);
-      expect(isPreLoop(row("specifying"))).toBe(true);
-    });
-
-    it("keeps the loop's own work on Home, from the moment approval starts it", () => {
-      // `ready` is approved and queued, which is the loop carrying it. If this
-      // ever reads true, Home has hidden work that is actually running.
-      for (const state of ["ready", "provisioning", "executing", "verifying", "pr_open", "merged", "done"])
-        expect(isPreLoop(row(state)), state).toBe(false);
-    });
-
-    it("puts every state Home refuses into the picker, so no ticket is nowhere", () => {
-      // Home and the picker are one split, not two filters: a state absent from
-      // both is a ticket a person cannot reach at all. The picker lists what
-      // isPreLoop says Home does not.
-      const refused = TICKET_STATES.filter((state) => isPreLoop(row(state)));
-      // Exactly the states the picker restores. Widen PRE_LOOP_STATES without
-      // widening what the picker lists and this fails, which is the only way a
-      // ticket ends up on neither surface.
-      expect([...refused]).toEqual(["draft", "specifying", "plan_review"]);
-      expect(refused.length).toBeLessThan(TICKET_STATES.length);
-    });
-
-    it("leaves a ticket that died before it ran on Home, which is the only place it is visible", () => {
-      // `plan_invalid` is terminal and was approved, so it is not planning to
-      // resume; hiding it would leave a dead ticket nowhere (D-103).
-      expect(isPreLoop(row("plan_invalid"))).toBe(false);
-    });
-  });
-
-  it("names a planning by its spec, then by the plan's own shorter name", () => {
-    const spec = { repoId: "repo-1", slug: "a-clock-app", title: "A clock app" };
-    const writing = { repoId: "repo-1", specSlug: "a-clock-app", key: null, outcome: "" } as OpenDraft;
-    const held = { specs: [spec], tasks: [], titles: {} } as unknown as Parameters<typeof titleOfDraft>[0];
-
-    // During the interview there is no outcome and no ticket, and "Untitled
-    // work" would stand beside a spec the person has already titled.
-    expect(titleOfDraft(held, writing)).toBe("A clock app");
-
-    // Once a plan is drafted, its ticket's title — not the outcome, which is a
-    // sentence stating what will be true and reads as a paragraph in a list.
-    const planned = {
-      specs: [spec],
-      titles: {},
-      tasks: [{ repoId: "repo-1", ticket: { key: "PRB-2", title: "Clock app" } }],
-    } as unknown as Parameters<typeof titleOfDraft>[0];
-    expect(
-      titleOfDraft(planned, {
-        ...writing,
-        key: "PRB-2",
-        outcome: "A person can read the time on a clock that updates every second without a reload.",
-      }),
-    ).toBe("Clock app");
-
-    // And with none of them, the row still says something.
-    expect(titleOfDraft({ specs: [], tasks: [], titles: {} } as unknown as Parameters<typeof titleOfDraft>[0], writing)).toBe(
-      "Untitled work",
-    );
-  });
-
-  it("lists a drafted plan once, under the planning that is writing its spec", () => {
-    // A plan the interview drafted leaves the session holding the spec, so
-    // listing the planning and the ticket would be two rows for one piece of
-    // work: deleting either would leave the other standing under the same
-    // title, and opening the ticket would start a second planning beside the
-    // first (D-101, D-103).
-    const ticket = (key: string, slug: string | null) => ({
-      repoId: "repo-1",
-      ticket: {
-        key,
-        admission: slug === null ? null : { spec: { path: `specs/${slug}/spec.md` } },
-      },
-    });
-    const writing = { id: "a", repoId: "repo-1", specSlug: "a-clock-app", key: null } as OpenDraft;
-    expect(ticketsNoDraftStandsFor([ticket("PRB-2", "a-clock-app")], [writing])).toEqual([]);
-    // Still covered once the session does hold the ticket, by the key.
-    const holding = { ...writing, key: "PRB-2" } as OpenDraft;
-    expect(ticketsNoDraftStandsFor([ticket("PRB-2", "a-clock-app")], [holding])).toEqual([]);
-
-    // And a ticket no planning is writing keeps its own row, which is the way
-    // into a plan the command line admitted.
-    expect(
-      ticketsNoDraftStandsFor([ticket("PRB-3", "another-spec")], [writing]).map(
-        (row) => row.ticket.key,
-      ),
-    ).toEqual(["PRB-3"]);
-    expect(
-      ticketsNoDraftStandsFor([ticket("PRB-4", null)], [writing]).map((row) => row.ticket.key),
-    ).toEqual(["PRB-4"]);
-    // A planning with no spec stands for nothing: matching on the missing slug
-    // would hide every ticket the command line admitted with no spec at all.
-    const nameless = { id: "c", repoId: "repo-1", specSlug: null, key: null } as OpenDraft;
-    expect(
-      ticketsNoDraftStandsFor([ticket("PRB-4", null)], [nameless]).map((row) => row.ticket.key),
-    ).toEqual(["PRB-4"]);
-    // And a spec of the same name in another repository is another spec.
-    const elsewhere = { ...writing, repoId: "repo-2" } as OpenDraft;
-    expect(
-      ticketsNoDraftStandsFor([ticket("PRB-2", "a-clock-app")], [elsewhere]).map(
-        (row) => row.ticket.key,
-      ),
-    ).toEqual(["PRB-2"]);
-  });
-
-  describe("which specs the picker offers", () => {
-    const spec = { repoId: "repo-1", slug: "have-a-dark-mode", title: "Have a dark mode" };
-    const ticketFor = (path: string | null) =>
-      ({
-        repoId: "repo-1",
-        repository: "test",
-        ticket: { key: "PRB-1", admission: { spec: path === null ? null : { path } } },
-      }) as unknown as Snapshot["tasks"][number];
-
-    it("offers one no planning and no ticket names", () => {
-      expect(unclaimedSpecs({ specs: [spec], tasks: [] }, [])).toEqual([spec]);
-    });
-
-    it("does not offer one a planning is writing", () => {
-      const draft = { repoId: "repo-1", specSlug: "have-a-dark-mode" } as OpenDraft;
-      expect(unclaimedSpecs({ specs: [spec], tasks: [] }, [draft])).toEqual([]);
-    });
-
-    it("does not offer one a ticket was drafted from, which is the only claim a CLI admission leaves", () => {
-      // No session at all: this arm is what a ticket the command line admitted
-      // is read through, and reading only the sessions would offer a spec whose
-      // plan is already on the board.
-      const tasks = [ticketFor("specs/have-a-dark-mode/spec.md")];
-      expect(unclaimedSpecs({ specs: [spec], tasks }, [])).toEqual([]);
-    });
-
-    it("reads the slug from the folder, whatever folder the repository keeps specs in", () => {
-      const tasks = [ticketFor("docs/specs/have-a-dark-mode/spec.md")];
-      expect(unclaimedSpecs({ specs: [spec], tasks }, [])).toEqual([]);
-    });
-
-    it("keeps a spec apart from one of the same name in another repository", () => {
-      const draft = { repoId: "repo-2", specSlug: "have-a-dark-mode" } as OpenDraft;
-      expect(unclaimedSpecs({ specs: [spec], tasks: [] }, [draft])).toEqual([spec]);
-    });
-
-    it("is unbothered by a ticket that was never drafted from a spec", () => {
-      expect(unclaimedSpecs({ specs: [spec], tasks: [ticketFor(null)] }, [])).toEqual([spec]);
-    });
   });
 
   it("lists a session Send just opened, before the host's refresh lands", async () => {
@@ -3409,6 +3136,37 @@ describe("the Graph pane (SCP-316)", () => {
       await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/));
     });
 
+    it("takes the chat's Confirm the plan through the reading of the plan against its spec, as the Graph's is", async () => {
+      const plan = await problems();
+      answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
+      answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
+      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
+      location.hash = `planning/${plan.id}/graph`;
+      await screen.findByRole("heading", { name: "Execution graph" });
+      const dock = screen.getByRole("complementary", { name: "Chat" });
+      const note = await within(dock).findByText(/^Every problem is resolved/);
+      // A rewording by hand after the problems were resolved, which only a
+      // reading made on the way to the contract can find.
+      await sampleBridge.request({
+        kind: "graphEdit",
+        repoId: plan.repoId,
+        key: plan.key,
+        edit: {
+          op: "set_criterion",
+          id: "ac_1",
+          text: "The person can choose Light or Dark, after a restart.",
+          expected_verification: { kind: "test", assertion: "after a restart" },
+        },
+      });
+      await waitFor(async () =>
+        expect((await graphOf(plan)).criteria.find((each) => each.id === "ac_1")?.text).toMatch(/after a restart/),
+      );
+      fireEvent.click(within(note).getByRole("button", { name: "Confirm the plan" }));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
+      await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+      expect(location.hash).toBe(`#planning/${plan.id}/drift`);
+    });
+
     it("withholds the chat's way on while a question from the interview stands, and offers it again once answered", async () => {
       const plan = await problems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
@@ -3690,21 +3448,21 @@ describe("the Graph pane (SCP-316)", () => {
       expect(within(again).getByText("Problem 1 of 2")).toBeTruthy();
       // A question the interview asks of its own stands instead, and the
       // reading after it puts nothing over it.
+      const readings = () =>
+        sampleBridge
+          .request({ kind: "snapshot" })
+          .then((snapshot) => snapshot.jobs.filter((job) => job.kind === "drift" && job.key === plan.key));
+      const before = (await readings()).length;
       fireEvent.click(within(again).getByRole("radio", { name: /Something else/ }));
       fireEvent.change(await within(again).findByLabelText("Your own words"), {
         target: { value: "ask me" },
       });
       sendGroup(again);
       await within(dock()).findByRole("group", { name: "How the queue is split" }, { timeout: 5000 });
-      const readings = () =>
-        sampleBridge
-          .request({ kind: "snapshot" })
-          .then((snapshot) => snapshot.jobs.filter((job) => job.kind === "drift" && job.key === plan.key));
-      const before = (await readings()).length;
       await waitFor(
         async () => {
           const jobs = await readings();
-          expect(jobs.length).toBeGreaterThan(before - 1);
+          expect(jobs.length).toBeGreaterThan(before);
           expect(jobs.every((job) => job.state === "completed")).toBe(true);
         },
         { timeout: 5000 },
@@ -4563,8 +4321,6 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     };
     /** Whether the composer's rim pulses. */
     const rim = (): boolean => composer().closest(".composer-box")?.classList.contains("awaiting-words") ?? false;
-    /** A line of a conversation, for reading one without a session. */
-    const entry = (n: number, line: unknown) => ({ n, at: "2026-09-23T00:00:00.000Z", line }) as never;
 
     it("takes a pick back when it is clicked again, and sends nothing until every part has one", async () => {
       const plan = await onSpec();
@@ -4645,7 +4401,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       await within(dock()).findByText(/^The spec is written/, {}, { timeout: 5000 });
       // Before the plan nothing is folded.
       expect(within(dock()).queryByRole("button", { name: /Show the earlier chat/ })).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Generate plan" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Generate plan" }));
       await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/(graph|criteria)$/), {
         timeout: 5000,
       });
@@ -4795,18 +4551,6 @@ describe("the interview docked in planning mode (SCP-313)", () => {
         expect(hint).not.toContain(answer);
     });
 
-    it("puts no line under the note that hands the spec over, for the rest of its turn", () => {
-      // The note is the status for the rest of the turn it is said in,
-      // whatever the session does after it (D-102); the next turn starts over.
-      const turn = entry(1, { kind: "turn", text: "write it" });
-      const note = entry(2, { kind: "note", text: INTERVIEW_WROTE_THE_SPEC, notable: true });
-      const tool = entry(3, { kind: "tool", tool: "read_plan", ok: true, detail: "", edit: null });
-      expect(handedOver([turn, note])).toBe(true);
-      expect(handedOver([turn, note, tool])).toBe(true);
-      expect(handedOver([turn, entry(2, { kind: "note", text: "Named specs/x." })])).toBe(false);
-      expect(handedOver([turn, note, entry(4, { kind: "turn", text: "and more" })])).toBe(false);
-    });
-
     it("gives the chat no hints on how to answer: no key hints, no explaining placeholders, no helper lines", async () => {
       await onSpec();
       // Nothing said yet, and nothing telling them what to say.
@@ -4890,25 +4634,6 @@ describe("the interview docked in planning mode (SCP-313)", () => {
       // Once the turn is over, it is.
       await turnOver(plan.id);
       await waitFor(() => expect(rim()).toBe(true));
-    });
-
-    it("reads what the conversation leaves to the person's words", () => {
-      const turn = entry(1, { kind: "turn", text: "go on" });
-      const said = (text: string) => entry(2, { kind: "said", text });
-      // The first message, where nothing of the conversation was dropped.
-      expect(waitsOnWords([], 0)).toBe(true);
-      // A conversation cut to its last lines had a first message, dropped.
-      expect(waitsOnWords([entry(401, { kind: "said", text: "Done." })], 400)).toBe(false);
-      // A question, however it is closed.
-      for (const text of ["Which one?", 'Which one?"', "Which one?)", "Which one?**", "Which one?”", "Which one? "])
-        expect(waitsOnWords([turn, said(text)], 0), text).toBe(true);
-      expect(waitsOnWords([turn, said("That is done.")], 0)).toBe(false);
-      // Work after the question does not take it back; a note does.
-      const tool = entry(3, { kind: "tool", tool: "read_plan", ok: true, detail: "", edit: null });
-      expect(waitsOnWords([turn, said("Which one?"), tool], 0)).toBe(true);
-      expect(waitsOnWords([turn, said("Which one?"), entry(3, { kind: "note", text: "The chat ended: gone." })], 0)).toBe(
-        false,
-      );
     });
 
     it("sends the chat's box on Enter", async () => {
@@ -4999,7 +4724,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     ).toBeTruthy();
 
     // The press is the pane's, and it is theirs.
-    const press = screen.getByRole("button", { name: "Generate plan" }) as HTMLButtonElement;
+    const press = (await screen.findByRole("button", { name: "Generate plan" })) as HTMLButtonElement;
     expect(press.closest('[role="complementary"]'), "at the foot of the spec").toBeNull();
     fireEvent.click(press);
     await waitFor(
@@ -5045,7 +4770,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     expect(within(note).queryByRole("button", { name: "Generate plan" })).toBeNull();
     expect(within(dock()).queryByRole("button", { name: "Generate plan" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Generate plan" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Generate plan" }));
     await waitFor(
       () => expect(location.hash).toMatch(/^#planning\/[^/]+\/(graph|criteria)$/),
       { timeout: 5000 },

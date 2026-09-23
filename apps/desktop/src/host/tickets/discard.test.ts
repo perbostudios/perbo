@@ -38,15 +38,24 @@ function state(): ProfileState {
     settings: SettingsSchema.parse({}),
     repositories: [],
     jobs: [],
+    asks: {},
     titles: { [repoId + ":PRB-1"]: "Renamed" },
     archived: [repoId + ":PRB-1"],
   });
 }
-function deps(over: { ticket?: Ticket; jobs?: Job[]; profile?: ProfileState } = {}): DiscardDeps {
+function deps(
+  over: {
+    ticket?: Ticket;
+    jobs?: Job[];
+    profile?: ProfileState;
+    stopChats?: DiscardDeps["stopChats"];
+  } = {},
+): DiscardDeps {
   return {
     tickets: { list: () => Promise.resolve({ tickets: [over.ticket ?? ticket()] }) },
     profile: { state: over.profile ?? state() },
     liveJobs: () => over.jobs ?? [],
+    stopChats: over.stopChats ?? (() => Promise.resolve()),
   };
 }
 /** A planning session drafting one ticket, as the profile records it. */
@@ -220,6 +229,7 @@ describe("discardTicket", () => {
       settings: SettingsSchema.parse({}),
       repositories: [],
       jobs: [],
+      asks: {},
       editingSessions: [planning("PRB-1"), planning("PRB-2")],
     }).editingSessions;
     await discardTicket(deps({ profile }), repo, "PRB-1");
@@ -227,5 +237,66 @@ describe("discardTicket", () => {
       "discarded",
       "editing",
     ]);
+  });
+
+  it("stops the chat of every planning it discards, and removes nothing until each has exited", async () => {
+    const repo = repository();
+    const profile = state();
+    profile.editingSessions = ProfileStateSchema.parse({
+      version: 1,
+      settings: SettingsSchema.parse({}),
+      repositories: [],
+      jobs: [],
+      asks: {},
+      editingSessions: [planning("PRB-1"), planning("PRB-2")],
+    }).editingSessions;
+    const stopped: string[][] = [];
+    const heldWhenStopped: boolean[] = [];
+    let exit: () => void = () => undefined;
+    const exited = new Promise<void>((resolve) => {
+      exit = resolve;
+    });
+    let settled = false;
+    const discarding = discardTicket(
+      deps({
+        profile,
+        stopChats: (ids) => {
+          stopped.push([...ids]);
+          heldWhenStopped.push(existsSync(ticketPath(repo, "PRB-1", ".json")));
+          return exited;
+        },
+      }),
+      repo,
+      "PRB-1",
+    ).then((refusal) => {
+      settled = true;
+      return refusal;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(stopped).toEqual([["80000000-0000-4000-8000-000000000003"]]);
+    expect(heldWhenStopped, "the chats are stopped before anything is removed").toEqual([true]);
+    expect(settled, "the delete waits for the chat to exit").toBe(false);
+    for (const suffix of [".json", ".contract.json", ".draft.json"] as const)
+      expect(existsSync(ticketPath(repo, "PRB-1", suffix)), `${suffix} waits for the chat`).toBe(true);
+    exit();
+    await expect(discarding).resolves.toBeNull();
+    expect(existsSync(ticketPath(repo, "PRB-1", ".json"))).toBe(false);
+  });
+
+  it("stops no chat where the delete is refused", async () => {
+    const repo = repository();
+    const stopped: string[][] = [];
+    await discardTicket(
+      deps({
+        ticket: ticket({ state: "pr_open" }),
+        stopChats: (ids) => {
+          stopped.push([...ids]);
+          return Promise.resolve();
+        },
+      }),
+      repo,
+      "PRB-1",
+    );
+    expect(stopped).toEqual([]);
   });
 });

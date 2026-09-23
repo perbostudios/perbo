@@ -90,10 +90,10 @@ describe("the spec a planning session holds", () => {
   };
 
   it("takes the spec folder with the planning that was writing it", async () => {
-    // A piece of work is one thing and is deleted as one. Leaving the writing
-    // behind put a row back in the picker under the same title the moment the
-    // delete finished, which reads as the delete having made a copy of the
-    // thing it removed (D-129).
+    // A piece of work is one thing and is deleted as one. Writing left behind
+    // puts a row back in the picker under the same title the moment the delete
+    // finishes, which reads as the delete having made a copy of the thing it
+    // removed (D-129).
     const { service, repo } = fixture();
     const registered = await service.registerRepository(repo);
     const session = await service.request({
@@ -198,10 +198,23 @@ describe("the spec a planning session holds", () => {
       sections,
     });
     await admitted(service, registered.id);
+    // The planning takes the ticket as it is opened, without claiming it made
+    // it, and the record then names the other folder.
+    recordSpecPath(repo, "specs/a-light-colour-mode/spec.md");
+    const resumed = await service.request({
+      kind: "editingOpen",
+      target: { kind: "session", id: session.id },
+    });
+    expect(resumed.key).toBe("PRB-1");
     recordSpecPath(repo, "docs/specs/a-light-colour-mode/spec.md");
+    const folder = join(repo, "specs", "a-light-colour-mode");
 
+    // Thrown away, so no planning holds the folder and what keeps it is the
+    // folder the records name: the ticket the planning holds names another.
+    await service.request({ kind: "editingDiscard", id: session.id });
+    expect(existsSync(folder), "the spec here, after the planning").toBe(true);
     await service.request({ kind: "discard", repoId: registered.id, key: "PRB-1" });
-    expect(existsSync(join(repo, "specs", "a-light-colour-mode")), "the spec here").toBe(true);
+    expect(existsSync(folder), "the spec here, after the ticket").toBe(true);
   });
 
   it("keeps the spec where the ticket naming it was not deleted", async () => {
@@ -2118,6 +2131,10 @@ const fs = require('node:fs');
 const readline = require('node:readline');
 fs.writeFileSync(${JSON.stringify(argv)}, JSON.stringify(process.argv.slice(2)));
 const send = (event) => process.stdout.write(JSON.stringify(event) + '\n');
+// The spec folder a turn still in flight writes as the session winds down,
+// where one is, and whether that write waits for the folder to be deleted: a
+// session whose stdin has closed finishes the turn it is in.
+let windsDown = null;
 send({ type: 'started', session_id: 'sdk-session-1', spec: 'specs/activation-email/spec.md',
   adr: 'docs/adr', model: null, tools: ['edit_plan', 'undo_edit', 'read_plan', 'ask_options'] });
 readline.createInterface({ input: process.stdin })
@@ -2175,6 +2192,20 @@ readline.createInterface({ input: process.stdin })
     if (turn.text.includes('write and hang')) {
       const argv = process.argv.slice(2);
       fs.appendFileSync(argv[argv.indexOf('--spec') + 1] + '/spec.md', '\nAnd the spec says so.\n');
+      send({ type: 'wrote_spec' });
+      return;
+    }
+    // A turn that writes the spec and never ends until stdin closes, and then
+    // writes it once more before it exits, a while after the stop: the Claude
+    // session finishes the turn it is in after its stdin has closed. The
+    // second write comes 200 ms after the close, or, for 'write back after a
+    // delete', as soon as the folder has gone, or 2.5 s after the close where
+    // it has not: inside the host's grace before it signals.
+    if (turn.text.includes('write as it winds down') || turn.text.includes('write back after a delete')) {
+      const argv = process.argv.slice(2);
+      windsDown = { folder: argv[argv.indexOf('--spec') + 1],
+        waitsForTheDelete: turn.text.includes('write back after a delete') };
+      fs.appendFileSync(windsDown.folder + '/spec.md', '\nAnd the spec says so.\n');
       send({ type: 'wrote_spec' });
       return;
     }
@@ -2265,7 +2296,23 @@ readline.createInterface({ input: process.stdin })
     // whole of it.
     send({ type: 'idle' });
   })
-  .on('close', () => { send({ type: 'ended', session_id: 'sdk-session-1', reason: 'the session ended' }); });
+  .on('close', () => {
+    const ended = () => send({ type: 'ended', session_id: 'sdk-session-1', reason: 'the session ended' });
+    if (windsDown === null) return ended();
+    const { folder, waitsForTheDelete } = windsDown;
+    const write = () => {
+      fs.mkdirSync(folder, { recursive: true });
+      fs.appendFileSync(folder + '/spec.md', '\nWritten as the turn wound down.\n');
+      ended();
+    };
+    if (!waitsForTheDelete) return void setTimeout(write, 200);
+    const closedAt = Date.now();
+    const poll = setInterval(() => {
+      if (fs.existsSync(folder) && Date.now() - closedAt < 2500) return;
+      clearInterval(poll);
+      write();
+    }, 10);
+  });
 `,
       { mode: 0o700 },
     );
@@ -2335,6 +2382,7 @@ readline.createInterface({ input: process.stdin })
     also?: Partial<ServiceOptions>,
   ): Promise<{
     service: DesktopService;
+    repo: string;
     repoId: string;
     id: string;
     changes: Change[];
@@ -2362,7 +2410,7 @@ readline.createInterface({ input: process.stdin })
       title: "Activation email",
       sections: SECTIONS,
     });
-    return { service: made.service, repoId: registered.id, id: session.id, changes };
+    return { service: made.service, repo: made.repo, repoId: registered.id, id: session.id, changes };
   }
 
   /** What the status line said a planning's turns were doing, in the order it said it. */
@@ -2958,6 +3006,106 @@ readline.createInterface({ input: process.stdin })
     // The fixture has no drafter behind `admit`, so the job itself fails; what
     // this test is about is what had already happened by the time it ran.
     expect(held.state).toBe("failed");
+  });
+
+  it("drafts from the spec a stopped turn writes before its child exits", async () => {
+    // A stop ends the chat's stdin, and the session finishes the turn it is in
+    // after that, so the turn can still write the spec until the child exits.
+    // The press waits for the exit: the draft reads the file the turn left
+    // behind (D-102), and what `admit` reads is what it titles, hashes and
+    // seeds the plan's reading against its spec with.
+    const read: { spec: string; running: boolean }[] = [];
+    let planning: { service: DesktopService; id: string } | null = null;
+    const runs: typeof runProcess = async (binary, args, options) => {
+      const at = args.indexOf("--from-spec");
+      if (at < 0) return runProcess(binary, args, options);
+      // The bytes `admit` is handed, at the moment it is invoked.
+      read.push({
+        spec: readFileSync(join(args[args.indexOf("--repo") + 1]!, args[at + 1]!), "utf8"),
+        running: ((await planning!.service.snapshot()).interviews ?? []).includes(planning!.id),
+      });
+      return { code: 1, stdout: "", stderr: "no drafter in this fixture", cancelled: false };
+    };
+    const made = await writing(runs);
+    planning = made;
+    const { service, repoId, id, changes } = made;
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "write as it winds down" });
+    await writingSaid(changes, id);
+
+    await finished(service, (await service.request({ kind: "generatePlan", repoId, id })).id);
+    expect(read).toHaveLength(1);
+    expect(read[0]!.spec).toContain("And the spec says so.");
+    expect(read[0]!.spec, "the write the turn made after its stdin closed").toContain(
+      "Written as the turn wound down.",
+    );
+    expect(read[0]!.running, "the chat had exited when the draft began").toBe(false);
+  });
+
+  /**
+   * A chat on the planning mid-turn that writes the spec once more after its
+   * stdin closes, as soon as the spec folder has gone, and then exits: the
+   * turn a delete has to wait out, since a delete that removes the folder
+   * first has it written back.
+   */
+  async function windingDown(): Promise<Awaited<ReturnType<typeof writing>> & { folder: string }> {
+    const made = await writing();
+    await made.service.request({ kind: "interviewStart", repoId: made.repoId, id: made.id });
+    await running(made.service, made.id);
+    await made.service.request({ kind: "interviewTurn", id: made.id, text: "write back after a delete" });
+    await writingSaid(made.changes, made.id);
+    return { ...made, folder: join(made.repo, "specs", "activation-email") };
+  }
+
+  /** The spec folder, gone once the chat has exited and with it anything its turn writes. */
+  async function staysGone(service: DesktopService, id: string, folder: string): Promise<void> {
+    const until = Date.now() + 20_000;
+    while (((await service.snapshot()).interviews ?? []).includes(id)) {
+      if (Date.now() > until) throw new Error("The chat never exited");
+      await delay(10);
+    }
+    expect(existsSync(folder), "the spec folder goes with the work, and no turn wrote it back").toBe(false);
+  }
+
+  it("stops the chat and waits out its turn before deleting the planning's spec", async () => {
+    const { service, id, folder } = await windingDown();
+    await service.request({ kind: "editingDiscard", id });
+    expect((await service.snapshot()).interviews ?? [], "the chat has gone").not.toContain(id);
+    await staysGone(service, id, folder);
+  });
+
+  it("stops the chat of a planning over a ticket deleted from its contract, and waits out its turn", async () => {
+    // Deleting the work from the contract page discards the planning drafting
+    // it, and the planning's chat goes with it (D-102): stopped, and exited
+    // before the spec folder goes (D-129), or the turn it is in writes the
+    // spec back into a folder the delete removed.
+    const { service, repo, repoId, id, folder } = await windingDown();
+    await finished(service, (await service.request({ kind: "admit", repoId, draft })).id);
+    const at = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as {
+      state: string;
+      admission: { spec?: unknown };
+    };
+    ticket.state = "plan_review";
+    ticket.admission.spec = {
+      path: "specs/activation-email/spec.md",
+      content_sha256: "sha256:" + "0".repeat(64),
+      files: [],
+      names_that_resolved: null,
+      symbols_judged_at_approval: false,
+    };
+    writeFileSync(at, JSON.stringify(ticket));
+    // The planning takes the plan drafted from its spec as it is opened.
+    expect(
+      (await service.request({ kind: "editingOpen", target: { kind: "session", id } })).key,
+    ).toBe("PRB-1");
+    expect((await service.snapshot()).interviews ?? []).toContain(id);
+
+    await service.request({ kind: "discard", repoId, key: "PRB-1" });
+    expect((await service.request({ kind: "editingRead", id })).phase).toBe("discarded");
+    expect((await service.snapshot()).interviews ?? [], "the chat has gone").not.toContain(id);
+    await staysGone(service, id, folder);
   });
 
   it("refuses to draft a plan while a group of the interview's questions stands", async () => {

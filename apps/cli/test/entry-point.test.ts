@@ -76,9 +76,9 @@ describe.sequential("the entry point", () => {
 
   // One cold spawn of the built binary per command, each individually bounded
   // by `spawnBuilt`'s own deadline, so a genuine hang fails there and this
-  // budget only ever bounds how slowly twenty of them run together. Nineteen
-  // take about a minute on the loaded machine SCP-191 measures against, so the
-  // budget is that with room, and it grows as the table does.
+  // budget only ever bounds how slowly twenty of them run together: what the
+  // table takes on the loaded machine SCP-191 measures against, with room, and
+  // it grows as the table does.
   it("carries all twenty commands", () => {
     for (const command of [...WITHOUT_ADMISSION, ...WITH_HISTORY]) {
       const help = invoke("main.js", [command, "--help"]);

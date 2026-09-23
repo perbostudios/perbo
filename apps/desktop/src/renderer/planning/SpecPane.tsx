@@ -10,6 +10,7 @@ import { SpecSection } from "./SpecSection.js";
 import { INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
 import type { Change, ExportedName, SpecSections, SpecView } from "../../shared/protocol.js";
 import type { PageProps } from "../shell/route.js";
+import { confirmRoute, planApproved } from "./panes.js";
 
 const Composer = lazy(() =>
   import("../tasks/Composer.js").then((module) => ({ default: module.Composer })),
@@ -639,14 +640,14 @@ export function SpecPane({
                   <Button
                     disabled={midTurn}
                     onClick={() =>
-                      workspace.tasks.some(
-                        (row) =>
-                          row.repoId === editor.repoId &&
-                          row.ticket.key === key &&
-                          row.ticket.approved_at !== null,
+                      navigate(
+                        confirmRoute({
+                          repoId: editor.repoId,
+                          key,
+                          sessionId,
+                          approved: planApproved(workspace, editor.repoId, key),
+                        }),
                       )
-                        ? navigate({ page: "task", repoId: editor.repoId, key, view: "contract" })
-                        : navigate({ page: "planning", sessionId, pane: "drift" })
                     }
                   >
                     Open the plan

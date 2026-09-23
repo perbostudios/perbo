@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES, hasAcceptanceCriteria } from "@perbo/contracts";
 import { SUBMIT_REVIEW_TOOL, type Model, type ModelRequest, type ModelTurn } from "@perbo/model";
-import { DriftVerdictSchema, type DriftFinding } from "@perbo/planning";
+import { DriftVerdictSchema, driftRecordPath, type DriftFinding } from "@perbo/planning";
 import { initRepository } from "@perbo/test-support";
 import { runCommandLine } from "../command-line/terminal.js";
 import { readContract, storeDir } from "../store/tickets.js";
 import { recordStreams } from "../test-support/streams.js";
 import { UsageError } from "../usage-error.js";
 import { admitCommandLine } from "./admit.js";
-import { driftRecordPath, readDriftRecord } from "../store/drift.js";
+import { readDriftRecord } from "../store/drift.js";
 import { driftCommandLine } from "./drift.js";
 import { editCommandLine } from "./edit/index.js";
 
@@ -96,6 +96,7 @@ function unreachable(): Model {
 }
 
 const drafted = {
+  name: "Activation email",
   outcome: "New users receive an activation email within 60 seconds of signing up.",
   acceptance_criteria: [
     {

@@ -39,10 +39,8 @@ import {
 } from "@perbo/contracts/browser";
 import {
   ContractEditing,
-  changeBetween,
   interviewModelFor,
   interviewProviderFor,
-  promiseOf,
   REREAD_COULD_NOT_START,
   sectionsOf,
   specFindings,
@@ -51,8 +49,14 @@ import {
   type PromisePair,
   type TurnMark,
 } from "../shared/contract-editing.js";
+import { ChangeMarks } from "../shared/change-marks.js";
 import { assembleLiveGraph } from "../shared/graph-live.js";
-import { busyMessage, exclusiveJob, isLive, journal, lane } from "../shared/jobs.js";
+import { busyMessage, exclusiveJob, heldRepository, isLive, journal, lane } from "../shared/jobs.js";
+import {
+  DELETE_TICKET_GONE,
+  DELETE_WAITS_FOR_COMMANDS,
+  deletePullRequestOpen,
+} from "../shared/discard.js";
 import type {
   PlanContract,
   ReviewArtifact,
@@ -74,11 +78,9 @@ import type {
   TaskSummary,
   Change,
   ChangeInput,
-  EditingChange,
   EditingSession,
   ModelCatalog,
   ModelProvider,
-  PlanPromise,
   SpecSections,
   SpecView,
   GraphCriterionView,
@@ -1593,13 +1595,14 @@ export function draftFromSpec(key: string, markdown: string, slug: string): void
 }
 
 export const editingRecords = () => parseStored(EditingSessionSchema.array(), JSON.parse(localStorage.getItem("perbo:preview-editing") ?? "[]"), 'localStorage["perbo:preview-editing"]');
+function persistEditing(records: EditingSession[]): void {
+  const previous = editingRecords();
+  localStorage.setItem("perbo:preview-editing", JSON.stringify(records));
+  for (const record of records) if (JSON.stringify(previous.find((entry) => entry.id === record.id)) !== JSON.stringify(record)) emit({ kind: "editing", sessionId: record.id });
+}
 export const editing = new ContractEditing({
   records: editingRecords,
-  persist: (records) => {
-    const previous = editingRecords();
-    localStorage.setItem("perbo:preview-editing", JSON.stringify(records));
-    for (const record of records) if (JSON.stringify(previous.find((entry) => entry.id === record.id)) !== JSON.stringify(record)) emit({ kind: "editing", sessionId: record.id });
-  },
+  persist: persistEditing,
   repository: (id) => {
     if (!snapshot.repositories.some((repo) => repo.id === id)) throw new Error("This sample repository is no longer connected.");
   },
@@ -1611,6 +1614,8 @@ export const editing = new ContractEditing({
   start: (request, owner) => answer(request, owner),
   stop: async (jobId) => { await answer({ kind: "cancel", jobId }); },
   id: () => crypto.randomUUID(),
+  // The sample repository keeps its specs in the default folder.
+  specFolder: () => "specs",
   standing: (id) => standingFor(id),
   setStanding: (id, entries) => {
     writeStanding(id, entries);
@@ -1780,6 +1785,12 @@ export function startSampleInterview(id: string): InterviewStatus {
  * Its own function because Generate plan makes the same ending: one press
  * stops the interview and drafts from what it left behind.
  */
+/** The chat of a planning that has been discarded, ended with it (D-102). */
+export function endPlanningChat(id: string): void {
+  sampleInterviews.delete(id);
+  sampleWorking.delete(id);
+  emit({ kind: "interview", sessionId: id, running: false, entry: null, asking: askingOf(id), working: false, doing: null });
+}
 export function stopSampleInterview(id: string): void {
   sampleInterviews.delete(id);
   sampleWorking.delete(id);
@@ -1820,7 +1831,7 @@ function windUpTurn(id: string): void {
   saidDrafted.delete(id);
   afterTheNote.delete(id);
   sampleDoing.delete(id);
-  recordChangeSince(id, pairAtTurn.get(id));
+  marks.recordChangeSince(id, pairAtTurn.get(id));
   pairAtTurn.delete(id);
 }
 
@@ -1863,72 +1874,36 @@ function saySpecIsDrafted(id: string, before: PromisePair | null | undefined): v
   converse(id, { kind: "note", text: INTERVIEW_WROTE_THE_SPEC, notable: true });
 }
 
-/**
- * The spec and the plan's promise as this planning holds them now, as the
- * host reads them off its files (D-128):
- * null on a side the planning does not have, and null as a whole where the
- * session has gone, which is then not measured.
- */
-export function pairOf(id: string): PromisePair | null {
-  try {
-    const session = editing.read(id);
-    return {
-      spec: session.specSlug === null ? null : specSectionsAt(session.specSlug),
-      plan: session.key === null ? null : promiseAt(session.key),
-    };
-  } catch {
-    return null;
-  }
-}
 /** The five sections of a spec as its file says them, or null where there is no file. */
 export function specSectionsAt(slug: string): SpecSections | null {
   const markdown = specFiles()[slug];
   return markdown === undefined ? null : sectionsOf(readSpecSections(markdown).text);
 }
-/** What the ticket's plan promises, or null where it has no contract. */
-export function promiseAt(key: string): PlanPromise | null {
-  const plan = plans.get(key);
-  return plan === undefined ? null : promiseOf(plan);
-}
 /** The pair as it stood when the first turn owed began, keyed by planning, as the host keeps it. */
 export const pairAtTurn = new Map<string, PromisePair | null>();
-/** Record on this planning what changed since `before`, where anything did and both readings could be made. */
-function recordChangeSince(id: string, before: PromisePair | null | undefined): void {
-  if (before === undefined || before === null) return;
-  const after = pairOf(id);
-  if (after === null) return;
-  const change = changeBetween(before, after, new Date().toISOString());
-  if (change !== null) markChange(id, change);
-}
-/** Record the change between two readings, where anything moved, on every live planning `on` names, as the host does. */
-export function markChangeOn(before: PromisePair, after: PromisePair, on: (session: EditingSession) => boolean): void {
-  const change = changeBetween(before, after, new Date().toISOString());
-  if (change === null) return;
-  for (const session of editingRecords())
-    if (session.phase !== "discarded" && on(session)) markChange(session.id, change);
-}
-/** Record a change to what this ticket's plan promises on every planning over it. */
-export function recordPlanChange(key: string, before: PlanPromise | null): void {
-  if (before === null) return;
-  const after = promiseAt(key);
-  if (after !== null) markChangeOn({ spec: null, plan: before }, { spec: null, plan: after }, (session) => session.key === key);
-}
 /**
- * Put the change on the planning's record as the last one, as the host does:
- * a record that will not take it is said in the chat, and the edit or the
- * save that made the change is not failed for it.
+ * The change marks (D-128) over the sample's records, marked as the host marks
+ * them (D-120): the sample's specs are one set whatever the repository, and a
+ * ticket's plan is the contract it holds. A line the chat would say of a
+ * planning that has gone is not said.
  */
-function markChange(id: string, change: EditingChange): void {
-  try {
-    editing.recordChange(id, change);
-  } catch (error) {
-    if (!stillThere(id)) return;
-    converse(id, {
-      kind: "note",
-      text: `The change could not be marked on the panes: ${error instanceof Error ? error.message : String(error)}`.slice(0, 12_000),
-    });
-  }
-}
+export const marks = new ChangeMarks<{ readonly id: string }>({
+  read: (id) => editing.read(id),
+  sessions: () => editingRecords(),
+  repository: (id) => ({ id }),
+  spec: (_repo, slug) => specSectionsAt(slug),
+  contract: (_repo, key) => {
+    const plan = plans.get(key);
+    if (plan === undefined) throw new Error(`${key} has no contract.`);
+    return plan;
+  },
+  recordChange: (id, change) => editing.recordChange(id, change),
+  say: (id, line) => {
+    if (stillThere(id)) converse(id, line);
+  },
+  // The sample's errors are its own words, with no credential in them.
+  redact: (text) => text,
+});
 
 /**
  * The plannings with a reading of their plan against the spec in flight, as
@@ -2236,9 +2211,9 @@ export function answerSampleTurn(id: string, text: string): void {
       // And the session goes on composing after it, as a real one can: what
       // it says once the note is out is not shown, because the note is what
       // the turn says (D-102). The turn ends there, and saying so is what
-      // takes the turn off the dock — a branch that returned without it left
-      // the sample saying it was working for ever, which is the one thing
-      // this pane must never do. Dropped where the turn has already been
+      // takes the turn off the dock — a branch that returned without it would
+      // leave the sample saying it is working for ever, which is the one
+      // thing this pane must never do. Dropped where the turn has already been
       // wound up under it, by the press that drafts or by a stop.
       setTimeout(() => {
         if (!sampleWorking.has(id) || !stillThere(id)) return;
@@ -2365,9 +2340,20 @@ export function answerSampleTurn(id: string, text: string): void {
   }, pause);
 }
 
-/** Take a sample ticket off the board with everything kept beside it, as the host deletes its files. */
-export function dropTicket(row: TaskRow): void {
-  const key = row.ticket.key;
+/**
+ * Delete a sample ticket with everything kept beside it, as the host's
+ * `discardTicket` deletes its files, and answer with the reason it stays where
+ * it does, in the host's words and in the host's order (D-129): a command
+ * running in the repository holds every delete, and a ticket whose pull
+ * request is open is the one stage a delete does not reach. The attempts and
+ * the bundles they sealed are held beside the ticket here rather than in a
+ * store of their own, so they go with it.
+ */
+export function discardTicket(repoId: string, key: string): string | null {
+  if (heldRepository(snapshot.jobs, repoId)) return DELETE_WAITS_FOR_COMMANDS;
+  const row = snapshot.tasks.find((entry) => entry.repoId === repoId && entry.ticket.key === key);
+  if (row === undefined) return DELETE_TICKET_GONE;
+  if (row.ticket.state === "pr_open") return deletePullRequestOpen(key);
   snapshot.tasks = snapshot.tasks.filter((entry) => entry !== row);
   plans.delete(key);
   approaches.delete(key);
@@ -2377,4 +2363,30 @@ export function dropTicket(row: TaskRow): void {
   // The reading of the plan against its spec goes with the plan, as the host
   // drops `<KEY>.drift.json` beside the ticket.
   driftRecords.delete(key);
+  // Its preferences, as the host forgets them: a key is never handed out
+  // again, so once the ticket is gone they name nothing.
+  const entry = repoId + ":" + key;
+  const { [entry]: title, ...titles } = snapshot.titles ?? {};
+  const { [entry]: models, ...taskModels } = snapshot.taskModels ?? {};
+  void title;
+  void models;
+  snapshot.titles = titles;
+  snapshot.taskModels = taskModels;
+  snapshot.archived = (snapshot.archived ?? []).filter((item) => item !== entry);
+  // And every planning over it, as the host discards them, with their chats
+  // (D-102): a planning over a ticket that is gone has nothing left to open.
+  const over = (session: EditingSession): boolean =>
+    session.repoId === repoId && session.key === key && session.phase !== "discarded";
+  const sessions = editingRecords();
+  persistEditing(
+    sessions.map((session) =>
+      over(session)
+        ? { ...session, phase: "discarded", resumeNew: false, revision: session.revision + 1 }
+        : session,
+    ),
+  );
+  for (const session of sessions.filter(over)) endPlanningChat(session.id);
+  emitPreferences();
+  emit({ kind: "records", repoId, key: null });
+  return null;
 }

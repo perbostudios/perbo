@@ -80,7 +80,7 @@ A spec is a folder in the repository, committed with the change ([D-103](11-open
 
 However large the issue, one draft is one contract is one ticket. Nothing runs from a draft: `perbo edit` changes any field while the ticket is at `plan_review`, and only `perbo approve` produces the contract the runner reads ([D-071](11-open-decisions.md)). Approval freezes the contract ([ADR-0016](adr/0016-minimal-machine-maintained-planning.md)), records the person's time from first rendering to approval and how many fields they changed, and is refused where:
 
-- the scope reaches a path that judges the attempt: `.perbo/**`, the configured `protected_paths` and `protected_tests`, or a pinned check's definition ([D-045](11-open-decisions.md), [D-079](11-open-decisions.md));
+- the scope can match a path that judges the attempt, its glob read as the seal reads one (a single `*` within one segment, `**` across them): `.perbo/**`, the configured `protected_paths` and `protected_tests`, or a pinned check's definition ([D-045](11-open-decisions.md), [D-079](11-open-decisions.md));
 - the contract is P3 and its decision fields are not stated;
 - the contract differs from its counter-seal.
 

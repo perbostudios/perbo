@@ -733,11 +733,6 @@ export function assembleContract(args: {
 }
 
 /**
- * What `approve` will not sign: a P3 contract whose decision fields nobody has
- * stated. Approving them unstated would make the level a label rather than a
- * decision.
- */
-/**
  * The segments of a judging glob before its first wildcard: the place it
  * names. `.perbo/**` names `.perbo`, `SECURITY.md` names itself, and a glob
  * that starts with a wildcard names none.
@@ -752,30 +747,35 @@ function literalSegments(glob: string): string[] {
 }
 
 /**
- * Whether a scope glob can reach the place a judging glob names, decided
- * segment by segment under the one meaning of a path glob that `matchesAny`
- * applies (`@perbo/contracts`, `glob-conformance.json`). A scope segment
- * holding `**` reaches everything past the text before it, so `**`, and a
- * `**` leading to `*.ts`, overlap every judging path. Any other scope segment
- * overlaps only if it matches the judging segment beside it: `*.md` matches
- * `SECURITY.md` but never `.perbo`, because a single `*` stays within one
- * segment. When the judging place runs out first the scope reaches inside
- * it; when the scope runs out first it names a place the judging path is
- * inside of, which refuses `packages` against a protected `packages/review/**`
- * too, deliberately — the answer is a narrower scope.
+ * Whether a scope glob can match a path inside the place a judging glob
+ * names, under the one meaning of a path glob that `matchesAny` applies
+ * (`@perbo/contracts`, `glob-conformance.json`). A judging glob with a
+ * wildcard is read as every path inside its place: the place's segments and
+ * at least one more. The scope is walked beside the place segment by segment.
+ * A scope segment holding `**` crosses into the place once the text before it
+ * matches the place's segment beside it, so `**`, `**` leading to `*.ts`,
+ * `pack**` and `packages/**` reach inside `packages/review/**` and `apps**`
+ * does not. Any other scope segment has to match the place's segment beside
+ * it: `*.md` never matches `.perbo`, because a single `*` stays within one
+ * segment. A scope with segments left once the place's run out reaches inside
+ * it, as `packages/review/prompt.ts` does. A scope that ends where the place
+ * does or before it, with no `**` on the way, matches only paths as deep as
+ * itself, which are the place or somewhere above it and never inside it: `*`
+ * does not reach `.perbo/**`, nor `docs/*` `docs/adr/**`, nor `packages` or
+ * `packages/review` `packages/review/**`.
  */
-function reaches(scope: string, judging: readonly string[]): boolean {
+function reachesInside(scope: string, place: readonly string[]): boolean {
   const segments = scope.split("/").filter((segment) => segment.length > 0);
-  for (let i = 0; i < segments.length && i < judging.length; i += 1) {
+  for (let i = 0; i < segments.length && i < place.length; i += 1) {
     const segment = segments[i] ?? "";
-    const here = judging[i] ?? "";
+    const here = place[i] ?? "";
     const crossing = segment.indexOf("**");
     // `**` takes the rest of this segment and every one after it, so only the
     // text before it has to match here.
     if (crossing !== -1) return matchesAny(here, [`${segment.slice(0, crossing)}*`]);
     if (!matchesAny(here, [segment])) return false;
   }
-  return true;
+  return segments.length > place.length;
 }
 
 /**
@@ -793,7 +793,10 @@ export function judgingOverlap(
       // A judging glob with no literal prefix (`**/*.pem`) names no place a
       // scope could be compared with; the seal still enforces it.
       if (place.length === 0) continue;
-      if (reaches(scope, place)) overlaps.push({ scope, judging: rule });
+      // A judging glob with no wildcard names one path, and the scope reaches
+      // it exactly when it matches that path: `*.md` reaches `SECURITY.md`.
+      const reaches = /[*?]/.test(rule.path) ? reachesInside(scope, place) : matchesAny(rule.path, [scope]);
+      if (reaches) overlaps.push({ scope, judging: rule });
     }
   }
   return overlaps;
@@ -816,6 +819,11 @@ export function assertRequirementsCarried(
   );
 }
 
+/**
+ * What `approve` will not sign: a P3 contract whose decision fields nobody has
+ * stated. Approving them unstated would make the level a label rather than a
+ * decision.
+ */
 export function assertApprovable(
   contract: PlanContract,
   key: string,
@@ -1463,9 +1471,10 @@ function assertNotAlreadyDrafted(input: Admitting): void {
  * apart from every other ticket in the store, which the drafter was shown. It
  * read the source and the repository before saying that, so it names what the
  * plan turned out to be rather than what somebody asked for before any of it
- * was known. Where nothing drafted a name, a spec's own title stands in: it is
- * what the work was called while its spec was written. Failing
- * both, the outcome — the only sentence a typed ticket has to be called by.
+ * was known. Where another ticket already carries it, a spec's own title
+ * stands in: it is what the work was called while its spec was written.
+ * Failing both, or where nothing was drafted, the outcome — the only sentence
+ * a typed ticket has to be called by.
  *
  * A drafted name or a spec title another ticket already carries is passed
  * over for the next; the outcome, the last, stands whatever it is. The draft

@@ -76,8 +76,8 @@ describe("perbo edit", () => {
     // `requirement_id` is shaped `R<n>` whatever spec exists. The edit path
     // takes it: the plan and the spec are settled against each other once,
     // where it matters, which is the moment approving freezes the contract
-    // (ADR-0016) — refusing here as well made the same check twice and stopped
-    // a person part-way through a change they were still making (D-103).
+    // (ADR-0016) — refusing here as well would make the same check twice and
+    // stop a person part-way through a change they are still making (D-103).
     const { repo, dir } = admitted("edit-requirement-id");
     const editor = rewrite("cite-nothing", 'c.acceptance_criteria[0].requirement_id = "R9";');
     expect(await edit(repo, editor), "the edit is taken").toBe(0);

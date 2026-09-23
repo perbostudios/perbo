@@ -29,10 +29,11 @@ import {
   driftLanded,
   driftRecords,
   driftTarget,
-  dropTicket,
+  discardTicket,
   editing,
   editingRecords,
   emit,
+  endPlanningChat,
   emitPreferences,
   forgetDrift,
   graphLog,
@@ -41,18 +42,15 @@ import {
   interviewStatus,
   isWorking,
   job,
-  markChangeOn,
+  marks,
   nameSampleSpec,
   nameSpecFromTurn,
   newSampleTicket,
   pairAtTurn,
-  pairOf,
   plans,
-  promiseAt,
   readings,
   readingSettled,
   recordDrift,
-  recordPlanChange,
   removeSpecFile,
   SAMPLE_INDEX,
   sampleCatalog,
@@ -78,7 +76,6 @@ import {
   writeGraphEdit,
   answerSampleTurn,
   askingChanged,
-  askingOf,
   converse,
 } from "./records.js";
 
@@ -128,7 +125,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         // What the plan promised before, so what the edit changed of it can be
         // marked on every planning over the ticket, as the host does; an edit
         // that only rearranged the graph marks nothing.
-        const before = promiseAt(request.key);
+        const before = marks.promiseAt({ id: request.repoId }, request.key);
         const edit: GraphEdit = request.edit;
         writeGraphEdit(
           request.key,
@@ -144,7 +141,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
           null,
         );
         job.resultKey = request.key;
-        recordPlanChange(request.key, before);
+        marks.recordPlanChange({ id: request.repoId }, request.key, before);
       },
       120,
     ),
@@ -154,10 +151,10 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       request.repoId,
       request.key,
       (job) => {
-        const before = promiseAt(request.key);
+        const before = marks.promiseAt({ id: request.repoId }, request.key);
         undoGraphEditAt(request.key, request.edit);
         job.resultKey = request.key;
-        recordPlanChange(request.key, before);
+        marks.recordPlanChange({ id: request.repoId }, request.key, before);
       },
       120,
     ),
@@ -183,36 +180,39 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   editingDiscard: (request) => {
     // The ticket this planning drafted goes with it, as it does on the real
     // host: a plan thrown away must not leave its ticket on the board with no
-    // way back to the plan, whatever stage it had reached
-    // (D-129). One this planning was merely
-    // opened over was never its to throw away.
+    // way back to the plan, whatever stage it had reached (D-129). One this
+    // planning was merely opened over was never its to throw away. Where the
+    // ticket stays — a pull request open, a command running in the repository
+    // — the planning goes and the ticket, and the spec it names, stay.
     const held = editing.read(request.id);
     const session = editing.discard(request.id, request.revision);
-    sampleInterviews.delete(request.id);
-    sampleWorking.delete(request.id);
-    emit({ kind: "interview", sessionId: request.id, running: false, entry: null, asking: askingOf(request.id), working: false, doing: null });
-    const drafted =
-      held.key === null || !held.admitted
-        ? undefined
-        : snapshot.tasks.find((entry) => entry.ticket.key === held.key);
-    if (drafted) {
-      dropTicket(drafted);
-      emit({ kind: "records", repoId: held.repoId, key: null });
-    }
+    endPlanningChat(request.id);
+    if (held.key !== null && held.admitted) discardTicket(held.repoId, held.key);
     // A planning that never took the ticket drafted from its own spec still
-    // deletes it: the row being thrown away stood for that work.
+    // deletes it: the row being thrown away stood for that work. Not where
+    // another planning curates it, by the spec it writes or the ticket it
+    // holds: that one is the planning to throw it away.
     if (held.key === null && held.specSlug !== null) {
       const mine = snapshot.tasks.filter(
         (entry) =>
+          entry.repoId === held.repoId &&
           entry.ticket.state === "plan_review" &&
           entry.ticket.admission.spec?.path === `specs/${held.specSlug!}/spec.md`,
       );
-      if (mine.length === 1) {
-        dropTicket(mine[0]!);
-        emit({ kind: "records", repoId: held.repoId, key: null });
-      }
+      const curated = (key: string): boolean =>
+        editingRecords().some(
+          (each) =>
+            each.id !== request.id &&
+            each.repoId === held.repoId &&
+            (each.specSlug === held.specSlug || each.key === key) &&
+            each.phase !== "discarded",
+        );
+      if (mine.length === 1 && !curated(mine[0]!.ticket.key))
+        discardTicket(held.repoId, mine[0]!.ticket.key);
     }
-    // And the spec they came from, once nothing is left holding it.
+    // And the spec they came from, once nothing is left holding it: a ticket
+    // that stayed still names it, and a plan is read against the spec it names
+    // (D-103).
     if (held.specSlug !== null) {
       removeSpecFile(held.specSlug, { sessionId: request.id });
       emit({ kind: "records", repoId: held.repoId, key: null });
@@ -235,7 +235,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // the first turn owed, so what the turns changed can be marked once the
     // last of them is over.
     const owed = (sampleWorking.get(request.id) ?? 0) + 1;
-    if (owed === 1) pairAtTurn.set(request.id, pairOf(request.id));
+    if (owed === 1) pairAtTurn.set(request.id, marks.pairOf(request.id));
     sampleWorking.set(request.id, owed);
     afterTheNote.delete(request.id);
     converse(request.id, { kind: "turn", text: request.text });
@@ -413,7 +413,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     editing.recordSpec(request.id, slug);
     // The change this save made, on every planning writing this spec: a save
     // of the same words changes nothing and marks nothing.
-    markChangeOn({ spec: before, plan: null }, { spec: specSectionsAt(slug), plan: null }, (each) => each.specSlug === slug);
+    marks.markChangeOn({ spec: before, plan: null }, { spec: specSectionsAt(slug), plan: null }, (each) => each.specSlug === slug);
     return { view: specView(request.id), conflicting: [] };
   },
   replan: async (request) => {
@@ -453,8 +453,8 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // this sample holds beside the ticket; the spec stays, because the new
     // plan is drafted from it. Deleted first, as the host deletes it, so the
     // new plan is named as the only plan this spec has.
-    dropTicket(ticketRow(request.key));
-    emit({ kind: "records", repoId: request.repoId, key: null });
+    const refusal = discardTicket(request.repoId, request.key);
+    if (refusal !== null) throw new Error(refusal);
     // A fresh admission, not a move: the approved contract is frozen
     // (ADR-0016), so the plan is drafted again from the spec.
     const markdown = specFiles()[named] ?? "";
@@ -517,7 +517,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         if (ticket.approved_at) throw new Error("An approved contract is immutable.");
         // What the plan promised before it is drafted again, for the marks on
         // the re-draft.
-        const before = promiseAt(request.key);
+        const before = marks.promiseAt({ id: request.repoId }, request.key);
         draftFromSpec(request.key, markdown, session.specSlug);
         // A name the person gave the ticket outlives the re-draft, as the host
         // keeps it on the spec.
@@ -525,7 +525,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         if (given !== undefined) nameSampleSpec(request.repoId, request.key, given);
         ticket.plan_version += 1;
         job.resultKey = request.key;
-        recordPlanChange(request.key, before);
+        marks.recordPlanChange({ id: request.repoId }, request.key, before);
       },
       1400,
       owner,
@@ -660,23 +660,20 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     return null;
   },
   discard: (request) => {
-    const row = ticketRow(request.key);
-    // The one stage a delete does not reach, as the host refuses it: the pull
-    // request is on GitHub and this machine does not own it.
-    if (row.ticket.state === "pr_open")
-      throw new Error(
-        `${request.key} has a pull request open, and that is a record this machine does not ` +
-          "own. Close or merge it on GitHub first, then delete the work.",
-      );
     // Which spec it was drafted from, read before the row goes.
-    const drafted = row.ticket.admission.spec?.path?.split("/").at(-2) ?? null;
-    dropTicket(row);
-    // The spec goes with the plan it drafted: a piece of work is deleted whole
-    // and the evidence goes with it — the attempts and the bundles they
-    // sealed, which this sample holds beside the ticket rather than in a store
-    // of its own.
-    if (drafted !== null) removeSpecFile(drafted, { sessionId: null });
-    emit({ kind: "records", repoId: request.repoId, key: null });
+    const drafted =
+      snapshot.tasks
+        .find((row) => row.repoId === request.repoId && row.ticket.key === request.key)
+        ?.ticket.admission.spec?.path?.split("/")
+        .at(-2) ?? null;
+    // Deleting work outright says the reason it stays, in the host's words.
+    const refusal = discardTicket(request.repoId, request.key);
+    if (refusal !== null) throw new Error(refusal);
+    // The spec goes with the plan it drafted: a piece of work is deleted whole.
+    if (drafted !== null) {
+      removeSpecFile(drafted, { sessionId: null });
+      emit({ kind: "records", repoId: request.repoId, key: null });
+    }
     return null;
   },
   taskSummary: (request) => {
@@ -779,10 +776,10 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       if (ticket.approved_at) throw new Error("An approved contract cannot be edited.");
       if (detail(request.key).digest !== request.digest) throw new Error("The contract changed since you viewed it.");
       // What the plan promised before this edit, for the marks on it.
-      const before = promiseAt(request.key);
+      const before = marks.promiseAt({ id: request.repoId }, request.key);
       applyDraft(ticket, request.draft);
       ticket.plan_version += 1;
-      recordPlanChange(request.key, before);
+      marks.recordPlanChange({ id: request.repoId }, request.key, before);
       if (request.models) {
         snapshot.taskModels = {
           ...snapshot.taskModels,

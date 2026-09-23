@@ -10,7 +10,9 @@ import type { GraphEdge, PlanContract, Ticket } from "@perbo/contracts";
 import type { PlanNode } from "@perbo/contracts";
 import { liveGraph, readAttempts, readDraftEdits } from "../records.js";
 import { attemptsPath, objectsPath, ticketPath } from "../repository/layout.js";
+import { specFolder } from "../repository/config.js";
 import { safePath } from "../repository/paths.js";
+import { ticketSpecSlug } from "./spec.js";
 import { trackedFiles, type Execute } from "../repository/git.js";
 import type { TicketReads } from "../tickets/reads.js";
 import type { RegisteredRepository } from "../profile/store.js";
@@ -70,9 +72,15 @@ function nodePages(
   nodes: readonly { id: string }[],
 ): Map<string, { path: string; text: string }> {
   const pages = new Map<string, { path: string; text: string }>();
-  const spec = ticket.admission.spec;
-  if (spec === null) return pages;
-  const folder = spec.path.split("/").slice(0, -1).join("/");
+  let folder: string;
+  try {
+    const slug = ticketSpecSlug(repo, ticket);
+    if (slug === null) return pages;
+    folder = `${specFolder(repo)}/${slug}`;
+  } catch {
+    // A spec folder the configuration cannot name is pages the pane does not show.
+    return pages;
+  }
   for (const node of nodes) {
     const path = `${folder}/nodes/${node.id}.md`;
     let full: string;

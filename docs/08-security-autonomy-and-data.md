@@ -91,7 +91,7 @@ These are refused whatever the contract, the person or a session asks ([D-022](1
 | Write outside the contract's write globs | the hook | seal, as `runner_defect` |
 | Write to a path the contract prohibits, to the spec folder, or to a file the branch's spec commit holds ([D-103](11-open-decisions.md)) | the hook | review, as `scope.prohibited_path` |
 | Write to `.github/**`, `CODEOWNERS` or `.perbo/**` | the hook, where the approved scope excludes the path | seal |
-| Modify what judges the attempt ([D-045](11-open-decisions.md)) | the hook, since approval refuses a scope that reaches it | seal |
+| Modify what judges the attempt ([D-045](11-open-decisions.md)) | the hook, since approval refuses a scope that can match it | seal |
 | Enable its own tooling | Claude: configuration withheld; `claude` is not on the allow-list; an `Agent` or `Task` call naming a role Perbo does not define is refused by the hook. Codex: `CODEX_HOME/agents` holds only Perbo's roles ([D-106](11-open-decisions.md)) | load report, transcript, seal; a subagent that made a call the hook never answered, on Claude, or that started one of its own, on Codex |
 | Destructive Git, or a push | deny list | transcript |
 | Merge its own pull request | `gh` denied; no credential | transcript |

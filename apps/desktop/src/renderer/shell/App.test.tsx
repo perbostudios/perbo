@@ -375,6 +375,54 @@ describe("UI v2", () => {
     expect(screen.queryByText("Compiling the contract")).toBeNull();
   });
 
+  it("only reads the ticket, and compiles nothing, when a ticket is opened from Home", async () => {
+    // Opening a ticket reads it; the contract is compiled on the way from a
+    // confirmed plan and on no other way onto a ticket's page.
+    mount();
+    await screen.findByRole("heading", { name: /Hi, / });
+    // Whatever the page says while it reads, recorded as it is put up.
+    const said: string[] = [];
+    let up: string | null = null;
+    const watch = new MutationObserver(() => {
+      const now =
+        ["Compiling the contract", "Reading the task and its evidence…"].find(
+          (text) => screen.queryByText(text) !== null,
+        ) ?? null;
+      if (now !== null && now !== up) said.push(now);
+      up = now;
+    });
+    watch.observe(document.body, { childList: true, subtree: true });
+    onTestFinished(() => watch.disconnect());
+    const read = async (): Promise<void> => {
+      const before = said.length;
+      await waitFor(() => expect(said.slice(before)).toContain("Reading the task and its evidence…"));
+      await waitFor(() => expect(screen.queryByText("Reading the task and its evidence…")).toBeNull(), {
+        timeout: 5000,
+      });
+    };
+    for (const title of ["Activation email never sent on signup", "Rate-limit the invite endpoint"]) {
+      location.hash = "home";
+      fireEvent.click(await screen.findByRole("button", { name: title }, { timeout: 5000 }));
+      await read();
+    }
+    // And a link to the plan waiting for approval while it is in planning,
+    // which is the ticket a confirm compiles.
+    location.hash = "home";
+    fireEvent.click(await screen.findByRole("button", { name: "Create" }));
+    const picker = await screen.findByRole("dialog", { name: "Plan a piece of work" });
+    fireEvent.click(within(picker).getByRole("button", { name: /^Split the settings page into tabs/ }));
+    await screen.findByRole("heading", { name: "Execution graph" }, { timeout: 5000 });
+    const planning = location.hash.split("/")[1];
+    const waiting = (await sampleBridge.request({ kind: "snapshot" })).drafts!.find(
+      (draft) => draft.id === planning,
+    )!;
+    location.hash = "home";
+    await screen.findByRole("heading", { name: /Hi, / });
+    location.hash = `task/${waiting.repoId}/${waiting.key}`;
+    await read();
+    expect(said).not.toContain("Compiling the contract");
+  });
+
   it("offers no way to the spec from the contract", async () => {
     // The contract states what approving freezes; the spec is the other half of
     // the same work and is read and written in planning, where the plan it

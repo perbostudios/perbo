@@ -41,6 +41,7 @@ function profile(over: Record<string, unknown> = {}): ProfileState {
       { id: beta, name: "beta", path: "/checkout/beta" },
     ],
     jobs: [],
+    asks: {},
     titles: { [alpha + ":PRB-1"]: "Renamed", [beta + ":PRB-9"]: "Another repository's" },
     taskModels: { [alpha + ":PRB-1"]: TaskModelsSchema.strip().parse(SettingsSchema.parse({})) },
     archived: [alpha + ":PRB-1", alpha + ":PRB-2", beta + ":PRB-9"],
@@ -97,9 +98,9 @@ describe("setArchived", () => {
 });
 
 describe("discardEditingFor", () => {
-  it("marks this ticket's planning discarded, and moves its revision on", () => {
+  it("marks this ticket's planning discarded, moves its revision on, and names it", () => {
     const state = profile({ editingSessions: [session({})] });
-    discardEditingFor(state, alpha, "PRB-1");
+    expect(discardEditingFor(state, alpha, "PRB-1")).toEqual([state.editingSessions[0]!.id]);
     expect(state.editingSessions[0]).toMatchObject({
       phase: "discarded",
       resumeNew: false,
@@ -111,7 +112,7 @@ describe("discardEditingFor", () => {
     const state = profile({
       editingSessions: [session({ phase: "discarded", revision: 4, resumeNew: false })],
     });
-    discardEditingFor(state, alpha, "PRB-1");
+    expect(discardEditingFor(state, alpha, "PRB-1")).toEqual([]);
     expect(state.editingSessions[0]).toMatchObject({ phase: "discarded", revision: 4 });
   });
 
@@ -122,7 +123,7 @@ describe("discardEditingFor", () => {
         session({ id: "80000000-0000-4000-8000-000000000004", repoId: beta }),
       ],
     });
-    discardEditingFor(state, alpha, "PRB-1");
+    expect(discardEditingFor(state, alpha, "PRB-1")).toEqual([]);
     expect(state.editingSessions.map((entry) => entry.phase)).toEqual(["editing", "editing"]);
   });
 });

@@ -99,6 +99,7 @@ function scripted(script: Array<Array<{ tool: string; input: unknown }>>): Model
 const submits = (input: unknown) => [{ tool: SUBMIT_REVIEW_TOOL, input }];
 
 const drafted = {
+  name: "Activation email",
   outcome: "New users receive an activation email within 60 seconds of signing up.",
   acceptance_criteria: [
     {
@@ -278,17 +279,27 @@ describe("a criterion keeps the requirement it answers across an edit", () => {
     const argv = ["PRB-1", "--repo", repo];
     for (const each of was) argv.push("--criterion", asFlag(each));
     argv.push("--criterion", `${cited.text} :: a screenshot of it :: artifact`);
-    await Promise.resolve(
-      runCommandLine(editCommandLine, { argv, streams: recordStreams(), cwd: repo, deps: { env: {} } }),
-    ).catch(() => undefined);
-
-    const twins = criteriaOf(dir).filter((each) => each.text === cited.text);
-    // Whatever else happens, the requirement must not be on a criterion that
-    // cannot be told from another, and must not be on two of them.
     expect(
-      twins.filter((each) => each.requirement_id !== undefined).length,
+      await runCommandLine(editCommandLine, { argv, streams: recordStreams(), cwd: repo, deps: { env: {} } }),
+      "the edit is written",
+    ).toBe(EXIT_CODES.approve);
+
+    // Neither twin carries the requirement: it cannot be told which of them
+    // answers it, so the citation goes, visibly, rather than moving.
+    const after = criteriaOf(dir);
+    const twins = after.filter((each) => each.text === cited.text);
+    expect(twins, "both twins are written").toHaveLength(2);
+    expect(
+      twins.map((each) => each.requirement_id),
       "an ambiguous text carries no citation",
-    ).toBeLessThan(2);
+    ).toEqual([undefined, undefined]);
+    // And every other criterion keeps its own.
+    const others = new Map(
+      was.filter((each) => each.text !== cited.text).map((each) => [each.text, each.requirement_id]),
+    );
+    expect(others.size, "criteria beside the twins").toBeGreaterThan(0);
+    for (const each of after.filter((entry) => entry.text !== cited.text))
+      expect(each.requirement_id, `${each.id} keeps its own requirement`).toBe(others.get(each.text));
   });
 
   it("does not move a requirement onto another criterion when the order changes", async () => {
@@ -443,14 +454,6 @@ describe("perbo admit --from-spec", () => {
     expect(ticket.title).toBe("Activation email retries");
     expect(readContract(storeDir(repo, null), "PRB-1").outcome).toBe(drafted.outcome);
     expect(ticket.title).not.toBe(drafted.outcome);
-  });
-
-  it("falls back to the spec's own title where nothing drafted a name", async () => {
-    // A draft with no name. The spec's title is the person's own words, which
-    // is the next best name and the one the folder already carries.
-    const { repo, specPath } = repository();
-    await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
-    expect(readTicket(storeDir(repo, null), "PRB-1").title).toBe("Activation email");
   });
 
   it("flattens a name a model wrote across lines", async () => {

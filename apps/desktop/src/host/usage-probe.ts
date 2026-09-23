@@ -5,7 +5,7 @@ import { z } from "zod";
 import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
 import type { UsageWindow } from "../shared/protocol.js";
 import { CLAUDE_METADATA_ARGS, metadataProcess } from "./model-catalog.js";
-import { childEnvironment } from "./process.js";
+import { childEnvironment, redact } from "./process.js";
 
 /**
  * A provider's own account of its plan windows (S6E), asked of its CLI with a
@@ -23,6 +23,18 @@ export interface ProviderUsage {
 export const CLAUDE_USAGE_UNSUPPORTED =
   "This Claude Code does not report its limits without an inference turn. Update it to see them.";
 const CLAUDE_NOT_REPORTED = "Claude Code did not report its limits. Check your connection and refresh.";
+
+/**
+ * Why a probe failed, written to the app's own log. The page says the probe
+ * failed in words about usage; the failure underneath comes from the metadata
+ * process the probe shares with model discovery and is worded about that, so
+ * it goes to the log rather than to the person.
+ */
+function logFailure(provider: string, error: unknown): void {
+  console.warn(
+    `The ${provider} usage probe failed: ${redact(error instanceof Error ? error.message : String(error))}`,
+  );
+}
 
 /** A provider's answer with no window to draw, and why. */
 export const noWindows = (detail: string, plan: string | null = null): ProviderUsage => ({ plan, windows: null, detail });
@@ -125,7 +137,8 @@ export async function claudeUsage(
         };
       },
     });
-  } catch {
+  } catch (error) {
+    logFailure("Claude Code", error);
     return noWindows(CLAUDE_NOT_REPORTED);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
@@ -256,7 +269,8 @@ export async function codexUsage(
         };
       },
     });
-  } catch {
+  } catch (error) {
+    logFailure("Codex", error);
     return noWindows("Codex did not report its limits. Check your connection and refresh.");
   } finally {
     rmSync(scratch, { recursive: true, force: true });

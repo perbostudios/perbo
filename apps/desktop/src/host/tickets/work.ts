@@ -2,7 +2,7 @@ import { existsSync, lstatSync, rmSync } from "node:fs";
 import type { Ticket } from "@perbo/contracts";
 import { specFolder } from "../repository/config.js";
 import { safePath } from "../repository/paths.js";
-import { specSlugOf } from "../plan/spec.js";
+import { specSlugOf } from "../../shared/spec-slug.js";
 import { SPEC_SLUG } from "../../shared/protocol.js";
 import type { Changes } from "../changes.js";
 import type { RegisteredRepository } from "../profile/store.js";
@@ -43,7 +43,7 @@ export async function draftedFrom(
   deps.reads.invalidate(repo.id);
   const folder = specFolder(repo);
   const mine = (await deps.tickets.list(repo)).tickets.filter(
-    (ticket) => ticket.state === "plan_review" && specSlugOf(ticket, folder) === slug,
+    (ticket) => ticket.state === "plan_review" && specSlugOf(ticket.admission.spec?.path, folder) === slug,
   );
   return mine.length === 1 ? mine[0]!.key : null;
 }
@@ -94,9 +94,9 @@ export async function deleteDraftedFromSpec(
  * Take the spec folder with the work it described.
  *
  * Deleting a piece of work deletes all of it — the planning, the ticket it
- * drafted, and the spec they came from. Leaving the writing behind put a row
- * back in the picker under the same title the moment the delete finished,
- * which reads as the delete having made a copy of the thing it removed.
+ * drafted, and the spec they came from. Writing left behind puts a row back
+ * in the picker under the same title the moment the delete finishes, which
+ * reads as the delete having made a copy of the thing it removed.
  *
  * The slug is held to one folder name and nothing else. It reaches here from an
  * admission record, which is a file in the repository rather than anything
@@ -142,14 +142,14 @@ export async function removeSpecFolder(
     // is read against the spec it names (D-103).
     deps.reads.invalidate(repoId);
     const tickets = (await deps.tickets.list(repo)).tickets;
-    if (tickets.some((ticket) => specSlugOf(ticket, folder) === slug)) return false;
+    if (tickets.some((ticket) => specSlugOf(ticket.admission.spec?.path, folder) === slug)) return false;
     // And where the planning held a ticket, the folder that ticket names must
     // be the one being deleted. A session's slug can be filled in from an
     // admission record written under a different spec folder, and `specs/foo`
     // is then an unrelated spec of the same name.
     if (except.claims !== null) {
       const mine = tickets.find((ticket) => ticket.key === except.claims);
-      if (mine !== undefined && specSlugOf(mine, folder) !== slug) return false;
+      if (mine !== undefined && specSlugOf(mine.admission.spec?.path, folder) !== slug) return false;
     }
     const at = safePath(repo, ...`${folder}/${slug}`.split("/"));
     if (!existsSync(at)) return true;
@@ -171,11 +171,10 @@ export async function deleteSpec(deps: WorkDeps, repoId: string, slug: string): 
   const repo = deps.repository(repoId);
   const folder = specFolder(repo);
   const at = safePath(repo, ...`${folder}/${slug}`.split("/"));
-  const path = `${folder}/${slug}/spec.md`;
   // A ticket drafted from this spec is judged stale against these bytes
   // (D-103), so deleting them would leave it unreadable as current for ever.
   const ticket = (await deps.tickets.list(repo)).tickets.find(
-    (each) => each.admission.spec?.path === path,
+    (each) => specSlugOf(each.admission.spec?.path, folder) === slug,
   );
   if (ticket !== undefined)
     throw new Error(

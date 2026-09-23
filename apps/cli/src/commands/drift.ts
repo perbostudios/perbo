@@ -7,6 +7,7 @@ import {
   DRIFT_REPORT_JSON_SCHEMA,
   DriftVerdictSchema,
   assertNoSymlink,
+  driftHash,
   readDrift,
   readSpecText,
   type DriftRecord,
@@ -25,7 +26,6 @@ import {
   planPromise,
   promisesHash,
   readDriftRecord,
-  sha256,
   writeDriftRecord,
   type DriftKey,
 } from "../store/drift.js";
@@ -36,8 +36,8 @@ import { ModelIdSchema } from "./admit.js";
 
 /**
  * `perbo drift` — the plan read against the spec it was drafted from
- * (D-128), and the one reader of the
- * record `store/drift.ts` keeps.
+ * (D-128), kept in the record `@perbo/planning`'s `drift-record.ts` reads and
+ * writes.
  *
  * The interview cannot part the two: its edit of a promise is held to the
  * spec in the same turn. A person's own edit is held to nothing, so after one
@@ -118,7 +118,7 @@ export async function drift(
         `${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const at: DriftKey = { spec: sha256(bytes), promises: promisesHash(contract) };
+  const at: DriftKey = { spec: driftHash(bytes), promises: promisesHash(contract) };
 
   const existing = readDriftRecord(dir, key);
   const holds =

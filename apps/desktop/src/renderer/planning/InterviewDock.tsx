@@ -22,6 +22,7 @@ import type {
 } from "../../shared/protocol.js";
 import type { useContractEditing } from "../contract-editor.js";
 import type { PageProps } from "../shell/route.js";
+import { confirmRoute, planApproved } from "./panes.js";
 
 /**
  * The interview, docked beside whichever pane is open (D-101, D-102).
@@ -396,7 +397,17 @@ export function InterviewDock({
               undoable={undoable}
               busy={busy}
               onContract={
-                withheld ? null : () => navigate({ page: "task", repoId, key, view: "contract" })
+                withheld
+                  ? null
+                  : () =>
+                      navigate(
+                        confirmRoute({
+                          repoId,
+                          key,
+                          sessionId: id,
+                          approved: planApproved(workspace, repoId, key),
+                        }),
+                      )
               }
             />
           ),

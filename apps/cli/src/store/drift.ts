@@ -1,8 +1,14 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { driftPath, hasAcceptanceCriteria, type PlanContract } from "@perbo/contracts";
-import { DriftRecordSchema, promiseTexts, type DriftRecord } from "@perbo/planning";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { hasAcceptanceCriteria, type PlanContract } from "@perbo/contracts";
+import {
+  PlanningError,
+  driftHash,
+  promiseTexts,
+  readDriftRecord as readRecord,
+  writeDriftRecord as writeRecord,
+  type DriftRecord,
+} from "@perbo/planning";
 import { UsageError } from "../usage-error.js";
 import { readContract } from "./tickets.js";
 
@@ -16,49 +22,33 @@ import { readContract } from "./tickets.js";
  * construction; a chat turn that moved the plan under the interview's guard
  * carries it forward; a hand edit lets it go, and the next reading is
  * `perbo drift`'s.
+ *
+ * The file itself — where it is, its shape, its bytes — is `@perbo/planning`'s
+ * `drift-record.ts`, which the desktop host reads and writes it through as
+ * well. What is here is the command line's: its refusal said as a
+ * `UsageError`, and when the record is seeded and carried.
  */
-
-export const sha256 = (bytes: Buffer | string): string =>
-  `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-
-/** `.perbo/tickets/<KEY>.drift.json`, beside the ticket's other records. */
-export function driftRecordPath(dir: string, key: string): string {
-  return join(dir, ...driftPath(key));
-}
 
 /**
  * The record beside a ticket: null where none has been written, and a
- * `UsageError` naming the file where one is there and is not a record — the
- * same hand edit the counter-seal catches on the contract, said in words a
- * person can act on rather than as a parse error.
+ * `UsageError` naming the file where one is there and is not a record.
  */
 export function readDriftRecord(dir: string, key: string): DriftRecord | null {
-  const path = driftRecordPath(dir, key);
-  if (!existsSync(path)) return null;
-  let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
+    return readRecord(dir, key);
   } catch (error) {
-    throw new UsageError(
-      `could not read ${path}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    if (error instanceof PlanningError) throw new UsageError(error.message);
+    throw error;
   }
-  const parsed = DriftRecordSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new UsageError(
-      `${path} is not a drift record:\n  ` +
-        parsed.error.issues
-          .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-          .join("\n  "),
-    );
-  }
-  return parsed.data;
 }
 
 export function writeDriftRecord(dir: string, key: string, record: DriftRecord): void {
-  const path = driftRecordPath(dir, key);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(DriftRecordSchema.parse(record), null, 2)}\n`);
+  try {
+    writeRecord(dir, key, record);
+  } catch (error) {
+    if (error instanceof PlanningError) throw new UsageError(error.message);
+    throw error;
+  }
 }
 
 /** The two hashes a verdict is kept against. */
@@ -84,14 +74,14 @@ export function driftKeyFor(args: {
   contract: PlanContract;
 }): DriftKey {
   return {
-    spec: sha256(readFileSync(resolve(args.repositoryRoot, args.specPath))),
+    spec: driftHash(readFileSync(resolve(args.repositoryRoot, args.specPath))),
     promises: promisesHash(args.contract),
   };
 }
 
 /** The plan's half of the key: its promise texts, in `promiseTexts`'s order. */
 export const promisesHash = (contract: PlanContract): string =>
-  sha256(JSON.stringify(promiseTexts(planPromise(contract))));
+  driftHash(JSON.stringify(promiseTexts(planPromise(contract))));
 
 /** What the reading is given of the plan: the outcome and each criterion's words. */
 export function planPromise(contract: PlanContract): {

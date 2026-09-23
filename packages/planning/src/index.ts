@@ -9,6 +9,7 @@ export {
 } from "./draft/index.js";
 export type { BoardEntry, DraftResult } from "./draft/index.js";
 export { readDrift } from "./drift.js";
+export { driftHash, driftRecordPath, readDriftRecord, writeDriftRecord } from "./drift-record.js";
 export {
   DRIFT_REPORT_JSON_SCHEMA,
   DriftFindingSchema,

@@ -26,7 +26,7 @@ import { repositorySpecs } from "./plan/spec.js";
 import { draftedFrom } from "./tickets/work.js";
 import { probeProviders } from "./providers/status.js";
 import { seedArchived } from "./profile/preferences.js";
-import { readStanding, writeStanding } from "./repository/config.js";
+import { readStanding, specFolder, writeStanding } from "./repository/config.js";
 import type { TicketRecords } from "./tickets/open.js";
 import type { SpecDeps } from "./plan/spec.js";
 import {
@@ -259,6 +259,7 @@ export class DesktopService {
         await this.dispatch({ kind: "cancel", jobId });
       },
       id: randomUUID,
+      specFolder: (repoId) => specFolder(this.repository(repoId)),
       standing: (repoId) => readStanding(this.repository(repoId)),
       setStanding: (repoId, entries) => {
         const repo = this.repository(repoId);

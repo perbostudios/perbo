@@ -42,6 +42,7 @@ packages/<name>/
     browser.ts          the part of it that loads in a browser
     <module>.ts         a module with no interior
     <module>.test.ts    its tests
+    test-support/       fakes two or more modules share; never built, never imported by src
     <module>/           a module with an interior
       index.ts          its surface
       internal/         what only this module imports

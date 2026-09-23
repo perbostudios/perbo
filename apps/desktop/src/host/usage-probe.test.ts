@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -8,6 +8,7 @@ import { CLAUDE_USAGE_UNSUPPORTED, claudeUsage, codexUsage } from "./usage-probe
 const temporary: string[] = [];
 afterEach(() => {
   for (const dir of temporary.splice(0)) rmSync(dir, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 /** A fake provider CLI that traces its argv, environment and every line it reads, and answers with `handler`. */
 function fixture(handler: string, { login = true } = {}) {
@@ -118,13 +119,17 @@ describe("Claude Code's plan windows from get_usage", () => {
     await expect(claudeUsage(test.options)).resolves.toEqual(expected);
   });
 
-  it("says so, with no window, for a CLI that never answers", async () => {
+  it("says so, with no window, for a CLI that never answers, and logs why", async () => {
     const test = fixture("");
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await expect(claudeUsage({ ...test.options, timeoutMs: 800 })).resolves.toEqual({
       plan: null,
       windows: null,
       detail: "Claude Code did not report its limits. Check your connection and refresh.",
     });
+    expect(warned.mock.calls).toEqual([
+      ["The Claude Code usage probe failed: Model discovery timed out. Check your connection and refresh."],
+    ]);
   });
 
   it("settles at the timeout and leaves no child behind when the CLI never exits", async () => {
@@ -182,14 +187,17 @@ describe("Codex's plan windows from the app-server", () => {
     });
   });
 
-  it("words a failed probe about usage, never about model discovery", async () => {
+  it("words a failed probe about usage, never about model discovery, and logs the failure underneath", async () => {
     const test = fixture("process.exit(1);");
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const result = await codexUsage(test.options);
     expect(result).toEqual({
       plan: null,
       windows: null,
       detail: "Codex did not report its limits. Check your connection and refresh.",
     });
+    expect(warned).toHaveBeenCalledTimes(1);
+    expect(String(warned.mock.calls[0]?.[0])).toMatch(/^The Codex usage probe failed: \S/);
   });
 
   it("does not read a login held outside a file as signed out, and starts nothing it cannot use", async () => {
