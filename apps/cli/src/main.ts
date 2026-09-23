@@ -7,6 +7,6 @@ import { startEntryPoint } from "./command-line/terminal.js";
  *
  * The one entry point the binary is built from: the table says which commands
  * exist, `command-line/terminal.js` is the shell around it, and each command
- * reads its own line by the one grammar (D-NEW-cli-grammar).
+ * reads its own line by the one grammar (D-125).
  */
 startEntryPoint(process.argv.slice(2), COMMANDS);

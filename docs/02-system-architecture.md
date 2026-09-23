@@ -75,7 +75,7 @@ Decided, not built: the merge switch trusts only the review run's own verdict co
 
 ## The packages
 
-Each package's entry file names what the others may import from it, and the layout inside a package is in [docs/07](07-monorepo-and-deployment.md) ([ADR-NEW-package-interface](adr/NEW-package-interface.md)).
+Each package's entry file names what the others may import from it, and the layout inside a package is in [docs/07](07-monorepo-and-deployment.md) ([ADR-0040](adr/0040-package-interface.md)).
 
 | Package | Holds |
 |---|---|

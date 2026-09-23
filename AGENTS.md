@@ -15,7 +15,7 @@ Perbo is an open-source operating plane for getting work done with coding agents
 
 ## The code
 
-The layout is in [docs/07](docs/07-monorepo-and-deployment.md), and each package's `README.md` says what it owns. `packages/model`, `packages/review`, `packages/evaluation` and `packages/runner` each carry an `AGENTS.md` with the rules that bind work inside them: read it before changing anything there, because the rules below are only the ones that hold everywhere. A package's interface is its entry file's named exports and its `package.json` subpaths; a module with an interior is a directory whose `internal/` nothing else imports; unit tests sit beside their module ([ADR-NEW-package-interface](docs/adr/NEW-package-interface.md), the layout in docs/07).
+The layout is in [docs/07](docs/07-monorepo-and-deployment.md), and each package's `README.md` says what it owns. `packages/model`, `packages/review`, `packages/evaluation` and `packages/runner` each carry an `AGENTS.md` with the rules that bind work inside them: read it before changing anything there, because the rules below are only the ones that hold everywhere. A package's interface is its entry file's named exports and its `package.json` subpaths; a module with an interior is a directory whose `internal/` nothing else imports; unit tests sit beside their module ([ADR-0040](docs/adr/0040-package-interface.md), the layout in docs/07).
 
 ```bash
 pnpm check                                   # the gate: every stage, in order

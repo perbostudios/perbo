@@ -1,6 +1,6 @@
 # Perbo desktop
 
-A local Electron application over the existing CLI, with a shared React interface and the supplied Perbo artwork. It reads real repositories and records. The sample host in `src/sample-host/` answers the same request protocol from labelled sample records, for the tests and for a development preview in a browser, and the packaged renderer does not contain it ([D-NEW-desktop-sample-host](../../docs/11-open-decisions.md)).
+A local Electron application over the existing CLI, with a shared React interface and the supplied Perbo artwork. It reads real repositories and records. The sample host in `src/sample-host/` answers the same request protocol from labelled sample records, for the tests and for a development preview in a browser, and the packaged renderer does not contain it ([D-120](../../docs/11-open-decisions.md)).
 
 ## Run locally
 

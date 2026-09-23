@@ -1,7 +1,7 @@
-# ADR-NEW-command-line-edge: A command is a typed function; argv lives at the edge
+# ADR-0039: A command is a typed function; argv lives at the edge
 
 - Status: accepted
-- Decision: [D-NEW-cli-grammar](../11-open-decisions.md)
+- Decision: [D-125](../11-open-decisions.md)
 - Extends: [ADR-0023](0023-untrusted-context-boundary.md)
 
 ## Context
@@ -13,7 +13,7 @@ A caller inside the process that builds a command line is building a sentence ou
 ## Decision
 
 - **A command is a function over typed input.** Each command declares an input type and a run that takes it. A caller in this process — the endpoint, the interview, the queue — calls that function with values. It never builds a command line, and nothing it passes is re-read as anything.
-- **Argv exists only in `apps/cli/src/command-line/`.** One grammar walks a line by the rules in [D-NEW-cli-grammar](../11-open-decisions.md); one table says which commands exist; one adapter turns a line into a command's input and its answer back into bytes. A command declares which flags it has and what each takes, beside the command, and reads its line by that grammar and no other.
+- **Argv exists only in `apps/cli/src/command-line/`.** One grammar walks a line by the rules in [D-125](../11-open-decisions.md); one table says which commands exist; one adapter turns a line into a command's input and its answer back into bytes. A command declares which flags it has and what each takes, beside the command, and reads its line by that grammar and no other.
 - **A value is text.** `--name=value` is split in flag position only, and a value flag takes the next token verbatim. What a value has to be — an enum, an integer, a ticket key, a date — is the command's input schema, so a caller in this process is owed the same check as a person at a terminal rather than a weaker one.
 - **Approval is not a field of a draft.** The input a drafting caller passes has no `approve`, so no combination of text can approve what it drafts. The endpoint, the queue's drafting tick and the interview all pass that type.
 - **The boundary is enforced, not remembered.** `eslint.config.mjs` refuses an import of `command-line/` from the endpoint, and of the terminal adapter from the queue and the interview, which read their own line but run no command from one. `scripts/lint-boundaries.test.mjs` shows each rule firing on the form it forbids and silent on the form it allows.

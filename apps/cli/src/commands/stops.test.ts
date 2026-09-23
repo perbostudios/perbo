@@ -376,7 +376,7 @@ describe("the reading against D-060's bar", () => {
 
 /**
  * A stop the AI stand-in answered is dogfood, and no number reported as a
- * partner's contains it (D-NEW-stand-in-dogfood). What the label cannot do is printed beside
+ * partner's contains it (D-121). What the label cannot do is printed beside
  * what it did: it is self-declared, so an unsigned tick is counted as a
  * person's and the partner n is an upper bound.
  */
@@ -445,7 +445,7 @@ describe("perbo stops excludes dogfood answers from the partner reading", () => 
     // Three stops the stand-in answered, two of them the only answer their
     // change had.
     expect(out).toMatch(
-      /dogfood stops excluded\s+3\s+answered by an AI stand-in, outside the partner reading \(D-NEW-stand-in-dogfood\); 2 changes left the precision population with them/,
+      /dogfood stops excluded\s+3\s+answered by an AI stand-in, outside the partner reading \(D-121\); 2 changes left the precision population with them/,
     );
     expect(out).toContain("3 dogfood stops excluded");
   });
@@ -464,7 +464,7 @@ describe("perbo stops excludes dogfood answers from the partner reading", () => 
     expect(out).toMatch(/precision of stopping\s+50%\s+.*2 changes with an answer \(1 endorsed, 1 overridden\)/);
     // The row stands at zero — "none were excluded" is the thing a reader of a
     // partner number needs told — and says nothing about changes it took out.
-    expect(out).toMatch(/dogfood stops excluded\s+0\s+answered by an AI stand-in, outside the partner reading \(D-NEW-stand-in-dogfood\)$/m);
+    expect(out).toMatch(/dogfood stops excluded\s+0\s+answered by an AI stand-in, outside the partner reading \(D-121\)$/m);
     expect(out).not.toContain("left the precision population");
     expect(out).not.toContain("dogfood stops excluded,");
     // The caveat is about every partner number, not only the ones something was

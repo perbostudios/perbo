@@ -870,7 +870,7 @@ describe("ac_4 — the stand-in partner's merged tickets are the first populatio
     const f = await fourCases("ac4-dogfood");
     const parsed = f.json as JsonOutput;
 
-    // D-NEW-stand-in-dogfood's label follows D-038's baseline: a store holding a partner's
+    // D-121's label follows D-038's baseline: a store holding a partner's
     // comparison, captured before their first ticket, is a partner's store and
     // its rows are not dogfood. This store holds no such file, which is what
     // the stand-in's own store looks like.
@@ -883,7 +883,7 @@ describe("ac_4 — the stand-in partner's merged tickets are the first populatio
     for (const key of ["AYO-3", "AYO-4"]) {
       const row = parsed.tickets.find((entry) => entry.ticket_key === key);
       expect(row, `${key} is merged in this store and belongs in the population`).toBeDefined();
-      // D-NEW-stand-in-dogfood: a stand-in's numbers are dogfood numbers, never a partner's.
+      // D-121: a stand-in's numbers are dogfood numbers, never a partner's.
       expect(row!.dogfood).toBe(true);
 
       // And the row says what is known about its window, from the record on

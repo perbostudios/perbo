@@ -29,7 +29,7 @@ No app imports another app's source; a provider SDK stays inside its own adapter
 
 ## Package layout
 
-Every package states its interface and keeps an interior ([ADR-NEW-package-interface](adr/NEW-package-interface.md)):
+Every package states its interface and keeps an interior ([ADR-0040](adr/0040-package-interface.md)):
 
 ```text
 packages/<name>/
@@ -52,11 +52,11 @@ packages/<name>/
 - Another package is imported by its name or one of its subpaths, never by a file under its `src/` or `dist/`.
 - An entry point that something outside its package names by path stays at `src/<name>.ts`, because its `dist` path is part of a contract: `apps/cli/src/main.ts`, `packages/evaluation/src/main.ts` and `packages/workspace/src/main.ts` (`bin` entries and the harness's spawn), and `packages/runner/src/guard-hook.ts` (`tooling/package/bundle.mjs`).
 - A generated module sits where its module wants it and moves with the one line that writes it: `tooling/skills/build.mjs` writes `packages/runner/src/skills/internal/content.ts`.
-- An app's `src/` follows the same rules ([D-NEW-package-interface](11-open-decisions.md)): `apps/cli` groups one module per command under `src/commands/` and keeps only the suites over its built package in `test/`, and `apps/desktop/src` is three layers — `host/`, `renderer/` and `shared/` — where the first two import across only through the third.
+- An app's `src/` follows the same rules ([D-122](11-open-decisions.md)): `apps/cli` groups one module per command under `src/commands/` and keeps only the suites over its built package in `test/`, and `apps/desktop/src` is three layers — `host/`, `renderer/` and `shared/` — where the first two import across only through the third.
 - A package's `test/` holds a test a pull request may not edit and what it imports, a suite whose subject is the repository rather than one module, data a test reads, and `packages/evaluation/test/`, whose suites reach the corpus and the sample through helpers beside them. `scripts/test-placement.test.mjs` holds `@perbo/contracts`, `@perbo/planning`, `@perbo/runner` and `@perbo/workspace` to that, naming every file their `test/` keeps with the reason it is not beside a module, and refuses a test under `src/` with no module beside it. An app's `test/` holds the suites that drive its built package.
 - A package the desktop's renderer imports names that part of itself in `src/browser.ts` and holds it where the constraint is: `packages/planning/src/browser.test.ts` bundles that surface for a browser with tree shaking off, so a module reaching a `node:` one fails in the package that offered it.
 - `apps/desktop` bundles with Vite and esbuild and typechecks its tests through its own `tsconfig.json`; its renderer keeps PascalCase filenames for React components. `apps/desktop/src/renderer/browser-imports.test.ts` bundles the renderer for the browser, which fails on a `node:` import it cannot resolve.
-- `eslint.config.mjs` refuses `export *` in `src/`, an import of another module's `internal/`, a deep import of another package, production code importing test code, a value taken from `@perbo/contracts` or `@perbo/planning` where a browser bundles the file, an import across the desktop's host and renderer layers, and a `git` or `gh` process outside the module that runs them ([D-NEW-one-git-module](11-open-decisions.md)); `scripts/lint-boundaries.test.mjs` shows each rule firing and staying silent.
+- `eslint.config.mjs` refuses `export *` in `src/`, an import of another module's `internal/`, a deep import of another package, production code importing test code, a value taken from `@perbo/contracts` or `@perbo/planning` where a browser bundles the file, an import across the desktop's host and renderer layers, and a `git` or `gh` process outside the module that runs them ([D-126](11-open-decisions.md)); `scripts/lint-boundaries.test.mjs` shows each rule firing and staying silent.
 
 ## Build graph and gates
 

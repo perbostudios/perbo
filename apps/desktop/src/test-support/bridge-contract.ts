@@ -26,7 +26,7 @@ const UNKNOWN_KEY = "PRB-9999999";
 
 /**
  * What answering the desktop's protocol means, run against every adapter that
- * claims to ([D-NEW-desktop-sample-host](../../../../docs/11-open-decisions.md)).
+ * claims to ([D-120](../../../../docs/11-open-decisions.md)).
  *
  * The cases are the promises a screen is written against — a refusal is a
  * refusal, a snapshot's rows name repositories it also carries, one command in

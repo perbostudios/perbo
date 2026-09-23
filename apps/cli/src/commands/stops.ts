@@ -76,7 +76,7 @@ import {
  * that could the command says the reading cannot resolve rather than printing a
  * pass. The population is the partner one: a stop the AI stand-in answered is
  * dogfood and is not in any number reported here as a partner reading
- * (D-NEW-stand-in-dogfood), and how many were left out is a row of the table rather than a
+ * (D-121), and how many were left out is a row of the table rather than a
  * silent subtraction.
  *
  * SCP-196, beside it: D-076's bar, over the ticket store rather than the
@@ -260,14 +260,14 @@ export function stopsRows(summary: StopsSummary): string[][] {
     ["unanswered stops", String(summary.unanswered_stops), "", `${summary.stops} stops across ${summary.changes} changes`],
     ["conflicting answers", String(summary.conflicts), "", "both boxes ticked"],
     [
-      // D-NEW-stand-in-dogfood: an AI's endorsement of a stop is not a person wanting to be
+      // D-121: an AI's endorsement of a stop is not a person wanting to be
       // asked, so the stand-in's answers are not in the number above. The row
       // exists at zero as well, because "none were excluded" is the thing a
       // reader of a partner number needs to be told.
       "dogfood stops excluded",
       String(summary.dogfood_stops),
       "",
-      "answered by an AI stand-in, outside the partner reading (D-NEW-stand-in-dogfood)" +
+      "answered by an AI stand-in, outside the partner reading (D-121)" +
         (summary.dogfood_changes === 0
           ? ""
           : `; ${summary.dogfood_changes} change${summary.dogfood_changes === 1 ? "" : "s"} left the ` +
@@ -283,14 +283,14 @@ export function renderStops(summary: StopsSummary): string {
 
 /**
  * What the partner reading left out, in the words every surface that prints a
- * partner number beside it uses (D-NEW-stand-in-dogfood). One phrase rather than three spellings,
+ * partner number beside it uses (D-121). One phrase rather than three spellings,
  * so the exclusion reads as the same fact wherever it appears.
  */
 export const excluded = (summary: StopsSummary): string =>
   `${summary.dogfood_stops} dogfood stop${summary.dogfood_stops === 1 ? "" : "s"} excluded`;
 
 /**
- * The sentence for a verdict the exclusion itself produced (D-NEW-stand-in-dogfood).
+ * The sentence for a verdict the exclusion itself produced (D-121).
  *
  * The dogfood label comes off a pull-request body, which is text anybody with
  * write access can edit, and the only thing it does is remove answers — so both
@@ -656,7 +656,7 @@ export function stopsByWeek(
  * {@link stopsRows}.
  *
  * The last column is the same exclusion the table above states once, said again
- * per week because each week's precision is its own partner reading (D-NEW-stand-in-dogfood) and
+ * per week because each week's precision is its own partner reading (D-121) and
  * each week's `n` is its own denominator: a week the stand-in answered four
  * stops in is a week whose `n` fell by up to four, and a column that only
  * existed for the total would leave that as a shrinking number with nothing

@@ -6,7 +6,7 @@ import { subscribe } from "./records.js";
 /**
  * The adapter the renderer is driven against with no native host behind it:
  * the tests under jsdom, and the development preview in a browser
- * ([D-NEW-desktop-sample-host](../../../../docs/11-open-decisions.md)).
+ * ([D-120](../../../../docs/11-open-decisions.md)).
  *
  * It answers the same Request table the host answers, over sample records held
  * in memory and in this browser's own storage. No process, credential,

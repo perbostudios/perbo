@@ -397,7 +397,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Changes if: edits are lost, a result lands in another session, or an admission is duplicated.
 - ADR: [ADR-0034](adr/0034-desktop-editing-and-workspace-projection.md).
 
-### D-NEW-desktop-sample-host — The desktop's sample records are a test double, not a shipped mode
+### D-120 — The desktop's sample records are a test double, not a shipped mode
 
 - Owner: Founder
 - Decision: the adapter that answers the desktop's request table from sample records is a development and test surface, `src/sample-host/`, and the packaged renderer does not contain it. The tests are driven against it under jsdom and the design preview is `preview.html`, a page Vite's production build has no entry for; the renderer knows one adapter slot, `window.perbo`, filled by preload in Electron, by that page in a browser and by the test setup under jsdom. It answers the same Request table the host answers and is held to it by a conformance suite that runs one contract against both. The protocol carries no field only the sample writes: a screen renders one reply shape, whichever adapter answered.
@@ -503,7 +503,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: a partner's direct-agent baseline is captured with `perbo baseline` before they first use Perbo: the same partner, comparable tickets, agent-direct, wall clock from start of work to pull request.
 - Why: it cannot be reconstructed afterwards.
 
-### D-NEW-stand-in-dogfood — A stand-in's stops are dogfood, never a partner reading
+### D-121 — A stand-in's stops are dogfood, never a partner reading
 
 - Owner: Founder
 - Decision: a stop an AI stand-in answered — a tick the stand-in signed, or `verdict --stand-in` — is a dogfood number: every row that carries it says so, it is counted in its own `dogfood stops excluded` row and column, and it is never pooled with a partner's precision. A store with no baseline captured before first use ([D-038](11-open-decisions.md)) has no partner population, so every row it holds is dogfood.
@@ -586,15 +586,15 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: every document states what is true now. A superseded or deprecated decision, ADR or comment is deleted, not marked. A document cites a decision by its id instead of restating it. Git holds the history.
 - Why: in the founder's words, "we only keep a source of truth, not history". Old positions left in place were read as current.
 
-### D-NEW-package-interface — Every package states its interface; a module keeps its interior
+### D-122 — Every package states its interface; a module keeps its interior
 
 - Owner: Founder
-- Decision: each package's entry file lists by name what other packages import from it, and its `package.json` `exports` names one subpath per runtime that consumes it — `.`, and `./browser` where the desktop renderer imports it; nothing else in a package is reachable from outside it. A module with an interior is a directory with one surface and an `internal/` that nothing outside it imports. A module's unit tests sit beside it and are typechecked with it, and the build leaves them out. A module one package uses lives in that package, and `@perbo/contracts` holds what two or more share. A package's `test/` keeps only what cannot sit beside a module — a test a pull request may not edit, a suite whose subject is the repository rather than one module, and data a test reads — and `scripts/test-placement.test.mjs` holds four packages to that. The layout is in [docs/07](07-monorepo-and-deployment.md), and the architecture in ADR-NEW-package-interface.
+- Decision: each package's entry file lists by name what other packages import from it, and its `package.json` `exports` names one subpath per runtime that consumes it — `.`, and `./browser` where the desktop renderer imports it; nothing else in a package is reachable from outside it. A module with an interior is a directory with one surface and an `internal/` that nothing outside it imports. A module's unit tests sit beside it and are typechecked with it, and the build leaves them out. A module one package uses lives in that package, and `@perbo/contracts` holds what two or more share. A package's `test/` keeps only what cannot sit beside a module — a test a pull request may not edit, a suite whose subject is the repository rather than one module, and data a test reads — and `scripts/test-placement.test.mjs` holds four packages to that. The layout is in [docs/07](07-monorepo-and-deployment.md), and the architecture in ADR-0040.
 - Why: when an interface is not stated, every internal symbol is public and no refactor stays inside its package; a test the gate does not typecheck drifts from the interface it tests.
 - Changes if: a package gains a consumer outside this repository, or the lint rules that hold the boundaries need more exceptions than there are modules.
-- ADR: [ADR-NEW-package-interface](adr/NEW-package-interface.md).
+- ADR: [ADR-0040](adr/0040-package-interface.md).
 
-### D-NEW-model-client — One model client, three transports, in a package of its own
+### D-123 — One model client, three transports, in a package of its own
 
 - Owner: Founder
 - Decision: every model call this repository makes goes through `@perbo/model`: one port, `Model`, carrying one turn of the read-or-submit protocol against a schema the calling process supplied; three transports onto it (the Anthropic SDK, a local `claude` binary, a local `codex` binary); token accounting and the list-price estimate that says what a turn cost. No other package imports a provider SDK, and no other package starts a provider binary for a model call. `@perbo/review` holds what judges — context assembly, the blocking matrix, the structured verdict, closure verification and artifact redaction — and nothing else. What counts as credential-shaped is `@perbo/contracts` ([D-063](11-open-decisions.md)).
@@ -672,24 +672,24 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Why: a person opening planning and typing what they want should be talking to the interview, not stopped by a field they have not found. Their own words name the folder, so nothing a model returned becomes a path ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). The naming is said rather than silent because a slug outlives the message it came from.
 - Built: `specTitleFromMessage` in `@perbo/planning`, the host naming the spec on the first turn and saying so as a note, and the browser preview doing the same.
 
-### D-NEW-contracts-shared-vocabulary — `@perbo/contracts` holds what two packages share
+### D-124 — `@perbo/contracts` holds what two packages share
 
 - Owner: Founder
 - Decision: a schema or rule lives in `@perbo/contracts` when two or more packages, the desktop included, read or write it; a record only one package reads and writes lives in that package beside its code. The CLI's baseline stopwatch and E1 ledger, its local verdicts record, its escapes record and the queue's ordering are its own.
 - Why: the dependency floor rebuilds every package on each change, and a module with one consumer is read more easily beside its caller.
 - Changes if: a second package reads one of those records.
 
-### D-NEW-cli-grammar — `perbo` reads every command line by one set of rules
+### D-125 — `perbo` reads every command line by one set of rules
 
 - Owner: Founder
 - Decision: one grammar reads argv for every command. `--name=value` is split only in flag position, so a value is never read again as a flag; a value flag takes the next token verbatim, whatever it is shaped like; a switch given a value is refused; `--` ends the options; a repeated single-value flag takes the last of them, which the desktop's trailing `--repo` relies on; and `-h` or `--help` is honoured in flag position and nowhere else. A command declares which flags it has, what each takes and how many positionals it accepts; what a value has to be — an enum, a number, a key, a URL, a date — is the command's input schema, which every caller reaches. This is the CLI's contract: a person's text, and the desktop's, reaches a command as the text it is.
 - Why: a caller can only know what a line will mean if every command reads it the same way, and what a person types into an outcome, a note or a path is text rather than more flags. Splitting `--name=value` in flag position alone is what keeps it text: a value re-read as a flag is a value that can approve the ticket it was admitted with, record a decision or turn publication on, and the desktop passes person-typed text as flag values. What a value has to be sits in the input schema instead, because a caller in this process reaches the command there and is owed the same check.
-- Built: `apps/cli/src/command-line/grammar.ts` with a test per rule, each command's grammar beside the command, and `terminal.flag-injection.test.ts` holding one case per free-text flag value a person or the desktop fills. What the rules are for — a command as a typed function, argv at the edge, and the boundary the lint rules hold — is [ADR-NEW-command-line-edge](adr/NEW-command-line-edge.md).
+- Built: `apps/cli/src/command-line/grammar.ts` with a test per rule, each command's grammar beside the command, and `terminal.flag-injection.test.ts` holding one case per free-text flag value a person or the desktop fills. What the rules are for — a command as a typed function, argv at the edge, and the boundary the lint rules hold — is [ADR-0039](adr/0039-command-line-edge.md).
 
-### D-NEW-one-git-module — Every git and gh process goes through one module
+### D-126 — Every git and gh process goes through one module
 
 - Owner: Founder
 - Decision: every `git` and `gh` process Perbo starts comes from `@perbo/workspace`'s `repository/` module. It builds argv, never a shell string, and refuses an operand git would read as an option before anything is spawned; it runs them in the environment the runner builds from an allow-list, with credential prompts off; it puts one timeout on a local read and a longer one on anything crossing the network, and refuses a fragment of an answer rather than reading it as the whole of one; and signing is whatever the person's own configuration says. Callers ask by name — the head, the merge base, the tracked files, the worktrees, a pull request — rather than by spelling a command. The write guard's replay of the agent's own push is the one exception, because it has to repeat the agent's global flags in the agent's environment, which the typed interface deliberately cannot express. `eslint.config.mjs` refuses the call anywhere else in a package's source, and `scripts/lint-boundaries.test.mjs` shows the rule firing and staying silent.
 - Why: the facts about running git are one set of facts — which environment it gets, that a prompt is a failure rather than a hang, how long it may take, what a truncated answer means — and every copy of them is a place they can disagree. Twenty-eight call sites had reached that state, several inheriting the ambient environment, so whether a fetch worked behind a proxy depended on which caller asked.
 - Changes if: a caller needs a git invocation the module cannot express and the shape cannot be added to it, which makes the exception list longer than the module's own interface.
-- ADR: [ADR-NEW-git-and-gh-module](adr/NEW-git-and-gh-module.md).
+- ADR: [ADR-0041](adr/0041-git-and-gh-module.md).

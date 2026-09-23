@@ -1,7 +1,7 @@
-# ADR-NEW-git-and-gh-module: One module starts every git and gh process
+# ADR-0041: One module starts every git and gh process
 
 - Status: accepted
-- Decision: [D-NEW-one-git-module](../11-open-decisions.md)
+- Decision: [D-126](../11-open-decisions.md)
 - Extends: [ADR-0023](0023-untrusted-context-boundary.md)
 
 ## Context

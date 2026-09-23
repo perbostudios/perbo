@@ -99,7 +99,7 @@ export const VerdictInputSchema = z.discriminatedUnion("list", [
     replace: z.boolean(),
     /**
      * `--stand-in`: the AI acting as the founder's partner took this decision,
-     * not a person (D-NEW-stand-in-dogfood). It is recorded on the row and keeps the answer out
+     * not a person (D-121). It is recorded on the row and keeps the answer out
      * of every partner reading `perbo stops` prints — the same label the pull
      * request carries when the stand-in signs a tick there.
      */
@@ -765,7 +765,7 @@ function renderVerdict(report: VerdictReport, json: boolean): Rendered {
       (taken.note === null ? "" : `  note: ${taken.note}\n`) +
       (taken.answered_by === DOGFOOD_ANSWERER
         ? "  recorded as the AI stand-in's answer: dogfood, and outside every partner reading " +
-          "`perbo stops` prints (D-NEW-stand-in-dogfood)\n"
+          "`perbo stops` prints (D-121)\n"
         : "") +
       (report.superseded ? "  the decision it replaces stays on the record, superseded\n" : "") +
       `  ${report.path} — this machine only; nothing was sent anywhere\n`,

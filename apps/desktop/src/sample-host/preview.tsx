@@ -2,7 +2,7 @@ import { sampleBridge } from "./bridge.js";
 
 /**
  * The development preview: the renderer, in a browser, against the sample host
- * ([D-NEW-desktop-sample-host](../../../../docs/11-open-decisions.md)). Vite
+ * ([D-120](../../../../docs/11-open-decisions.md)). Vite
  * builds the app from `index.html` alone, so this page and everything it
  * reaches stay out of the packaged renderer.
  *

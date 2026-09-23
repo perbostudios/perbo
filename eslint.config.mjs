@@ -34,8 +34,8 @@ const NO_TRANSPORT_PROCESS_EXECUTION = {
 };
 
 /**
- * One module starts every git and gh process (D-NEW-one-git-module,
- * ADR-NEW-git-and-gh-module). A call here takes one of two forms — a binary
+ * One module starts every git and gh process (D-126,
+ * ADR-0041). A call here takes one of two forms — a binary
  * followed by its arguments, or one array of words — so the ban reads the
  * first word of each. A binary a variable names is out of its reach, and the
  * module is where a variable that holds one lives.
@@ -46,7 +46,7 @@ const NO_GIT_OR_GH_PROCESS = {
     ":matches([arguments.0.value=/^(git|gh)$/], [arguments.0.elements.0.value=/^(git|gh)$/])",
   message:
     "git and gh go through @perbo/workspace's repository module: argv only, in the runner's " +
-    "allow-listed environment, with prompts off (D-NEW-one-git-module).",
+    "allow-listed environment, with prompts off (D-126).",
 };
 
 /**
@@ -63,7 +63,7 @@ const STARTS_GIT_OR_GH = [
 
 /**
  * A package states its interface by name, and a module keeps an interior
- * (ADR-NEW-package-interface; the layout is in docs/07 "Package layout").
+ * (ADR-0040; the layout is in docs/07 "Package layout").
  * `export *` re-exports whatever a file happens to hold, so the interface is
  * whatever the implementation is.
  */

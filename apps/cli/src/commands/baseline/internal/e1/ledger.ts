@@ -45,7 +45,7 @@ export const E1_LEARNING_CURVE_TICKETS = 5;
 /**
  * Who is being measured. A partner is a person whose baseline can carry E1; the
  * AI stand-in's is `agent_direct`, which is evidence about the product and
- * never evidence about a partner (SCP-080, D-NEW-stand-in-dogfood).
+ * never evidence about a partner (SCP-080, D-121).
  */
 export const E1_ARMS = ["partner", "agent_direct"] as const;
 export const E1ArmSchema = z.enum(E1_ARMS);

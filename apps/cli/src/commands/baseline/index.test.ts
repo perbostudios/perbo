@@ -207,7 +207,7 @@ describe("what a pipe carries", () => {
   it("is the record for the two verbs that have one, and the same line for the rest", async () => {
     // `jsonWhenPiped` is the command's, so it holds for every verb behind it;
     // what each verb does with it is the rendering's. The line verbs write the
-    // same sentence either way, which is what docs/04 promises (D-NEW-cli-grammar).
+    // same sentence either way, which is what docs/04 promises (D-125).
     const dir = repo("piped");
     const piped = await baseline(dir, ["start", "a title"], at(0), false);
     const terminal = await baseline(repo("terminal"), ["start", "a title"], at(0), true);

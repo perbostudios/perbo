@@ -246,7 +246,7 @@ describe("the shell around the table", () => {
   it("leaves a `--help` a flag took as its value to that flag, and runs the command", async () => {
     // The shell reads no flag of its own past the command name: which tokens
     // are flags is the command's grammar's answer, so a value is a value
-    // (D-NEW-cli-grammar).
+    // (D-125).
     const { entry, ran } = table();
     const { err, restore } = written();
     try {

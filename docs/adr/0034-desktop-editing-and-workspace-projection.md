@@ -25,7 +25,7 @@ Three modules own the desktop's lifecycles, each behind a focused interface.
   - A dirty generation forces a fresh pass when a mutation overlaps a read. One module states that rule, `src/shared/read-generations.ts`, and both the host's reads and every one of the renderer's query hooks go through it.
   - The host shares in-flight reads; the selected output attempt still passes ticket, bundle, size, regular-file and hash checks.
 
-The sample host, which the tests and the development preview run the renderer against, answers the same Request table as the host and is held to it by a conformance suite ([D-NEW-desktop-sample-host](../11-open-decisions.md)). Neither it nor the native host changes the CLI's authority over tickets and contracts, or the runner's review, publication and merge controls.
+The sample host, which the tests and the development preview run the renderer against, answers the same Request table as the host and is held to it by a conformance suite ([D-120](../11-open-decisions.md)). Neither it nor the native host changes the CLI's authority over tickets and contracts, or the runner's review, publication and merge controls.
 
 A recorded admission result reserves its ticket while the canonical read completes. If that ticket was already open in another editor, the existing editor keeps ownership and its unfinished buffer. The submitting session keeps its fields and receipt as a visible conflict, with a link to the canonical contract. Retrying or restarting never overwrites either buffer and never repeats an admission.
 

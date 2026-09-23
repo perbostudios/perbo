@@ -1,7 +1,7 @@
-# ADR-NEW-package-interface: Every package states its interface and keeps an interior
+# ADR-0040: Every package states its interface and keeps an interior
 
 - Status: accepted
-- Decision: [D-NEW-package-interface](../11-open-decisions.md)
+- Decision: [D-122](../11-open-decisions.md)
 - Extends: [ADR-0007](0007-monorepo-trunk-worktrees.md)
 
 ## Context

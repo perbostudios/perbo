@@ -5,7 +5,7 @@ One model call, three wires.
 Every model call this repository makes — the reviewer's, the drafter's, the closure verifier's and
 the doctor's probe — goes through `Model`: one turn of a read-or-submit protocol, against a schema
 the calling process supplied. Nothing else imports a provider SDK, and nothing else starts a
-provider binary for a model call ([D-NEW-model-client](../../docs/11-open-decisions.md)).
+provider binary for a model call ([D-123](../../docs/11-open-decisions.md)).
 
 The port exists because the callers have to run with no network and no credential in a test, and
 because the same conversation reaches three different transports. It carries no policy: what a read

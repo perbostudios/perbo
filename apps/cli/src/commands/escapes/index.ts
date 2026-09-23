@@ -463,7 +463,7 @@ export function writeTicketEscapes(args: {
 /**
  * Whether this store's numbers are the stand-in's.
  *
- * [D-NEW-stand-in-dogfood](../../../../../docs/11-open-decisions.md) requires that a stand-in's
+ * [D-121](../../../../../docs/11-open-decisions.md) requires that a stand-in's
  * numbers are labelled dogfood and never pooled with a partner's. What tells
  * the two apart on disk is [D-038](../../../../../docs/11-open-decisions.md)'s
  * baseline: a partner's direct-agent comparison is captured **before** their
@@ -722,7 +722,7 @@ export const escapesReport: CommandReport<EscapesInput, { json: boolean }, Escap
     const out = [
       `${renderMetricTable([METRIC_TABLE_HEADER, ...stopsRows(stops), ...escapesRows(summary, due)])}\n`,
       // Precision of stopping is a partner reading wherever it is printed, and
-      // this command prints it in the same rows `perbo stops` does (D-NEW-stand-in-dogfood).
+      // this command prints it in the same rows `perbo stops` does (D-121).
       // What the dogfood label cannot promise travels with it here for the
       // same reason it does there: a number quoted out of this table is quoted
       // as a partner's.

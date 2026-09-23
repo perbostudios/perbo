@@ -361,7 +361,7 @@ population whose lower bound can clear 70%, so below one that could resolve a pa
 `CANNOT RESOLVE` and prints no verdict — the two numbers are still there; what cannot resolve is the
 reading, not the sample. An interval that spans 70% is a `FAIL`, and says it spans rather than
 resolving below. Every number reported here as a partner reading leaves out the stops an AI stand-in
-answered (D-NEW-stand-in-dogfood): a stand-in signs its tick, or answers with `verdict --stand-in`, and those answers
+answered (D-121): a stand-in signs its tick, or answers with `verdict --stand-in`, and those answers
 are **dogfood** — counted in the `dogfood stops excluded` row, in the per-week column of the same
 name, and beside the before-window figures `--since` prints, so an `n` that shrank always says why.
 Because the label is self-declared, it can be wrong both ways, and the line under the verdict says

@@ -238,7 +238,7 @@ describe("perbo stops --by-week", () => {
   });
 
   /**
-   * D-NEW-stand-in-dogfood, per week and before the window: every precision this command prints
+   * D-121, per week and before the window: every precision this command prints
    * is a partner reading, so every one of them says what it left out. A week's
    * `n` that fell because the stand-in answered four of its stops is a week
    * whose `n` fell for a reason, and the reason is a column rather than a
@@ -305,7 +305,7 @@ describe("perbo stops --by-week", () => {
         "unanswered stops           0                  3 stops across 4 changes\n" +
         "conflicting answers        0                  both boxes ticked\n" +
         "dogfood stops excluded     0                  answered by an AI stand-in, outside the " +
-        "partner reading (D-NEW-stand-in-dogfood)\n" +
+        "partner reading (D-121)\n" +
         // This store has no ticket store beside its stops records, so SCP-196's
         // and SCP-202's rows read n=0 — the flag under test still changed none
         // of the bytes above them, which is what this test is for.
