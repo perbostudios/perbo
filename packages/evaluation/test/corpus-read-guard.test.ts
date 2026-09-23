@@ -26,8 +26,9 @@ import { createScratch } from "@perbo/test-support";
  *   - and no file but the gate hands the loader on, since a re-export would put
  *     it within reach of a suite under a name that is not its own.
  *
- * The module that declares the loader is exempt: `src/corpus.ts` is where the
- * loader lives, not a file that reaches around the gate to reach it.
+ * The module that defines the loader is exempt: `src/corpus.ts` is where the
+ * loader is written as a function, not a file that binds its name to something
+ * imported so as to reach around the gate.
  *
  * The scan is two halves that catch different things. The textual half looks
  * for the loader's name against its parenthesis, which is the spelling anyone
@@ -118,6 +119,8 @@ function resolveModule(fromFile: string, specifier: string): string | null {
 
 interface SrcFacts {
   declaresLoader: boolean;
+  /** The loader is written here as a function, which only its own module does. */
+  definesLoader: boolean;
   /** `export * from X`. */
   star: string[];
   /** `export { imported as exported } from X`. */
@@ -128,7 +131,13 @@ interface SrcFacts {
 
 function srcFacts(path: string): SrcFacts {
   const source = parseFile(path);
-  const facts: SrcFacts = { declaresLoader: false, star: [], named: [], starAs: [] };
+  const facts: SrcFacts = {
+    declaresLoader: false,
+    definesLoader: false,
+    star: [],
+    named: [],
+    starAs: [],
+  };
 
   for (const statement of source.statements) {
     if (
@@ -137,6 +146,7 @@ function srcFacts(path: string): SrcFacts {
       isExported(statement)
     ) {
       facts.declaresLoader = true;
+      facts.definesLoader = true;
     }
     if (ts.isVariableStatement(statement) && isExported(statement)) {
       for (const declaration of statement.declarationList.declarations) {
@@ -528,7 +538,9 @@ const HELPER_REMEDY = `Name the directory, or take the corpus from ${GATE}.`;
 function exemptIn(dir: string): Set<string> {
   const exempt = new Set(
     tsFilesUnder(dir)
-      .filter((path) => srcFacts(path).declaresLoader)
+      // Only where the loader is written, as a function: a file that binds the
+      // name to something it imported is reaching for it, not declaring it.
+      .filter((path) => srcFacts(path).definesLoader)
       .map((path) => relative(dir, path).replaceAll("\\", "/")),
   );
   if (existsSync(join(dir, GATE))) exempt.add(GATE);
