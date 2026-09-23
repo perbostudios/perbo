@@ -27,6 +27,7 @@ import { RunRefusedError } from "../../refusal.js";
 import { resolveResumeSource, type ResumeSource } from "../../resume.js";
 import type { TicketRunConfig } from "./config.js";
 import type { RunLimits } from "./context.js";
+import { refuseUnknownCostBasis } from "./ledger.js";
 
 /**
  * Everything a run settles before it provisions anything.
@@ -133,6 +134,9 @@ export async function start(args: {
    * branch, and — where nothing else counts the runs — how many there have been.
    */
   const priorAttempts = readAttemptsRecord(attemptsPath);
+  // A record whose spend this version cannot add up stops the run here, before
+  // a park is waited out or the checkout is read.
+  refuseUnknownCostBasis(priorAttempts, attemptsPath);
   // The larger of what the caller counted and what the record holds, then the
   // first number whose root is not on the record. A re-level records its
   // attempts under the number after the record's last run without adding to

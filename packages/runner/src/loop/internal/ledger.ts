@@ -57,6 +57,18 @@ function unknownBasis(record: unknown, path: string): Error | null {
   );
 }
 
+/**
+ * Refuse a ticket's record that names a cost basis this version does not know
+ * (`unknownBasis`). A run asks as it starts, before it waits out a park or
+ * reads the checkout, so a record it cannot add up costs nothing.
+ */
+export function refuseUnknownCostBasis(prior: AttemptsRecord | null, path: string): void {
+  for (const attempt of prior?.attempts ?? []) {
+    const refused = unknownBasis(attempt, path);
+    if (refused !== null) throw refused;
+  }
+}
+
 export class Ledger {
   /** The ticket's attempts record on disk. */
   readonly path: string;
@@ -77,19 +89,15 @@ export class Ledger {
   private recordedThrough = 0;
 
   /**
-   * Refuses a record naming a cost basis this version does not know here,
-   * before the run provisions or spends anything, rather than when the budget
-   * is first checked.
+   * Refuses a record naming a cost basis this version does not know, as
+   * `start` has already done, rather than when the budget is first checked.
    */
   constructor(record: LedgerRecord) {
     this.path = record.path;
     this.prior = record.prior;
     this.ticketId = record.ticketId;
     this.sealed = sealedByAttempt(record.prior);
-    for (const attempt of record.prior?.attempts ?? []) {
-      const refused = unknownBasis(attempt, record.path);
-      if (refused !== null) throw refused;
-    }
+    refuseUnknownCostBasis(record.prior, record.path);
   }
 
   get attempts(): readonly ExecutionAttempt[] {
