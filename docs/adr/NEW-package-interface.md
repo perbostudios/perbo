@@ -18,7 +18,7 @@ The monorepo's packages are consumed by each other through pnpm workspaces and b
 
 The protected tests pin module paths and names (`.github/protected-paths.json`), so the modules they import stay at `src/<name>.ts` as real modules. One that needs an interior keeps `src/<name>.ts` as its surface and puts the interior in `src/<name>/internal/`.
 
-`eslint.config.mjs` holds the import rules, and `scripts/lint-boundaries.test.mjs` shows each rule firing on the form it forbids and staying silent on the form it allows. One migration is still in flight, held by a list a file may only leave: the entry that still uses `export *`, in `eslint.config.mjs`.
+`eslint.config.mjs` holds the import rules, and `scripts/lint-boundaries.test.mjs` shows each rule firing on the form it forbids and staying silent on the form it allows.
 
 ## Consequences
 

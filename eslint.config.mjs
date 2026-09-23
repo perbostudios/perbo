@@ -177,20 +177,13 @@ const PRODUCTION_SOURCE_ONLY = {
 };
 
 /**
- * Entry files that still re-export with `*`. A burn-down list: a file may only
- * leave it, and the exception goes away with its last entry. The change that
- * curates a package's entry into named exports takes that entry off this list.
- */
-export const EXPORT_ALL_BURN_DOWN = [];
-
-/**
  * The git and gh ban, over one zone's production source. It repeats the bans
  * that zone already carries, because this object replaces the rule's options
  * for the files it names.
  */
 const startsNoGitOrGh = (files, ...syntax) => ({
   files,
-  ignores: [...PRODUCTION_SOURCE_ONLY.ignores, ...STARTS_GIT_OR_GH, ...EXPORT_ALL_BURN_DOWN],
+  ignores: [...PRODUCTION_SOURCE_ONLY.ignores, ...STARTS_GIT_OR_GH],
   rules: { "no-restricted-syntax": ["error", ...syntax, NO_GIT_OR_GH_PROCESS] },
 });
 
@@ -220,10 +213,8 @@ export default tseslint.config(
   {
     // A source file names what it exports. A later config object replaces the
     // rule's options whole, so every array that reaches a source file repeats
-    // both bans. A file on the burn-down list falls back to the array above,
-    // which is how it keeps the shell-string ban while it still uses `*`.
+    // both bans.
     files: SOURCE,
-    ignores: EXPORT_ALL_BURN_DOWN,
     rules: {
       "no-restricted-syntax": ["error", NO_SHELL_STRING, NO_EXPORT_ALL],
     },
@@ -238,7 +229,6 @@ export default tseslint.config(
   {
     // The reviewer's source, which the object above no longer reaches.
     files: ["packages/review/src/**"],
-    ignores: EXPORT_ALL_BURN_DOWN,
     rules: {
       "no-restricted-syntax": ["error", NO_PROCESS_EXECUTION, NO_EXPORT_ALL],
     },
@@ -253,7 +243,6 @@ export default tseslint.config(
   {
     // Its source, which the object above no longer reaches.
     files: ["packages/model/src/**"],
-    ignores: EXPORT_ALL_BURN_DOWN,
     rules: {
       "no-restricted-syntax": ["error", NO_TRANSPORT_PROCESS_EXECUTION, NO_EXPORT_ALL],
     },

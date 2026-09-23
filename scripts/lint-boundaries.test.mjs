@@ -14,7 +14,6 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { EXPORT_ALL_BURN_DOWN } from "../eslint.config.mjs";
 import { REPO_ROOT } from "./check.mjs";
 
 // Through a package that declares it, because the package is what runs it.
@@ -73,8 +72,7 @@ test("`export *` outside a package's source is not this rule's business", async 
   await allows("packages/workspace/test/m.test.ts", EXPORT_ALL);
 });
 
-test("the burn-down list is empty, so every package entry names what it exports", async () => {
-  assert.deepEqual(EXPORT_ALL_BURN_DOWN, []);
+test("every package entry names what it exports, the reviewer's included", async () => {
   await refuses("packages/review/src/index.ts", EXPORT_ALL, NAME_WHAT);
 });
 
