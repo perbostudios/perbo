@@ -2731,8 +2731,8 @@ readline.createInterface({ input: process.stdin })
       "said before the turn is over, not at its end",
     ).toBe(true);
 
-    // And the endings that used to say it do not say it again: the stop, and
-    // the child going, which are the two that come after this.
+    // And the endings that come after this do not say it again: the stop, and
+    // the child going.
     await service.request({ kind: "interviewStop", id });
     await waitFor(async () => expect((await service.snapshot()).interviews).toEqual([]));
     const after = (await service.request({ kind: "editingRead", id })).conversation;

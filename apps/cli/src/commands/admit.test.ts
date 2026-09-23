@@ -21,7 +21,7 @@ import {
 import { UsageError } from "../usage-error.js";
 import { editCommandLine } from "./edit/index.js";
 import { buildInspectReport, inspectCommandLine, renderInspect } from "./inspect.js";
-import { LIST_JSON_SCHEMA_VERSION, ListJsonSchema, admitCommandLine, applyObservedPath, approveCommandLine, listCommandLine, loadAdmitted, statesObserved } from "./admit.js";
+import { LIST_JSON_SCHEMA_VERSION, ListJsonSchema, admitCommandLine, applyObservedPath, approveCommandLine, judgingOverlap, listCommandLine, loadAdmitted, statesObserved } from "./admit.js";
 import { PACKAGE_ROOT, REPO_ROOT } from "../test-support/paths.js";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import {
@@ -858,6 +858,36 @@ describe("level is derived, not chosen", () => {
       }),
     ).toThrow(/\*\* overlaps protected \.perbo\/\*\*/);
     expect(existsSync(join(storeDir(everything, null), "tickets"))).toBe(false);
+  });
+
+  it("reads a scope glob as the seal does: a single `*` stays within one segment", () => {
+    const overlaps = (scope: string, judging: string) =>
+      judgingOverlap([scope], [{ path: judging, source: "store" }]).length > 0;
+    // A root-level `*.md` can never name a path under `.perbo/`.
+    expect(overlaps("*.md", ".perbo/**")).toBe(false);
+    // It does name a protected root-level Markdown file.
+    expect(overlaps("*.md", "SECURITY.md")).toBe(true);
+    // `**` crosses segments, so it reaches the store.
+    expect(overlaps("**/*.md", ".perbo/**")).toBe(true);
+    // A `*` segment that matches the judging segment reaches inside it...
+    expect(overlaps(".perbo*/**", ".perbo/**")).toBe(true);
+    expect(overlaps("docs/*.md", "docs/**")).toBe(true);
+    // ...and one that does not match it names somewhere else.
+    expect(overlaps("docs/*.md", "docs/adr/**")).toBe(false);
+    expect(overlaps("src/*/index.ts", "src/review/**")).toBe(true);
+    expect(overlaps("src/rev*/index.ts", "src/other/**")).toBe(false);
+    // A `**` after literal text reaches only what that text matches.
+    expect(overlaps("pack**", "packages/review/**")).toBe(true);
+    expect(overlaps("apps**", "packages/review/**")).toBe(false);
+
+    // End to end: the founder's `*.md` scope is approved beside the store.
+    const markdown = repository("judging-root-markdown");
+    runCommandLine(admitCommandLine, {
+      argv: argvFor(markdown, "--path", "*.md", "--approve"),
+      streams: recordStreams(),
+      cwd: markdown,
+    });
+    expect(readTicket(storeDir(markdown, null), "PRB-1").approved_at).not.toBeNull();
   });
 
   it("refuses at approval a scope that reaches what judges the attempt (D-045)", () => {

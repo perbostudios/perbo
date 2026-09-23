@@ -1051,10 +1051,9 @@ describe("discarding a plan", () => {
     expect(after.drafts?.some((draft) => draft.id === session.id) ?? false).toBe(false);
   });
 
-  // A ticket that has run is kept twice over: this planning did not admit it,
-  // and `deleteContract` refuses a state past planning anyway. The first
-  // answer comes first, so what this proves is that the ticket survives —
-  // not which of the two rules saved it.
+  // A ticket that has run is kept because this planning did not admit it:
+  // throwing a planning away deletes only the ticket it drafted. The stage is
+  // no guard, since `discardTicket` deletes at every stage but `pr_open`.
   it("keeps a ticket whose loop has run", async () => {
     const before = await sampleBridge.request({ kind: "snapshot" });
     const run = before.tasks.find(

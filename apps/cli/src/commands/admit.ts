@@ -21,6 +21,7 @@ import {
   isDependencyPath,
   isMigrationPath,
   isSecurityPath,
+  matchesAny,
   onePieceOfWork,
   sameName,
   ticketSourceLabel,
@@ -736,40 +737,63 @@ export function assembleContract(args: {
  * stated. Approving them unstated would make the level a label rather than a
  * decision.
  */
-/** The literal text before a glob's first wildcard: the part that names a real place. */
-function staticPrefix(glob: string): string {
-  const cut = glob.search(/[*?[{]/);
-  return cut === -1 ? glob : glob.slice(0, cut);
+/**
+ * The segments of a judging glob before its first wildcard: the place it
+ * names. `.perbo/**` names `.perbo`, `SECURITY.md` names itself, and a glob
+ * that starts with a wildcard names none.
+ */
+function literalSegments(glob: string): string[] {
+  const segments: string[] = [];
+  for (const segment of glob.split("/")) {
+    if (/[*?]/.test(segment)) break;
+    if (segment.length > 0) segments.push(segment);
+  }
+  return segments;
+}
+
+/**
+ * Whether a scope glob can reach the place a judging glob names, decided
+ * segment by segment under the one meaning of a path glob that `matchesAny`
+ * applies (`@perbo/contracts`, `glob-conformance.json`). A scope segment
+ * holding `**` reaches everything past the text before it, so `**`, and a
+ * `**` leading to `*.ts`, overlap every judging path. Any other scope segment
+ * overlaps only if it matches the judging segment beside it: `*.md` matches
+ * `SECURITY.md` but never `.perbo`, because a single `*` stays within one
+ * segment. When the judging place runs out first the scope reaches inside
+ * it; when the scope runs out first it names a place the judging path is
+ * inside of, which refuses `packages` against a protected `packages/review/**`
+ * too, deliberately — the answer is a narrower scope.
+ */
+function reaches(scope: string, judging: readonly string[]): boolean {
+  const segments = scope.split("/").filter((segment) => segment.length > 0);
+  for (let i = 0; i < segments.length && i < judging.length; i += 1) {
+    const segment = segments[i] ?? "";
+    const here = judging[i] ?? "";
+    const crossing = segment.indexOf("**");
+    // `**` takes the rest of this segment and every one after it, so only the
+    // text before it has to match here.
+    if (crossing !== -1) return matchesAny(here, [`${segment.slice(0, crossing)}*`]);
+    if (!matchesAny(here, [segment])) return false;
+  }
+  return true;
 }
 
 /**
  * A scope that reaches into what judges the attempt is refused here, with the
- * reason, rather than at the seal after an attempt has run (D-045). Overlap is
- * decided on the static prefixes: either glob naming a place inside the other's
- * is an overlap. That refuses `packages/**` against a protected
- * `packages/review/**` too, deliberately — the answer is a narrower scope.
+ * reason, rather than at the seal after an attempt has run (D-045).
  */
-/** `a/b` is inside `a/b/…` and is `a/b` itself; it is not inside `a/bc`. */
-function inside(path: string, prefix: string): boolean {
-  const base = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix;
-  return path === base || path.startsWith(`${base}/`);
-}
-
 export function judgingOverlap(
   allowed: readonly string[],
   judging: readonly JudgingRule[],
 ): Array<{ scope: string; judging: JudgingRule }> {
   const overlaps: Array<{ scope: string; judging: JudgingRule }> = [];
   for (const scope of allowed) {
-    const s = staticPrefix(scope);
     for (const rule of judging) {
-      const j = staticPrefix(rule.path);
+      const place = literalSegments(rule.path);
       // A judging glob with no literal prefix (`**/*.pem`) names no place a
       // scope could be compared with; the seal still enforces it.
-      if (j.length === 0) continue;
-      // A scope with no literal prefix (`**`, `**/*.ts`) names every place,
-      // so it reaches every judging path there is.
-      if (s.length === 0 || inside(s, j) || inside(j, s)) overlaps.push({ scope, judging: rule });
+      if (place.length === 0) continue;
+      if (reaches(scope, place)) overlaps.push({ scope, judging: rule });
     }
   }
   return overlaps;

@@ -839,13 +839,14 @@ This is the one home for the decisions that govern Perbo. Every other document c
   on every picker row, each naming what it deletes; `ticketsNoDraftStandsFor`, which covers a
   reviewing ticket by the spec a planning writes as well as by its key, so one spec is one row;
   the adoption on open, which puts a ticket already drafted from this planning's spec onto the
-  planning — without claiming it made one it did not; `deleteContract`, which takes the ticket,
+  planning — without claiming it made one it did not; `discardTicket` in `host/tickets/discard.ts`,
+  reached only through the host's `discardDrafted`, which takes the ticket,
   its contract, its draft, its approach, the reading of its plan against its spec, the attempts
   record and the bundle manifests those attempts sealed, and leaves the content-addressed objects
   under them, because one of those bytes can be what another ticket's bundle names; the delete on
   the contract page and on the stopped-run page, each asking first in the words of the stage it is
   at; `replan`, which asks `admit`'s spent-record question itself and then deletes the stopped
-  ticket through `deleteContract` before it admits the new plan from the spec, so the new plan is
+  ticket through `discardDrafted` before it admits the new plan from the spec, so the new plan is
   named as the only plan that spec has; the picker's delete marks, which Home reads too, so a
   ticket being planned again is off Home before the host has answered; `StoppedScreen` and the ladder in `ticket-workspace.ts`, which land a run whose stop is still
   settling on that page as well as one whose record says it stopped; `publish` on a run's job, which
