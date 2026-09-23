@@ -461,8 +461,20 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       placeholderWholeWord = false;
       const stop = consumeOptions(program, wrapper);
       if (stop !== null) return stop;
-      if (wrapper.appendsOperands === true)
-        supplied = { wrapper: program, placeholder, wholeWord: placeholderWholeWord };
+      if (wrapper.appendsOperands === true) {
+        // A whole-word placeholder that stands nowhere in the wrapped command
+        // — not as an operand, not as an option's value — is not substituted,
+        // and the wrapper appends its input as it does with no placeholder.
+        const rest = words.slice(i + (wrapper.operands ?? 0));
+        const substituted =
+          placeholder !== null &&
+          (!placeholderWholeWord || rest.some((word) => word.value === placeholder));
+        supplied = {
+          wrapper: program,
+          placeholder: substituted ? placeholder : null,
+          wholeWord: placeholderWholeWord,
+        };
+      }
       i += wrapper.operands ?? 0;
       continue;
     }

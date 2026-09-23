@@ -228,14 +228,11 @@ export function writerFindings(
   }
 
   const supplied = context.supplied;
-  // A whole-word placeholder that stands in no operand is not substituted at
-  // all: the wrapper appends its input, as it does with no placeholder.
-  const placeholder =
-    supplied === undefined || supplied.placeholder === null
-      ? null
-      : supplied.wholeWord && !operands.some((word) => word.value === supplied.placeholder)
-        ? null
-        : supplied.placeholder;
+  const placeholder = supplied?.placeholder ?? null;
+  /** Whether this word is where the wrapper's input lands. */
+  const carries = (value: string): boolean =>
+    placeholder !== null &&
+    (supplied?.wholeWord === true ? value === placeholder : value.includes(placeholder));
 
   /** A destination the wrapper supplies rather than the line: not a path at all. */
   const unread = (label: string, how: string): WriteFinding => ({
@@ -249,7 +246,7 @@ export function writerFindings(
   const judge = (word: Word, label: string): WriteFinding[] => {
     // The placeholder stands where this destination goes, so what is written is
     // whatever the wrapper reads, not the word on the line.
-    if (supplied !== undefined && placeholder !== null && word.value.includes(placeholder)) {
+    if (supplied !== undefined && carries(word.value)) {
       return [
         unread(
           label,

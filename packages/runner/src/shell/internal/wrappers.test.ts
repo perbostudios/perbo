@@ -76,6 +76,9 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
   // the command, and the placeholder they stand for is `{}`.
   "xargs -i rm {}",
   "xargs --replace tee {}",
+  // BSD `-J` substitutes wherever the placeholder stands alone, an option's value included.
+  "echo /etc/x | xargs -J % curl -o % https://example.com/x",
+  "xargs -J % cp -t % a",
 ];
 
 /** Run `body` with the xargs entry no longer saying it appends operands. */
