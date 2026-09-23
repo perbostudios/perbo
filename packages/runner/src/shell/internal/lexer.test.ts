@@ -156,6 +156,16 @@ const HEREDOC_AFTER_AN_UNSURE_END: Array<{ line: string; shells: Shell[] }> = [
   { line: "echo $'\\' <<EOF'\ncp a /etc/x", shells: ["bash", "zsh"] },
 ];
 
+/**
+ * An ANSI-C quote, `$'…'`, whose `\'` is a quote character: read as a plain
+ * single quote it ends there, and the rest of the line is quoted the other way
+ * round. The shells run the `cp`.
+ */
+const ANSI_C_ESCAPED_QUOTE = ["echo $'\\''; cp a /etc/x", "echo $(echo $'\\''); cp a /etc/x"];
+
+/** An ANSI-C quote whose escapes leave its end where a single quote's is. */
+const ANSI_C_PLAIN = ["IFS=$'\\n' read -r a < src/a.ts", "printf $'a\\tb\\\\' > sub/x"];
+
 /** The bash on this machine, by major and minor version, or null. */
 function bashVersion(): string | null {
   if (!existsSync("/bin/bash")) return null;
@@ -246,6 +256,32 @@ describe("a shell comment", () => {
         expect(run.stdout, `${shell}: ${probe}`).toContain("<a></etc/x>");
       });
     }
+  }
+
+  for (const line of ANSI_C_ESCAPED_QUOTE) {
+    it(`makes ${JSON.stringify(line)} unreadable, where an ANSI-C quote holds an escaped quote`, () => {
+      expect(decision(line), line).toBe("refused");
+      expect(sentence(line), line).toContain("holds an escaped quote");
+    });
+    for (const shell of ["bash", "zsh"] as const) {
+      const argv = installed(shell);
+      it.skipIf(argv === null)(`is run by ${shell} in ${JSON.stringify(line)}`, () => {
+        const [program, ...options] = argv!;
+        const probe = line.replace("cp a /etc/x", "printf '<%s>' a /etc/x");
+        const run = spawnSync(program!, [...options, "-c", probe], {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin" },
+          timeout: 10_000,
+        });
+        expect(run.stdout, `${shell}: ${probe}`).toContain("<a></etc/x>");
+      });
+    }
+  }
+
+  for (const line of ANSI_C_PLAIN) {
+    it(`reads ${JSON.stringify(line)}, whose ANSI-C quote ends where a single quote does`, () => {
+      expect(decision(line), line).toBe("allowed");
+    });
   }
 
   it("does not hide a rebinding of the scratch directory from the guard", () => {

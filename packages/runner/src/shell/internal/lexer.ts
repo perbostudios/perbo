@@ -422,6 +422,19 @@ function ansiQuoteReadsPlain(text: string, from: number): boolean {
 }
 
 /**
+ * The first `$'…'` anywhere in the text — inside a substitution or a quote too
+ * — that does not end where a plain single quote does, or -1. Every reader
+ * here takes a `'` as a plain single quote, so after one the whole line is
+ * read quoted the other way round.
+ */
+function misreadAnsiQuote(text: string): number {
+  for (let at = text.indexOf("$'"); at !== -1; at = text.indexOf("$'", at + 2)) {
+    if (!ansiQuoteReadsPlain(text, at)) return at;
+  }
+  return -1;
+}
+
+/**
  * The same line with every heredoc body removed, and why the line cannot be
  * read, where it cannot.
  *
@@ -452,6 +465,9 @@ function ansiQuoteReadsPlain(text: string, from: number): boolean {
  * end it (`certain`); after one, a `#` is a character only where the character
  * before it joins it to a word (`JOINS_A_WORD`).
  *
+ * A `$'…'` holding an escaped `'` makes the line `unreadable` wherever it
+ * stands (`misreadAnsiQuote`).
+ *
  * Where bash and zsh disagree whether a `<<` opens a heredoc — after the `}`
  * bash ends a `${…}` at and zsh does not — the line is `unreadable` too, and so
  * it is where a `<<` this reads as opening one stands after an expansion or a
@@ -464,7 +480,8 @@ export function withoutHeredocBodies(command: string): {
   unreadable: string | null;
 } {
   const bodies: HeredocBody[] = [];
-  if (!command.includes("<<") && !command.includes("#")) {
+  const ansi = misreadAnsiQuote(command);
+  if (!command.includes("<<") && !command.includes("#") && ansi === -1) {
     return { text: command, bodies, unreadable: null };
   }
   let kept = "";
@@ -604,6 +621,11 @@ export function withoutHeredocBodies(command: string): {
     }
     at = /\s/.test(ch) || WORD_BREAK.has(ch) ? "start" : "inside";
     i += 1;
+  }
+  if (ansi !== -1) {
+    unreadable ??=
+      `the $'…' in ${JSON.stringify(command.slice(ansi, ansi + 16).split("\n")[0])} holds an ` +
+      "escaped quote, which ends it for this guard and not for the shell";
   }
   return { text: kept + command.slice(start), bodies, unreadable };
 }

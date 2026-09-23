@@ -69,6 +69,8 @@ const MISREAD = [
   'echo "$(echo " #")"; cp a /etc/x',
   `cp a "$(echo '"')/../../etc" #' b'`,
   'echo "$(echo " <<EOF")"\ncp a /etc/x',
+  // An ANSI-C quote's escaped `'`, read as the quote's end.
+  "echo $'\\''; cp a /etc/x",
   // A `find -exec` terminator read as the end of a writer's operands.
   "cp a sub + /etc",
   "cp a sub ';' /etc",
