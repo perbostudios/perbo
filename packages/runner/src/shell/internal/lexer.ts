@@ -235,14 +235,29 @@ function skipHeredocBodies(
  * exception, and it is the reason the bodies are returned rather than dropped:
  * where the command is an interpreter or a shell, that data **is** its program,
  * and the guard reads it as such (SCP-177).
+ *
+ * With `comments`, a comment comes out too: an unquoted `#` that starts a word
+ * runs to the end of its line, and the shell runs none of it — not the words
+ * after it, not an operator, and not a `<<` that would otherwise take the lines
+ * after it as a body. A `#` inside a word, a quoted one and an escaped one are
+ * characters. A backslash at the end of a comment continues nothing, so the
+ * newline after it still ends the command.
  */
-export function withoutHeredocBodies(command: string): { text: string; bodies: HeredocBody[] } {
+export function withoutHeredocBodies(
+  command: string,
+  options: { comments?: boolean } = {},
+): { text: string; bodies: HeredocBody[] } {
   const bodies: HeredocBody[] = [];
-  if (!command.includes("<<")) return { text: command, bodies };
+  const comments = options.comments === true;
+  if (!command.includes("<<") && !(comments && command.includes("#"))) {
+    return { text: command, bodies };
+  }
   let kept = "";
   let start = 0;
   let opened: Heredoc[] = [];
   let quote: string | null = null;
+  /** True where the next character would start a word. */
+  let wordStart = true;
   let i = 0;
   while (i < command.length) {
     const ch = command[i]!;
@@ -253,12 +268,15 @@ export function withoutHeredocBodies(command: string): { text: string; bodies: H
     }
     if (ch === "\\") {
       // An escaped newline continues the line, so the body it opens still
-      // begins after the next newline that ends one.
+      // begins after the next newline that ends one, and the word it stood in
+      // goes on after it.
+      if (command[i + 1] !== "\n") wordStart = false;
       i += 2;
       continue;
     }
     if (quote === null && (ch === '"' || ch === "'")) {
       quote = ch;
+      wordStart = false;
       i += 1;
       continue;
     }
@@ -272,22 +290,34 @@ export function withoutHeredocBodies(command: string): { text: string; bodies: H
       // runs, which is read on its own.
       const read = readSubstitution(command, i);
       if (read === null) break;
+      wordStart = false;
       i = read.end;
+      continue;
+    }
+    if (comments && ch === "#" && wordStart) {
+      const newline = command.indexOf("\n", i);
+      const end = newline === -1 ? command.length : newline;
+      kept += command.slice(start, i);
+      start = end;
+      i = end;
       continue;
     }
     if (ch === "<" && command[i + 1] === "<") {
       if (command[i + 2] === "<") {
         // A here-string. Its word is on this line, and the two characters it
         // ends with are not an operator of their own.
+        wordStart = true;
         i += 3;
         continue;
       }
       const read = readHeredocTag(command, i + 2);
       if (read === null) {
+        wordStart = true;
         i += 2;
         continue;
       }
       opened.push(read.heredoc);
+      wordStart = false;
       i = read.end;
       continue;
     }
@@ -296,8 +326,10 @@ export function withoutHeredocBodies(command: string): { text: string; bodies: H
       i = skipHeredocBodies(command, i + 1, opened, bodies);
       start = i;
       opened = [];
+      wordStart = true;
       continue;
     }
+    wordStart = /\s/.test(ch) || WORD_BREAK.has(ch);
     i += 1;
   }
   return { text: kept + command.slice(start), bodies };
@@ -327,16 +359,20 @@ export function heredocQueue(bodies: readonly HeredocBody[]): Map<string, Heredo
  * Splitting is quote-aware: a separator inside `"…"`, `'…'`, a `$(…)`, a
  * backtick pair or a subshell is part of a command, not a boundary. Heredoc
  * bodies come out before anything else is read, because they are input rather
- * than command text (SCP-174). Line continuations are joined next, because
- * `git branch \<newline> -D main` deletes a branch.
+ * than command text (SCP-174), and so do comments where `comments` is set. Line
+ * continuations are joined next, because `git branch \<newline> -D main`
+ * deletes a branch.
  */
-export function scanSegments(command: string): {
+export function scanSegments(
+  command: string,
+  options: { comments?: boolean } = {},
+): {
   texts: string[];
   separators: string[];
   balanced: boolean;
   bodies: HeredocBody[];
 } {
-  const read = withoutHeredocBodies(command);
+  const read = withoutHeredocBodies(command, options);
   const bodies = read.bodies;
   const text = read.text.replace(/\\\r?\n/g, " ");
   const texts: string[] = [];

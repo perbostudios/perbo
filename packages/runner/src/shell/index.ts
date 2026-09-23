@@ -65,9 +65,11 @@ export function readCommandLine(command: string, scope: ResolvedScope): CommandR
   // Read as if the runner had named no scratch directory once the line rebinds
   // one of its variables: that is the reading this module had before it had one
   // to offer, so the narrowing can only refuse. The rebinding is looked for in
-  // the line the shell runs, not in a heredoc body it hands to a command.
+  // the line the shell runs, not in a heredoc body it hands to a command or a
+  // comment it skips — the same text the segments below are read from.
   const effective: ResolvedScope =
-    scope.tmpdir !== null && SCRATCH_REBOUND.test(withoutHeredocBodies(text).text)
+    scope.tmpdir !== null &&
+    SCRATCH_REBOUND.test(withoutHeredocBodies(text, { comments: true }).text)
       ? { ...scope, tmpdir: null }
       : scope;
   return inspectSegments(

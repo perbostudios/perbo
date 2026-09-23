@@ -48,8 +48,14 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
 /** The same wrapper where the line spells the destination, on both paths. */
 const DESTINATION_ON_THE_LINE = ["xargs -I{} cp {} sub", "xargs -0 -n1 cp -t sub"];
 
+/** Writes outside the worktree that a misreading of the line hid, on both paths. */
+const MISREAD = [
+  // A comment's words read as operands: `-t sub` made `/etc/x` a source.
+  "cp a /etc/x # -t sub",
+];
+
 describe("a write neither executor can see the destination of", () => {
-  for (const command of [...FROM_STANDARD_INPUT, ...SUBSTITUTED_FOR_THE_DESTINATION]) {
+  for (const command of [...FROM_STANDARD_INPUT, ...SUBSTITUTED_FOR_THE_DESTINATION, ...MISREAD]) {
     it(`is refused by the hook and by Codex — ${command}`, () => {
       const hook = judgePreToolCall(
         { tool_name: "Bash", tool_input: { command }, tool_use_id: "hook" },

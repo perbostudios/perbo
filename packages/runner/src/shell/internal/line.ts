@@ -960,7 +960,7 @@ export function inspectSegments(
       segments: [],
     };
   }
-  const { texts, separators, balanced, bodies } = scanSegments(command);
+  const { texts, separators, balanced, bodies } = scanSegments(command, { comments: true });
   const heredocs = heredocQueue(bodies);
   const findings: WriteFinding[] = [];
   const segments: CommandSegment[] = [];
