@@ -113,7 +113,7 @@ export const LocalVerdictSchema = z
      */
     decided_by: DecidedBySchema.optional(),
     /**
-     * Whether the AI stand-in took this decision rather than a person (D-058),
+     * Whether the AI stand-in took this decision rather than a person (D-NEW-stand-in-dogfood),
      * which is the same label the pull-request path records on a signed tick.
      * Absent is a person: `perbo verdict` is typed by whoever is at the
      * machine, and only `--stand-in` says otherwise. A row written before this
@@ -268,7 +268,7 @@ export function mergeLocalVerdicts(
         stop.answered_at !== null &&
         Date.parse(stop.answered_at) > Date.parse(row.decided_at);
       // The answerer travels with the answer: where the decision taken here
-      // stands, so does what it says about who took it (D-058).
+      // stands, so does what it says about who took it (D-NEW-stand-in-dogfood).
       return ticked
         ? stop
         : {

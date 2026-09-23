@@ -237,7 +237,7 @@ describe("perbo sync writes the stop answers beside the attempt record", () => {
 }, SPAWN_TEST_TIMEOUT_MS);
 
 /* ------------------------------------------------------------------ *
- * Who answered, from the same body (D-058).
+ * Who answered, from the same body (D-NEW-stand-in-dogfood).
  * ------------------------------------------------------------------ */
 
 /**

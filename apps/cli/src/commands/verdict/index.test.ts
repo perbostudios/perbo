@@ -1074,7 +1074,7 @@ describe("perbo verdict --list reads back what was decided about a change", () =
 }, SPAWN_TEST_TIMEOUT_MS);
 
 /**
- * `perbo verdict --stand-in`: the command line's half of D-058's label.
+ * `perbo verdict --stand-in`: the command line's half of D-NEW-stand-in-dogfood's label.
  *
  * A stop becomes dogfood two ways, and this is the one that needs no pull
  * request: the AI acting as the founder's partner takes a decision here and

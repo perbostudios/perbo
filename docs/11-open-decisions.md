@@ -503,6 +503,13 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: a partner's direct-agent baseline is captured with `perbo baseline` before they first use Perbo: the same partner, comparable tickets, agent-direct, wall clock from start of work to pull request.
 - Why: it cannot be reconstructed afterwards.
 
+### D-NEW-stand-in-dogfood — A stand-in's stops are dogfood, never a partner reading
+
+- Owner: Founder
+- Decision: a stop an AI stand-in answered — a tick the stand-in signed, or `verdict --stand-in` — is a dogfood number: every row that carries it says so, it is counted in its own `dogfood stops excluded` row and column, and it is never pooled with a partner's precision. A store with no baseline captured before first use ([D-038](11-open-decisions.md)) has no partner population, so every row it holds is dogfood.
+- Why: precision of stopping is the partner reading the product is judged by; a number that mixed the stand-in's answers into it would be quoted as a partner's.
+- Changes if: a stand-in's answers are shown to track a partner's closely enough to pool.
+
 ### D-047 — The partner agreement
 
 - Owner: Founder

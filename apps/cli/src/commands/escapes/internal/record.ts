@@ -284,7 +284,7 @@ export interface EscapeRow {
   ticket_key: string;
   ticket_id: string;
   /**
-   * D-058: a stand-in's numbers are dogfood numbers and are never pooled with
+   * D-NEW-stand-in-dogfood: a stand-in's numbers are dogfood numbers and are never pooled with
    * a partner's, so every row says which it is rather than leaving the reader
    * to remember.
    */
