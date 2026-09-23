@@ -9,6 +9,7 @@ import { WorkspaceReads } from "../host/workspace-reads.js";
 import { ContractEditor, flushContractEditors, useContractEditing } from "./contract-editor.js";
 import { bridge } from "./workspace/index.js";
 import { INTERVIEW_CONVERSATION_CAP, TaskModelsSchema } from "../shared/protocol.js";
+import { READ_ATTEMPTS } from "../shared/read-generations.js";
 import type { Change, DesktopBridge, Detail, EditingSession, Job, ReplyMap, Request } from "../shared/protocol.js";
 import { sampleBridge } from "../sample-host/bridge.js";
 
@@ -315,6 +316,37 @@ describe("editor binding lifecycle", () => {
     old.resolve(stale);
     await vi.waitFor(() => expect(editor.getSnapshot().session).toMatchObject({ phase: "editing", key: "PRB-421" }));
     expect(reads).toBe(2);
+    disconnect();
+  });
+
+  /**
+   * A session that changes under every read never settles, and the editor
+   * follows the same ceiling every other guarded read does: it stops reading,
+   * says so where the screen can show it, and leaves the next change or the
+   * next refresh to read again.
+   */
+  it("refuses a session read that every change overlaps", async () => {
+    const f = await fixture();
+    const editor = new ContractEditor(f.connection, { kind: "new", repoId }, models);
+    const disconnect = editor.connect();
+    await vi.waitFor(() => expect(editor.getSnapshot().loading).toBe(false));
+    const original = f.request.getMockImplementation()!;
+    let reads = 0;
+    // Changes for longer than the ceiling allows, then settles: an unbounded
+    // loop reads the settled session and reports no failure at all.
+    f.request.mockImplementation(async (request) => {
+      if (request.kind !== "editingRead") return original(request);
+      reads += 1;
+      if (reads <= READ_ATTEMPTS + 5) {
+        await Promise.resolve();
+        f.emit({ kind: "records", sequence: reads, repoId: null, key: null });
+      }
+      return original(request);
+    });
+    f.emit({ kind: "records", sequence: 0, repoId: null, key: null });
+    await vi.waitFor(() => expect(reads).toBeGreaterThanOrEqual(READ_ATTEMPTS));
+    expect(reads).toBe(READ_ATTEMPTS);
+    expect(editor.getSnapshot().error).toMatch(/changed while every attempt to read them/);
     disconnect();
   });
 

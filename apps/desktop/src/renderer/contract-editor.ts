@@ -3,6 +3,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { EditingSessionSchema, LegacyEditingSchema, TaskModelsSchema } from "../shared/protocol.js";
 import type { DesktopBridge, Detail, EditingForm, EditingOperation, EditingSession, EditingTarget, LegacyEditing, TaskModels } from "../shared/protocol.js";
 import { editingForm } from "../shared/contract-editing.js";
+import { READ_ATTEMPTS, READ_REFUSED } from "../shared/read-generations.js";
 import { bridge } from "./workspace/index.js";
 
 const saving = new Set<Promise<void>>();
@@ -163,7 +164,11 @@ export class ContractEditor {
     if (!this.saved || this.value.saving || this.value.submitting || this.failedSave) return Promise.resolve();
     const id = this.saved.id, changes = this.changes, generation = this.generation;
     this.reading = (async () => {
-      for (;;) {
+      // The read is taken again while a change lands under it, and a session
+      // that changes under every attempt never settles, so the reading follows
+      // the ceiling every other guarded read does: past it the read is refused,
+      // and the next change or the next refresh takes it again.
+      for (let attempt = 0; attempt < READ_ATTEMPTS; attempt++) {
         const revision = this.refreshRevision;
         let session: EditingSession;
         try { session = await this.connection.request({ kind: "editingRead", id }); } catch (error) {
@@ -182,6 +187,7 @@ export class ContractEditor {
         if (revision !== this.refreshRevision) continue;
         return;
       }
+      throw new Error(READ_REFUSED);
     })().catch((error) => { if (generation === this.generation) this.publish({ error: message(error) }); }).finally(() => { this.reading = null; });
     return this.reading;
   }

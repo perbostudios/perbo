@@ -14,7 +14,7 @@ import { sampleBridge } from "../../sample-host/bridge.js";
 import { bridge } from "../workspace/index.js";
 import { setPlatformForTests } from "../../shared/shortcuts.js";
 import { resetRailSize } from "./rail-size.js";
-import type { ReplyMap, Request } from "../../shared/protocol.js";
+import type { Change, ReplyMap, Request } from "../../shared/protocol.js";
 
 let client: QueryClient;
 beforeEach(() => {
@@ -238,5 +238,34 @@ describe("UI v2", () => {
     fireEvent.click(screen.getByRole("button", { name: /Refresh connections/ }));
     await screen.findByText("Connections refreshed");
     expect(screen.queryByRole("button", { name: "Perbo home" })).toBeNull();
+  });
+});
+
+/**
+ * The ceiling on a guarded read governs the whole workspace as well, and every
+ * repository's invalidation dirties it, so records moving across repositories
+ * faster than the workspace can be read refuse the read rather than taking it
+ * again. What the person is left with then is the refusal and a way to ask
+ * again, never an empty window.
+ */
+describe("a workspace read nothing lets settle", () => {
+  it("shows the refusal and a way to read again", async () => {
+    const snapshot = structuredClone(await sampleBridge.request({ kind: "snapshot" }));
+    let listener: ((change: Change) => void) | undefined;
+    vi.spyOn(bridge, "subscribe").mockImplementation((next) => { listener = next; return () => (listener = undefined); });
+    let sequence = 0;
+    vi.spyOn(bridge, "request").mockImplementation(async (input) => {
+      if (input.kind === "snapshot") {
+        const repository = snapshot.repositories[sequence % snapshot.repositories.length]!;
+        listener?.({ kind: "records", sequence: ++sequence, repoId: repository.id, key: null });
+        return structuredClone(snapshot) as never;
+      }
+      if (input.kind === "repositorySnapshot")
+        return { repository: snapshot.repositories.find((entry) => entry.id === input.repoId)!, tasks: [], errors: [] } as never;
+      throw new Error("Unexpected request " + input.kind);
+    });
+    mount();
+    expect(await screen.findByText(/changed while every attempt to read them/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 });
