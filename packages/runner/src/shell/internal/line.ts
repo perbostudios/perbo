@@ -184,14 +184,55 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   /** Whether that placeholder is replaced only as a whole operand. */
   let placeholderWholeWord: boolean;
   /**
-   * A word the shell hands the wrapper as written: nothing in it is expanded,
-   * substituted or rewritten on the way, so the wrapper sees the placeholder.
+   * The characters of a word the shell reads unquoted: outside single and
+   * double quotes and not escaped. Only those can expand.
+   */
+  const unquoted = (raw: string): string => {
+    let out = "";
+    let quote: "'" | '"' | null = null;
+    for (let at = 0; at < raw.length; at += 1) {
+      const char = raw[at]!;
+      if (quote === "'") {
+        if (char === "'") quote = null;
+        continue;
+      }
+      if (quote === '"') {
+        if (char === "\\") at += 1;
+        else if (char === '"') quote = null;
+        continue;
+      }
+      if (char === "\\") {
+        at += 1;
+        continue;
+      }
+      if (char === "'" || char === '"') {
+        quote = char;
+        continue;
+      }
+      out += char;
+    }
+    return out;
+  };
+  /**
+   * A word the shell may turn into other words — a glob, whose result depends
+   * on the files present, or a brace expansion. Where such a word stands in a
+   * command a wrapper substitutes into, the placeholder can end up anywhere or
+   * nowhere, and the line cannot be read.
+   */
+  const expands = (word: Word): boolean => {
+    const bare = unquoted(word.raw);
+    return /[*?[]/.test(bare) || /\{[^{}]*(,|\.\.)[^{}]*\}/.test(bare);
+  };
+  /**
+   * A word the shell hands the wrapper as written, so the wrapper sees the
+   * placeholder: not a redirect's, nothing substituted into it, and no tilde
+   * for the shell to expand at its start.
    */
   const literal = (word: Word): boolean =>
     word.redirect !== true &&
     !word.variable &&
     word.substitutions.length === 0 &&
-    (word.raw !== word.value || !/[~*?[{$]/.test(word.value));
+    !unquoted(word.raw).startsWith("~");
 
   const stopHere = (): Analysis => ({
     findings,
@@ -504,10 +545,25 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         return stopHere();
       }
       if (wrapper.appendsOperands === true) {
+        const rest = words.slice(i + (wrapper.operands ?? 0));
+        const expanded =
+          named !== null && placeholderWholeWord
+            ? rest.find((word) => word.redirect !== true && expands(word))
+            : undefined;
+        if (expanded !== undefined) {
+          findings.push({
+            detail:
+              `${expanded.raw} is a word the shell expands, so where ${program} finds ${named} ` +
+              `in the command it runs — or whether it does — cannot be read here: ` +
+              `${context.segment.slice(0, 200)}`,
+            target: null,
+            resolved: null,
+          });
+          return stopHere();
+        }
         // A whole-word placeholder that stands nowhere in the wrapped command
         // — not as an operand, not as an option's value — is not substituted,
         // and the wrapper appends its input as it does with no placeholder.
-        const rest = words.slice(i + (wrapper.operands ?? 0));
         const substituted =
           named !== null &&
           (!placeholderWholeWord || rest.some((word) => literal(word) && word.value === named));

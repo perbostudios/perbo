@@ -42,8 +42,6 @@ const FROM_STANDARD_INPUT = [
   // A word the shell rewrites never reaches xargs as the placeholder, so the
   // input is appended after all.
   "echo /etc | xargs -J '~' cp a ~ b",
-  "echo /etc | xargs -J '{a,b}' cp {a,b} b",
-  "echo /etc | xargs -J '*' cp a * b",
 ];
 
 /**
@@ -64,6 +62,11 @@ const DESTINATION_ON_THE_LINE = [
   "xargs grep TODO",
   "xargs ls",
   "xargs curl -o out/payload https://example.com/x",
+  // `{}` is what xargs is most often told to substitute, and a quoted tilde is
+  // handed over as written.
+  "find . -print0 | xargs -0 -J {} cp {} out",
+  "xargs -J {} cp {} out",
+  "xargs -J '~' cp a '~' b",
 ];
 
 /**
@@ -99,6 +102,31 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
   "echo /etc | xargs -J -- cp a b --",
   // An unset variable is rewritten to nothing before xargs runs.
   "echo /etc | xargs -J '$P' cp a $P b",
+  // `{}` and `{x}` are not brace expansions, so the shell hands them to xargs
+  // as written and they stand where the destination goes.
+  "echo /etc | xargs -J {} cp -t {} a",
+  "echo /etc | xargs -J {} mv -t {} a",
+  "echo /etc | xargs -J {} curl -o {} https://x",
+  "echo /etc | xargs -J {} tar -C {} -xf a.tar",
+  "echo /etc | xargs -J {} nice cp -t {} a",
+  "echo /etc | xargs -J '{x}' cp -t {x} a",
+  "echo /etc | xargs -J 'a~' cp -t a~ x",
+  // A glob or a brace expansion in the wrapped command can put the placeholder
+  // anywhere or nowhere, depending on the files present: the line is unreadable.
+  "echo /etc | xargs -J '{a,b}' cp {a,b} b",
+  "echo /etc | xargs -J '*' cp a * b",
+  "echo /etc | xargs -J '[' cp -t [ x",
+  "echo /etc | xargs -J 'zq?' cp -t zq? x",
+  "echo /etc | xargs -J 'a*' cp x 'a'* b",
+  "echo /etc | xargs -J 'a*' cp x \\a* b",
+  "echo /etc | xargs -J '*' cp a \"\"* b",
+  "echo /etc | xargs -J '{a,b}c' cp a {a,b}'c' b",
+  "echo /etc | xargs -J a cp -t [a] x",
+  "echo /etc | xargs -J a cp -t {a,} x",
+  "echo /etc | xargs -J a cp -t ? x",
+  "echo /etc | xargs -J a curl -o [a] https://x",
+  // A tilde the shell expands never reaches xargs, whatever is quoted after it.
+  "echo /etc | xargs -J '~/x' cp a ~/'x' b",
 ];
 
 /** Run `body` with the xargs entry no longer saying it appends operands. */
