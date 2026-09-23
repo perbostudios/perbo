@@ -25,7 +25,6 @@ export function linkFindings(rest: Word[], context: Context): WriteFinding[] {
   for (let i = 0; i < rest.length; i += 1) {
     const word = rest[i]!;
     const value = word.value;
-    if (value === ";" || value === "+" || value === "(" || value === ")") break;
     if (!optionsEnded) {
       if (value === "--") {
         optionsEnded = true;

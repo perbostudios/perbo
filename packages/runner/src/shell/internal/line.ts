@@ -729,9 +729,12 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       programs.push(verb);
       const at = rest.findIndex((word) => word.value === "-exec" || word.value === "-execdir");
       if (at !== -1) {
+        // A `;` word ends the body, and so does a `+` straight after `{}`; any
+        // other `+` is one of the body's own words, as `find` reads it.
         const body: Word[] = [];
         for (const word of rest.slice(at + 1)) {
-          if (word.value === ";" || word.value === "+") break;
+          if (word.value === ";") break;
+          if (word.value === "+" && body[body.length - 1]?.value === "{}") break;
           body.push(word);
         }
         // The body is a command of its own: it inherits the directory, not the
@@ -886,7 +889,8 @@ function analyzeSegment(
       run(item.text);
       continue;
     }
-    if (item.kind === "word" && (item.word.value === "(" || item.word.value === ")")) {
+    // Only an unquoted parenthesis opens or closes a subshell; `'('` is a word.
+    if (item.kind === "word" && (item.word.raw === "(" || item.word.raw === ")")) {
       run("");
       if (item.word.value === "(") {
         enclosing.push(cwd);

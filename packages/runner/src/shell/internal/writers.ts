@@ -148,8 +148,6 @@ export function writerFindings(
   for (let i = 0; i < rest.length; i += 1) {
     const word = rest[i]!;
     const value = word.value;
-    // A `find … -exec` body ends here, and so does a `{ … }` group.
-    if (value === ";" || value === "+" || value === "(" || value === ")") break;
     if (!optionsEnded) {
       if (value === "--") {
         optionsEnded = true;

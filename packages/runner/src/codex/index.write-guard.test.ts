@@ -52,6 +52,9 @@ const DESTINATION_ON_THE_LINE = ["xargs -I{} cp {} sub", "xargs -0 -n1 cp -t sub
 const MISREAD = [
   // A comment's words read as operands: `-t sub` made `/etc/x` a source.
   "cp a /etc/x # -t sub",
+  // A `find -exec` terminator read as the end of a writer's operands.
+  "cp a sub + /etc",
+  "cp a sub ';' /etc",
 ];
 
 describe("a write neither executor can see the destination of", () => {
