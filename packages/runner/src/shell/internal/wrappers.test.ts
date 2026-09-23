@@ -39,6 +39,11 @@ const FROM_STANDARD_INPUT = [
   // A redirect target is the shell's word, not xargs's: the placeholder stands
   // nowhere xargs looks, so the input is appended.
   "echo /etc | xargs -J % cp > % a b",
+  // A word the shell rewrites never reaches xargs as the placeholder, so the
+  // input is appended after all.
+  "echo /etc | xargs -J '~' cp a ~ b",
+  "echo /etc | xargs -J '{a,b}' cp {a,b} b",
+  "echo /etc | xargs -J '*' cp a * b",
 ];
 
 /**
@@ -86,6 +91,14 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
   "echo /etc | xargs -J % env -C % rm x",
   "xargs -I{} env -C {} rm x",
   "xargs -J % pnpm -C % exec rm x",
+  // A placeholder shaped like an option stands where a writer reads options,
+  // so whatever the input holds is read as one: the line cannot be read.
+  "echo /etc/passwd | xargs -J -r rm -r",
+  "echo /etc | xargs -J -f cp a b -f",
+  "echo /etc/passwd | xargs -I -f rm -f",
+  "echo /etc | xargs -J -- cp a b --",
+  // An unset variable is rewritten to nothing before xargs runs.
+  "echo /etc | xargs -J '$P' cp a $P b",
 ];
 
 /** Run `body` with the xargs entry no longer saying it appends operands. */

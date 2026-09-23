@@ -183,6 +183,15 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   let placeholder: string | null;
   /** Whether that placeholder is replaced only as a whole operand. */
   let placeholderWholeWord: boolean;
+  /**
+   * A word the shell hands the wrapper as written: nothing in it is expanded,
+   * substituted or rewritten on the way, so the wrapper sees the placeholder.
+   */
+  const literal = (word: Word): boolean =>
+    word.redirect !== true &&
+    !word.variable &&
+    word.substitutions.length === 0 &&
+    (word.raw !== word.value || !/[~*?[{$]/.test(word.value));
 
   const stopHere = (): Analysis => ({
     findings,
@@ -480,18 +489,31 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       placeholderWholeWord = false;
       const stop = consumeOptions(program, wrapper);
       if (stop !== null) return stop;
+      // Set inside the option consumer, which the narrowing above cannot see.
+      const named = placeholder as string | null;
+      if (named !== null && named.startsWith("-")) {
+        // The placeholder stands where a writer reads its options, so whatever
+        // the input holds is read as one, and the line cannot be read at all.
+        findings.push({
+          detail:
+            `the placeholder ${named} ${program} substitutes its input for is shaped like an ` +
+            `option, so the command it runs cannot be read: ${context.segment.slice(0, 200)}`,
+          target: null,
+          resolved: null,
+        });
+        return stopHere();
+      }
       if (wrapper.appendsOperands === true) {
         // A whole-word placeholder that stands nowhere in the wrapped command
         // — not as an operand, not as an option's value — is not substituted,
         // and the wrapper appends its input as it does with no placeholder.
         const rest = words.slice(i + (wrapper.operands ?? 0));
         const substituted =
-          placeholder !== null &&
-          (!placeholderWholeWord ||
-            rest.some((word) => word.redirect !== true && word.value === placeholder));
+          named !== null &&
+          (!placeholderWholeWord || rest.some((word) => literal(word) && word.value === named));
         supplied = {
           wrapper: program,
-          placeholder: substituted ? placeholder : null,
+          placeholder: substituted ? named : null,
           wholeWord: placeholderWholeWord,
         };
       }
