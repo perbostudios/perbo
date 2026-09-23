@@ -76,6 +76,11 @@ const UNDER_A_FIND_START = [
   // `-execdir` runs the body on the starting point itself from the directory above it.
   "find sub -execdir cp a ../x \\;",
   "find sub -okdir cp a ../x \\;",
+  // A starting point after `--`, or in a file.
+  "find -- /etc -name x -delete",
+  "find -files0-from list -delete",
+  // A starting point and an action arriving on standard input.
+  "echo /etc/x -delete | xargs find",
 ];
 
 /** An `xargs` behind another whose placeholder the inner one's command carries, on both paths. */

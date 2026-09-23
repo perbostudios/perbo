@@ -851,6 +851,43 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     } else if (verb === "find") {
       programs.push(verb);
       const expression = findExpression(rest);
+      // Words a wrapper in front puts where `find` reads a starting point or
+      // an action can be an action themselves: `-delete`, or `-fprint` taking
+      // the word after it as its file. An appending wrapper puts them after
+      // the whole expression, BSD's `-J` puts every word it reads wherever its
+      // placeholder stands, and a placeholder standing as a head is one.
+      const fed =
+        supplied === undefined
+          ? null
+          : supplied.placeholder === null
+            ? `${supplied.wrapper} appends the words it reads from standard input to its expression`
+            : supplied.wholeWord && rest.some((word) => carries(word))
+              ? `${supplied.wrapper} substitutes every word it reads from standard input for ` +
+                `${supplied.placeholder} in it`
+              : expression.heads.some((word) => carries(word))
+                ? `${supplied.wrapper} substitutes the words it reads from standard input for ` +
+                  `${supplied.placeholder} where it reads a starting point or an action`
+                : null;
+      if (fed !== null) {
+        findings.push({
+          detail:
+            `what find walks and what it does there cannot be read — ${fed}: ` +
+            `${context.segment.slice(0, 200)}`,
+          target: null,
+          resolved: null,
+        });
+        return stopHere();
+      }
+      if (expression.startsFrom !== null && (expression.deletes || expression.bodies.length > 0)) {
+        findings.push({
+          detail:
+            `the starting points find -files0-from reads from ${expression.startsFrom.raw} are ` +
+            `not on the line, so where its -delete or -exec body writes cannot be resolved: ` +
+            `${context.segment.slice(0, 200)}`,
+          target: null,
+          resolved: null,
+        });
+      }
       const starts = expression.starts.length > 0 ? expression.starts : [HERE];
       /** A path under which the walk writes, or a file an action writes. */
       const judgeWritten = (word: Word, label: string): WriteFinding[] =>
@@ -865,10 +902,6 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       for (const { action, word } of expression.files) {
         findings.push(...judgeWritten(word, `the find ${action} destination`));
       }
-      // The words a wrapper in front of the `find` substitutes into a body are
-      // its own input; words it appends land after the whole expression, never
-      // in a body.
-      const into = supplied?.placeholder === null ? undefined : supplied;
       for (const body of expression.bodies) {
         // A body runs on each path the walk finds, which `find` puts where `{}`
         // stands, and every one is under a starting point: so the body is read
@@ -878,7 +911,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         // A body the wrapper in front substitutes its own input into is read
         // as written, because that input is what stands there.
         const readings =
-          into !== undefined && body.words.some((word) => carries(word))
+          supplied !== undefined && body.words.some((word) => carries(word))
             ? [{ words: body.words, at: cwd }]
             : starts.flatMap((start) =>
                 body.inFoundDirectory
@@ -895,7 +928,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
             ...context,
             cwd: reading.at,
             stdin: undefined,
-            supplied: into,
+            supplied,
           });
           findings.push(...inner.findings);
           if (!inner.accounted) accounted = false;

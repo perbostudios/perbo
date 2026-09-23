@@ -11,6 +11,15 @@ import type { Word } from "./lexer.js";
 export interface FindExpression {
   /** Where the walk starts; empty where the line names none, which is `.`. */
   starts: Word[];
+  /** The file GNU's `-files0-from` reads the starting points from, where one does. */
+  startsFrom: Word | null;
+  /**
+   * Every word `find` reads as a starting point, an operator, or the name of a
+   * test or an action — every word but an argument and a body's words. A word
+   * standing here can be an action: `-delete`, or `-fprint` taking the word
+   * after it as the file it writes.
+   */
+  heads: Word[];
   /** Each command the expression runs on what it finds, in order. */
   bodies: FindBody[];
   /** True where the expression deletes what it finds. */
@@ -34,6 +43,24 @@ const RUNS_A_COMMAND = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
 const IN_FOUND_DIRECTORY = new Set(["-execdir", "-okdir"]);
 /** Actions whose operand is a file they write. */
 const WRITES_A_FILE = new Set(["-fprint", "-fprint0", "-fls", "-fprintf"]);
+/**
+ * GNU's and BSD's tests and actions that take one argument, and `-fprintf`,
+ * which takes two. A primary missing here has its argument read as a head,
+ * which can only refuse more.
+ */
+const ARGUMENTS = new Map<string, number>([
+  ...[
+    "-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex",
+    "-lname", "-ilname", "-newer", "-anewer", "-cnewer", "-mnewer", "-Bnewer", "-samefile",
+    "-user", "-group", "-uid", "-gid", "-type", "-xtype", "-perm", "-size", "-links", "-inum",
+    "-mtime", "-mmin", "-atime", "-amin", "-ctime", "-cmin", "-Btime", "-Bmin", "-used",
+    "-maxdepth", "-mindepth", "-fstype", "-context", "-flags", "-printf", "-regextype",
+    "-fprint", "-fprint0", "-fls", "-files0-from",
+  ].map((name): [string, number] => [name, 1]),
+  ["-fprintf", 2],
+]);
+/** GNU's `-newerXY`, one argument each. */
+const NEWER = /^-newer[aBcmt][aBcmt]$/;
 
 /** Read the words after `find`. */
 export function findExpression(rest: readonly Word[]): FindExpression {
@@ -56,6 +83,8 @@ export function findExpression(rest: readonly Word[]): FindExpression {
       i += 2;
       continue;
     }
+    // Both end their options at `--`; the starting points follow it.
+    if (value === "--") i += 1;
     break;
   }
   // The starting points run up to the first word the expression starts with.
@@ -69,8 +98,10 @@ export function findExpression(rest: readonly Word[]): FindExpression {
     starts.push(word);
   }
 
+  const expression = i;
   const bodies: FindBody[] = [];
   const files: FindExpression["files"] = [];
+  let startsFrom: Word | null = null;
   let deletes = false;
   while (i < rest.length) {
     const word = rest[i]!;
@@ -92,10 +123,40 @@ export function findExpression(rest: readonly Word[]): FindExpression {
       continue;
     }
     if (value === "-delete") deletes = true;
+    if (value === "-files0-from" && rest[i] !== undefined) startsFrom = rest[i]!;
     if (WRITES_A_FILE.has(value) && rest[i] !== undefined) {
       files.push({ action: value, word: rest[i]! });
       i += 1;
     }
   }
-  return { starts, bodies, deletes, files };
+  return { starts, startsFrom, heads: heads(rest, expression, starts), bodies, deletes, files };
+}
+
+/**
+ * The heads of an expression that starts at `from`, as `find` reads it: each
+ * primary's arguments and each body are skipped, and every other word is one.
+ * The scan above reads actions wherever a word could name one; this reads
+ * only where `find` does.
+ */
+function heads(rest: readonly Word[], from: number, starts: readonly Word[]): Word[] {
+  const read: Word[] = [...starts];
+  let i = from;
+  while (i < rest.length) {
+    const word = rest[i]!;
+    i += 1;
+    if (word.redirect === true) continue;
+    read.push(word);
+    if (RUNS_A_COMMAND.has(word.value)) {
+      let last: string | undefined;
+      while (i < rest.length) {
+        const part = rest[i]!.value;
+        i += 1;
+        if (part === ";" || (part === "+" && last === "{}")) break;
+        last = part;
+      }
+      continue;
+    }
+    i += ARGUMENTS.get(word.value) ?? (NEWER.test(word.value) ? 1 : 0);
+  }
+  return read;
 }

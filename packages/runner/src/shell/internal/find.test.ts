@@ -27,6 +27,10 @@ const WRITES_OUTSIDE = [
   "find ~ -execdir touch x \\;",
   // Under `..`, every path the walk finds runs the body in `..` itself.
   "find .. -execdir touch x \\;",
+  // A starting point after `--` is one: both finds end their options there.
+  "find -- /etc -name x -delete",
+  "find -- /etc -exec rm {} \\;",
+  "find -P -- /etc -delete",
   // Every body is read, not only the first.
   "find . -exec true \\; -exec rm -rf /etc/x \\;",
   "find . -ok rm /etc/x \\;",
@@ -44,6 +48,41 @@ const WITHIN_OR_READ = [
   "find src -execdir touch x \\;",
   "find src/deep -execdir rm {} \\;",
   "find . -fprint out/found.txt",
+  "find -- src -name x -delete",
+  "find -files0-from list -print",
+];
+
+/** A `find` whose starting points are in a file this guard does not read. */
+const STARTS_IN_A_FILE = ["find -files0-from list -delete", "find -files0-from - -exec rm {} +"];
+
+/**
+ * A `find` a wrapper in front feeds, where what it reads can be a starting
+ * point or an action: `-delete`, or `-fprint` taking the next word as its file.
+ */
+const FED_BY_A_WRAPPER = [
+  "echo /etc/x -delete | xargs find",
+  // Appended after the expression, a `-delete` or a new body still acts.
+  "xargs find . -name x",
+  "xargs find . -name x -exec rm {} \\;",
+  // BSD's `-J` puts every word it reads where its placeholder stands.
+  "echo /etc -delete | xargs -J % find % -name x",
+  "xargs -J % find . -name %",
+  // A placeholder standing as a starting point or as an action.
+  "xargs -I{} find {} -name x",
+  "xargs -I{} find /etc {}",
+  "xargs -I{} find /etc -name -name {}",
+];
+
+/**
+ * A placeholder `find` reads as a test's argument or as a body's word, which no
+ * input turns into an action: `-I` substitutes one word however it is spelled.
+ */
+const AN_ARGUMENT = [
+  "xargs -I{} find . -name {}",
+  "xargs -I{} find /etc -newer {} -print",
+  "xargs -I{} find . -newermt {}",
+  "xargs -I{} find . -fprintf out {}",
+  "xargs -I{} find . -exec echo {} \\;",
 ];
 
 describe("a find's starting point", () => {
@@ -64,4 +103,24 @@ describe("a find's starting point", () => {
     expect(decision(command), command).toBe("refused");
     expect(sentence(command), command).toContain("xargs");
   });
+
+  for (const command of STARTS_IN_A_FILE) {
+    it(`cannot be read where ${command} reads it from a file`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("-files0-from");
+    });
+  }
+
+  for (const command of FED_BY_A_WRAPPER) {
+    it(`cannot be read where a wrapper feeds ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("what find walks and what it does there");
+    });
+  }
+
+  for (const command of AN_ARGUMENT) {
+    it(`is read where the wrapper's input is only an argument in ${command}`, () => {
+      expect(decision(command), command).toBe("allowed");
+    });
+  }
 });

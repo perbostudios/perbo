@@ -216,8 +216,9 @@ const OUTSIDE_THE_NESTED_COMMAND = [
   "xargs -I{} sh -c 'rm sub/x'",
   // BSD `-J` replaces only a whole operand, so `rm %` runs as written.
   "xargs -J % sh -c 'rm %'",
-  // Appended words follow the whole `find` expression and reach no body.
-  "xargs find . -name x -exec rm {} \\;",
+  // The input is `-name`'s pattern, and reaches no body. A `find` the input
+  // is appended to is in find.test.ts: appended words can add a body.
+  "xargs -I{} find . -name {} -exec rm sub/x \\;",
 ];
 
 describe("a placeholder substituted into a nested command", () => {
