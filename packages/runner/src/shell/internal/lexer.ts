@@ -453,7 +453,10 @@ function ansiQuoteReadsPlain(text: string, from: number): boolean {
  * before it joins it to a word (`JOINS_A_WORD`).
  *
  * Where bash and zsh disagree whether a `<<` opens a heredoc — after the `}`
- * bash ends a `${…}` at and zsh does not — the line is `unreadable` too.
+ * bash ends a `${…}` at and zsh does not — the line is `unreadable` too, and so
+ * it is where a `<<` this reads as opening one stands after an expansion or a
+ * `$'…'` whose end is uncertain: it may be text inside a quote the shells read
+ * as still open, and taken as a heredoc it would hide the lines after it.
  */
 export function withoutHeredocBodies(command: string): {
   text: string;
@@ -475,17 +478,17 @@ export function withoutHeredocBodies(command: string): {
   /** Where zsh ends the last `${…}` that bash ended sooner. */
   let zshUntil = -1;
   let unreadable: string | null = null;
+  /** The expansion or `$'` after which what is quoted is uncertain, as written. */
+  const opener = () =>
+    JSON.stringify(command.slice(unsure, command[unsure] === "`" ? unsure + 1 : unsure + 2));
   const comment = (hash: number): string => {
     const excerpt = JSON.stringify(command.slice(hash, hash + 24).split("\n")[0]);
     if (unsure === -1) {
       return `the # in ${excerpt} starts a word, so it may open a comment, and ${COMMENT}`;
     }
-    const opener = JSON.stringify(
-      command.slice(unsure, command[unsure] === "`" ? unsure + 1 : unsure + 2),
-    );
     return (
-      `the # in ${excerpt} may open a comment — what is quoted after the ${opener} before it ` +
-      `cannot be read with certainty — and ${COMMENT}`
+      `the # in ${excerpt} may open a comment — what is quoted after the ${opener()} before ` +
+      `it cannot be read with certainty — and ${COMMENT}`
     );
   };
   /** From `from` on, only the character before a `#` proves it a character. */
@@ -570,6 +573,12 @@ export function withoutHeredocBodies(command: string): {
         unreadable ??=
           "a << after the } that bash ends a ${…} at and zsh does not opens a heredoc " +
           "to one shell and is text to another";
+      }
+      if (unsure !== -1) {
+        unreadable ??=
+          `the << in ${JSON.stringify(command.slice(i, read.end))} may stand inside a quote — ` +
+          `what is quoted after the ${opener()} before it cannot be read with certainty — and ` +
+          "a heredoc it opened would take the lines the shell runs after it as data";
       }
       opened.push(read.heredoc);
       at = "inside";

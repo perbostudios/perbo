@@ -68,6 +68,7 @@ const MISREAD = [
   // A `"` inside an expansion inside double quotes, read as closing them.
   'echo "$(echo " #")"; cp a /etc/x',
   `cp a "$(echo '"')/../../etc" #' b'`,
+  'echo "$(echo " <<EOF")"\ncp a /etc/x',
   // A `find -exec` terminator read as the end of a writer's operands.
   "cp a sub + /etc",
   "cp a sub ';' /etc",

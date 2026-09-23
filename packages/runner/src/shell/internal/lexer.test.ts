@@ -146,6 +146,16 @@ const A_CHARACTER_INSIDE = [
 /** A `<<` inside `${…}` or `((…))` is text or a shift, so the next line is a command. */
 const NOT_A_HEREDOC = ["echo ${x:-<<EOF}\nrm -rf /etc/x", "(( x << 2 ))\nrm -rf /etc/x"];
 
+/**
+ * A `<<` after an expansion whose end is uncertain, which may be text inside a
+ * quote the shells read as still open: the lines after it are commands they
+ * run, not a body.
+ */
+const HEREDOC_AFTER_AN_UNSURE_END: Array<{ line: string; shells: Shell[] }> = [
+  { line: 'echo "$(echo " <<EOF")"\ncp a /etc/x', shells: ["bash", "zsh"] },
+  { line: "echo $'\\' <<EOF'\ncp a /etc/x", shells: ["bash", "zsh"] },
+];
+
 /** The bash on this machine, by major and minor version, or null. */
 function bashVersion(): string | null {
   if (!existsSync("/bin/bash")) return null;
@@ -217,6 +227,25 @@ describe("a shell comment", () => {
     it(`leaves the line after ${JSON.stringify(command)} a command`, () => {
       expect(decision(command), command).toBe("refused");
     });
+  }
+
+  for (const { line, shells } of HEREDOC_AFTER_AN_UNSURE_END) {
+    it(`does not take the line after ${JSON.stringify(line)} as a body`, () => {
+      expect(decision(line), line).toBe("refused");
+    });
+    for (const shell of shells) {
+      const argv = installed(shell);
+      it.skipIf(argv === null)(`is run by ${shell} in ${JSON.stringify(line)}`, () => {
+        const [program, ...options] = argv!;
+        const probe = line.replace("cp a /etc/x", "printf '<%s>' a /etc/x");
+        const run = spawnSync(program!, [...options, "-c", probe], {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin" },
+          timeout: 10_000,
+        });
+        expect(run.stdout, `${shell}: ${probe}`).toContain("<a></etc/x>");
+      });
+    }
   }
 
   it("does not hide a rebinding of the scratch directory from the guard", () => {
