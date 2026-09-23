@@ -61,6 +61,53 @@ export function suppliedDestination(
   };
 }
 
+/**
+ * The words a wrapper supplies, where the command behind it still reads them
+ * as options: a placeholder that begins a word before the command's `--`, or
+ * words appended to a line with no `--`. What the wrapper reads is not the
+ * line's to vouch for — `touch -- 'sub/-t..'; ls sub | xargs -I{} cp {} out`
+ * runs GNU `cp -t.. out` — so a word that begins with `-` there is an option,
+ * which can move where the command writes. `dd` reads no options, but an
+ * `of=` among its operands names where it writes, `--` or not, so for a
+ * command that `takesAssignments` every supplied word is refused.
+ */
+export function suppliedAsOption(
+  verb: string,
+  rest: readonly Word[],
+  context: Context,
+  takesAssignments = false,
+): WriteFinding | null {
+  const supplied = context.supplied;
+  if (supplied === undefined) return null;
+  const ends = takesAssignments ? -1 : rest.findIndex((word) => word.value === "--");
+  const placeholder = supplied.placeholder;
+  const at =
+    placeholder === null
+      ? null
+      : (ends === -1 ? rest : rest.slice(0, ends)).find((word) =>
+          word.value.startsWith(placeholder),
+        );
+  if (placeholder === null ? ends !== -1 : at === undefined) return null;
+  const how =
+    placeholder === null
+      ? `${supplied.wrapper} appends the words it reads from standard input to ${verb}'s`
+      : `${supplied.wrapper} substitutes the words it reads from standard input for the ` +
+        `${placeholder} that begins ${at!.raw}`;
+  const read = takesAssignments
+    ? `and ${verb} reads an of= among its operands as where it writes`
+    : `where ${verb} still reads options, so one that begins with - is an option rather than a ` +
+      `path — ${
+        placeholder === null
+          ? "end the line with -- to keep them paths"
+          : `put -- before it, or a prefix such as ./${placeholder}`
+      }`;
+  return {
+    detail: `${how}, ${read}: ${context.segment.slice(0, 200)}`,
+    target: null,
+    resolved: null,
+  };
+}
+
 export const basename = (word: string) => word.slice(word.lastIndexOf("/") + 1);
 export const isAssignment = (value: string) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(value);
 

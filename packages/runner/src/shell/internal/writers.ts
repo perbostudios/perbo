@@ -1,4 +1,10 @@
-import { anyPresent, optionSet, optionsPresent, type Context } from "./command.js";
+import {
+  anyPresent,
+  optionSet,
+  optionsPresent,
+  suppliedAsOption,
+  type Context,
+} from "./command.js";
 import { judgeTarget, pathFinding, type Destination, type WriteFinding } from "./destination.js";
 import type { Word } from "./lexer.js";
 
@@ -123,6 +129,20 @@ const REMOTE_DESTINATION = /^[^/~.][^/]*:/;
 
 /** Judge the destinations of one writer, given the words after its verb. */
 export function writerFindings(
+  verb: string,
+  spec: WriterSpec,
+  rest: Word[],
+  context: Context,
+): WriteFinding[] {
+  // Read before the options are: a supplied word can be the option that makes
+  // the command a writer at all, as `-i` makes `sed` one.
+  const option = suppliedAsOption(verb, rest, context, spec.assignments !== undefined);
+  const named = destinationFindings(verb, spec, rest, context);
+  return option === null ? named : [option, ...named];
+}
+
+/** The destinations the words after `verb` name, read through its `spec`. */
+function destinationFindings(
   verb: string,
   spec: WriterSpec,
   rest: Word[],

@@ -1,6 +1,12 @@
 import { lstatSync } from "node:fs";
 import { dirname } from "node:path";
-import { carries, optionsPresent, suppliedDestination, type Context } from "./command.js";
+import {
+  carries,
+  optionsPresent,
+  suppliedAsOption,
+  suppliedDestination,
+  type Context,
+} from "./command.js";
 import { judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
 import type { Word } from "./lexer.js";
 import type { Cwd } from "./scope.js";
@@ -62,7 +68,8 @@ export function linkFindings(rest: Word[], context: Context): WriteFinding[] {
       ? [suppliedDestination(label, supplied, context.segment)]
       : pathFinding(label, word, judgeTarget(word.value, context.scope, cwd, true), context.segment);
 
-  const findings: WriteFinding[] = [];
+  const option = suppliedAsOption("ln", rest, context);
+  const findings: WriteFinding[] = option === null ? [] : [option];
   // Where the link is made: the `-t` directory, the last operand of a two-part
   // form, or — for a lone target — the directory the command runs in.
   const link = targetDirectory ?? (operands.length >= 2 ? operands[operands.length - 1]! : null);

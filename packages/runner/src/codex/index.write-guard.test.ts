@@ -46,14 +46,18 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
 ];
 
 /**
- * The same wrapper where the line spells the destination, and a `#` read as a
- * character, on both paths.
+ * The same wrapper where the line spells the destination and a `--` keeps the
+ * words it supplies from being options, and a `#` read as a character, on both
+ * paths.
  */
 const DESTINATION_ON_THE_LINE = [
-  "xargs -I{} cp {} sub",
-  "xargs -0 -n1 cp -t sub",
+  "xargs -I{} cp -- {} sub",
+  "xargs -0 -n1 cp -t sub --",
   "cp a b#c '#' sub",
 ];
+
+/** The same wrapper where the words it supplies stand where `cp` reads options, on both paths. */
+const SUPPLIED_WHERE_OPTIONS_ARE_READ = ["xargs -I{} cp {} sub", "xargs -0 -n1 cp -t sub"];
 
 /** Writes outside the worktree that a misreading of the line would hide, on both paths. */
 const MISREAD = [
@@ -123,6 +127,7 @@ describe("a write neither executor can see the destination of", () => {
     ...BEYOND_THE_WRITER_TABLE,
     ...BEHIND_ANOTHER_WRAPPER,
     ...UNDER_A_FIND_START,
+    ...SUPPLIED_WHERE_OPTIONS_ARE_READ,
   ]) {
     it(`is refused by the hook and by Codex — ${command}`, () => {
       const hook = judgePreToolCall(
