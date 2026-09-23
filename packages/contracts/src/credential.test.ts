@@ -138,6 +138,20 @@ describe("the provider key prefixes", () => {
     expect(hits("gho_0123456789ab-cdef_gh")).toEqual(["gho_0123456789ab-cdef_gh"]);
   });
 
+  it("finds a fine-grained GitHub token whole, the underscore in its middle included", () => {
+    // `github_pat_` carries an installation id, an underscore, then the
+    // secret. Read as alphanumerics only, the value ends at that underscore
+    // and everything after it is published.
+    const token = "github_pat_11ABCDEFG0abcdefghijklm_0123456789abcdefghijklmnopqrstuvwxyzAB";
+
+    expect(hits(`gh auth said ${token}`)).toEqual([token]);
+    expect(findCredentials(token)[0]?.rule).toBe("vendor.github_pat");
+  });
+
+  it("does not fire on a github_pat prefix with too little behind it", () => {
+    expect(hits("github_pat_0123456789abcdef")).toEqual([]);
+  });
+
   it("names the rule that fired, so a false positive is attributable", () => {
     expect(findCredentials("sk-ant-api03-0123456789abcdefghij")[0]?.rule).toBe("vendor.anthropic");
     expect(findCredentials("sk-proj-0123456789abcdefghij")[0]?.rule).toBe("vendor.openai_project");
