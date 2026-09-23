@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseWorktrees } from "./worktrees.js";
 
-const record = (...attributes: string[]) => `${attributes.join("\0")}\0\0`;
+const record = (...attributes: string[]) => `${attributes.join("\n")}\n\n`;
 
 describe("reading the registered worktrees", () => {
   it("reads a branch, a detached head and a path with a space", () => {
@@ -17,13 +17,13 @@ describe("reading the registered worktrees", () => {
     ]);
   });
 
-  it("keeps a path that contains a newline whole", () => {
-    // The reason for `-z`: a line-based reader reports two worktrees here, one
-    // of them at a path that does not exist.
-    const stdout = record("worktree /r/two\nlines", "HEAD abc123", "detached");
-    expect(parseWorktrees(stdout)).toEqual([
-      { path: "/r/two\nlines", head: "abc123", branch: null, detached: true },
+  it("reads the listing git writes, with or without the final blank line", () => {
+    const listing = "worktree /r/main\nHEAD abc123\nbranch refs/heads/main\n\nworktree /r/det\nHEAD def456\ndetached\n";
+    expect(parseWorktrees(listing)).toEqual([
+      { path: "/r/main", head: "abc123", branch: "main", detached: false },
+      { path: "/r/det", head: "def456", branch: null, detached: true },
     ]);
+    expect(parseWorktrees(listing.trimEnd())).toEqual(parseWorktrees(listing));
   });
 
   it("carries the attributes it does not model without losing the record", () => {

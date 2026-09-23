@@ -8,17 +8,16 @@ export interface WorktreeEntry {
 }
 
 /**
- * `git worktree list --porcelain -z`, read.
- *
- * `-z` rather than lines: a worktree path may contain a newline, and a parser
- * that splits on one reports a repository it cannot see the shape of. Each
- * attribute is NUL-terminated and an empty attribute ends a record, so the
- * separator between two worktrees is two NULs.
+ * The records of `git worktree list --porcelain`: one attribute a line, a
+ * blank line between worktrees. The line-based form rather than `-z`, which
+ * git accepts only from 2.36 and which a distribution's git may not have; the
+ * cost is that a worktree whose path carries a line break is read as two, and
+ * that is a path git itself warns against.
  */
 export function parseWorktrees(stdout: string): WorktreeEntry[] {
   const entries: WorktreeEntry[] = [];
   let current: WorktreeEntry | null = null;
-  for (const attribute of stdout.split("\0")) {
+  for (const attribute of stdout.split("\n")) {
     if (attribute.length === 0) {
       if (current !== null) entries.push(current);
       current = null;

@@ -23,11 +23,11 @@ function fakeGit(answers: Record<string, ProcessResult>): {
   return { execute, calls };
 }
 
-const record = (...fields: string[]): string => fields.join("\0");
+const record = (...fields: string[]): string => fields.join("\n");
 
 describe("the worktree holding a branch", () => {
   const listing = (listed: string): Record<string, ProcessResult> => ({
-    "worktree list --porcelain -z": ok(listed),
+    "worktree list --porcelain": ok(listed),
   });
 
   it("finds the worktree holding a branch, across records", async () => {
@@ -36,24 +36,17 @@ describe("the worktree holding a branch", () => {
         [
           record("worktree /checkout", "HEAD abc", "branch refs/heads/main", ""),
           record("worktree /work/PRB-1", "HEAD def", "branch refs/heads/prb-1", ""),
-        ].join("\0"),
+        ].join("\n"),
       ),
     );
     expect(await worktreeForBranch(execute, "/checkout", "refs/heads/prb-1")).toBe("/work/PRB-1");
   });
 
   it("matches a branch whole, so a longer name is not its worktree", async () => {
-    const listed = record("worktree /work/ab", "branch refs/heads/ab", "") + "\0";
+    const listed = record("worktree /work/ab", "branch refs/heads/ab", "") + "\n";
     expect(await worktreeForBranch(fakeGit(listing(listed)).execute, "/checkout", "refs/heads/a")).toBeNull();
     expect(await worktreeForBranch(fakeGit(listing(listed)).execute, "/checkout", "refs/heads/ab")).toBe(
       "/work/ab",
-    );
-  });
-
-  it("keeps a path that holds a newline, which a line-separated listing would split", async () => {
-    const listed = record("worktree /work/two\nlines", "branch refs/heads/prb-1", "") + "\0";
-    expect(await worktreeForBranch(fakeGit(listing(listed)).execute, "/checkout", "refs/heads/prb-1")).toBe(
-      "/work/two\nlines",
     );
   });
 
@@ -61,13 +54,13 @@ describe("the worktree holding a branch", () => {
     const listed = [
       record("worktree /checkout", "HEAD abc", "detached", ""),
       record("worktree /other", "HEAD def", "branch refs/heads/other", ""),
-    ].join("\0");
+    ].join("\n");
     expect(await worktreeForBranch(fakeGit(listing(listed)).execute, "/checkout", "refs/heads/prb-1")).toBeNull();
     expect(await worktreeForBranch(fakeGit(listing("")).execute, "/checkout", "refs/heads/prb-1")).toBeNull();
   });
 
   it("answers nothing for a record that names a branch but no worktree", async () => {
-    const listed = record("branch refs/heads/prb-1", "") + "\0";
+    const listed = record("branch refs/heads/prb-1", "") + "\n";
     expect(await worktreeForBranch(fakeGit(listing(listed)).execute, "/checkout", "refs/heads/prb-1")).toBeNull();
   });
 });
@@ -135,11 +128,11 @@ describe("reading a checkout", () => {
     expect(await topLevel(execute, "/checkout/src")).toBe("/checkout");
   });
 
-  it("asks Git for the -z listing when looking for a branch's worktree", async () => {
+  it("asks Git for the line listing when looking for a branch's worktree", async () => {
     const { execute, calls } = fakeGit({
-      "worktree list --porcelain -z": ok(record("worktree /work/PRB-1", "branch refs/heads/prb-1", "") + "\0"),
+      "worktree list --porcelain": ok(record("worktree /work/PRB-1", "branch refs/heads/prb-1", "") + "\n"),
     });
     expect(await worktreeForBranch(execute, "/checkout", "refs/heads/prb-1")).toBe("/work/PRB-1");
-    expect(calls[0]?.args).toEqual(["worktree", "list", "--porcelain", "-z"]);
+    expect(calls[0]?.args).toEqual(["worktree", "list", "--porcelain"]);
   });
 });

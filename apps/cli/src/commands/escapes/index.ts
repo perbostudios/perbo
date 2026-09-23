@@ -20,7 +20,7 @@ import {
   type TicketEscapes,
 } from "./internal/record.js";
 import { z } from "zod";
-import { CommandFailedError, gh, git, type RunResult } from "@perbo/workspace";
+import { CommandFailedError, gh, git, githubCredentialOverlay, type RunResult } from "@perbo/workspace";
 import { readInput } from "../../usage-error.js";
 import {
   parseArgv,
@@ -247,7 +247,12 @@ function observeBranch(args: {
   const attempt = (command: readonly string[]): string | null => {
     let result: RunResult;
     try {
-      result = git.runSync(cwd, command, { maxOutputBytes: MAX_ANSWER_BYTES });
+      // The fetch may reach GitHub over HTTPS, where gh's credential helper
+      // answers only with the token pair on the line.
+      result = git.runSync(cwd, command, {
+        maxOutputBytes: MAX_ANSWER_BYTES,
+        overlay: githubCredentialOverlay(),
+      });
     } catch (error) {
       return reason(error);
     }

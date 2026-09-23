@@ -23,6 +23,11 @@
  * agent already answers on.
  */
 const GIT_FORWARDED = [
+  // Where git reads the person's own configuration and credentials. Forwarded
+  // when set and never emptied: Git for Windows takes its home from
+  // `USERPROFILE` only while `HOME` is absent, and an empty one hides
+  // `~/.gitconfig` — `safe.directory`, the excludes file, the identity.
+  "HOME",
   // Signing and configuration: the person's own setup decides whether a commit
   // is signed and with which key.
   "SSH_AUTH_SOCK",
@@ -91,7 +96,6 @@ function forward(base: NodeJS.ProcessEnv, env: NodeJS.ProcessEnv, names: string[
 export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return forward(base, {
     PATH: base.PATH ?? "/usr/bin:/bin",
-    HOME: base.HOME ?? "",
     LANG: base.LANG ?? "C",
     // A credential prompt becomes a failure rather than a hang.
     GIT_TERMINAL_PROMPT: "0",
@@ -103,4 +107,19 @@ export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv
 
 export function ghEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return forward(base, { ...gitEnv(base), GH_PROMPT_DISABLED: "1" }, GH_FORWARDED);
+}
+
+/**
+ * What a git call that reaches GitHub over HTTPS is given on top of `gitEnv`:
+ * the token pair, so gh's credential helper can answer, with the helper's own
+ * prompt off, because that helper is a `gh` process and a prompt there is the
+ * same hang it is anywhere else. Only where the remote is GitHub, since a
+ * token handed to every git call would reach every remote.
+ */
+export function githubCredentialOverlay(base: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  return {
+    GH_PROMPT_DISABLED: "1",
+    ...(base.GH_TOKEN ? { GH_TOKEN: base.GH_TOKEN } : {}),
+    ...(base.GITHUB_TOKEN ? { GITHUB_TOKEN: base.GITHUB_TOKEN } : {}),
+  };
 }

@@ -26,7 +26,7 @@ import { parseWorktrees, type WorktreeEntry } from "./internal/worktrees.js";
 
 export type { GitProcess, ProcessOptions } from "./internal/process.js";
 export type { WorktreeEntry } from "./internal/worktrees.js";
-export { gitEnv } from "./internal/environment.js";
+export { gitEnv, githubCredentialOverlay } from "./internal/environment.js";
 
 /** A local read or write of the repository on this disk. */
 const LOCAL_TIMEOUT_MS = 120_000;
@@ -231,7 +231,7 @@ export function createGit(options: RepositoryOptions = {}): Git {
     configSync: (cwd, key, type, call) => value(askSync(cwd, configArgs(key, type), call)),
 
     worktrees: async (cwd, call) =>
-      parseWorktrees(succeeded(await ask(cwd, ["worktree", "list", "--porcelain", "-z"], call)).stdout),
+      parseWorktrees(succeeded(await ask(cwd, ["worktree", "list", "--porcelain"], call)).stdout),
     addWorktree: (cwd, spec, call) => run(cwd, addWorktreeArgs(spec), call),
     removeWorktree: (cwd, path, call) =>
       run(cwd, ["worktree", "remove", "--force", operand(path, "worktree path")], call),

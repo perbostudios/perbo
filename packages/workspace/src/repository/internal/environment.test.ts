@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ghEnv, gitEnv } from "./environment.js";
+import { ghEnv, gitEnv, githubCredentialOverlay } from "./environment.js";
 
 /**
  * What the runner's Git and `gh` are given.
@@ -48,11 +48,25 @@ describe("the environment the runner's git and gh run in", () => {
 
   it("omits a name the host does not set, rather than emptying it", () => {
     // On POSIX there is no APPDATA. An empty string is a value, and `gh` would
-    // read it as a configuration directory at the filesystem root.
+    // read it as a configuration directory at the filesystem root; Git for
+    // Windows reads an empty HOME as a home and stops looking at USERPROFILE.
     const env = gitEnv({ PATH: "/usr/bin" });
     expect("APPDATA" in env).toBe(false);
     expect("LOCALAPPDATA" in env).toBe(false);
     expect("USERPROFILE" in env).toBe(false);
+    expect("HOME" in env).toBe(false);
+    expect(gitEnv({ PATH: "/usr/bin", HOME: "/home/x" }).HOME).toBe("/home/x");
+  });
+
+  it("hands git no GitHub token of its own; the overlay does that where a remote is GitHub", () => {
+    const env = gitEnv({ ...BASE, GH_TOKEN: "ghp_0123456789abcdefghij", GITHUB_TOKEN: "ghp_0123456789abcdefghik" });
+    expect("GH_TOKEN" in env).toBe(false);
+    expect("GITHUB_TOKEN" in env).toBe(false);
+    expect(githubCredentialOverlay({ GH_TOKEN: "ghp_0123456789abcdefghij" })).toEqual({
+      GH_PROMPT_DISABLED: "1",
+      GH_TOKEN: "ghp_0123456789abcdefghij",
+    });
+    expect(githubCredentialOverlay({ PATH: "/usr/bin" })).toEqual({ GH_PROMPT_DISABLED: "1" });
   });
 
   it("forwards what Windows needs to run git and gpg at all", () => {

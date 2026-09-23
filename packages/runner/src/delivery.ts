@@ -29,7 +29,7 @@ import {
   type StopRouting,
   type TicketSource,
 } from "@perbo/contracts";
-import { gh, git, isAttemptBranch } from "@perbo/workspace";
+import { gh, git, githubCredentialOverlay, isAttemptBranch } from "@perbo/workspace";
 import { requireGithubCredential } from "./github-credential.js";
 
 /**
@@ -72,31 +72,6 @@ const DEFAULT_TIMEOUT_MS = 180_000;
  */
 const MAX_ANSWER_BYTES = 64 * 1024 * 1024;
 
-/**
- * The credential a git command that reaches GitHub presents.
- *
- * Over an HTTPS remote git asks a credential helper for the password, and the
- * helper `gh auth setup-git` writes — `gh auth git-credential` — reads the
- * token out of the environment git started it in. A machine whose GitHub
- * credential is `GH_TOKEN` rather than a stored login is one this product
- * supports, and on it the environment is the only place the token is: without
- * this the push has nothing to present and fails with the attempt already
- * sealed and reviewed. The environment the repository module builds for git
- * carries no token, because a token is not something git itself needs; the two
- * commands here that speak to GitHub add it and the local reads beside them do
- * not.
- *
- * A name this machine does not set is left unset rather than emptied: an empty
- * `GH_TOKEN` is a credential `gh` reads as none.
- */
-function githubCredentialOverlay(base: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  return {
-    // The helper is a `gh` process, where a prompt is the same hang it is anywhere else.
-    GH_PROMPT_DISABLED: "1",
-    ...(base.GH_TOKEN ? { GH_TOKEN: base.GH_TOKEN } : {}),
-    ...(base.GITHUB_TOKEN ? { GITHUB_TOKEN: base.GITHUB_TOKEN } : {}),
-  };
-}
 
 /** What is read off a pull request to say whether one stands on the branch. */
 const PULL_REQUEST_FIELDS = ["number", "url", "state"];

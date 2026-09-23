@@ -26,7 +26,7 @@ export {
 } from "./naming.js";
 export { replaceFile } from "./replace-file.js";
 export type { ReplaceFileOptions } from "./replace-file.js";
-export { createGh, createGit, gh, git, gitEnv } from "./repository/index.js";
+export { createGh, createGit, gh, git, githubCredentialOverlay } from "./repository/index.js";
 export type { Git, GitProcess, ProcessOptions } from "./repository/index.js";
 export {
   DEFAULT_SUSPEND_INTERVAL_MS,

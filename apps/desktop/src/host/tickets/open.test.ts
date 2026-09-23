@@ -43,7 +43,7 @@ function records(over: Partial<Ticket> = {}): TicketRecords {
 /** A temporary directory is reached through a link on macOS, and the host opens the canonical path. */
 const canonical = (path: string): string => realpathSync(path);
 const listing = (path: string, branch: string): string =>
-  ["worktree " + path, "HEAD abc", "branch " + branch, ""].join("\0") + "\0";
+  ["worktree " + path, "HEAD abc", "branch " + branch, ""].join("\n") + "\n";
 const git = (stdout: string): Execute => () =>
   Promise.resolve({ code: 0, stdout, stderr: "", cancelled: false });
 
