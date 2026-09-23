@@ -181,9 +181,7 @@ const PRODUCTION_SOURCE_ONLY = {
  * leave it, and the exception goes away with its last entry. The change that
  * curates a package's entry into named exports takes that entry off this list.
  */
-export const EXPORT_ALL_BURN_DOWN = [
-  "packages/review/src/index.ts",
-];
+export const EXPORT_ALL_BURN_DOWN = [];
 
 /**
  * The git and gh ban, over one zone's production source. It repeats the bans
