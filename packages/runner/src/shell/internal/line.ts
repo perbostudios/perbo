@@ -401,6 +401,35 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       : { path: at.resolved ?? cwd.path, unknown: false };
   };
 
+  /**
+   * Where an `-execdir` body runs on what a walk from `start` finds, and what
+   * `{}` is there. A path under the start runs it in the directory holding
+   * that path, the shallowest being the start itself, with `{}` a name inside
+   * it. The start itself runs it a level up, as `./<name>`: GNU in the
+   * directory the path names it from — `sub` for `sub/deep` and for `sub/..`,
+   * the directory above home for `~` — and BSD in the command's own
+   * directory. A relative destination in the body is judged from each.
+   */
+  const execdirReadings = (start: Word): Array<{ found: Word; at: Cwd }> => {
+    const as = (value: string): Word => ({ ...start, raw: value, value });
+    const value = start.value.replace(/(?<=[^/])\/+$/, "");
+    const slash = value.lastIndexOf("/");
+    const name = value.slice(slash + 1);
+    const parent =
+      name === "." || name === ".."
+        ? directoryOf(as(slash === -1 ? "." : slash === 0 ? "/" : value.slice(0, slash)))
+        : directoryOf(as(`${value}/..`));
+    const self = as(name.length === 0 ? "." : `./${name}`);
+    const readings = [
+      { found: HERE, at: directoryOf(start) },
+      { found: self, at: parent },
+    ];
+    if (parent.path !== cwd.path || parent.unknown !== cwd.unknown) {
+      readings.push({ found: self, at: cwd });
+    }
+    return readings;
+  };
+
   /** A file the wrapper itself writes — `time -o` — judged as any destination is. */
   const wrote = (operand: Word, option: string, wrapper: string): void => {
     const label = `the file ${wrapper} ${option} writes`;
@@ -844,16 +873,20 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         // A body runs on each path the walk finds, which `find` puts where `{}`
         // stands, and every one is under a starting point: so the body is read
         // once per starting point with that point in its place. `-execdir`
-        // runs it in the found path's own directory, where `{}` is `./<name>`.
+        // runs it in the directory holding each found path, which for the
+        // starting point itself is the one above it (`execdirReadings`).
         // A body the wrapper in front substitutes its own input into is read
         // as written, because that input is what stands there.
         const readings =
           into !== undefined && body.words.some((word) => carries(word))
             ? [{ words: body.words, at: cwd }]
-            : starts.map((start) =>
+            : starts.flatMap((start) =>
                 body.inFoundDirectory
-                  ? { words: body.words.map((word) => placed(word, HERE)), at: directoryOf(start) }
-                  : { words: body.words.map((word) => placed(word, start)), at: cwd },
+                  ? execdirReadings(start).map(({ found, at }) => ({
+                      words: body.words.map((word) => placed(word, found)),
+                      at,
+                    }))
+                  : [{ words: body.words.map((word) => placed(word, start)), at: cwd }],
               );
         readings.forEach((reading, index) => {
           // The body is a command of its own: it inherits the directory, not

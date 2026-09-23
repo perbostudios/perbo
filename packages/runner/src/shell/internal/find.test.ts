@@ -18,6 +18,15 @@ const WRITES_OUTSIDE = [
   "find /etc -exec cp a {} \\;",
   "find /etc -execdir rm {} \\;",
   "find /etc -execdir touch x \\;",
+  // `-execdir` runs the body on the starting point itself a level up: GNU in
+  // the directory above it, BSD in the command's own directory.
+  "find sub -execdir cp a ../x \\;",
+  "find src -execdir rm -rf ../x \\;",
+  "find sub -okdir cp a ../x \\;",
+  "find src/deep -execdir cp a ../x \\;",
+  "find ~ -execdir touch x \\;",
+  // Under `..`, every path the walk finds runs the body in `..` itself.
+  "find .. -execdir touch x \\;",
   // Every body is read, not only the first.
   "find . -exec true \\; -exec rm -rf /etc/x \\;",
   "find . -ok rm /etc/x \\;",
@@ -32,6 +41,8 @@ const WITHIN_OR_READ = [
   "find /etc -name hosts -exec cp {} out \\;",
   "find /etc -name x -print",
   "find . -execdir touch x \\;",
+  "find src -execdir touch x \\;",
+  "find src/deep -execdir rm {} \\;",
   "find . -fprint out/found.txt",
 ];
 

@@ -22,8 +22,8 @@ export interface FindExpression {
 export interface FindBody {
   words: Word[];
   /**
-   * True for `-execdir` and `-okdir`, which run the body in the directory of
-   * each found path, where `{}` is `./<name>`.
+   * True for `-execdir` and `-okdir`, which run the body in the directory
+   * holding each found path, where `{}` is `./<name>`.
    */
   inFoundDirectory: boolean;
 }

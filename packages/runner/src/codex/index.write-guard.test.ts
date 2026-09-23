@@ -70,7 +70,13 @@ const SUBSTITUTED_INTO_A_NESTED_COMMAND = [
 ];
 
 /** Writes under a `find` starting point outside the worktree, on both paths. */
-const UNDER_A_FIND_START = ["find /etc -name x -delete", "find /etc -name x -exec rm {} +"];
+const UNDER_A_FIND_START = [
+  "find /etc -name x -delete",
+  "find /etc -name x -exec rm {} +",
+  // `-execdir` runs the body on the starting point itself from the directory above it.
+  "find sub -execdir cp a ../x \\;",
+  "find sub -okdir cp a ../x \\;",
+];
 
 /** An `xargs` behind another whose placeholder the inner one's command carries, on both paths. */
 const BEHIND_ANOTHER_WRAPPER = ["xargs -I{} xargs -a list -I@ cp a @ {}"];
