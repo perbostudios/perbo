@@ -276,11 +276,16 @@ const GIT_ARGV = 'import { execFileSync } from "node:child_process";\nexport con
 const GH_ARGV = 'import { run } from "./process.js";\nexport const out = run(["gh", "pr", "view"]);\n';
 const NODE_ARGV = 'import { execFileSync } from "node:child_process";\nexport const out = execFileSync("node", ["--version"]);\n';
 const GIT_WORDS = 'export const VERIFY: readonly string[] = ["git", "status", "--porcelain"];\n';
+const GIT_VERSION =
+  'import { version } from "./probe.js";\nexport const git = version("git", process.env);\n';
 const ONE_MODULE = "go through @perbo/workspace";
 
 test("a source file starts no git or gh process, whichever form it takes", async () => {
   await refuses("packages/x/src/a.ts", GIT_ARGV, ONE_MODULE);
   await refuses("packages/x/src/a.ts", GH_ARGV, ONE_MODULE);
+  // A binary's `--version` asked through a helper of the file's own.
+  await refuses("packages/x/src/a.ts", GIT_VERSION, ONE_MODULE);
+  await refuses("packages/runner/src/preflight.ts", GIT_VERSION, ONE_MODULE);
   await refuses("apps/cli/src/commands/b.ts", GIT_ARGV, ONE_MODULE);
   await refuses("apps/desktop/src/host/b.ts", GH_ARGV, ONE_MODULE);
 });
