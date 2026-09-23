@@ -75,6 +75,12 @@ const MISREAD = [
   'echo "$(echo " <<EOF")"\ncp a /etc/x',
   // An ANSI-C quote's escaped `'`, read as the quote's end.
   "echo $'\\''; cp a /etc/x",
+  // A heredoc whose body waits behind an expansion or a `((…))` whose end is uncertain.
+  "cat <<EOF; cat ${x:-a\nEOF\n}\n$(cp a /etc/x)\nEOF",
+  "cat <<EOF; cat $[1+\nEOF\n2]\n$(cp a /etc/x)\nEOF",
+  "cat <<EOF; ((1+\nEOF\n2))\n$(cp a /etc/x)\nEOF",
+  "cat <<'EOF'; cat ${x:-a\nEOF\n{b}\n$(cp a /etc/x)\n}\nEOF",
+  "cat <<'EOF'; cat ${x:-{a}\n$(cp a /etc/x)\n}\nEOF",
   // A `find -exec` terminator read as the end of a writer's operands.
   "cp a sub + /etc",
   "cp a sub ';' /etc",

@@ -473,6 +473,12 @@ function misreadAnsiQuote(text: string): number {
  * it is where a `<<` this reads as opening one stands after an expansion or a
  * `$'…'` whose end is uncertain: it may be text inside a quote the shells read
  * as still open, and taken as a heredoc it would hide the lines after it.
+ *
+ * A heredoc's body starts after the newline that ends the line its `<<` stands
+ * on, and a newline inside an expansion or a `((…))` ends no line. So where a
+ * `<<` waits for its body behind an expansion, a `$'…'` or a `((…))` whose end
+ * is uncertain — one holding a newline included — which newline starts the
+ * body is uncertain too, and the line is `unreadable`.
  */
 export function withoutHeredocBodies(command: string): {
   text: string;
@@ -494,6 +500,8 @@ export function withoutHeredocBodies(command: string): {
   let unsure = -1;
   /** Where zsh ends the last `${…}` that bash ended sooner. */
   let zshUntil = -1;
+  /** The first `<<` whose body has not started, as written, or null. */
+  let waiting: string | null = null;
   let unreadable: string | null = null;
   /** The expansion or `$'` after which what is quoted is uncertain, as written. */
   const opener = () =>
@@ -512,6 +520,12 @@ export function withoutHeredocBodies(command: string): {
   const lose = (from: number) => {
     if (unsure !== -1) return;
     unsure = from;
+    if (waiting !== null) {
+      unreadable ??=
+        `the << in ${waiting} takes its body from the lines after the one it stands on, and ` +
+        `after the ${opener()} that follows it where that line ends cannot be read with ` +
+        "certainty, so which lines are data and which the shell runs cannot be told";
+    }
     const hash = looseHash(command, from);
     if (hash !== -1) unreadable ??= comment(hash);
   };
@@ -598,6 +612,7 @@ export function withoutHeredocBodies(command: string): {
           "a heredoc it opened would take the lines the shell runs after it as data";
       }
       opened.push(read.heredoc);
+      waiting ??= JSON.stringify(command.slice(i, read.end));
       at = "inside";
       i = read.end;
       continue;
@@ -607,6 +622,7 @@ export function withoutHeredocBodies(command: string): {
       i = skipHeredocBodies(command, i + 1, opened, bodies);
       start = i;
       opened = [];
+      waiting = null;
       at = "start";
       continue;
     }

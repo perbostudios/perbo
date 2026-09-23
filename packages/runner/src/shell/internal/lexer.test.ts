@@ -156,6 +156,26 @@ const HEREDOC_AFTER_AN_UNSURE_END: Array<{ line: string; shells: Shell[] }> = [
   { line: "echo $'\\' <<EOF'\ncp a /etc/x", shells: ["bash", "zsh"] },
 ];
 
+/** Why a line whose heredoc waits behind an uncertain expansion is refused. */
+const BODY_START = "where that line ends cannot be read with certainty";
+
+/**
+ * A heredoc whose body waits behind an expansion or a `((…))` whose end is
+ * uncertain — one holding a newline, or one bash and zsh end in different
+ * places. The body starts after the newline that ends the line, and which
+ * newline that is decides which lines are data and which the shell runs.
+ * `shells` names the shells that run the `cp`: in an unquoted body's
+ * substitution, or, under zsh, in a `${…}` it reads on past the `}` bash ends
+ * it at.
+ */
+const BODY_BEHIND_AN_UNSURE_END: Array<{ line: string; shells: Shell[] }> = [
+  { line: "cat <<EOF; cat ${x:-a\nEOF\n}\n$(cp a /etc/x)\nEOF", shells: ["bash", "zsh"] },
+  { line: "cat <<EOF; cat $[1+\nEOF\n2]\n$(cp a /etc/x)\nEOF", shells: ["bash", "zsh"] },
+  { line: "cat <<EOF; ((1+\nEOF\n2))\n$(cp a /etc/x)\nEOF", shells: ["bash", "zsh"] },
+  { line: "cat <<'EOF'; cat ${x:-a\nEOF\n{b}\n$(cp a /etc/x)\n}\nEOF", shells: ["zsh"] },
+  { line: "cat <<'EOF'; cat ${x:-{a}\n$(cp a /etc/x)\n}\nEOF", shells: ["zsh"] },
+];
+
 /**
  * An ANSI-C quote, `$'…'`, whose `\'` is a quote character: read as a plain
  * single quote it ends there, and the rest of the line is quoted the other way
@@ -254,6 +274,29 @@ describe("a shell comment", () => {
           timeout: 10_000,
         });
         expect(run.stdout, `${shell}: ${probe}`).toContain("<a></etc/x>");
+      });
+    }
+  }
+
+  for (const { line, shells } of BODY_BEHIND_AN_UNSURE_END) {
+    it(`makes ${JSON.stringify(line)} unreadable, where its heredoc's body waits`, () => {
+      expect(decision(line), line).toBe("refused");
+      expect(sentence(line), line).toContain(BODY_START);
+    });
+    for (const shell of shells) {
+      const argv = installed(shell);
+      it.skipIf(argv === null)(`is run by ${shell} in ${JSON.stringify(line)}`, () => {
+        const [program, ...options] = argv!;
+        // To standard error: under zsh the substitution's output would join
+        // the word it stands in, which `cat` names only in its own error.
+        const probe = line.replace("cp a /etc/x", "printf '<%s>' a /etc/x >&2");
+        const run = spawnSync(program!, [...options, "-c", probe], {
+          cwd: lab,
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin" },
+          timeout: 10_000,
+        });
+        expect(run.stderr, `${shell}: ${probe}`).toContain("<a></etc/x>");
       });
     }
   }
