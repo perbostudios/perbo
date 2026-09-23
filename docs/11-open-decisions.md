@@ -397,6 +397,14 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Changes if: edits are lost, a result lands in another session, or an admission is duplicated.
 - ADR: [ADR-0034](adr/0034-desktop-editing-and-workspace-projection.md).
 
+### D-120 — The desktop's sample records are a test double, not a shipped mode
+
+- Owner: Founder
+- Decision: the adapter that answers the desktop's request table from sample records is a development and test surface, `src/sample-host/`, and the packaged renderer does not contain it. The tests are driven against it under jsdom and the design preview is `preview.html`, a page Vite's production build has no entry for; the renderer knows one adapter slot, `window.perbo`, filled by preload in Electron, by that page in a browser and by the test setup under jsdom. It answers the same Request table the host answers and is held to it by a conformance suite that runs one contract against both. The protocol carries no field only the sample writes: a screen renders one reply shape, whichever adapter answered.
+- Why: a double the product ships is a second implementation of every screen's data, and the fields it added — a mode flag, a curated description, a progress figure — are things the product cannot show, against "nothing shown is invented" ([D-097](11-open-decisions.md)). Held to one table by a suite that runs on both, the preview is evidence about the app rather than a picture of it.
+- Changes if: the preview needs to show something the host cannot answer, which is the point at which it has stopped standing in for the host.
+- ADR: [ADR-0033](adr/0033-focrux-local-desktop-and-subscription-providers.md), [ADR-0034](adr/0034-desktop-editing-and-workspace-projection.md).
+
 ### D-097 — Perbo UI v2; the phone's surfaces follow pairing
 
 - Owner: Founder
@@ -495,6 +503,13 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: a partner's direct-agent baseline is captured with `perbo baseline` before they first use Perbo: the same partner, comparable tickets, agent-direct, wall clock from start of work to pull request.
 - Why: it cannot be reconstructed afterwards.
 
+### D-121 — A stand-in's stops are dogfood, never a partner reading
+
+- Owner: Founder
+- Decision: a stop an AI stand-in answered — a tick the stand-in signed, or `verdict --stand-in` — is a dogfood number: every row that carries it says so, it is counted in its own `dogfood stops excluded` row and column, and it is never pooled with a partner's precision. A store with no baseline captured before first use ([D-038](11-open-decisions.md)) has no partner population, so every row it holds is dogfood.
+- Why: precision of stopping is the partner reading the product is judged by; a number that mixed the stand-in's answers into it would be quoted as a partner's.
+- Changes if: a stand-in's answers are shown to track a partner's closely enough to pool.
+
 ### D-047 — The partner agreement
 
 - Owner: Founder
@@ -571,6 +586,22 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: every document states what is true now. A superseded or deprecated decision, ADR or comment is deleted, not marked. A document cites a decision by its id instead of restating it. Git holds the history.
 - Why: in the founder's words, "we only keep a source of truth, not history". Old positions left in place were read as current.
 
+### D-122 — Every package states its interface; a module keeps its interior
+
+- Owner: Founder
+- Decision: each package's entry file lists by name what other packages import from it, and its `package.json` `exports` names one subpath per runtime that consumes it — `.`, and `./browser` where the desktop renderer imports it; nothing else in a package is reachable from outside it. A module with an interior is a directory with one surface and an `internal/` that nothing outside it imports. A module's unit tests sit beside it and are typechecked with it, and the build leaves them out. A module one package uses lives in that package, and `@perbo/contracts` holds what two or more share. A package's `test/` keeps only what cannot sit beside a module — a test a pull request may not edit, a suite whose subject is the repository rather than one module, and data a test reads — and `scripts/test-placement.test.mjs` holds four packages to that. The layout is in [docs/07](07-monorepo-and-deployment.md), and the architecture in ADR-0040.
+- Why: when an interface is not stated, every internal symbol is public and no refactor stays inside its package; a test the gate does not typecheck drifts from the interface it tests.
+- Changes if: a package gains a consumer outside this repository, or the lint rules that hold the boundaries need more exceptions than there are modules.
+- ADR: [ADR-0040](adr/0040-package-interface.md).
+
+### D-123 — One model client, three transports, in a package of its own
+
+- Owner: Founder
+- Decision: every model call this repository makes goes through `@perbo/model`: one port, `Model`, carrying one turn of the read-or-submit protocol against a schema the calling process supplied; three transports onto it (the Anthropic SDK, a local `claude` binary, a local `codex` binary); token accounting and the list-price estimate that says what a turn cost. No other package imports a provider SDK, and no other package starts a provider binary for a model call. `@perbo/review` holds what judges — context assembly, the blocking matrix, the structured verdict, closure verification and artifact redaction — and nothing else. What counts as credential-shaped is `@perbo/contracts` ([D-063](11-open-decisions.md)).
+- Why: drafting, review, closure verification and the doctor's probe all make the same call, and reaching it through the reviewer puts a provider SDK in the drafter's dependency graph and the reviewer's package in the drafter's. A change to the request bytes is then indistinguishable from a change to the judgement. Separated, each has one home and one set of tests, and the reviewer's package holds only what a reviewer-change review has to read.
+- Changes if: a caller needs a protocol this port cannot carry — a conversation that is not read-or-submit — in which case the port grows a second shape rather than a second client.
+- Note: a change to a default model, to the request a transport builds or to the price card is a change to the reviewer under [D-010](11-open-decisions.md), and `.github/workflows/build.yml` has to watch `packages/model/` for that to hold.
+
 ### D-112 — Trademarks, patents and the brand under Apache-2.0
 
 - Owner: Founder
@@ -640,3 +671,25 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: the interview writes `specs/<slug>/spec.md`, so a planning with no slug has nowhere to write. Where the person has not titled it in the Spec pane, the host cuts a title from their first turn — the first sentence, its opening dropped, clipped to a whole word within the slug's cap — writes the spec with it and records the slug, then starts the interview on that spec and sends the turn. The chat says which folder was named. A turn no folder name can come from is refused as before, naming the title it could not take. The folder is minted once and is not moved afterwards; the title in it stays editable.
 - Why: a person opening planning and typing what they want should be talking to the interview, not stopped by a field they have not found. Their own words name the folder, so nothing a model returned becomes a path ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). The naming is said rather than silent because a slug outlives the message it came from.
 - Built: `specTitleFromMessage` in `@perbo/planning`, the host naming the spec on the first turn and saying so as a note, and the browser preview doing the same.
+
+### D-124 — `@perbo/contracts` holds what two packages share
+
+- Owner: Founder
+- Decision: a schema or rule lives in `@perbo/contracts` when two or more packages, the desktop included, read or write it; a record only one package reads and writes lives in that package beside its code. The CLI's baseline stopwatch and E1 ledger, its local verdicts record, its escapes record and the queue's ordering are its own.
+- Why: the dependency floor rebuilds every package on each change, and a module with one consumer is read more easily beside its caller.
+- Changes if: a second package reads one of those records.
+
+### D-125 — `perbo` reads every command line by one set of rules
+
+- Owner: Founder
+- Decision: one grammar reads argv for every command. `--name=value` is split only in flag position, so a value is never read again as a flag; a value flag takes the next token verbatim, whatever it is shaped like; a switch given a value is refused; `--` ends the options; a repeated single-value flag takes the last of them, which the desktop's trailing `--repo` relies on; and `-h` or `--help` is honoured in flag position and nowhere else. A command declares which flags it has, what each takes and how many positionals it accepts; what a value has to be — an enum, a number, a key, a URL, a date — is the command's input schema, which every caller reaches. This is the CLI's contract: a person's text, and the desktop's, reaches a command as the text it is.
+- Why: a caller can only know what a line will mean if every command reads it the same way, and what a person types into an outcome, a note or a path is text rather than more flags. Splitting `--name=value` in flag position alone is what keeps it text: a value re-read as a flag is a value that can approve the ticket it was admitted with, record a decision or turn publication on, and the desktop passes person-typed text as flag values. What a value has to be sits in the input schema instead, because a caller in this process reaches the command there and is owed the same check.
+- Built: `apps/cli/src/command-line/grammar.ts` with a test per rule, each command's grammar beside the command, and `terminal.flag-injection.test.ts` holding one case per free-text flag value a person or the desktop fills. What the rules are for — a command as a typed function, argv at the edge, and the boundary the lint rules hold — is [ADR-0039](adr/0039-command-line-edge.md).
+
+### D-126 — Every git and gh process goes through one module
+
+- Owner: Founder
+- Decision: every `git` and `gh` process Perbo starts comes from `@perbo/workspace`'s `repository/` module. It builds argv, never a shell string, and refuses an operand git would read as an option before anything is spawned; it runs them in the environment the runner builds from an allow-list, with credential prompts off; it puts one timeout on a local read and a longer one on anything crossing the network, and refuses a fragment of an answer rather than reading it as the whole of one; and signing is whatever the person's own configuration says. Callers ask by name — the head, the merge base, the tracked files, the worktrees, a pull request — rather than by spelling a command. The write guard's replay of the agent's own push is the one exception, because it has to repeat the agent's global flags in the agent's environment, which the typed interface deliberately cannot express. `eslint.config.mjs` refuses the call anywhere else in a package's source, and `scripts/lint-boundaries.test.mjs` shows the rule firing and staying silent.
+- Why: the facts about running git are one set of facts — which environment it gets, that a prompt is a failure rather than a hang, how long it may take, what a truncated answer means — and every copy of them is a place they can disagree. A call site that inherits the ambient environment makes whether a fetch works behind a proxy depend on which caller asked.
+- Changes if: a caller needs a git invocation the module cannot express and the shape cannot be added to it, which makes the exception list longer than the module's own interface.
+- ADR: [ADR-0041](adr/0041-git-and-gh-module.md).

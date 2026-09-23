@@ -1,8 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Button, EmptyState } from "@perbo/ui";
-import { InkIcon } from "../InkIcon.js";
+import { Button, EmptyState, InkIcon } from "../ui/index.js";
 import { useCreate } from "../shell/create.js";
-import { useContractEditing } from "../tasks/contract-editor.js";
+import { useContractEditing } from "../contract-editor.js";
 import { ExplorerPane } from "./ExplorerPane.js";
 import { ImpactPane } from "./ImpactPane.js";
 import { HistoryDrawer } from "./HistoryDrawer.js";
@@ -10,7 +9,7 @@ import { InterviewDock } from "./InterviewDock.js";
 import { DockHandle } from "./DockHandle.js";
 import { dockWidthLimit, useDockWidth } from "../shell/dock-size.js";
 import { PLANNING_PANES } from "./panes.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 import type { PlanningPane } from "./panes.js";
 const SpecPane = lazy(() =>
   import("./SpecPane.js").then((module) => ({ default: module.SpecPane })),
@@ -24,9 +23,10 @@ const GraphPane = lazy(() =>
  * contract editing session so it survives leaving and restarting. The Spec
  * pane holds the spec the plan is drafted from, and the contract steps under
  * it (D-103); the Explorer pane reads the repository and marks paths for the
- * draft's scope; the Graph pane curates the execution graph and approves it
- * once (D-100); the Impact pane lists, on demand, what the draft is likely to
- * touch that its scope does not cover (D-015).
+ * draft's scope; the Graph pane curates the execution graph and confirms it
+ * to the contract, where the one approval is (D-100); the Impact pane lists
+ * what the draft is likely to touch that its scope does not cover (D-015),
+ * checked once when the plan first arrives and by its button after that.
  *
  * One pane at a time, with the interview docked beside it (D-102) and the
  * plan's history opening as a drawer over the pane, so the chat is there from

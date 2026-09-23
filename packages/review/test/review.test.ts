@@ -1,16 +1,12 @@
-import { readFileSync } from "node:fs";
-import { existsSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { CheckResult, PlanContract } from "@perbo/contracts";
 import { PlanNotReviewableError, runReview } from "../src/review.js";
-import { ProviderError, type ModelRequest, type ReviewModel } from "../src/provider.js";
-import { claudeCliModel } from "../src/provider-cli.js";
+import { ProviderError, type Model, type ModelRequest } from "@perbo/model";
 import { buildSuppressions } from "../src/suppression.js";
 import { coverageEntry, reads, scriptedModel, submits } from "./double.js";
-import { argumentOf, fakeClaudeBinary } from "./fake-claude.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "./spawn-timeout.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-review-test-"));
 mkdirSync(join(scratch, "packages/a/src"), { recursive: true });
@@ -27,46 +23,59 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const repoDir = join(scratch, "packages");
 
-const contract = (level: "P1" | "P2" = "P1"): PlanContract => ({
-  plan_id: "plan_test",
-  version: 1,
-  ticket_id: "ticket_test",
-  level,
-  outcome: "a does the thing",
-  acceptance_criteria: [
-    {
-      id: "ac_1",
-      text: "a returns 1",
-      expected_verification: { kind: "test", assertion: "a === 1" },
+type ContractAtLevel<L extends "P1" | "P2"> = Extract<PlanContract, { level: L }>;
+
+// One overload per level, because the levels are a discriminated union and a
+// P2 contract carries five fields a P1 one does not: a caller that asks for P2
+// gets the type that has them, and a caller that asks for neither gets P1 and
+// may add the fields P1 accepts, such as `nodes`.
+function contract(level?: "P1"): ContractAtLevel<"P1">;
+function contract(level: "P2"): ContractAtLevel<"P2">;
+function contract(
+  level: "P1" | "P2" = "P1",
+): ContractAtLevel<"P1"> | ContractAtLevel<"P2"> {
+  const body: Omit<ContractAtLevel<"P1">, "level"> = {
+    plan_id: "plan_test",
+    version: 1,
+    ticket_id: "ticket_test",
+    outcome: "a does the thing",
+    acceptance_criteria: [
+      {
+        id: "ac_1",
+        text: "a returns 1",
+        expected_verification: { kind: "test", assertion: "a === 1" },
+      },
+      {
+        id: "ac_2",
+        text: "helper returns 2",
+        expected_verification: { kind: "test", assertion: "helper() === 2" },
+      },
+    ],
+    scope: {
+      repository_id: "repo_fixture",
+      paths_allowed: ["a/**"],
+      paths_prohibited: [".github/**"],
+      generated_paths: [],
+      expansion_budget_files: 3,
     },
-    {
-      id: "ac_2",
-      text: "helper returns 2",
-      expected_verification: { kind: "test", assertion: "helper() === 2" },
+    base: {
+      base_commit: "a1b2c3d",
+      context_manifest_hash: `sha256:${"0".repeat(64)}`,
+      captured_at: "2026-08-27T09:00:00Z",
     },
-  ],
-  scope: {
-    repository_id: "repo_fixture",
-    paths_allowed: ["a/**"],
-    paths_prohibited: [".github/**"],
-    generated_paths: [],
-    expansion_budget_files: 3,
-  },
-  base: {
-    base_commit: "a1b2c3d",
-    context_manifest_hash: `sha256:${"0".repeat(64)}`,
-    captured_at: "2026-08-27T09:00:00Z",
-  },
-  ...(level === "P2"
+  };
+  return level === "P2"
     ? {
+        ...body,
+        level: "P2",
         data_impact: "none",
         security_impact: "none",
         rollout: "flag",
         rollback: "revert",
         estimated_recurring_cost_micros: 0,
       }
-    : {}),
-});
+    : { ...body, level: "P1" };
+}
 
 const diff = `diff --git a/a/src/a.ts b/a/src/a.ts
 index 1111111..2222222 100644
@@ -157,7 +166,7 @@ describe("a complete, clean review", () => {
 
   it("retains cache reads and writes separately while reporting total input", async () => {
     const base = scriptedModel([submits(bothMet)]);
-    const model: ReviewModel = {
+    const model: Model = {
       provider: base.provider,
       model_id: base.model_id,
       async turn(request) {
@@ -182,7 +191,7 @@ describe("a complete, clean review", () => {
   it("does not undercount a review when only some turns report cost", async () => {
     const base = scriptedModel([reads("a/src/helper.ts"), submits(bothMet)]);
     let turn = 0;
-    const model: ReviewModel = {
+    const model: Model = {
       provider: base.provider,
       model_id: base.model_id,
       async turn(request) {
@@ -617,7 +626,7 @@ describe("suppression", () => {
 
 describe("a review that did not complete is not a pass", () => {
   it("reports error when the provider fails", async () => {
-    const failing: ReviewModel = {
+    const failing: Model = {
       provider: "double",
       model_id: "failing",
       async turn(_request: ModelRequest) {
@@ -635,7 +644,7 @@ describe("a review that did not complete is not a pass", () => {
 
   it("names what the reviewer was reading when the failure came (SCP-188)", async () => {
     let turns = 0;
-    const failingOnTheAnswer: ReviewModel = {
+    const failingOnTheAnswer: Model = {
       provider: "double",
       model_id: "failing",
       async turn(_request: ModelRequest) {
@@ -871,73 +880,83 @@ describe("the reviewer's inputs do not grow when an executor exists", () => {
 });
 
 /**
- * The reviewer's session, end to end over the claude-cli transport: the review
- * opens one session of its own, resumes it, and leaves none of it behind in the
- * user's session store however the review ended.
+ * The transport is released once, however the review ended.
+ *
+ * A transport can hold a session in the user's own store and a directory of
+ * its own, so a path out of the loop that skipped the release would leave one
+ * of each behind per review — and the paths out are not one.
  */
-describe("a review carried by the claude-cli transport", () => {
-  const helperRead = { next: "read_files", read_paths: ["a/src/helper.ts"], review: null };
-  const submitted = { next: "submit_review", read_paths: [], review: bothMet };
-
-  const transcript = (home: string, id: string) =>
-    join(home, ".claude", "projects", "-scratch-review", `${id}.jsonl`);
-  const neighbours = (home: string) => [
-    join(home, ".claude", "projects", "-scratch-review", "a-session-of-the-users.jsonl"),
-    join(home, ".claude", "projects", "-another-project", "a-second-session.jsonl"),
-  ];
-
-  const review = (options: { structured: unknown[]; failOnCall?: number }) => {
-    const home = mkdtempSync(join(scratch, "cli-home-"));
-    const fake = fakeClaudeBinary({ dir: scratch, ...options });
-    const model = claudeCliModel({
-      submitSchema: { type: "object" },
-      binary: fake.path,
-      env: { PATH: process.env.PATH ?? "", HOME: home },
-    });
-    return { home, fake, model };
+describe("the review releases its transport", () => {
+  const counting = (
+    behaviour: (turn: number) => { tool: string; input: unknown }[] | Error,
+  ): Model & { disposed: () => number } => {
+    let disposed = 0;
+    let turn = 0;
+    return {
+      provider: "double",
+      model_id: "scripted",
+      disposed: () => disposed,
+      async turn() {
+        turn += 1;
+        const next = behaviour(turn);
+        if (next instanceof Error) throw next;
+        return {
+          toolCalls: next.map((call, index) => ({
+            id: `tool_${turn}_${index}`,
+            name: call.tool,
+            input: call.input,
+          })),
+          usage: {
+            input_tokens: 1000,
+            output_tokens: 200,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          stop_reason: "tool_use",
+        };
+      },
+      async dispose() {
+        disposed += 1;
+      },
+    };
   };
 
-  it("resumes one session across the review's turns and removes it at the end", async () => {
-    const { home, fake, model } = review({ structured: [helperRead, submitted] });
-
+  it("releases it once when a verdict is submitted", async () => {
+    const model = counting(() => submits(bothMet));
     const { artifact } = await run({ model });
     expect(artifact.decision).toBe("approve");
-
-    const [first, second] = fake.invocations();
-    const id = argumentOf(first?.argv ?? [], "--session-id") ?? "";
-    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    expect(argumentOf(second?.argv ?? [], "--resume")).toBe(id);
-    // The second turn carries only what is new; the plan went with the first.
-    expect(second?.stdin ?? "").not.toContain("acceptance criteria");
-
-    expect(existsSync(transcript(home, id))).toBe(false);
-    for (const path of neighbours(home)) {
-      expect(existsSync(path), path).toBe(true);
-    }
+    expect(model.disposed()).toBe(1);
   });
 
-  it("removes it when the review's second turn fails", async () => {
-    const { home, fake, model } = review({ structured: [helperRead, submitted], failOnCall: 2 });
-
+  it("releases it once when a turn fails", async () => {
+    const model = counting((turn) =>
+      turn === 1
+        ? reads("a/src/helper.ts")
+        : new ProviderError("the transport went away", 2, "provider_unavailable"),
+    );
     const { artifact } = await run({ model });
-    expect(artifact.error).not.toBeNull();
-
-    const id = argumentOf(fake.calls()[0] ?? [], "--session-id") ?? "";
-    expect(id).not.toBe("");
-    expect(existsSync(transcript(home, id))).toBe(false);
-    for (const path of neighbours(home)) {
-      expect(existsSync(path), path).toBe(true);
-    }
+    expect(artifact.error?.kind).toBe("provider_unavailable");
+    expect(model.disposed()).toBe(1);
   });
-}, SPAWN_TEST_TIMEOUT_MS);
 
+  it("releases it once when the corrected verdict is rejected too", async () => {
+    const unknownCriterion = {
+      ...bothMet,
+      coverage: [coverageEntry({ criterion_id: "ac_nonexistent" })],
+    };
+    const model = counting(() => submits(unknownCriterion));
+    const { artifact } = await run({ model });
+    expect(artifact.error?.kind).toBe("verdict_rejected");
+    expect(model.disposed()).toBe(1);
+  });
+});
 
 /**
  * A source file carrying a NUL byte (SCP-188).
  *
  * AYO-33, 2026-09-04: the executor wrote two NUL bytes into
- * `packages/contracts/src/verdicts.ts`, the reviewer asked to read it, and the
- * transport died on `The argument 'args[22]' must be a string without null
+ * `apps/cli/src/commands/verdict/record.ts`, the reviewer asked to read it, and
+ * the transport died on `The argument 'args[22]' must be a string without null
  * bytes` -- one review bundle, the ticket `failed`, and a re-run over the same
  * sealed commit would have died the same way. The file is a finding on the
  * change now, and the review that reports it finishes.
@@ -963,7 +982,7 @@ index 0000000..1111111
 Binary files /dev/null and b/a/src/verdicts.ts differ
 `;
 
-  const reviewOfIt = (model: ReviewModel) =>
+  const reviewOfIt = (model: Model) =>
     runReview({
       contract: contract(),
       diff: binaryDiff,
@@ -983,8 +1002,8 @@ Binary files /dev/null and b/a/src/verdicts.ts differ
     expect(answer).toContain("a/src/verdicts.ts");
     expect(answer).toContain(`byte ${offset}`);
     expect(answer).not.toContain("export const equal");
-    expect(artifact.context_manifest.map((item) => item.attrs?.path)).not.toContain(
-      "a/src/verdicts.ts",
+    expect(artifact.context_manifest.map((item) => item.provenance)).not.toContain(
+      "a/src/verdicts.ts at head",
     );
   });
 
@@ -1028,28 +1047,4 @@ Binary files /dev/null and b/a/src/verdicts.ts differ
     expect(finding?.blocking).toBe(true);
     expect(finding?.caused_by_change).toBe(false);
   });
-
-  it("completes over the claude-cli transport, whose argv could never have carried it", async () => {
-    const home = mkdtempSync(join(scratch, "nul-home-"));
-    const fake = fakeClaudeBinary({
-      dir: scratch,
-      structured: [
-        { next: "read_files", read_paths: ["a/src/verdicts.ts"], review: null },
-        { next: "submit_review", read_paths: [], review: bothMet },
-      ],
-    });
-    const model = claudeCliModel({
-      submitSchema: { type: "object" },
-      binary: fake.path,
-      env: { PATH: process.env.PATH ?? "", HOME: home },
-    });
-
-    const { artifact } = await reviewOfIt(model);
-
-    expect(artifact.error).toBeNull();
-    expect(
-      artifact.findings.some((entry) => entry.rule_id === "legibility.nul_byte_in_file"),
-    ).toBe(true);
-    expect(fake.invocations()).toHaveLength(2);
-  });
-}, SPAWN_TEST_TIMEOUT_MS);
+});

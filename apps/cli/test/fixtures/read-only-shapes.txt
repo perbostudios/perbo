@@ -146,7 +146,7 @@
 "coproc git log --output=x"
 "true && git log --output=x"
 
-# the contract table (apps/cli/test/interview-contract.ts) — every command every
+# the contract table (apps/cli/src/commands/interview/test-support/contract.ts) — every command every
 # describeInterviewContract case has driven across all six rounds of this build
 "git log --output=notes.txt"
 "git log --output notes.txt"

@@ -43,10 +43,32 @@ that approved contract. Everything below is the detail.
 One source tree, one entry point ([`src/main.ts`](src/main.ts)), open (D-075):
 `apps/cli`'s own `build` bundles it into `dist/perbo.js`
 ([`tooling/package/bundle.mjs`](../../tooling/package/bundle.mjs)), and
-[`test/open-bundle.test.ts`](test/open-bundle.test.ts) reads the shipped bundle's own module graph to
+[`test/bundle-hosts.test.ts`](test/bundle-hosts.test.ts) reads the shipped bundle's own module graph to
 check it talks to the model provider the user pays for and to nothing of ours.
 `pnpm release:pack` stages the same bundle into the design-partner tarball
 ([`tooling/package/pack.mjs`](../../tooling/package/pack.mjs)).
+
+## Source layout
+
+`src/` follows the repository's module layout ([docs/07](../../docs/07-monorepo-and-deployment.md), "Package layout").
+
+| Directory | What it holds |
+|---|---|
+| [`command-line/`](src/command-line) | The argv edge: the terminal shell around the command table, and the usage text |
+| [`commands/`](src/commands) | One module per command — a file where the command is one piece, a directory with an `index.ts` surface and an `internal/` where it is not |
+| [`store/`](src/store) | `<repo>/.perbo/` and the records every command reads and writes |
+| [`spec/`](src/spec) | The Spec (D-103): its pages, and whether a ticket's spec still matches the repository |
+| [`endpoint/`](src/endpoint) | The loopback tool server the queue hosts for a session |
+
+The root holds the two build entries — [`main.ts`](src/main.ts) for the binary and
+[`index.ts`](src/index.ts) for the library — and the small modules every command shares.
+[`version.ts`](src/version.ts) stays at the root: it reads `../package.json` from
+`import.meta.url`, which names this package only from one level under `src/`.
+
+A test sits beside the module it covers. [`test/`](test) holds the suites whose subject is the built
+package — the compiled tree, the bundle, the packed tarball, the README quick start — and
+`test/fixtures/`, the authored data the suites read — among it the repository `perbo index` is run
+over.
 
 ## Install
 
@@ -216,7 +238,7 @@ through local `gh`, hands its title and body to a model as delimited `trust="ext
 alongside the repository's tree, and takes back a constrained draft: one outcome, the criteria
 the work has, each with an assertion and a kind, a proposed scope of one to eight globs, a
 rationale and, where the work divides, the nodes and edges of an execution graph
-(`@perbo/planning`, prompt `draft_v3`). The draft is written beside the ticket as
+(`@perbo/planning`, prompt `draft_v4`). The draft is written beside the ticket as
 `<KEY>.draft.json` with the model, provider, tokens and cost that produced it, and the contract is
 created in `plan_review`. **A draft is never executed; only an approved contract is.** The person's
 `approve` is the authority boundary under ADR-0023 §4 — a scope glob a model proposed becomes an
@@ -339,7 +361,7 @@ population whose lower bound can clear 70%, so below one that could resolve a pa
 `CANNOT RESOLVE` and prints no verdict — the two numbers are still there; what cannot resolve is the
 reading, not the sample. An interval that spans 70% is a `FAIL`, and says it spans rather than
 resolving below. Every number reported here as a partner reading leaves out the stops an AI stand-in
-answered (D-058): a stand-in signs its tick, or answers with `verdict --stand-in`, and those answers
+answered (D-121): a stand-in signs its tick, or answers with `verdict --stand-in`, and those answers
 are **dogfood** — counted in the `dogfood stops excluded` row, in the per-week column of the same
 name, and beside the before-window figures `--since` prints, so an `n` that shrank always says why.
 Because the label is self-declared, it can be wrong both ways, and the line under the verdict says
@@ -367,24 +389,24 @@ merged ticket — all runs, priced rows only, unpriced attempts counted and name
 own history says it merged.
 
 `verdict` is the same answer taken here rather than on the pull request (SCP-181), for the times
-there is no pull request yet, no `gh` credential, or no reason to leave the terminal.
-`perbo verdict <review> --endorse|--override <stop key>` answers a stop exactly as the two boxes
-do, and `--accept|--reject <finding key>` judges any finding, stop or not. `<review>` is a ticket
-key, a pull request — url or number — or a review id, and the key is a finding key, whole or by any
-prefix that names one finding: **the same key the checkbox carries**, so a stop answered either way
-is one decision about one finding. The row goes to `<store>/verdicts.json` with who took it, when
-and the note; nothing leaves the machine and nothing on the network is asked. Who took it is this
-repository's own `git config user.name` and `user.email` — the two lines git already asks every
-contributor for, carried on the row as `decided_by`, with no account and no token anywhere in it —
-or `--author` where you are recording somebody else's decision. Where the repository names neither
-and `--author` is absent, nothing is written and the two lines to set are printed: a record that
-names nobody is not evidence of who decided. `stops` and `escapes` print the author beside each
-decision that carries one, and a row written before the field existed keeps being read exactly as
-it was. `stops` counts it beside the answers read off pull requests — the local record fills in a
-stop nobody ticked, and where both exist the later answer stands — and `inspect` prints it beside
-its finding. A key that already carries a decision is refused without `--replace`; with it, the
-earlier decision is superseded on the record rather than overwritten, because "we changed our mind"
-is part of what the file is for.
+there is no pull request yet, no `gh` credential, or no reason to leave the terminal. `perbo
+verdict <review> --endorse|--override <stop key>` answers a stop exactly as the two boxes do, and
+`--accept|--reject <finding key>` judges any finding, stop or not. `<review>` is a ticket key, the
+id a run with no ticket was filed under, a pull request — url or number — or a review id, and the
+key is a finding key, whole or by any prefix that names one finding: **the same key the checkbox
+carries**, so a stop answered either way is one decision about one finding. The row goes to
+`<store>/verdicts.json` with who took it, when and the note; nothing leaves the machine and nothing
+on the network is asked. Who took it is this repository's own `git config user.name` and
+`user.email` — the two lines git already asks every contributor for, carried on the row as
+`decided_by`, with no account and no token anywhere in it — or `--author` where you are recording
+somebody else's decision. Where the repository names neither and `--author` is absent, nothing is
+written and the two lines to set are printed: a record that names nobody is not evidence of who
+decided. `stops` and `escapes` print the author beside each decision that carries one, and a row
+written before the field existed keeps being read exactly as it was. `stops` counts it beside the
+answers read off pull requests — the local record fills in a stop nobody ticked, and where both
+exist the later answer stands — and `inspect` prints it beside its finding. A key that already
+carries a decision is refused without `--replace`; with it, the earlier decision is superseded on
+the record rather than overwritten, because "we changed our mind" is part of what the file is for.
 
 `perbo verdict --list <change>` reads that record back: every decision recorded for one change —
 the finding key, the decision, who decided and when — newest first, a superseded row kept and

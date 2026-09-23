@@ -1,6 +1,6 @@
-import { Button } from "@perbo/ui";
-import type { PageProps } from "../shell/App.js";
-import type { useContractEditing } from "../tasks/contract-editor.js";
+import { Button } from "../ui/index.js";
+import type { PageProps } from "../shell/route.js";
+import type { useContractEditing } from "../contract-editor.js";
 
 type Editor = ReturnType<typeof useContractEditing>;
 

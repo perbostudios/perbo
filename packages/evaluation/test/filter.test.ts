@@ -52,7 +52,7 @@ describe("selectFixtures", () => {
 
   it("partitions unprepared fixtures out and names them", () => {
     const { selected, excluded_unprepared } = selectFixtures(entries, null);
-    expect(selected.map((e: never) => (e as Entry).fixture.id)).toEqual([
+    expect(selected.map((e) => e.fixture.id)).toEqual([
       "aaa-authored",
       "bbb-pinned-cached",
     ]);
@@ -75,9 +75,7 @@ describe("selectFixtures", () => {
     // Floor on the authored count (AGENTS.md): pinned fixtures may lack a
     // cache on this machine, authored ones never do.
     const { selected } = selectFixtures(sample as never[], null);
-    const authored = selected.filter(
-      (e: never) => (e as { pinned: boolean }).pinned === false,
-    );
+    const authored = selected.filter((e) => e.pinned === false);
     expect(authored.length).toBeGreaterThanOrEqual(SAMPLE_AUTHORED_IDS.length);
   });
 });

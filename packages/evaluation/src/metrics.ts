@@ -8,38 +8,7 @@
  * optional here — it is the finding.
  */
 
-export interface Proportion {
-  point: number;
-  low: number;
-  high: number;
-  n: number;
-  successes: number;
-  /** Whether the interval can distinguish pass from fail against a threshold. */
-  resolves?: boolean;
-}
-
-/**
- * Wilson score interval. Chosen over the normal approximation because at these
- * sample sizes the normal one produces bounds outside [0, 1] and is wrong near
- * the extremes, which is where a corpus this size mostly lives.
- */
-export function wilson(successes: number, n: number, z = 1.959963984540054): Proportion {
-  if (n === 0) return { point: NaN, low: NaN, high: NaN, n: 0, successes: 0 };
-  const p = successes / n;
-  const z2 = z * z;
-  const denominator = 1 + z2 / n;
-  const centre = p + z2 / (2 * n);
-  const spread = z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n));
-  return {
-    point: p,
-    // The interval always contains the point estimate; clamping to it removes a
-    // floating-point artifact that puts `high` one ulp below p at p = 1.
-    low: Math.min(p, Math.max(0, (centre - spread) / denominator)),
-    high: Math.max(p, Math.min(1, (centre + spread) / denominator)),
-    n,
-    successes,
-  };
-}
+import type { WilsonInterval } from "@perbo/contracts";
 
 /**
  * Whether the interval sits wholly on one side of the threshold. When it does
@@ -47,7 +16,7 @@ export function wilson(successes: number, n: number, z = 1.959963984540054): Pro
  * (D-050's reversal trigger).
  */
 export function resolvesAgainst(
-  proportion: Proportion,
+  proportion: WilsonInterval,
   threshold: number,
   direction: "at_least" | "at_most",
 ): boolean {

@@ -5,7 +5,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -13,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PermissionProfile } from "@perbo/contracts";
+import { replaceFile } from "@perbo/workspace";
 import {
   ADMISSION_RULES,
   judgeCommand,
@@ -21,7 +21,8 @@ import {
 } from "./admission.js";
 import { PERBO_AGENT_ROLE_NAMES, isSubagentTool, judgeSubagentStart, SUBAGENT_TOOL_NAMES } from "./agents.js";
 import { writeBriefRecord, type BriefRecords } from "./brief.js";
-import { UNKNOWN_CWD, describeShellCwd, type CommandSegment } from "./prohibited.js";
+import { describeShellCwd } from "./prohibited.js";
+import { UNKNOWN_CWD, type CommandSegment } from "./shell/index.js";
 import { HOST_TEMPORARY_DIRECTORY } from "./scratch.js";
 
 /**
@@ -642,7 +643,7 @@ function callerOf(call: PreToolCall): string | null {
  * redirect. A program that acts on its own does not — `curl -o` writes without
  * one, and is on the deny-list.
  */
-const EFFECT_FREE_VERBS = new Set(["cd", "pushd", "popd", "echo", "printf", "true", "false", ":"]);
+export const EFFECT_FREE_VERBS = new Set(["cd", "pushd", "popd", "echo", "printf", "true", "false", ":"]);
 
 /** Every command a line runs, the ones inside a nested shell included. */
 function everySegment(segments: readonly CommandSegment[]): CommandSegment[] {
@@ -939,9 +940,7 @@ export function runPreToolHook(
     try {
       const path = agentStateFile(directory, call.agent_id);
       const next: PreToolAgentState = { agent: agent.agent, cwd: judged.next_cwd };
-      const pending = `${path}.pending`;
-      writeFileSync(pending, JSON.stringify(next), "utf8");
-      renameSync(pending, path);
+      replaceFile(path, JSON.stringify(next));
     } catch (error) {
       // The write door says the other true thing, and neither sentence is the
       // other's: here the guard knows exactly where this agent stands — it is
@@ -989,4 +988,3 @@ export function runPreToolHook(
 
 /** The rules a decision can name, re-exported so a reader of a record has one import. */
 export { ADMISSION_RULES };
-export { EFFECT_FREE_VERBS };

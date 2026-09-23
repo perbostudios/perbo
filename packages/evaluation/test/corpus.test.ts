@@ -241,7 +241,12 @@ describeCorpus("scp-006 detection is deterministic after D-062", () => {
     );
     expect(finding).toBeDefined();
     expect(finding!.blocking).toBe(true);
-    // Attributability: score.ts matches on expected_detection.files.
-    expect(entry!.fixture.expected_detection.files).toContain(finding!.file);
+    // Attributability: score.ts matches on expected_detection.files, which only
+    // the anchored modes carry — `clean` and `contested` register nothing.
+    const expectation = entry!.fixture.expected_detection;
+    if (expectation.mode !== "blocking" && expectation.mode !== "coverage") {
+      throw new Error(`scp-006 is scored in ${expectation.mode} mode, which anchors no file`);
+    }
+    expect(expectation.files).toContain(finding!.file);
   });
 });

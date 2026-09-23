@@ -1,4 +1,4 @@
-import { markSpecSymbols } from "@perbo/planning/spec-text";
+import { markSpecSymbols } from "@perbo/planning/browser";
 
 /**
  * A spec section read as the shapes it was written in, for the view a person

@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Notice, cx } from "@perbo/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { bridge, errorMessage } from "../data.js";
+import { Button, InfoHint, LineIcon, Notice, ThinkingStatus, cx, type LineIconName } from "../ui/index.js";
+import { useQueryClient } from "@tanstack/react-query";
+import { bridge, errorMessage, useGraph } from "../workspace/index.js";
 import { graphHistory, latestUndoable } from "./history.js";
 import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS } from "../../shared/contract-editing.js";
 import { AskedHandle } from "./AskedHandle.js";
 import { askedHeightLimit, useAskedHeight } from "../shell/asked-size.js";
-import { InfoHint } from "../InfoHint.js";
-import { LineIcon, type LineIconName } from "../icons.js";
-import { ThinkingStatus } from "../Screen.js";
 import { INTERVIEW_CONVERSATION_CAP } from "../../shared/protocol.js";
 import type {
   Asking,
@@ -17,7 +14,7 @@ import type {
   InterviewEntry,
   Snapshot,
 } from "../../shared/protocol.js";
-import type { useContractEditing } from "../tasks/contract-editor.js";
+import type { useContractEditing } from "../contract-editor.js";
 
 /**
  * The interview, docked beside whichever pane is open (D-101, D-102).
@@ -149,27 +146,8 @@ export function InterviewDock({
   // landed since is what D-100 lets an undo take back, and the host refuses
   // any other. The drawer reads the same query, so this costs no second read.
   const key = session?.key ?? null;
-  const graph = useQuery({
-    queryKey: ["graph", repoId, key],
-    queryFn: () => bridge.request({ kind: "graphRead", repoId, key: key ?? "" }),
-    networkMode: "always",
-    enabled: key !== null,
-    staleTime: 1000,
-  });
+  const graph = useGraph(repoId, key);
   const undoable = latestUndoable(graphHistory(graph.data?.history ?? []))?.n ?? null;
-  // And it follows the records itself: the Graph pane and the history drawer
-  // each invalidate this query, and over the Spec or the Explorer pane with the
-  // drawer closed neither is there — which would leave the card offering an
-  // undo for an edit the plan has passed, or none for the edit it just made.
-  useEffect(
-    () =>
-      bridge.subscribe((change: Change) => {
-        if (change.kind !== "records" || key === null) return;
-        if (change.repoId !== null && change.repoId !== repoId) return;
-        void client.invalidateQueries({ queryKey: ["graph", repoId, key] });
-      }),
-    [client, key, repoId],
-  );
   // The newest line is what the person is reading; a chat that stayed where it
   // was would answer somewhere off the bottom of the screen.
   useEffect(() => {

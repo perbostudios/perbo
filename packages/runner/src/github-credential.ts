@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
 import { GH_NOT_LOGGED_IN, type GithubCredential } from "@perbo/contracts";
+import { createGh, gh } from "@perbo/workspace";
 
 /**
  * Which credential GitHub is read through, and whether it answers (SCP-200).
@@ -48,14 +48,16 @@ export interface GithubCredentialRequest {
 
 /** Whether `gh auth status` answers on whichever credential the env carries. */
 function ghAnswers(request: GithubCredentialRequest): boolean {
+  const asked = request.binary === undefined ? gh : createGh({ binary: request.binary });
   try {
-    execFileSync(request.binary ?? "gh", ["auth", "status"], {
-      timeout: request.timeoutMs ?? 30_000,
-      stdio: "ignore",
-      env: request.env ?? process.env,
+    const status = asked.runSync(process.cwd(), ["auth", "status"], {
+      ...(request.env === undefined ? {} : { base: request.env }),
+      timeoutMs: request.timeoutMs ?? 30_000,
     });
-    return true;
+    return status.code === 0;
   } catch {
+    // No `gh` on this machine at all, which is the same answer as one that
+    // will not say who it is logged in as.
     return false;
   }
 }

@@ -106,7 +106,7 @@ test("--filter expands to exactly three commands", () => {
     ["pnpm", "exec", "turbo", "run", "typecheck", "test", "lint", "--filter=@perbo/contracts"],
   ]);
   assert.deepEqual(
-    filterPlan("@perbo/ui").map((step) => step.stage),
+    filterPlan("@perbo/desktop").map((step) => step.stage),
     FILTERED_STAGES,
   );
 });
@@ -229,6 +229,14 @@ test("--base and --head override the range and skip git entirely", () => {
   assert.equal(code, 0);
   assert.deepEqual(runner.runs(), [["node", ".github/scripts/protected-paths.mjs", base, head]]);
   assert.equal(runner.calls.filter((call) => call.kind === "capture").length, 0);
+});
+
+test("a value flag given twice is refused rather than the last one winning", () => {
+  assert.throws(
+    () => parseArgs(["--filter", "@perbo/cli", "--filter", "@perbo/desktop"]),
+    /--filter is given once; run the gate once per package/,
+  );
+  assert.throws(() => parseArgs(["--corpus", "a", "--corpus=b"]), /--corpus is given once/);
 });
 
 test("--base without --head, and a base that is not a SHA, are refused", () => {

@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import type { CheckResult } from "@perbo/contracts";
+import { formatUsd, type CheckResult } from "@perbo/contracts";
 import {
   DEFAULT_REVIEW_TIMEOUT_MS,
   matchesFilter,
@@ -20,7 +20,7 @@ import { measureBaseline, renderBaselines, type BaselineResult } from "./baselin
 import { defaultCacheDir, defaultCorpusDir, loadCorpus, type LoadedFixture } from "./corpus.js";
 import { ruleAuthorityFrom, summariseCorpus } from "./summarise.js";
 import { withRecallDefinitions, withRecallLabels } from "./score.js";
-import { formatUsd, parseUsd } from "./spend.js";
+import { parseUsd } from "./spend.js";
 import { serialiseRunsFile } from "./runs-file.js";
 import {
   buildCorpusRunManifest,
@@ -461,7 +461,7 @@ export async function main(
   }
   if (args.maxSpendMicros !== null) {
     process.stderr.write(
-      `\nspend ceiling ${formatUsd(args.maxSpendMicros)}: ` +
+      `\nspend ceiling ${formatUsd(args.maxSpendMicros, 2)}: ` +
         `${result.partial ? `reached — ${result.partial.reason}` : "not reached"}\n`,
     );
   }

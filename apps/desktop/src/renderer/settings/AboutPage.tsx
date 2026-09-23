@@ -1,12 +1,13 @@
-import { Button, Notice } from "@perbo/ui";
-import { Brand, FactList, PageHeader, SectionLabel } from "../Screen.js";
-import { errorMessage, useAction, useUsage } from "../data.js";
-import type { PageProps } from "../shell/App.js";
+import { Brand, Button, FactList, Notice, PageHeader, SectionLabel } from "../ui/index.js";
+import { errorMessage, useAction, useUsage } from "../workspace/index.js";
+import type { PageProps } from "../shell/route.js";
+import { useSurface } from "../shell/surface.js";
 import { dollars, monthLabel } from "./UsagePage.js";
 
 /** Settings · General · About (S6C): what this is, and what this machine has merged, spent and connected. */
 export function AboutPage({ workspace, navigate }: PageProps) {
   const action = useAction();
+  const surface = useSurface();
   const usage = useUsage();
   const back = (): void => navigate({ page: "general" });
   return (
@@ -20,9 +21,7 @@ export function AboutPage({ workspace, navigate }: PageProps) {
               <h1>perbo</h1>
               <span className="small muted">
                 {workspace.version} ·{" "}
-                {workspace.mode === "desktop"
-                  ? "desktop · local"
-                  : "interactive preview"}
+                {surface === "native" ? "desktop · local" : "interactive preview"}
               </span>
             </div>
           </div>

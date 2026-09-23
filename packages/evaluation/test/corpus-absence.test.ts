@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import {
   CORPUS_ABSENT_REASON,
   CORPUS_DIR_ENV,
@@ -12,13 +12,14 @@ import {
 
 const runVitest = promisify(execFile);
 const PACKAGE_ROOT = resolve(import.meta.dirname, "..");
+const scratchDirectory = scratchDirectories("perbo-absence-");
 
 /** Runs vitest over `suites` with `env` applied, and reads back its JSON report. */
 async function runSuites(
   suites: readonly string[],
   env: Record<string, string>,
 ): Promise<{ report: Report }> {
-  const outputFile = join(mkdtempSync(join(tmpdir(), "perbo-absence-")), "report.json");
+  const outputFile = join(scratchDirectory(), "report.json");
   await runVitest(
     "pnpm",
     ["exec", "vitest", "run", ...suites, "--reporter=json", `--outputFile=${outputFile}`],

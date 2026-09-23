@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { scratchDirectories } from "@perbo/test-support";
+import { createGit, type GitProcess, type RunResult } from "@perbo/workspace";
 import { isTestPath, splitTestPaths, baselineStatus, measureBaseline } from "../src/baseline.js";
+import type { LoadedFixture } from "../src/corpus.js";
+import { clonePathFor } from "../src/prepare.js";
 import { sample } from "./sample-fixtures.js";
 
 /**
@@ -14,6 +17,8 @@ import { sample } from "./sample-fixtures.js";
  * fixture. The evidence is obtainable: check out the base commit, apply only
  * the test files from the diff, and run.
  */
+
+const scratchDirectory = scratchDirectories("perbo-baseline-");
 
 describe("isTestPath", () => {
   it("recognises the test conventions of the repositories the corpus pins", () => {
@@ -114,9 +119,91 @@ describe("measureBaseline on an authored fixture", () => {
   it("measures the before tree with the after tests, without a pinned repository", async () => {
     const fixture = sample.find((entry) => entry.fixture.id === "cln-025-archived-rows-hidden-from-listing");
     expect(fixture).toBeDefined();
-    const result = await measureBaseline({ fixture: fixture!, cacheRoot: mkdtempSync(join(tmpdir(), "perbo-base-test-")) });
+    const result = await measureBaseline({
+      fixture: fixture!,
+      cacheRoot: scratchDirectory("perbo-base-test-"),
+    });
     expect(result.skipped).toBeNull();
     expect(result.check?.status).toBe("passed");
     expect(result.check?.summary).toMatch(/before tree/);
   }, 120_000);
+});
+
+/**
+ * A scripted git, so the worktree the measurement takes can be answered without
+ * a clone. What git means by an answer is the repository module's; what
+ * `measureBaseline` does with one is this.
+ */
+function scripted(answer: (argv: readonly string[]) => Partial<RunResult>): GitProcess {
+  const reply = (argv: readonly string[]): RunResult => ({
+    argv: [...argv],
+    code: 0,
+    signal: null,
+    stdout: "",
+    stderr: "",
+    duration_ms: 0,
+    timed_out: false,
+    truncated: false,
+    ...answer(argv),
+  });
+  return {
+    run: (argv) => Promise.resolve(reply(argv)),
+    runSync: (argv) => reply(argv),
+  };
+}
+
+describe("the test-only patch measureBaseline applies", () => {
+  const scratch = scratchDirectory("perbo-baseline-patch-");
+
+  const testDiff = [
+    "diff --git a/src/__tests__/a.spec.ts b/src/__tests__/a.spec.ts",
+    "--- a/src/__tests__/a.spec.ts",
+    "+++ b/src/__tests__/a.spec.ts",
+    "@@ -1 +1 @@",
+    "-expect(a).toBe(1)",
+    "+expect(a).toBe(2)",
+    "",
+  ].join("\n");
+
+  /** A pinned fixture whose change touches a test file, with a prepared clone. */
+  const prepared = (name: string): { fixture: LoadedFixture; cacheRoot: string } => {
+    const pinnedSample = sample.find((entry) => entry.fixture.pinned_repository !== null);
+    expect(pinnedSample, "the sample carries a pinned fixture").toBeDefined();
+    const cacheRoot = join(scratch, name);
+    const clone = clonePathFor(cacheRoot, pinnedSample!.fixture.pinned_repository!.url);
+    mkdirSync(join(clone, ".git"), { recursive: true });
+    return { fixture: { ...pinnedSample!, diff: testDiff }, cacheRoot };
+  };
+
+  it("is refused when only part of it arrived, rather than measured with", async () => {
+    // A patch cut at the ceiling applies cleanly or not at all for reasons that
+    // have nothing to do with the base commit, and either outcome would be
+    // recorded as fail-first evidence about the fixture.
+    const result = await measureBaseline({
+      ...prepared("cut"),
+      git: createGit({
+        process: scripted((argv) =>
+          argv.includes("--no-color") ? { stdout: testDiff, truncated: true } : {},
+        ),
+      }),
+    });
+    expect(result.check).toBeNull();
+    expect(result.skipped).toMatch(/patch is larger than \d+ bytes and only part of it arrived/);
+  });
+
+  it("is measured with when the whole of it arrived", async () => {
+    const result = await measureBaseline({
+      ...prepared("whole"),
+      git: createGit({
+        process: scripted((argv) =>
+          argv.includes("--no-color")
+            ? { stdout: testDiff }
+            : argv.includes("apply")
+              ? { code: 1, stderr: "error: patch does not apply" }
+              : {},
+        ),
+      }),
+    });
+    expect(result.skipped).toMatch(/does not apply to the base commit/);
+  });
 });

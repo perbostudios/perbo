@@ -56,6 +56,9 @@ importers:
       '@perbo/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@perbo/model':
+        specifier: workspace:*
+        version: link:../../packages/model
       '@perbo/planning':
         specifier: workspace:*
         version: link:../../packages/planning
@@ -65,6 +68,9 @@ importers:
       '@perbo/runner':
         specifier: workspace:*
         version: link:../../packages/runner
+      '@perbo/test-support':
+        specifier: workspace:*
+        version: link:../../tooling/test-support
       '@perbo/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
@@ -104,9 +110,6 @@ importers:
       '@perbo/planning':
         specifier: workspace:*
         version: link:../../packages/planning
-      '@perbo/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
       '@tanstack/react-query':
         specifier: 5.102.8
         version: 5.102.8(react@19.2.8)
@@ -126,6 +129,9 @@ importers:
       '@perbo/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@perbo/test-support':
+        specifier: workspace:*
+        version: link:../../tooling/test-support
       '@perbo/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
@@ -190,6 +196,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.4.0
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
       eslint:
         specifier: 'catalog:'
         version: 10.9.1(jiti@2.7.0)
@@ -214,15 +223,46 @@ importers:
       '@perbo/review':
         specifier: workspace:*
         version: link:../review
-      '@perbo/runner':
-        specifier: workspace:*
-        version: link:../runner
       '@perbo/workspace':
         specifier: workspace:*
         version: link:../workspace
       zod:
         specifier: 'catalog:'
         version: 4.4.3
+    devDependencies:
+      '@eslint/js':
+        specifier: 'catalog:'
+        version: 10.0.1(eslint@10.9.1(jiti@2.7.0))
+      '@perbo/test-support':
+        specifier: workspace:*
+        version: link:../../tooling/test-support
+      '@perbo/tsconfig':
+        specifier: workspace:*
+        version: link:../../tooling/tsconfig
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.4.0
+      eslint:
+        specifier: 'catalog:'
+        version: 10.9.1(jiti@2.7.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      typescript-eslint:
+        specifier: 'catalog:'
+        version: 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@26.4.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0))
+
+  packages/model:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: 'catalog:'
+        version: 0.121.0(zod@4.4.3)
+      '@perbo/contracts':
+        specifier: workspace:*
+        version: link:../contracts
     devDependencies:
       '@eslint/js':
         specifier: 'catalog:'
@@ -251,9 +291,12 @@ importers:
       '@perbo/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@perbo/review':
+      '@perbo/model':
         specifier: workspace:*
-        version: link:../review
+        version: link:../model
+      '@perbo/workspace':
+        specifier: workspace:*
+        version: link:../workspace
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -261,12 +304,18 @@ importers:
       '@eslint/js':
         specifier: 'catalog:'
         version: 10.0.1(eslint@10.9.1(jiti@2.7.0))
+      '@perbo/test-support':
+        specifier: workspace:*
+        version: link:../../tooling/test-support
       '@perbo/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
       '@types/node':
         specifier: 'catalog:'
         version: 26.4.0
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
       eslint:
         specifier: 'catalog:'
         version: 10.9.1(jiti@2.7.0)
@@ -282,12 +331,12 @@ importers:
 
   packages/review:
     dependencies:
-      '@anthropic-ai/sdk':
-        specifier: 'catalog:'
-        version: 0.121.0(zod@4.4.3)
       '@perbo/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@perbo/model':
+        specifier: workspace:*
+        version: link:../model
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -319,6 +368,9 @@ importers:
       '@perbo/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@perbo/model':
+        specifier: workspace:*
+        version: link:../model
       '@perbo/review':
         specifier: workspace:*
         version: link:../review
@@ -332,6 +384,9 @@ importers:
       '@eslint/js':
         specifier: 'catalog:'
         version: 10.0.1(eslint@10.9.1(jiti@2.7.0))
+      '@perbo/test-support':
+        specifier: workspace:*
+        version: link:../../tooling/test-support
       '@perbo/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
@@ -351,30 +406,6 @@ importers:
         specifier: 'catalog:'
         version: 4.1.11(@types/node@26.4.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0))
 
-  packages/ui:
-    devDependencies:
-      '@perbo/tsconfig':
-        specifier: workspace:*
-        version: link:../../tooling/tsconfig
-      '@types/react':
-        specifier: 19.2.18
-        version: 19.2.18
-      '@types/react-dom':
-        specifier: 19.2.7
-        version: 19.2.7(@types/react@19.2.18)
-      eslint:
-        specifier: 'catalog:'
-        version: 10.9.1(jiti@2.7.0)
-      react:
-        specifier: 19.2.8
-        version: 19.2.8
-      react-dom:
-        specifier: 19.2.8
-        version: 19.2.8(react@19.2.8)
-      typescript:
-        specifier: 'catalog:'
-        version: 5.9.3
-
   packages/workspace:
     dependencies:
       '@perbo/contracts':
@@ -387,6 +418,9 @@ importers:
       '@eslint/js':
         specifier: 'catalog:'
         version: 10.0.1(eslint@10.9.1(jiti@2.7.0))
+      '@perbo/test-support':
+        specifier: workspace:*
+        version: link:../../tooling/test-support
       '@perbo/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
@@ -411,6 +445,30 @@ importers:
       esbuild:
         specifier: 'catalog:'
         version: 0.28.2
+
+  tooling/test-support:
+    devDependencies:
+      '@eslint/js':
+        specifier: 'catalog:'
+        version: 10.0.1(eslint@10.9.1(jiti@2.7.0))
+      '@perbo/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.4.0
+      eslint:
+        specifier: 'catalog:'
+        version: 10.9.1(jiti@2.7.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      typescript-eslint:
+        specifier: 'catalog:'
+        version: 8.68.0(eslint@10.9.1(jiti@2.7.0))(typescript@5.9.3)
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@26.4.0)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0))
 
   tooling/tsconfig: {}
 

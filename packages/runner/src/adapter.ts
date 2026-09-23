@@ -6,14 +6,14 @@ import { resolve, sep } from "node:path";
 import {
   invocationShapeHash,
   type AgentInvocation,
-  type AttemptCostBasis,
+  type CostBasis,
   type BriefReinjection,
   type CommandRecord,
   type NeutralisationRecord,
   type PermissionProfile,
   type TerminationReason,
 } from "@perbo/contracts";
-import { MODEL_ID, costMicros as providerListCostMicros } from "@perbo/review";
+import { PRICED_MODEL_ID, costMicros as providerListCostMicros } from "@perbo/model";
 import {
   DEFAULT_SUSPEND_INTERVAL_MS,
   DEFAULT_SUSPEND_THRESHOLD_MS,
@@ -37,12 +37,8 @@ import {
   prepareUnguardedSettings,
   readPreToolDecisions,
 } from "./pretool.js";
-import {
-  UNKNOWN_CWD,
-  inspectToolWrite,
-  type ProhibitedHit,
-  type ShellCwd,
-} from "./prohibited.js";
+import { inspectToolWrite, type ProhibitedHit, type ShellCwd } from "./prohibited.js";
+import { UNKNOWN_CWD } from "./shell/index.js";
 import { DEFAULT_AGENT_TOOLS } from "./profile.js";
 import { prepareScratchDirectory, scratchEnvironment } from "./scratch.js";
 import { describeTransportFailure, transportExhaustion } from "./transport.js";
@@ -205,7 +201,7 @@ export interface AgentResult {
     cache_read_input_tokens: number;
     output_tokens: number;
     cost_micros: number;
-    cost_basis: AttemptCostBasis;
+    cost_basis: CostBasis;
     /**
      * The attempt was stopped before the transport wrote its final accounting
      * line, so these are the running sums from the messages already read.
@@ -659,7 +655,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
   let cacheReadTokens = 0;
   let outputTokens = 0;
   let costMicros = 0;
-  let costBasis: AttemptCostBasis = "unavailable";
+  let costBasis: CostBasis = "unavailable";
   /**
    * The pinned transport can emit several content blocks for one model
    * request, each repeating that request's usage. The latest reading for each
@@ -754,7 +750,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
 
   /** Price the accounting read so far only where this exact model has a card. */
   const noteProviderListEstimate = (): void => {
-    if (costBasis === "transport_reported" || request.model !== MODEL_ID) return;
+    if (costBasis === "transport_reported" || request.model !== PRICED_MODEL_ID) return;
     costMicros = providerListCostMicros({
       input_tokens: freshInputTokens,
       cache_creation_input_tokens: cacheCreationTokens,

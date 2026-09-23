@@ -1,6 +1,6 @@
 # `@perbo/contracts`
 
-Versioned schemas for every record the loop writes and reads.
+Versioned schemas for the records two or more packages write or read.
 
 Implemented as Zod schemas with inferred types — **files, not tables**:
 
@@ -25,7 +25,30 @@ a human may raise a level and may not lower one.
 
 `paths.ts` is the single home for "what counts as a migration / dependency / config / security /
 agent-configuration path". Two copies of that answer, one in scope enforcement and one in risk
-derivation, would drift.
+derivation, would drift. It is also the single home for what a path glob *means*: `matchesAny`
+is the interface, and `test/glob-conformance.json` states the semantics as cases, so a matcher
+written elsewhere to them answers that table rather than a reading of its own.
+
+`store-layout.ts` is the single home for the paths a repository's store holds: the store's own
+directory name, and every record inside it that more than one package reads, as segments a caller
+joins to the store it is holding. The CLI writes them, the runner appends to them and the desktop
+reads them, so a second spelling anywhere is a drift nobody notices until a record goes missing.
+`docs/03-domain-and-event-model.md` "Store layout" is the same tree in prose.
+
+`cost.ts` is the single home for a dollar figure and what it is: the bases a cost can have, the
+rule that an unpriced component is counted and never summed as zero ([D-070](../../docs/11-open-decisions.md)),
+the roll arithmetic that adds components up while keeping what is missing from them, and how an
+amount and a subtotal read. It imports zod alone, so the desktop's renderer takes its names from
+`@perbo/contracts/browser`.
+
+`credential.ts` is the single home for "what counts as credential-shaped" ([D-063](../../docs/11-open-decisions.md)):
+`findCredentials` and `redactCredentials`, deliberately narrow, each rule requiring a positive
+signal of secrecy rather than entropy alone. It sits here beside the two neighbouring facts —
+`isCredentialEnvName` in `permission.ts`, which says which environment variables are credentials,
+and `SecretIndex`, which says which materialized content is one — and every package that has to
+redact what it writes already depends on this one. Its false-positive behaviour is measured over the
+whole corpus by `packages/evaluation/test/credential-sweep.test.ts`, so a rule change is a
+measurement, not an edit.
 
 `review.ts` carries one deliberate asymmetry worth knowing about. A finding's `routing` is derived
 from `blocking` when it is absent, rather than defaulted, so an artifact written before D-051 stays

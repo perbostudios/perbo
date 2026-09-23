@@ -14,18 +14,20 @@
   },
   "files": ["dist"],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit --declaration false --declarationMap false --sourceMap false",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "lint": "eslint src test"
   },
   "dependencies": {
     "@perbo/contracts": "workspace:*",
+    "@perbo/model": "workspace:*",
     "@perbo/review": "workspace:*",
     "@perbo/workspace": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@perbo/test-support": "workspace:*",
     "@perbo/tsconfig": "workspace:*",
     "@eslint/js": "catalog:",
     "@types/node": "catalog:",

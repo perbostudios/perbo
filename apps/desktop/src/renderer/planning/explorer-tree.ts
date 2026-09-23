@@ -1,7 +1,9 @@
-import { matchesAny } from "@perbo/contracts/paths";
-import { standingGlob } from "@perbo/contracts/standing";
-import type { PlanNode } from "@perbo/contracts/plan";
-import type { StandingProhibitedEntry } from "@perbo/contracts/standing";
+import {
+  matchesAny,
+  standingGlob,
+  type PlanNode,
+  type StandingProhibitedEntry,
+} from "@perbo/contracts/browser";
 import { markOf, type DraftMark } from "../../shared/contract-editing.js";
 import type { EditingForm } from "../../shared/protocol.js";
 
@@ -110,7 +112,7 @@ export function rowMark(
     standing: standing.find((entry) => covers(entry.path, path)) ?? null,
     via:
       form.draft.prohibited.find(
-        (entry) => entry !== glob && entry.endsWith("/**") && path.startsWith(entry.slice(0, -2)),
+        (entry) => entry !== glob && entry.endsWith("/**") && matchesAny(probe(path), [entry]),
       ) ?? null,
   };
 }

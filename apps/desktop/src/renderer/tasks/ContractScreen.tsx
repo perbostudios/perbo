@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Dialog, Notice } from "@perbo/ui";
-import { FactList, Rename, SectionLabel, WizardHeader } from "../Screen.js";
-import { InkIcon } from "../InkIcon.js";
-import { bridge, errorMessage, useAction } from "../data.js";
+import { Button, Dialog, FactList, InkIcon, Notice, SectionLabel } from "../ui/index.js";
+import { WizardHeader } from "./wizard.js";
+import { Rename } from "./Rename.js";
+import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey } from "./ticket-workspace.js";
-import { planNodes } from "@perbo/contracts/plan";
+import { planNodes } from "@perbo/contracts/browser";
 import { costLabel, pendingScope, taskRecords } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
 export function ContractScreen(context: TaskContext) {

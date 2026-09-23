@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, EmptyState, Notice } from "@perbo/ui";
-import { withNoGo } from "@perbo/planning/impact";
-import type { ImpactReasonKind, ImpactWarning } from "@perbo/planning/impact";
-import { LineIcon } from "../icons.js";
-import { bridge, errorMessage } from "../data.js";
+import { Button, EmptyState, LineIcon, Notice } from "../ui/index.js";
+import { withNoGo } from "@perbo/planning/browser";
+import type { ImpactReasonKind, ImpactWarning } from "@perbo/planning/browser";
+import { bridge, errorMessage } from "../workspace/index.js";
 import type { ImpactView } from "../../shared/protocol.js";
-import type { PageProps } from "../shell/App.js";
-import type { useContractEditing } from "../tasks/contract-editor.js";
+import type { PageProps } from "../shell/route.js";
+import type { useContractEditing } from "../contract-editor.js";
 import { ConfirmPlan } from "./ConfirmPlan.js";
 
 type Editor = ReturnType<typeof useContractEditing>;

@@ -20,12 +20,12 @@ Three modules own the desktop's lifecycles, each behind a focused interface.
   - A terminal command's stale records cannot establish success or recovery while fresh records are being read.
 - **Workspace refresh sits behind the query hooks.**
   - Validated progress events patch the job display without native reads.
-  - Record events refresh the changed repository and the active detail and output queries.
+  - Record events refresh the changed repository and the active detail, output, summary and graph queries.
   - Polling and visibility wakeups still read external CLI changes.
-  - A dirty generation forces a fresh pass when a mutation overlaps a read.
+  - A dirty generation forces a fresh pass when a mutation overlaps a read. One module states that rule, `src/shared/read-generations.ts`, and both the host's reads and every one of the renderer's query hooks go through it.
   - The host shares in-flight reads; the selected output attempt still passes ticket, bundle, size, regular-file and hash checks.
 
-The preview uses the same editing protocol against sample records. Neither the preview nor the native host changes the CLI's authority over tickets and contracts, or the runner's review, publication and merge controls.
+The sample host, which the tests and the development preview run the renderer against, answers the same Request table as the host and is held to it by a conformance suite ([D-120](../11-open-decisions.md)). Neither it nor the native host changes the CLI's authority over tickets and contracts, or the runner's review, publication and merge controls.
 
 A recorded admission result reserves its ticket while the canonical read completes. If that ticket was already open in another editor, the existing editor keeps ownership and its unfinished buffer. The submitting session keeps its fields and receipt as a visible conflict, with a link to the canonical contract. Retrying or restarting never overwrites either buffer and never repeats an admission.
 
@@ -35,3 +35,4 @@ A recorded admission result reserves its ticket while the canonical read complet
 - A forced process exit can still lose unacknowledged input.
 - The CLI store and the desktop profile are not one transaction, so an admission without a recorded result is unknown until inspected. Nothing submits it again silently.
 - Polling still costs work in proportion to the connected repositories.
+- A read that a mutation overlaps on every pass is refused after a bounded number of them, rather than taken again for as long as the records keep moving; the refresh that follows takes it again.

@@ -14,7 +14,8 @@ import {
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PACKAGE_ROOT, REPO_ROOT, buildCli, removeStagedBundles } from "./open-build.js";
+import { buildCli, removeStagedBundles } from "../src/test-support/built-cli.js";
+import { PACKAGE_ROOT, REPO_ROOT } from "../src/test-support/paths.js";
 
 /**
  * `apps/cli` is a package somebody can install (ADR-0032).

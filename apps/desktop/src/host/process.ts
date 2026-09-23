@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { delimiter, join } from "node:path";
 import { homedir } from "node:os";
+import { credentialValuesOf, redactCredentials, replaceValues } from "@perbo/contracts";
 
 export interface ProcessResult {
   code: number;
@@ -158,29 +159,39 @@ export function childEnvironment(
   return env;
 }
 
-/** Logs are bounded and redact credentials inherited by this app, in addition to common token forms. */
+/**
+ * A bare `sk-` key, the one provider form the shared detector does not cover:
+ * `sk-` before twelve characters is also how `sk-spinner-container` is
+ * written, and the detector is wired into the artifact writer, where a false
+ * positive mangles a finding about nothing sensitive. Here it costs a reader
+ * one over-redacted log line, so the broader rule is worth its price. The
+ * detector's own prefixes — `sk-ant-`, `sk-proj-`, `gh?_` and the rest — are
+ * covered by the pass after this one.
+ */
+const PROVIDER_KEY = /\bsk-[A-Za-z0-9_-]{12,}\b/g;
+
+/**
+ * Logs are bounded, and what reaches them carries no credential this app can
+ * recognise: first the values of the environment it inherited, longest first
+ * so a value that prefixes another leaves no tail; then the bare `sk-` key
+ * above; then the shared detector, which knows PEM blocks, JWTs, credentials
+ * inside a URL, vendor keys and long values bound to a secret-named identifier;
+ * then the terminal's own escapes.
+ *
+ * The first pass is by exact value and the two after it are by shape, which is
+ * what covers a credential this machine does not hold — one the agent wrote, or
+ * one it read out of the repository.
+ */
 export function redact(
   text: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  let result = text;
-  for (const [name, value] of Object.entries(env)) {
-    if (
-      value &&
-      value.length >= 8 &&
-      /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/i.test(name)
-    )
-      result = result.split(value).join("[redacted]");
-  }
-  return result
-    .replace(
-      /\b(?:sk-ant-|sk-proj-|sk-|gh[pousr]_)[A-Za-z0-9_-]{12,}\b/g,
-      "[redacted]",
-    )
-    .replace(
-      new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g"),
-      "",
-    );
+  const values = replaceValues(text, credentialValuesOf(env), "[redacted]").text;
+  const keys = values.replace(PROVIDER_KEY, "[redacted]");
+  return redactCredentials(keys).text.replace(
+    new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*[a-zA-Z]`, "g"),
+    "",
+  );
 }
 
 /**
@@ -329,6 +340,21 @@ export function startLineProcess(
       for (const timer of timers) timer.unref();
     },
   };
+}
+
+/**
+ * The stdout of a command that succeeded. A non-zero exit is the command's own
+ * stderr where it wrote one, and a cancellation says so rather than reporting
+ * a failure the person caused.
+ */
+export function requireSuccess(result: ProcessResult): string {
+  if (result.code !== 0)
+    throw new Error(
+      result.cancelled
+        ? "Command stopped. Refresh the ticket to read its recorded outcome."
+        : result.stderr.trim() || `CLI exited with code ${result.code}.`,
+    );
+  return result.stdout;
 }
 
 /** Fixed binary + argv only. Cancelling the process group reaches the CLI's provider children too. */

@@ -1,12 +1,4 @@
-import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import {
@@ -17,6 +9,7 @@ import {
   type ExecutionAttempt,
   type VerifiedCommit,
 } from "@perbo/contracts";
+import { replaceFile } from "@perbo/workspace";
 import { sameCommit } from "./resume.js";
 
 /**
@@ -344,7 +337,9 @@ export function appendAttempts(input: {
 
   const attempts: StoredAttempt[] = [...prior, ...input.attempts];
   mkdirSync(dirname(input.path), { recursive: true });
-  writeAtomically(
+  // Replaced whole: a half-written record is refused by every later reader,
+  // which would stop every later run of the ticket.
+  replaceFile(
     input.path,
     `${JSON.stringify({ ticket_id: input.ticket_id, attempts }, null, 2)}\n`,
   );
@@ -352,22 +347,36 @@ export function appendAttempts(input: {
 }
 
 /**
- * Replace the record in one step, or leave what is on disk alone.
+ * Which attempt sealed which commit, from the attempts record already on disk.
  *
- * `rename` within a directory is atomic, so a run killed while it writes leaves
- * the record either as it was or as it now is and never half of each — the same
- * step the spend ledger is replaced by, for the same reason. A half-written
- * record is refused by every later reader, and because the reader refuses
- * rather than starts over, that one file would stop every later run of the
- * ticket.
+ * The record is appended to rather than replaced, so this names every commit
+ * any run of the ticket sealed — a commit from two runs ago is attributed to
+ * the attempt that made it rather than recorded by its sha alone.
  */
-function writeAtomically(path: string, contents: string): void {
-  const temporary = `${path}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
-  try {
-    writeFileSync(temporary, contents);
-    renameSync(temporary, path);
-  } catch (error) {
-    rmSync(temporary, { force: true });
-    throw error;
+export function sealedByAttempt(record: AttemptsRecord | null): Map<string, string> {
+  const known = new Map<string, string>();
+  const head = z.object({ attempt_id: z.string(), head_commit: z.string().nullable() });
+  for (const attempt of record?.attempts ?? []) {
+    const parsed = head.safeParse(attempt);
+    if (!parsed.success || parsed.data.head_commit === null) continue;
+    known.set(parsed.data.head_commit, parsed.data.attempt_id);
   }
+  return known;
+}
+
+/**
+ * The commit this ticket's spec is in, as its attempts record names it, or
+ * null where no run has made one (D-103).
+ *
+ * Read from the record rather than derived from the branch, because the
+ * question a resumed run asks is whether the branch still starts where the
+ * record says it does — and a branch is not evidence about itself.
+ */
+export function specCommitOnRecord(record: AttemptsRecord | null): string | null {
+  const shape = z.object({ spec_commit: z.string().nullable().optional() });
+  for (const attempt of [...(record?.attempts ?? [])].reverse()) {
+    const parsed = shape.safeParse(attempt);
+    if (parsed.success && parsed.data.spec_commit) return parsed.data.spec_commit;
+  }
+  return null;
 }

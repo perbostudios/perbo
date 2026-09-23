@@ -64,12 +64,42 @@ function parseArgs(argv) {
   };
 }
 
-/** `*` matches within one path segment, `**` across segments. Anchored to the whole path. */
-export function matchesGlob(pattern, path) {
-  const source = pattern
-    .split("**")
-    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replaceAll("\\*", "[^/]*"))
-    .join(".*");
+/**
+ * Whether `path` matches `pattern`, with the semantics of `@perbo/contracts`'
+ * `matchesAny`, which `packages/contracts/test/glob-conformance.json` holds
+ * both to: `*` within one path segment, `**` across segments, a `**` before a
+ * slash also matching no segment at all, `?` one character other than `/`, and
+ * every other character literal.
+ *
+ * A copy rather than an import. This check runs before anything is built, so
+ * there is no `@perbo/contracts/dist` to import; and it stays under `.github/`,
+ * which an attempt may not write, so a pull request cannot loosen the matcher
+ * that judges it.
+ */
+export function matchesGlob(path, pattern) {
+  let source = "";
+  for (let i = 0; i < pattern.length; i += 1) {
+    const char = pattern[i] ?? "";
+    if (char === "*") {
+      if (pattern[i + 1] === "*") {
+        if (pattern[i + 2] === "/") {
+          source += "(?:.*/)?";
+          i += 2;
+        } else {
+          source += ".*";
+          i += 1;
+        }
+      } else {
+        source += "[^/]*";
+      }
+      continue;
+    }
+    if (char === "?") {
+      source += "[^/]";
+      continue;
+    }
+    source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
   return new RegExp(`^${source}$`).test(path);
 }
 
@@ -97,9 +127,9 @@ export function loadProtectedConfig(configPath) {
  * `protected_tests` is matched by exact equality, not by prefix: a file whose
  * name merely starts with a protected test's path (a `.bak` beside it, an
  * unrelated file one directory level deeper with a matching name) is not the
- * protected file and is not refused. `protected_paths` is matched by the same
- * anchored glob the assembler itself uses, so a path there protects
- * everything under it deliberately, the way a directory-scoped entry should.
+ * protected file and is not refused. `protected_paths` is matched as
+ * `@perbo/contracts` matches a glob, so a path there protects everything under
+ * it deliberately, the way a directory-scoped entry should.
  */
 export function protectedHits(changedPaths, { protected_tests, protected_paths }) {
   const exact = new Set(protected_tests);
@@ -109,7 +139,7 @@ export function protectedHits(changedPaths, { protected_tests, protected_paths }
       hits.push({ file, rule: `a protected test (${file})` });
       continue;
     }
-    const matched = protected_paths.find((pattern) => matchesGlob(pattern, file));
+    const matched = protected_paths.find((pattern) => matchesGlob(file, pattern));
     if (matched) hits.push({ file, rule: `a protected path (${matched})` });
   }
   return hits;

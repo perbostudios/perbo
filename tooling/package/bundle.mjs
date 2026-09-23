@@ -53,7 +53,7 @@ export const CLI_BIN = join("apps", "cli", "dist", "perbo.js");
  *
  * Bundled for the same reason the binaries are, and it is the same reason twice:
  * an installed `@perbo/cli` has no `@perbo/contracts` beside it, so the
- * compiled `dist/index.js` — which is `export *` over modules that import the
+ * compiled `dist/index.js` — a named list over modules that import the
  * workspace by name — resolves nothing once it leaves this repository. A
  * manifest may not name an entry point that only works where it was built, so
  * the published one is this bundle and `dist/index.js` stays what it is: the

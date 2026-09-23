@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { git } from "@perbo/workspace";
 import { z } from "zod";
 import { BUNDLE_DIRNAME, BUNDLE_FILENAME } from "./bundle.js";
 import type { LoadedFixture } from "./corpus.js";
@@ -171,22 +172,27 @@ export function repeatStructure(runs: readonly RunRecord[]): CorpusRunManifest["
     }));
 }
 
+/**
+ * What the tree this run was made from was, as far as git will say.
+ *
+ * Through `@perbo/workspace`'s repository module, so it runs in the runner's
+ * environment and under a bound: a manifest is written before the first paid
+ * call, and a credential prompt here would hold the whole corpus run open on a
+ * terminal nobody is watching. A directory git will not answer about is
+ * recorded as unknown rather than guessed at — both fields or neither, because
+ * "clean" about a commit nobody could name says nothing.
+ */
 const gitSnapshot = (cwd: string): { commit: string | null; trackedDirty: boolean | null } => {
+  const unknown = { commit: null, trackedDirty: null };
   try {
-    const commit = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd,
-      encoding: "utf8",
-    }).trim();
-    const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
-      cwd,
-      encoding: "utf8",
-    });
+    const commit = git.headSync(cwd);
+    if (commit === null) return unknown;
     return {
       commit: /^[0-9a-f]{40}$/.test(commit) ? commit : null,
-      trackedDirty: status.trim().length > 0,
+      trackedDirty: git.hasTrackedChangesSync(cwd),
     };
   } catch {
-    return { commit: null, trackedDirty: null };
+    return unknown;
   }
 };
 

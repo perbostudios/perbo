@@ -1,5 +1,11 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { scratchDirectories } from "@perbo/test-support";
+import { createGit, type GitProcess, type RunResult } from "@perbo/workspace";
 import { describe, expect, it } from "vitest";
-import { clonePathFor } from "../src/prepare.js";
+import type { LoadedFixture } from "../src/corpus.js";
+import { clonePathFor, prepareFixture } from "../src/prepare.js";
+import { sample } from "./sample-fixtures.js";
 
 describe("clonePathFor", () => {
   const cache = "/cache";
@@ -26,5 +32,100 @@ describe("clonePathFor", () => {
     ]) {
       expect(clonePathFor(cache, hostile).startsWith("/cache/clones/")).toBe(true);
     }
+  });
+});
+
+/**
+ * A scripted git, so the calls `prepareFixture` makes can be answered without
+ * cloning half a gigabyte over the network.
+ *
+ * Only what git *says* is scripted. What git means by it is the module's, and
+ * `prepareFixture`'s own reading of an answer — the head it compares, the diff
+ * it writes, the answer it refuses — is what these exercise.
+ */
+function scripted(answer: (argv: readonly string[]) => Partial<RunResult>): GitProcess {
+  const reply = (argv: readonly string[]): RunResult => ({
+    argv: [...argv],
+    code: 0,
+    signal: null,
+    stdout: "",
+    stderr: "",
+    duration_ms: 0,
+    timed_out: false,
+    truncated: false,
+    ...answer(argv),
+  });
+  return {
+    run: (argv) => Promise.resolve(reply(argv)),
+    runSync: (argv) => reply(argv),
+  };
+}
+
+const DIFF = ["diff --git a/x b/x", "--- a/x", "+++ b/x", "@@ -1 +1 @@", "-a", "+b", ""].join("\n");
+
+const scratchDirectory = scratchDirectories("perbo-prepare-");
+
+describe("prepareFixture", () => {
+  const scratch = scratchDirectory();
+
+  const pinnedFixture = (): LoadedFixture => {
+    const found = sample.find((entry) => entry.fixture.pinned_repository !== null);
+    expect(found, "the sample carries a pinned fixture").toBeDefined();
+    return found!;
+  };
+
+  const cacheRoot = (name: string): string => join(scratch, name);
+
+  it("writes the diff between the pinned commits, and counts what it changed", async () => {
+    const prepared = await prepareFixture({
+      fixture: pinnedFixture(),
+      cacheRoot: cacheRoot("whole"),
+      git: createGit({
+        process: scripted((argv) =>
+          argv.includes("--no-color")
+            ? { stdout: DIFF }
+            : argv.includes("--name-only")
+              ? { stdout: "x\ny\n" }
+              : {},
+        ),
+      }),
+    });
+    expect(readFileSync(prepared.diff_path, "utf8")).toBe(DIFF);
+    expect(prepared.files_changed).toBe(2);
+  });
+
+  it("refuses a diff too large to hold, rather than pinning the part that fits", async () => {
+    // A cut diff is still a valid-looking diff. Writing one to `change.diff`
+    // would pin a fixture whose change is not the change, and the reviewer
+    // would be scored on it without anything ever saying so.
+    await expect(
+      prepareFixture({
+        fixture: pinnedFixture(),
+        cacheRoot: cacheRoot("cut"),
+        git: createGit({
+          process: scripted((argv) =>
+            argv.includes("--no-color") ? { stdout: DIFF, truncated: true } : {},
+          ),
+        }),
+      }),
+    ).rejects.toThrow(/diff between the pinned commits is larger than \d+ bytes and only part of it arrived/);
+  });
+
+  it("refuses a cut list of changed files too, because the count is read", async () => {
+    await expect(
+      prepareFixture({
+        fixture: pinnedFixture(),
+        cacheRoot: cacheRoot("cut-names"),
+        git: createGit({
+          process: scripted((argv) =>
+            argv.includes("--name-only")
+              ? { stdout: "x\n", truncated: true }
+              : argv.includes("--no-color")
+                ? { stdout: DIFF }
+                : {},
+          ),
+        }),
+      }),
+    ).rejects.toThrow(/list of files changed between the pinned commits is larger than/);
   });
 });

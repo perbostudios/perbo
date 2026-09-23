@@ -1,5 +1,10 @@
-import type { ModelRequest, ModelTurn, ReviewModel } from "../src/provider.js";
-import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL } from "../src/verdict.js";
+import {
+  READ_FILE_TOOL,
+  SUBMIT_REVIEW_TOOL,
+  type Model,
+  type ModelRequest,
+  type ModelTurn,
+} from "@perbo/model";
 
 /**
  * A scripted model. The reviewer's behaviour under a given verdict has to be
@@ -9,7 +14,7 @@ import { READ_FILE_TOOL, SUBMIT_REVIEW_TOOL } from "../src/verdict.js";
 export function scriptedModel(
   script: Array<{ tool: string; input: unknown }[]>,
   usagePerTurn = { input_tokens: 1000, output_tokens: 200 },
-): ReviewModel & { requests: ModelRequest[] } {
+): Model & { requests: ModelRequest[] } {
   const requests: ModelRequest[] = [];
   let turn = 0;
   return {

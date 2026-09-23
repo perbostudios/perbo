@@ -1,4 +1,4 @@
-import { cx } from "@perbo/ui";
+import { cx } from "../ui/index.js";
 import { specBlocks, type SpecItem, type SpecRun } from "./spec-format.js";
 
 /**

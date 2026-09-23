@@ -25,24 +25,35 @@ const fixture = (overrides: Record<string, unknown>): Fixture =>
     ...overrides,
   });
 
-const finding = (overrides: Partial<Finding>): Finding => ({
-  key: "a".repeat(64),
-  rule_id: "criterion.not_met",
-  source: "semantic",
-  criterion_id: "ac_2",
-  severity: "blocker",
-  blocking: true,
-  blocking_reason: "contract",
-  confidence: 0.9,
-  file: "packages/a/src/a.ts",
-  line: 1,
-  symbol: null,
-  statement: "x",
-  status: "open",
-  outcome: "unknown",
-  waiver: null,
-  ...overrides,
-});
+const finding = (overrides: Partial<Finding>): Finding => {
+  const blocking = overrides.blocking ?? true;
+  return {
+    key: "a".repeat(64),
+    rule_id: "criterion.not_met",
+    source: "semantic",
+    criterion_id: "ac_2",
+    severity: "blocker",
+    blocking,
+    blocking_reason: "contract",
+    // The routing a blocking matrix produces for this shape, derived the way
+    // the contract schema derives it from `blocking`. A test that wants another
+    // outcome passes `routing` itself.
+    routing: blocking ? "blocks" : "advisory",
+    row: null,
+    closure: null,
+    direction: null,
+    caused_by_change: null,
+    confidence: 0.9,
+    file: "packages/a/src/a.ts",
+    line: 1,
+    symbol: null,
+    statement: "x",
+    status: "open",
+    outcome: "unknown",
+    waiver: null,
+    ...overrides,
+  };
+};
 
 const artifact = (overrides: Partial<ReviewArtifact>): ReviewArtifact =>
   ({
@@ -152,6 +163,23 @@ describe("blocking-mode detection", () => {
       );
       expect(score.surfaced, routing).toBe(false);
     }
+  });
+
+  it("scores an artifact written before the routing was recorded (D-051)", () => {
+    // `score.ts` derives a missing routing from `blocking` so a stored round-one
+    // artifact stays scoreable, and the corpus is read back across runs. The
+    // cast builds that artifact deliberately: a finding with no `routing` key at
+    // all, which the current `Finding` type cannot express.
+    const withoutRouting = Object.fromEntries(
+      Object.entries(finding({})).filter(([field]) => field !== "routing"),
+    ) as unknown as Finding;
+    const score = scoreRun(
+      fixture({}),
+      artifact({ decision: "changes_requested", findings: [withoutRouting] }),
+      2,
+    );
+    expect(score.detected).toBe(true);
+    expect(score.surfaced).toBe(true);
   });
 
   it("surfaced agrees with detected wherever detected holds", () => {
@@ -285,7 +313,16 @@ describe("coverage-mode detection", () => {
     status: "met" | "not_met" = "met",
   ) =>
     artifact({
-      coverage: [{ criterion_id: "ac_2", status, verification_strength, evidence: null, note: null }],
+      coverage: [
+        {
+          criterion_id: "ac_2",
+          status,
+          verification_strength,
+          evidence: null,
+          note: null,
+          authored_in_response_to: null,
+        },
+      ],
     });
 
   it("counts a weak grading even when nothing blocked", () => {

@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { cx } from "@perbo/ui";
-import { InkIcon } from "../InkIcon.js";
+import { InkIcon, cx } from "../ui/index.js";
 import { panesFor } from "../planning/panes.js";
 import type { Snapshot } from "../../shared/protocol.js";
 import { useCreate } from "./create.js";
 import { useShortcut } from "./shortcuts.js";
 import { RAIL_WIDTH, setRailSize, useRailSize } from "./rail-size.js";
-import type { Route } from "./App.js";
+import type { Route } from "./route.js";
 
 export const SETTINGS_PAGES = [
   "general",

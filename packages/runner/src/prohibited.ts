@@ -8,42 +8,18 @@ import {
 } from "@perbo/contracts";
 import {
   UNKNOWN_CWD,
-  WRITERS,
-  allowedPathsSentence,
   inspectWritePath,
-  prohibitedPathsSentence,
   readCommandLine,
   resolveScope,
   splitCommandSegments,
-  withoutHeredocBodies,
   type CommandSegment,
   type Cwd,
   type ResolvedScope,
   type WorktreeScope,
   type WriteCause,
   type WriteFinding,
-  type WriteRule,
-  type WriterSpec,
-} from "./shell.js";
+} from "./shell/index.js";
 import { describePushDestination, readPush, resolvePushDestination } from "./push-remote.js";
-
-export {
-  UNKNOWN_CWD,
-  WRITERS,
-  allowedPathsSentence,
-  inspectWritePath,
-  prohibitedPathsSentence,
-  resolveScope,
-};
-export type {
-  CommandSegment,
-  ResolvedScope,
-  WorktreeScope,
-  WriteCause,
-  WriteFinding,
-  WriteRule,
-  WriterSpec,
-};
 
 /**
  * The refusal a write finding carries, as a prohibited action. A finding about
@@ -323,24 +299,6 @@ function somethingBeforeThePush(earlier: readonly string[]): string | null {
     }
   }
   return null;
-}
-
-/**
- * The bodies of the here-documents `command` opens whose delimiter is not
- * quoted — the ones a shell expands `$(…)`, `` `…` `` and `$name` inside, so
- * what a command runs is not only what its line spells. Read by the runner's
- * own `withoutHeredocBodies`, which takes every `<<` on a line in order — two
- * on one line (`cat <<A <<B`) each take their body in turn — so a caller that
- * must judge what those bodies run reads them the way the shell feeds them,
- * not just the first. A quoted delimiter (`<<'E'`) makes its body literal and
- * is left out. Exposed for the interview's read-only guard, which holds a
- * here-document body to the read-only shapes the same as any other command
- * (SCP-355).
- */
-export function expandableHeredocBodies(command: string): string[] {
-  return withoutHeredocBodies(command)
-    .bodies.filter((heredoc) => !heredoc.quoted)
-    .map((heredoc) => heredoc.body);
 }
 
 export function inspectCommandWithCwd(

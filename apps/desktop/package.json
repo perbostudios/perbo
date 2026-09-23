@@ -11,16 +11,15 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/dev.mjs",
-    "preview": "vite --host 127.0.0.1 --port 51859 --strictPort",
+    "preview": "vite --host 127.0.0.1 --port 51859 --strictPort --open /preview.html",
     "start": "electron .",
     "package": "electron-builder --dir",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint src test"
+    "lint": "eslint src"
   },
   "dependencies": {
     "@perbo/planning": "workspace:*",
-    "@perbo/ui": "workspace:*",
     "@fontsource/caveat": "5.2.8",
     "@fontsource/instrument-sans": "5.3.0",
     "@fontsource/jetbrains-mono": "5.2.8",
@@ -32,6 +31,7 @@
   "devDependencies": {
     "@perbo/cli": "workspace:*",
     "@perbo/contracts": "workspace:*",
+    "@perbo/test-support": "workspace:*",
     "@perbo/tsconfig": "workspace:*",
     "@testing-library/react": "16.3.3",
     "@types/node": "catalog:",

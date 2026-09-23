@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { cx } from "@perbo/ui";
+import { cx } from "../ui/index.js";
 import {
   DEFAULT_ASKED_HEIGHT,
   MIN_ASKED_HEIGHT,

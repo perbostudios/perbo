@@ -1,8 +1,8 @@
 /**
  * The two lanes a desktop command runs in (D-101).
  *
- * The host, the browser preview host and the renderer all read these lists, so
- * there is one answer to what may run beside what.
+ * The host, the sample host and the renderer all read these lists, so there is
+ * one answer to what may run beside what.
  */
 
 /**

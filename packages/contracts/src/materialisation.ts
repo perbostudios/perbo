@@ -13,8 +13,6 @@ import { RepositoryIdSchema } from "./ids.js";
  * rather than a heuristic it guesses.
  */
 
-export * from "./materialisation-entry.js";
-
 export const PACKAGE_MANAGERS = ["pnpm", "npm", "yarn", "bun", "uv", "none"] as const;
 export const PackageManagerSchema = z.enum(PACKAGE_MANAGERS);
 export type PackageManager = (typeof PACKAGE_MANAGERS)[number];

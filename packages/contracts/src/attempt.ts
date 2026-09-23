@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { ExecutorSkillReceiptSchema } from "./executor-skills.js";
 import { SealedCommitSchema } from "./changeset.js";
+import { CostBasisSchema } from "./cost.js";
 import {
   AttemptIdSchema,
   ChangeSetIdSchema,
@@ -11,7 +12,6 @@ import {
   TicketIdSchema,
 } from "./ids.js";
 import { PlanLevelSchema } from "./plan.js";
-import { ReviewCostBasisSchema } from "./review.js";
 import { BundleIdSchema } from "./runbundle.js";
 import {
   AutonomyClassSchema,
@@ -239,12 +239,6 @@ export const EgressRecordSchema = z.strictObject({
 });
 export type EgressRecord = z.infer<typeof EgressRecordSchema>;
 
-export const AttemptCostBasisSchema = z.union([
-  ReviewCostBasisSchema,
-  z.literal("not_incurred"),
-]);
-export type AttemptCostBasis = z.infer<typeof AttemptCostBasisSchema>;
-
 /**
  * Final transport accounting is authoritative for every token field. Without
  * it, the fields are sums of the latest provisional usage for each distinct
@@ -270,7 +264,7 @@ export const AttemptUsageSchema = z.strictObject({
   output_tokens: z.number().int().min(0),
   cost_micros: z.number().int().min(0),
   /** Historical Claude attempt records were transport-reported. */
-  cost_basis: AttemptCostBasisSchema.default("transport_reported"),
+  cost_basis: CostBasisSchema.default("transport_reported"),
   /**
    * The attempt was stopped before its transport wrote a final accounting
    * line, so token figures are the assistant-request sums read by the stop and

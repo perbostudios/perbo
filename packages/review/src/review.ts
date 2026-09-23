@@ -38,19 +38,17 @@ import { PROMPT_VERSION, buildContext, renderReadFileResult, systemPrompt } from
 import { DEFAULT_REPO_LIMITS, RepoReader, type RepoLimits } from "./repo.js";
 import {
   ProviderError,
-  ZERO_USAGE,
-  addUsage,
-  resolveModelCost,
-  type ModelUsage,
-  type ReviewModel,
-} from "./provider.js";
+  READ_FILE_TOOL,
+  SUBMIT_REVIEW_TOOL,
+  openSession,
+  type Model,
+  type ToolResult,
+} from "@perbo/model";
 import { NO_MEASUREMENTS, type RuleAuthority, type SuppressionLookup } from "./suppression.js";
 import { assessLegibility, illegibleReadFindings } from "./legibility.js";
 import { assessScope } from "./scope.js";
 import {
   MalformedVerdictError,
-  READ_FILE_TOOL,
-  SUBMIT_REVIEW_TOOL,
   UnknownCriterionError,
   verdictSchemas,
   type ClosureAuthority,
@@ -78,7 +76,7 @@ export interface ReviewInput {
   changeset?: ChangeSet | undefined;
   checks: CheckResult[];
   repoDir: string;
-  model: ReviewModel;
+  model: Model;
   head_commit?: string | undefined;
   /**
    * Whether the base the change was cut from passed the workspace's verify
@@ -480,15 +478,9 @@ export async function runReview(input: ReviewInput): Promise<ReviewOutcome> {
     checks.map((check) => check.check_id),
   );
 
-  const messages: Array<{ role: "user" | "assistant"; content: unknown }> = [
-    { role: "user", content: context.render() },
-  ];
+  const session = openSession(input.model, system, context.render());
   const turns: Array<{ tool: string; input: unknown }> = [];
 
-  let usage: ModelUsage = ZERO_USAGE;
-  let modelTurns = 0;
-  let reportedCostTurns = 0;
-  let reportedCostMicros = 0;
   let verdict: ModelVerdict | null = null;
   let error: ReviewError | null = null;
   /**
@@ -511,14 +503,7 @@ export async function runReview(input: ReviewInput): Promise<ReviewOutcome> {
 
   try {
     for (let turn = 0; turn < maxTurns && verdict === null && !changeset.truncated; turn += 1) {
-      const forceSubmit = turn === maxTurns - 1;
-      const result = await input.model.turn({ system, messages, forceSubmit });
-      modelTurns += 1;
-      usage = addUsage(usage, result.usage);
-      if (result.reported_cost_micros !== undefined) {
-        reportedCostTurns += 1;
-        reportedCostMicros += result.reported_cost_micros;
-      }
+      const result = await session.next(turn === maxTurns - 1);
 
       const submit = result.toolCalls.find((call) => call.name === SUBMIT_REVIEW_TOOL);
       if (submit) {
@@ -542,23 +527,9 @@ export async function runReview(input: ReviewInput): Promise<ReviewOutcome> {
         // The correction is asked for on this conversation, as a tool result on
         // the submission that was rejected — the shape every other turn uses,
         // and the one a resumed session carries.
-        messages.push({
-          role: "assistant",
-          content: [
-            { type: "tool_use", id: submit.id, name: submit.name, input: submit.input },
-          ],
-        });
-        messages.push({
-          role: "user",
-          content: [
-            {
-              type: "tool_result",
-              tool_use_id: submit.id,
-              content: correctionTurn(accepted.reason),
-              is_error: true,
-            },
-          ],
-        });
+        session.answer([
+          { call: submit, content: correctionTurn(accepted.reason), isError: true },
+        ]);
         continue;
       }
 
@@ -566,24 +537,14 @@ export async function runReview(input: ReviewInput): Promise<ReviewOutcome> {
       if (reads.length === 0) {
         // The model stopped without asking for anything and without submitting.
         // One more turn, with the submit tool forced.
-        messages.push({ role: "assistant", content: [{ type: "text", text: "(no tool call)" }] });
-        messages.push({
-          role: "user",
-          content: "Call submit_review now with one coverage entry per criterion.",
-        });
+        session.nudge(
+          "(no tool call)",
+          "Call submit_review now with one coverage entry per criterion.",
+        );
         continue;
       }
 
-      messages.push({
-        role: "assistant",
-        content: reads.map((call) => ({
-          type: "tool_use",
-          id: call.id,
-          name: call.name,
-          input: call.input,
-        })),
-      });
-      const results = reads.map((call) => {
+      const results: ToolResult[] = reads.map((call) => {
         const path = String((call.input as { path?: unknown })?.path ?? "");
         const outcome = reader.read(path);
         turns.push({ tool: READ_FILE_TOOL, input: { path } });
@@ -603,16 +564,15 @@ export async function runReview(input: ReviewInput): Promise<ReviewOutcome> {
           });
         }
         return {
-          type: "tool_result" as const,
-          tool_use_id: call.id,
+          call,
           content: renderReadFileResult(outcome),
           // A refused read is a failed tool call as far as the model is
           // concerned; the refusal text says why, and the flag says not to
           // treat it as the file's contents.
-          ...(outcome.ok ? {} : { is_error: true }),
+          isError: !outcome.ok,
         };
       });
-      messages.push({ role: "user", content: results });
+      session.answer(results);
       reading = reads.map((call) => String((call.input as { path?: unknown })?.path ?? ""));
     }
 
@@ -651,7 +611,7 @@ export async function runReview(input: ReviewInput): Promise<ReviewOutcome> {
     // The review is over for the transport whatever happens next: no further
     // turn is taken, and what it holds for this review goes now rather than at
     // the caller's convenience.
-    await input.model.dispose?.();
+    await session.close();
   }
 
   const { overrides, discreditedChecks } =
@@ -890,13 +850,7 @@ export async function runReview(input: ReviewInput): Promise<ReviewOutcome> {
 
   const decision = deriveDecision({ error, coverage, findings, escalations: escalationCount(findings) });
 
-  const resolvedCost = resolveModelCost({
-    usage,
-    turns: modelTurns,
-    reportedTurns: reportedCostTurns,
-    reportedCostMicros,
-    unreportedCostBasis: input.model.unreported_cost_basis,
-  });
+  const { usage, ...resolvedCost } = session.accounting();
   const artifact = ReviewArtifactSchema.parse({
     schema_version: REVIEW_ARTIFACT_SCHEMA_VERSION,
     review_id: reviewId(changeset, now),

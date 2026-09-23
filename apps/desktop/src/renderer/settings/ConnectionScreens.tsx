@@ -1,13 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { exclusiveJob } from "../../shared/jobs.js";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Field, Notice, cx } from "@perbo/ui";
-import { bridge, errorMessage, useAction } from "../data.js";
-import { Dropdown, FactList, ProgressDots, SectionLabel, useElapsed } from "../Screen.js";
-import { InkIcon } from "../InkIcon.js";
+import {
+  Button,
+  Dropdown,
+  FactList,
+  Field,
+  InkIcon,
+  Notice,
+  ProgressDots,
+  SectionLabel,
+  cx,
+  useElapsed,
+} from "../ui/index.js";
+import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { ManifestDialog } from "./ManifestDialog.js";
 import { SkillPicker } from "./SkillPicker.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 import { ModelCatalogSchema } from "../../shared/protocol.js";
 import type {
   ModelProvider,
@@ -204,7 +213,7 @@ export function ModelPicker({
                     ? "Your saved model is no longer listed. Choose a model to replace it."
                     : selectedChoice.description}
             {catalog.data?.source === "sample" && (
-              <div>Sample catalog · browser preview</div>
+              <div>Sample catalog</div>
             )}
             {catalog.isError && choices.length > 0 && (
               <div>

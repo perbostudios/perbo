@@ -1,12 +1,12 @@
 import { useEffect } from "react";
-import { Button, Notice } from "@perbo/ui";
-import { errorMessage, useDetail } from "../data.js";
-import type { PageProps, TaskView } from "../shell/App.js";
+import { Button, Notice } from "../ui/index.js";
+import { errorMessage, useDetail } from "../workspace/index.js";
+import type { PageProps, TaskView } from "../shell/route.js";
 import { Composer } from "./Composer.js";
 import { ExplorerScreen } from "./ExplorerScreen.js";
 import { ContractScreen } from "./ContractScreen.js";
 import { LoopScreen } from "./LoopScreen.js";
-import { planNodes } from "@perbo/contracts/plan";
+import { planNodes } from "@perbo/contracts/browser";
 import { projectTicket } from "./ticket-workspace.js";
 import {
   CompletionScreen,

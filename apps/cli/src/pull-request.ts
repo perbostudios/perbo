@@ -1,7 +1,5 @@
-import { execFile, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { z } from "zod";
 import { parsePullRequestReference, type GithubCredential } from "@perbo/contracts";
 import {
@@ -9,8 +7,8 @@ import {
   requireGithubCredential,
   type GithubCredentialReading,
 } from "@perbo/runner";
-import { gitEnv, run as captureRun, type RunResult } from "@perbo/workspace";
-import { UsageError } from "./args.js";
+import { CommandFailedError, createGh, gh, git, type RunResult } from "@perbo/workspace";
+import { UsageError } from "./usage-error.js";
 
 /**
  * Where a ticketless review gets its change from (SCP-179).
@@ -25,7 +23,17 @@ import { UsageError } from "./args.js";
  * pull request at all.
  */
 
-const run = promisify(execFile);
+/**
+ * What one of these reads may say.
+ *
+ * A pull request's diff is the large one. Past this a read holds the tail of
+ * the answer and nothing else, which is shaped exactly like the whole of one —
+ * so every read below asks whether it was cut before it reads a word of it.
+ */
+const MAX_ANSWER_BYTES = 64 * 1024 * 1024;
+
+/** How long one read of a pull request may take. */
+const READ_TIMEOUT_MS = 120_000;
 
 /** A pull request as a review needs it: the contract's source, and the change. */
 export interface PullRequestRead {
@@ -96,6 +104,20 @@ const GhPullRequestSchema = z.object({
   headRepositoryOwner: z.object({ login: z.string().min(1) }).nullable().optional(),
 });
 
+/** What `gh pr view --json` is asked for, which is what the schema above reads. */
+const PULL_REQUEST_FIELDS = [
+  "number",
+  "title",
+  "body",
+  "url",
+  "headRefName",
+  "baseRefName",
+  "headRefOid",
+  "baseRefOid",
+  "headRepository",
+  "headRepositoryOwner",
+] as const;
+
 /**
  * `owner/name` of the head repository, and whether `gh` reported one at all.
  *
@@ -161,25 +183,45 @@ function isMissingBinary(error: unknown): boolean {
   return failure.code === "ENOENT" && typeof failure.syscall === "string";
 }
 
-/** The one line of a `gh` failure worth putting in front of a person. */
+/** The one line of a `gh` that never started worth putting in front of a person. */
 function ghReason(error: unknown): string {
-  const failure = error as { stderr?: string; message?: string };
+  const failure = error as { message?: string };
+  return (failure.message ?? String(error)).split("\n")[0] || "unknown failure";
+}
+
+/** The same for a `gh` that ran and refused, which says why on its own stderr. */
+function ghSaid(result: RunResult): string {
   return (
-    (failure.stderr ?? "").trim().split("\n")[0] ||
-    (failure.message ?? String(error)).split("\n")[0] ||
+    result.stderr.trim().split("\n")[0] ||
+    new CommandFailedError(result).message.split("\n")[0] ||
     "unknown failure"
   );
 }
 
-function ghFailure(reference: string, what: string, error: unknown): Error {
-  // A missing binary is described by `describeFailure` with its install line;
-  // it must arrive there as itself rather than wrapped in a message.
-  if (isMissingBinary(error)) return error as Error;
-  const reason = ghReason(error);
+function ghFailure(reference: string, what: string, reason: string): Error {
   return new UsageError(
     `gh could not read ${what} of ${reference}: ${reason}. ` +
       "Run `gh auth login` if it is a credential, or check the reference.",
   );
+}
+
+/**
+ * What `gh` said, where it said all of it.
+ *
+ * An answer past the ceiling arrives as its own tail: the pull request's JSON
+ * would fail to parse for a reason that is not the one, and a diff would be
+ * reviewed as though the hunks cut out of it were never in the change. Neither
+ * is a reading anything may act on, so both are refused here rather than read.
+ */
+function whole(result: RunResult, reference: string, what: string): string {
+  if (result.truncated) {
+    throw new UsageError(
+      `gh said more about ${what} of ${reference} than this read holds ` +
+        `(${MAX_ANSWER_BYTES} bytes), and only the tail of it arrived. Nothing was reviewed.`,
+    );
+  }
+  if (result.code !== 0) throw ghFailure(reference, what, ghSaid(result));
+  return result.stdout;
 }
 
 export interface GhOptions {
@@ -216,34 +258,26 @@ export async function readPullRequest(
     if (!(error instanceof GithubCredentialError)) throw error;
     throw new UsageError(error.message, { cause: error });
   }
-  const common = {
-    encoding: "utf8" as const,
-    timeout: options.timeoutMs ?? 120_000,
-    maxBuffer: 64 * 1024 * 1024,
-    ...(options.cwd ? { cwd: options.cwd } : {}),
+  const reader = createGh({ binary });
+  const cwd = options.cwd ?? process.cwd();
+  const call = {
+    timeoutMs: options.timeoutMs ?? READ_TIMEOUT_MS,
+    maxOutputBytes: MAX_ANSWER_BYTES,
   };
 
-  let viewed: string;
+  let view: RunResult;
   try {
-    viewed = (
-      await run(
-        binary,
-        [
-          "pr",
-          "view",
-          String(target.number),
-          "--repo",
-          repo,
-          "--json",
-          "number,title,body,url,headRefName,baseRefName,headRefOid,baseRefOid," +
-            "headRepository,headRepositoryOwner",
-        ],
-        common,
-      )
-    ).stdout;
+    view = await reader.viewPullRequest(cwd, String(target.number), PULL_REQUEST_FIELDS, {
+      repo,
+      ...call,
+    });
   } catch (error) {
-    throw ghFailure(target.reference, "the pull request", error);
+    // A missing binary is described by `describeFailure` with its install
+    // line; it reaches there as itself rather than wrapped in a message.
+    if (isMissingBinary(error)) throw error as Error;
+    throw ghFailure(target.reference, "the pull request", ghReason(error));
   }
+  const viewed = whole(view, target.reference, "the pull request");
 
   let raw: unknown;
   try {
@@ -277,34 +311,36 @@ export async function readPullRequest(
     ? "same_repository"
     : "fork";
   if (head_lookup === "fork") {
-    try {
-      // A GET, like the two reads around it: the exit status is the answer, so
-      // the commit's own JSON — which carries every file it touched — is never
-      // read into this process.
-      await run(
-        binary,
-        ["api", `repos/${head_repository}/commits/${parsed.data.headRefOid}`, "--silent"],
-        common,
-      );
-    } catch (error) {
-      if (isMissingBinary(error)) throw error as Error;
-      throw new UsageError(
+    const unreachable = (said: string): UsageError =>
+      new UsageError(
         `${target.reference} is opened from the fork ${head_repository}, and gh could not fetch ` +
-          `its head commit ${parsed.data.headRefOid} from ${head_repository}: ${ghReason(error)}. ` +
+          `its head commit ${parsed.data.headRefOid} from ${head_repository}: ${said}. ` +
           "The fork may be private or deleted, or its branch force-pushed past this commit. " +
           "Nothing was reviewed.",
       );
+    // A GET: the exit status is the answer, so the commit's own JSON — which
+    // carries every file it touched — is never read into this process.
+    let fetched: RunResult;
+    try {
+      fetched = await reader.api(cwd, `repos/${head_repository}/commits/${parsed.data.headRefOid}`, {
+        silent: true,
+        ...call,
+      });
+    } catch (error) {
+      if (isMissingBinary(error)) throw error as Error;
+      throw unreachable(ghReason(error));
     }
+    if (fetched.code !== 0) throw unreachable(ghSaid(fetched));
   }
 
-  let diff: string;
+  let read: RunResult;
   try {
-    diff = (
-      await run(binary, ["pr", "diff", String(target.number), "--repo", repo], common)
-    ).stdout;
+    read = await reader.run(cwd, ["pr", "diff", String(target.number), "--repo", repo], call);
   } catch (error) {
-    throw ghFailure(target.reference, "the diff", error);
+    if (isMissingBinary(error)) throw error as Error;
+    throw ghFailure(target.reference, "the diff", ghReason(error));
   }
+  const diff = whole(read, target.reference, "the diff");
 
   return {
     reference: target.reference,
@@ -333,38 +369,19 @@ export interface RefRangeRead {
   diff: string;
 }
 
-export type GitRunner = (args: string[], cwd: string) => string;
-
-const gitSync: GitRunner = (args, cwd) =>
-  execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
-
-/**
- * The same, for a read whose failure is an answer rather than a fault: a ref
- * that is not there, or a directory that is not a repository. `git` writes both
- * to its stderr, and `execFileSync` hands the parent's stderr to the child
- * unless it is told otherwise — so a question this asks and shrugs off would
- * otherwise print a `fatal:` a person has no reason to read.
- */
-const gitQuiet: GitRunner = (args, cwd) =>
-  execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-
-function resolveCommit(ref: string, repo: string, git: GitRunner): string {
+function resolveCommit(ref: string, repo: string): string {
+  let found: string | null = null;
   try {
-    return git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], repo).trim();
+    found = git.resolveCommitSync(repo, ref);
   } catch {
-    throw new UsageError(
-      `'${ref}' does not name a commit in ${repo}. Fetch it first, or name a ref that is there.`,
-    );
+    // A ref git would read as an option, a read that did not finish, or no
+    // git here at all. None of those is this ref resolving, and the line below
+    // is the one a person can act on.
   }
+  if (found !== null) return found;
+  throw new UsageError(
+    `'${ref}' does not name a commit in ${repo}. Fetch it first, or name a ref that is there.`,
+  );
 }
 
 /**
@@ -374,27 +391,37 @@ function resolveCommit(ref: string, repo: string, git: GitRunner): string {
  * only defined answer — the read says which one it took rather than quietly
  * comparing something else.
  */
-export function readRefRange(input: {
-  repo: string;
-  head: string;
-  base: string;
-  git?: GitRunner;
-}): RefRangeRead {
-  const git = input.git ?? gitSync;
-  const head_commit = resolveCommit(input.head, input.repo, git);
-  const baseRefCommit = resolveCommit(input.base, input.repo, git);
+export function readRefRange(input: { repo: string; head: string; base: string }): RefRangeRead {
+  const head_commit = resolveCommit(input.head, input.repo);
+  const baseRefCommit = resolveCommit(input.base, input.repo);
 
   let base_commit = baseRefCommit;
   let merge_base = false;
   try {
-    const found = git(["merge-base", baseRefCommit, head_commit], input.repo).trim();
-    if (found) {
+    const found = git.mergeBaseSync(input.repo, baseRefCommit, head_commit);
+    if (found !== null) {
       base_commit = found;
       merge_base = true;
     }
   } catch {
-    // No common ancestor. `base_commit` stays the base ref's own commit.
+    // No common ancestor, or a read that did not finish. `base_commit` stays
+    // the base ref's own commit and the range below is the two-dot one.
   }
+
+  const change = git.runSync(input.repo, ["diff", "--no-color", base_commit, head_commit], {
+    maxOutputBytes: MAX_ANSWER_BYTES,
+  });
+  // A diff past the ceiling arrives as its own tail, which is a change set
+  // missing whatever came before the cut — and a review of it would judge a
+  // contract against hunks nobody chose.
+  if (change.truncated) {
+    throw new UsageError(
+      `the change between ${input.base} and ${input.head} in ${input.repo} is larger than this ` +
+        `read holds (${MAX_ANSWER_BYTES} bytes), and only the tail of it arrived. Nothing was ` +
+        "reviewed.",
+    );
+  }
+  if (change.code !== 0) throw new CommandFailedError(change);
 
   return {
     head_ref: input.head,
@@ -402,7 +429,7 @@ export function readRefRange(input: {
     head_commit,
     base_commit,
     merge_base,
-    diff: git(["diff", "--no-color", `${base_commit}`, `${head_commit}`], input.repo),
+    diff: change.stdout,
   };
 }
 
@@ -564,6 +591,15 @@ export function triggersOnPullRequest(source: string): boolean | null {
 /** The default ceiling on one `gh` call here. */
 const CHECKS_TIMEOUT_MS = 30_000;
 
+/**
+ * What one read of what a repository runs may say.
+ *
+ * Every one of them is a list or a JSON body that is parsed, so an answer past
+ * this is refused rather than read: a reading is only allowed to say "nothing
+ * runs on a pull request here" when `gh` answered both of its questions whole.
+ */
+const MAX_CHECKS_BYTES = 512 * 1024;
+
 /** One workflow this repository would run on a pull request. */
 export interface PullRequestWorkflow {
   /** The workflow's name, as `gh` lists it. */
@@ -620,10 +656,6 @@ export interface PullRequestChecksRequest {
    */
   ref?: string | null;
   timeoutMs?: number;
-  /** The environment `gh` runs under. The caller's own by default. */
-  env?: NodeJS.ProcessEnv;
-  /** How `git` is run. The real one everywhere but a test of this reader. */
-  git?: GitRunner;
 }
 
 /**
@@ -648,27 +680,10 @@ export function unaskedPullRequestChecks(
   };
 }
 
-/** The environment a read-only `gh` runs under: it finds its own credential. */
-function ghEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return {
-    ...gitEnv(base),
-    GH_PROMPT_DISABLED: "1",
-    ...(base.GH_TOKEN ? { GH_TOKEN: base.GH_TOKEN } : {}),
-    ...(base.GITHUB_TOKEN ? { GITHUB_TOKEN: base.GITHUB_TOKEN } : {}),
-  };
-}
-
-/** One `gh` call. Null where it could not be started at all. */
-async function gh(
-  argv: string[],
-  request: { worktree: string; timeoutMs: number; env: NodeJS.ProcessEnv },
-): Promise<RunResult | null> {
+/** One `gh` read. Null where it could not be started at all. */
+async function ask(call: () => Promise<RunResult>): Promise<RunResult | null> {
   try {
-    return await captureRun(argv, {
-      cwd: request.worktree,
-      env: request.env,
-      timeoutMs: request.timeoutMs,
-    });
+    return await call();
   } catch {
     return null;
   }
@@ -707,34 +722,47 @@ const WORKFLOW_FILE = /^\.github\/workflows\/[^/]+\.ya?ml$/i;
  * back to the working tree. An empty map is an answer: that ref carries no
  * workflow.
  */
-function workflowsAtRef(
-  ref: string,
-  request: { worktree: string; git: GitRunner },
-): Map<string, string> | null {
-  let listed: string;
-  try {
-    // `:(top)` resolves the pathspec against the repository root rather than
-    // against the directory `git` was run in — a checkout that is one package
-    // of a monorepo would otherwise be asked about its own `.github`, which is
-    // not where GitHub looks for a workflow.
-    listed = request.git(
-      ["ls-tree", "-r", "-z", "--name-only", `${ref}^{tree}`, "--", ":(top).github/workflows/"],
-      request.worktree,
-    );
-  } catch {
-    return null;
-  }
+function workflowsAtRef(ref: string, worktree: string): Map<string, string> | null {
+  /**
+   * One read of this checkout's objects, or null where it did not answer.
+   *
+   * A listing or a file cut at the ceiling is null too: the reading would
+   * otherwise miss a workflow, or read a workflow's `on:` out of half its
+   * source, and either one reports a repository as running nothing on a pull
+   * request when it runs something.
+   */
+  const read = (args: string[]): string | null => {
+    let result: RunResult;
+    try {
+      result = git.runSync(worktree, args, { maxOutputBytes: MAX_ANSWER_BYTES });
+    } catch {
+      return null;
+    }
+    return result.code === 0 && !result.truncated ? result.stdout : null;
+  };
+  // `:(top)` resolves the pathspec against the repository root rather than
+  // against the directory `git` was run in — a checkout that is one package
+  // of a monorepo would otherwise be asked about its own `.github`, which is
+  // not where GitHub looks for a workflow.
+  const listed = read([
+    "ls-tree",
+    "-r",
+    "-z",
+    "--name-only",
+    `${ref}^{tree}`,
+    "--",
+    ":(top).github/workflows/",
+  ]);
+  if (listed === null) return null;
   const found = new Map<string, string>();
   for (const path of listed.split("\0")) {
     if (!WORKFLOW_FILE.test(path)) continue;
-    try {
-      found.set(path, request.git(["show", `${ref}:${path}`], request.worktree));
-    } catch {
-      // One file of the ref that will not come out of the object store. The
-      // reading cannot say what that workflow triggers on, and saying "no" for
-      // a file it could not read is exactly the mistake this must not make.
-      return null;
-    }
+    const source = read(["show", `${ref}:${path}`]);
+    // One file of the ref that will not come out of the object store. The
+    // reading cannot say what that workflow triggers on, and saying "no" for
+    // a file it could not read is exactly the mistake this must not make.
+    if (source === null) return null;
+    found.set(path, source);
   }
   return found;
 }
@@ -753,7 +781,6 @@ async function workflowSource(
   request: {
     worktree: string;
     timeoutMs: number;
-    env: NodeJS.ProcessEnv;
     /** The ref's own workflow files, where the ref could be read. */
     atRef: Map<string, string> | null;
   },
@@ -767,11 +794,16 @@ async function workflowSource(
       // Not in this checkout either; ask GitHub for it.
     }
   }
-  const fetched = await gh(
-    ["gh", "api", "-H", "Accept: application/vnd.github.raw", `repos/{owner}/{repo}/contents/${path}`],
-    request,
+  const fetched = await ask(() =>
+    gh.api(request.worktree, `repos/{owner}/{repo}/contents/${path}`, {
+      accept: "application/vnd.github.raw",
+      timeoutMs: request.timeoutMs,
+      maxOutputBytes: MAX_CHECKS_BYTES,
+    }),
   );
-  if (fetched === null || fetched.code !== 0) return null;
+  // A source cut at the ceiling declares whatever `on:` survived the cut,
+  // which is the one answer this must never give.
+  if (fetched === null || fetched.code !== 0 || fetched.truncated) return null;
   return fetched.stdout;
 }
 
@@ -831,27 +863,32 @@ export async function readPullRequestChecks(
   const ref = request.ref ?? null;
   // The workflows the head will carry, out of the object store. Null where
   // there is no such ref here, and there the working tree is the fallback.
-  const atRef = ref === null ? null : workflowsAtRef(ref, {
-    worktree: request.worktree,
-    git: request.git ?? gitQuiet,
-  });
+  const atRef = ref === null ? null : workflowsAtRef(ref, request.worktree);
   const options = {
     worktree: request.worktree,
     timeoutMs: request.timeoutMs ?? CHECKS_TIMEOUT_MS,
-    env: request.env ?? ghEnv(),
     atRef,
   };
+  const call = { timeoutMs: options.timeoutMs, maxOutputBytes: MAX_CHECKS_BYTES };
   const unanswered = (detail: string): PullRequestChecks => ({
     ...unaskedPullRequestChecks(base, detail),
     workflows_ref: atRef === null ? null : ref,
   });
 
-  const listed = await gh(["gh", "workflow", "list", "--all", "--json", "name,path,state"], options);
+  const listed = await ask(() =>
+    gh.run(options.worktree, ["workflow", "list", "--all", "--json", "name,path,state"], call),
+  );
   if (listed === null) return unanswered("`gh` could not be run in this checkout");
   if (listed.code !== 0) {
     return unanswered(
       `\`gh workflow list\` failed: ${(listed.stderr || listed.stdout).trim().slice(-200)}`,
     );
+  }
+  // A listing past what this read holds arrives as its own tail, which is
+  // JSON that will not parse — and what went wrong is the size of the answer
+  // rather than anything `gh` wrote.
+  if (listed.truncated) {
+    return unanswered("`gh workflow list` said more than this read holds, and only the tail arrived");
   }
   let workflows: ListedWorkflow[];
   // `gh workflow list --all` prints nothing where there is nothing to list,
@@ -899,11 +936,13 @@ export async function readPullRequestChecks(
     // Both mechanisms, because either alone can be the only one in force: a
     // repository governed by rulesets answers 404 on the protection endpoint,
     // and one governed by classic protection carries no ruleset.
-    const rules = await gh(
-      ["gh", "api", `repos/{owner}/{repo}/rules/branches/${segment(base)}`],
-      options,
+    const rules = await ask(() =>
+      gh.api(options.worktree, `repos/{owner}/{repo}/rules/branches/${segment(base)}`, call),
     );
     if (rules === null) return unanswered("`gh` could not be run in this checkout");
+    if (rules.truncated) {
+      return unanswered(`the rules on ${base} said more than this read holds, and only the tail arrived`);
+    }
     if (rules.code === 0) {
       try {
         required.push(...rulesetContexts(JSON.parse(rules.stdout)));
@@ -914,11 +953,19 @@ export async function readPullRequestChecks(
       return unanswered(`the rules on ${base} could not be read: ${rules.stderr.trim().slice(-200)}`);
     }
 
-    const protection = await gh(
-      ["gh", "api", `repos/{owner}/{repo}/branches/${segment(base)}/protection/required_status_checks`],
-      options,
+    const protection = await ask(() =>
+      gh.api(
+        options.worktree,
+        `repos/{owner}/{repo}/branches/${segment(base)}/protection/required_status_checks`,
+        call,
+      ),
     );
     if (protection === null) return unanswered("`gh` could not be run in this checkout");
+    if (protection.truncated) {
+      return unanswered(
+        `the protection on ${base} said more than this read holds, and only the tail arrived`,
+      );
+    }
     if (protection.code === 0) {
       try {
         required.push(...protectionContexts(JSON.parse(protection.stdout)));

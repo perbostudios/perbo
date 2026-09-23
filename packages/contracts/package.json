@@ -11,57 +11,17 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./executor-skills": {
-      "types": "./dist/executor-skills.d.ts",
-      "default": "./dist/executor-skills.js"
-    },
-    "./materialisation-entry": {
-      "types": "./dist/materialisation-entry.d.ts",
-      "default": "./dist/materialisation-entry.js"
-    },
-    "./paths": {
-      "types": "./dist/paths.d.ts",
-      "default": "./dist/paths.js"
-    },
-    "./standing": {
-      "types": "./dist/standing.d.ts",
-      "default": "./dist/standing.js"
-    },
-    "./plan": {
-      "types": "./dist/plan.d.ts",
-      "default": "./dist/plan.js"
-    },
-    "./approach": {
-      "types": "./dist/approach.d.ts",
-      "default": "./dist/approach.js"
-    },
-    "./graph-edit": {
-      "types": "./dist/graph-edit.d.ts",
-      "default": "./dist/graph-edit.js"
-    },
-    "./interview-protocol": {
-      "types": "./dist/interview-protocol.d.ts",
-      "default": "./dist/interview-protocol.js"
-    },
-    "./size": {
-      "types": "./dist/size.d.ts",
-      "default": "./dist/size.js"
-    },
-    "./risk": {
-      "types": "./dist/risk.d.ts",
-      "default": "./dist/risk.js"
-    },
-    "./symbol-index": {
-      "types": "./dist/symbol-index.d.ts",
-      "default": "./dist/symbol-index.js"
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit --declaration false --declarationMap false --sourceMap false",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "lint": "eslint src test"
   },
@@ -72,6 +32,7 @@
     "@perbo/tsconfig": "workspace:*",
     "@eslint/js": "catalog:",
     "@types/node": "catalog:",
+    "esbuild": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",
     "typescript-eslint": "catalog:",

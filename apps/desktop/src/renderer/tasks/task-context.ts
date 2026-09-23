@@ -1,5 +1,6 @@
+import { formatUsd } from "@perbo/contracts/browser";
 import type { Detail, OpenDraft } from "../../shared/protocol.js";
-import type { PageProps, TaskView } from "../shell/App.js";
+import type { PageProps, TaskView } from "../shell/route.js";
 import { projectTicket } from "./ticket-workspace.js";
 export interface TaskContext extends PageProps {
   detail: Detail;
@@ -44,13 +45,19 @@ export function taskRecords({ detail, workspace, repoId }: TaskContext) {
       workspace.taskModels?.[repoId + ":" + ticket.key] ?? workspace.settings,
     repo: workspace.repositories.find((repo) => repo.id === repoId),
     title: workspace.titles?.[repoId + ":" + ticket.key] ?? ticket.title,
-    sample: workspace.mode === "preview" ? detail.sample : undefined,
   };
 }
-export const costLabel = (detail: Detail): string =>
-  detail.cost.unavailable > 0 && detail.cost.micros === 0
+/**
+ * What a run has cost so far. A total is all-in only where every component of
+ * it is priced (D-070): where some are not, the figure is a floor and says so,
+ * and where none is, there is no figure to give.
+ */
+export const costLabel = ({ cost }: Pick<Detail, "cost">): string =>
+  cost.unavailable > 0 && cost.micros === 0
     ? "Unavailable"
-    : "$" + (detail.cost.micros / 1_000_000).toFixed(2);
+    : cost.partial && cost.micros > 0
+      ? `at least ${formatUsd(cost.micros, 2)}`
+      : formatUsd(cost.micros, 2);
 
 /**
  * The scope a saved editing session holds that this contract does not carry.

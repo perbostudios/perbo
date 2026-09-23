@@ -18,17 +18,19 @@
     "dist/index.bundle.js"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node ../../tooling/package/bundle.mjs --package",
-    "typecheck": "tsc -p tsconfig.json --noEmit --declaration false --declarationMap false --sourceMap false",
+    "build": "tsc -p tsconfig.build.json && node ../../tooling/package/bundle.mjs --package",
+    "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "lint": "eslint src test"
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "catalog:",
     "@perbo/contracts": "workspace:*",
+    "@perbo/model": "workspace:*",
     "@perbo/planning": "workspace:*",
     "@perbo/review": "workspace:*",
     "@perbo/runner": "workspace:*",
+    "@perbo/test-support": "workspace:*",
     "@perbo/tsconfig": "workspace:*",
     "@perbo/workspace": "workspace:*",
     "@eslint/js": "catalog:",

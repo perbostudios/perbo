@@ -1,8 +1,14 @@
 {
-  "extends": "@perbo/tsconfig/base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist"
-  },
-  "include": ["src/**/*.ts"]
+  "extends": "@perbo/tsconfig/library.json",
+  // `exclude` in a leaf replaces the preset's, so the preset's three entries are
+  // repeated here. The last two are protected tests (.github/protected-paths.json)
+  // that do not compile against the current Finding and BlockingInput types; a
+  // pull request cannot edit them. They still run under vitest.
+  "exclude": [
+    "${configDir}/test/fixtures",
+    "${configDir}/dist",
+    "${configDir}/node_modules",
+    "${configDir}/test/blocking.test.ts",
+    "${configDir}/test/remediation.test.ts"
+  ]
 }

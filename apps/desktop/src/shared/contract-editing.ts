@@ -1,4 +1,3 @@
-import { planNodes } from "@perbo/contracts/plan";
 // The rule for what counts as a group's answer lives in the protocol, because
 // the interview counts on it too: it refuses to draft while a group it asked
 // is unanswered, and a second copy of the rule would let the two disagree.
@@ -6,8 +5,10 @@ import {
   LEAVE_IT_TO_THE_INTERVIEW,
   PART_LETTERS,
   answersGroup,
-} from "@perbo/contracts/interview-protocol";
-import { standingGlob, type StandingProhibitedEntry } from "@perbo/contracts/standing";
+  planNodes,
+  standingGlob,
+  type StandingProhibitedEntry,
+} from "@perbo/contracts/browser";
 import {
   DraftSchema,
   EditingFormSchema,

@@ -1,7 +1,7 @@
 import {
   EXECUTOR_SKILLS,
   type ExecutorSkillId,
-} from "@perbo/contracts/executor-skills";
+} from "@perbo/contracts/browser";
 
 export function SkillPicker({
   selected,

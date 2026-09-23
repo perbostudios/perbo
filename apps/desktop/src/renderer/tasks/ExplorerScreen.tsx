@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, cx } from "@perbo/ui";
-import { bridge } from "../data.js";
-import { LineIcon } from "../icons.js";
+import { Button, LineIcon, cx } from "../ui/index.js";
+import { bridge } from "../workspace/index.js";
 import { covers, nodesNaming, treeRows } from "../planning/explorer-tree.js";
-import { planNodes } from "@perbo/contracts/plan";
+import { planNodes } from "@perbo/contracts/browser";
 import type { TaskContext } from "./task-context.js";
 
 /**

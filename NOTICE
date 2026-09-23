@@ -22,7 +22,7 @@ no contributor licence agreement.
 
 Third-party material
 
-packages/ui/src/motion.css contains transitions from transitions.dev
+apps/desktop/src/renderer/ui/motion.css contains transitions from transitions.dev
 (https://transitions.dev). They are not licensed under the Apache License,
 Version 2.0. They are used under the transitions.dev terms, and any use of
 them is governed by those terms: https://transitions.dev/terms.html

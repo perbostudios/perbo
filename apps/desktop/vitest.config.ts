@@ -9,7 +9,7 @@ export default defineConfig({
   test: {
     testTimeout: 60_000,
     hookTimeout: 30_000,
-    include: ["test/**/*.test.{ts,tsx}"],
-    setupFiles: ["test/setup.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
+    setupFiles: ["src/test-support/vitest-setup.ts"],
   },
 });

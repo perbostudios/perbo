@@ -1,13 +1,17 @@
 import { z } from "zod";
-import { ExecutorSkillsSchema } from "@perbo/contracts/executor-skills";
-import { GraphEditSchema } from "@perbo/contracts/graph-edit";
-import { StandingProhibitedEntrySchema } from "@perbo/contracts/standing";
-import { MaterializationEntrySchema } from "@perbo/contracts/materialisation-entry";
 import {
+  ExecutorSkillsSchema,
+  GraphEditSchema,
+  MaterializationEntrySchema,
   MAX_QUESTION_GROUPS,
   MAX_QUESTION_OPTIONS,
   MAX_QUESTION_PARTS,
-} from "@perbo/contracts/interview-protocol";
+  StandingProhibitedEntrySchema,
+  type GraphEdge,
+  type SizeEstimate,
+  type StandingProhibitedEntry,
+  type VerificationKind,
+} from "@perbo/contracts/browser";
 import type {
   CoverageStatus,
   ExportKind,
@@ -17,12 +21,7 @@ import type {
   Ticket,
   VerificationStrength,
 } from "@perbo/contracts";
-import type { GraphEdge } from "@perbo/contracts/approach";
-import type { VerificationKind } from "@perbo/contracts/plan";
-import type { SizeEstimate } from "@perbo/contracts/size";
-import type { StandingProhibitedEntry } from "@perbo/contracts/standing";
-import type { SpecField } from "@perbo/planning/spec-text";
-import type { ImpactReport } from "@perbo/planning/impact";
+import type { ImpactReport, SpecField } from "@perbo/planning/browser";
 import { BindingSchema, ShortcutActionSchema } from "./shortcuts.js";
 
 const identifier = z.string().uuid();
@@ -296,9 +295,9 @@ export const INTERVIEW_CONVERSATION_CAP = 400;
 /**
  * What the host says when this planning cannot have an interview yet (D-102).
  *
- * Here rather than in the host, because the browser preview stands in for the
- * host and a second spelling of a sentence the person reads would drift from
- * this one at the next edit.
+ * Here rather than in the host, because the sample host stands in for the host
+ * and a second spelling of a sentence the person reads would drift from this
+ * one at the next edit.
  */
 export const INTERVIEW_NEEDS_A_TITLE =
   "Give this planning a spec title first. The interview writes specs/<slug>/spec.md, and the slug " +
@@ -1012,21 +1011,6 @@ export interface TaskRow {
   repoId: string;
   repository: string;
   ticket: Ticket;
-  summary?: {
-    description?: string;
-    created?: string;
-    stage?: number;
-    criteriaMet?: number;
-    criteriaTotal?: number;
-    cost?: string;
-    delivery?: string;
-    progress?: number;
-    elapsed?: string;
-    files?: number;
-    branch?: string;
-    additions?: number;
-    deletions?: number;
-  };
 }
 /** Whether the machine is being held awake for a live run (S6F, Away from keyboard). */
 export interface PowerState {
@@ -1035,7 +1019,6 @@ export interface PowerState {
   since: string | null;
 }
 export interface Snapshot {
-  mode: "desktop" | "preview";
   version: string;
   settings: Settings;
   repositories: Repository[];
@@ -1175,20 +1158,6 @@ export interface Detail {
    */
   effective: { stallMinutes: number; ticketDollars: number };
   report: unknown;
-  sample?: {
-    progress: number;
-    stage: number;
-    current: string;
-    elapsed: string;
-    steps: {
-      text: string;
-      time: string;
-      state: "complete" | "current" | "queued";
-    }[];
-    decisions: DecisionQuestion[];
-    transcript: { author: string; label: string; text: string }[];
-    terminal: string;
-  };
 }
 export interface DecisionQuestion {
   id: string;
@@ -1301,6 +1270,19 @@ export interface ReplyMap {
   openPullRequest: null;
   export: string | null;
 }
+/** One Request, narrowed to the kind it carries. */
+export type RequestOf<K extends Request["kind"]> = Extract<Request, { kind: K }>;
+/**
+ * A handler for every Request kind and for nothing else: a host that answers
+ * the protocol is this table. A missing kind or a key the protocol does not
+ * declare is a compile error, which is what makes the table exhaustive.
+ */
+export type RequestHandlers<Context = void> = {
+  [K in Request["kind"]]: (
+    request: RequestOf<K>,
+    context: Context,
+  ) => Promise<ReplyMap[K]> | ReplyMap[K];
+};
 export interface DesktopBridge {
   request<T extends Request>(request: T): Promise<ReplyMap[T["kind"]]>;
   subscribe(listener: (change: Change) => void): () => void;

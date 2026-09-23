@@ -1,4 +1,4 @@
-import type { InkIconName } from "../InkIcon.js";
+import type { InkIconName } from "../ui/index.js";
 import type { Snapshot } from "../../shared/protocol.js";
 
 /**

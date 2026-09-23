@@ -8,7 +8,7 @@ Model quality, cost, interfaces and providers keep changing. Building authority 
 
 ## Decision
 
-Every planning, execution, review and verification run emits an immutable `RunBundle` with its bounded inputs, provenance, configuration, tool calls, artifacts and usage. Models and agents sit behind adapters with stable contracts; the adapters are Claude Code and Codex. Prompts, tools, policies and model versions are versioned inputs. What a bundle can be replayed for is tiered per bundle ([ADR-0026](0026-replay-claim-tiering.md)).
+Every planning, execution, review and verification run emits an immutable `RunBundle` with its bounded inputs, provenance, configuration, tool calls, artifacts and usage. Models and agents sit behind adapters with stable contracts; the adapters are Claude Code and Codex. The model-call adapters live in `@perbo/model`, one port with one transport per wire, and nothing else in the repository reaches a provider ([D-123](../11-open-decisions.md)). Prompts, tools, policies and model versions are versioned inputs. What a bundle can be replayed for is tiered per bundle ([ADR-0026](0026-replay-claim-tiering.md)).
 
 ## Consequences
 

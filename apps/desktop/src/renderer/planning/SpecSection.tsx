@@ -7,7 +7,7 @@ import {
   specSymbolNames,
   symbolBeingTyped,
   symbolOptions,
-} from "@perbo/planning/spec-text";
+} from "@perbo/planning/browser";
 import { caretPoint } from "./caret.js";
 import { SpecReading } from "./SpecReading.js";
 import type { ExportedName } from "../../shared/protocol.js";

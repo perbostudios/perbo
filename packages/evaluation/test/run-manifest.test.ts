@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { sample } from "./sample-fixtures.js";
 import type { HarnessResult, RunRecord } from "../src/harness.js";
 import {
@@ -14,6 +14,8 @@ import {
   runManifestFingerprint,
   validateCorpusRunManifest,
 } from "../src/run-manifest.js";
+
+const scratchDirectory = scratchDirectories("perbo-manifest-");
 
 const fixtures = sample.slice(0, 2);
 const runs: RunRecord[] = fixtures.flatMap((fixture) =>
@@ -142,8 +144,7 @@ describe("corpus run manifests", () => {
  * scoreable.
  */
 describe("run manifests written before the reviewer bundle was recorded", () => {
-  const scratch = mkdtempSync(join(tmpdir(), "perbo-manifest-compat-"));
-  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  const scratch = scratchDirectory("perbo-manifest-compat-");
 
   /** Exactly what a run wrote before `<out>/bin/` existed: v1, and no bundle fields. */
   const priorManifest = (): Record<string, unknown> => {
@@ -231,8 +232,7 @@ describe("run manifests written before the harness enforced a review deadline", 
 });
 
 describe("a results directory whose reviewer copy is no longer beside it", () => {
-  const scratch = mkdtempSync(join(tmpdir(), "perbo-manifest-bundle-"));
-  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  const scratch = scratchDirectory("perbo-manifest-bundle-");
 
   const withBundle = (dir: string, contents: string | null): string => {
     mkdirSync(join(dir, "bin"), { recursive: true });
@@ -302,4 +302,49 @@ describe("a results directory whose reviewer copy is no longer beside it", () =>
       }),
     ).toEqual([]);
   });
+});
+
+/**
+ * The state of the tree is read by the runner's git, not by whatever the shell
+ * that started the corpus run happened to hold.
+ *
+ * A manifest is written before the first paid call and read long afterwards, so
+ * the two fields it takes from git have to come back or come back as unknown —
+ * never after a wait nobody bounded, on a prompt nobody is there to answer.
+ */
+describe("the git a run manifest's source snapshot starts", () => {
+  const scratch = scratchDirectory("perbo-manifest-git-");
+
+  it.skipIf(process.platform === "win32")(
+    "runs in the runner's environment, with prompts off and no ambient secret",
+    () => {
+      const bin = join(scratch, "bin");
+      const dump = join(scratch, "child-env.txt");
+      const entry = join(scratch, "entry.mjs");
+      const commit = "9".repeat(40);
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(entry, "// the reviewer entry a manifest records the digest of\n");
+      writeFileSync(
+        join(bin, "git"),
+        `#!/bin/sh\nenv > ${JSON.stringify(dump)}\ncase "$*" in *rev-parse*) echo ${commit};; esac\n`,
+      );
+      chmodSync(join(bin, "git"), 0o755);
+
+      const path = process.env.PATH;
+      process.env.PATH = `${bin}:${path ?? ""}`;
+      process.env.PERBO_SENTINEL_TOKEN = "a token the child must not see";
+      let source: ReturnType<typeof captureRunSource>;
+      try {
+        source = captureRunSource({ cliPath: entry, cwd: scratch });
+      } finally {
+        process.env.PATH = path;
+        delete process.env.PERBO_SENTINEL_TOKEN;
+      }
+
+      expect(source.source_commit).toBe(commit);
+      const child = readFileSync(dump, "utf8").split("\n");
+      expect(child).toContain("GIT_TERMINAL_PROMPT=0");
+      expect(child.filter((line) => line.startsWith("PERBO_SENTINEL_TOKEN="))).toEqual([]);
+    },
+  );
 });

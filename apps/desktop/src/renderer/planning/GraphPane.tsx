@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Dialog, Notice, cx } from "@perbo/ui";
-import { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS } from "@perbo/contracts/size";
-import type { GraphEdit } from "@perbo/contracts/graph-edit";
-import { bridge, errorMessage, useAction } from "../data.js";
+import { useQueryClient } from "@tanstack/react-query";
+import { Button, Dialog, Notice, cx } from "../ui/index.js";
+import { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS, type GraphEdit } from "@perbo/contracts/browser";
+import { bridge, errorMessage, useAction, useGraph } from "../workspace/index.js";
 import { isLive } from "../../shared/jobs.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { GraphInspector, SplitDialog } from "./GraphInspector.js";
@@ -18,8 +17,8 @@ import type {
   Job,
   Snapshot,
 } from "../../shared/protocol.js";
-import type { useContractEditing } from "../tasks/contract-editor.js";
-import type { Route } from "../shell/App.js";
+import type { useContractEditing } from "../contract-editor.js";
+import type { Route } from "../shell/route.js";
 
 /**
  * The Graph pane (D-100, D-101, SCP-316): the plan's execution graph, the size
@@ -83,47 +82,15 @@ export function GraphPane({
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const graph = useQuery({
-    queryKey: ["graph", repoId, key],
-    queryFn: () => bridge.request({ kind: "graphRead", repoId, key: key ?? "" }),
-    networkMode: "always",
-    enabled: key !== null,
-    staleTime: 1000,
-  });
-  const view: GraphView | undefined = graph.data;
-
   /**
    * The records this pane reads are written while a run moves, so the pane
-   * follows them (D-100): one that refreshed only on its own edits would show
-   * the run as it stood when it was opened. A run's progress arrives many
-   * times a minute and each read walks the repository's bundle store, so it is
-   * taken at most once a second, and the last one is never dropped.
+   * follows them (D-100). It reads through the workspace refresh, which takes
+   * a repository again on a records change and on the poll — about two seconds
+   * while a run is live, fifteen while none is — and patches a progress update
+   * where it stands without reading anything (D-095).
    */
-  useEffect(() => {
-    if (key === null) return undefined;
-    let at = 0;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const take = (): void => {
-      at = Date.now();
-      timer = null;
-      void client.invalidateQueries({ queryKey: ["graph", repoId, key] });
-    };
-    const stop = bridge.subscribe((change: Change) => {
-      const job = "job" in change ? change.job : undefined;
-      const mine =
-        change.kind === "records"
-          ? change.repoId === null || change.repoId === repoId
-          : change.kind === "progress" && (job?.key === key || job?.resultKey === key);
-      if (!mine || timer !== null) return;
-      const since = Date.now() - at;
-      if (since >= 1000) take();
-      else timer = setTimeout(take, 1000 - since);
-    });
-    return () => {
-      if (timer !== null) clearTimeout(timer);
-      stop();
-    };
-  }, [client, key, repoId]);
+  const graph = useGraph(repoId, key);
+  const view: GraphView | undefined = graph.data;
 
   /** One edit, through the host, with the pane redrawn from what the store then holds. */
   const apply = useCallback(

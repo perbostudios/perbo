@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { findCredentials } from "./credential.js";
 
 /**
  * The A2b permission profile and the prohibited-action list
@@ -188,6 +189,36 @@ export const CREDENTIAL_ENV_DENY_PATTERNS = [
 
 export function isCredentialEnvName(name: string): boolean {
   return CREDENTIAL_ENV_DENY_PATTERNS.some((pattern) => pattern.test(name));
+}
+
+/**
+ * Names whose values authenticate something. `isCredentialEnvName` is the list
+ * of what may never be forwarded to a child; this widens it by shape for the
+ * *reading* side, because a value that must not be forwarded must also not be
+ * printed.
+ */
+const SECRET_NAME = /API_?KEY|KEY$|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL/i;
+
+/** Below this a value is a setting, not a credential, and matching it would mangle prose. */
+const MIN_SECRET_LENGTH = 8;
+
+/**
+ * The values of this environment that authenticate something, longest first:
+ * every variable `isCredentialEnvName` refuses to forward, plus any whose name
+ * says KEY, TOKEN, SECRET, PASSWORD, PASSWD or CREDENTIAL, at eight characters
+ * or more.
+ *
+ * Longest first because a key and a prefix of it are both here, and taking the
+ * prefix out first leaves the longer one's tail behind.
+ */
+export function credentialValuesOf(env: NodeJS.ProcessEnv): string[] {
+  const values = new Set<string>();
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined || value.length < MIN_SECRET_LENGTH) continue;
+    if (SECRET_NAME.test(name)) values.add(value);
+    else if (isCredentialEnvName(name) && findCredentials(value).length > 0) values.add(value);
+  }
+  return [...values].sort((a, b) => b.length - a.length);
 }
 
 /**

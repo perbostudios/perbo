@@ -1,0 +1,55 @@
+{
+  "_comment": [
+    "What a path glob means, as cases. `matchesAny` in packages/contracts/src/paths.ts is the one",
+    "home for these semantics, and packages/contracts/src/paths.glob-conformance.test.ts runs",
+    "every case against it. Every other copy of the matcher answers every case the same way; a",
+    "copy is held to this file rather than to a reading of its own.",
+    "A row is added when a case is decided, never removed to make a matcher pass."
+  ],
+  "cases": [
+    { "pattern": "**/*.ts", "path": "foo.ts", "matches": true },
+    { "pattern": "**/*.ts", "path": "a/b/foo.ts", "matches": true },
+    { "pattern": "**/*.ts", "path": "a/b/foo.tsx", "matches": false },
+    { "pattern": "**/.env*", "path": ".env", "matches": true },
+    { "pattern": "**/.env*", "path": "packages/auth/.env.local", "matches": true },
+    { "pattern": "**/CODEOWNERS", "path": "CODEOWNERS", "matches": true },
+    { "pattern": "**/*.pem", "path": "infra/tls/server.pem", "matches": true },
+    { "pattern": "a/**/b", "path": "a/b", "matches": true },
+    { "pattern": "a/**/b", "path": "a/x/y/b", "matches": true },
+
+    { "pattern": "*.ts", "path": "b.ts", "matches": true },
+    { "pattern": "*.ts", "path": "a/b.ts", "matches": false },
+    { "pattern": "a/*", "path": "a/b", "matches": true },
+    { "pattern": "a/*", "path": "a/b/c", "matches": false },
+    { "pattern": "*", "path": ".env", "matches": true },
+
+    { "pattern": "a/**", "path": "a/b/c", "matches": true },
+    { "pattern": "a/**", "path": "a", "matches": false },
+    { "pattern": "a/**", "path": "ab/c", "matches": false },
+    { "pattern": "**", "path": "any/depth/file.ts", "matches": true },
+    { "pattern": "a**b", "path": "ax/yb", "matches": true },
+    { "pattern": "packages/auth/**", "path": "packages/auth/a/b.ts", "matches": true },
+    { "pattern": "packages/auth/**", "path": "packages/email/a.ts", "matches": false },
+    { "pattern": "packages/evaluation/sample/**", "path": "packages/evaluation/sample/fixtures/x/fixture.json", "matches": true },
+    { "pattern": "packages/evaluation/sample/**", "path": "packages/evaluation/samples/x.json", "matches": false },
+
+    { "pattern": "src/?.ts", "path": "src/a.ts", "matches": true },
+    { "pattern": "src/?.ts", "path": "src/ab.ts", "matches": false },
+    { "pattern": "a?b", "path": "a/b", "matches": false },
+
+    { "pattern": "a.b", "path": "axb", "matches": false },
+    { "pattern": "a+b", "path": "a+b", "matches": true },
+    { "pattern": "a(b)", "path": "a(b)", "matches": true },
+    { "pattern": "a[bc]", "path": "ab", "matches": false },
+    { "pattern": "a[bc]", "path": "a[bc]", "matches": true },
+    { "pattern": "{a,b}.ts", "path": "a.ts", "matches": false },
+    { "pattern": "{a,b}.ts", "path": "{a,b}.ts", "matches": true },
+    { "pattern": "a\\*b", "path": "a*b", "matches": false },
+    { "pattern": "a\\*b", "path": "a\\xb", "matches": true },
+
+    { "pattern": "./a/*.ts", "path": "a/x.ts", "matches": false },
+    { "pattern": "a/", "path": "a/", "matches": true },
+    { "pattern": "a/", "path": "a/x", "matches": false },
+    { "pattern": "README.md", "path": "readme.md", "matches": false }
+  ]
+}

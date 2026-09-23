@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { pooled, runCorpus, type HarnessResult } from "../src/harness.js";
 import { main } from "../src/main.js";
 import { SAMPLE_AUTHORED_IDS, sampleDir } from "./sample-fixtures.js";
@@ -19,8 +19,8 @@ import { summariseCorpus } from "../src/summarise.js";
  * not about which function the harness called.
  */
 
-const scratch = mkdtempSync(join(tmpdir(), "perbo-spend-test-"));
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+const scratchDirectory = scratchDirectories("perbo-spend-test-");
+const scratch = scratchDirectory();
 afterEach(() => vi.restoreAllMocks());
 
 /** The sample's five prepared, authored fixtures. Substrings, as `--filter` takes them. */

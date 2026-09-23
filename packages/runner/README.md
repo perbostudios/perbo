@@ -4,9 +4,12 @@ The half of execution that is not the agent.
 
 - `profile.ts` — the A2b permission profile: the command allow-list, the deny list, the environment
   built from an allow-list rather than scrubbed by a deny-list, and the pinned provider base URL.
-- `adapter.ts` — the Claude Code adapter (`adapter-codex.ts` is the Codex one). It builds an argv rather than assembling one,
+- `adapter.ts` — the Claude Code adapter (`codex/` is the Codex one). It builds an argv rather than assembling one,
   records it on the attempt with the prompt removed from the hash, and **asserts** that the agent
   loaded nothing originating in the repository (ADR-0030).
+- `codex/` — the Codex adapter: `index.ts` is the surface (`runCodexAgent` and the three decisions
+  the thread's items are answered with); `internal/rpc.ts` holds the thread session, its argv and
+  the agent role files it writes.
 - `quarantine.ts` — the other half of ADR-0030: every known agent-configuration path moved out of
   the worktree before handover and restored afterwards, journalled before the first move so an
   interrupted attempt is recoverable.
@@ -24,6 +27,9 @@ The half of execution that is not the agent.
   completed on.
 - `prohibited.ts` — the prohibited-action list, detected on commands *and* on the sealed paths,
   because a file write is not a command.
+- `shell/` — how the guard reads a command line or a path to find where it writes: `index.ts` is the
+  surface (`readCommandLine`, `inspectWritePath`, the scope types); `internal/` holds the lexer, the
+  writer, wrapper, git and interpreter tables, the inline-program reader and the line assembly.
 - `spec-commit.ts` — the spec the change is judged against, put on the branch as its first commit
   past the contract's base before the executor is invoked, from the files approval recorded and
   their hashes ([D-103](../../docs/11-open-decisions.md)). A file that has changed or gone since
@@ -34,15 +40,45 @@ The half of execution that is not the agent.
   Every file the spec commit holds is excluded from it, so the checks, the review, the verification
   and the pull request read one range and the review reads the diff after the spec.
 - `bundle.ts` — immutable, content-addressed run bundles with a computed replayability tier.
-- `delivery.ts` — push and pull request through local `git` and `gh`. The runner holds the
-  credential; the agent never sees a token; nothing here merges.
-- `checks.ts` — the pinned set, run in the worktree after the seal: uncached, one at a time, with
+- `delivery.ts` — push and pull request through `@perbo/workspace`'s repository module, which
+  starts every `git` and `gh` this package runs. The runner holds the credential; the agent never
+  sees a token; nothing here merges.
+- `checks/` — the pinned set, run in the worktree after the seal: uncached, one at a time, with
   a failed unit check re-run on its own failing files. A ticket whose plan carries an execution
   graph runs the set again once per node afterwards, narrowed to the change's test files inside
   that node's paths ([D-107](../../docs/11-open-decisions.md)); a node's result is evidence for
-  that node's review and never the gate, which stays the whole-change result.
-- `loop.ts` — contract → worktree → spec commit → agent → seal → checks → review → route → pull
-  request.
+  that node's review and never the gate, which stays the whole-change result. `index.ts` runs the
+  set; `internal/rerun.ts` reads a failed run's output and plans what is run again.
+- `loop/` — the run. `index.ts` is the entry and the sequencer: contract → worktree → spec commit →
+  agent → seal → checks → review → route → pull request. It holds the run's public types,
+  `runTicket`, the run's limits and the order the phases run in; `internal/` holds the phases, and
+  nothing outside the module imports them.
+  - `internal/config.ts` — `TicketRunConfigSchema` and the two path lists a run is judged by.
+  - `internal/context.ts` — the ports a run reaches the world through, and what it is bounded by.
+  - `internal/state.ts` — what one round hands the next, the step a round's routing comes to, and the
+    state that step leaves.
+  - `internal/ledger.ts` — this run's attempts, rounds and declines, what the ticket has spent, and the
+    append to the ticket's record.
+  - `internal/start.ts` — everything a run can be refused for before it has cost anything.
+  - `internal/provision.ts` — the worktree a round's attempt runs in.
+  - `internal/continuation.ts` — the remediation a re-run continues, and whether the branch is still
+    the one that review judged.
+  - `internal/relevel.ts` — a re-level: the branch put back to what the pull request has, and the
+    judgement of the merged result where no executor ran.
+  - `internal/level.ts` — the three points the base branch's tip is merged into the attempt's branch.
+  - `internal/brief.ts` — what a round hands its executor.
+  - `internal/execute.ts` — the handover, with the repository's own agent configuration quarantined
+    around it.
+  - `internal/seal.ts` — the change set the round is judged on.
+  - `internal/check.ts` — the pinned set over that change set, and the worktree swept after it.
+  - `internal/attempt.ts` — what the attempt ended as, and the record and bundle it leaves.
+  - `internal/route.ts` — what an attempt that stopped, or a base conflict, comes to.
+  - `internal/verify.ts` — D-061's closure verification and the routing that reads it.
+  - `internal/review.ts` — the independent review, its bundle, and the routing that reads its verdict.
+  - `internal/deliver.ts` — the push, the pull request and SCP-202's merge step.
+  - `internal/merge-up.ts` — the base branch's tip merged into the attempt's branch, and the paths
+    a conflict left markers in.
+  - `internal/orphans.ts` — the processes an attempt left behind, swept from its worktree.
 
 One hazard worth knowing before you choose a `worktree_root`: **a worktree nested inside another
 package manager's workspace inherits it.** `pnpm` resolves its workspace root by walking up, so a

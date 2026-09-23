@@ -4,16 +4,14 @@ import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { scratchDirectories } from "@perbo/test-support";
 import { assertBundleToolchain, captureExecutedBundle } from "../src/bundle.js";
 import { main } from "../src/main.js";
 import { sampleDir } from "./sample-fixtures.js";
@@ -36,8 +34,8 @@ import { describeWhen } from "./corpus-present.js";
 // as `process.argv[1]`, and what module resolution reports for a file it found,
 // are both resolved, and the assertions below compare against them.
 const here = dirname(fileURLToPath(import.meta.url));
-const scratch = realpathSync(mkdtempSync(join(tmpdir(), "perbo-bundle-copy-test-")));
-afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+const scratchDirectory = scratchDirectories("perbo-bundle-copy-test-");
+const scratch = realpathSync(scratchDirectory());
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -356,7 +354,7 @@ describe("finding the bundler a run builds its copy with", () => {
     const hostTmp = join(root, "tmp");
     mkdirSync(hostTmp, { recursive: true });
     vi.stubEnv("TMPDIR", hostTmp);
-    const inside = realpathSync(mkdtempSync(join(tmpdir(), "perbo-inside-checkout-")));
+    const inside = realpathSync(scratchDirectory("perbo-inside-checkout-"));
     const stranded = join(inside, "no-repository", "deep", "dist");
     mkdirSync(stranded, { recursive: true });
 

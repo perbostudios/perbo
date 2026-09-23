@@ -11,14 +11,13 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { matchesAny, parseUnifiedDiff } from "@perbo/contracts";
-import type { Ticket } from "@perbo/contracts";
-import { nodeState } from "../shared/graph-state.js";
+import { CostBasisSchema, costOf, parseUnifiedDiff, rollCosts } from "@perbo/contracts";
+import type { Cost, Ticket } from "@perbo/contracts";
+import { assembleLiveGraph } from "../shared/graph-live.js";
+import type { LiveCheck, LiveNodeInput, LiveReview } from "../shared/graph-live.js";
 import type {
-  GraphCriterionState,
   GraphEditView,
   GraphLiveView,
-  GraphNodeLive,
   InterviewEdit,
   TaskSummary,
   UsageLedger,
@@ -93,12 +92,21 @@ const EARLY_STOP_REASONS = new Set([
 ]);
 export const isEarlyStop = (reason: string | undefined): boolean =>
   reason !== undefined && EARLY_STOP_REASONS.has(reason);
-/** A priced attempt reported a cost; `unavailable` and `not_incurred` are not zero dollars. */
-export const isPriced = (attempt: StoredAttempt): boolean =>
-  attempt.usage?.cost_micros !== undefined &&
-  !["unavailable", "not_incurred"].includes(
-    attempt.usage.cost_basis ?? "transport_reported",
-  );
+/** A record can name a basis this version cannot price, and an unpriced one is counted. */
+const BASIS = CostBasisSchema.catch("unavailable");
+/**
+ * What one attempt cost. A record carrying no figure at all, and one naming a
+ * basis this version cannot price, are both unpriced: `unavailable` and
+ * `not_incurred` are not zero dollars.
+ */
+const attemptCost = (attempt: StoredAttempt): Cost =>
+  costOf({
+    micros: attempt.usage?.cost_micros ?? 0,
+    basis:
+      attempt.usage?.cost_micros === undefined
+        ? "unavailable"
+        : BASIS.parse(attempt.usage.cost_basis ?? "transport_reported"),
+  });
 
 export function readAttempts(path: string): {
   attempts: StoredAttempt[];
@@ -176,7 +184,7 @@ export function readDraftEdits(path: string): GraphEditView[] {
  *
  * What the chat's card for an `edit_plan` or an `undo_edit` is drawn from: the
  * edit the command wrote down, rather than the session's own account of what
- * it did ([ADR-0023](../../../docs/adr/0023-untrusted-context-boundary.md)).
+ * it did ([ADR-0023](../../../../docs/adr/0023-untrusted-context-boundary.md)).
  * An undo is itself an edit, and names the one it reversed.
  *
  * The author is what links the record to the card, because the last edit of
@@ -317,7 +325,7 @@ export function summariseTicket(input: {
 }): TaskSummary {
   const { ticket, attempts, bundles } = input;
   const latest = attempts.at(-1);
-  const priced = attempts.filter(isPriced);
+  const cost = rollCosts(attempts.map(attemptCost));
   const notes: string[] = [];
   if (input.attemptsError) notes.push(input.attemptsError);
   let diff: TaskSummary["diff"] = null;
@@ -342,18 +350,9 @@ export function summariseTicket(input: {
     branch: ticket.delivery.branch ?? latest?.branch ?? null,
     attempts: attempts.length,
     latestAttemptAt: latest?.created_at ?? null,
-    costMicros: priced.length
-      ? priced.reduce(
-          (sum, attempt) => sum + (attempt.usage?.cost_micros ?? 0),
-          0,
-        )
-      : null,
+    costMicros: cost.priced ? cost.micros : null,
     costBasis:
-      attempts.length === 0
-        ? "none"
-        : priced.length === attempts.length
-          ? "priced"
-          : "unpriced",
+      cost.components === 0 ? "none" : cost.unavailable === 0 ? "priced" : "unpriced",
     diff,
     note: notes.length ? notes.join(" ") : null,
   };
@@ -395,21 +394,16 @@ export function ledgerFor(
     // A ticket, not an attempt: three early stops on one ticket read as one ticket stopped.
     if (inMonth.some((attempt) => isEarlyStop(attempt.termination?.reason)))
       ledger.stoppedShort++;
-    for (const attempt of inMonth) {
-      if (isPriced(attempt)) {
-        ledger.pricedAttempts++;
-        ledger.spentMicros += attempt.usage?.cost_micros ?? 0;
-      } else ledger.unpricedAttempts++;
-    }
+    const spent = rollCosts(inMonth.map(attemptCost));
+    ledger.pricedAttempts += spent.priced;
+    ledger.unpricedAttempts += spent.unavailable;
+    ledger.spentMicros += spent.micros;
     if (ticket.state === "merged" && monthOf(ticket.updated_at) === month) {
       ledger.ticketsMerged++;
-      const priced = attempts.filter(isPriced);
-      if (priced.length && priced.length === attempts.length) {
+      const cost = rollCosts(attempts.map(attemptCost));
+      if (cost.priced > 0 && cost.unavailable === 0) {
         mergedPriced++;
-        mergedSpend += priced.reduce(
-          (sum, attempt) => sum + (attempt.usage?.cost_micros ?? 0),
-          0,
-        );
+        mergedSpend += cost.micros;
       }
     }
   }
@@ -487,26 +481,10 @@ const StoredReviewSchema = z.looseObject({
     .default([]),
 });
 
-/** One node of the plan, as the live read needs it: its globs and its criteria. */
-export interface LiveNodeInput {
-  id: string;
-  paths: readonly string[];
-  criteria: readonly string[];
-}
-
 /**
- * What a run's records say about a plan's execution graph (D-100, SCP-317).
- *
- * The records and no others: the sealed change set, whose paths say which of a
- * node's globs the branch has touched; the pinned checks, each carrying the
- * node it was narrowed to (D-107); the review artifact's evidence bindings,
- * which are the only account of a criterion's state that is not the executor's
- * own, read only where that review judged the plan the ticket now carries; and
- * the verifications the rounds since have recorded beside it, because a review
- * artifact is immutable and a finding it opened would otherwise read open for
- * ever (D-061). The executor's transcript and its account of its own change
- * are in the same bundle and are read by nothing here, which is the rule
- * ADR-0023 states and the reason this exists.
+ * The records a plan's execution graph is read from (D-100, SCP-317), and
+ * nothing derived from them: {@link assembleLiveGraph} is where the deriving
+ * happens, so the host and the sample host answer alike.
  *
  * The latest attempt is the one read: a change set is the branch against the
  * base rather than an attempt's own delta, so the latest holds all of it. The
@@ -548,102 +526,47 @@ export function liveGraph(input: {
   };
 
   const diff = read(execution, "change.diff");
-  const changed = diff === null ? [] : parseUnifiedDiff(diff).map((file) => file.path);
-  // A change set was sealed and its bytes are not here to read: withheld above
-  // the reviewable cap, or not retained. Saying so is the difference between a
-  // node nobody touched and a node nothing could be read about.
-  const note =
-    latest && latest.changeset_id && diff === null
-      ? "This attempt's sealed change set is not in the bundle store, so no path could be read from it."
-      : null;
-  let reviewNote: string | null = null;
-
-  const checks = parse(read(execution, "checks.json"), StoredChecksSchema) ?? [];
+  const checks: LiveCheck[] = (parse(read(execution, "checks.json"), StoredChecksSchema) ?? []).map(
+    (check) => ({
+      name: check.name ?? check.check_id ?? "Check",
+      status: check.status,
+      node: check.node ? { id: check.node.node_id, scope: check.node.scope } : null,
+    }),
+  );
   const newest = <T extends BundleManifest>(bundles: T[]): T | undefined =>
     [...bundles].sort((left, right) => (left.created_at ?? "").localeCompare(right.created_at ?? "")).at(-1);
-  // The review on record, which a remediation round does not replace: a round
-  // is verified rather than reviewed again (D-061), so it seals a change set
-  // this review never judged and no newer review appears. What does make the
-  // review not an account of these criteria is a re-draft, because criterion
-  // ids are only unique within a plan version.
   const reviewBundle = newest(
     mine.filter((bundle) => bundle.kind === "review" && bundle.subject_id.startsWith("rev_")),
   );
   const reviewed = parse(read(reviewBundle, "review.json"), StoredReviewSchema);
-  const stale =
-    reviewed?.plan_version !== undefined &&
-    input.planVersion !== undefined &&
-    reviewed.plan_version !== input.planVersion;
-  const review = stale ? null : reviewed;
-  if (stale) {
-    reviewNote =
-      "The plan has been re-drafted since it was reviewed, so the review on record is not an account " +
-      "of these criteria.";
-  }
-  // What the rounds since that review closed. A review artifact is immutable,
-  // so a finding it opened reads open for ever unless the closures beside it
-  // are read too (D-061) — every one of them, because a round's list names
-  // only what that round closed, and only those made after the review, so a
-  // finding a later review raised again is not answered by an older closure.
-  const since = reviewBundle?.created_at ?? reviewed?.created_at ?? "";
-  const closed = new Set(
-    mine
-      .filter(
-        (bundle) => bundle.subject_id.startsWith("cv_") && (bundle.created_at ?? "").localeCompare(since) >= 0,
-      )
-      .flatMap((bundle) => (bundle.inputs?.findings_closed ?? "").split(","))
-      .map((key) => key.trim())
-      .filter((key) => key.length > 0),
-  );
-  const bound = new Map((review?.coverage ?? []).map((entry) => [entry.criterion_id, entry]));
-  const open = new Map<string, string>();
-  for (const finding of review?.findings ?? [])
-    if (
-      finding.criterion_id &&
-      finding.status === "open" &&
-      finding.statement &&
-      !(finding.key && closed.has(finding.key))
-    )
-      open.set(finding.criterion_id, open.get(finding.criterion_id) ?? finding.statement);
+  const review: LiveReview | null = reviewed
+    ? {
+        planVersion: reviewed.plan_version,
+        createdAt: reviewBundle?.created_at ?? reviewed.created_at ?? "",
+        coverage: reviewed.coverage,
+        findings: reviewed.findings,
+      }
+    : null;
+  const closures = mine
+    .filter((bundle) => bundle.subject_id.startsWith("cv_"))
+    .map((bundle) => ({
+      createdAt: bundle.created_at ?? "",
+      closed: (bundle.inputs?.findings_closed ?? "")
+        .split(",")
+        .map((key) => key.trim())
+        .filter((key) => key.length > 0),
+    }));
 
-  const nodes = input.nodes.map((node): GraphNodeLive => {
-    const touched = changed.filter((path) => matchesAny(path, node.paths)).sort();
-    // A run the loop could not narrow to this node is the whole command with
-    // the node's name on it: the loop runs every pinned check once per node
-    // for every node, so a node the change never reached has one, it passes,
-    // and counting it would read that node as further along than a node the
-    // change did reach (D-107).
-    const ran = checks
-      .filter((check) => check.node?.node_id === node.id && check.node.scope === "files")
-      .map((check) => ({ name: check.name ?? check.check_id ?? "Check", status: check.status }));
-    const criteria = node.criteria.map((id): GraphCriterionState => {
-      const binding = bound.get(id);
-      const location = binding?.evidence?.location ?? null;
-      return {
-        id,
-        state: binding?.status ?? "unbound",
-        strength: binding?.verification_strength ?? null,
-        evidence: location
-          ? location.line
-            ? `${location.file}:${location.line}`
-            : location.file
-          : (binding?.evidence?.ref ?? null),
-        finding: open.get(id) ?? null,
-      };
-    });
-    return { id: node.id, state: nodeState({ touched, ran, criteria }), changed: touched, criteria, checks: ran };
-  });
-  return {
-    attempt: latest?.attempt_id ?? null,
-    nodes,
-    // A flat plan has no node for a path to be outside of, so nothing is: its
-    // whole change set is the change, and the task screen is where it is read.
-    outside:
-      input.nodes.length === 0
-        ? []
-        : changed
-            .filter((path) => !input.nodes.some((node) => matchesAny(path, node.paths)))
-            .sort(),
-    note: note ?? reviewNote,
-  };
+  return assembleLiveGraph(
+    input.nodes,
+    {
+      attempt: latest?.attempt_id ?? null,
+      changed: diff === null ? null : parseUnifiedDiff(diff).map((file) => file.path),
+      sealed: Boolean(latest?.changeset_id),
+      checks,
+      review,
+      closures,
+    },
+    input.planVersion,
+  );
 }

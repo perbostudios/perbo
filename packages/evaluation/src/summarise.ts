@@ -1,13 +1,12 @@
 import type { LoadedFixture } from "./corpus.js";
 import { DEFECT_CLASSES, type DefectClass } from "./fixture.js";
 import type { HarnessResult, PartialRun, RunRecord } from "./harness.js";
+import { wilsonInterval, type WilsonInterval } from "@perbo/contracts";
 import {
   bootstrapQuantile,
   majority,
   resolvesAgainst,
   stability,
-  wilson,
-  type Proportion,
   type Quantile,
   type Stability,
 } from "./metrics.js";
@@ -38,8 +37,8 @@ export interface MetricSummary {
   name: string;
   threshold: number | null;
   direction: "at_least" | "at_most" | null;
-  by_fixture: Proportion;
-  by_run: Proportion;
+  by_fixture: WilsonInterval;
+  by_run: WilsonInterval;
   /** Whether the fixture-level interval sits wholly on one side of the threshold. */
   resolves: boolean | null;
   meets: boolean | null;
@@ -54,7 +53,7 @@ export interface CorpusSummary {
   defective_count: number;
   clean_count: number;
   contested_count: number;
-  contested_gate_closed: Proportion;
+  contested_gate_closed: WilsonInterval;
   runs_attempted: number;
   runs_failed: number;
   /**
@@ -65,7 +64,7 @@ export interface CorpusSummary {
    * in the run-health section underneath it. Naming the loss was not enough;
    * the numbers above it read as measurements.
    */
-  completeness: Proportion;
+  completeness: WilsonInterval;
   /**
    * Why no threshold in this summary is a measurement, or null when they are.
    *
@@ -98,16 +97,16 @@ export interface CorpusSummary {
   latency_ms: { p50: Quantile; p95: Quantile };
   cost_micros: { p50: Quantile; p95: Quantile };
   /** Completed artifacts with a defensible dollar basis, never token coverage. */
-  cost_coverage: Proportion;
+  cost_coverage: WilsonInterval;
   /** Completed artifacts whose transport exposed no defensible dollar value. */
   cost_unavailable: number;
-  did_not_complete: Proportion;
+  did_not_complete: WilsonInterval;
   /** Coverage and unresolved candidates for attribution-v2 mechanism scoring. */
   attribution?: {
     /** Blocking-mode run scores carrying the v2 confirmation field. */
-    v2_coverage: Proportion;
+    v2_coverage: WilsonInterval;
     /** File-only anchor hits that require a blind mechanism read. */
-    file_only_candidates: Proportion;
+    file_only_candidates: WilsonInterval;
   };
   /**
    * D-051's routing, measured. `clean_with_remediable` is the share of clean
@@ -116,8 +115,8 @@ export interface CorpusSummary {
    * defects a human would never have been shown.
    */
   routing: {
-    clean_with_blocking_finding: Proportion;
-    clean_with_remediable_finding: Proportion;
+    clean_with_blocking_finding: WilsonInterval;
+    clean_with_remediable_finding: WilsonInterval;
     /**
      * D-060's companion number, and it ships with the metric rather than
      * beside it in prose. Precision of stopping improves trivially if the
@@ -130,11 +129,11 @@ export interface CorpusSummary {
      */
     clean_shown_to_a_person: {
       /** Unique clean fixtures with a person-facing finding in any completed repeat. */
-      by_fixture_any_repeat: Proportion;
+      by_fixture_any_repeat: WilsonInterval;
       /** Person-facing review attempts, retained as the diagnostic repetition rate. */
-      by_run: Proportion;
+      by_run: WilsonInterval;
     };
-    defective_detected_by_routing: Proportion;
+    defective_detected_by_routing: WilsonInterval;
     remediable_findings_total: number;
     blocking_findings_on_clean_total: number;
     remediable_findings_on_clean_total: number;
@@ -195,8 +194,8 @@ function summarise(
     if (values.length > 0) perFixture.push(values);
   }
 
-  const by_fixture = wilson(perFixture.filter(majority).length, perFixture.length);
-  const by_run = wilson(runSuccesses, runTotal);
+  const by_fixture = wilsonInterval(perFixture.filter(majority).length, perFixture.length);
+  const by_run = wilsonInterval(runSuccesses, runTotal);
   const resolves =
     threshold === null || direction === null ? null : resolvesAgainst(by_fixture, threshold, direction);
   /**
@@ -204,7 +203,7 @@ function summarise(
    *
    * A metric no member of this run belongs to has measured nothing, so it
    * neither passes nor fails its threshold. The `n === 0` branch is not
-   * redundant with the comparison below it: `wilson(0, 0)` is NaN, and a NaN
+   * redundant with the comparison below it: `wilsonInterval(0, 0)` is NaN, and a NaN
    * comparison is false in both directions, which prints a bar nobody in the
    * run could have reached as a failure. The threshold stays on the row, so a
    * reader still sees what would have been measured.
@@ -432,7 +431,7 @@ export function summariseCorpus(result: HarnessResult, repeats: number): CorpusS
     }),
   );
 
-  const completeness = wilson(
+  const completeness = wilsonInterval(
     result.runs.filter((record) => record.artifact !== null).length,
     result.runs.length,
   );
@@ -486,7 +485,7 @@ export function summariseCorpus(result: HarnessResult, repeats: number): CorpusS
      * watching because a large one means "drawn from merged commits" has
      * stopped producing clean changes.
      */
-    contested_gate_closed: wilson(
+    contested_gate_closed: wilsonInterval(
       result.runs.filter(
         (record) => record.score?.contested === true && !record.score.gate_open,
       ).length,
@@ -502,20 +501,20 @@ export function summariseCorpus(result: HarnessResult, repeats: number): CorpusS
     by_class,
     latency_ms: { p50: bootstrapQuantile(latencies, 0.5), p95: bootstrapQuantile(latencies, 0.95) },
     cost_micros: { p50: bootstrapQuantile(costs, 0.5), p95: bootstrapQuantile(costs, 0.95) },
-    cost_coverage: wilson(priced.length, completed.length),
+    cost_coverage: wilsonInterval(priced.length, completed.length),
     cost_unavailable: completed.length - priced.length,
-    did_not_complete: wilson(
+    did_not_complete: wilsonInterval(
       completed.filter((record) => record.score?.did_not_complete).length,
       completed.length,
     ),
     attribution: (() => {
       const blockingRuns = blockingMode.flatMap((entry) => entry.runs).filter(scored);
       return {
-        v2_coverage: wilson(
+        v2_coverage: wilsonInterval(
           blockingRuns.filter((record) => record.score!.confirmed_detected !== undefined).length,
           blockingRuns.length,
         ),
-        file_only_candidates: wilson(
+        file_only_candidates: wilsonInterval(
           blockingRuns.filter((record) => record.score!.attribution_status === "candidate").length,
           blockingRuns.length,
         ),
@@ -539,22 +538,22 @@ export function summariseCorpus(result: HarnessResult, repeats: number): CorpusS
         onClean.filter(shownToPerson).map((record) => record.fixture_id),
       );
       return {
-        clean_with_blocking_finding: wilson(
+        clean_with_blocking_finding: wilsonInterval(
           onClean.filter((record) => record.score!.blocking_finding).length,
           onClean.length,
         ),
-        clean_with_remediable_finding: wilson(
+        clean_with_remediable_finding: wilsonInterval(
           onClean.filter((record) => record.score!.remediable_findings > 0).length,
           onClean.length,
         ),
         clean_shown_to_a_person: {
-          by_fixture_any_repeat: wilson(
+          by_fixture_any_repeat: wilsonInterval(
             shownCleanFixtureIds.size,
             observedCleanFixtureIds.size,
           ),
-          by_run: wilson(onClean.filter(shownToPerson).length, onClean.length),
+          by_run: wilsonInterval(onClean.filter(shownToPerson).length, onClean.length),
         },
-        defective_detected_by_routing: wilson(
+        defective_detected_by_routing: wilsonInterval(
           onDefective.filter((record) => record.score!.detected_by_routing).length,
           onDefective.length,
         ),

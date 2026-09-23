@@ -25,6 +25,7 @@ const base = (over: Partial<BlockingInput> = {}): BlockingInput => ({
   rule_demoted: false,
   waived: false,
   closure: "executor",
+  direction: null,
   remediation_available: true,
   ...over,
 });

@@ -1,15 +1,13 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Dialog, Notice } from "@perbo/ui";
-import type { SpecField } from "@perbo/planning/spec-text";
-import { specSymbolNames } from "@perbo/planning/spec-text";
-import { bridge } from "../data.js";
-import { InfoHint } from "../InfoHint.js";
-import { InkIcon } from "../InkIcon.js";
-import { useContractEditing } from "../tasks/contract-editor.js";
+import { Button, Dialog, InfoHint, InkIcon, Notice } from "../ui/index.js";
+import type { SpecField } from "@perbo/planning/browser";
+import { specSymbolNames } from "@perbo/planning/browser";
+import { bridge } from "../workspace/index.js";
+import { useContractEditing } from "../contract-editor.js";
 import { SpecSection } from "./SpecSection.js";
 import type { ExportedName, SpecSections, SpecView } from "../../shared/protocol.js";
-import type { PageProps } from "../shell/App.js";
+import type { PageProps } from "../shell/route.js";
 
 const Composer = lazy(() =>
   import("../tasks/Composer.js").then((module) => ({ default: module.Composer })),

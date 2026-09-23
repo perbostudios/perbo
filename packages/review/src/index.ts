@@ -1,16 +1,17 @@
-export * from "./agent-config.js";
-export * from "./blocking.js";
-export * from "./closure-verify.js";
-export * from "./credential.js";
-export * from "./graph.js";
-export * from "./legibility.js";
-export * from "./prompt.js";
-export * from "./provider.js";
-export * from "./redact.js";
-export * from "./provider-cli.js";
-export * from "./provider-codex-cli.js";
-export * from "./repo.js";
-export * from "./review.js";
-export * from "./scope.js";
-export * from "./suppression.js";
-export * from "./verdict.js";
+export { decideBlocking, isRemediableFamily, remediableFindings } from "./blocking.js";
+export { closureVerifySchema, verifyClosures } from "./closure-verify.js";
+export type { ClosureRow, ClosureVerification } from "./closure-verify.js";
+export { reviewGraph } from "./graph.js";
+export { assessLegibility } from "./legibility.js";
+export { PROMPT_VERSION } from "./prompt.js";
+export { redactReviewArtifact } from "./redact.js";
+export { RepoReader } from "./repo.js";
+export { deriveDecision, PlanNotReviewableError, runReview } from "./review.js";
+export { assessScope } from "./scope.js";
+export {
+  buildRuleAuthority,
+  buildSuppressions,
+  RuleAuthorityFileSchema,
+  SuppressionFileSchema,
+} from "./suppression.js";
+export { verdictSchemas } from "./verdict.js";

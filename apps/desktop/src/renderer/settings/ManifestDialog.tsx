@@ -1,12 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Dialog, Notice } from "@perbo/ui";
+import { Button, Dialog, Dropdown, IconButton, Notice } from "../ui/index.js";
 import {
   ManifestEditorSchema,
   type ManifestEditor,
 } from "../../shared/protocol.js";
-import { bridge, errorMessage, useAction } from "../data.js";
-import { Dropdown, IconButton } from "../Screen.js";
+import { bridge, errorMessage, useAction } from "../workspace/index.js";
 
 export function ManifestDialog({
   repoId,
@@ -20,15 +19,18 @@ export function ManifestDialog({
     queryFn: () => bridge.request({ kind: "manifest", repoId }),
     staleTime: 0,
   });
-  const [value, setValue] = useState<ManifestEditor | null>(null),
-    [digest, setDigest] = useState("");
+  // Only the person's own edit is held here. The read stays the query's, so a
+  // reopened dialog shows the configuration as it is now rather than as it was
+  // when this repository's entry was last filled.
+  const [draft, setDraft] = useState<{ digest: string; value: ManifestEditor } | null>(null);
   const action = useAction();
-  useEffect(() => {
-    if (query.data && !value) {
-      setValue(query.data.value);
-      setDigest(query.data.digest);
-    }
-  }, [query.data, value]);
+  const read = query.data;
+  const value = draft?.value ?? read?.value ?? null;
+  const digest = draft?.digest ?? read?.digest ?? "";
+  /** The configuration changed after the person started editing: saving would be refused. */
+  const moved = draft !== null && read !== undefined && read.digest !== draft.digest;
+  const edit = (next: ManifestEditor): void =>
+    setDraft({ digest: draft?.digest ?? read!.digest, value: next });
   const valid = ManifestEditorSchema.safeParse(value);
   return (
     <Dialog title="Edit worktree manifest" onClose={close}>
@@ -51,7 +53,7 @@ export function ManifestDialog({
                     icon="reject"
                     label={"Remove manifest entry " + (index + 1)}
                     onClick={() =>
-                      setValue({
+                      edit({
                         ...value,
                         entries: value.entries.filter(
                           (_, position) => position !== index,
@@ -66,7 +68,7 @@ export function ManifestDialog({
                     aria-label={"Source " + (index + 1)}
                     value={entry.source_path}
                     onChange={(event) =>
-                      setValue({
+                      edit({
                         ...value,
                         entries: value.entries.map((item, position) =>
                           position === index
@@ -83,7 +85,7 @@ export function ManifestDialog({
                     aria-label={"Destination " + (index + 1)}
                     value={entry.path}
                     onChange={(event) =>
-                      setValue({
+                      edit({
                         ...value,
                         entries: value.entries.map((item, position) =>
                           position === index
@@ -99,7 +101,7 @@ export function ManifestDialog({
                     aria-label={"Entry kind " + (index + 1)}
                     value={entry.kind}
                     onChange={(event) =>
-                      setValue({
+                      edit({
                         ...value,
                         entries: value.entries.map((item, position) =>
                           position === index
@@ -123,7 +125,7 @@ export function ManifestDialog({
                         type="checkbox"
                         checked={entry[key]}
                         onChange={(event) =>
-                          setValue({
+                          edit({
                             ...value,
                             entries: value.entries.map((item, position) =>
                               position === index
@@ -155,7 +157,7 @@ export function ManifestDialog({
           <button
             className="add-row"
             onClick={() =>
-              setValue({
+              edit({
                 ...value,
                 entries: [
                   ...value.entries,
@@ -180,7 +182,7 @@ export function ManifestDialog({
               aria-label="Off-limits paths"
               value={value.offLimits.join("\n")}
               onChange={(event) =>
-                setValue({
+                edit({
                   ...value,
                   offLimits: event.target.value
                     .split("\n")
@@ -195,13 +197,24 @@ export function ManifestDialog({
           </p>
         </>
       )}
+      {moved && (
+        <Notice tone="warning">
+          The repository configuration changed after you started editing. Saving now would be
+          refused.
+        </Notice>
+      )}
+      {moved && (
+        <Button onClick={() => setDraft(null)}>
+          Start again from the current configuration
+        </Button>
+      )}
       {action.error && (
         <Notice tone="danger">{errorMessage(action.error)}</Notice>
       )}
       <div className="row">
         <Button
           variant="primary"
-          disabled={!valid.success || action.isPending}
+          disabled={!valid.success || moved || action.isPending}
           onClick={() => {
             if (valid.success)
               void action

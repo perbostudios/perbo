@@ -31,6 +31,9 @@ A new ADR is written on its branch as `NEW-<label>.md`, with the heading `# ADR-
 | [0036](0036-queue.md) | The queue is a process over the store |
 | [0037](0037-execution-graph.md) | Large work is one ticket with an execution graph (not built) |
 | [0038](0038-subagents.md) | The executor may delegate to subagents (not built) |
+| [0039](0039-command-line-edge.md) | A command is a typed function; argv lives at the edge |
+| [0040](0040-package-interface.md) | Every package states its interface and keeps an interior |
+| [0041](0041-git-and-gh-module.md) | One module starts every git and gh process |
 
 ## Template
 

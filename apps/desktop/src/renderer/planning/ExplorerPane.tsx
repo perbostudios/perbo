@@ -1,13 +1,11 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Checkbox, Notice, Segmented, cx } from "@perbo/ui";
-import { standingGlob } from "@perbo/contracts/standing";
-import { planNodes } from "@perbo/contracts/plan";
-import { LineIcon } from "../icons.js";
-import { bridge, errorMessage } from "../data.js";
+import { Checkbox, LineIcon, Notice, Segmented, cx } from "../ui/index.js";
+import { planNodes, standingGlob } from "@perbo/contracts/browser";
+import { bridge, errorMessage } from "../workspace/index.js";
 import type { DraftMark } from "../../shared/contract-editing.js";
-import type { PageProps } from "../shell/App.js";
-import type { useContractEditing } from "../tasks/contract-editor.js";
+import type { PageProps } from "../shell/route.js";
+import type { useContractEditing } from "../contract-editor.js";
 import { ConfirmPlan } from "./ConfirmPlan.js";
 import { nodesNaming, rowMark, treeRows, viaLabel, type RowMark } from "./explorer-tree.js";
 

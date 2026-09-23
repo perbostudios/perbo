@@ -1,20 +1,19 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Button, Notice, cx } from "@perbo/ui";
-import { errorMessage, useWorkspace } from "../data.js";
-import { InkIcon } from "../InkIcon.js";
-import { Brand, HeaderSlotProvider, TitleBar } from "../Screen.js";
+import { Brand, Button, HeaderSlotProvider, InkIcon, Notice, TitleBar } from "../ui/index.js";
+import { errorMessage, useWorkspace } from "../workspace/index.js";
 import { HomePage } from "../tasks/HomePage.js";
 import { Onboarding } from "../settings/Onboarding.js";
 import { projectTicket } from "../tasks/ticket-workspace.js";
 import { isFiled } from "../../shared/archive.js";
-import type { Settings, Snapshot } from "../../shared/protocol.js";
+import type { Settings } from "../../shared/protocol.js";
 import { PlanningMode } from "../planning/PlanningMode.js";
-import { isPlanningPane, type PlanningPane } from "../planning/panes.js";
+import { isPlanningPane } from "../planning/panes.js";
 import { CreateProvider } from "./create.js";
 import { Rail, RailToggle, SETTINGS_PAGES } from "./Rail.js";
 import { useRailSize } from "./rail-size.js";
 import { ShortcutProvider, useShortcut } from "./shortcuts.js";
+import type { Route, SettingsSection, TaskView } from "./route.js";
 import { ToastProvider } from "./Toast.js";
 const SettingsPage = lazy(() =>
   import("../settings/SettingsPage.js").then((module) => ({
@@ -27,37 +26,6 @@ const TaskPage = lazy(() =>
   })),
 );
 
-export type TaskView =
-  | "auto"
-  | "contract"
-  | "loop"
-  | "output"
-  | "review"
-  | "merge"
-  | "decisions"
-  | "called-off"
-  | "complete"
-  | "explorer";
-export type SettingsSection =
-  | "general"
-  | "usage"
-  | "connections"
-  | "providers"
-  | "repositories"
-  | "about"
-  | "shortcuts";
-export type Route =
-  | {
-      page: "home" | "archive" | "setup" | "settings" | SettingsSection;
-    }
-  | { page: "planning"; sessionId: string; pane: PlanningPane }
-  | {
-      page: "task";
-      repoId: string;
-      key: string;
-      view?: TaskView;
-      edit?: boolean;
-    };
 const PAGES = [
   "home",
   "archive",
@@ -71,10 +39,6 @@ const PAGES = [
   "about",
   "shortcuts",
 ] as const;
-export interface PageProps {
-  workspace: Snapshot;
-  navigate: (route: Route) => void;
-}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function readRoute(): Route {
   const parts = location.hash.slice(1).split("/").map(decodeURIComponent);
@@ -248,10 +212,7 @@ export function App() {
         >
           <CreateProvider workspace={data} navigate={navigate}>
           <HeaderSlotProvider>
-            <div
-              className={cx("app-shell", "app--" + data.mode)}
-              data-preview={data.mode === "preview" || undefined}
-            >
+            <div className="app-shell">
               {/* The bar is the drag region; the toggle and the header's controls punch no-drag holes in it. */}
               <TitleBar>{!setup && <RailToggle />}</TitleBar>
               <div className="app-body">
@@ -287,14 +248,6 @@ export function App() {
                   </Suspense>
                 </main>
               </div>
-              {data.mode === "preview" && (
-                <div
-                  className="preview-indicator"
-                  title="Interactive preview with sample records. No coding agents run and no repositories are accessed."
-                >
-                  Sample workspace
-                </div>
-              )}
             </div>
           </HeaderSlotProvider>
           </CreateProvider>

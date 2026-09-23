@@ -3,6 +3,7 @@ import { z } from "zod";
 import { CheckResultSchema } from "./check.js";
 import { SealedCommitSchema } from "./changeset.js";
 import { ContextItemSchema } from "./context.js";
+import { ReviewCostBasisSchema } from "./cost.js";
 import {
   ChangeSetIdSchema,
   CheckIdSchema,
@@ -392,12 +393,6 @@ export const ReviewErrorSchema = z.strictObject({
 export type ReviewError = z.infer<typeof ReviewErrorSchema>;
 
 export const REVIEW_ARTIFACT_SCHEMA_VERSION = 1;
-export const ReviewCostBasisSchema = z.enum([
-  "transport_reported",
-  "provider_list_estimate",
-  "unavailable",
-]);
-export type ReviewCostBasis = z.infer<typeof ReviewCostBasisSchema>;
 
 export const ReviewArtifactSchema = z.strictObject({
   schema_version: z.literal(REVIEW_ARTIFACT_SCHEMA_VERSION),
