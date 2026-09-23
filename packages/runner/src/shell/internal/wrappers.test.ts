@@ -194,3 +194,43 @@ describe("a writer whose destination is the placeholder", () => {
     });
   }
 });
+
+/**
+ * A placeholder inside a command line a nested shell runs, or inside a `find`
+ * body: the wrapper puts its input into a line this guard reads as written, so
+ * what that line runs cannot be read, and the refusal names the wrapper.
+ */
+const SUBSTITUTED_INTO_A_NESTED_COMMAND = [
+  "echo /etc/passwd | xargs -I{} sh -c 'rm {}'",
+  "echo 'rm /etc/x' | xargs -J % sh -c %",
+  "echo 'rm /etc/x' | xargs -J % pnpm exec -c %",
+  "xargs -I{} bash -c 'cp a {}'",
+  "xargs -I{} npx -c 'rm {}'",
+  "xargs -I{} pnpm exec --call='rm {}'",
+  "echo /etc/passwd | xargs -I{} find . -exec rm {} \\;",
+  "echo /etc/passwd | xargs -I{} find . -exec sh -c 'rm {}' \\;",
+];
+
+/** The same shapes where the input stays out of the nested line. */
+const OUTSIDE_THE_NESTED_COMMAND = [
+  "xargs -I{} sh -c 'rm sub/x'",
+  // BSD `-J` replaces only a whole operand, so `rm %` runs as written.
+  "xargs -J % sh -c 'rm %'",
+  // Appended words follow the whole `find` expression and reach no body.
+  "xargs find . -name x -exec rm {} \\;",
+];
+
+describe("a placeholder substituted into a nested command", () => {
+  for (const command of SUBSTITUTED_INTO_A_NESTED_COMMAND) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("xargs");
+    });
+  }
+
+  for (const command of OUTSIDE_THE_NESTED_COMMAND) {
+    it(`allows ${command}`, () => {
+      expect(decision(command), command).toBe("allowed");
+    });
+  }
+});

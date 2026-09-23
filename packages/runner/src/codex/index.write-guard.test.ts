@@ -57,8 +57,19 @@ const MISREAD = [
   "cp a sub ';' /etc",
 ];
 
+/** A placeholder `xargs` substitutes into a line a nested shell runs, on both paths. */
+const SUBSTITUTED_INTO_A_NESTED_COMMAND = [
+  "echo /etc/passwd | xargs -I{} sh -c 'rm {}'",
+  "echo 'rm /etc/x' | xargs -J % sh -c %",
+];
+
 describe("a write neither executor can see the destination of", () => {
-  for (const command of [...FROM_STANDARD_INPUT, ...SUBSTITUTED_FOR_THE_DESTINATION, ...MISREAD]) {
+  for (const command of [
+    ...FROM_STANDARD_INPUT,
+    ...SUBSTITUTED_FOR_THE_DESTINATION,
+    ...MISREAD,
+    ...SUBSTITUTED_INTO_A_NESTED_COMMAND,
+  ]) {
     it(`is refused by the hook and by Codex — ${command}`, () => {
       const hook = judgePreToolCall(
         { tool_name: "Bash", tool_input: { command }, tool_use_id: "hook" },

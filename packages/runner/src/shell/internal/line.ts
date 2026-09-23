@@ -172,8 +172,11 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   let cwd = context.cwd;
   /** True when the nested command runs in this shell rather than a new one. */
   let nestedRunsHere = false;
-  /** The wrapper standing in front that supplies the command its operands. */
-  let supplied: SuppliedOperands | undefined;
+  /**
+   * The wrapper standing in front that supplies the command its operands — the
+   * one on these words, or the one in front of the `find` whose body they are.
+   */
+  let supplied: SuppliedOperands | undefined = context.supplied;
   /**
    * The placeholder that wrapper substitutes the words it reads for, where one
    * of its options names one. It is read as that option's value is read, so a
@@ -309,6 +312,32 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     return stopHere();
   };
 
+  /** Whether the wrapper in front substitutes its input into this word. */
+  const carries = (word: Word): boolean =>
+    supplied !== undefined &&
+    supplied.placeholder !== null &&
+    (supplied.wholeWord
+      ? word.value === supplied.placeholder
+      : word.value.includes(supplied.placeholder));
+
+  /**
+   * A command line a nested shell runs, with the wrapper in front substituting
+   * its input into it. The words land inside a line this guard reads as
+   * written, so what runs cannot be read.
+   */
+  const substitutedInto = (operand: Word, by: string): Analysis | null => {
+    if (supplied === undefined || !carries(operand)) return null;
+    findings.push({
+      detail:
+        `the command ${operand.raw} passed to ${by} cannot be read — ${supplied.wrapper} ` +
+        `substitutes the words it reads from standard input for ${supplied.placeholder} in it: ` +
+        `${context.segment.slice(0, 200)}`,
+      target: null,
+      resolved: null,
+    });
+    return stopHere();
+  };
+
   /**
    * Where a move leaves the shell.
    *
@@ -335,13 +364,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     if (operand === undefined) return unknownOption(option, wrapper);
     // A directory the wrapper in front supplies from its standard input is a
     // destination the line never spelled, as an operand carrying it would be.
-    if (
-      supplied !== undefined &&
-      supplied.placeholder !== null &&
-      (supplied.wholeWord
-        ? operand.value === supplied.placeholder
-        : operand.value.includes(supplied.placeholder))
-    ) {
+    if (supplied !== undefined && carries(operand)) {
       findings.push({
         detail:
           `the directory ${wrapper} ${option} runs in cannot be resolved — ${supplied.wrapper} ` +
@@ -402,6 +425,8 @@ function analyzeWords(words: Word[], context: Context): Analysis {
           if (operand.variable || operand.substitutions.length > 0) {
             return unreadable(operand, `${wrapper} ${name}`);
           }
+          const into = substitutedInto(operand, `${wrapper} ${name}`);
+          if (into !== null) return into;
           nested.push(operand.value);
           i += attached === null ? 2 : 1;
           continue;
@@ -435,6 +460,8 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         if (operand.variable || operand.substitutions.length > 0) {
           return unreadable(operand, `${wrapper} ${raw}`);
         }
+        const into = substitutedInto(operand, `${wrapper} ${raw}`);
+        if (into !== null) return into;
         nested.push(operand.value);
         i += 2;
         continue;
@@ -631,6 +658,8 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       if (operand.variable || operand.substitutions.length > 0) {
         return unreadable(operand, `${value} -c`);
       }
+      const into = substitutedInto(operand, `${value} -c`);
+      if (into !== null) return into;
       nested.push(operand.value);
       break;
     }
@@ -737,9 +766,16 @@ function analyzeWords(words: Word[], context: Context): Analysis {
           if (word.value === "+" && body[body.length - 1]?.value === "{}") break;
           body.push(word);
         }
-        // The body is a command of its own: it inherits the directory, not the
-        // standard input the line gave the `find`.
-        const inner = analyzeWords(body, { ...context, cwd, stdin: undefined });
+        // The body is a command of its own: it inherits the directory, and the
+        // words a wrapper in front of the `find` substitutes into it, but not
+        // the standard input the line gave the `find`. Words a wrapper appends
+        // land after the whole expression, never in a body.
+        const inner = analyzeWords(body, {
+          ...context,
+          cwd,
+          stdin: undefined,
+          supplied: supplied?.placeholder === null ? undefined : supplied,
+        });
         findings.push(...inner.findings);
         if (!inner.accounted) accounted = false;
         // `find … -exec rm {} ;` runs `rm`: what the line writes is the body's,
