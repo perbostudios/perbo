@@ -370,6 +370,12 @@ const ROWS: Array<[string, Decision, string]> = [
   ["ls sub | xargs -I{} cp {} <root>/out", "allowed", "xargs-stdin"],
   ["ls sub | xargs -0 -n1 cp -t <root>/out", "allowed", "xargs-stdin"],
   ["ls sub | xargs grep TODO", "allowed", "xargs-stdin"],
+  // A placeholder standing where the destination goes is a word the line does
+  // not spell either.
+  ["ls sub | xargs -I{} rm {}", "refused", "xargs-stdin"],
+  ["ls sub | xargs -I{} tee {}", "refused", "xargs-stdin"],
+  ["ls sub | xargs -i mkdir {}", "refused", "xargs-stdin"],
+  ["ls sub | xargs -I{} rm sub/generated", "allowed", "xargs-stdin"],
 
   // ---- the filesystem root is a directory a shell can stand in.
   ["cd /", "allowed", "root-directory"],

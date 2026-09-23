@@ -42,9 +42,32 @@ const DESTINATION_ON_THE_LINE = [
   "xargs -J % cp % out",
   "xargs -0 -n1 cp -t out",
   "xargs --replace=% mv % out",
+  // A substituting wrapper whose operands carry no placeholder runs the line as
+  // it stands, once per word it reads.
+  "xargs -I{} rm sub/generated",
   "xargs grep TODO",
   "xargs ls",
   "xargs curl -o out/payload https://example.com/x",
+];
+
+/**
+ * The placeholder standing where the destination goes. Every operand of an
+ * `rm`, a `touch`, a `mkdir`, a `tee` or an `install -d` is a destination, and
+ * the last operand of a `cp` is, so a placeholder in one of those positions is
+ * a path the line does not spell any more than an appended word is.
+ */
+const SUBSTITUTED_FOR_THE_DESTINATION = [
+  "echo /etc/passwd | xargs -I{} rm {}",
+  "xargs -I{} touch {}",
+  "xargs -I{} mkdir {}",
+  "xargs -I{} tee {}",
+  "xargs -J % install -d %",
+  "xargs --replace=% rm %",
+  "xargs -I{} cp src {}",
+  // `-i` and `--replace` take a value only attached, so the word after one is
+  // the command, and the placeholder they stand for is `{}`.
+  "xargs -i rm {}",
+  "xargs --replace tee {}",
 ];
 
 /** Run `body` with the xargs entry no longer saying it appends operands. */
@@ -77,6 +100,17 @@ describe("a writer whose destination is on the line", () => {
   for (const command of DESTINATION_ON_THE_LINE) {
     it(`allows ${command}`, () => {
       expect(decision(command), command).toBe("allowed");
+    });
+  }
+});
+
+describe("a writer whose destination is the placeholder", () => {
+  for (const command of SUBSTITUTED_FOR_THE_DESTINATION) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+      // The refusal names the wrapper that supplies the word, because the line
+      // the agent typed spells no path for it to recognise.
+      expect(sentence(command), command).toContain("xargs");
     });
   }
 });

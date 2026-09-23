@@ -38,8 +38,18 @@ const FROM_STANDARD_INPUT = [
   "xargs cp a",
 ];
 
+/** Destinations `xargs` substitutes for its placeholder, on both paths. */
+const SUBSTITUTED_FOR_THE_DESTINATION = [
+  "echo /etc/passwd | xargs -I{} rm {}",
+  "xargs -I{} touch {}",
+  "xargs -i rm {}",
+];
+
+/** The same wrapper where the line spells the destination, on both paths. */
+const DESTINATION_ON_THE_LINE = ["xargs -I{} cp {} sub", "xargs -0 -n1 cp -t sub"];
+
 describe("a write neither executor can see the destination of", () => {
-  for (const command of FROM_STANDARD_INPUT) {
+  for (const command of [...FROM_STANDARD_INPUT, ...SUBSTITUTED_FOR_THE_DESTINATION]) {
     it(`is refused by the hook and by Codex — ${command}`, () => {
       const hook = judgePreToolCall(
         { tool_name: "Bash", tool_input: { command }, tool_use_id: "hook" },
@@ -52,6 +62,21 @@ describe("a write neither executor can see the destination of", () => {
       expect(hook.rule, command).toBe("write_outside_worktree");
       expect(codex.decision, command).toBe("denied");
       expect(codex.rule, command).toBe("write_outside_worktree");
+    });
+  }
+});
+
+describe("a write both executors can see the destination of", () => {
+  for (const command of DESTINATION_ON_THE_LINE) {
+    it(`is allowed by the hook and by Codex — ${command}`, () => {
+      const hook = judgePreToolCall(
+        { tool_name: "Bash", tool_input: { command }, tool_use_id: "hook" },
+        state(),
+        new Date(),
+      ).decision;
+
+      expect(hook.decision, command).not.toBe("denied");
+      expect(codexCommandDecision(command, root, state()).decision, command).not.toBe("denied");
     });
   }
 });

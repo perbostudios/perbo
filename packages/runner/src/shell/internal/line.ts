@@ -1,4 +1,10 @@
-import { basename, isAssignment, optionSet, type Context } from "./command.js";
+import {
+  basename,
+  isAssignment,
+  optionSet,
+  type Context,
+  type SuppliedOperands,
+} from "./command.js";
 import {
   destinationSentence,
   judgeTarget,
@@ -166,13 +172,13 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   let cwd = context.cwd;
   /** True when the nested command runs in this shell rather than a new one. */
   let nestedRunsHere = false;
-  /** The wrapper standing in front of the command that appends its operands. */
-  let appendsOperands: string | undefined;
+  /** The wrapper standing in front that supplies the command its operands. */
+  let supplied: SuppliedOperands | undefined;
   /**
-   * The placeholder the wrapper standing in front substitutes the words it
-   * reads for, where one of its options names one. It is read as that option's
-   * value is read, so a value attached to a short option — the `list.txt` of
-   * `xargs -alist.txt` — is never taken for a cluster of option letters.
+   * The placeholder that wrapper substitutes the words it reads for, where one
+   * of its options names one. It is read as that option's value is read, so a
+   * value attached to a short option — the `list.txt` of `xargs -alist.txt` —
+   * is never taken for a cluster of option letters.
    */
   let placeholder: string | null;
 
@@ -291,6 +297,11 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     const dirs = optionSet(spec.dirs);
     const refused = optionSet(spec.refuse);
     const substitutes = optionSet(spec.substitutes);
+    const attachedValues = optionSet(spec.attachedValues);
+    /** The placeholder a substituting option names, or the wrapper's default. */
+    const substituted = (option: string, value: string | null) => {
+      if (substitutes.has(option)) placeholder = value ?? spec.defaultPlaceholder ?? null;
+    };
     while (i < words.length) {
       const word = words[i]!;
       const raw = word.value;
@@ -321,8 +332,13 @@ function analyzeWords(words: Word[], context: Context): Analysis {
           i += attached === null ? 2 : 1;
           continue;
         }
+        if (attachedValues.has(name)) {
+          substituted(name, attached);
+          i += 1;
+          continue;
+        }
         if (values.has(name)) {
-          if (substitutes.has(name)) placeholder = attached ?? words[i + 1]?.value ?? null;
+          substituted(name, attached ?? words[i + 1]?.value ?? null);
           i += attached === null ? 2 : 1;
           continue;
         }
@@ -360,24 +376,26 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       let unknown: string | null = null;
       while (at < raw.length) {
         const option = `-${raw[at]}`;
+        const inline = raw.slice(at + 1);
         if (flags.has(option)) {
           at += 1;
           continue;
         }
         if (refused.has(option)) return refusedOption(option, wrapper);
         if (dirs.has(option)) {
-          const inline = raw.slice(at + 1);
           const operand = inline.length > 0 ? { ...word, raw: inline, value: inline } : words[i + 1];
           const stop = moveInto(operand, option, wrapper);
           if (stop !== null) return stop;
           separate = inline.length === 0;
           break;
         }
+        if (attachedValues.has(option)) {
+          substituted(option, inline.length > 0 ? inline : null);
+          break;
+        }
         if (values.has(option)) {
-          separate = raw.length === at + 1;
-          if (substitutes.has(option)) {
-            placeholder = separate ? (words[i + 1]?.value ?? null) : raw.slice(at + 1);
-          }
+          separate = inline.length === 0;
+          substituted(option, separate ? (words[i + 1]?.value ?? null) : inline);
           break;
         }
         unknown = option;
@@ -437,7 +455,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       placeholder = null;
       const stop = consumeOptions(program, wrapper);
       if (stop !== null) return stop;
-      if (wrapper.appendsOperands === true && placeholder === null) appendsOperands = program;
+      if (wrapper.appendsOperands === true) supplied = { wrapper: program, placeholder };
       i += wrapper.operands ?? 0;
       continue;
     }
@@ -514,9 +532,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       // written more than the destinations this table names, so a caller
       // deciding the line by where those landed has not seen the whole act.
       if (spec.beyondNamedPaths !== true) mutating = true;
-      findings.push(
-        ...writerFindings(verb, spec, rest, { ...context, cwd, appendsOperands }),
-      );
+      findings.push(...writerFindings(verb, spec, rest, { ...context, cwd, supplied }));
     } else if (verb === "ln") {
       programs.push(verb);
       mutating = true;

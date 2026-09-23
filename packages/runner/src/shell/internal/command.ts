@@ -9,11 +9,23 @@ export interface Context {
   /** Where the command's standard input comes from, where the line says. */
   stdin?: StdinSource | undefined;
   /**
-   * The wrapper that appends the words it reads from standard input to this
-   * command, where one stands in front of it. Those words are operands, so a
+   * The operands a wrapper supplies to this command from its standard input,
+   * where one stands in front of it. Those words are not on the line, so a
    * writer reached this way names destinations the line does not carry.
    */
-  appendsOperands?: string | undefined;
+  supplied?: SuppliedOperands | undefined;
+}
+
+/**
+ * How a wrapper hands a command the words it reads: `xargs` appends them as
+ * further operands, or, where one of its options names a placeholder,
+ * substitutes them for that placeholder in the operands the line spells.
+ */
+export interface SuppliedOperands {
+  /** The wrapper's name, for the sentence a refusal writes. */
+  wrapper: string;
+  /** The placeholder the words replace, or null where they are appended. */
+  placeholder: string | null;
 }
 
 export const basename = (word: string) => word.slice(word.lastIndexOf("/") + 1);
