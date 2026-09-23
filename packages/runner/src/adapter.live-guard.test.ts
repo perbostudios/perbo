@@ -34,7 +34,6 @@ const model = process.env.PERBO_AGENT_MODEL ?? "sonnet";
 const describeLive = LIVE ? describe : describe.skip;
 
 if (!LIVE) {
-  // eslint-disable-next-line no-console -- the reason a skipped gate was skipped
   console.log(
     "[live-guard] skipped: set PERBO_LIVE_AGENT_TESTS=1 (and have a `claude` " +
       "credential) to run the pre-execution guard against the pinned binary.",

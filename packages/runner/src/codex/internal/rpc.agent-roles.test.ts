@@ -69,7 +69,6 @@ const CODEX_PRESENT = spawnSync(CODEX_BINARY, ["--version"], { stdio: "ignore" }
 const describeIfCodex = CODEX_PRESENT ? describe : describe.skip;
 
 if (!CODEX_PRESENT) {
-  // eslint-disable-next-line no-console -- the reason a skipped gate was skipped
   console.log(
     "[codex-agent-roles] skipped: `codex` was not found on PATH. This probe spends nothing and " +
       "needs no login (an isolated CODEX_HOME with no auth.json, never a live turn) — set " +
