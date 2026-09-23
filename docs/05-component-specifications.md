@@ -40,8 +40,6 @@ Versioned Zod schemas and inferred types — files, not tables — for every art
 
 **Emits:** the typed schemas and inferred types every other package imports; no runtime behaviour of its own. Not published to a package registry — it ships inlined in the CLI bundle.
 
-Decided, not built: grouping a large ticket's plan into an execution graph, and a size derived from it ([D-100](11-open-decisions.md), [D-104](11-open-decisions.md)).
-
 ## `packages/model` — `@perbo/model`
 
 The model call: one port over one turn of the read-or-submit protocol, and three transports onto it — the Anthropic SDK, a local `claude` binary and a local `codex` binary ([D-NEW-model-client](11-open-decisions.md)).
