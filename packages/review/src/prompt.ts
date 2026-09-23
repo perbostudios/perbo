@@ -33,10 +33,10 @@ import {
  * below: a changed byte anywhere in that surface is a new version and a
  * fresh corpus score.
  */
-export const PROMPT_VERSION = "reviewer_v10";
+export const PROMPT_VERSION = "reviewer_v11";
 
 /**
- * The delimiter namespace is `perbo:`, from `reviewer_v10`. The version covers
+ * The delimiter namespace is `perbo:`. The version covers
  * everything the reviewer is shown, not only the system prompt, so a byte
  * changed here is a new PROMPT_VERSION and a fresh corpus score.
  */

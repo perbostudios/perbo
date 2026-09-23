@@ -218,7 +218,7 @@ Immutable and versioned. The load-bearing shape:
   "target": { "type": "changeset", "id": "cs_…", "base_commit": "a1b2c3…", "head_commit": "d4e5f6…" },
   "plan_version": 1,
   "independence": {
-    "context_builder": "reviewer_v10",
+    "context_builder": "reviewer_v11",
     "executor_narrative_visible": false,
     "executor_transcript_visible": false,
     "separate_process": true,
@@ -243,7 +243,7 @@ Immutable and versioned. The load-bearing shape:
   "decision": "approve | changes_requested | escalate | remediable | error | incomplete",
   "routing_policy": "d069",
   "cost_micros": 210000,
-  "model": { "provider": "claude-cli", "model_id": "…", "prompt_version": "reviewer_v10",
+  "model": { "provider": "claude-cli", "model_id": "…", "prompt_version": "reviewer_v11",
              "input_tokens": 42000, "cache_read_input_tokens": 18000, "cache_creation_input_tokens": 6000,
              "output_tokens": 1800, "cost_basis": "transport_reported | provider_list_estimate | unavailable" }
 }

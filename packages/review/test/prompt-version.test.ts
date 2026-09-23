@@ -8,8 +8,8 @@ import { PROMPT_VERSION, systemPrompt } from "../src/prompt.js";
 import { runReview } from "../src/review.js";
 import { coverageEntry, scriptedModel, submits } from "./double.js";
 
-/** sha256 of `systemPrompt(contract, "P1")` at `reviewer_v10`, the one prompt version. */
-const REVIEWER_V10_P1_DIGEST = "11336132723b5a18e02802a4a16e6ea007e80245662e80e3fdd06911e0af3135";
+/** sha256 of `systemPrompt(contract, "P1")` at `reviewer_v11`, the one prompt version. */
+const REVIEWER_V11_P1_DIGEST = "11336132723b5a18e02802a4a16e6ea007e80245662e80e3fdd06911e0af3135";
 
 const contract: PlanContract = {
   plan_id: "plan_pv",
@@ -79,10 +79,10 @@ const verdict = {
 };
 
 describe("the reviewer prompt version", () => {
-  it("is reviewer_v10, byte-identical to the pinned digest", () => {
-    expect(PROMPT_VERSION).toBe("reviewer_v10");
+  it("is reviewer_v11, byte-identical to the pinned digest", () => {
+    expect(PROMPT_VERSION).toBe("reviewer_v11");
     const prompt = systemPrompt(contract, "P1");
-    expect(createHash("sha256").update(prompt).digest("hex")).toBe(REVIEWER_V10_P1_DIGEST);
+    expect(createHash("sha256").update(prompt).digest("hex")).toBe(REVIEWER_V11_P1_DIGEST);
   });
 
   it("delimits everything it shows the reviewer under one namespace, perbo:", () => {
@@ -97,7 +97,7 @@ describe("the reviewer prompt version", () => {
 });
 
 describe("runReview stamps the prompt version that produced the artifact", () => {
-  it("stamps reviewer_v10 and shows the model the prompt", async () => {
+  it("stamps reviewer_v11 and shows the model the prompt", async () => {
     const model = scriptedModel([submits(verdict)]);
     const outcome = await runReview({
       contract,
@@ -107,8 +107,8 @@ describe("runReview stamps the prompt version that produced the artifact", () =>
       model,
       now: new Date("2026-09-02T10:00:00Z"),
     });
-    expect(outcome.artifact.model.prompt_version).toBe("reviewer_v10");
-    expect(outcome.artifact.independence.context_builder).toBe("reviewer_v10");
-    expect(outcome.bundle.prompt_version).toBe("reviewer_v10");
+    expect(outcome.artifact.model.prompt_version).toBe("reviewer_v11");
+    expect(outcome.artifact.independence.context_builder).toBe("reviewer_v11");
+    expect(outcome.bundle.prompt_version).toBe("reviewer_v11");
   });
 });
