@@ -331,6 +331,17 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     return stopHere();
   };
 
+  const rootedOption = (option: string, wrapper: string): Analysis => {
+    findings.push({
+      detail:
+        `${wrapper} ${option} runs the command under another root directory, so every path it ` +
+        `names resolves somewhere this guard does not read: ${context.segment.slice(0, 200)}`,
+      target: null,
+      resolved: null,
+    });
+    return stopHere();
+  };
+
   /** Whether the wrapper in front substitutes its input into this word. */
   const carries = (word: Word): boolean => carriesInto(supplied, word.value);
 
@@ -460,6 +471,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     const dirs = optionSet(spec.dirs);
     const destinations = optionSet(spec.destinations);
     const refused = optionSet(spec.refuse);
+    const roots = optionSet(spec.roots);
     const substitutes = optionSet(spec.substitutes);
     const wholeWord = optionSet(spec.substitutesWholeWord);
     const attachedValues = optionSet(spec.attachedValues);
@@ -482,6 +494,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         const name = eq === -1 ? raw : raw.slice(0, eq);
         const attached = eq === -1 ? null : raw.slice(eq + 1);
         if (refused.has(name)) return refusedOption(raw, wrapper);
+        if (roots.has(name)) return rootedOption(raw, wrapper);
         if (dirs.has(name)) {
           const operand = attached === null ? words[i + 1] : { ...word, raw: attached, value: attached };
           const stop = moveInto(operand, name, wrapper);
@@ -560,6 +573,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
           continue;
         }
         if (refused.has(option)) return refusedOption(option, wrapper);
+        if (roots.has(option)) return rootedOption(option, wrapper);
         if (dirs.has(option)) {
           const operand = inline.length > 0 ? { ...word, raw: inline, value: inline } : words[i + 1];
           const stop = moveInto(operand, option, wrapper);

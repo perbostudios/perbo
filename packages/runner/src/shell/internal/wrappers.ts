@@ -25,6 +25,11 @@ export interface WrapperSpec {
   /** Options refused by name, because their operand hides a command. */
   refuse?: readonly string[];
   /**
+   * Options refused by name because their operand becomes the root directory
+   * of the command the wrapper runs, as `sudo -R` makes it.
+   */
+  roots?: readonly string[];
+  /**
    * True where the wrapper appends the words it reads from standard input to
    * the command it runs. Those words are operands the line does not spell, so a
    * writer behind such a wrapper is handed destinations the guard cannot see.
@@ -70,8 +75,9 @@ export const WRAPPERS = new Map<string, WrapperSpec>([
   ["nohup", { flags: ["--help", "--version"] }],
   ["sudo", {
     flags: ["-b", "-E", "-e", "-H", "-i", "-K", "-k", "-l", "-n", "-P", "-S", "-s", "-V", "-v", "-A", "--background", "--edit", "--set-home", "--login", "--remove-timestamp", "--list", "--non-interactive", "--preserve-groups", "--stdin", "--shell", "--version", "--validate", "--askpass", "--reset-timestamp"],
-    values: ["-C", "-g", "-h", "-p", "-R", "-r", "-T", "-t", "-U", "-u", "-c", "--close-from", "--group", "--host", "--prompt", "--chroot", "--role", "--command-timeout", "--type", "--other-user", "--user"],
+    values: ["-C", "-g", "-h", "-p", "-r", "-T", "-t", "-U", "-u", "-c", "--close-from", "--group", "--host", "--prompt", "--role", "--command-timeout", "--type", "--other-user", "--user"],
     dirs: ["-D", "--chdir"],
+    roots: ["-R", "--chroot"],
   }],
   ["doas", { flags: ["-n", "-s", "-L"], values: ["-a", "-C", "-u"] }],
   ["timeout", {

@@ -294,6 +294,27 @@ describe("a destination the writer table does not name", () => {
 });
 
 /**
+ * `sudo -R` runs the command under another root directory, where every path
+ * the command names resolves somewhere this guard does not read — inside the
+ * worktree or not.
+ */
+const UNDER_ANOTHER_ROOT = [
+  "sudo -R /etc rm x",
+  "sudo --chroot=/etc rm x",
+  "sudo -nR /etc rm x",
+  "sudo -R src rm x",
+];
+
+describe("a command run under another root directory", () => {
+  for (const command of UNDER_ANOTHER_ROOT) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("under another root directory");
+    });
+  }
+});
+
+/**
  * One `xargs` behind another whose input reaches it: the command the inner one
  * runs is built from two inputs, and the refusal names the outer wrapper.
  */
