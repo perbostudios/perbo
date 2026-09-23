@@ -1090,9 +1090,18 @@ export function inspectSegments(
       segments: [],
     };
   }
-  const { texts, separators, balanced, bodies } = scanSegments(command, { comments: true });
+  const { texts, separators, balanced, bodies, unreadable } = scanSegments(command, {
+    comments: true,
+  });
   const heredocs = heredocQueue(bodies);
   const findings: WriteFinding[] = [];
+  if (unreadable !== null) {
+    findings.push({
+      detail: `this line cannot be read — ${unreadable}: ${command.slice(0, 200)}`,
+      target: null,
+      resolved: null,
+    });
+  }
   const segments: CommandSegment[] = [];
   let cwd = start;
   /** The stage a pipe put before this one, which is where its input comes from. */

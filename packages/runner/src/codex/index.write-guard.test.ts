@@ -48,10 +48,16 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
 /** The same wrapper where the line spells the destination, on both paths. */
 const DESTINATION_ON_THE_LINE = ["xargs -I{} cp {} sub", "xargs -0 -n1 cp -t sub"];
 
-/** Writes outside the worktree that a misreading of the line hid, on both paths. */
+/** Writes outside the worktree that a misreading of the line would hide, on both paths. */
 const MISREAD = [
-  // A comment's words read as operands: `-t sub` made `/etc/x` a source.
+  // A comment's words read as operands: `-t sub` would make `/etc/x` a source.
   "cp a /etc/x # -t sub",
+  // A `#` both shells read as a character, read as a comment hiding the `cp`.
+  "echo ${x:-a #}; cp a /etc/x",
+  "cat <(true)#x; cp a /etc/x",
+  "(( 1 #)); cp a /etc/x",
+  // A `#` bash and zsh disagree on.
+  "cp a /etc/x ${x:+{a} #} -t sub",
   // A `find -exec` terminator read as the end of a writer's operands.
   "cp a sub + /etc",
   "cp a sub ';' /etc",

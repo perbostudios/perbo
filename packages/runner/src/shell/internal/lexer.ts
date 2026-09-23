@@ -217,6 +217,128 @@ function skipHeredocBodies(
   return at;
 }
 
+/** Skip the quoted text that starts at `from`, returning where it ends, or null. */
+function skipQuoted(text: string, from: number): number | null {
+  const quote = text[from]!;
+  for (let i = from + 1; i < text.length; i += 1) {
+    if (quote === '"' && text[i] === "\\") i += 1;
+    else if (text[i] === quote) return i + 1;
+  }
+  return null;
+}
+
+/**
+ * Where a `${…}` starting at `from` ends, as bash reads it and as zsh does.
+ *
+ * Both skip quoted text and substitutions inside one, and both read a `#` in
+ * one as a character. They disagree on a bare `{` inside: bash ends the
+ * expansion at the first `}` that no nested `${` claims, and zsh counts the
+ * `{`, so `${x:-{a} #}` ends after `{a}` under bash — the ` #}` then opening a
+ * comment — and at the last `}` under zsh. Null where bash finds no end; where
+ * zsh finds none, its end is the end of the text.
+ */
+function readParameterExpansion(text: string, from: number): { bash: number; zsh: number } | null {
+  let bashDepth = 1;
+  let zshDepth = 1;
+  let bash: number | null = null;
+  let i = from + 2;
+  while (i < text.length) {
+    const ch = text[i]!;
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      const end = skipQuoted(text, i);
+      if (end === null) break;
+      i = end;
+      continue;
+    }
+    if (ch === "`" || (ch === "$" && text[i + 1] === "(")) {
+      const read = readSubstitution(text, i);
+      if (read === null) break;
+      i = read.end;
+      continue;
+    }
+    if (ch === "$" && text[i + 1] === "{") {
+      if (bash === null) bashDepth += 1;
+      zshDepth += 1;
+      i += 2;
+      continue;
+    }
+    if (ch === "{") zshDepth += 1;
+    if (ch === "}") {
+      if (bash === null) {
+        bashDepth -= 1;
+        if (bashDepth === 0) bash = i + 1;
+      }
+      zshDepth -= 1;
+      if (zshDepth === 0) return { bash: bash ?? i + 1, zsh: i + 1 };
+    }
+    i += 1;
+  }
+  return bash === null ? null : { bash, zsh: text.length };
+}
+
+/**
+ * Where the balanced text that a `(` or `[` at `from` opens ends, just past the
+ * character that closes it, or null. Quoted text and substitutions inside are
+ * skipped.
+ */
+function readBalanced(text: string, from: number, open: string, close: string): number | null {
+  let depth = 1;
+  let i = from + 1;
+  while (i < text.length) {
+    const ch = text[i]!;
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      const end = skipQuoted(text, i);
+      if (end === null) return null;
+      i = end;
+      continue;
+    }
+    if (ch === "`" || (ch === "$" && text[i + 1] === "(")) {
+      const read = readSubstitution(text, i);
+      if (read === null) return null;
+      i = read.end;
+      continue;
+    }
+    if (ch === open) depth += 1;
+    else if (ch === close) {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+    i += 1;
+  }
+  return null;
+}
+
+/**
+ * Where an arithmetic command `(( … ))` starting at `from` ends, or null where
+ * the `((` opens two subshells. Both shells take it as arithmetic only where
+ * the `)` balancing the second `(` is followed at once by another.
+ */
+function readArithmeticCommand(text: string, from: number): number | null {
+  const inner = readBalanced(text, from + 1, "(", ")");
+  return inner !== null && text[inner] === ")" ? inner + 1 : null;
+}
+
+/**
+ * What a `(` the scan stands inside opened: a list of commands (a subshell, a
+ * group), a process substitution `<(…)`, or a parenthesis inside a word, as an
+ * array assignment's `x=(…)` is. It decides what a `#` straight after the `)`
+ * that closes it is: a comment after a list, a character after a process
+ * substitution, and after a word's parenthesis a character to bash and a
+ * comment to zsh.
+ */
+type Paren = "list" | "substitution" | "word";
+
+/** Whether the next character starts a word, continues one, or is in dispute. */
+type Position = "start" | "inside" | "disputed";
+
 /**
  * The same line with every heredoc body removed.
  *
@@ -229,7 +351,8 @@ function skipHeredocBodies(
  * two operators on one line take their bodies in that order — and ends at the
  * first line equal to the tag. An unterminated body runs to the end of the
  * text. `<<<` is a here-string, whose word is on the line itself, and is left
- * alone.
+ * alone, as is a `<<` inside `${…}`, `$[…]`, `$((…))` or `((…))`, where it is
+ * text or a shift.
  *
  * What the command does with the data is the command's own — with one
  * exception, and it is the reason the bodies are returned rather than dropped:
@@ -240,24 +363,35 @@ function skipHeredocBodies(
  * runs to the end of its line, and the shell runs none of it — not the words
  * after it, not an operator, and not a `<<` that would otherwise take the lines
  * after it as a body. A `#` inside a word, a quoted one and an escaped one are
- * characters. A backslash at the end of a comment continues nothing, so the
- * newline after it still ends the command.
+ * characters, and so is one inside `${…}`, `$[…]` or `((…))`, or straight after
+ * a process substitution's `)`. A backslash at the end of a comment continues
+ * nothing, so the newline after it still ends the command.
+ *
+ * Where bash and zsh disagree whether a `#` opens a comment — straight after an
+ * array's `)`, inside `[[ … ]]`, after the `}` bash ends a `${…}` at and zsh
+ * does not — or whether a `<<` opens a heredoc, nothing is taken out and
+ * `unreadable` says why: the line cannot be read the same way under both.
  */
 export function withoutHeredocBodies(
   command: string,
   options: { comments?: boolean } = {},
-): { text: string; bodies: HeredocBody[] } {
+): { text: string; bodies: HeredocBody[]; unreadable: string | null } {
   const bodies: HeredocBody[] = [];
   const comments = options.comments === true;
   if (!command.includes("<<") && !(comments && command.includes("#"))) {
-    return { text: command, bodies };
+    return { text: command, bodies, unreadable: null };
   }
   let kept = "";
   let start = 0;
   let opened: Heredoc[] = [];
   let quote: string | null = null;
-  /** True where the next character would start a word. */
-  let wordStart = true;
+  let at: Position = "start";
+  const parens: Paren[] = [];
+  /** True inside `[[ … ]]`. */
+  let condition = false;
+  /** Where zsh ends the last `${…}` that bash ended sooner. */
+  let zshUntil = -1;
+  let unreadable: string | null = null;
   let i = 0;
   while (i < command.length) {
     const ch = command[i]!;
@@ -270,13 +404,13 @@ export function withoutHeredocBodies(
       // An escaped newline continues the line, so the body it opens still
       // begins after the next newline that ends one, and the word it stood in
       // goes on after it.
-      if (command[i + 1] !== "\n") wordStart = false;
+      if (command[i + 1] !== "\n") at = "inside";
       i += 2;
       continue;
     }
     if (quote === null && (ch === '"' || ch === "'")) {
       quote = ch;
-      wordStart = false;
+      at = "inside";
       i += 1;
       continue;
     }
@@ -290,11 +424,40 @@ export function withoutHeredocBodies(
       // runs, which is read on its own.
       const read = readSubstitution(command, i);
       if (read === null) break;
-      wordStart = false;
+      at = "inside";
       i = read.end;
       continue;
     }
-    if (comments && ch === "#" && wordStart) {
+    if (ch === "$" && command[i + 1] === "{") {
+      const read = readParameterExpansion(command, i);
+      if (read === null) break;
+      if (read.zsh > read.bash) zshUntil = Math.max(zshUntil, read.zsh);
+      at = "inside";
+      i = read.bash;
+      continue;
+    }
+    if (ch === "$" && command[i + 1] === "[") {
+      const end = readBalanced(command, i + 1, "[", "]");
+      if (end === null) break;
+      at = "inside";
+      i = end;
+      continue;
+    }
+    if (comments && ch === "#" && at !== "inside") {
+      const disputed =
+        at === "disputed"
+          ? "a # straight after a ) that closes an array, a function's name or a case pattern"
+          : condition
+            ? "a # that starts a word inside [[ … ]]"
+            : i < zshUntil
+              ? "a # after the } that bash ends a ${…} at and zsh does not"
+              : null;
+      if (disputed !== null) {
+        unreadable ??= `${disputed} is a comment to one shell and a character to another`;
+        at = "inside";
+        i += 1;
+        continue;
+      }
       const newline = command.indexOf("\n", i);
       const end = newline === -1 ? command.length : newline;
       kept += command.slice(start, i);
@@ -306,18 +469,23 @@ export function withoutHeredocBodies(
       if (command[i + 2] === "<") {
         // A here-string. Its word is on this line, and the two characters it
         // ends with are not an operator of their own.
-        wordStart = true;
+        at = "start";
         i += 3;
         continue;
       }
       const read = readHeredocTag(command, i + 2);
       if (read === null) {
-        wordStart = true;
+        at = "start";
         i += 2;
         continue;
       }
+      if (i < zshUntil) {
+        unreadable ??=
+          "a << after the } that bash ends a ${…} at and zsh does not opens a heredoc " +
+          "to one shell and is text to another";
+      }
       opened.push(read.heredoc);
-      wordStart = false;
+      at = "inside";
       i = read.end;
       continue;
     }
@@ -326,13 +494,56 @@ export function withoutHeredocBodies(
       i = skipHeredocBodies(command, i + 1, opened, bodies);
       start = i;
       opened = [];
-      wordStart = true;
+      at = "start";
       continue;
     }
-    wordStart = /\s/.test(ch) || WORD_BREAK.has(ch);
+    if (ch === "(") {
+      if (at !== "inside" && command[i + 1] === "(") {
+        const end = readArithmeticCommand(command, i);
+        if (end !== null) {
+          at = "start";
+          i = end;
+          continue;
+        }
+      }
+      const before = command[i - 1];
+      parens.push(
+        at === "inside" ? "word" : before === "<" || before === ">" ? "substitution" : "list",
+      );
+      at = "start";
+      i += 1;
+      continue;
+    }
+    if (ch === ")") {
+      // A `)` that closes nothing this scan opened — a `case` pattern's, or
+      // one a misread `case` inside a substitution left over — closes what
+      // this cannot name.
+      const closed = parens.pop();
+      at = closed === "list" ? "start" : closed === "substitution" ? "inside" : "disputed";
+      i += 1;
+      continue;
+    }
+    if (at !== "inside" && command.startsWith("[[", i) && /\s/.test(command[i + 2] ?? "")) {
+      condition = true;
+      at = "inside";
+      i += 2;
+      continue;
+    }
+    if (
+      condition &&
+      at !== "inside" &&
+      command.startsWith("]]", i) &&
+      /^(?:$|[\s;&|)])/.test(command.slice(i + 2, i + 3))
+    ) {
+      condition = false;
+      at = "inside";
+      i += 2;
+      continue;
+    }
+    at = /\s/.test(ch) || WORD_BREAK.has(ch) ? "start" : "inside";
     i += 1;
   }
-  return { text: kept + command.slice(start), bodies };
+  return { text: kept + command.slice(start), bodies, unreadable };
 }
 
 /**
@@ -371,6 +582,8 @@ export function scanSegments(
   separators: string[];
   balanced: boolean;
   bodies: HeredocBody[];
+  /** Why the shells disagree on what the line runs, where they do. */
+  unreadable: string | null;
 } {
   const read = withoutHeredocBodies(command, options);
   const bodies = read.bodies;
@@ -453,7 +666,7 @@ export function scanSegments(
   if (quote !== null || depth !== 0) balanced = false;
   texts.push(text.slice(start));
   separators.push("");
-  return { texts, separators, balanced, bodies };
+  return { texts, separators, balanced, bodies, unreadable: read.unreadable };
 }
 
 /** The list `inspectCommand` evaluates its pattern rules against. */
