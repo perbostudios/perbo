@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it as vitestIt } from "vitest";
 import { InterviewEventSchema, type InterviewEvent } from "@perbo/contracts";
 import {
   SUBMIT_REVIEW_TOOL,
@@ -11,7 +11,14 @@ import {
 import { INTERVIEW_SESSION_FILE, INTERVIEW_TOOL_NAMES } from "../index.js";
 import { listTickets, readDraftSnapshot, readTicket, storeDir } from "../../../store/tickets.js";
 import type { RecordedStreams } from "../../../test-support/streams.js";
-import { initRepository } from "@perbo/test-support";
+import { initRepository, SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
+
+// Every case spawns git and a fake app server, so each runs on the spawn
+// ceiling rather than vitest's five-second default.
+const it = (name: string, run: () => Promise<void>): void => {
+  vitestIt(name, run, SPAWN_TEST_TIMEOUT_MS);
+};
+
 
 /**
  * The interview's behaviour, stated once and run once per transport (SCP-312).

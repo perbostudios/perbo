@@ -257,7 +257,9 @@ describe("a repository the diagnostic refuses", () => {
         streams: read,
         cwd: repo,
           });
-      return read.plain();
+      // The machine-readable report is read as written: a painted escape in it
+      // is a defect, not something to strip.
+      return isTTY ? read.plain() : read.out();
     };
     expect((JSON.parse(await inspected(false)) as RecordedRefusal).refusal).toEqual(record.refusal);
     const shown = await inspected(true);
