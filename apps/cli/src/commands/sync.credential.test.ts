@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,11 +5,12 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * SCP-200 criterion 1, for `perbo sync`: which credential `gh` was read
@@ -34,22 +34,6 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 const OUTCOME = "Search results are paginated.";
 const PR = 91;
 const url = `https://github.com/o/r/pull/${PR}`;
-
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 const ghAnswer = `${JSON.stringify({
   number: PR,
@@ -122,8 +106,7 @@ function withGh<T>(bin: string, token: string | null, body: () => T | Promise<T>
 /** A ticket sitting at `pr_open` behind a pull request the loop published. */
 function publishedTicket(name: string): { repo: string; dir: string } {
   const repo = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
+  emptyRepository(repo);
   runCommandLine(admitCommandLine, {
     argv: [
       "--repo",
@@ -136,7 +119,7 @@ function publishedTicket(name: string): { repo: string; dir: string } {
       "packages/search/**",
       "--approve",
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   const dir = storeDir(repo, null);
@@ -170,7 +153,7 @@ describe("sync says which credential it read GitHub through", () => {
       const gh = fakeGh("sync-token", 1);
 
       const code = await withGh(gh.path, SENTINEL, () =>
-        runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
@@ -189,7 +172,7 @@ describe("sync says which credential it read GitHub through", () => {
       const gh = fakeGh("sync-login", 0);
 
       const code = await withGh(gh.path, null, () =>
-        runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.approve);
@@ -205,14 +188,14 @@ describe("sync says which credential it read GitHub through", () => {
       const { repo, dir } = publishedTicket("neither");
       const gh = fakeGh("sync-neither", 1);
       const before = readFileSync(ticketFile(dir), "utf8");
-      const streams = capture();
+      const streams = recordStreams();
 
       const code = await withGh(gh.path, null, () =>
         runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
       );
 
       expect(code).toBe(EXIT_CODES.did_not_complete);
-      expect(streams.err.join("")).toContain("gh is not logged in");
+      expect(streams.err()).toContain("gh is not logged in");
       // Before anything else: the pull request was never asked about, and the
       // ticket is byte for byte what it was.
       expect(gh.calls()).toEqual(["auth status"]);

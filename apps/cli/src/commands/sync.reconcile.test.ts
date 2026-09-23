@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,12 +5,13 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { derivedBranch, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
-import { makeAttempt } from "../test-support/attempt-fixture.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { makeAttempt } from "../test-support/records.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * `perbo sync` brings a **stranded** ticket back.
@@ -33,27 +33,10 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const OUTCOME = "Search results are paginated.";
 
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 function repository(name: string): string {
   const dir = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
+  emptyRepository(dir);
   return dir;
-}
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
 }
 
 const admitArgv = (repo: string) => [
@@ -161,7 +144,7 @@ function stranded(
   options: { writeAttemptsFile?: boolean; attemptsOn?: (ticket: Ticket) => string } = {},
 ): { repo: string; dir: string; ticket: Ticket; branch: string } {
   const repo = repository(name);
-  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
+  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: recordStreams(), cwd: repo });
   const dir = storeDir(repo, null);
   const at = new Date("2026-09-01T09:00:00.000Z");
 
@@ -223,7 +206,7 @@ describe("perbo sync derives the stranded ticket's branch and asks gh about it o
       expect(readTicket(dir, "PRB-1").delivery.branch).toBeNull();
 
       await withGh(gh.bin, () =>
-        runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+        runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
       );
 
       const calls = gh.invocations();
@@ -241,7 +224,7 @@ describe("perbo sync derives the stranded ticket's branch and asks gh about it o
     const gh = fakeGh("recorded-ayo", { stdout: ghAnswer("OPEN") });
 
     await withGh(gh.bin, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
 
     const calls = gh.invocations();
@@ -255,7 +238,7 @@ describe("perbo sync derives the stranded ticket's branch and asks gh about it o
     const gh = fakeGh("recorded-none", { stdout: ghAnswer("OPEN") });
 
     await withGh(gh.bin, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
 
     expect(gh.invocations()[0]?.slice(0, 3)).toEqual([
@@ -280,7 +263,7 @@ describe("what gh and the attempts record say decides where the ticket lands", (
   it("walks an open pull request over a completed attempt to pr_open", async () => {
     const { repo, dir } = stranded("evidence-open", "executing");
     const gh = fakeGh("evidence-open", { stdout: ghAnswer("OPEN") });
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -297,7 +280,7 @@ describe("what gh and the attempts record say decides where the ticket lands", (
     const gh = fakeGh("evidence-closed", { stdout: ghAnswer("CLOSED") });
 
     const code = await withGh(gh.bin, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -315,7 +298,7 @@ describe("what gh and the attempts record say decides where the ticket lands", (
       code: 1,
     });
     const before = readFileSync(ticketFile(dir), "utf8");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -324,7 +307,7 @@ describe("what gh and the attempts record say decides where the ticket lands", (
     expect(code).toBe(EXIT_CODES.did_not_complete);
     expect(readFileSync(ticketFile(dir), "utf8")).toBe(before);
     expect(readTicket(dir, "PRB-1").state).toBe("executing");
-    expect(streams.err.join("")).toContain("found no pull request");
+    expect(streams.err()).toContain("found no pull request");
   });
 
   it("carries a merged pull request all the way from executing", async () => {
@@ -332,7 +315,7 @@ describe("what gh and the attempts record say decides where the ticket lands", (
     const gh = fakeGh("evidence-merged", { stdout: ghAnswer("MERGED") });
 
     await withGh(gh.bin, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
 
     const ticket = readTicket(dir, "PRB-1");
@@ -347,7 +330,7 @@ describe("the history a reconciliation writes says it is a reconciliation", () =
     const gh = fakeGh("provenance", { stdout: ghAnswer("OPEN") });
 
     await withGh(gh.bin, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
 
     const after = readTicket(dir, "PRB-1");
@@ -379,7 +362,7 @@ describe("sync refuses rather than inventing a history it cannot walk", () => {
     ]);
     const gh = fakeGh("refusal", { stdout: ghAnswer("OPEN") });
     const before = readFileSync(ticketFile(dir), "utf8");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -388,7 +371,7 @@ describe("sync refuses rather than inventing a history it cannot walk", () => {
     expect(code).toBe(EXIT_CODES.did_not_complete);
     expect(readFileSync(ticketFile(dir), "utf8")).toBe(before);
 
-    const reported = streams.err.join("");
+    const reported = streams.err();
     expect(reported).toContain("refusing to reconcile it to pr_open");
     expect(reported).toContain("the run ended pr_open and the ticket is verifying, which has no row to it");
   });
@@ -397,7 +380,7 @@ describe("sync refuses rather than inventing a history it cannot walk", () => {
     const { repo, dir } = stranded("refusal-norecord", "provisioning", [], { writeAttemptsFile: false });
     const gh = fakeGh("refusal-norecord", { stdout: ghAnswer("OPEN") });
     const before = readFileSync(ticketFile(dir), "utf8");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh.bin, () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -405,6 +388,6 @@ describe("sync refuses rather than inventing a history it cannot walk", () => {
 
     expect(code).toBe(EXIT_CODES.did_not_complete);
     expect(readFileSync(ticketFile(dir), "utf8")).toBe(before);
-    expect(streams.err.join("")).toContain("refusing to reconcile it to pr_open");
+    expect(streams.err()).toContain("refusing to reconcile it to pr_open");
   });
 }, SPAWN_TEST_TIMEOUT_MS);

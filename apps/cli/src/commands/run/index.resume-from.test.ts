@@ -9,9 +9,10 @@ import { admitCommandLine } from "../admit.js";
 import { executeCommandLine } from "./index.js";
 import { buildInspectReport, renderInspect } from "../inspect.js";
 import { readTicket, storeDir } from "../../store/tickets.js";
-import { makeAttempt, makeTicket } from "../../test-support/attempt-fixture.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { makeAttempt, makeTicket } from "../../test-support/records.js";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, initRepository } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * `perbo run --ticket <id> --resume-from <bundle_id>` at the command line
@@ -56,43 +57,16 @@ afterAll(() => {
   }
 });
 
-const streams = () => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY: false,
-    },
-  };
-};
-
 /** The attempt a ceiling cut, in every fixture below. */
 const CUT_ATTEMPT = "att_c07e0f1a2b3c4d5e";
 
-const GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: GIT_ENV });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /** A repository with one commit, the way `perbo admit` expects to find one. */
 function repository(name: string): string {
   const dir = scratch(`perbo-resume-${name}-`);
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: GIT_ENV });
-  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture" }));
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  initRepository(dir, { files: { "package.json": JSON.stringify({ name: "fixture" }) } });
   return dir;
 }
 
@@ -122,7 +96,7 @@ function retainedDiff(dir: string): string {
 
 /** The ticket `admit` writes, ready to run, and the contract's base commit. */
 function admit(repo: string): { ticket_id: string; base_commit: string } {
-  const admitted = streams();
+  const admitted = recordStreams();
   expect(
     runCommandLine(admitCommandLine, {
       argv: [
@@ -132,7 +106,7 @@ function admit(repo: string): { ticket_id: string; base_commit: string } {
         "--path", "packages/search/**",
         "--approve",
       ],
-      streams: admitted.streams,
+      streams: admitted,
       cwd: repo,
     }),
   ).toBe(0);
@@ -246,16 +220,16 @@ describe("perbo run --resume-from, when the base commit has moved", () => {
     const before = readTicket(storeDir(repo, null), "PRB-1");
     const bundleBefore = readFileSync(bundle.path, "utf8");
 
-    const run = streams();
+    const run = recordStreams();
     const code = await runCommandLine(executeCommandLine, {
       argv: ["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id],
-      streams: run.streams,
+      streams: run,
       cwd: repo,
     });
 
     expect(code).not.toBe(0);
     expect(code).toBe(3);
-    const said = run.err.join("");
+    const said = run.err();
     // The file the person is trying to recover is named, with both commits and
     // the bundle it is in, so the refusal can be acted on where it is read.
     expect(said).toContain("change.diff");
@@ -263,7 +237,7 @@ describe("perbo run --resume-from, when the base commit has moved", () => {
     expect(said).toContain(cutBase);
     expect(said).toContain(moved);
     expect(said).toContain("could not resume");
-    expect(run.out.join("")).toBe("");
+    expect(run.out()).toBe("");
 
     // Nothing was executed: the agent binary the run would have used was never
     // started, not even for its version.
@@ -287,27 +261,27 @@ describe("perbo run --resume-from, when the base commit has moved", () => {
     });
     const agent = recordingAgentBinary(repo);
 
-    const wrongTicket = streams();
+    const wrongTicket = recordStreams();
     expect(
       await runCommandLine(executeCommandLine, {
         argv: ["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id],
-        streams: wrongTicket.streams,
+        streams: wrongTicket,
         cwd: repo,
       }),
     ).toBe(3);
-    expect(wrongTicket.err.join("")).toContain("change.diff");
-    expect(wrongTicket.err.join("")).toContain("ticket_someoneelses");
+    expect(wrongTicket.err()).toContain("change.diff");
+    expect(wrongTicket.err()).toContain("ticket_someoneelses");
 
-    const notABundle = streams();
+    const notABundle = recordStreams();
     expect(
       await runCommandLine(executeCommandLine, {
         argv: ["--repo", repo, "--ticket", "PRB-1", "--resume-from", "../../etc/passwd"],
-        streams: notABundle.streams,
+        streams: notABundle,
         cwd: repo,
       }),
     ).toBe(3);
-    expect(notABundle.err.join("")).toContain("change.diff");
-    expect(notABundle.err.join("")).toContain("is not a bundle id");
+    expect(notABundle.err()).toContain("change.diff");
+    expect(notABundle.err()).toContain("is not a bundle id");
 
     expect(agent.ran()).toBe(false);
     expect(readTicket(storeDir(repo, null), "PRB-1").state).toBe("ready");
@@ -331,18 +305,18 @@ describe("perbo run --resume-from, when the bundle matches the run", () => {
     // bundle is not what ends this run.
     const restore = withoutClaudeOnPath();
     let code: number;
-    const run = streams();
+    const run = recordStreams();
     try {
       code = await runCommandLine(executeCommandLine, {
         argv: ["--repo", repo, "--ticket", "PRB-1", "--resume-from", bundle.bundle_id],
-        streams: run.streams,
+        streams: run,
         cwd: repo,
       });
     } finally {
       restore();
     }
 
-    const said = run.err.join("");
+    const said = run.err();
     expect(said).toContain(`resuming from execution bundle ${bundle.bundle_id}`);
     expect(said).toContain(CUT_ATTEMPT);
     expect(said).toContain("cost_ceiling_exceeded");

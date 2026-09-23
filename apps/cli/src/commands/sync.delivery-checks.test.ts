@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,10 +11,11 @@ import {
 } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * What the ticket's delivery record says about the checks on its head.
@@ -33,22 +33,6 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 const OUTCOME = "Search results are paginated.";
 const PR = 71;
 const url = `https://github.com/o/r/pull/${PR}`;
-
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 /** A `gh` on PATH that answers every invocation from one fixed body. */
 function fakeGh(name: string, stdout: string): string {
@@ -111,8 +95,7 @@ function publishedTicket(
   read: { checks: DeliveredCheck[]; state: DeliveryChecksState } | null,
 ): { repo: string; dir: string; ticket: Ticket } {
   const repo = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
+  emptyRepository(repo);
   runCommandLine(admitCommandLine, {
     argv: [
       "--repo",
@@ -125,7 +108,7 @@ function publishedTicket(
       "packages/search/**",
       "--approve",
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   const dir = storeDir(repo, null);
@@ -189,7 +172,7 @@ describe("the checks the run read, on the ticket", () => {
       state: "checks_failed",
       checks: [{ name: "build", conclusion: "failure" }],
     });
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(
       fakeGh(
@@ -216,7 +199,7 @@ describe("the checks the run read, on the ticket", () => {
 
   it("records a check still going as unchecked beside one that concluded, and a legacy context under its own name", async () => {
     const { repo, dir } = publishedTicket("running", null);
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(
       fakeGh(

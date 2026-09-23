@@ -17,6 +17,8 @@ import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import { type ExecuteDeps, executeCommandLine } from "./index.js";
 import { inspectCommandLine } from "../inspect.js";
 import { storeDir } from "../../store/index.js";
+import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * What a person reads when the loop refuses to start.
@@ -41,18 +43,8 @@ import { storeDir } from "../../store/index.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-refused-run-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /**
  * A repository with one commit and a test script. A lockfile is not required
@@ -60,19 +52,13 @@ const git = (dir: string, ...argv: string[]): string =>
  */
 function repository(name: string, options: { lockfile: boolean }): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify({ name: "fixture", scripts: { test: "node --test" } }, null, 2)}\n`,
-  );
-  if (options.lockfile) writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  initRepository(dir, {
+    files: {
+      "package.json": `${JSON.stringify({ name: "fixture", scripts: { test: "node --test" } }, null, 2)}\n`,
+      ...(options.lockfile ? { "pnpm-lock.yaml": "lockfileVersion: '9.0'\n" } : {}),
+      "src/index.ts": "export const version = 1;\n",
+    },
+  });
   return dir;
 }
 
@@ -149,24 +135,6 @@ const okPreflight = (_request: PreflightRequest): PreflightResult => ({
   github: null,
 });
 
-const capture = (isTTY = false) => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY,
-    },
-  };
-};
-
-/** The rendering without its colours: the words are what is being read. */
-// eslint-disable-next-line no-control-regex
-const uncoloured = (text: string): string => text.replace(/\u001b\[[0-9;]*m/g, "");
-
 /**
  * `perbo run …` as the program runs it: the command, and — for anything that
  * escapes it — `exitForThrown` writing onto the same stderr, which is
@@ -177,19 +145,19 @@ async function program(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string }> {
-  const streams = capture();
+  const streams = recordStreams();
   try {
     const code = await runCommandLine(executeCommandLine, {
       argv: ["--repo", repo, ...argv],
-      streams: streams.streams,
+      streams,
       cwd: repo,
       deps: { preflight: okPreflight, ...options },
     });
-    return { code, err: streams.err.join("") };
+    return { code, err: streams.err() };
   } catch (error) {
     const failure = exitForThrown("run", error);
-    streams.streams.stderr(`error: ${failure.message}\n`);
-    return { code: failure.code, err: streams.err.join("") };
+    streams.stderr(`error: ${failure.message}\n`);
+    return { code: failure.code, err: streams.err() };
   }
 }
 
@@ -283,16 +251,16 @@ describe("a repository the diagnostic refuses", () => {
     // And `inspect` reads it back in the same words the record holds — in the
     // report a script parses, field for field, and in the one a person reads.
     const inspected = async (isTTY: boolean): Promise<string> => {
-      const read = capture(isTTY);
+      const read = recordStreams({ isTTY });
       await runCommandLine(inspectCommandLine, {
         argv: [runId, "--repo", repo],
-        streams: read.streams,
+        streams: read,
         cwd: repo,
           });
-      return read.out.join("");
+      return read.plain();
     };
     expect((JSON.parse(await inspected(false)) as RecordedRefusal).refusal).toEqual(record.refusal);
-    const shown = uncoloured(await inspected(true));
+    const shown = await inspected(true);
     expect(flat(shown)).toContain(flat(record.refusal!.reason));
     for (const finding of record.refusal!.findings) {
       expect(shown).toContain(finding.reason);

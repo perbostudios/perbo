@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { repository, type ContractStep, type InterviewHarness } from "./test-support/contract.js";
 import { claudeHarness, codexHarness } from "./test-support/harness.js";
 import { FIXTURES } from "../../test-support/paths.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * Every command spelling the five D-073 review rounds on SCP-355 drove
@@ -66,7 +67,7 @@ async function checkNoneWrite(harness: InterviewHarness, scratch: string, shapes
   const binDir = fakeBin(marker);
   const env = { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
   const parentDir = join(repo, "..");
-  const gitStatus = (): string => execFileSync("git", ["-C", repo, "status", "--porcelain"], { encoding: "utf8" });
+  const gitStatus = (): string => execFileSync("git", ["-C", repo, "status", "--porcelain"], { encoding: "utf8", env: gitEnvironment() });
   const parentListing = (): string => [...readdirSync(parentDir)].sort().join("\n");
 
   for (let i = 0; i < shapes.length; i += 1) {

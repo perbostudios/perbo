@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -11,6 +10,8 @@ import {
 } from "@perbo/model";
 import { INTERVIEW_SESSION_FILE, INTERVIEW_TOOL_NAMES } from "../index.js";
 import { listTickets, readDraftSnapshot, readTicket, storeDir } from "../../../store/tickets.js";
+import type { RecordedStreams } from "../../../test-support/streams.js";
+import { initRepository } from "@perbo/test-support";
 
 /**
  * The interview's behaviour, stated once and run once per transport (SCP-312).
@@ -52,8 +53,8 @@ export interface ContractDecision {
 
 export interface ContractRun {
   code: number;
-  out: string[];
-  err: string[];
+  /** What the command wrote, for the assertions that read the event stream. */
+  streams: RecordedStreams;
   decisions: ContractDecision[];
 }
 
@@ -99,26 +100,14 @@ The queue package already has a sender.
 
 export const SPEC_FOLDER = "specs/activation-email";
 
-export const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 /** A checkout with one package in it, for an interview to read and write beside. */
 export function repository(scratch: string): string {
-  const repo = mkdtempSync(join(scratch, "repo-"));
-  mkdirSync(join(repo, "packages", "queue"), { recursive: true });
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  writeFileSync(join(repo, "packages", "queue", "send.ts"), "export const send = () => 1;\n");
-  writeFileSync(join(repo, "README.md"), "# demo\n");
-  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitIdentity });
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitIdentity });
-  return repo;
+  return initRepository(mkdtempSync(join(scratch, "repo-")), {
+    files: {
+      "packages/queue/send.ts": "export const send = () => 1;\n",
+      "README.md": "# demo\n",
+    },
+  }).dir;
 }
 
 /** The drafter `admit --from-spec` runs, scripted to one draft. */
@@ -170,15 +159,11 @@ export const drafted = {
 };
 
 /** The events a run streamed, parsed back through the protocol's own schema. */
-export function events(run: { out: string[] }): InterviewEvent[] {
-  return run.out
-    .join("")
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line) => InterviewEventSchema.parse(JSON.parse(line)));
+export function events(run: RecordedStreams): InterviewEvent[] {
+  return run.jsonLines().map((event) => InterviewEventSchema.parse(event));
 }
 
-export const refusals = (run: { out: string[] }) =>
+export const refusals = (run: RecordedStreams) =>
   events(run).filter((event) => event.type === "refused");
 
 const writeSpec = (content = SPEC): ContractStep => ({
@@ -214,11 +199,11 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
         // The code was never written, and the person was told why rather than asked.
         expect(readFileSync(join(repo, "packages", "queue", "send.ts"), "utf8")).toContain("() => 1");
         expect(readFileSync(join(repo, "CONTEXT.md"), "utf8")).toContain("# Terms");
-        const refused = refusals(result);
+        const refused = refusals(result.streams);
         expect(refused).toHaveLength(1);
         expect(refused[0]).toMatchObject({ rule: "write_outside_scope" });
         expect(refused[0]?.reason).toContain("packages/queue/send.ts");
-        const said = result.err.join("").split("\n").filter((line) => line.startsWith("refused:"));
+        const said = result.streams.err().split("\n").filter((line) => line.startsWith("refused:"));
         expect(said).toHaveLength(1);
         expect(said[0]).toContain("packages/queue/send.ts");
         expect(said[0], "a refusal is a statement, not a question").not.toContain("?");
@@ -232,7 +217,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
         ]);
         expect(result.decisions.map((each) => each.behavior)).toEqual(["allow", "deny"]);
         expect(existsSync(join(repo, "specs", "somebody-else"))).toBe(false);
-        expect(refusals(result).at(-1)?.reason).toContain("specs/somebody-else/spec.md");
+        expect(refusals(result.streams).at(-1)?.reason).toContain("specs/somebody-else/spec.md");
       });
 
       it("creates the spec and ADR folders on the first write to them", async () => {
@@ -255,7 +240,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           { kind: "write", path: ".perbo/tickets/PRB-1.contract.json", content: "{}" },
         ]);
         expect(result.decisions[2]?.behavior).toBe("deny");
-        expect(refusals(result).at(-1)?.rule).toBe("write_prohibited_path");
+        expect(refusals(result.streams).at(-1)?.rule).toBe("write_prohibited_path");
         expect(
           readFileSync(join(storeDir(repo, null), "tickets", "PRB-1.contract.json"), "utf8"),
         ).toContain("acceptance_criteria");
@@ -271,7 +256,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           { kind: "command", command: "git push origin main" },
         ]);
         expect(result.decisions.map((each) => each.behavior)).toEqual(["allow", "deny", "deny"]);
-        const refused = refusals(result);
+        const refused = refusals(result.streams);
         expect(refused.map((event) => event.rule)).toEqual([
           "command_allow_list",
           "command_deny_list",
@@ -322,7 +307,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
         expect(result.decisions.map((each) => each.behavior)).toEqual(commands.map(() => "deny"));
         // The flag itself is named, not just the program, so a person reads
         // why a `git log` in particular was refused.
-        const reasons = refusals(result).map((event) => event.reason);
+        const reasons = refusals(result.streams).map((event) => event.reason);
         expect(reasons[0]).toContain("--output");
         expect(reasons[1]).toContain("--output");
         expect(reasons[2]).toContain("--output");
@@ -352,7 +337,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           { kind: "command", command: "find ./not-delete -type f" },
         ]);
         expect(result.decisions.map((each) => each.behavior)).toEqual(["allow", "allow", "allow"]);
-        expect(refusals(result)).toHaveLength(0);
+        expect(refusals(result.streams)).toHaveLength(0);
       });
 
       // A banned flag quoted, or split across a quote, still reaches the
@@ -388,7 +373,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           commands.map((command) => ({ kind: "command", command }) as ContractStep),
         );
         expect(result.decisions.map((each) => each.behavior)).toEqual(commands.map(() => "deny"));
-        const reasons = refusals(result).map((event) => event.reason);
+        const reasons = refusals(result.streams).map((event) => event.reason);
         expect(reasons[0]).toContain("--output");
         expect(reasons[1]).toContain("--pre");
         expect(reasons[2]).toContain("--output");
@@ -420,7 +405,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           commands.map((command) => ({ kind: "command", command }) as ContractStep),
         );
         expect(result.decisions.map((each) => each.behavior)).toEqual(["deny", "deny", "deny"]);
-        const reasons = refusals(result).map((event) => event.reason);
+        const reasons = refusals(result.streams).map((event) => event.reason);
         expect(reasons[0]).toContain(String.raw`\-exec`);
         expect(reasons[1]).toContain("$'-exec'");
         expect(reasons[2]).toContain(String.raw`\-delete`);
@@ -432,7 +417,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           { kind: "command", command: "find . -name 'unterminated" },
         ]);
         expect(result.decisions.map((each) => each.behavior)).toEqual(["deny"]);
-        expect(refusals(result)[0]?.reason).toContain("'unterminated");
+        expect(refusals(result.streams)[0]?.reason).toContain("'unterminated");
       });
 
       // The ticket's own shape reaches the program just the same run through
@@ -451,7 +436,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           commands.map((command) => ({ kind: "command", command }) as ContractStep),
         );
         expect(result.decisions.map((each) => each.behavior)).toEqual(["deny", "deny", "deny"]);
-        const reasons = refusals(result).map((event) => event.reason);
+        const reasons = refusals(result.streams).map((event) => event.reason);
         expect(reasons[0]).toContain("--output");
         expect(reasons[1]).toContain("--output");
         expect(reasons[2]).toContain("-delete");
@@ -479,7 +464,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           "deny",
           "deny",
         ]);
-        const reasons = refusals(result).map((event) => event.reason);
+        const reasons = refusals(result.streams).map((event) => event.reason);
         expect(reasons[0]).toContain("--output");
         expect(reasons[1]).toContain("--output");
         expect(reasons[2]).toContain("--pre");
@@ -516,7 +501,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           "deny",
           "deny",
         ]);
-        const reasons = refusals(result).map((event) => event.reason);
+        const reasons = refusals(result.streams).map((event) => event.reason);
         for (const reason of reasons) expect(reason).toContain("--output");
       });
 
@@ -526,7 +511,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           { kind: "command", command: "cat \"$(ls '$(git log --output=x)')\"" },
         ]);
         expect(result.decisions.map((each) => each.behavior)).toEqual(["allow"]);
-        expect(refusals(result)).toHaveLength(0);
+        expect(refusals(result.streams)).toHaveLength(0);
       });
 
       it("reads a substitution body's own invocation past a wrapper, a subshell, a brace group, an assignment prefix, a list or a pipeline, both transports", async () => {
@@ -553,7 +538,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           commands.map((command) => ({ kind: "command", command }) as ContractStep),
         );
         expect(result.decisions.map((each) => each.behavior)).toEqual(commands.map(() => "deny"));
-        const reasons = refusals(result).map((event) => event.reason);
+        const reasons = refusals(result.streams).map((event) => event.reason);
         for (const reason of reasons) expect(reason).toContain("read-only shapes");
       });
 
@@ -580,7 +565,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           commands.map((command) => ({ kind: "command", command }) as ContractStep),
         );
         expect(result.decisions.map((each) => each.behavior)).toEqual(commands.map(() => "deny"));
-        const reasons = refusals(result).map((event) => event.reason);
+        const reasons = refusals(result.streams).map((event) => event.reason);
         for (const reason of reasons) expect(reason).toContain("--output");
       });
 
@@ -596,7 +581,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           commands.map((command) => ({ kind: "command", command }) as ContractStep),
         );
         expect(result.decisions.map((each) => each.behavior)).toEqual(commands.map(() => "allow"));
-        expect(refusals(result)).toHaveLength(0);
+        expect(refusals(result.streams)).toHaveLength(0);
       });
 
       it("reads a process-substitution body the same way a command-substitution body is read, both transports", async () => {
@@ -612,7 +597,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           commands.map((command) => ({ kind: "command", command }) as ContractStep),
         );
         expect(result.decisions.map((each) => each.behavior)).toEqual(commands.map(() => "deny"));
-        const reasons = refusals(result).map((event) => event.reason);
+        const reasons = refusals(result.streams).map((event) => event.reason);
         for (const reason of reasons) expect(reason).toContain("--output");
       });
 
@@ -620,7 +605,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
         const repo = repository(scratch());
         const result = await run(repo, [{ kind: "command", command: "cat <(ls)" }]);
         expect(result.decisions.map((each) => each.behavior)).toEqual(["allow"]);
-        expect(refusals(result)).toHaveLength(0);
+        expect(refusals(result.streams)).toHaveLength(0);
       });
 
       it("refuses a ban-eligible program's own word that carries an unresolved expansion, both transports", async () => {
@@ -642,7 +627,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           commands.map((command) => ({ kind: "command", command }) as ContractStep),
         );
         expect(result.decisions.map((each) => each.behavior)).toEqual(commands.map(() => "deny"));
-        const reasons = refusals(result).map((event) => event.reason);
+        const reasons = refusals(result.streams).map((event) => event.reason);
         for (const reason of reasons) expect(reason).toContain("its value is not one this reading resolves");
       });
 
@@ -685,7 +670,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           commands.map((command) => ({ kind: "command", command }) as ContractStep),
         );
         expect(result.decisions.map((each) => each.behavior)).toEqual(["allow", "allow"]);
-        expect(refusals(result)).toHaveLength(0);
+        expect(refusals(result.streams)).toHaveLength(0);
       });
 
       it("refuses a shape the closure backstop finds unaccounted, both transports", async () => {
@@ -752,7 +737,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           commands.map((command) => ({ kind: "command", command }) as ContractStep),
         );
         expect(result.decisions.map((each) => each.behavior)).toEqual(commands.map(() => "allow"));
-        expect(refusals(result)).toHaveLength(0);
+        expect(refusals(result.streams)).toHaveLength(0);
       });
 
       it("reads a substitution body past an escaped or quoted paren, so a `\\)` in it cannot end the body early, both transports", async () => {
@@ -851,7 +836,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           commands.map((command) => ({ kind: "command", command }) as ContractStep),
         );
         expect(result.decisions.map((each) => each.behavior)).toEqual(["allow", "allow", "allow"]);
-        expect(refusals(result)).toHaveLength(0);
+        expect(refusals(result.streams)).toHaveLength(0);
       });
 
       it("admits a path argument that merely contains a quoted banned word as a substring", async () => {
@@ -872,7 +857,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           "allow",
           "allow",
         ]);
-        expect(refusals(result)).toHaveLength(0);
+        expect(refusals(result.streams)).toHaveLength(0);
       });
     });
 
@@ -898,7 +883,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
         expect(ticket.approved_at).toBeNull();
         expect(ticket.admission.spec?.path).toBe(`${SPEC_FOLDER}/spec.md`);
         expect(
-          events(result).some((event) => event.type === "tool" && event.tool === "generate_plan"),
+          events(result.streams).some((event) => event.type === "tool" && event.tool === "generate_plan"),
         ).toBe(true);
       });
 
@@ -940,7 +925,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
         expect(readTicket(dir, "PRB-1").admission.edit_count).toBe(0);
         expect(result.decisions[2]?.result).toContain("edit 1");
         expect(
-          events(result).some((event) => event.type === "tool" && event.tool === "edit_plan"),
+          events(result.streams).some((event) => event.type === "tool" && event.tool === "edit_plan"),
         ).toBe(true);
       });
 
@@ -982,7 +967,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
       it("holds no tool that approves, publishes, runs or merges", async () => {
         const repo = repository(scratch());
         const result = await run(repo, []);
-        const started = events(result).find((event) => event.type === "started");
+        const started = events(result.streams).find((event) => event.type === "started");
         expect(started?.type === "started" ? started.tools.slice().sort() : []).toEqual(
           [...INTERVIEW_TOOL_NAMES].sort(),
         );
@@ -991,7 +976,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           { kind: "call", tool: "publish", input: {} },
         ]);
         expect(result2.decisions.map((each) => each.behavior)).toEqual(["deny", "deny"]);
-        for (const refusal of refusals(result2)) expect(refusal.reason).toContain("holds no");
+        for (const refusal of refusals(result2.streams)) expect(refusal.reason).toContain("holds no");
       });
 
       it("answers every call allow or deny, and never puts one to the person", async () => {
@@ -1007,7 +992,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           expect(["allow", "deny"]).toContain(decision.behavior);
         }
         // Nothing the person reads is a question: the streams carry statements.
-        expect(result.err.join("")).not.toContain("?");
+        expect(result.streams.err()).not.toContain("?");
       });
 
       it("cannot reach admit --approve through generate_plan", async () => {
@@ -1026,7 +1011,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
       it("reports the id the transport gave back, records it beside the spec, and resumes on it", async () => {
         const repo = repository(scratch());
         const first = await run(repo, [writeSpec()], { sessionId: "sess-abc" });
-        expect(events(first)[0]).toMatchObject({ type: "started", session_id: "sess-abc" });
+        expect(events(first.streams)[0]).toMatchObject({ type: "started", session_id: "sess-abc" });
         const recorded = JSON.parse(
           readFileSync(join(repo, SPEC_FOLDER, INTERVIEW_SESSION_FILE), "utf8"),
         ) as { session_id: string };
@@ -1036,8 +1021,8 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           argv: ["--session", "sess-abc"],
           sessionId: "sess-abc",
         });
-        expect(events(second)[0]).toMatchObject({ type: "started", session_id: "sess-abc" });
-        expect(events(second).at(-1)).toMatchObject({ type: "ended", session_id: "sess-abc" });
+        expect(events(second.streams)[0]).toMatchObject({ type: "started", session_id: "sess-abc" });
+        expect(events(second.streams).at(-1)).toMatchObject({ type: "ended", session_id: "sess-abc" });
       });
     });
   });

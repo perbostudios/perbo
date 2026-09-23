@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Model } from "@perbo/model";
 import { parseReviewArgs } from "./internal/args.js";
 import { runReviewCommand } from "./index.js";
-import type { Streams } from "../../streams.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * `perbo review --pr` on a pull request opened from a fork (SCP-211).
@@ -199,13 +199,7 @@ async function review(
   argv: string[],
   options: { cwd: string; gh: string; model: Model & { built: number; turns: number } },
 ): Promise<Ran> {
-  let out = "";
-  let err = "";
-  const streams: Streams = {
-    stdout: (chunk) => (out += chunk),
-    stderr: (chunk) => (err += chunk),
-    isTTY: false,
-  };
+  const streams = recordStreams();
   const code = await runReviewCommand({
     args: parseReviewArgs(argv),
     streams,
@@ -217,7 +211,7 @@ async function review(
       return options.model;
     },
   });
-  return { out, err, code };
+  return { out: streams.out(), err: streams.err(), code };
 }
 
 /** The one bundle in `<repo>/.perbo/reviews`, parsed. */

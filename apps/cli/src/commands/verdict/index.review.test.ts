@@ -24,8 +24,9 @@ import {
 } from "../review/ticketless.js";
 import { verdictCommandLine } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
-import { makeAttempt, makeReview } from "../../test-support/attempt-fixture.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { makeAttempt, makeReview } from "../../test-support/records.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * `perbo verdict` on a review that no attempt filed (SCP-249).
@@ -75,12 +76,6 @@ const WORK_ID = "ticket_gh_o_r_7";
 const NOW = new Date("2026-09-06T09:10:11.000Z");
 const LATER = new Date("2026-09-06T12:00:00.000Z");
 const AUTHOR = "Lian Matsuo <lian@example.invalid>";
-
-function capture() {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk: string) => out.push(chunk), stderr: (chunk: string) => err.push(chunk), isTTY: false };
-}
 
 /* ------------------------------------------------------------------ *
  * The review the pull request got: two advisory findings of one rule on
@@ -193,7 +188,7 @@ const readVerdicts = (store: string) =>
 const verdict = (repo: string, argv: string[], now = NOW) =>
   runCommandLine(verdictCommandLine, {
     argv: [...argv, "--repo", repo],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
     now,
   });
@@ -201,7 +196,7 @@ const verdict = (repo: string, argv: string[], now = NOW) =>
 describe("perbo verdict answers a review that `review --pr` wrote", () => {
   it("records the decision against the work the review names", async () => {
     const { repo, store } = repositoryWithReview("records");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await runCommandLine(verdictCommandLine, {
       argv: [REVIEW_ID, "--accept", QUEUE.slice(0, 12), "--note", "fair: no test covers it", "--author", AUTHOR, "--repo", repo],
@@ -233,8 +228,8 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
       superseded_at: null,
     });
     // The key came off the review this store holds, and the line says so.
-    expect(streams.err.join("")).toContain(REVIEW_ID);
-    expect(streams.err.join("")).toContain("nothing was sent anywhere");
+    expect(streams.err()).toContain(REVIEW_ID);
+    expect(streams.err()).toContain("nothing was sent anywhere");
   });
 
   it("rejects a finding the same way it accepts one", async () => {
@@ -251,7 +246,7 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
     const { repo } = repositoryWithReview("lists");
     await verdict(repo, [REVIEW_ID, "--accept", QUEUE, "--author", AUTHOR]);
     await verdict(repo, [REVIEW_ID, "--reject", SERVER, "--author", AUTHOR], LATER);
-    const streams = capture();
+    const streams = recordStreams();
 
     expect(
       await runCommandLine(verdictCommandLine, {
@@ -261,7 +256,7 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
         now: NOW,
       }),
     ).toBe(EXIT_CODES.approve);
-    const printed = streams.out.join("");
+    const printed = streams.out();
     expect(printed).toContain(`${QUEUE.slice(0, 12)}  accept`);
     expect(printed).toContain(`${SERVER.slice(0, 12)}  reject`);
     // Newest first, which is where the reader's question ends up.
@@ -272,7 +267,7 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
     const { repo, store } = repositoryWithReview("replace");
     await verdict(repo, [REVIEW_ID, "--accept", QUEUE, "--author", AUTHOR]);
     const before = readFileSync(join(store, "verdicts.json"), "utf8");
-    const refused = capture();
+    const refused = recordStreams();
 
     expect(
       await runCommandLine(verdictCommandLine, {
@@ -282,7 +277,7 @@ describe("perbo verdict answers a review that `review --pr` wrote", () => {
         now: LATER,
       }),
     ).toBe(EXIT_CODES.usage_or_input_error);
-    expect(refused.err.join("")).toContain("--replace");
+    expect(refused.err()).toContain("--replace");
     // Refused means the bytes on disk did not move.
     expect(readFileSync(join(store, "verdicts.json"), "utf8")).toBe(before);
 
@@ -401,7 +396,7 @@ describe("a review an attempt filed still resolves through the attempts record",
 
   it("decides the finding the run's own review names, by the id the run was filed under", async () => {
     const { repo, store, key } = repositoryWithBoth("attempt-filed");
-    const streams = capture();
+    const streams = recordStreams();
 
     expect(
       await runCommandLine(verdictCommandLine, {
@@ -421,8 +416,8 @@ describe("a review an attempt filed still resolves through the attempts record",
     });
     // And the same, in what a person is shown: the id the run was filed under,
     // never the pull request the review beside it read.
-    expect(streams.out.join("")).toContain(WORK_ID);
-    expect(streams.out.join("")).not.toContain(PULL_REQUEST);
-    expect(streams.err.join("")).toContain("read from the review artifact");
+    expect(streams.out()).toContain(WORK_ID);
+    expect(streams.out()).not.toContain(PULL_REQUEST);
+    expect(streams.err()).toContain("read from the review artifact");
   });
 }, SPAWN_TEST_TIMEOUT_MS);

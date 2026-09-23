@@ -20,6 +20,8 @@ import { COMMAND_NAMES } from "../src/command-line/names.js";
 import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/built-cli.js";
 import { REPO_ROOT } from "../src/test-support/paths.js";
 import { runCommandLine } from "../src/command-line/terminal.js";
+import { recordStreams } from "../src/test-support/streams.js";
+import { gitEnvironment, initBareRepository, initRepository } from "@perbo/test-support";
 
 /**
  * The open README's quick start, run rather than read.
@@ -239,18 +241,8 @@ function withOneStepMutated(find: string, replace: string): { text: string; step
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "perbo-readme-")));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /**
  * The repository the quick start is pointed at: one commit, a `test` script the
@@ -260,26 +252,18 @@ const git = (dir: string, ...argv: string[]): string =>
  */
 function repository(name: string): string {
   const dir = realpathSync(mkdtempSync(join(scratch, `${name}-`)));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify(
-      { name: "quickstart-fixture", private: true, scripts: { test: 'node -e "process.exit(0)"' } },
-      null,
-      2,
-    )}\n`,
-  );
-  mkdirSync(join(dir, "src"), { recursive: true });
-  mkdirSync(join(dir, "test"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.js"), "export const version = 1;\n");
-  writeFileSync(join(dir, "test", "index.test.js"), "// the suite this repository already has\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
-  const bare = mkdtempSync(join(scratch, `${name}-remote-`));
-  execFileSync("git", ["init", "-q", "--bare", bare], { env: gitEnv });
+  initRepository(dir, {
+    files: {
+      "package.json": `${JSON.stringify(
+        { name: "quickstart-fixture", private: true, scripts: { test: 'node -e "process.exit(0)"' } },
+        null,
+        2,
+      )}\n`,
+      "src/index.js": "export const version = 1;\n",
+      "test/index.test.js": "// the suite this repository already has\n",
+    },
+  });
+  const bare = initBareRepository(mkdtempSync(join(scratch, `${name}-remote-`)));
   git(dir, "remote", "add", "origin", bare);
   git(dir, "push", "-q", "origin", "main");
   return dir;
@@ -661,16 +645,15 @@ describe("the prerequisites the quick start states before its first command", ()
     // shipped preflight, told a floor this machine does not meet, through the
     // shipped `doctor`. What the README states the floor *is* is checked
     // against the workspace's own `engines` above.
-    const out: string[] = [];
+    const streams = recordStreams({ isTTY: true });
     const status = await runCommandLine(doctorCommandLine, {
       argv: ["--repo", repo],
-      streams: { stdout: (chunk) => out.push(chunk), stderr: () => undefined, isTTY: true },
+      streams,
       cwd: repo,
       deps: { preflight: (request: PreflightRequest) =>
           preflight({ ...request, minNodeMajor: Number(process.versions.node.split(".")[0]) + 1 }) },
     });
-    // eslint-disable-next-line no-control-regex
-    const shown = out.join("").replace(/\u001b\[[0-9;]*m/g, "");
+    const shown = streams.plain();
     expect(shown).toContain("node_too_old");
     expect(shown).toContain(process.versions.node);
     expect(shown).toContain("install Node");

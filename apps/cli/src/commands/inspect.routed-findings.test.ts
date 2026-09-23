@@ -12,7 +12,7 @@ import {
   makeAttempt,
   makeRoutedReview,
   makeTicket,
-} from "../test-support/attempt-fixture.js";
+} from "../test-support/records.js";
 
 /**
  * The record the pull request and the markdown verdict point at.

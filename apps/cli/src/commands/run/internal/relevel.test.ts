@@ -7,15 +7,15 @@ import { EXIT_CODES } from "@perbo/contracts";
 import { TicketRunConfigSchema } from "@perbo/runner";
 import { UsageError } from "../../../usage-error.js";
 import { admitCommandLine, listCommandLine } from "../../admit.js";
-import type { Streams } from "../../../streams.js";
 import { TICKET_RUNS, executeCommandLine } from "../index.js";
 import { processDeps } from "../../serve/index.js";
 import { readTicket, storeDir as storeDirOf, writeTicket } from "../../../store/tickets.js";
 import { TicketSchema, transition, withReconciliation } from "@perbo/contracts";
 import { mergedTicketContext, ticketKeysMergedBetween } from "./relevel.js";
 import { storeDir } from "../../../store/tickets.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, initBareRepository, initRepository } from "@perbo/test-support";
 import { runCommandLine } from "../../../command-line/terminal.js";
+import { recordStreams } from "../../../test-support/streams.js";
 
 /**
  * SCP-227: what a re-level's conflict round is briefed with, read from the
@@ -26,25 +26,10 @@ import { runCommandLine } from "../../../command-line/terminal.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-relevel-cli-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const env = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, ...args], { env, encoding: "utf8" }).trim();
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (c) => out.push(c), stderr: (c) => err.push(c), isTTY: false };
-}
+const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, ...args], { env: gitEnvironment(), encoding: "utf8" }).trim();
 
 function admitted(repo: string, outcome: string, path: string): string {
-  const streams = capture();
+  const streams = recordStreams();
   const code = runCommandLine(admitCommandLine, {
     argv: [
       "--repo", repo,
@@ -57,8 +42,8 @@ function admitted(repo: string, outcome: string, path: string): string {
     streams,
     cwd: repo,
   });
-  if (code !== EXIT_CODES.approve) throw new Error(streams.err.join(""));
-  return (JSON.parse(streams.out.join("")) as { ticket: { key: string } }).ticket.key;
+  if (code !== EXIT_CODES.approve) throw new Error(streams.err());
+  return (streams.json<{ ticket: { key: string } }>()).ticket.key;
 }
 
 /** One commit on the current branch touching `path`. */
@@ -73,9 +58,7 @@ function commit(dir: string, path: string, message: string): string {
 describe("what merged under a branch", () => {
   it("reads the loop's own merge shapes out of the base's history, and nothing else", () => {
     const repo = join(scratch, "history");
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
     const from = git(repo, "rev-parse", "HEAD");
     // The runner's own merge subject.
     git(repo, "checkout", "-q", "-b", "ayo/AYO-1/one");
@@ -97,16 +80,14 @@ describe("what merged under a branch", () => {
 
   it("names no key at all where the log it read arrived cut", async () => {
     const repo = join(scratch, "history-cut");
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
     const from = git(repo, "rev-parse", "HEAD");
     // One commit whose message alone is longer than a `git log` may say, so
     // what the read holds is the tail of the log and not the log.
     writeFileSync(join(repo, "long.md"), "long\n");
     git(repo, "add", "-A");
     execFileSync("git", ["-C", repo, "commit", "-q", "-F", "-"], {
-      env,
+      env: gitEnvironment(),
       input: `a long commit\n\n${"x".repeat(65 * 1024 * 1024)}\n`,
     });
     // The merge the tail does hold, which is the trap: a cut log is shaped
@@ -123,9 +104,7 @@ describe("what merged under a branch", () => {
 
   it("reads a merge of an prb/ branch the way it reads an ayo/ one, and no other namespace's", () => {
     const repo = join(scratch, "history-prb");
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
     const from = git(repo, "rev-parse", "HEAD");
     // A person's merge of the loop's pull request, which names the branch.
     git(repo, "checkout", "-q", "-b", "prb/PRB-3/three");
@@ -145,9 +124,7 @@ describe("what merged under a branch", () => {
 
   it("briefs with the store's approved contracts for those keys, never the branch's own", async () => {
     const repo = join(scratch, "context");
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
     mkdirSync(join(repo, ".perbo"), { recursive: true });
     writeFileSync(join(repo, ".perbo", "config.json"), JSON.stringify({ base_ref: "main" }));
     const one = admitted(repo, "One is done.", "one/**");
@@ -184,9 +161,7 @@ describe("what merged under a branch", () => {
 describe("the store's hooks for a re-level", () => {
   function admittedRepo(): { repo: string; key: string } {
     const repo = join(scratch, `hooks-${Math.random().toString(16).slice(2)}`);
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
     mkdirSync(join(repo, ".perbo"), { recursive: true });
     writeFileSync(join(repo, ".perbo", "config.json"), JSON.stringify({ base_ref: "main" }));
     return { repo, key: admitted(repo, "Mine is done.", "mine/**") };
@@ -287,9 +262,9 @@ describe("the store's hooks for a re-level", () => {
         reason: "carries 1 commit the loop did not make",
       }),
     );
-    const streams = capture();
+    const streams = recordStreams();
     runCommandLine(listCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
-    expect(streams.out.join("")).toContain(
+    expect(streams.out()).toContain(
       "re-level did not level the branch at cccccccccccc (exit 3: carries 1 commit the loop did not make)",
     );
   });
@@ -299,10 +274,8 @@ describe("the queue's reading of a branch", () => {
   it("judges by the pushed branch, so an unpushed merge commit does not read as level", async () => {
     const repo = join(scratch, "pushed");
     const remote = join(scratch, "pushed-remote.git");
-    mkdirSync(repo, { recursive: true });
-    git(repo, "init", "-q", "-b", "main");
-    commit(repo, "README.md", "base");
-    execFileSync("git", ["init", "-q", "--bare", remote], { env });
+    initRepository(repo, { files: { "README.md": "base\n" }, message: "base" });
+    initBareRepository(remote);
     git(repo, "remote", "add", "origin", remote);
     git(repo, "checkout", "-q", "-b", "ayo/AYO-1/one");
     commit(repo, "one.md", "one");

@@ -1,12 +1,12 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { readContract, storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * D-105: the standing prohibited list is a repository agreement, so every
@@ -18,30 +18,13 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 function repository(name: string, config?: unknown): string {
   const dir = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: "t",
-      GIT_AUTHOR_EMAIL: "t@t.invalid",
-      GIT_COMMITTER_NAME: "t",
-      GIT_COMMITTER_EMAIL: "t@t.invalid",
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      GIT_CONFIG_SYSTEM: "/dev/null",
-    },
-  });
+  emptyRepository(dir);
   if (config !== undefined) {
     mkdirSync(join(dir, ".perbo"), { recursive: true });
     writeFileSync(join(dir, ".perbo", "config.json"), JSON.stringify(config, null, 2));
   }
   return dir;
 }
-
-const streams = (): Streams => ({
-  stdout: () => undefined,
-  stderr: () => undefined,
-  isTTY: false,
-});
 
 const admit = (repo: string, ...extra: string[]): number | Promise<number> =>
   runCommandLine(admitCommandLine, {
@@ -56,7 +39,7 @@ const admit = (repo: string, ...extra: string[]): number | Promise<number> =>
       "packages/auth/**",
       ...extra,
     ],
-    streams: streams(),
+    streams: recordStreams(),
     cwd: repo,
   });
 

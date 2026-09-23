@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,13 +5,14 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, TICKET_SCHEMA_VERSION, TicketSchema, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
-import { makeAttempt } from "../test-support/attempt-fixture.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../test-support/spawn-timeout.js";
+import { makeAttempt } from "../test-support/records.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import { stopsCommandLine } from "./stops.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * SCP-196: the loop's own success as a live number.
@@ -29,12 +29,6 @@ import { runCommandLine } from "../command-line/terminal.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-unattended-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
-
 /* ------------------------------------------------------------------ *
  * `perbo sync`: `commits_outside_loop` read from `gh pr view --json commits`.
  * ------------------------------------------------------------------ */
@@ -42,16 +36,6 @@ function capture(): Streams & { out: string[]; err: string[] } {
 const OUTCOME = "Search results are paginated.";
 const PR = 71;
 const url = `https://github.com/o/r/pull/${PR}`;
-
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
 
 /** A `gh` on PATH that answers every invocation from one fixed body. */
 function fakeGh(name: string, stdout: string): string {
@@ -113,8 +97,7 @@ const withGh = <T,>(bin: string, body: () => T | Promise<T>): Promise<Awaited<T>
 /** A ticket sitting at `pr_open` behind a pull request the loop published. */
 function publishedTicket(name: string): { repo: string; dir: string; branch: string } {
   const repo = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
+  emptyRepository(repo);
   runCommandLine(admitCommandLine, {
     argv: [
       "--repo",
@@ -127,7 +110,7 @@ function publishedTicket(name: string): { repo: string; dir: string; branch: str
       "packages/search/**",
       "--approve",
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   const dir = storeDir(repo, null);
@@ -154,7 +137,7 @@ const NOW = new Date("2026-09-04T10:00:00.000Z");
 describe("sync reads commits_outside_loop from gh, by message, not by author", () => {
   it("records no commit outside the loop when every commit carries the attempt trailer", async () => {
     const { repo, dir } = publishedTicket("all-loop");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(
       fakeGh("all-loop", ghAnswer("MERGED", [
@@ -172,7 +155,7 @@ describe("sync reads commits_outside_loop from gh, by message, not by author", (
 
   it("records a commit outside the loop when one carries no attempt trailer — never checking who git says wrote it", async () => {
     const { repo, dir } = publishedTicket("one-person-commit");
-    const streams = capture();
+    const streams = recordStreams();
 
     await withGh(
       fakeGh("one-person-commit", ghAnswer("MERGED", [
@@ -189,7 +172,7 @@ describe("sync reads commits_outside_loop from gh, by message, not by author", (
 
   it("leaves it null when gh names no commits to judge", async () => {
     const { repo, dir } = publishedTicket("no-commits-field");
-    const streams = capture();
+    const streams = recordStreams();
 
     await withGh(fakeGh("no-commits-field", ghAnswer("OPEN", [])), () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -310,10 +293,10 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     // loop never ran a completed attempt against it, and a merged ticket with
     // nothing recorded must not crash the reading.
 
-    const streams = capture();
+    const streams = recordStreams();
     const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(code).toBe(EXIT_CODES.approve);
-    const out = streams.out.join("");
+    const out = streams.out();
     expect(out).toMatch(/unattended merges\s+67%\s+\[21–94\]\s+3 merged tickets with a known answer \(2 unattended, 1 attended\)/);
     expect(out).toMatch(
       /cost per merged ticket\s+\$1\.3333\s+3 merged tickets, 2 attempts, 2 cost components \(2 priced\)/,
@@ -344,9 +327,9 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
       }),
     ]);
 
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
-    expect(streams.out.join("")).toContain("AYO-1/att_unpriced");
+    expect(streams.out()).toContain("AYO-1/att_unpriced");
   });
 
   it("emits the same numbers as JSON", async () => {
@@ -365,12 +348,12 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     );
     writeAttempts(dir, "ticket_1", [priced("ticket_1", 4_000_000)]);
 
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo });
-    const parsed = JSON.parse(streams.out.join("")) as {
+    const parsed = streams.json<{
       unattended_merges: { merged: number; unattended: number; attended: number; unknown: number; share: { point: number; n: number } };
       merged_cost: { tickets: number; attempts: number; priced: number; micros: number };
-    };
+    }>();
     expect(parsed.unattended_merges.merged).toBe(1);
     expect(parsed.unattended_merges.unattended).toBe(1);
     expect(parsed.unattended_merges.share.point).toBe(1);
@@ -404,11 +387,11 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
       }),
     );
 
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--since", "2026-09-02", "--json"], streams, cwd: repo });
-    const parsed = JSON.parse(streams.out.join("")) as {
+    const parsed = streams.json<{
       unattended_merges: { merged: number; attended: number };
-    };
+    }>();
     // Only AYO-2 merged inside the window; AYO-1 (before it) is excluded
     // entirely rather than counted as a miss.
     expect(parsed.unattended_merges.merged).toBe(1);
@@ -431,10 +414,10 @@ describe("perbo stops prints D-076's number beside D-060's", () => {
     );
     writeFileSync(join(dir, "state", "ticket_1.attempts.json"), "{not json");
 
-    const streams = capture();
+    const streams = recordStreams();
     const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
     expect(code).toBe(EXIT_CODES.approve);
-    expect(streams.err.join("")).toContain("AYO-1");
-    expect(streams.out.join("")).toMatch(/unattended merges\s+100%/);
+    expect(streams.err()).toContain("AYO-1");
+    expect(streams.out()).toMatch(/unattended merges\s+100%/);
   });
 });

@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import { UsageError } from "../usage-error.js";
-import type { Streams } from "../streams.js";
 import { parseArgv, switchFlag, valueFlag, type FlagTable, type Grammar } from "./grammar.js";
 import { USAGE } from "./usage.js";
 import { runCommandLine, runEntryPoint, type EntryPoint } from "./terminal.js";
 import { VERSION } from "../version.js";
 import type { NarratedCommand, ReportCommand, TerminalCommand } from "./table.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * The adapter between a command line and a command, on two commands built for
@@ -84,83 +84,73 @@ const narrating: NarratedCommand<DemoInput, DemoOutput, DemoDeps> = {
   },
 };
 
-function streams(isTTY: boolean): { streams: Streams; out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    streams: { stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY },
-    out,
-    err,
-  };
-}
-
 describe("a command that answers with a record", () => {
   it("writes the reading, what it said while it worked, and its own exit code", () => {
-    const { streams: s, out, err } = streams(true);
+    const s = recordStreams({ isTTY: true });
     const code = runCommandLine(reporting, { argv: ["--repo", "/tmp"], streams: s, cwd: "/" });
     expect(code).toBe(2);
-    expect(out.join("")).toBe("REPO /tmp (nothing)\n");
+    expect(s.out()).toBe("REPO /tmp (nothing)\n");
     // What it said while it worked comes before what the rendering adds.
-    expect(err.join("")).toBe("looking\none row\n");
+    expect(s.err()).toBe("looking\none row\n");
   });
 
   it("answers synchronously, so a caller that reads a number reads one", () => {
-    const { streams: s } = streams(true);
+    const s = recordStreams({ isTTY: true });
     expect(runCommandLine(reporting, { argv: [], streams: s, cwd: "/" })).not.toBeInstanceOf(
       Promise,
     );
   });
 
   it("writes the record when `--json` is given", () => {
-    const { streams: s, out } = streams(true);
+    const s = recordStreams({ isTTY: true });
     expect(runCommandLine(reporting, { argv: ["--json"], streams: s, cwd: "/" })).toBe(0);
-    expect(out.join("")).toBe('{"repo":"."}\n');
+    expect(s.out()).toBe('{"repo":"."}\n');
   });
 
   it("writes the reading on a pipe where the command does not promise the record", () => {
-    const { streams: s, out } = streams(false);
+    const s = recordStreams({ isTTY: false });
     expect(runCommandLine(reporting, { argv: [], streams: s, cwd: "/" })).toBe(2);
-    expect(out.join("")).toBe("REPO . (nothing)\n");
+    expect(s.out()).toBe("REPO . (nothing)\n");
   });
 
   it("writes the record on a pipe where the command does promise it", () => {
-    const { streams: s, out } = streams(false);
+    const s = recordStreams({ isTTY: false });
     const promises: ReportCommand<DemoInput, DemoOutput, DemoReport, DemoDeps> = {
       ...reporting,
       jsonWhenPiped: true,
     };
     expect(runCommandLine(promises, { argv: [], streams: s, cwd: "/" })).toBe(0);
-    expect(out.join("")).toBe('{"repo":"."}\n');
+    expect(s.out()).toBe('{"repo":"."}\n');
   });
 
   it("hands the command what a caller injected", () => {
-    const { streams: s, out } = streams(true);
+    const s = recordStreams({ isTTY: true });
     runCommandLine(reporting, { argv: [], streams: s, cwd: "/", deps: { seen: "a fake" } });
-    expect(out.join("")).toBe("REPO . (a fake)\n");
+    expect(s.out()).toBe("REPO . (a fake)\n");
   });
 });
 
 describe("a command that answers while it works", () => {
   it("writes through the streams it was given and returns its own code", async () => {
-    const { streams: s, out, err } = streams(false);
+    const s = recordStreams({ isTTY: false });
     await expect(
       runCommandLine(narrating, { argv: ["--repo", "/tmp"], streams: s, cwd: "/" }),
     ).resolves.toBe(3);
-    expect(out.join("")).toBe("done\n");
-    expect(err.join("")).toBe("syncing /tmp\n");
+    expect(s.out()).toBe("done\n");
+    expect(s.err()).toBe("syncing /tmp\n");
   });
 });
 
 describe("whatever the command is", () => {
   it("prints the help for a line that asks for it, and runs nothing", () => {
-    const { streams: s, out, err } = streams(true);
+    const s = recordStreams({ isTTY: true });
     expect(runCommandLine(reporting, { argv: ["--help"], streams: s, cwd: "/" })).toBe(0);
-    expect(err.join("")).toBe(USAGE);
-    expect(out).toEqual([]);
+    expect(s.err()).toBe(USAGE);
+    expect(s.out()).toBe("");
   });
 
   it("lets a refusal out to the entry point, which decides what it exits as", () => {
-    const { streams: s } = streams(true);
+    const s = recordStreams({ isTTY: true });
     expect(() =>
       runCommandLine(reporting, { argv: ["--nope"], streams: s, cwd: "/" }),
     ).toThrow(UsageError);

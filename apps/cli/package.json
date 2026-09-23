@@ -30,6 +30,7 @@
     "@perbo/planning": "workspace:*",
     "@perbo/review": "workspace:*",
     "@perbo/runner": "workspace:*",
+    "@perbo/test-support": "workspace:*",
     "@perbo/tsconfig": "workspace:*",
     "@perbo/workspace": "workspace:*",
     "@eslint/js": "catalog:",

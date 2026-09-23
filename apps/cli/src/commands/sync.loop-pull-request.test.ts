@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,11 +5,12 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { EXIT_CODES, HAND_OFF_NOTE, OPENER_UNKNOWN_NOTE, transition, type Ticket } from "@perbo/contracts";
 import { branchName } from "@perbo/workspace";
 import { ListJsonSchema, admitCommandLine, listCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { buildInspectReport } from "./inspect.js";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import { readContract, readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * SCP-173: `perbo sync` on a `failed` ticket whose branch carries a pull
@@ -36,27 +36,10 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const OUTCOME = "Search results are paginated.";
 
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 function repository(name: string): string {
   const dir = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
+  emptyRepository(dir);
   return dir;
-}
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
 }
 
 const admitArgv = (repo: string) => [
@@ -141,7 +124,7 @@ const LOOP_PR = 41;
  */
 function publishedTicket(name: string): { repo: string; dir: string; ticket: Ticket; branch: string } {
   const repo = repository(name);
-  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: capture(), cwd: repo });
+  runCommandLine(admitCommandLine, { argv: admitArgv(repo), streams: recordStreams(), cwd: repo });
   const dir = storeDir(repo, null);
   const branch = branchName({
     ticket_key: "PRB-1",
@@ -210,7 +193,7 @@ describe("ac_1 — the loop's own pull request outlives a failed re-run", () => 
   it("syncs to merged, crediting the loop with the pull request and marking no hand-off", async () => {
     const { repo, dir, ticket: before } = reRunFailedTicket("loop-merged");
     const gh = fakeGh("loop-merged", { stdout: ghAnswer(LOOP_PR, "MERGED") });
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await withGh(gh, () =>
       runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo, now: NOW }),
@@ -244,7 +227,7 @@ describe("ac_1 — the loop's own pull request outlives a failed re-run", () => 
     const gh = fakeGh("loop-open", { stdout: ghAnswer(LOOP_PR, "OPEN") });
 
     const code = await withGh(gh, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -260,7 +243,7 @@ describe("ac_2 — a pull request the record has never seen is still a hand-off"
     const gh = fakeGh("stranger-pr", { stdout: ghAnswer(77, "MERGED") });
 
     const code = await withGh(gh, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);
@@ -287,7 +270,7 @@ describe("ac_2 — a pull request the record only ever saw as a stranger's stays
     // there is nothing to walk to. The record still takes the number, because
     // that is what `gh` says is on the branch.
     const first = await withGh(closed, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
     expect(first).toBe(EXIT_CODES.approve);
     const between = readTicket(dir, "PRB-1");
@@ -300,7 +283,7 @@ describe("ac_2 — a pull request the record only ever saw as a stranger's stays
     const second = await withGh(merged, () =>
       runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T10:00:00.000Z"),
       }),
@@ -321,7 +304,7 @@ describe("ac_2 — a pull request the record only ever saw as a stranger's stays
     const stranger = fakeGh("stranger-before-failing", { stdout: ghAnswer(77, "OPEN") });
 
     await withGh(stranger, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
     expect(readTicket(dir, "PRB-1")).toMatchObject({
       state: "changes_requested",
@@ -332,7 +315,7 @@ describe("ac_2 — a pull request the record only ever saw as a stranger's stays
     await withGh(stranger, () =>
       runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T10:00:00.000Z"),
       }),
@@ -349,14 +332,14 @@ describe("ac_2 — a pull request the record only ever saw as a stranger's stays
     const open = fakeGh("loop-reopened", { stdout: ghAnswer(LOOP_PR, "OPEN") });
 
     await withGh(closed, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
     expect(readTicket(dir, "PRB-1").delivery).toMatchObject({ state: "closed", opened_by: "loop" });
 
     await withGh(open, () =>
       runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T10:00:00.000Z"),
       }),
@@ -382,10 +365,10 @@ describe("what a failed ticket whose latest run produced nothing shows a reader"
     // `list --json` carries the record verbatim, so it is where the whole of it
     // is visible: open, at the number the loop opened, dated at the round that
     // observed it and not at the run that failed afterwards.
-    const streams = capture();
+    const streams = recordStreams();
     const code = runCommandLine(listCommandLine, { argv: ["--repo", repo, "--all", "--json"], streams, cwd: repo });
     expect(code).toBe(EXIT_CODES.approve);
-    const listed = ListJsonSchema.parse(JSON.parse(streams.out.join("")));
+    const listed = ListJsonSchema.parse(streams.json());
     expect(listed.tickets).toHaveLength(1);
     expect(listed.tickets[0]!.delivery).toEqual({
       branch: ticket.delivery.branch,
@@ -427,7 +410,7 @@ describe("ac_3 — inspect reads the hand-off off the row, not off the edge", ()
   it("reports handed_off false for the loop's pull request, whose row is still failed -> pr_open", async () => {
     const { repo, dir } = reRunFailedTicket("inspect-loop");
     const gh = fakeGh("inspect-loop", { stdout: ghAnswer(LOOP_PR, "MERGED") });
-    await withGh(gh, () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }));
+    await withGh(gh, () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }));
 
     const report = buildInspectReport({ storeDirectory: dir, key: "PRB-1", attempt: null });
     expect(report.handed_off).toBe(false);
@@ -440,7 +423,7 @@ describe("ac_3 — inspect reads the hand-off off the row, not off the edge", ()
   it("reports handed_off true for a pull request the record never saw", async () => {
     const { repo, dir } = reRunFailedTicket("inspect-handoff");
     const gh = fakeGh("inspect-handoff", { stdout: ghAnswer(77, "MERGED") });
-    await withGh(gh, () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }));
+    await withGh(gh, () => runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }));
 
     const report = buildInspectReport({ storeDirectory: dir, key: "PRB-1", attempt: null });
     expect(report.handed_off).toBe(true);
@@ -460,7 +443,7 @@ describe("ac_4 — SCP-176: an opener neither the record nor the history can att
     const gh = fakeGh("unrecorded-opener", { stdout: ghAnswer(LOOP_PR, "OPEN") });
 
     const code = await withGh(gh, () =>
-      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: capture(), cwd: repo, now: NOW }),
+      runCommandLine(syncCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo, now: NOW }),
     );
 
     expect(code).toBe(EXIT_CODES.approve);

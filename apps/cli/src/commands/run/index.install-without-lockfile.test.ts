@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -9,12 +8,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { type ExecuteDeps, doctorCommandLine, executeCommandLine } from "./index.js";
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
+import { npmRepository } from "../../test-support/repository.js";
 
 /**
  * A first run on a repository that has no lockfile yet.
@@ -45,18 +47,8 @@ import { runCommandLine } from "../../command-line/terminal.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-no-lockfile-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /**
  * One commit, a `test` script, no lockfile and no `.perbo/` — the two-file npm
@@ -64,30 +56,11 @@ const git = (dir: string, ...argv: string[]): string =>
  * ignored because the worktree's install writes it and it is not the change.
  */
 function repository(name: string, manifest: Record<string, unknown> = {}): string {
-  const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify(
-      {
-        name: "fixture",
-        private: true,
-        scripts: { test: 'node -e "process.exit(0)"' },
-        ...manifest,
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  writeFileSync(join(dir, ".gitignore"), "node_modules/\n");
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
-  return dir;
+  return npmRepository(mkdtempSync(join(scratch, `${name}-`)), {
+    manifest,
+    lockfile: false,
+    files: { ".gitignore": "node_modules/\n" },
+  }).dir;
 }
 
 /** An executor that writes one file, as a real program the runner spawns. */
@@ -252,8 +225,7 @@ async function loop(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string; out: string }> {
-  const out: string[] = [];
-  const err: string[] = [];
+  const streams = recordStreams();
   const code = await runCommandLine(executeCommandLine, {
     argv: [
         "--repo",
@@ -267,18 +239,14 @@ async function loop(
         "--json",
         ...argv,
       ],
-    streams: {
-        stdout: (chunk: string) => out.push(chunk),
-        stderr: (chunk: string) => err.push(chunk),
-        isTTY: false,
-      },
+    streams,
     cwd: repo,
     deps: { preflight: okPreflight, hooks: { review: reviewer() as never }, ...options },
   });
   // The report is returned unparsed: a run that refuses writes nothing to
   // stdout, and a test that parses eagerly fails on the JSON rather than on
   // the line it is about.
-  return { code, err: err.join(""), out: out.join("") };
+  return { code, err: streams.err(), out: streams.out() };
 }
 
 interface AttemptRecord {
@@ -307,18 +275,6 @@ function sealedPaths(repo: string, one: AttemptRecord): string[] {
     .split("\n")
     .filter((path) => path.length > 0);
 }
-
-const capture = (isTTY: boolean) => {
-  const out: string[] = [];
-  return {
-    out,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: () => undefined,
-      isTTY,
-    },
-  };
-};
 
 describe("a run on a repository with no lockfile", () => {
   it("says the install is unpinned, names what pins it, and runs", async () => {
@@ -376,20 +332,20 @@ describe("doctor on a repository with no lockfile", () => {
   it("reports the install as unpinned, and names the advisory", async () => {
     const repo = repository("doctor");
 
-    const reported = capture(false);
+    const reported = recordStreams();
     const code = await runCommandLine(doctorCommandLine, {
       argv: ["--repo", repo, "--json"],
-      streams: reported.streams,
+      streams: reported,
       cwd: repo,
       deps: { preflight: okPreflight },
     });
 
-    const report = JSON.parse(reported.out.join("")) as {
+    const report = reported.json<{
       materializable: boolean;
       findings: Array<{ reason: string; severity: string; detail: string }>;
       proposed: { install: { command: string[]; pinned: boolean } };
       config: { proposed: { materialization_manifest: { install: { pinned: boolean } } } };
-    };
+    }>();
     expect(code).toBe(0);
     expect(report.materializable).toBe(true);
     expect(report.proposed.install.command).toEqual([
@@ -407,14 +363,14 @@ describe("doctor on a repository with no lockfile", () => {
     expect(advisory?.detail).toContain("npm install --package-lock-only");
 
     // The report a person reads says it too, rather than only the JSON.
-    const shown = capture(true);
+    const shown = recordStreams({ isTTY: true });
     await runCommandLine(doctorCommandLine, {
       argv: ["--repo", repo],
-      streams: shown.streams,
+      streams: shown,
       cwd: repo,
       deps: { preflight: okPreflight },
     });
-    const text = shown.out.join("");
+    const text = shown.out();
     expect(text).toContain("advisory  lockfile_missing");
     expect(text).toContain("unpinned");
   }, 120_000);
@@ -466,7 +422,7 @@ async function doctor(
   repo: string,
   options: { write?: boolean; human?: boolean } = {},
 ): Promise<{ text: string; code: number }> {
-  const shown = capture(options.human === true);
+  const shown = recordStreams({ isTTY: options.human === true });
   const code = await runCommandLine(doctorCommandLine, {
     argv: [
         "--repo",
@@ -474,11 +430,11 @@ async function doctor(
         ...(options.human ? [] : ["--json"]),
         ...(options.write ? ["--write-config"] : []),
       ],
-    streams: shown.streams,
+    streams: shown,
     cwd: repo,
     deps: { preflight: okPreflight },
   });
-  return { text: shown.out.join(""), code };
+  return { text: shown.out(), code };
 }
 
 const reportedBy = async (repo: string, write = false): Promise<DoctorReport> =>
@@ -782,18 +738,7 @@ describe("the install binary a run checks the machine for", () => {
  */
 function checkout(name: string, files: Record<string, string>): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  for (const [path, body] of Object.entries(files)) {
-    const target = join(dir, path);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, body);
-  }
-  writeFileSync(join(dir, ".gitignore"), "node_modules/\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  initRepository(dir, { files: { ...files, ".gitignore": "node_modules/\n" } });
   return dir;
 }
 

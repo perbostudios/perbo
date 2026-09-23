@@ -12,9 +12,9 @@ import { ResumeRecordSchema, contractForUnresolved, mergeResumed } from "./inter
 import { runReviewCommand, type RunOptions } from "./index.js";
 import { VERSION } from "../../version.js";
 import { describeFailure } from "../../failure.js";
-import type { Streams } from "../../streams.js";
 import { spawnBuilt } from "../../test-support/built-cli.js";
 import { BUILT_ENTRY, PACKAGE_ROOT } from "../../test-support/paths.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 const packageMetadata: unknown = JSON.parse(
   readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8"),
@@ -154,13 +154,7 @@ async function invoke(
   isTTY = false,
   extra: Partial<RunOptions> = {},
 ): Promise<Captured> {
-  let out = "";
-  let err = "";
-  const streams: Streams = {
-    stdout: (chunk) => (out += chunk),
-    stderr: (chunk) => (err += chunk),
-    isTTY,
-  };
+  const streams = recordStreams({ isTTY });
   const args = parseReviewArgs([...argv, "--state", stateDir]);
   const code = await runReviewCommand({
     args,
@@ -170,7 +164,7 @@ async function invoke(
     makeModel: () => model,
     ...extra,
   });
-  return { out, err, code };
+  return { out: streams.out(), err: streams.err(), code };
 }
 
 const base = [
@@ -528,16 +522,16 @@ describe("resume", () => {
     expect(existsSync(join(stateDir, `${reviewId}.json`))).toBe(true);
 
     const clean = mkdtempSync(join(scratch, "state-"));
-    let out = "";
+    const streams = recordStreams();
     const args = parseReviewArgs([...base, "--state", clean]);
     await runReviewCommand({
       args,
-      streams: { stdout: (chunk) => (out += chunk), stderr: () => undefined, isTTY: false },
+      streams,
       cwd: scratch,
       now: new Date("2026-08-27T10:00:00Z"),
       makeModel: () => stubModel(bothMet),
     });
-    const id = JSON.parse(out).review_id as string;
+    const id = streams.json<{ review_id: string }>().review_id;
     expect(existsSync(join(clean, `${id}.json`))).toBe(false);
   });
 

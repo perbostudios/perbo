@@ -15,8 +15,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import { SecretIndex, type RunBundle, type RunBundleKind } from "@perbo/contracts";
 import { BundleStore } from "@perbo/runner";
 import { inspectCommandLine } from "./inspect.js";
-import { makeAttempt, makeReview, makeTicket } from "../test-support/attempt-fixture.js";
+import { makeAttempt, makeReview, makeTicket } from "../test-support/records.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * `perbo inspect <ticket> --verify <attempt>` (AYO-69).
@@ -34,20 +35,6 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 const TICKET_ID = "ticket_verify00001";
 const ATTEMPT = "att_verify00000001";
-
-function capture(isTTY = true) {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY,
-    },
-  };
-}
 
 const DIFF = `diff --git a/packages/search/src/query.ts b/packages/search/src/query.ts
 index 1111111..2222222 100644
@@ -195,13 +182,13 @@ async function verify(
   fixture: Fixture,
   argv: string[] = [],
 ): Promise<{ code: number; out: string; err: string }> {
-  const { out, err, streams } = capture();
+  const streams = recordStreams({ isTTY: true });
   const code = await runCommandLine(inspectCommandLine, {
     argv: ["AYO-8", "--verify", ATTEMPT, "--repo", fixture.repo, ...argv],
     streams,
     cwd: fixture.repo,
   });
-  return { code, out: out.join(""), err: err.join("") };
+  return { code, out: streams.out(), err: streams.err() };
 }
 
 describe("perbo inspect --verify", () => {
@@ -344,7 +331,7 @@ describe("perbo inspect --verify", () => {
       now: new Date("2026-09-03T09:05:00.000Z"),
     });
 
-    const { out, streams } = capture();
+    const streams = recordStreams({ isTTY: true });
     const code = await runCommandLine(inspectCommandLine, {
       argv: ["AYO-8", "--verify", ATTEMPT, "--repo", repo],
       streams,
@@ -352,9 +339,9 @@ describe("perbo inspect --verify", () => {
     });
 
     expect(code).toBe(0);
-    expect(out.join("")).toContain("not retained");
-    expect(out.join("")).toContain("verified: 0 objects");
-    expect(out.join("")).not.toContain("missing");
+    expect(streams.out()).toContain("not retained");
+    expect(streams.out()).toContain("verified: 0 objects");
+    expect(streams.out()).not.toContain("missing");
   });
 
   it("hands the same verdict to a script under --json", async () => {
@@ -417,7 +404,7 @@ describe("perbo inspect --verify", () => {
     );
     const before = snapshot(store);
 
-    const { out, streams } = capture();
+    const streams = recordStreams({ isTTY: true });
     const code = await runCommandLine(inspectCommandLine, {
       argv: ["AYO-8", "--verify", ATTEMPT, "--repo", repo],
       streams,
@@ -425,15 +412,15 @@ describe("perbo inspect --verify", () => {
     });
 
     expect(code).not.toBe(0);
-    expect(out.join("")).toContain("holds no bundle for this attempt");
-    expect(out.join("")).not.toContain("verified:");
+    expect(streams.out()).toContain("holds no bundle for this attempt");
+    expect(streams.out()).not.toContain("verified:");
     expect(existsSync(join(store, "bundles"))).toBe(false);
     expect(snapshot(store)).toEqual(before);
   });
 
   it("refuses an attempt the record does not hold rather than verifying nothing", () => {
     const fixture = storeWithBundle("verify-unknown-attempt");
-    const { streams } = capture();
+    const streams = recordStreams({ isTTY: true });
     expect(() =>
       runCommandLine(inspectCommandLine, {
         argv: ["AYO-8", "--verify", "att_nope", "--repo", fixture.repo],

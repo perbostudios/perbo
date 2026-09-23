@@ -18,6 +18,9 @@ import { type ExecuteDeps, doctorCommandLine, executeCommandLine, resolveBase } 
 import { inspectCommandLine } from "../inspect.js";
 import { exitForThrown, runCommandLine } from "../../command-line/terminal.js";
 import { storeDir } from "../../store/index.js";
+import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment, initBareRepository } from "@perbo/test-support";
+import { npmRepository } from "../../test-support/repository.js";
 
 /**
  * The branch a run publishes against, and which of three sources named it.
@@ -43,18 +46,8 @@ import { storeDir } from "../../store/index.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-base-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /** The commit a ref names, as `git` resolves it in that checkout. */
 const tipOf = (dir: string, ref: string): string => git(dir, "rev-parse", ref).trim();
@@ -90,27 +83,7 @@ interface RepositoryShape {
 
 /** A repository with one commit, a `test` script, a lockfile and no `.perbo/`. */
 function repository(name: string, shape: RepositoryShape = {}): string {
-  const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify(
-      { name: "fixture", private: true, scripts: { test: 'node -e "process.exit(0)"' } },
-      null,
-      2,
-    )}\n`,
-  );
-  writeFileSync(
-    join(dir, "package-lock.json"),
-    `${JSON.stringify({ name: "fixture", lockfileVersion: 3, packages: {} }, null, 2)}\n`,
-  );
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  const dir = npmRepository(mkdtempSync(join(scratch, `${name}-`))).dir;
   for (const branch of shape.branches ?? []) {
     git(dir, "checkout", "-q", "-b", branch);
     writeFileSync(join(dir, "src", `${branch.replace(/[^a-z0-9]/gi, "-")}.ts`), "export const on = 1;\n");
@@ -121,7 +94,7 @@ function repository(name: string, shape: RepositoryShape = {}): string {
   const remoteDefault = shape.remoteDefault === true ? "main" : (shape.remoteDefault ?? null);
   if (remoteDefault) {
     const bare = mkdtempSync(join(scratch, `${name}-remote-`));
-    execFileSync("git", ["init", "-q", "--bare", bare], { env: gitEnv });
+    initBareRepository(bare);
     git(dir, "remote", "add", "origin", bare);
     git(dir, "push", "-q", "origin", "--all");
     // A default the checkout has no branch for is still a branch on the remote:
@@ -374,16 +347,6 @@ const reviewer =
 const OUTCOME = "The feature module exports a computed total";
 const CRITERION = "total() returns the sum of its inputs :: total([1,2]) is 3 :: test";
 
-const capture = (isTTY = false) => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, streams: { stdout: (c: string) => out.push(c), stderr: (c: string) => err.push(c), isTTY } };
-};
-
-/** The rendering without its colours: the words are what is being read. */
-// eslint-disable-next-line no-control-regex
-const uncoloured = (text: string): string => text.replace(/\u001b\[[0-9;]*m/g, "");
-
 /** What a run reported about itself, from the JSON it writes on stdout. */
 interface RunReport {
   ticket_id: string;
@@ -399,22 +362,22 @@ async function run(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string; out: string }> {
-  const streams = capture();
+  const streams = recordStreams();
   try {
     const code = await runCommandLine(executeCommandLine, {
       argv: ["--repo", repo, "--outcome", OUTCOME, "--criterion", CRITERION, "--json", ...argv],
-      streams: streams.streams,
+      streams,
       cwd: repo,
       deps: { preflight: okPreflight, hooks: {
           review: reviewer() as never,
           push: (async () => ({ pushed: true, detail: "hooked" })) as never,
         }, ...options },
     });
-    return { code, err: streams.err.join(""), out: streams.out.join("") };
+    return { code, err: streams.err(), out: streams.out() };
   } catch (error) {
     const failure = exitForThrown("run", error);
-    streams.streams.stderr(`error: ${failure.message}\n`);
-    return { code: failure.code, err: streams.err.join(""), out: streams.out.join("") };
+    streams.stderr(`error: ${failure.message}\n`);
+    return { code: failure.code, err: streams.err(), out: streams.out() };
   }
 }
 
@@ -480,22 +443,22 @@ async function runContract(
       ...config,
     }),
   );
-  const streams = capture();
+  const streams = recordStreams();
   try {
     const code = await runCommandLine(executeCommandLine, {
       argv: ["--repo", repo, "--contract", contractPath, "--config", configPath, "--json", ...argv],
-      streams: streams.streams,
+      streams,
       cwd: repo,
       deps: { preflight: okPreflight, hooks: {
           review: reviewer() as never,
           push: (async () => ({ pushed: true, detail: "hooked" })) as never,
         } },
     });
-    return { code, err: streams.err.join(""), out: streams.out.join("") };
+    return { code, err: streams.err(), out: streams.out() };
   } catch (error) {
     const failure = exitForThrown("run", error);
-    streams.streams.stderr(`error: ${failure.message}\n`);
-    return { code: failure.code, err: streams.err.join(""), out: streams.out.join("") };
+    streams.stderr(`error: ${failure.message}\n`);
+    return { code: failure.code, err: streams.err(), out: streams.out() };
   }
 }
 
@@ -746,15 +709,15 @@ describe("a base_ref that is not a branch name", () => {
     const repo = repository("doctor-mistyped", { remoteDefault: "develop" });
     repoConfig(repo, { base_ref: "" });
 
-    const reported = capture(true);
+    const reported = recordStreams({ isTTY: true });
     await runCommandLine(doctorCommandLine, {
       argv: ["--repo", repo],
-      streams: reported.streams,
+      streams: reported,
       cwd: repo,
       deps: { preflight: okPreflight },
     });
 
-    const shown = uncoloured(reported.out.join(""));
+    const shown = reported.plain();
     // The diagnostic reports what a run would do with this file, which is
     // refuse — and does not answer `main` as though the key were not there.
     expect(shown).toContain("BASE      none");
@@ -860,27 +823,27 @@ describe("what says where a run publishes", () => {
     git(repo, "remote", "set-head", "origin", "main");
     repoConfig(repo, { base_ref: "release/1.x" });
 
-    const asJson = capture();
+    const asJson = recordStreams();
     expect(
       await runCommandLine(inspectCommandLine, {
         argv: [reported.ticket_id, "--repo", repo],
-        streams: asJson.streams,
+        streams: asJson,
         cwd: repo,
           }),
     ).toBe(0);
-    const report = JSON.parse(asJson.out.join("")) as { base: { ref: string; from: string } | null };
+    const report = asJson.json<{ base: { ref: string; from: string } | null }>();
     expect(report.base).toEqual({ ref: "develop", from: "remote_default" });
 
     // And in the reading a person gets on a terminal, beside the pull request.
-    const onTty = capture(true);
+    const onTty = recordStreams({ isTTY: true });
     expect(
       await runCommandLine(inspectCommandLine, {
         argv: [reported.ticket_id, "--repo", repo],
-        streams: onTty.streams,
+        streams: onTty,
         cwd: repo,
           }),
     ).toBe(0);
-    const shown = uncoloured(onTty.out.join(""));
+    const shown = onTty.plain();
     expect(shown).toContain("base develop (remote default)");
     // Above the attempts, with the run's identity and its pull request, not
     // buried in the round that happened to publish.
@@ -892,14 +855,14 @@ describe("what says where a run publishes", () => {
     const nameless = repository("doctor-nameless", { detached: true });
 
     const report = async (repo: string): Promise<string> => {
-      const reported = capture(true);
+      const reported = recordStreams({ isTTY: true });
       await runCommandLine(doctorCommandLine, {
         argv: ["--repo", repo],
-        streams: reported.streams,
+        streams: reported,
         cwd: repo,
         deps: { preflight: okPreflight },
       });
-      return uncoloured(reported.out.join(""));
+      return reported.plain();
     };
 
     expect(await report(declared)).toContain("BASE      develop — remote default:");
@@ -919,25 +882,25 @@ describe("what says where a run publishes", () => {
       ...(writeConfig ? ["--write-config"] : []),
     ];
 
-    const reported = capture();
+    const reported = recordStreams();
     await runCommandLine(doctorCommandLine, {
       argv: doctorArgs(false),
-      streams: reported.streams,
+      streams: reported,
       cwd: repo,
       deps: { preflight: okPreflight },
     });
-    const report = JSON.parse(reported.out.join("")) as {
+    const report = reported.json<{
       base: { ref: string | null; from: string | null };
       config: { proposed: { base_ref?: string } };
-    };
+    }>();
     expect(report.base.ref).toBe("main");
     expect(report.base.from).toBe("branch");
     expect(report.config.proposed.base_ref).toBe("main");
 
-    const written = capture();
+    const written = recordStreams();
     await runCommandLine(doctorCommandLine, {
       argv: doctorArgs(true),
-      streams: written.streams,
+      streams: written,
       cwd: repo,
       deps: { preflight: okPreflight },
     });

@@ -6,7 +6,6 @@ import { claudeInterviewTransport } from "../claude.js";
 const CLAUDE = "/usr/local/bin/claude";
 import { codexInterviewTransport } from "../codex.js";
 import { interviewCommandLine } from "../index.js";
-import type { Streams } from "../../../streams.js";
 import { fakeAppServer, type ServerStep } from "./fake-app-server.js";
 import {
   drafter,
@@ -19,21 +18,7 @@ import {
 } from "./contract.js";
 import { scriptedSdk, type ScriptStep } from "./fake-sdk.js";
 import { runCommandLine } from "../../../command-line/terminal.js";
-
-/**
- * The two transports, each driven by the same script (SCP-312).
- *
- * A harness is what turns "the session tries this" into the traffic its
- * transport carries, and reads back what the interview answered. Neither
- * starts a session or calls a model: the Claude one drives the SDK double, and
- * the Codex one spawns the fake app server against the transport's own code.
- */
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (c) => out.push(c), stderr: (c) => err.push(c), isTTY: false };
-}
+import { recordStreams } from "../../../test-support/streams.js";
 
 /** One turn from the person, which is what makes a session run at all. */
 const oneTurn = async function* (): AsyncGenerator<string> {
@@ -64,7 +49,7 @@ export function claudeHarness(): InterviewHarness {
   return {
     name: "claude",
     async run(input): Promise<ContractRun> {
-      const streams = capture();
+      const streams = recordStreams();
       const sdk = scriptedSdk({
         steps: input.steps.map(asSdkStep),
         cwd: input.repo,
@@ -92,7 +77,7 @@ export function claudeHarness(): InterviewHarness {
         result: call.result,
         isError: call.isError,
       }));
-      return { code, out: streams.out, err: streams.err, decisions };
+      return { code, streams, decisions };
     },
   };
 }
@@ -115,7 +100,7 @@ export function codexHarness(scratch: () => string): InterviewHarness {
   return {
     name: "codex",
     async run(input): Promise<ContractRun> {
-      const streams = capture();
+      const streams = recordStreams();
       const server = fakeAppServer({
         root: mkdtempSync(join(scratch(), "app-server-")),
         steps: input.steps.map(asServerStep),
@@ -143,7 +128,7 @@ export function codexHarness(scratch: () => string): InterviewHarness {
       // words, as the other transport answers one, so what says it was refused
       // is the `refused` event the protocol carries it on.
       const refused = new Set(
-        refusals({ out: streams.out }).map((event) => event.tool),
+        refusals(streams).map((event) => event.tool),
       );
       const decisions: ContractDecision[] = server.answers().map((answer, at) => {
         const step = input.steps[at];
@@ -164,7 +149,7 @@ export function codexHarness(scratch: () => string): InterviewHarness {
           isError: behavior === "allow" && answer.success === false,
         };
       });
-      return { code, out: streams.out, err: streams.err, decisions };
+      return { code, streams, decisions };
     },
   };
 }

@@ -5,7 +5,7 @@ import {
   ESCALATED_RULE,
   ROUTED_RULES,
   makeRoutedReview,
-} from "../../../test-support/attempt-fixture.js";
+} from "../../../test-support/records.js";
 
 /**
  * What `review --format markdown` shows a person, and what it only counts.

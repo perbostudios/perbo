@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,10 +10,11 @@ import {
   type Ticket,
 } from "@perbo/contracts";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { syncCommandLine } from "./sync.js";
 import { readTicket, storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
+import { emptyRepository } from "../test-support/repository.js";
 
 /**
  * SCP-206 criterion 3: which arm produced a delivery record survives the sync
@@ -38,22 +38,6 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 const PR = 41;
 const url = `https://github.com/o/r/pull/${PR}`;
 const BRANCH = "direct/perbo-1/search-results-are-paginated";
-
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 const ghAnswer = (
   state = "OPEN",
@@ -113,10 +97,7 @@ function directArmTicket(
   options: { state?: "executing" | "pr_open"; arm?: "loop" | "direct" } = {},
 ): { repo: string; dir: string } {
   const repo = join(scratch, name);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  execFileSync("git", ["-C", repo, "commit", "-q", "--allow-empty", "-m", "base"], {
-    env: gitIdentity,
-  });
+  emptyRepository(repo);
   runCommandLine(admitCommandLine, {
     argv: [
       "--repo",
@@ -129,7 +110,7 @@ function directArmTicket(
       "packages/search/**",
       "--approve",
     ],
-    streams: capture(),
+    streams: recordStreams(),
     cwd: repo,
   });
   const dir = storeDir(repo, null);
@@ -184,7 +165,7 @@ describe("sync carries the arm across the record it rewrites", () => {
 
       const code = await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
       });
@@ -226,7 +207,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
 
       const code = await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
       });
@@ -252,7 +233,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
       const before = readFileSync(join(dir, "tickets", "PRB-1.json"), "utf8");
       process.env.PATH = `${fakeGh("bin-loop-stranded", ghAnswer("OPEN"))}:${originalPath ?? ""}`;
       process.env.GH_TOKEN = "ghp_scp206syncarmsentinel";
-      const streams = capture();
+      const streams = recordStreams();
 
       const code = await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
@@ -263,7 +244,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
 
       expect(code).toBe(EXIT_CODES.did_not_complete);
       expect(readFileSync(join(dir, "tickets", "PRB-1.json"), "utf8")).toBe(before);
-      expect(streams.err.join("")).toContain("refusing to reconcile it to pr_open");
+      expect(streams.err()).toContain("refusing to reconcile it to pr_open");
     },
     SPAWN_DEADLINE_MS,
   );
@@ -286,7 +267,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
 
       await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
         deps: {
@@ -317,7 +298,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
 
       await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
         deps: {
@@ -346,7 +327,7 @@ describe("sync carries a direct-arm record to a scored merge", () => {
 
       await runCommandLine(syncCommandLine, {
         argv: ["PRB-1", "--repo", repo],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         now: new Date("2026-09-04T11:40:00.000Z"),
         deps: {

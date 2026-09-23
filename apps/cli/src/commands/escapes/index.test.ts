@@ -15,6 +15,8 @@ import { EscapeCollectionError, TicketEscapesSchema, escapeStatus, escapesComman
 import { syncCommandLine } from "../sync.js";
 import { idsFor, readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
 
 /**
  * `perbo escapes` (SCP-145) over a real git history: one merge reverted, one
@@ -32,22 +34,9 @@ const GIT_FIXTURE_TIMEOUT_MS = 60_000;
 const scratch = mkdtempSync(join(tmpdir(), "perbo-escapes-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = (at?: string) => ({
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-  ...(at ? { GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at } : {}),
-});
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
+/** Fixture git, with the commit dates this suite's merge windows are measured from. */
+const gitEnv = (at?: string): NodeJS.ProcessEnv =>
+  gitEnvironment(at ? { GIT_AUTHOR_DATE: at, GIT_COMMITTER_DATE: at } : {});
 
 interface Fixture {
   repo: string;
@@ -171,7 +160,7 @@ const sync = (
 ) =>
   runCommandLine(syncCommandLine, {
     argv: [ticket.key, "--repo", fixtureAt.repo],
-    streams: options.streams ?? capture(),
+    streams: options.streams ?? recordStreams(),
     cwd: fixtureAt.repo,
     now: new Date(observedAt),
     deps: {
@@ -280,11 +269,11 @@ async function fourCases(name: string): Promise<Fixture & { rows: string; json: 
     const ticket = ticketAt(f, entry.key, `ayo/${entry.key}`, index + 1);
     await sync(f, ticket, entry.mergedAt, OBSERVED_AT);
   }
-  const table = capture();
+  const table = recordStreams();
   await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
-  const json = capture();
+  const json = recordStreams();
   await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
-  return { ...f, rows: table.out.join(""), json: JSON.parse(json.out.join("")) as unknown };
+  return { ...f, rows: table.out(), json: json.json<unknown>()};
 }
 
 /** The instant `days` before the fixed clock every reading in this file is taken at. */
@@ -319,18 +308,18 @@ async function readReport(f: Fixture): Promise<{
   narrative: (metric: string) => string;
   json: JsonOutput;
 }> {
-  const table = capture();
+  const table = recordStreams();
   await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
-  const json = capture();
+  const json = recordStreams();
   await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
-  const text = table.out.join("");
+  const text = table.out();
   const lines = text.split("\n");
   return {
     text,
     line: (key) => lines.find((entry) => new RegExp(`^${key}\\b`).test(entry)) ?? "",
     detail: (prefix) => lines.find((entry) => entry.trim().startsWith(prefix)) ?? "",
     narrative: (metric) => (lines.find((entry) => entry.startsWith(metric)) ?? "").split(/ {2,}/).at(-1) ?? "",
-    json: JSON.parse(json.out.join("")) as JsonOutput,
+    json: json.json<JsonOutput>(),
   };
 }
 
@@ -444,9 +433,9 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
 
     const ticket = ticketAt(f, "AYO-1", "ayo/AYO-1", 1);
     await sync(f, ticket, MERGED_AT, OBSERVED_AT);
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams, cwd: f.repo, now: READ_AT });
-    const row = (JSON.parse(streams.out.join("")) as JsonOutput).tickets[0]!;
+    const row = (streams.json<JsonOutput>()).tickets[0]!;
     expect(row.same_path_touched).toBe(true);
     expect(row.same_path.map((commit) => commit.sha)).toEqual([rework]);
     expect(row.same_path[0]!.paths).toEqual(["one.txt"]);
@@ -463,7 +452,7 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     const ticket = ticketAt(f, "AYO-1", "ayo/AYO-1", 1);
     await runCommandLine(syncCommandLine, {
       argv: [ticket.key, "--repo", f.repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: f.repo,
       now: new Date(OBSERVED_AT),
       deps: {
@@ -506,9 +495,9 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     expect(record.observed_head.sha).toBe(upstream.git(undefined, "rev-parse", "main").trim());
     expect(record.reverts[0]!.reverts).toEqual([upstream.merges["AYO-1"]]);
 
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(escapesCommandLine, { argv: ["--repo", local.repo, "--json"], streams, cwd: local.repo, now: READ_AT });
-    const json = JSON.parse(streams.out.join("")) as JsonOutput;
+    const json = streams.json<JsonOutput>();
     expect(json.tickets[0]!.status).toBe("observed");
     expect(json.tickets[0]!.reverted).toBe(true);
     expect(json.escapes.reverted).toBe(1);
@@ -522,9 +511,9 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     local.git(undefined, "remote", "set-url", "origin", join(scratch, "no-such-repository"));
 
     const ticket = ticketAt(local, "AYO-1", "ayo/AYO-1", 1);
-    const streams = capture();
+    const streams = recordStreams();
     await sync(local, ticket, MERGED_AT, OBSERVED_AT, { streams });
-    expect(streams.err.join("")).toContain("git fetch origin main");
+    expect(streams.err()).toContain("git fetch origin main");
 
     const record = readRecord(local, ticket);
     // The revert is genuinely not in this clone, so the record cannot name it —
@@ -534,9 +523,9 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     expect(record.observed_head.sha).toBe(local.merges["AYO-1"]);
     expect(record.observed_head.committed_at).toBe(MERGED_AT);
 
-    const json = capture();
+    const json = recordStreams();
     await runCommandLine(escapesCommandLine, { argv: ["--repo", local.repo, "--json"], streams: json, cwd: local.repo, now: READ_AT });
-    const parsed = JSON.parse(json.out.join("")) as JsonOutput;
+    const parsed = json.json<JsonOutput>();
     expect(parsed.tickets[0]!.status).toBe("stale");
     expect(parsed.tickets[0]!.observed_through).toBe(MERGED_AT);
     // Out of the denominator: a rate that counted this ticket as a survivor
@@ -545,22 +534,22 @@ describe("ac_1 — a revert column and a separate same-path column, over a real 
     expect(parsed.escapes.stale).toBe(1);
     expect(parsed.escapes.revert_rate.n).toBe(0);
 
-    const table = capture();
+    const table = recordStreams();
     await runCommandLine(escapesCommandLine, { argv: ["--repo", local.repo], streams: table, cwd: local.repo, now: READ_AT });
-    expect(table.out.join("")).toContain("`perbo sync AYO-1`");
-    expect(table.err.join("")).toContain("behind the default branch");
+    expect(table.out()).toContain("`perbo sync AYO-1`");
+    expect(table.err()).toContain("behind the default branch");
 
     // Reachable again, the same command closes the gap and the revert appears.
     local.git(undefined, "remote", "set-url", "origin", upstream.repo);
     await sync(local, ticket, MERGED_AT, "2026-09-17T00:00:00.000Z");
-    const after = capture();
+    const after = recordStreams();
     await runCommandLine(escapesCommandLine, {
       argv: ["--repo", local.repo, "--json"],
       streams: after,
       cwd: local.repo,
       now: new Date("2026-09-18T00:00:00.000Z"),
     });
-    const healed = JSON.parse(after.out.join("")) as JsonOutput;
+    const healed = after.json<JsonOutput>();
     expect(healed.tickets[0]!.status).toBe("observed");
     expect(healed.tickets[0]!.reverted).toBe(true);
   }, GIT_FIXTURE_TIMEOUT_MS);
@@ -601,10 +590,10 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
       throw new Error("the network is not available to `perbo escapes`");
     }) as typeof fetch;
     try {
-      const streams = capture();
+      const streams = recordStreams();
       const code = await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams, cwd: f.repo, now: READ_AT });
       expect(code).toBe(0);
-      const json = JSON.parse(streams.out.join("")) as JsonOutput;
+      const json = streams.json<JsonOutput>();
       expect(json.tickets.map((row) => row.ticket_key)).toEqual(["AYO-1"]);
       expect(json.tickets[0]!.status).toBe("observed");
       expect(json.escapes.closed).toBe(1);
@@ -732,7 +721,7 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     const written = readFileSync(escapesPath(f.dir, ticket.ticket_id), "utf8");
 
     const silent = fakeGh("gh-silent-bin", null);
-    const streams = capture();
+    const streams = recordStreams();
     await silent.during(() =>
       runCommandLine(syncCommandLine, {
         argv: [ticket.key, "--repo", f.repo],
@@ -745,7 +734,7 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
       }),
     );
     expect(readFileSync(escapesPath(f.dir, ticket.ticket_id), "utf8")).toBe(written);
-    expect(streams.err.join("")).toContain("unchanged");
+    expect(streams.err()).toContain("unchanged");
   }, GIT_FIXTURE_TIMEOUT_MS);
 
   it("reads `not yet due` for a ticket merged eight days ago, never zero", async () => {
@@ -754,9 +743,9 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     const ticket = ticketAt(f, "AYO-1", "ayo/AYO-1", 1);
     await sync(f, ticket, mergedAt, OBSERVED_AT);
 
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams, cwd: f.repo, now: READ_AT });
-    const json = JSON.parse(streams.out.join("")) as JsonOutput;
+    const json = streams.json<JsonOutput>();
     expect(json.tickets[0]!.status).toBe("window open");
     expect(json.tickets[0]!.due).toBe(false);
     expect(json.tickets[0]!.due_at).toBe("2026-09-21T00:00:00.000Z");
@@ -766,11 +755,11 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     // No value at all, rather than a zero rate over an empty denominator.
     expect(json.escapes.revert_rate.n).toBe(0);
 
-    const table = capture();
+    const table = recordStreams();
     await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
-    expect(table.out.join("")).toContain("not yet due");
-    expect(table.out.join("")).toContain("not yet due until 2026-09-21T00:00:00.000Z");
-    expect(table.out.join("")).not.toMatch(/AYO-1.*\bno\b/);
+    expect(table.out()).toContain("not yet due");
+    expect(table.out()).toContain("not yet due until 2026-09-21T00:00:00.000Z");
+    expect(table.out()).not.toMatch(/AYO-1.*\bno\b/);
   }, GIT_FIXTURE_TIMEOUT_MS);
 
   it("stops reading `not yet due` once the fourteen days are up on a record nobody refreshed", async () => {
@@ -784,14 +773,14 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
     expect(closes).toBe("2026-09-21T00:00:00.000Z");
 
     const read = async (now: string): Promise<JsonOutput> => {
-      const streams = capture();
+      const streams = recordStreams();
       await runCommandLine(escapesCommandLine, {
         argv: ["--repo", f.repo, "--json"],
         streams,
         cwd: f.repo,
         now: new Date(now),
       });
-      return JSON.parse(streams.out.join("")) as JsonOutput;
+      return streams.json<JsonOutput>();
     };
 
     const open = await read("2026-09-20T23:59:59.000Z");
@@ -811,16 +800,16 @@ describe("ac_2 — sync writes the record; escapes reads it and nothing else", (
 
     // And it says so, with the command that fixes it — the same courtesy the
     // never-synced ticket already got.
-    const table = capture();
+    const table = recordStreams();
     await runCommandLine(escapesCommandLine, {
       argv: ["--repo", f.repo],
       streams: table,
       cwd: f.repo,
       now: new Date("2026-11-01T00:00:00.000Z"),
     });
-    expect(table.out.join("")).toContain(`watched only to ${OBSERVED_AT}, fell due ${closes}`);
-    expect(table.out.join("")).toContain("`perbo sync AYO-1`");
-    expect(table.err.join("")).toContain("stops short of their 14-day window");
+    expect(table.out()).toContain(`watched only to ${OBSERVED_AT}, fell due ${closes}`);
+    expect(table.out()).toContain("`perbo sync AYO-1`");
+    expect(table.err()).toContain("stops short of their 14-day window");
 
     // Synced again after the window closed, the same ticket is evidence.
     await sync(f, ticket, mergedAt, "2026-11-01T00:00:00.000Z");
@@ -867,9 +856,9 @@ describe("ac_3 — the rate, its interval and its n, in the stops table", () => 
     const f = fixture("no-stops", [{ key: "AYO-1", file: "one.txt", mergedAt: MERGED_AT }]);
     const ticket = ticketAt(f, "AYO-1", "ayo/AYO-1", 1);
     await sync(f, ticket, MERGED_AT, OBSERVED_AT);
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo], streams, cwd: f.repo, now: READ_AT });
-    const out = streams.out.join("");
+    const out = streams.out();
     expect(out).toContain("precision of stopping");
     expect(out).toContain("person shown something");
     expect(out).toContain("escape rate (reverted, 14d)");
@@ -941,15 +930,15 @@ describe("ac_4 — the stand-in partner's merged tickets are the first populatio
       }),
     );
 
-    const table = capture();
+    const table = recordStreams();
     await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo], streams: table, cwd: f.repo, now: READ_AT });
-    const json = capture();
+    const json = recordStreams();
     await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
-    const parsed = JSON.parse(json.out.join("")) as JsonOutput;
+    const parsed = json.json<JsonOutput>();
 
     expect(parsed.tickets).toHaveLength(4);
     for (const row of parsed.tickets) expect(row.dogfood).toBe(false);
-    const line = table.out.join("").split("\n").find((entry) => /^AYO-3\b/.test(entry));
+    const line = table.out().split("\n").find((entry) => /^AYO-3\b/.test(entry));
     expect(line).toBeDefined();
     expect(line).toContain("partner");
     expect(line).not.toContain("dogfood");
@@ -984,9 +973,9 @@ describe("ac_4 — the stand-in partner's merged tickets are the first populatio
       }),
     );
 
-    const json = capture();
+    const json = recordStreams();
     await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
-    const parsed = JSON.parse(json.out.join("")) as JsonOutput;
+    const parsed = json.json<JsonOutput>();
     expect(parsed.tickets).toHaveLength(4);
     for (const row of parsed.tickets) expect(row.dogfood).toBe(true);
   }, GIT_FIXTURE_TIMEOUT_MS);
@@ -1031,7 +1020,7 @@ describe("ac_4 / SCP-157 — a hand-off reconciliation counts toward the merged 
     const PR_URL = "https://github.com/o/r/pull/99";
     await runCommandLine(syncCommandLine, {
       argv: ["AYO-9", "--repo", f.repo],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: f.repo,
       now: new Date(OBSERVED_AT),
       deps: {
@@ -1073,9 +1062,9 @@ describe("ac_4 / SCP-157 — a hand-off reconciliation counts toward the merged 
 
     // No code change to `escapes` for this: it already reads every ticket
     // whose `state` is `merged`, whatever route got it there.
-    const json = capture();
+    const json = recordStreams();
     await runCommandLine(escapesCommandLine, { argv: ["--repo", f.repo, "--json"], streams: json, cwd: f.repo, now: READ_AT });
-    const report = JSON.parse(json.out.join("")) as JsonOutput;
+    const report = json.json<JsonOutput>();
     expect(report.escapes.merged).toBe(1);
     expect(report.tickets.map((row) => row.ticket_key)).toContain("AYO-9");
   }, GIT_FIXTURE_TIMEOUT_MS);

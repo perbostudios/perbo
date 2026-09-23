@@ -10,6 +10,8 @@ import { exitForThrown } from "../../command-line/terminal.js";
 import { type ExecuteDeps, doctorCommandLine, executeCommandLine } from "./index.js";
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * What a person reads about a repository whose configuration signs commits with
@@ -28,18 +30,8 @@ import { runCommandLine } from "../../command-line/terminal.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-signing-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /** A key pair, locked behind `passphrase` where one is given. */
 function keypair(name: string, passphrase: string): { pub: string; secret: string } {
@@ -57,23 +49,17 @@ function keypair(name: string, passphrase: string): { pub: string; secret: strin
  */
 function repository(name: string, pub: string | null): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify({ name: "fixture", scripts: { test: "node --test" } }, null, 2)}\n`,
-  );
-  writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  const repo = initRepository(dir, {
+    files: {
+      "package.json": `${JSON.stringify({ name: "fixture", scripts: { test: "node --test" } }, null, 2)}\n`,
+      "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+      "src/index.ts": "export const version = 1;\n",
+    },
+  });
   if (pub !== null) {
-    git(dir, "config", "commit.gpgsign", "true");
-    git(dir, "config", "gpg.format", "ssh");
-    git(dir, "config", "user.signingkey", pub);
+    repo.git("config", "commit.gpgsign", "true");
+    repo.git("config", "gpg.format", "ssh");
+    repo.git("config", "user.signingkey", pub);
   }
   return dir;
 }
@@ -122,20 +108,6 @@ const okPreflight = (_request: PreflightRequest): PreflightResult => ({
   github: null,
 });
 
-const capture = () => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY: false,
-    },
-  };
-};
-
 /**
  * `perbo run …` as the program runs it: the command, and — for anything that
  * escapes it — `exitForThrown` writing onto the same stderr.
@@ -145,19 +117,19 @@ async function program(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string }> {
-  const streams = capture();
+  const streams = recordStreams();
   try {
     const code = await runCommandLine(executeCommandLine, {
       argv: ["--repo", repo, ...argv],
-      streams: streams.streams,
+      streams,
       cwd: repo,
       deps: { preflight: okPreflight, ...options },
     });
-    return { code, err: streams.err.join("") };
+    return { code, err: streams.err() };
   } catch (error) {
     const failure = exitForThrown("run", error);
-    streams.streams.stderr(`error: ${failure.message}\n`);
-    return { code: failure.code, err: streams.err.join("") };
+    streams.stderr(`error: ${failure.message}\n`);
+    return { code: failure.code, err: streams.err() };
   }
 }
 
@@ -223,20 +195,20 @@ describe("a repository whose configuration signs commits with a key nothing can 
   it("is reported by doctor, in the same words, in the report a script reads", async () => {
     const key = keypair("locked-doctor", "a-passphrase-no-agent-holds");
     const repo = repository("locked-doctor", key.pub);
-    const read = capture();
+    const read = recordStreams();
 
     const code = await runCommandLine(doctorCommandLine, {
       argv: ["--repo", repo, "--json"],
-      streams: read.streams,
+      streams: read,
       cwd: repo,
       deps: { preflight: okPreflight },
     });
 
     expect(code).toBe(1);
-    const report = JSON.parse(read.out.join("")) as {
+    const report = read.json<{
       materializable: boolean;
       findings: Array<{ reason: string; severity: string; detail: string }>;
-    };
+    }>();
     expect(report.materializable).toBe(false);
     const finding = report.findings.find((candidate) => candidate.reason === SIGNING);
     expect(finding, `findings were ${report.findings.map((f) => f.reason).join(", ")}`).toBeDefined();
@@ -247,20 +219,20 @@ describe("a repository whose configuration signs commits with a key nothing can 
   it("runs a repository whose key does sign exactly as before", async () => {
     const key = keypair("open", "");
     const repo = repository("open-doctor", key.pub);
-    const read = capture();
+    const read = recordStreams();
 
     const code = await runCommandLine(doctorCommandLine, {
       argv: ["--repo", repo, "--json"],
-      streams: read.streams,
+      streams: read,
       cwd: repo,
       deps: { preflight: okPreflight },
     });
 
     expect(code).toBe(0);
-    const report = JSON.parse(read.out.join("")) as {
+    const report = read.json<{
       materializable: boolean;
       findings: Array<{ reason: string }>;
-    };
+    }>();
     expect(report.materializable).toBe(true);
     expect(report.findings.map((finding) => finding.reason)).toEqual([]);
   }, 120_000);

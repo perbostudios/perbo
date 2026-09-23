@@ -10,9 +10,9 @@ import { parseReviewArgs } from "./internal/args.js";
 import { UsageError } from "../../usage-error.js";
 import { normalisePullRequestReference } from "../../pull-request.js";
 import { runReviewCommand } from "./index.js";
-import type { Streams } from "../../streams.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, initRepository } from "@perbo/test-support";
 import { FIXTURES, PACKAGE_ROOT, REPO_ROOT } from "../../test-support/paths.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * `perbo review` with no admitted ticket (SCP-179).
@@ -41,17 +41,6 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 afterEach(() => {
   vi.restoreAllMocks();
 });
-
-/** As sync.loop-pull-request.test.ts does it: a committer nobody has to be. */
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
 
 /**
  * A `gh` that replays one pull request and logs every invocation.
@@ -206,13 +195,7 @@ async function review(
     model?: Model;
   },
 ): Promise<Ran> {
-  let out = "";
-  let err = "";
-  const streams: Streams = {
-    stdout: (chunk) => (out += chunk),
-    stderr: (chunk) => (err += chunk),
-    isTTY: options.isTTY ?? false,
-  };
+  const streams = recordStreams({ isTTY: options.isTTY ?? false });
   const seen: Seen = { system: "", prompt: "" };
   const code = await runReviewCommand({
     args: parseReviewArgs(argv),
@@ -230,7 +213,7 @@ async function review(
       return model;
     },
   });
-  return { out, err, code, system: seen.system, prompt: seen.prompt };
+  return { out: streams.out(), err: streams.err(), code, system: seen.system, prompt: seen.prompt };
 }
 
 /** The one bundle in `<repo>/.perbo/reviews`, parsed. */
@@ -329,12 +312,8 @@ describe("ac_1: a review with no admitted ticket, in both invocation forms", () 
     // way every other git-backed test in this suite does it: whoever runs this
     // may sign their own commits, and a scratch repository must not inherit it.
     const git = (...args: string[]) =>
-      execFileSync("git", args, { cwd: repo, encoding: "utf8", env: gitIdentity }).trim();
-    git("init", "--quiet", "--initial-branch", "main");
-    mkdirSync(join(repo, "src"), { recursive: true });
-    writeFileSync(join(repo, "src/index.ts"), "export const page = 0;\n");
-    git("add", "-A");
-    git("commit", "--quiet", "-m", "before");
+      execFileSync("git", args, { cwd: repo, encoding: "utf8", env: gitEnvironment() }).trim();
+    initRepository(repo, { files: { "src/index.ts": "export const page = 0;\n" }, message: "before" });
     git("checkout", "--quiet", "-b", "paginate");
     writeFileSync(join(repo, "src/index.ts"), "export const page = 25;\n");
     git("add", "-A");

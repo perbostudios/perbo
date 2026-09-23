@@ -1,12 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { type ExecuteDeps, executeCommandLine } from "./index.js";
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * A run on a repository whose own scripts give a worktree nothing to run: a
@@ -29,34 +31,13 @@ import { runCommandLine } from "../../command-line/terminal.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-unverified-run-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /** A checkout of exactly the files it is given, committed once. */
 function checkout(name: string, files: Record<string, string>): string {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  for (const [path, body] of Object.entries(files)) {
-    const target = join(dir, path);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, body);
-  }
-  writeFileSync(join(dir, ".gitignore"), "node_modules/\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  initRepository(dir, { files: { ...files, ".gitignore": "node_modules/\n" } });
   return dir;
 }
 
@@ -240,8 +221,7 @@ async function loop(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string; out: string }> {
-  const out: string[] = [];
-  const err: string[] = [];
+  const streams = recordStreams();
   const code = await runCommandLine(executeCommandLine, {
     argv: [
         "--repo",
@@ -255,17 +235,13 @@ async function loop(
         "--json",
         ...argv,
       ],
-    streams: {
-        stdout: (chunk: string) => out.push(chunk),
-        stderr: (chunk: string) => err.push(chunk),
-        isTTY: false,
-      },
+    streams,
     cwd: repo,
     deps: { preflight: okPreflight, hooks: { review: reviewer() as never }, ...options },
   });
   // Unparsed: a run that refuses writes nothing to stdout, and a test that
   // parsed eagerly would fail on the JSON rather than on the refusal.
-  return { code, err: err.join(""), out: out.join("") };
+  return { code, err: streams.err(), out: streams.out() };
 }
 
 interface AttemptRecord {

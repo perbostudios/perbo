@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { ExecutionAttemptSchema, type ExecutionAttempt } from "@perbo/contracts";
 import { buildInspectReport, renderInspect } from "./inspect.js";
-import { makeAttempt, makeTicket } from "../test-support/attempt-fixture.js";
+import { makeAttempt, makeTicket } from "../test-support/records.js";
 
 /**
  * D-096: `perbo inspect` says how often an attempt's brief was given back

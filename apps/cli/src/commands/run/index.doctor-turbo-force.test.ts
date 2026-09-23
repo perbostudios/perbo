@@ -5,37 +5,9 @@ import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts"
 import type { PreflightResult } from "@perbo/runner";
 import { afterAll, describe, expect, it } from "vitest";
 import { doctorCommandLine } from "./index.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
-import type { Streams } from "../../streams.js";
-
-/**
- * The CHECKS block: the pinned checks `perbo doctor` can see would read a
- * build tool's cache instead of the tree they are judging.
- *
- * turbo answers a task from its cache when the inputs the package declares have
- * not changed, so a check that runs turbo without `--force` can report a pass
- * for a run that never happened. The runner sets the flag on the argv it runs
- * and puts `TURBO_FORCE` in the environment; this block is the other half — a
- * configured check that says neither is named in the file a person maintains,
- * so it can be fixed there rather than only in the runner's memory.
- *
- * Advisory: it names something to change, and it never reaches the exit code.
- * Every case builds a real `.perbo/config.json` on disk and reads the answer
- * back out of the command's own output.
- */
-
-const streams = () => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, human: sink(out, err, true), machine: sink(out, err, false) };
-};
-
-const sink = (out: string[], err: string[], isTTY: boolean): Streams => ({
-  stdout: (chunk: string) => out.push(chunk),
-  stderr: (chunk: string) => err.push(chunk),
-  isTTY,
-});
+import { recordStreams } from "../../test-support/streams.js";
 
 /** The line this diagnostic is asked for by: a repository, and the record or the reading. */
 const doctorArgs = (repo: string, json: boolean): string[] => [
@@ -85,14 +57,14 @@ function repository(name: string, config: Record<string, unknown> | null): strin
 }
 
 async function doctor(repo: string, json = false): Promise<{ text: string; code: number }> {
-  const sinks = streams();
+  const sinks = recordStreams({ isTTY: !json });
   const code = await runCommandLine(doctorCommandLine, {
     argv: doctorArgs(repo, json),
-    streams: json ? sinks.machine : sinks.human,
+    streams: sinks,
     cwd: process.cwd(),
     deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
   });
-  return { text: sinks.out.join(""), code };
+  return { text: sinks.out(), code };
 }
 
 /** Every line under the CHECKS heading, or none where there is no block. */

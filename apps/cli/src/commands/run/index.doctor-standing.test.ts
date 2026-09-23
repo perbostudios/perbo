@@ -6,28 +6,7 @@ import type { PreflightResult } from "@perbo/runner";
 import { afterEach, describe, expect, it } from "vitest";
 import { doctorCommandLine } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
-import type { Streams } from "../../streams.js";
-
-/**
- * The PROHIBITED block: the standing list this repository refuses a write to
- * for every ticket (D-105), each entry with what put it there.
- *
- * Separate from JUDGING, which is what an approved scope may not overlap
- * (D-045). A scope may name a standing path; what is refused is the write. One
- * block claiming both would be wrong about one of them.
- */
-
-const streams = () => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, human: sink(out, err, true), machine: sink(out, err, false) };
-};
-
-const sink = (out: string[], err: string[], isTTY: boolean): Streams => ({
-  stdout: (chunk: string) => out.push(chunk),
-  stderr: (chunk: string) => err.push(chunk),
-  isTTY,
-});
+import { recordStreams } from "../../test-support/streams.js";
 
 /** The line this diagnostic is asked for by: a repository, and the record or the reading. */
 const doctorArgs = (repo: string, json: boolean): string[] => [
@@ -65,14 +44,14 @@ function repository(name: string, config: Record<string, unknown> | null): strin
 }
 
 async function doctor(repo: string, json: boolean): Promise<string> {
-  const sinks = streams();
+  const sinks = recordStreams({ isTTY: !json });
   await runCommandLine(doctorCommandLine, {
     argv: doctorArgs(repo, json),
-    streams: json ? sinks.machine : sinks.human,
+    streams: sinks,
     cwd: process.cwd(),
     deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
   });
-  return sinks.out.join("");
+  return sinks.out();
 }
 
 /** The block a reader takes: the lines between the PROHIBITED heading and the blank line after it. */

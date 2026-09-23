@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ReviewArtifactSchema, SecretIndex, type ExecutionAttempt, type Finding } from "@perbo/contracts";
 import { BundleStore } from "@perbo/runner";
 import { buildInspectReport, renderInspect } from "./inspect.js";
-import { makeAttempt, makeReview, makeTicket } from "../test-support/attempt-fixture.js";
+import { makeAttempt, makeReview, makeTicket } from "../test-support/records.js";
 
 /**
  * A blocked check finding, read for what its attribution rests on.

@@ -12,11 +12,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { specBaseline, specStaleness } from "./staleness.js";
 import { indexCommandLine } from "../commands/symbol-index.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
+import { gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * Whether a ticket's spec is still the one its contract was drafted from
@@ -34,18 +36,8 @@ import { runCommandLine } from "../command-line/terminal.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-spec-staleness-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 const hashOf = (path: string): string =>
   `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
@@ -76,26 +68,15 @@ let repos = 0;
  */
 function repository(spec = SPEC, extra: Record<string, string> = {}): { repo: string; specPath: string } {
   const repo = join(scratch, `repo-${repos++}`);
-  mkdirSync(join(repo, "specs", "activation-email"), { recursive: true });
-  execFileSync("git", ["init", "-q", "-b", "main", repo], { env: gitEnv });
-  git(repo, "config", "user.name", "t");
-  git(repo, "config", "user.email", "t@t.invalid");
-  git(repo, "config", "commit.gpgsign", "false");
   const specPath = join(repo, "specs", "activation-email", "spec.md");
-  writeFileSync(specPath, spec);
-  mkdirSync(join(repo, "packages", "queue"), { recursive: true });
-  writeFileSync(
-    join(repo, "packages", "queue", "send.ts"),
-    "export function sendActivation(): number {\n  return 1;\n}\n",
-  );
-  writeFileSync(join(repo, "packages", "queue", "retry.ts"), "export const retries = 3;\n");
-  for (const [path, content] of Object.entries(extra)) {
-    const at = join(repo, path);
-    mkdirSync(dirname(at), { recursive: true });
-    writeFileSync(at, content);
-  }
-  git(repo, "add", "-A");
-  git(repo, "commit", "-q", "-m", "base");
+  initRepository(repo, {
+    files: {
+      "specs/activation-email/spec.md": spec,
+      "packages/queue/send.ts": "export function sendActivation(): number {\n  return 1;\n}\n",
+      "packages/queue/retry.ts": "export const retries = 3;\n",
+      ...extra,
+    },
+  });
   index(repo);
   return { repo, specPath };
 }
@@ -104,7 +85,7 @@ function repository(spec = SPEC, extra: Record<string, string> = {}): { repo: st
 function index(repo: string): void {
   const code = runCommandLine(indexCommandLine, {
     argv: ["--repo", repo],
-    streams: { stdout: () => undefined, stderr: () => undefined, isTTY: false },
+    streams: recordStreams(),
     cwd: repo,
   });
   expect(code).toBe(0);
@@ -716,7 +697,7 @@ describe("a path is judged where it lands, not where it is spelled", () => {
     // The clone is the reading that would have cost the ticket: same record,
     // same spec bytes, and none of this machine's untracked files.
     const clone = join(scratch, `clone-${repos++}`);
-    execFileSync("git", ["clone", "-q", repo, clone], { env: gitEnv, stdio: ["ignore", "pipe", "pipe"] });
+    execFileSync("git", ["clone", "-q", repo, clone], { env: gitEnvironment(), stdio: ["ignore", "pipe", "pipe"] });
     index(clone);
     expect(check(clone, before)).toEqual({ path: SPEC_PATH, judged_against: "approval", stale: [], unjudged: [] });
   });
@@ -743,7 +724,7 @@ describe("a path is judged where it lands, not where it is spelled", () => {
     expect(before.names_that_resolved).toEqual(["@sendActivation"]);
 
     const clone = join(scratch, `clone-${repos++}`);
-    execFileSync("git", ["clone", "-q", repo, clone], { env: gitEnv, stdio: ["ignore", "pipe", "pipe"] });
+    execFileSync("git", ["clone", "-q", repo, clone], { env: gitEnvironment(), stdio: ["ignore", "pipe", "pipe"] });
     index(clone);
     expect(check(clone, before)).toEqual({ path: SPEC_PATH, judged_against: "approval", stale: [], unjudged: [] });
   }, CHECKOUT_TEST_TIMEOUT_MS);

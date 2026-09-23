@@ -22,11 +22,10 @@ import {
   type InterviewSession,
 } from "./index.js";
 import { listTickets, readDraftSnapshot, storeDir } from "../../store/tickets.js";
-import type { Streams } from "../../streams.js";
 import {
   describeInterviewContract,
   drafter,
-  gitIdentity,
+  events,
   repository as makeRepository,
   SPEC,
   SPEC_FOLDER,
@@ -35,6 +34,7 @@ import { claudeHarness, codexHarness } from "./test-support/harness.js";
 import { scriptedSdk, type ScriptStep } from "./test-support/fake-sdk.js";
 import { BUILT_ENTRY, REPO_ROOT } from "../../test-support/paths.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /** The built command, for the approval an interview cannot make. */
 const CLI = BUILT_ENTRY;
@@ -68,20 +68,6 @@ const repository = () => makeRepository(scratch);
 describeInterviewContract(claudeHarness(), () => scratch);
 describeInterviewContract(codexHarness(() => scratch), () => scratch);
 
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (c) => out.push(c), stderr: (c) => err.push(c), isTTY: false };
-}
-
-/** The events the command streamed, parsed back through the protocol's own schema. */
-const events = (streams: { out: string[] }) =>
-  streams.out
-    .join("")
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line) => InterviewEventSchema.parse(JSON.parse(line)));
-
 const writeSpec = (content = SPEC): ScriptStep => ({
   kind: "tool",
   tool: "Write",
@@ -94,7 +80,7 @@ async function interview(
   steps: readonly ScriptStep[],
   extra: { argv?: string[]; sessionId?: string; spec?: string; turns?: readonly string[] } = {},
 ) {
-  const streams = capture();
+  const streams = recordStreams();
   const sdk = scriptedSdk({ steps, cwd: repo, ...(extra.sessionId ? { sessionId: extra.sessionId } : {}) });
   const code = await runCommandLine(interviewCommandLine, {
     argv: ["--repo", repo, "--spec", extra.spec ?? SPEC_FOLDER, ...(extra.argv ?? [])],
@@ -140,7 +126,7 @@ describe("the line an interview is asked for by", () => {
     const path = join(repo, SPEC_FOLDER, INTERVIEW_SESSION_FILE);
     const record = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
     writeFileSync(path, JSON.stringify({ ...record, spec: "specs/x/../../../pwned/spec.md" }));
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(interviewCommandLine, {
       argv: ["--repo", repo, "--session", "sess-xyz"],
       streams,
@@ -164,7 +150,7 @@ describe("the line an interview is asked for by", () => {
     mkdirSync(elsewhere, { recursive: true });
     mkdirSync(join(repo, "specs"), { recursive: true });
     symlinkSync(elsewhere, join(repo, "specs", "linked"));
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(interviewCommandLine, {
       argv: ["--repo", repo, "--spec", "specs/linked"],
       streams,
@@ -178,7 +164,7 @@ describe("the line an interview is asked for by", () => {
       },
     });
     expect(existsSync(join(elsewhere, INTERVIEW_SESSION_FILE))).toBe(false);
-    expect(streams.err.join("")).toContain("outside");
+    expect(streams.err()).toContain("outside");
   });
 
   it("writes no record through a record that is itself a symlink", async () => {
@@ -187,7 +173,7 @@ describe("the line an interview is asked for by", () => {
     mkdirSync(elsewhere, { recursive: true });
     mkdirSync(join(repo, SPEC_FOLDER), { recursive: true });
     symlinkSync(join(elsewhere, "taken.json"), join(repo, SPEC_FOLDER, INTERVIEW_SESSION_FILE));
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(interviewCommandLine, {
       argv: ["--repo", repo, "--spec", SPEC_FOLDER],
       streams,
@@ -201,7 +187,7 @@ describe("the line an interview is asked for by", () => {
       },
     });
     expect(existsSync(join(elsewhere, "taken.json"))).toBe(false);
-    expect(streams.err.join("")).toContain("symlink");
+    expect(streams.err()).toContain("symlink");
   });
 
   it("takes the spec of the folder a session's record was found in, and skips a record it cannot read", async () => {
@@ -214,7 +200,7 @@ describe("the line an interview is asked for by", () => {
       mkdirSync(join(repo, "specs", slug), { recursive: true });
       writeFileSync(join(repo, "specs", slug, INTERVIEW_SESSION_FILE), body);
     }
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(interviewCommandLine, {
       argv: ["--repo", repo, "--session", "sess-two"],
       streams,
@@ -233,7 +219,7 @@ describe("the line an interview is asked for by", () => {
 
   it("refuses a spec outside the repository's spec folder", async () => {
     const repo = repository();
-    const streams = capture();
+    const streams = recordStreams();
     await expect(
       runCommandLine(interviewCommandLine, {
         argv: ["--repo", repo, "--spec", "docs/notes"],
@@ -260,7 +246,7 @@ describe("the line an interview is asked for by", () => {
     const run = (named: string) =>
       runCommandLine(interviewCommandLine, {
         argv: ["--repo", repo, "--spec", named],
-        streams: capture(),
+        streams: recordStreams(),
         cwd: repo,
         deps: {
           transport: claudeInterviewTransport(
@@ -287,7 +273,7 @@ describe("the line an interview is asked for by", () => {
     }
     // And the spellings that do name one: each may write its own and no other.
     for (const named of ["specs/x", "specs/x/", "./specs/x/.", "specs/x/spec.md"]) {
-      const streams = capture();
+      const streams = recordStreams();
       const sdk = scriptedSdk({
         steps: [
           {
@@ -319,7 +305,7 @@ describe("the line an interview is asked for by", () => {
 
   it("refuses a run that names neither a spec nor a session to resume", async () => {
     const repo = repository();
-    const streams = capture();
+    const streams = recordStreams();
     await expect(
       runCommandLine(interviewCommandLine, {
         argv: ["--repo", repo],
@@ -675,7 +661,7 @@ describe("edit_plan (SCP-311 criterion 3)", () => {
   it("says a plan is approved rather than that none was drafted", async () => {
     const repo = repository();
     await interview(repo, [writeSpec(), generate]);
-    execFileSync(process.execPath, [CLI, "approve", "PRB-1", "--repo", repo], { env: gitIdentity, stdio: "ignore" });
+    execFileSync(process.execPath, [CLI, "approve", "PRB-1", "--repo", repo], { stdio: "ignore" });
     const { sdk } = await interview(repo, [
       { kind: "call", tool: "edit_plan", input: { graph_edit: { op: "remove_edge", from: "node_1", to: "node_2" } } },
       { kind: "call", tool: "read_plan", input: {} },

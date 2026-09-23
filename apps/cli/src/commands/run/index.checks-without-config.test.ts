@@ -1,12 +1,14 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { type ExecuteDeps, executeCommandLine, proposedChecks } from "./index.js";
 import { storeDir } from "../../store/index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
+import { initRepository } from "@perbo/test-support";
+import { npmRepository } from "../../test-support/repository.js";
 
 /**
  * A first run on a repository that has no `.perbo/config.json` (SCP-259).
@@ -28,42 +30,12 @@ import { runCommandLine } from "../../command-line/terminal.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-checks-no-config-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
-const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
-
 /**
  * A repository with one commit, an npm lockfile, and whatever scripts the test
  * gives it — and, above all, no `.perbo/` at all.
  */
 function repository(name: string, scripts: Record<string, string>): string {
-  const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify({ name: "fixture", private: true, scripts }, null, 2)}\n`,
-  );
-  writeFileSync(
-    join(dir, "package-lock.json"),
-    `${JSON.stringify({ name: "fixture", lockfileVersion: 3, packages: {} }, null, 2)}\n`,
-  );
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
-  return dir;
+  return npmRepository(mkdtempSync(join(scratch, `${name}-`)), { manifest: { scripts } }).dir;
 }
 
 /**
@@ -86,10 +58,6 @@ const MEMBER_SCRIPTS = {
 
 function monorepo(name: string): { root: string; api: string } {
   const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
   const files: Record<string, string> = {
     "pnpm-workspace.yaml": "packages:\n  - 'services/*'\n",
     "package.json": `${JSON.stringify({ name: "monorepo", private: true, scripts: ROOT_SCRIPTS }, null, 2)}\n`,
@@ -98,13 +66,7 @@ function monorepo(name: string): { root: string; api: string } {
     "services/api/src/index.ts": "export const version = 1;\n",
     "services/web/package.json": `${JSON.stringify({ name: "@fixture/web", scripts: MEMBER_SCRIPTS }, null, 2)}\n`,
   };
-  for (const [path, body] of Object.entries(files)) {
-    const target = join(dir, path);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, body);
-  }
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  initRepository(dir, { files });
   return { root: dir, api: join(dir, "services", "api") };
 }
 
@@ -310,8 +272,7 @@ async function loop(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; err: string; json: RunJson }> {
-  const out: string[] = [];
-  const err: string[] = [];
+  const streams = recordStreams();
   const code = await runCommandLine(executeCommandLine, {
     argv: [
         "--repo",
@@ -323,15 +284,11 @@ async function loop(
         "--json",
         ...argv,
       ],
-    streams: {
-        stdout: (chunk: string) => out.push(chunk),
-        stderr: (chunk: string) => err.push(chunk),
-        isTTY: false,
-      },
+    streams,
     cwd: repo,
     deps: { preflight: okPreflight, hooks: { review: reviewer() as never }, ...options },
   });
-  return { code, err: err.join(""), json: JSON.parse(out.join("")) as RunJson };
+  return { code, err: streams.err(), json: streams.json<RunJson>() };
 }
 
 describe("a run on a repository that has no configuration", () => {

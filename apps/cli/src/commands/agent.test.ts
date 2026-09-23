@@ -13,7 +13,7 @@ import {
 import { ENDPOINT_FILE, type EndpointRecord } from "../endpoint/index.js";
 import { mcpCommandLine } from "./mcp.js";
 import { runCommandLine } from "../command-line/terminal.js";
-import type { Streams } from "../streams.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * `perbo agent` and `perbo mcp`: the launch and the handover. Both read the
@@ -23,12 +23,6 @@ import type { Streams } from "../streams.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-agent-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (c) => out.push(c), stderr: (c) => err.push(c), isTTY: false };
-}
 
 const record: EndpointRecord = {
   url: "http://127.0.0.1:41999/mcp",
@@ -100,7 +94,7 @@ describe("the launch", () => {
 describe("perbo agent", () => {
   it("refuses without a running queue, naming what to start", async () => {
     const repo = repository(false);
-    const streams = capture();
+    const streams = recordStreams();
     const launches: AgentLaunch[] = [];
     const code = await runCommandLine(agentCommandLine, {
       argv: ["--repo", repo],
@@ -115,12 +109,12 @@ describe("perbo agent", () => {
     });
     expect(code).toBe(EXIT_CODES.did_not_complete);
     expect(launches).toEqual([]);
-    expect(streams.err.join("")).toContain("perbo serve");
+    expect(streams.err()).toContain("perbo serve");
   });
 
   it("writes the Claude file for the launch alone and removes it afterwards", async () => {
     const repo = repository(true);
-    const streams = capture();
+    const streams = recordStreams();
     let seen: { exists: boolean; mode: number; body: string } | null = null;
     const code = await runCommandLine(agentCommandLine, {
       argv: ["--repo", repo],
@@ -143,7 +137,7 @@ describe("perbo agent", () => {
       mcpServers: { perbo: { type: "http", url: record.url, headers: { Authorization: `Bearer ${record.tokens.person}` } } },
     });
     expect(existsSync(join(repo, ".perbo", "state", `agent-${process.pid}.mcp.json`))).toBe(false);
-    expect(streams.err.join("")).toContain("cannot approve, publish or merge");
+    expect(streams.err()).toContain("cannot approve, publish or merge");
   });
 
   it("removes a launch file left by a session that was killed, and keeps a live one", async () => {
@@ -163,7 +157,7 @@ describe("perbo agent", () => {
     const state = join(repo, ".perbo", "state");
     chmodSync(state, 0o500);
     try {
-      const streams = capture();
+      const streams = recordStreams();
       const launches: AgentLaunch[] = [];
       const code = await runCommandLine(agentCommandLine, {
         argv: ["--repo", repo],
@@ -178,8 +172,8 @@ describe("perbo agent", () => {
       });
       expect(code).toBe(EXIT_CODES.did_not_complete);
       expect(launches).toEqual([]);
-      expect(streams.err.join("")).toContain(`cannot write the launch file`);
-      expect(streams.err.join("")).toContain(`The state directory ${state} has to be writable by you`);
+      expect(streams.err()).toContain(`cannot write the launch file`);
+      expect(streams.err()).toContain(`The state directory ${state} has to be writable by you`);
     } finally {
       chmodSync(state, 0o700);
     }
@@ -189,7 +183,7 @@ describe("perbo agent", () => {
     const repo = repository(true);
     const code = await runCommandLine(agentCommandLine, {
       argv: ["--repo", repo, "--provider", "codex"],
-      streams: capture(),
+      streams: recordStreams(),
       cwd: repo,
       deps: {
         launch: async () => 7,
@@ -202,13 +196,13 @@ describe("perbo agent", () => {
 describe("perbo mcp", () => {
   it("prints the person's block, or the drafter's, and writes nothing", () => {
     const repo = repository(true);
-    const streams = capture();
+    const streams = recordStreams();
     expect(mcpCommandLine.read(["--drafter", "--json"])).toMatchObject({
       input: { role: "drafter" },
       output: { json: true },
     });
     expect(runCommandLine(mcpCommandLine, { argv: ["--repo", repo], streams, cwd: repo })).toBe(EXIT_CODES.approve);
-    const text = streams.out.join("");
+    const text = streams.out();
     expect(text).toContain(record.url);
     expect(text).toContain(record.tokens.person);
     expect(text).not.toContain(record.tokens.drafter);
@@ -216,18 +210,18 @@ describe("perbo mcp", () => {
     expect(text).toContain("claude mcp add --transport http perbo");
     expect(text).toContain("bearer_token_env_var");
 
-    const json = capture();
+    const json = recordStreams();
     runCommandLine(mcpCommandLine, { argv: ["--repo", repo, "--drafter", "--json"], streams: json, cwd: repo });
-    expect(JSON.parse(json.out.join(""))).toEqual({
+    expect(json.json()).toEqual({
       mcpServers: { perbo: { type: "http", url: record.url, headers: { Authorization: `Bearer ${record.tokens.drafter}` } } },
     });
   });
 
   it("says which command to start when no queue is serving", () => {
     const repo = repository(false);
-    const streams = capture();
+    const streams = recordStreams();
     expect(runCommandLine(mcpCommandLine, { argv: ["--repo", repo], streams, cwd: repo })).toBe(EXIT_CODES.did_not_complete);
-    expect(streams.err.join("")).toContain("perbo serve");
-    expect(streams.out).toEqual([]);
+    expect(streams.err()).toContain("perbo serve");
+    expect(streams.out()).toBe("");
   });
 });

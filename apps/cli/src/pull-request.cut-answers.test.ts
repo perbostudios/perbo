@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { UsageError } from "./usage-error.js";
 import { readPullRequest, readPullRequestChecks, readRefRange } from "./pull-request.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "./test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, initRepository } from "@perbo/test-support";
 
 /**
  * What these reads do with an answer that arrived cut.
@@ -19,17 +19,6 @@ import { SPAWN_TEST_TIMEOUT_MS } from "./test-support/spawn-timeout.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-cut-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-
-/** A committer nobody has to be, as the other repository tests do it. */
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
 
 /** More bytes than any of these reads holds, written as fast as the pipe takes them. */
 const FLOOD = "dd if=/dev/zero bs=1048576 count=65 2>/dev/null | tr '\\0' 'x'";
@@ -74,11 +63,8 @@ describe("a range of local refs whose change is larger than the read holds", () 
   it("refuses it rather than reviewing the tail of it", () => {
     const repo = mkdtempSync(join(scratch, "range-"));
     const git = (...args: string[]): string =>
-      execFileSync("git", ["-C", repo, ...args], { env: gitIdentity, encoding: "utf8" }).trim();
-    git("init", "-q", "-b", "main");
-    writeFileSync(join(repo, "README.md"), "base\n");
-    git("add", "-A");
-    git("commit", "-qm", "base");
+      execFileSync("git", ["-C", repo, ...args], { env: gitEnvironment(), encoding: "utf8" }).trim();
+    initRepository(repo, { files: { "README.md": "base\n" } });
     git("checkout", "-q", "-b", "change");
     writeFileSync(join(repo, "wide.txt"), Buffer.alloc(65 * 1024 * 1024, "xxxxxxx\n"));
     git("add", "-A");

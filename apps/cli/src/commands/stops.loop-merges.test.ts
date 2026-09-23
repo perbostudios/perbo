@@ -9,7 +9,6 @@ import {
   type DeliveryArm,
   type Ticket,
 } from "@perbo/contracts";
-import type { Streams } from "../streams.js";
 import { stopsCommandLine } from "./stops.js";
 import {
   ESCAPE_WINDOW_DAYS,
@@ -19,6 +18,7 @@ import {
 } from "./escapes/index.js";
 import { storeDir, writeTicket } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
 
 /**
  * SCP-202 criterion 4: what the loop's own merges cost, beside the share that
@@ -33,12 +33,6 @@ import { runCommandLine } from "../command-line/terminal.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-loop-merges-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, stdout: (chunk) => out.push(chunk), stderr: (chunk) => err.push(chunk), isTTY: false };
-}
 
 const MERGED_AT = "2026-08-01T00:00:00.000Z";
 const OBSERVED_AT = "2026-09-01T00:00:00.000Z";
@@ -163,11 +157,11 @@ function populated(name: string): string {
 describe("ac_4 — the loop's own merges are counted beside the unattended share", () => {
   it("prints how many the loop merged and how many of those were undone inside the window", async () => {
     const repo = populated("loop-merges-table");
-    const streams = capture();
+    const streams = recordStreams();
 
     const code = await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo, now: NOW });
     expect(code).toBe(EXIT_CODES.approve);
-    const out = streams.out.join("");
+    const out = streams.out();
 
     // Beside the unattended share, in the same table.
     expect(out).toContain("unattended merges");
@@ -185,10 +179,10 @@ describe("ac_4 — the loop's own merges are counted beside the unattended share
 
   it("reports the same counts in --json", async () => {
     const repo = populated("loop-merges-json");
-    const streams = capture();
+    const streams = recordStreams();
 
     await runCommandLine(stopsCommandLine, { argv: ["--repo", repo, "--json"], streams, cwd: repo, now: NOW });
-    const report = JSON.parse(streams.out.join("")) as { loop_merges: Record<string, number> };
+    const report = streams.json<{ loop_merges: Record<string, number> }>();
 
     expect(report.loop_merges).toEqual({
       merged: 4,

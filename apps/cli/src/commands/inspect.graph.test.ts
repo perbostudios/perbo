@@ -1,56 +1,35 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@perbo/contracts";
 import { admitCommandLine } from "./admit.js";
-import type { Streams } from "../streams.js";
 import { editCommandLine } from "./edit/index.js";
 import { inspectCommandLine, type InspectReport } from "./inspect.js";
 import { storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
+import { initRepository } from "@perbo/test-support";
 
 const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-graph-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
-
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
-function capture(isTTY: boolean): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    stdout: (chunk: string) => out.push(chunk),
-    stderr: (chunk: string) => err.push(chunk),
-    isTTY,
-  };
-}
 
 let repos = 0;
 /** Twelve tracked files under one package, and one under another. */
 function repository(): string {
   const repo = join(scratch, `repo-${repos++}`);
-  execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  mkdirSync(join(repo, "packages", "queue", "src"), { recursive: true });
-  for (let i = 1; i <= 12; i += 1) {
-    writeFileSync(join(repo, "packages", "queue", "src", `f${i}.ts`), `export const f${i} = ${i};\n`);
-  }
-  mkdirSync(join(repo, "packages", "queue", "test"), { recursive: true });
-  writeFileSync(join(repo, "packages", "queue", "test", "send.test.ts"), "export {};\n");
-  mkdirSync(join(repo, "packages", "reports", "src"), { recursive: true });
-  writeFileSync(join(repo, "packages", "reports", "src", "daily.ts"), "export const daily = 1;\n");
-  execFileSync("git", ["-C", repo, "add", "-A"], { env: gitIdentity });
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "base"], { env: gitIdentity });
+  initRepository(repo, {
+    files: {
+      ...Object.fromEntries(
+        Array.from({ length: 12 }, (_, i) => [
+          `packages/queue/src/f${i + 1}.ts`,
+          `export const f${i + 1} = ${i + 1};\n`,
+        ]),
+      ),
+      "packages/queue/test/send.test.ts": "export {};\n",
+      "packages/reports/src/daily.ts": "export const daily = 1;\n",
+    },
+  });
   return repo;
 }
 
@@ -66,7 +45,7 @@ function admitted(criteria: number, paths: string[]): string {
       ]).flat(),
       ...paths.flatMap((path) => ["--path", path]),
     ],
-    streams: capture(false),
+    streams: recordStreams(),
     cwd: repo,
   });
   if (code !== EXIT_CODES.approve) throw new Error("admission failed");
@@ -76,22 +55,21 @@ function admitted(criteria: number, paths: string[]): string {
 const graphEdit = (repo: string, edit: unknown) =>
   runCommandLine(editCommandLine, {
     argv: ["PRB-1", "--repo", repo, "--graph-edit", JSON.stringify(edit)],
-    streams: capture(false),
+    streams: recordStreams(),
     cwd: repo,
   });
 
 /** The rendering as a person reads it at 80 columns: colour stripped. */
 async function inspectText(repo: string): Promise<string> {
-  const streams = capture(true);
+  const streams = recordStreams({ isTTY: true });
   expect(await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
-  // eslint-disable-next-line no-control-regex
-  return streams.out.join("").replace(/\u001b\[[0-9;]*m/g, "");
+  return streams.plain();
 }
 
 async function inspectJson(repo: string): Promise<InspectReport> {
-  const streams = capture(false);
+  const streams = recordStreams();
   expect(await runCommandLine(inspectCommandLine, { argv: ["PRB-1", "--repo", repo], streams, cwd: repo })).toBe(0);
-  return JSON.parse(streams.out.join("")) as never;
+  return streams.json<never>();
 }
 
 /** Two nodes over the two packages, ordered. */
@@ -176,7 +154,7 @@ describe("perbo inspect on a plan with a graph", () => {
     const repo = admitted(2, ["packages/queue/**"]);
     await runCommandLine(editCommandLine, {
       argv: ["PRB-1", "--repo", repo, "--path", "packages/queue/src/**"],
-      streams: capture(false),
+      streams: recordStreams(),
       cwd: repo,
     });
     const report = await inspectJson(repo);

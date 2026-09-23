@@ -7,12 +7,13 @@ import { EXIT_CODES, TicketSchema, transition, withReconciliation, type Ticket, 
 import { acquireServeLock } from "@perbo/runner";
 import { UsageError } from "../../usage-error.js";
 import { admitCommandLine } from "../admit.js";
-import type { Streams } from "../../streams.js";
 import { ServeTickSchema, processDeps, serveCommandLine, type ServeDeps } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { readEndpoint } from "../../endpoint/index.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment, initRepository } from "@perbo/test-support";
 import { readTicket, storeDir, writeTicket } from "../../store/tickets.js";
+import { recordStreams } from "../../test-support/streams.js";
+import { emptyRepository } from "../../test-support/repository.js";
 
 /**
  * `perbo serve` (SCP-008 criterion 5, SCP-227): the queue over one store.
@@ -28,34 +29,11 @@ import { readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-serve-test-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitIdentity = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
-function capture(): Streams & { out: string[]; err: string[] } {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    stdout: (chunk: string) => out.push(chunk),
-    stderr: (chunk: string) => err.push(chunk),
-    isTTY: false,
-  };
-}
-
 let repos = 0;
 function repository(config: Record<string, unknown> = {}): string {
   const dir = join(scratch, `repo-${repos++}`);
   mkdirSync(dir, { recursive: true });
-  execFileSync("git", ["init", "-q", "-b", "main", dir]);
-  execFileSync("git", ["-C", dir, "commit", "-q", "--allow-empty", "-m", "base"], { env: gitIdentity });
+  emptyRepository(dir);
   mkdirSync(join(dir, ".perbo"), { recursive: true });
   writeFileSync(join(dir, ".perbo", "config.json"), JSON.stringify({ base_ref: "main", ...config }, null, 2));
   return dir;
@@ -66,7 +44,7 @@ function admitted(
   repo: string,
   input: { outcome: string; paths: string[]; dependsOn?: string[]; priority?: string; generated?: string[] },
 ): string {
-  const streams = capture();
+  const streams = recordStreams();
   const argv = [
     "--repo", repo,
     "--outcome", input.outcome,
@@ -79,8 +57,8 @@ function admitted(
     "--json",
   ];
   const code = runCommandLine(admitCommandLine, { argv: argv, streams, cwd: repo });
-  if (code !== EXIT_CODES.approve) throw new Error(`admit failed: ${streams.err.join("")}`);
-  const document = JSON.parse(streams.out.join("")) as { ticket: { key: string } };
+  if (code !== EXIT_CODES.approve) throw new Error(`admit failed: ${streams.err()}`);
+  const document = streams.json<{ ticket: { key: string } }>();
   return document.ticket.key;
 }
 
@@ -147,7 +125,7 @@ const serveLine = (argv: readonly string[]) => serveCommandLine.read(argv).input
 const AT = new Date("2026-09-10T12:00:00.000Z");
 
 async function serveOnce(repo: string, deps: ServeDeps, extra: string[] = [], paused = false) {
-  const streams = capture();
+  const streams = recordStreams();
   const code = await runCommandLine(serveCommandLine, {
     argv: ["--repo", repo, "--once", ...extra],
     streams,
@@ -205,8 +183,8 @@ describe("perbo serve --once", () => {
     const left = readTicket(storeDir(repo), third);
     expect(left.state).toBe("ready");
     expect(left.scheduling).toEqual({ waits_on: [], decided_at: null, reconciliation: null });
-    expect(streams.err.join("")).toContain(`started ${first}`);
-    expect(streams.err.join("")).toContain(`started ${second}`);
+    expect(streams.err()).toContain(`started ${first}`);
+    expect(streams.err()).toContain(`started ${second}`);
   });
 
   it("starts one at a time by default, and counts a run it did not start", async () => {
@@ -235,7 +213,7 @@ describe("perbo serve --once", () => {
     // The open pull request is still read, so a merge by hand is seen; the
     // queue itself asks for none.
     expect(f.synced).toEqual([{ key: open, merge: false }]);
-    expect(streams.err.join("")).not.toContain("started ");
+    expect(streams.err()).not.toContain("started ");
   });
 
   it("hosts the endpoint for the tick and removes its record when it stops, and writes none under --no-endpoint", async () => {
@@ -402,7 +380,7 @@ describe("perbo serve --once", () => {
     const { code, streams } = await serveOnce(repo, f.deps);
     expect(code).toBe(EXIT_CODES.approve);
     expect(f.spawned).toEqual([key]);
-    expect(streams.err.join("")).toContain("fetch of main failed");
+    expect(streams.err()).toContain("fetch of main failed");
   });
 
   it("refuses to run beside another queue over the same store", async () => {
@@ -417,7 +395,7 @@ describe("perbo serve --once", () => {
       const f = fakes();
       const { code, streams } = await serveOnce(repo, f.deps);
       expect(code).toBe(EXIT_CODES.usage_or_input_error);
-      expect(streams.err.join("")).toContain(String(process.pid));
+      expect(streams.err()).toContain(String(process.pid));
       expect(f.spawned).toEqual([]);
     } finally {
       held.release();
@@ -431,7 +409,7 @@ describe("perbo serve --once", () => {
     const f = fakes();
     const { code, streams } = await serveOnce(repo, f.deps);
     expect(code).toBe(EXIT_CODES.usage_or_input_error);
-    expect(streams.err.join("")).toContain("base_ref");
+    expect(streams.err()).toContain("base_ref");
     expect(f.fetched).toEqual([]);
     expect(f.spawned).toEqual([]);
   });
@@ -445,7 +423,7 @@ describe("perbo serve --once", () => {
     const { code, streams } = await serveOnce(repo, f.deps);
     expect(code).toBe(EXIT_CODES.approve);
     expect(f.spawned).toEqual([]);
-    expect(streams.err.join("")).toContain("automation is disabled");
+    expect(streams.err()).toContain("automation is disabled");
   });
 
   it("rewrites a ticket only when its reading changed", async () => {
@@ -534,7 +512,7 @@ describe("perbo serve --once", () => {
     walk(repo, dep, ["verifying", "independent_review", "pr_open"]);
     const { streams } = await serveOnce(repo, f.deps);
     expect(readTicket(dir, held).state).toBe("provisioning");
-    expect(streams.err.join("")).toContain(`${held} moved to provisioning while the queue was deciding`);
+    expect(streams.err()).toContain(`${held} moved to provisioning while the queue was deciding`);
   });
 
   it("orders a dependency before the ticket that names it, whatever their priority", async () => {
@@ -569,7 +547,7 @@ describe("perbo serve --once", () => {
     const { streams } = await serveOnce(repo, publishing.deps, ["--publish", "--json"]);
     // The re-level takes the one place; the new ticket waits for the next tick.
     expect(argvs).toEqual([["run", "--ticket", open, "--relevel", "--repo", repo, "--publish"]]);
-    const tick = ServeTickSchema.parse(JSON.parse(streams.out.join("").trim()));
+    const tick = ServeTickSchema.parse(JSON.parse(streams.out().trim()));
     expect(tick.relevelled).toEqual([open]);
     expect(tick.started).toEqual([]);
     expect(readTicket(storeDir(repo), open).scheduling.reconciliation).toBeNull();
@@ -577,7 +555,7 @@ describe("perbo serve --once", () => {
     const hand = fakes({ baseState: async () => ({ tip: TIP, behind: true }) });
     const quiet = await serveOnce(repo, hand.deps);
     expect(hand.spawned).toEqual([next]);
-    expect(quiet.streams.err.join("")).toContain(`${open} is behind main; start serve with --publish`);
+    expect(quiet.streams.err()).toContain(`${open} is behind main; start serve with --publish`);
   });
 
   it("records a re-level that did not level the branch, and tries again only once the base moves", async () => {
@@ -614,7 +592,7 @@ describe("perbo serve --once", () => {
       at: "2026-09-10T12:00:00.000Z",
       reason: "the run did not start: carries 1 commit the loop did not make past what the pull request has (abc).",
     });
-    expect(streams.err.join("")).toContain(`tries again once main moves past ${tip.slice(0, 12)}`);
+    expect(streams.err()).toContain(`tries again once main moves past ${tip.slice(0, 12)}`);
     // Same tip: not tried again.
     await serveOnce(repo, f.deps, ["--publish"]);
     expect(relevels).toEqual([open]);
@@ -714,7 +692,7 @@ describe("perbo serve --once", () => {
     const second = admitted(repo, { outcome: "Every package lints.", paths: ["packages/**"] });
     const f = fakes();
     const { streams } = await serveOnce(repo, f.deps, ["--json"]);
-    const lines = streams.out.join("").trim().split("\n");
+    const lines = streams.out().trim().split("\n");
     expect(lines).toHaveLength(1);
     const tick = ServeTickSchema.parse(JSON.parse(lines[0]!));
     expect(tick).toMatchObject({
@@ -734,7 +712,7 @@ describe("perbo serve --once", () => {
 
 /** A ticket admitted by hand from a tracker reference, so the store holds that issue. */
 function admittedFrom(repo: string, reference: string): string {
-  const streams = capture();
+  const streams = recordStreams();
   const code = runCommandLine(admitCommandLine, {
     argv: [
       "--repo", repo, "--outcome", "Docs say what is true.", "--criterion", "Docs say what is true. :: a test asserts it",
@@ -743,8 +721,8 @@ function admittedFrom(repo: string, reference: string): string {
     streams,
     cwd: repo,
   });
-  if (code !== EXIT_CODES.approve) throw new Error(streams.err.join(""));
-  return (JSON.parse(streams.out.join("")) as { ticket: { key: string } }).ticket.key;
+  if (code !== EXIT_CODES.approve) throw new Error(streams.err());
+  return (streams.json<{ ticket: { key: string } }>()).ticket.key;
 }
 
 const TRACKER = { tracker: { repository: "o/r", draft_label: "perbo" } };
@@ -773,7 +751,7 @@ describe("perbo serve drafts labelled tracker issues", () => {
     f.deps.sleep = async () => {
       if (++ticks >= 2) controller.abort();
     };
-    const streams = capture();
+    const streams = recordStreams();
     const code = await runCommandLine(serveCommandLine, {
       argv: ["--repo", repo, "--interval", "1s", "--json"],
       streams,
@@ -786,13 +764,13 @@ describe("perbo serve drafts labelled tracker issues", () => {
     // ticket, so the second tick would have asked for #2 again were it not
     // remembered as tried.
     expect(f.drafted).toEqual(["o/r#2", "o/r#3"]);
-    const ticksPrinted = streams.out.join("").trim().split("\n").map((line) => ServeTickSchema.parse(JSON.parse(line)));
+    const ticksPrinted = streams.out().trim().split("\n").map((line) => ServeTickSchema.parse(JSON.parse(line)));
     expect(ticksPrinted.map((tick) => tick.drafted)).toEqual([
       [{ reference: "o/r#2", key: "AYO-2", code: 0 }],
       [{ reference: "o/r#3", key: "AYO-3", code: 0 }],
     ]);
-    expect(streams.err.join("")).toContain("drafted o/r#2 as AYO-2; nothing runs until it is approved");
-    expect(streams.err.join("")).toContain("drafting 'perbo' issues from o/r");
+    expect(streams.err()).toContain("drafted o/r#2 as AYO-2; nothing runs until it is approved");
+    expect(streams.err()).toContain("drafting 'perbo' issues from o/r");
 
     // A new process remembers nothing: the store is the record, and #2 is
     // still not in it.
@@ -816,7 +794,7 @@ describe("perbo serve drafts labelled tracker issues", () => {
     f.deps.sleep = async () => {
       if (++ticks >= 2) controller.abort();
     };
-    const streams = capture();
+    const streams = recordStreams();
     await runCommandLine(serveCommandLine, {
       argv: ["--repo", repo, "--interval", "1s"],
       streams,
@@ -825,7 +803,7 @@ describe("perbo serve drafts labelled tracker issues", () => {
       deps: { processes: f.deps, clock: () => AT, signal: controller.signal },
     });
     expect(f.drafted).toEqual(["o/r#5"]);
-    expect(streams.err.join("")).toContain("draft of o/r#5 exited 1; not tried again while this queue runs");
+    expect(streams.err()).toContain("draft of o/r#5 exited 1; not tried again while this queue runs");
   });
 
   it("drafts nothing while paused, nothing without a tracker, and says once when the issues cannot be listed", async () => {
@@ -840,7 +818,7 @@ describe("perbo serve drafts labelled tracker issues", () => {
 
     const failing = fakes({ listIssues: async () => ({ ok: false, detail: "gh: not logged in" }) });
     const { streams } = await serveOnce(repository(TRACKER), failing.deps);
-    expect(streams.err.join("")).toContain("could not list perbo issues in o/r: gh: not logged in");
+    expect(streams.err()).toContain("could not list perbo issues in o/r: gh: not logged in");
     expect(failing.drafted).toEqual([]);
   });
 
@@ -858,7 +836,7 @@ describe("perbo serve drafts labelled tracker issues", () => {
     });
     const { streams } = await serveOnce(repo, f.deps);
     expect(f.drafted).toEqual(["o/r#9"]);
-    const lines = streams.err.join("").split("\n");
+    const lines = streams.err().split("\n");
     expect(lines.some((line) => line.startsWith("forged:"))).toBe(false);
     expect(lines).toContain("drafting o/r#9: Nine forged: drafted o/r#99 as AYO-99; nothing runs until it is approved");
   });
@@ -867,8 +845,8 @@ describe("perbo serve drafts labelled tracker issues", () => {
     const f = fakes();
     const { code, streams } = await serveOnce(repository({ tracker: { draft_label: 1 } }), f.deps);
     expect(code).toBe(EXIT_CODES.usage_or_input_error);
-    expect(streams.err.join("")).toContain("sets 'tracker' to something this cannot read");
-    expect(streams.err.join("")).toContain("repository");
+    expect(streams.err()).toContain("sets 'tracker' to something this cannot read");
+    expect(streams.err()).toContain("repository");
     expect(f.listed).toEqual([]);
   });
 });
@@ -912,11 +890,8 @@ describe("processDeps", () => {
   it("names every sealed path of a branch whose diff runs past half a megabyte", async () => {
     const repo = mkdtempSync(join(scratch, "sealed-"));
     const git = (...args: string[]): string =>
-      execFileSync("git", ["-C", repo, ...args], { env: gitIdentity, encoding: "utf8" }).trim();
-    git("init", "-q", "-b", "main");
-    writeFileSync(join(repo, "README.md"), "base\n");
-    git("add", "-A");
-    git("commit", "-qm", "base");
+      execFileSync("git", ["-C", repo, ...args], { env: gitEnvironment(), encoding: "utf8" }).trim();
+    initRepository(repo, { files: { "README.md": "base\n" } });
     git("checkout", "-q", "-b", "sealed");
     mkdirSync(join(repo, "wide"));
     for (let n = 0; n < 3000; n += 1) {

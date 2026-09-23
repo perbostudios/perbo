@@ -6,33 +6,9 @@ import type { PreflightResult } from "@perbo/runner";
 import { afterAll, describe, expect, it } from "vitest";
 import { doctorCommandLine } from "./index.js";
 import { USAGE } from "../../command-line/usage.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
-import type { Streams } from "../../streams.js";
-
-/**
- * The CORPUS line: what `perbo doctor` says about the corpus cache this
- * checkout would review against.
- *
- * Every case here builds a real checkout on disk — a real cache directory with
- * real fixture directories and a real pin beside a real recorded score — and
- * reads the line back out of the command's own output. The two injections are
- * the ones every `doctor` test takes (the machine probe and the materialisation
- * walk, which spawn programs); nothing about the cache is doubled, because the
- * whole claim is that the command reads what is on the disk.
- */
-
-const streams = () => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, human: sink(out, err, true), machine: sink(out, err, false) };
-};
-
-const sink = (out: string[], err: string[], isTTY: boolean): Streams => ({
-  stdout: (chunk: string) => out.push(chunk),
-  stderr: (chunk: string) => err.push(chunk),
-  isTTY,
-});
+import { recordStreams } from "../../test-support/streams.js";
 
 /** The line this diagnostic is asked for by: a repository, and the record or the reading. */
 const doctorArgs = (repo: string, json: boolean): string[] => [
@@ -113,14 +89,14 @@ function checkout(
 }
 
 async function doctor(repo: string, json = false): Promise<{ text: string; code: number }> {
-  const sinks = streams();
+  const sinks = recordStreams({ isTTY: !json });
   const code = await runCommandLine(doctorCommandLine, {
     argv: doctorArgs(repo, json),
-    streams: json ? sinks.machine : sinks.human,
+    streams: sinks,
     cwd: process.cwd(),
     deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
   });
-  return { text: sinks.out.join(""), code };
+  return { text: sinks.out(), code };
 }
 
 /**

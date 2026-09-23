@@ -6,9 +6,9 @@ import type { PreflightResult } from "@perbo/runner";
 import { afterEach, describe, expect, it } from "vitest";
 import { doctorCommandLine } from "./index.js";
 import { readJudgingPaths } from "../../store/tickets.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
-import type { Streams } from "../../streams.js";
+import { recordStreams } from "../../test-support/streams.js";
 
 /**
  * The JUDGING block: what `perbo doctor` says judges an attempt in this store.
@@ -26,18 +26,6 @@ interface JudgingEntry {
   source: string;
   set: boolean;
 }
-
-const streams = () => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return { out, err, human: sink(out, err, true), machine: sink(out, err, false) };
-};
-
-const sink = (out: string[], err: string[], isTTY: boolean): Streams => ({
-  stdout: (chunk: string) => out.push(chunk),
-  stderr: (chunk: string) => err.push(chunk),
-  isTTY,
-});
 
 /** The line this diagnostic is asked for by: a repository, and the record or the reading. */
 const doctorArgs = (repo: string, json: boolean): string[] => [
@@ -78,14 +66,14 @@ function repository(name: string, config: Record<string, unknown> | null): strin
 }
 
 async function doctor(repo: string, json: boolean): Promise<{ text: string; code: number }> {
-  const sinks = streams();
+  const sinks = recordStreams({ isTTY: !json });
   const code = await runCommandLine(doctorCommandLine, {
     argv: doctorArgs(repo, json),
-    streams: json ? sinks.machine : sinks.human,
+    streams: sinks,
     cwd: process.cwd(),
     deps: { preflight: () => machineReady, diagnose: () => Promise.resolve(materializable) },
   });
-  return { text: sinks.out.join(""), code };
+  return { text: sinks.out(), code };
 }
 
 /**

@@ -8,8 +8,9 @@ import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import type { DiagnoseRequest } from "@perbo/workspace";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type DoctorDeps, doctorCommandLine } from "./index.js";
-import { SPAWN_TEST_TIMEOUT_MS } from "../../test-support/spawn-timeout.js";
+import { SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams, type RecordedStreams } from "../../test-support/streams.js";
 
 /**
  * `perbo doctor`, with the three things it does that start another program —
@@ -50,20 +51,6 @@ vi.mock("node:child_process", async (importOriginal) => {
     spawnSync: watch("spawnSync", actual.spawnSync),
   } satisfies typeof actual;
 });
-
-const streams = () => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY: false,
-    },
-  };
-};
 
 /** The line this diagnostic is asked for by: a repository, and the record. */
 const doctorArgs = (repo: string, extra: readonly string[] = []): string[] => [
@@ -134,7 +121,7 @@ describe("perbo doctor", () => {
     const dir = checkout("refusal");
     writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "x" }));
     const requests: DiagnoseRequest[] = [];
-    const { out, streams: sink } = streams();
+    const sink = recordStreams();
 
     const code = await runCommandLine(doctorCommandLine, {
       argv: doctorArgs(dir),
@@ -159,7 +146,7 @@ describe("perbo doctor", () => {
     });
 
     expect(code).toBe(1);
-    const result = JSON.parse(out.join("")) as { materializable: boolean; findings: Array<{ reason: string }> };
+    const result = sink.json<{ materializable: boolean; findings: Array<{ reason: string }> }>();
     expect(result.materializable).toBe(false);
     expect(result.findings.map((finding) => finding.reason)).toContain("lockfile_missing");
     expect(result.findings.map((finding) => finding.reason)).toContain("ignored_paths_unavailable");
@@ -173,7 +160,7 @@ describe("perbo doctor", () => {
     const dir = checkout("injected");
     const machineRequests: PreflightRequest[] = [];
     const diagnoseRequests: DiagnoseRequest[] = [];
-    const { out } = await run(dir, {
+    const { streams } = await run(dir, {
       preflight: (request) => {
         machineRequests.push(request);
         return machineReady;
@@ -216,10 +203,10 @@ describe("perbo doctor", () => {
     expect(observed.started).toEqual([]);
     // The stubs' answers are the ones reported, not a second opinion from the
     // real ones alongside them.
-    const result = JSON.parse(out.join("")) as {
+    const result = streams.json<{
       preflight: PreflightResult;
       findings: Array<{ reason: string }>;
-    };
+    }>();
     expect(result.preflight).toEqual(machineReady);
     expect(result.findings.map((finding) => finding.reason)).toEqual([
       "lockfile_missing",
@@ -232,17 +219,17 @@ describe("perbo doctor", () => {
     // alone, and the real preflight looks for binaries on a PATH with none.
     const dir = join(checkout("defaults"), "gone");
     const restore = withEmptyPath();
-    let out: string[];
+    let streams: RecordedStreams;
     try {
-      ({ out } = await run(dir, {}));
+      ({ streams } = await run(dir, {}));
     } finally {
       restore();
     }
 
-    const result = JSON.parse(out.join("")) as {
+    const result = streams.json<{
       findings: Array<{ reason: string }>;
       preflight: PreflightResult;
-    };
+    }>();
     // `source_checkout_missing` is the real diagnostic's own answer, and
     // `agent_binary_missing` the real preflight's; neither stub says either.
     expect(result.findings.map((finding) => finding.reason)).toContain("source_checkout_missing");
@@ -257,15 +244,15 @@ describe("perbo doctor", () => {
 async function run(
   repo: string,
   collaborators: Partial<Pick<DoctorDeps, "preflight" | "diagnose" | "baseRef" | "pullRequestChecks">>,
-): Promise<{ out: string[]; err: string[]; code: number }> {
-  const sink = streams();
+): Promise<{ streams: RecordedStreams; code: number }> {
+  const sink = recordStreams();
   const code = await runCommandLine(doctorCommandLine, {
     argv: doctorArgs(repo),
-    streams: sink.streams,
+    streams: sink,
     cwd: process.cwd(),
     deps: { ...collaborators },
   });
-  return { out: sink.out, err: sink.err, code };
+  return { streams: sink, code };
 }
 
 /**

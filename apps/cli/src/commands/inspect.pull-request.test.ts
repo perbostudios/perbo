@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +6,8 @@ import type { PreflightRequest, PreflightResult } from "@perbo/runner";
 import { type ExecuteDeps, executeCommandLine } from "./run/index.js";
 import { inspectCommandLine } from "./inspect.js";
 import { runCommandLine } from "../command-line/terminal.js";
+import { recordStreams } from "../test-support/streams.js";
+import { npmRepository } from "../test-support/repository.js";
 
 /**
  * What `perbo inspect` says about the pull request a run with no ticket
@@ -26,43 +27,9 @@ import { runCommandLine } from "../command-line/terminal.js";
 const scratch = mkdtempSync(join(tmpdir(), "perbo-inspect-pr-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
-const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
-
 /** A repository with one commit, a `test` script, a lockfile and no `.perbo/`. */
 function repository(name: string): string {
-  const dir = mkdtempSync(join(scratch, `${name}-`));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify(
-      { name: "fixture", private: true, scripts: { test: 'node -e "process.exit(0)"' } },
-      null,
-      2,
-    )}\n`,
-  );
-  writeFileSync(
-    join(dir, "package-lock.json"),
-    `${JSON.stringify({ name: "fixture", lockfileVersion: 3, packages: {} }, null, 2)}\n`,
-  );
-  mkdirSync(join(dir, "src"), { recursive: true });
-  writeFileSync(join(dir, "src", "index.ts"), "export const version = 1;\n");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
-  return dir;
+  return npmRepository(mkdtempSync(join(scratch, `${name}-`))).dir;
 }
 
 /** An executor that writes one file, as a real program the runner spawns. */
@@ -272,24 +239,6 @@ const reviewer =
 const OUTCOME = "The feature module exports a computed total";
 const CRITERION = "total() returns the sum of its inputs :: total([1,2]) is 3 :: test";
 
-const capture = (isTTY = false) => {
-  const out: string[] = [];
-  const err: string[] = [];
-  return {
-    out,
-    err,
-    streams: {
-      stdout: (chunk: string) => out.push(chunk),
-      stderr: (chunk: string) => err.push(chunk),
-      isTTY,
-    },
-  };
-};
-
-/** The rendering without its colours: the words are what is being read. */
-// eslint-disable-next-line no-control-regex
-const uncoloured = (text: string): string => text.replace(/\u001b\[[0-9;]*m/g, "");
-
 const originalPath = process.env.PATH;
 
 /** The `gh` on PATH for one run, restored whatever the run did. */
@@ -308,7 +257,7 @@ async function run(
   argv: readonly string[],
   options: Partial<ExecuteDeps> = {},
 ): Promise<{ code: number; out: string; err: string }> {
-  const streams = capture();
+  const streams = recordStreams();
   const code = await runCommandLine(executeCommandLine, {
     argv: [
         "--repo",
@@ -320,14 +269,14 @@ async function run(
         "--json",
         ...argv,
       ],
-    streams: streams.streams,
+    streams,
     cwd: repo,
     deps: { preflight: okPreflight, hooks: {
         review: reviewer() as never,
         push: (async () => ({ pushed: true, detail: "hooked" })) as never,
       }, ...options },
   });
-  return { code, out: streams.out.join(""), err: streams.err.join("") };
+  return { code, out: streams.out(), err: streams.err() };
 }
 
 /** What the run reported about itself, from the JSON it writes on stdout. */
@@ -341,21 +290,21 @@ async function inspect(
   repo: string,
   runId: string,
 ): Promise<{ report: { pull_request_url: string | null }; shown: string }> {
-  const asJson = capture(false);
+  const asJson = recordStreams();
   await runCommandLine(inspectCommandLine, {
     argv: [runId, "--repo", repo],
-    streams: asJson.streams,
+    streams: asJson,
     cwd: repo,
   });
-  const onTty = capture(true);
+  const onTty = recordStreams({ isTTY: true });
   await runCommandLine(inspectCommandLine, {
     argv: [runId, "--repo", repo],
-    streams: onTty.streams,
+    streams: onTty,
     cwd: repo,
   });
   return {
-    report: JSON.parse(asJson.out.join("")) as { pull_request_url: string | null },
-    shown: uncoloured(onTty.out.join("")),
+    report: asJson.json<{ pull_request_url: string | null }>(),
+    shown: onTty.plain(),
   };
 }
 

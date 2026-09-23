@@ -6,6 +6,9 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { DiagnosticResultSchema, type DiagnosticResult } from "@perbo/contracts";
 import { doctorCommandLine } from "./index.js";
 import { runCommandLine } from "../../command-line/terminal.js";
+import { recordStreams } from "../../test-support/streams.js";
+import { gitEnvironment } from "@perbo/test-support";
+import { emptyRepository } from "../../test-support/repository.js";
 
 /**
  * SCP-200 criterion 2: `perbo doctor` says which credential path GitHub is
@@ -83,18 +86,8 @@ afterEach(() => {
   else process.env.GITHUB_TOKEN = originalGithubToken;
 });
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "t",
-  GIT_AUTHOR_EMAIL: "t@t.invalid",
-  GIT_COMMITTER_NAME: "t",
-  GIT_COMMITTER_EMAIL: "t@t.invalid",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
-};
-
 const git = (dir: string, ...argv: string[]): string =>
-  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnv });
+  execFileSync("git", ["-C", dir, ...argv], { encoding: "utf8", env: gitEnvironment() });
 
 /**
  * A checkout on `main` with one commit in it.
@@ -108,12 +101,7 @@ function repository(name: string): string {
   const dir = join(scratch, name);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "fixture" }));
-  execFileSync("git", ["init", "-q", "-b", "main", dir], { env: gitEnv });
-  git(dir, "config", "user.name", "t");
-  git(dir, "config", "user.email", "t@t.invalid");
-  git(dir, "config", "commit.gpgsign", "false");
-  git(dir, "add", "-A");
-  git(dir, "commit", "-qm", "base");
+  emptyRepository(dir);
   return dir;
 }
 
@@ -334,14 +322,14 @@ async function doctor(
   if (options.token === null) delete process.env.GH_TOKEN;
   else process.env.GH_TOKEN = options.token;
 
-  const out: string[] = [];
+  const streams = recordStreams({ isTTY: !options.json });
   await runCommandLine(doctorCommandLine, {
     argv: doctorArgs(repo, options.json),
-    streams: { stdout: (chunk) => out.push(chunk), stderr: () => undefined, isTTY: !options.json },
+    streams,
     cwd: process.cwd(),
     deps: { diagnose: () => Promise.resolve(materializable) },
   });
-  return out.join("");
+  return streams.out();
 }
 
 describe("what `perbo doctor` reports about the GitHub credential", () => {
