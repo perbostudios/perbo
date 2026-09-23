@@ -29,8 +29,8 @@ describe("the reviewer's execution boundary", () => {
       "packages/review/src/some-new-file.ts",
       "packages/review/src/nested/provider-cli.ts",
       "packages/review/test/m.test.ts",
-      // The rule covers a path, not a file: the two names the transports had
-      // are refused like any other, so a transport cannot come back here.
+      // The rule covers a path, not a file: the names a provider transport
+      // takes are refused like any other, so one cannot live here.
       "packages/review/src/provider-cli.ts",
       "packages/review/src/provider-codex-cli.ts",
     ]) {
