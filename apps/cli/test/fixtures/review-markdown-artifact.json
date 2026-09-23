@@ -16,7 +16,7 @@
   "actual_risk": "P1",
   "escalated": false,
   "independence": {
-    "context_builder": "reviewer_v10",
+    "context_builder": "reviewer_v11",
     "executor_narrative_visible": false,
     "executor_transcript_visible": false,
     "separate_process": true,
@@ -258,7 +258,7 @@
   "model": {
     "provider": "double",
     "model_id": "scripted",
-    "prompt_version": "reviewer_v10",
+    "prompt_version": "reviewer_v11",
     "input_tokens": 4200,
     "cache_read_input_tokens": 0,
     "cache_creation_input_tokens": 0,

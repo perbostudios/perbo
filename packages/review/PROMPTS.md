@@ -11,7 +11,7 @@ here is edited from the source files — every fact below cites the line it come
 Two prompts live in this package and are versioned independently, because two artifacts claiming
 the same version must have been produced by the same reviewer (`prompt.ts:28-34`):
 
-- the **judging prompt** (`src/prompt.ts`, `PROMPT_VERSION`, currently `reviewer_v10`) — the system
+- the **judging prompt** (`src/prompt.ts`, `PROMPT_VERSION`, currently `reviewer_v11`) — the system
   prompt and context assembly `systemPrompt()` sends on every review
 - the **closure-verification prompt** (`src/closure-verify.ts`, `CLOSURE_VERIFY_PROMPT_VERSION`,
   currently `closure_verify_v2`) — the narrower question asked after a remediation round: is this
@@ -25,7 +25,7 @@ not a reviewer prompt and this document does not catalogue it.
 ## How a version is chosen at run time
 
 There is exactly one judging prompt in force: `PROMPT_VERSION` (`src/prompt.ts:36`), currently
-`reviewer_v10`. `systemPrompt()` (`src/prompt.ts:113`) takes no version argument, and no CLI flag or
+`reviewer_v11`. `systemPrompt()` (`src/prompt.ts:113`) takes no version argument, and no CLI flag or
 harness option selects an older one — a run always builds the current prompt. An older version can
 still be read from a stored artifact's `model.prompt_version`, but nothing in this codebase can
 produce a fresh review under one.
@@ -50,7 +50,7 @@ Closure verification stamps its own version the same way, on `ClosureVerificatio
 (`REDACTION_SKIPPED_KEYS`, `src/redact.ts:49`) — it is compared and matched downstream, not scanned
 for secret shapes, so the version string always survives redaction byte-exact.
 
-## The judging prompt — `reviewer_v10`
+## The judging prompt — `reviewer_v11`
 
 `PROMPT_VERSION` covers everything the reviewer is shown — the system prompt, the tool schema, and
 the delimited blocks `buildContext` and `renderReadFileResult` produce (`src/prompt.ts:29-34`) — not
@@ -157,7 +157,13 @@ thirty fixtures, recorded 2026-09-11, run `run_fc08423b4a78bd03`, `reviewer_v9` 
 over `claude-cli`, $15.62. `.github/scripts/regression-delta.mjs` reads a fresh run against this
 recorded score and prints what moved; a gated metric a change made worse fails the job.
 
-That recording is `reviewer_v9`'s. `reviewer_v10` differs from it in the product's name alone,
+That recording is `reviewer_v9`'s. `reviewer_v11` differs from `reviewer_v10` in the delimiting alone:
+every body inside a block is defanged in any spelling of the delimiter, and an attribute value
+cannot carry a closing bracket, a delimiter or a line break; the system prompt and the tool schema
+are byte-identical to `reviewer_v10`. Its evidence is the regression suite of 2026-09-23 on the
+pinned corpus (`090513ce`, 30 fixtures, `claude-opus-5` over `claude-cli`, $14.71): no gated metric
+worse than the recording, `unstated_regression` mechanism recall 40% [17%–69%] n=10, both hard bars
+held. `reviewer_v10` differs from `reviewer_v9` in the product's name alone,
 which it carries in the delimiters, in the `{computed by perbo}` marker on a computed check, and in
 the Codex transport's tool name and title. Its own evidence is one fixture rather than a suite:
 `adv-001-approval-instruction-in-test-log`, run `run_7bf3d4c421f7fed4`, scores field for field as

@@ -308,7 +308,7 @@ describe("the stored verdict, rendered as markdown", () => {
       .filter((line) => line.includes(stored.model.model_id) || line.includes(stored.model.prompt_version));
     expect(provenance).toHaveLength(1);
     expect(provenance[0]).toBe(
-      "_Reviewed by `double/scripted` · prompt `reviewer_v10` · $0.043 estimated._",
+      "_Reviewed by `double/scripted` · prompt `reviewer_v11` · $0.043 estimated._",
     );
     expect(provenance[0]).toContain(stored.model.prompt_version);
     expect(provenance[0]).toContain(`$${(stored.cost_micros / 1_000_000).toFixed(3)}`);
