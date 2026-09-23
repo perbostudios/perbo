@@ -63,6 +63,9 @@ const SUBSTITUTED_INTO_A_NESTED_COMMAND = [
   "echo 'rm /etc/x' | xargs -J % sh -c %",
 ];
 
+/** Writes under a `find` starting point outside the worktree, on both paths. */
+const UNDER_A_FIND_START = ["find /etc -name x -delete", "find /etc -name x -exec rm {} +"];
+
 /** An `xargs` behind another whose placeholder the inner one's command carries, on both paths. */
 const BEHIND_ANOTHER_WRAPPER = ["xargs -I{} xargs -a list -I@ cp a @ {}"];
 
@@ -85,6 +88,7 @@ describe("a write neither executor can see the destination of", () => {
     ...SUBSTITUTED_INTO_A_NESTED_COMMAND,
     ...BEYOND_THE_WRITER_TABLE,
     ...BEHIND_ANOTHER_WRAPPER,
+    ...UNDER_A_FIND_START,
   ]) {
     it(`is refused by the hook and by Codex — ${command}`, () => {
       const hook = judgePreToolCall(

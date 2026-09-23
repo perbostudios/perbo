@@ -14,6 +14,7 @@ import {
   type Destination,
   type WriteFinding,
 } from "./destination.js";
+import { findExpression } from "./find.js";
 import { gitFindings } from "./git.js";
 import { INTERPRETERS, interpreterFindings } from "./interpreter.js";
 import {
@@ -40,6 +41,21 @@ import {
   type WrapperSpec,
 } from "./wrappers.js";
 import { WRITERS, writerFindings } from "./writers.js";
+
+/** The directory a command runs in, as a word: `find`'s default starting point. */
+const HERE: Word = { raw: ".", value: ".", substitutions: [], variable: false };
+
+/** A word of a `find` body with the path the walk found standing where `{}` does. */
+function placed(word: Word, found: Word): Word {
+  if (!word.value.includes("{}")) return word;
+  return {
+    ...word,
+    raw: word.raw.split("{}").join(found.raw),
+    value: word.value.split("{}").join(found.value),
+    substitutions: [...word.substitutions, ...found.substitutions],
+    variable: word.variable || found.variable,
+  };
+}
 
 /** One command of a line, as the reading of that line found it. */
 export interface CommandSegment {
@@ -375,6 +391,14 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     const destination = judgeTarget(operand.value, context.scope, cwd, true);
     cwd = moved(destination, operand.raw, `the directory ${wrapper} ${option} runs in`);
     return null;
+  };
+
+  /** The directory a `find` starting point names, as a body run in it stands. */
+  const directoryOf = (start: Word): Cwd => {
+    const at = judgeTarget(start.value, context.scope, cwd, true);
+    return at.kind === "unresolvable"
+      ? { path: cwd.path, unknown: true }
+      : { path: at.resolved ?? cwd.path, unknown: false };
   };
 
   /** A file the wrapper itself writes — `time -o` — judged as any destination is. */
@@ -797,34 +821,59 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       cd = { path: cwd.path, unknown: true };
     } else if (verb === "find") {
       programs.push(verb);
-      const at = rest.findIndex((word) => word.value === "-exec" || word.value === "-execdir");
-      if (at !== -1) {
-        // A `;` word ends the body, and so does a `+` straight after `{}`; any
-        // other `+` is one of the body's own words, as `find` reads it.
-        const body: Word[] = [];
-        for (const word of rest.slice(at + 1)) {
-          if (word.value === ";") break;
-          if (word.value === "+" && body[body.length - 1]?.value === "{}") break;
-          body.push(word);
+      const expression = findExpression(rest);
+      const starts = expression.starts.length > 0 ? expression.starts : [HERE];
+      /** A path under which the walk writes, or a file an action writes. */
+      const judgeWritten = (word: Word, label: string): WriteFinding[] =>
+        supplied !== undefined && carries(word)
+          ? [suppliedDestination(label, supplied, context.segment)]
+          : pathFinding(label, word, judgeTarget(word.value, context.scope, cwd, true), context.segment);
+      if (expression.deletes) {
+        for (const start of starts) {
+          findings.push(...judgeWritten(start, "the find -delete starting point"));
         }
-        // The body is a command of its own: it inherits the directory, and the
-        // words a wrapper in front of the `find` substitutes into it, but not
-        // the standard input the line gave the `find`. Words a wrapper appends
-        // land after the whole expression, never in a body.
-        const inner = analyzeWords(body, {
-          ...context,
-          cwd,
-          stdin: undefined,
-          supplied: supplied?.placeholder === null ? undefined : supplied,
+      }
+      for (const { action, word } of expression.files) {
+        findings.push(...judgeWritten(word, `the find ${action} destination`));
+      }
+      // The words a wrapper in front of the `find` substitutes into a body are
+      // its own input; words it appends land after the whole expression, never
+      // in a body.
+      const into = supplied?.placeholder === null ? undefined : supplied;
+      for (const body of expression.bodies) {
+        // A body runs on each path the walk finds, which `find` puts where `{}`
+        // stands, and every one is under a starting point: so the body is read
+        // once per starting point with that point in its place. `-execdir`
+        // runs it in the found path's own directory, where `{}` is `./<name>`.
+        // A body the wrapper in front substitutes its own input into is read
+        // as written, because that input is what stands there.
+        const readings =
+          into !== undefined && body.words.some((word) => carries(word))
+            ? [{ words: body.words, at: cwd }]
+            : starts.map((start) =>
+                body.inFoundDirectory
+                  ? { words: body.words.map((word) => placed(word, HERE)), at: directoryOf(start) }
+                  : { words: body.words.map((word) => placed(word, start)), at: cwd },
+              );
+        readings.forEach((reading, index) => {
+          // The body is a command of its own: it inherits the directory, not
+          // the standard input the line gave the `find`.
+          const inner = analyzeWords(reading.words, {
+            ...context,
+            cwd: reading.at,
+            stdin: undefined,
+            supplied: into,
+          });
+          findings.push(...inner.findings);
+          if (!inner.accounted) accounted = false;
+          // `find … -exec rm {} ;` runs `rm`: what the line writes is the
+          // body's, and the admission decision is about the same act.
+          if (inner.mutating) mutating = true;
+          if (index > 0) return;
+          programs.push(...inner.programs);
+          invocations.push(...inner.invocations);
+          unreadablePrograms.push(...inner.unreadablePrograms);
         });
-        findings.push(...inner.findings);
-        if (!inner.accounted) accounted = false;
-        // `find … -exec rm {} ;` runs `rm`: what the line writes is the body's,
-        // and the admission decision is about the same act.
-        if (inner.mutating) mutating = true;
-        programs.push(...inner.programs);
-        invocations.push(...inner.invocations);
-        unreadablePrograms.push(...inner.unreadablePrograms);
       }
     } else {
       programs.push(verb);
