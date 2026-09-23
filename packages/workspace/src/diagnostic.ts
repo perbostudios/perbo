@@ -841,16 +841,19 @@ export async function ignoredPaths(checkout: string, timeoutMs = 60_000): Promis
     ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],
     { timeoutMs },
   );
-  // A failure here used to return `[]`, which is indistinguishable from "this
-  // repository needs nothing materialized" — so a directory that is not a git
-  // checkout, or a monorepo that blew the timeout, was reported
-  // `materializable: true` with an empty manifest, and the missing `.env`
-  // resurfaced mid-attempt as a test failure the agent was blamed for. That is
-  // the outcome this file exists to prevent.
-  if (result.code !== 0) {
+  // A listing git did not finish saying is refused, never read as the whole
+  // of it: an empty or a cut list is indistinguishable from "this repository
+  // needs nothing more materialized", and the `.env` it left out resurfaces
+  // mid-attempt as a test failure the agent is blamed for. That is the outcome
+  // this file exists to prevent.
+  if (result.code !== 0 || result.timed_out || result.truncated) {
     throw new IgnoredPathsUnavailableError(
       checkout,
-      result.timed_out ? `it did not finish within ${timeoutMs}ms` : (result.stderr.trim() || `git exited ${result.code}`),
+      result.timed_out
+        ? `it did not finish within ${timeoutMs}ms`
+        : result.truncated
+          ? "the listing is longer than git's answer may be, and part of it was cut off"
+          : (result.stderr.trim() || `git exited ${result.code}`),
     );
   }
   return result.stdout

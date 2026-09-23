@@ -117,6 +117,16 @@ async function countWorkspaces(dir: string): Promise<number | null> {
   const result = await git.run(dir, ["ls-files", "--", "**/package.json", "package.json"], {
     timeoutMs: MEASUREMENT_READ_TIMEOUT_MS,
   });
+  // A count read from a listing git did not finish saying is a smaller number,
+  // not the count.
+  if (result.code !== 0 || result.timed_out || result.truncated) {
+    const why = result.timed_out
+      ? `the listing did not finish within ${MEASUREMENT_READ_TIMEOUT_MS}ms`
+      : result.truncated
+        ? "the listing is longer than git's answer may be, and part of it was cut off"
+        : result.stderr.trim() || `git exited ${result.code}`;
+    throw new Error(`could not count the workspace packages in ${dir}: ${why}`);
+  }
   const manifests = result.stdout.split("\n").filter((line) => line.trim().length > 0);
   return manifests.length;
 }
