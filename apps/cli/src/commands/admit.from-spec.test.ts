@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { ApproachRecordSchema, EXIT_CODES } from "@perbo/contracts";
+import { ApproachRecordSchema, EXIT_CODES, type AcceptanceCriterion } from "@perbo/contracts";
 import {
   SUBMIT_REVIEW_TOOL,
   type Model,
@@ -11,11 +11,12 @@ import {
   type ModelTurn,
 } from "@perbo/model";
 import { UsageError } from "../usage-error.js";
-import { admitCommandLine } from "./admit.js";
+import { admitCommandLine, approveCommandLine } from "./admit.js";
 import { editCommandLine } from "./edit/index.js";
 import { INTERVIEW_SESSION_FILE } from "./interview/index.js";
 import { specCommitFiles } from "../spec/pages.js";
-import { listTickets, readApproachRecord, readContract, readDraftSnapshot, readTicket, storeDir } from "../store/tickets.js";
+import { readDriftRecord } from "../store/drift.js";
+import { listTickets, readApproachRecord, readContract, readTicket, storeDir } from "../store/tickets.js";
 import { runCommandLine } from "../command-line/terminal.js";
 import { recordStreams } from "../test-support/streams.js";
 import { initRepository } from "@perbo/test-support";
@@ -98,6 +99,7 @@ function scripted(script: Array<Array<{ tool: string; input: unknown }>>): Model
 const submits = (input: unknown) => [{ tool: SUBMIT_REVIEW_TOOL, input }];
 
 const drafted = {
+  name: "Activation email",
   outcome: "New users receive an activation email within 60 seconds of signing up.",
   acceptance_criteria: [
     {
@@ -143,6 +145,27 @@ async function admitFromSpec(
   return { code, streams };
 }
 
+/** A ticket admitted by hand, with no model, called by the outcome it was typed with. */
+async function admitTyped(repo: string, outcome: string): Promise<void> {
+  const code = await runCommandLine(admitCommandLine, {
+    argv: [
+      "--repo", repo, "--outcome", outcome, "--criterion", `${outcome} :: a test asserts it`,
+      "--path", "packages/auth/**",
+    ],
+    streams: recordStreams(),
+    cwd: repo,
+  });
+  expect(code).toBe(EXIT_CODES.approve);
+}
+
+/** The names the drafter was shown, one a line, from its first request. */
+function namesShown(model: { requests: ModelRequest[] }): string[] {
+  const user = String(model.requests[0]!.messages[0]!.content);
+  const block = /<perbo:names trust="repo"[^>]*>\n([\s\S]*?)\n<\/perbo:names>/.exec(user);
+  expect(block, "a names block").not.toBeNull();
+  return block![1]!.split("\n");
+}
+
 /** An "editor" that is `node <script>`, writing one citation into the contract as a hand edit does. */
 function citing(name: string, criterion: number, requirementId: string): string {
   const script = join(scratch, `${name}.js`);
@@ -162,75 +185,166 @@ const editWith = async (repo: string, editor: string) =>
     cwd: repo,
     deps: { env: { EDITOR: editor } },
   });
+const approve = (repo: string) =>
+  runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo });
 
-describe("a citation on a spec-drafted contract is checked against the spec", () => {
-  it("accepts an id the spec carries, refuses one it does not, and names a spec it cannot read", async () => {
+const criteriaOf = (dir: string): AcceptanceCriterion[] => {
+  const contract = readContract(dir, "PRB-1");
+  return "acceptance_criteria" in contract ? contract.acceptance_criteria : [];
+};
+const asFlag = (each: AcceptanceCriterion): string =>
+  `${each.text} :: ${each.expected_verification.assertion} :: ${each.expected_verification.kind}`;
+
+/**
+ * PRB-1 drafted from the spec, then flat, as deleting the last node from the
+ * Graph pane leaves it: `--criterion` replaces every criterion and is refused
+ * while the plan has nodes. Its nodes are merged into one and that one
+ * deleted, so its criteria have nowhere to move to and every one is kept.
+ */
+async function admittedFlat(): Promise<{ repo: string; dir: string; was: AcceptanceCriterion[] }> {
+  const { repo, specPath } = repository();
+  await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
+  const dir = storeDir(repo, null);
+  const graphEdit = (edits: unknown) =>
+    runCommandLine(editCommandLine, {
+      argv: ["PRB-1", "--repo", repo, "--graph-edit", JSON.stringify(edits)],
+      streams: recordStreams(),
+      cwd: repo,
+    });
+  const start = readContract(dir, "PRB-1");
+  const nodes = "nodes" in start ? (start.nodes ?? []) : [];
+  for (let at = 1; at < nodes.length; at += 1)
+    expect(
+      await graphEdit({ op: "merge_nodes", ids: [nodes[0]!.id, nodes[at]!.id] }),
+      `merging ${nodes[at]!.id}`,
+    ).toBe(EXIT_CODES.approve);
+  expect(
+    await graphEdit({ op: "delete_node", id: nodes[0]!.id, move_criteria_to: null }),
+    "the last node goes and the plan is flat",
+  ).toBe(EXIT_CODES.approve);
+  return { repo, dir, was: criteriaOf(dir) };
+}
+
+describe("a citation on a spec-drafted contract is settled where it is frozen", () => {
+  it("lets an edit write a citation the spec does not carry, and refuses to freeze it", async () => {
+    // Editing is free: a citation the spec does not carry is written, and read
+    // on the contract page, and refused at approval — which is where the
+    // contract is frozen (D-128).
     const { repo, specPath } = repository();
     await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
-    const dir = storeDir(repo, null);
-    // R4 is in the spec, cited by ac_3 but not by ac_1: a criterion may start citing it.
-    expect(await editWith(repo, citing("cite-r4", 0, "R4"))).toBe(EXIT_CODES.approve);
-    const contract = readContract(dir, "PRB-1");
-    expect(
-      "acceptance_criteria" in contract ? contract.acceptance_criteria[0]?.requirement_id : null,
-    ).toBe("R4");
-    // R9 is not in the spec, whatever the file says.
-    await expect(editWith(repo, citing("cite-r9", 1, "R9"))).rejects.toThrow(/R9/);
-    // The spec is what the set is read from; without it nothing can be checked.
+    expect(await editWith(repo, citing("cite-r9", 1, "R9"))).toBe(EXIT_CODES.approve);
+    expect(() => approve(repo)).toThrow(/R9/);
+  });
+
+  it("passes over a spec whose file has gone, as the rest of approval does", async () => {
+    const { repo, specPath } = repository();
+    await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
     rmSync(specPath);
-    await expect(editWith(repo, citing("cite-r2", 1, "R2"))).rejects.toThrow(
-      /specs\/activation-email\/spec\.md/,
-    );
+    // Nothing can be checked against a spec that is not there, and approval
+    // does not refuse over it — it leaves admission's record standing.
+    expect(approve(repo)).toBe(EXIT_CODES.approve);
   });
 });
 
-describe("a citation an undo would put back is checked against the spec", () => {
-  it("refuses the undo while the spec no longer carries the id, and applies it once it does", async () => {
+describe("approving settles what the plan cites against the spec", () => {
+  it("refuses to freeze a contract citing a requirement the spec no longer carries", async () => {
+    // Approval freezes the contract (ADR-0016) and the spec travels with it —
+    // the loop commits the folder and the reviewer reads it. A citation
+    // pointing at nothing would be frozen in and printed on a node's page as
+    // provenance it does not have (D-103).
     const { repo, specPath } = repository();
     await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
-    const dir = storeDir(repo, null);
-    const graphEdit = (edits: unknown) =>
-      runCommandLine(editCommandLine, {
-        argv: ["PRB-1", "--repo", repo, "--graph-edit", JSON.stringify(edits)],
-        streams: recordStreams(),
-        cwd: repo,
-      });
-    const cited = () => {
-      const contract = readContract(dir, "PRB-1");
-      return "acceptance_criteria" in contract
-        ? contract.acceptance_criteria.map((criterion) => criterion.requirement_id ?? null)
-        : [];
-    };
-    // Edit 1 records ac_1 whole, citing R1; the spec then renames R1 to R3,
-    // and the person takes the remedy the next edit offers: drop the citation.
+    // The person edits the spec between drafting and approving, which is theirs
+    // to do: R1 goes.
+    writeFileSync(specPath, SPEC.replace("- R1:", "- R7:"));
+    expect(() => approve(repo)).toThrow(/R1/);
+  });
+
+  it("approves where every citation still stands", async () => {
+    const { repo, specPath } = repository();
+    await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
+    expect(approve(repo)).toBe(EXIT_CODES.approve);
+  });
+});
+
+describe("a criterion keeps the requirement it answers across an edit", () => {
+  it("does not move a requirement onto a criterion that shares another's words", async () => {
+    // Two criteria can say the same thing and be proven differently. If only
+    // the cited one is counted, the text looks unambiguous and the requirement
+    // lands on whichever copy survives — a citation that is wrong rather than
+    // missing, which nothing downstream can catch.
+    const { repo, dir, was } = await admittedFlat();
+    const cited = was.find((each) => each.requirement_id !== undefined)!;
+    // A twin: the same words, proven another way, citing nothing.
+    const argv = ["PRB-1", "--repo", repo];
+    for (const each of was) argv.push("--criterion", asFlag(each));
+    argv.push("--criterion", `${cited.text} :: a screenshot of it :: artifact`);
     expect(
-      await graphEdit({
-        op: "set_criterion",
-        id: "ac_1",
-        text: "A signup queues one activation email.",
-        expected_verification: { kind: "test", assertion: "one message is on the queue" },
-      }),
+      await runCommandLine(editCommandLine, { argv, streams: recordStreams(), cwd: repo, deps: { env: {} } }),
+      "the edit is written",
     ).toBe(EXIT_CODES.approve);
-    writeFileSync(specPath, SPEC.replace("- R1:", "- R3:"));
-    const dropping = join(scratch, "drop-r1.js");
-    writeFileSync(
-      dropping,
-      `const fs = require("node:fs");\nconst file = process.argv[process.argv.length - 1];\n` +
-        `const c = JSON.parse(fs.readFileSync(file, "utf8"));\ndelete c.acceptance_criteria[0].requirement_id;\n` +
-        `fs.writeFileSync(file, JSON.stringify(c, null, 2));\n`,
+
+    // Neither twin carries the requirement: it cannot be told which of them
+    // answers it, so the citation goes, visibly, rather than moving.
+    const after = criteriaOf(dir);
+    const twins = after.filter((each) => each.text === cited.text);
+    expect(twins, "both twins are written").toHaveLength(2);
+    expect(
+      twins.map((each) => each.requirement_id),
+      "an ambiguous text carries no citation",
+    ).toEqual([undefined, undefined]);
+    // And every other criterion keeps its own.
+    const others = new Map(
+      was.filter((each) => each.text !== cited.text).map((each) => [each.text, each.requirement_id]),
     );
-    expect(await editWith(repo, `node ${dropping}`)).toBe(EXIT_CODES.approve);
-    expect(cited()).toEqual([null, "R2", "R4"]);
+    expect(others.size, "criteria beside the twins").toBeGreaterThan(0);
+    for (const each of after.filter((entry) => entry.text !== cited.text))
+      expect(each.requirement_id, `${each.id} keeps its own requirement`).toBe(others.get(each.text));
+  });
 
-    const undo = () =>
-      runCommandLine(editCommandLine, { argv: ["PRB-1", "--repo", repo, "--undo", "1"], streams: recordStreams(), cwd: repo });
-    await expect(undo()).rejects.toThrow(/R1/);
-    expect(cited()).toEqual([null, "R2", "R4"]);
-    expect(readDraftSnapshot(dir, "PRB-1")?.edits.map((edit) => edit.undone)).toEqual([false, false]);
+  it("does not move a requirement onto another criterion when the order changes", async () => {
+    // `parseCriterion` numbers what it is given, ac_1 upward, so neither the id
+    // nor the position identifies a criterion across a flag edit: reorder them
+    // and either would stamp each requirement onto its neighbour. Every id
+    // still exists in the spec afterwards, so nothing downstream could catch
+    // it — the citation would be wrong rather than missing.
+    const { repo, dir, was } = await admittedFlat();
+    expect(was.length, "more than one criterion to reorder").toBeGreaterThan(1);
+    const cited = new Map(was.map((each) => [each.text, each.requirement_id]));
+    expect([...cited.values()].filter(Boolean).length, "the plan cites its spec").toBeGreaterThan(1);
 
-    writeFileSync(specPath, SPEC);
-    expect(await undo()).toBe(EXIT_CODES.approve);
-    expect(cited()).toEqual(["R1", "R2", "R4"]);
+    // The same criteria, the same count, back to front. Nothing is dropped, so
+    // the edit goes through — and every requirement must travel with its own
+    // words rather than with the number it happened to hold.
+    const argv = ["PRB-1", "--repo", repo];
+    for (const each of [...was].reverse()) argv.push("--criterion", asFlag(each));
+    expect(await runCommandLine(editCommandLine, { argv, streams: recordStreams(), cwd: repo, deps: { env: {} } })).toBe(
+      EXIT_CODES.approve,
+    );
+
+    for (const each of criteriaOf(dir))
+      expect(
+        each.requirement_id,
+        `${each.id} ("${each.text.slice(0, 28)}") must keep its own requirement`,
+      ).toBe(cited.get(each.text));
+  });
+
+  it("keeps a criterion's requirement across a flag edit, which carries text and verification only", async () => {
+    // The desktop's compile sends --criterion for every criterion whether it
+    // changed or not. Without carrying the citation every compile would drop
+    // them all, silently, and the node pages would tell the executor the work
+    // was drafted from nothing (D-103).
+    const { repo, dir, was } = await admittedFlat();
+    const cited = was.map((each) => each.requirement_id);
+    expect(cited.filter(Boolean).length, "the drafted plan cites its spec").toBeGreaterThan(0);
+
+    // Re-send every criterion unchanged, as a compile does.
+    const argv = ["PRB-1", "--repo", repo];
+    for (const each of was) argv.push("--criterion", asFlag(each));
+    expect(await runCommandLine(editCommandLine, { argv, streams: recordStreams(), cwd: repo, deps: { env: {} } })).toBe(
+      EXIT_CODES.approve,
+    );
+    expect(criteriaOf(dir).map((each) => each.requirement_id)).toEqual(cited);
   });
 });
 
@@ -323,18 +437,102 @@ describe("perbo admit --from-spec", () => {
     expect(nodes?.[1]?.paths).toEqual(["packages/queue/**"]);
   });
 
-  it("calls the ticket what the person called the spec, not what the draft called the outcome", async () => {
+  it("calls the ticket what the drafter named the work, not the outcome sentence", async () => {
     const { repo, specPath } = repository();
-    const { code } = await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
+    const { code } = await admitFromSpec(
+      repo,
+      specPath,
+      scripted([submits({ ...drafted, name: "Activation email retries" })]),
+    );
     expect(code).toBe(EXIT_CODES.approve);
 
-    // The spec's own title, so the board, the folder and the planning pane all
-    // say the same thing. The outcome is a sentence the drafter wrote, and it
-    // is still the contract's outcome — it is just not the ticket's name.
+    // The drafter read the spec and the repository before saying this, so it
+    // names what the plan turned out to be — and it is short, which a board
+    // needs. The outcome is still the contract's outcome; it is a sentence,
+    // and a sentence is not a name.
     const ticket = readTicket(storeDir(repo, null), "PRB-1");
-    expect(ticket.title).toBe("Activation email");
+    expect(ticket.title).toBe("Activation email retries");
     expect(readContract(storeDir(repo, null), "PRB-1").outcome).toBe(drafted.outcome);
     expect(ticket.title).not.toBe(drafted.outcome);
+  });
+
+  it("flattens a name a model wrote across lines", async () => {
+    // Shown as a title, so it is one line and it fits (ADR-0023 §4).
+    const { repo, specPath } = repository();
+    await admitFromSpec(
+      repo,
+      specPath,
+      scripted([submits({ ...drafted, name: "Activation\n  email  retries" })]),
+    );
+    expect(readTicket(storeDir(repo, null), "PRB-1").title).toBe("Activation email retries");
+  });
+
+  it("shows the drafter every other ticket's name, whatever its state", async () => {
+    // D-127: the name is told apart
+    // from every row a person's board shows, and that is more than the
+    // tickets in flight.
+    const { repo, specPath } = repository();
+    const dir = storeDir(repo, null);
+    await admitTyped(repo, "Snake on a walled board");
+    await admitTyped(repo, "Twin-dial clock");
+    const merged = readTicket(dir, "PRB-2");
+    writeFileSync(join(dir, "tickets", "PRB-2.json"), JSON.stringify({ ...merged, state: "merged" }, null, 2));
+
+    const model = scripted([submits({ ...drafted, name: "Activation email retries" })]);
+    await admitFromSpec(repo, specPath, model);
+    expect(namesShown(model)).toEqual(["Snake on a walled board", "Twin-dial clock"]);
+  });
+
+  it("leaves the ticket being drafted again off the names, so its own name is not taken from it", async () => {
+    const { repo, specPath } = repository();
+    await admitFromSpec(repo, specPath, scripted([submits({ ...drafted, name: "Activation email retries" })]));
+    await admitTyped(repo, "Snake on a walled board");
+
+    const model = scripted([submits({ ...drafted, name: "Activation email retries" })]);
+    const { code } = await admitFromSpec(repo, specPath, model, ["--start-over", "PRB-1"]);
+    expect(code).toBe(EXIT_CODES.approve);
+    expect(namesShown(model)).toEqual(["Snake on a walled board"]);
+    expect(readTicket(storeDir(repo, null), "PRB-1").title).toBe("Activation email retries");
+  });
+
+  it("passes over a drafted name another ticket carries, for the spec's title and then the outcome", async () => {
+    // The same name to a person scanning the board, whatever its case and
+    // spacing. The draft is kept: only the name falls back.
+    const { repo, specPath } = repository();
+    await admitTyped(repo, "activation  EMAIL retries");
+    const { code } = await admitFromSpec(
+      repo,
+      specPath,
+      scripted([submits({ ...drafted, name: "Activation email retries" })]),
+    );
+    expect(code).toBe(EXIT_CODES.approve);
+    expect(readTicket(storeDir(repo, null), "PRB-2").title).toBe("Activation email");
+
+    // With the spec's title taken too, the outcome is what is left.
+    const other = repository();
+    await admitTyped(other.repo, "Activation email retries");
+    await admitTyped(other.repo, "Activation Email");
+    await admitFromSpec(
+      other.repo,
+      other.specPath,
+      scripted([submits({ ...drafted, name: "Activation email retries" })]),
+    );
+    expect(readTicket(storeDir(other.repo, null), "PRB-3").title).toBe(drafted.outcome);
+  });
+
+  it("keeps the drafted name when the outcome is edited", async () => {
+    const { repo, specPath } = repository();
+    await admitFromSpec(repo, specPath, scripted([submits({ ...drafted, name: "Activation email retries" })]));
+    const code = await runCommandLine(editCommandLine, {
+      argv: ["PRB-1", "--repo", repo, "--outcome", "New users receive an activation email within 30 seconds."],
+      streams: recordStreams(),
+      cwd: repo,
+      deps: { env: {} },
+    });
+    expect(code).toBe(EXIT_CODES.approve);
+    const dir = storeDir(repo, null);
+    expect(readContract(dir, "PRB-1").outcome).toBe("New users receive an activation email within 30 seconds.");
+    expect(readTicket(dir, "PRB-1").title).toBe("Activation email retries");
   });
 
   it("shows the person the graph and the No-Gos it just recorded", async () => {
@@ -671,5 +869,65 @@ describe("the files the loop commits with the spec", () => {
     expect(files.map((file) => file.path)).toEqual(["specs/activation-email/spec.md"]);
     expect(said.join("")).toContain("specs/activation-email/nodes");
     expect(said.join("")).toContain("warning");
+  });
+});
+
+describe("the spec takes the ticket's name", () => {
+  // D-127: the Spec pane, the picker
+  // and the contract's head show one name, so the spec's title line is
+  // rewritten to the ticket's. The folder keeps its slug, which the record's
+  // path names (ADR-0023 §4).
+  const specFolders = (repo: string) => readdirSync(join(repo, "specs")).sort();
+  const named = (name: string) => scripted([submits({ ...drafted, name })]);
+
+  it("is titled with the drafted name, the folder unchanged and the record hashing it as renamed", async () => {
+    const { repo, specPath } = repository();
+    const { code } = await admitFromSpec(repo, specPath, named("Activation email retries"));
+    expect(code).toBe(EXIT_CODES.approve);
+
+    expect(readFileSync(specPath, "utf8")).toBe(SPEC.replace("# Activation email\n", "# Activation email retries\n"));
+    expect(specFolders(repo)).toEqual(["activation-email"]);
+    const dir = storeDir(repo, null);
+    const spec = readTicket(dir, "PRB-1").admission.spec;
+    expect(spec?.path).toBe("specs/activation-email/spec.md");
+    expect(spec?.content_sha256).toBe(hashOf(specPath));
+    expect(spec?.files.find((file) => file.path === "specs/activation-email/spec.md")?.content_sha256).toBe(hashOf(specPath));
+    // The verdict a fresh draft is seeded with holds at the renamed spec, so
+    // the way to the contract calls no model for the rename.
+    expect(readDriftRecord(dir, "PRB-1")?.spec).toBe(hashOf(specPath));
+  });
+
+  it("is titled again when the ticket is drafted again under another name", async () => {
+    const { repo, specPath } = repository();
+    await admitFromSpec(repo, specPath, named("Activation email retries"));
+    const { code } = await admitFromSpec(repo, specPath, named("Retried activation email"), ["--start-over", "PRB-1"]);
+    expect(code).toBe(EXIT_CODES.approve);
+    const dir = storeDir(repo, null);
+    expect(readTicket(dir, "PRB-1").title).toBe("Retried activation email");
+    expect(readFileSync(specPath, "utf8").split("\n")[0]).toBe("# Retried activation email");
+    expect(specFolders(repo)).toEqual(["activation-email"]);
+    expect(readTicket(dir, "PRB-1").admission.spec?.content_sha256).toBe(hashOf(specPath));
+    expect(readDriftRecord(dir, "PRB-1")?.spec).toBe(hashOf(specPath));
+  });
+
+  it("is left as it was where the node pages refuse the admission", async () => {
+    const { repo, specPath } = repository();
+    const elsewhere = mkdtempSync(join(scratch, "elsewhere-"));
+    symlinkSync(elsewhere, join(repo, "specs", "activation-email", "nodes"));
+    await expect(admitFromSpec(repo, specPath, named("Activation email retries"))).rejects.toThrow(/symlink/);
+    expect(readFileSync(specPath, "utf8")).toBe(SPEC);
+    expect(readdirSync(elsewhere)).toEqual([]);
+  });
+
+  it("keeps its own title where that is the name, and takes the outcome where the outcome is", async () => {
+    const { repo, specPath } = repository();
+    await admitFromSpec(repo, specPath, scripted([submits(drafted)]));
+    expect(readFileSync(specPath, "utf8")).toBe(SPEC);
+
+    const other = repository();
+    await admitTyped(other.repo, "Activation email retries");
+    await admitTyped(other.repo, "Activation Email");
+    await admitFromSpec(other.repo, other.specPath, named("Activation email retries"));
+    expect(readFileSync(other.specPath, "utf8").split("\n")[0]).toBe(`# ${drafted.outcome}`);
   });
 });

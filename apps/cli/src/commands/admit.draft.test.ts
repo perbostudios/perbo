@@ -65,6 +65,7 @@ const criteria = (what: string) => [
 
 /** Work across three packages, as one contract. */
 const whole = {
+  name: "Activation email, end to end",
   outcome: "Signup sends, confirms and reports the activation email.",
   acceptance_criteria: criteria("the whole"),
   proposed_scope: { paths_allowed: ["packages/auth/**", "packages/queue/**", "packages/reports/**"], paths_prohibited_extra: [] },
@@ -101,6 +102,7 @@ const split = {
 };
 
 const one = {
+  name: "Activation email",
   outcome: "New users receive an activation email.",
   acceptance_criteria: criteria("the email"),
   proposed_scope: { paths_allowed: ["packages/queue/**"], paths_prohibited_extra: [] },
@@ -142,7 +144,7 @@ describe("perbo admit --from: one draft is one ticket", () => {
     expect(code).toBe(EXIT_CODES.approve);
     const document = streams.json<{ ticket: { key: string } }>();
     expect(document.ticket.key).toBe("PRB-1");
-    expect(readTicket(dir, "PRB-1").title).toBe(whole.outcome);
+    expect(readTicket(dir, "PRB-1").title).toBe(whole.name);
     expect(existsSync(join(dir, "tickets", "PRB-2.json"))).toBe(false);
   });
 
@@ -156,7 +158,7 @@ describe("perbo admit --from: one draft is one ticket", () => {
     expect(code).toBe(EXIT_CODES.approve);
     expect(JSON.stringify(model.requests[0]?.messages[0])).not.toContain(first);
     expect(streams.err()).toContain(`${first} is in flight but its contract cannot be read; it is left off the board`);
-    expect(readTicket(dir, "PRB-2").title).toBe(one.outcome);
+    expect(readTicket(dir, "PRB-2").title).toBe(one.name);
   });
 
   it("shows the drafter the board, takes the dependency it proposes, and refuses one the board does not show", async () => {

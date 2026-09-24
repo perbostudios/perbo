@@ -12,7 +12,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
-import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
+import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment, type EffortLevel } from "@perbo/contracts";
 import { PERBO_AGENT_ROLES, type AgentRole } from "../../agents.js";
 
 export const CODEX_EXECUTOR_ARGV = [
@@ -453,7 +453,8 @@ export class CodexExecutorSession {
       .parse(await this.request("thread/read", { threadId }));
     return response.thread.agentRole ?? null;
   }
-  async turn(threadId: string, model: string, prompt: string): Promise<string> {
+  /** `effort` is the run's configured level, or null for the `medium` this runner sends by default. */
+  async turn(threadId: string, model: string, prompt: string, effort: EffortLevel | null = null): Promise<string> {
     const response = z
       .object({ turn: z.object({ id: z.string() }).passthrough() })
       .passthrough()
@@ -467,7 +468,7 @@ export class CodexExecutorSession {
           approvalsReviewer: "user",
           sandboxPolicy: { type: "readOnly", networkAccess: false },
           model,
-          effort: "medium",
+          effort: effort ?? "medium",
         }),
       );
     const id = response.turn.id;

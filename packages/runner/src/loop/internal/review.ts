@@ -418,8 +418,9 @@ export function flakyCheckFindings(checks: readonly CheckResult[]): Finding[] {
  *
  * The submit schema is built from **this** plan's criteria and this change
  * set's checks, so the tool schema itself cannot express a criterion the plan
- * does not have. The model id is pinned by configuration, never sniffed from
- * the repository.
+ * does not have. The model id and the effort are pinned by configuration,
+ * each sent only where one is configured, and neither sniffed from the
+ * repository.
  */
 export function reviewerModel(
   config: TicketRunConfig,
@@ -433,6 +434,7 @@ export function reviewerModel(
   return createModel(config.reviewer_provider, {
     submitSchema: schema,
     modelId: config.reviewer_model,
+    effort: config.reviewer_effort,
   });
 }
 

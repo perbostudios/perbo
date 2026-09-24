@@ -1,11 +1,14 @@
-import { interviewSessionArgs } from "../shared/contract-editing.js";
+import { interviewSessionArgs, REREAD_COULD_NOT_START, untouchedPlanning } from "../shared/contract-editing.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -15,8 +18,9 @@ import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { DesktopService, type ServiceOptions } from "./service.js";
 import { runProcess, startLineProcess } from "./process.js";
-import { GRAPH_NODE_STATES, SettingsSchema } from "../shared/protocol.js";
-import { lane } from "../shared/jobs.js";
+import { GRAPH_NODE_STATES, INTERVIEW_WROTE_THE_SPEC, SettingsSchema } from "../shared/protocol.js";
+import { isLive, lane } from "../shared/jobs.js";
+import { DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
 import type {
   Change,
   Draft,
@@ -87,6 +91,200 @@ describe("the spec a planning session holds", () => {
     notes: "",
   };
 
+  it("takes the spec folder with the planning that was writing it", async () => {
+    // A piece of work is one thing and is deleted as one. Writing left behind
+    // puts a row back in the picker under the same title the moment the delete
+    // finishes, which reads as the delete having made a copy of the thing it
+    // removed (D-129).
+    const { service, repo } = fixture();
+    const registered = await service.registerRepository(repo);
+    const session = await service.request({
+      kind: "editingOpen",
+      target: { kind: "fresh", repoId: registered.id },
+    });
+    await saveSpec(service, {
+      kind: "specSave",
+      id: session.id,
+      repoId: registered.id,
+      title: "A light colour mode",
+      sections,
+    });
+    const folder = join(repo, "specs", "a-light-colour-mode");
+    expect(existsSync(folder)).toBe(true);
+
+    await service.request({ kind: "editingDiscard", id: session.id });
+    expect(existsSync(folder), "the writing goes with the planning").toBe(false);
+    // And the picker has nothing left to offer for it.
+    expect((await service.snapshot()).specs ?? []).toEqual([]);
+  });
+
+  /** A ticket in this repository, admitted the way the board admits one. */
+  async function admitted(service: DesktopService, repoId: string): Promise<void> {
+    const job = await service.request({
+      kind: "admit",
+      repoId,
+      draft: {
+        outcome: "New users receive an activation email",
+        criteria: [{ text: "A signup queues one email", assertion: "signup.test.ts", kind: "test" }],
+        paths: ["packages/auth/**"],
+        prohibited: [],
+      },
+    });
+    await finished(service, job.id);
+  }
+
+  /** That ticket's record, as a repository could carry it. */
+  function recordSpecPath(repo: string, path: string): void {
+    const at = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as {
+      state: string;
+      admission: { spec?: unknown };
+    };
+    ticket.state = "plan_review";
+    ticket.admission.spec = {
+      path,
+      content_sha256: "sha256:" + "0".repeat(64),
+      files: [],
+      names_that_resolved: null,
+      symbols_judged_at_approval: false,
+    };
+    writeFileSync(at, JSON.stringify(ticket));
+  }
+
+  it("refuses a recorded spec path that climbs out of the spec folder", async () => {
+    // The path reaches this from an admission record, which is a file in the
+    // repository rather than anything this process wrote, and the delete it
+    // feeds is recursive. `safePath` alone does not make it safe: it refuses a
+    // path landing outside the repository, and `..` lands back inside it —
+    // `specs/../..` is the repository root.
+    const { service, repo } = fixture();
+    const registered = await service.registerRepository(repo);
+    const session = await service.request({
+      kind: "editingOpen",
+      target: { kind: "fresh", repoId: registered.id },
+    });
+    await saveSpec(service, {
+      kind: "specSave",
+      id: session.id,
+      repoId: registered.id,
+      title: "A light colour mode",
+      sections,
+    });
+    await admitted(service, registered.id);
+    recordSpecPath(repo, "specs/../../spec.md");
+
+    // The delete itself succeeds — a climbing record is not a reason to refuse
+    // to delete the contract, only a reason to touch no folder for it.
+    await service.request({ kind: "discard", repoId: registered.id, key: "PRB-1" });
+    // The repository is still there, and so is every spec in it.
+    expect(existsSync(join(repo, ".perbo")), "the repository").toBe(true);
+    expect(existsSync(join(repo, "README.md")), "the working tree").toBe(true);
+    expect(existsSync(join(repo, "specs", "a-light-colour-mode")), "an unrelated spec").toBe(true);
+  });
+
+  it("deletes no folder for a spec recorded under a folder this repository does not use", async () => {
+    // The same reading, one step short of a climb: `docs/specs/foo/spec.md`
+    // names a folder this repository is not keeping specs in, and `specs/foo`
+    // is then an unrelated spec that happens to share the name.
+    const { service, repo } = fixture();
+    const registered = await service.registerRepository(repo);
+    const session = await service.request({
+      kind: "editingOpen",
+      target: { kind: "fresh", repoId: registered.id },
+    });
+    await saveSpec(service, {
+      kind: "specSave",
+      id: session.id,
+      repoId: registered.id,
+      title: "A light colour mode",
+      sections,
+    });
+    await admitted(service, registered.id);
+    // The planning takes the ticket as it is opened, without claiming it made
+    // it, and the record then names the other folder.
+    recordSpecPath(repo, "specs/a-light-colour-mode/spec.md");
+    const resumed = await service.request({
+      kind: "editingOpen",
+      target: { kind: "session", id: session.id },
+    });
+    expect(resumed.key).toBe("PRB-1");
+    recordSpecPath(repo, "docs/specs/a-light-colour-mode/spec.md");
+    const folder = join(repo, "specs", "a-light-colour-mode");
+
+    // Thrown away, so no planning holds the folder and what keeps it is the
+    // folder the records name: the ticket the planning holds names another.
+    await service.request({ kind: "editingDiscard", id: session.id });
+    expect(existsSync(folder), "the spec here, after the planning").toBe(true);
+    await service.request({ kind: "discard", repoId: registered.id, key: "PRB-1" });
+    expect(existsSync(folder), "the spec here, after the ticket").toBe(true);
+  });
+
+  it("keeps the spec where the ticket naming it was not deleted", async () => {
+    // A planning opened over a ticket the command line admitted did not make
+    // it, so throwing the planning away leaves the ticket — and a plan is read
+    // against the spec it names (D-103), so the spec stays with it. Deleting
+    // the writing out from under a plan that survives is the one thing
+    // `specDelete` refuses outright.
+    const { service, repo } = fixture();
+    const registered = await service.registerRepository(repo);
+    const session = await service.request({
+      kind: "editingOpen",
+      target: { kind: "fresh", repoId: registered.id },
+    });
+    await saveSpec(service, {
+      kind: "specSave",
+      id: session.id,
+      repoId: registered.id,
+      title: "A light colour mode",
+      sections,
+    });
+    await admitted(service, registered.id);
+    recordSpecPath(repo, "specs/a-light-colour-mode/spec.md");
+    // The session takes the ticket on open, as a planning resumed over one the
+    // command line drafted does — without claiming it made it.
+    const resumed = await service.request({
+      kind: "editingOpen",
+      target: { kind: "session", id: session.id },
+    });
+    expect(resumed.key, "the planning found the plan drafted from its spec").toBe("PRB-1");
+    expect(resumed.admitted, "and does not claim to have made it").toBe(false);
+
+    await service.request({ kind: "editingDiscard", id: session.id });
+    const store = join(repo, ".perbo", "tickets");
+    expect(existsSync(join(store, "PRB-1.json")), "work this planning did not do").toBe(true);
+    expect(
+      existsSync(join(repo, "specs", "a-light-colour-mode")),
+      "the spec that plan is read against",
+    ).toBe(true);
+  });
+
+  it("leaves a spec a planning is still writing when a ticket naming it is deleted", async () => {
+    // That planning's work, and this delete was never asked about it.
+    const { service, repo } = fixture();
+    const registered = await service.registerRepository(repo);
+    const session = await service.request({
+      kind: "editingOpen",
+      target: { kind: "fresh", repoId: registered.id },
+    });
+    await saveSpec(service, {
+      kind: "specSave",
+      id: session.id,
+      repoId: registered.id,
+      title: "A light colour mode",
+      sections,
+    });
+    await admitted(service, registered.id);
+    recordSpecPath(repo, "specs/a-light-colour-mode/spec.md");
+    const folder = join(repo, "specs", "a-light-colour-mode");
+
+    await service.request({ kind: "discard", repoId: registered.id, key: "PRB-1" });
+    expect(existsSync(folder), "a planning is still writing it").toBe(true);
+
+    // And once that planning goes too, so does the writing.
+    await service.request({ kind: "editingDiscard", id: session.id });
+    expect(existsSync(folder)).toBe(false);
+  });
+
   it("rewrites the node pages when the spec is saved, and names each requirement's node", async () => {
     const { service, repo } = fixture();
     const registered = await service.registerRepository(repo);
@@ -130,6 +328,193 @@ describe("the spec a planning session holds", () => {
     expect(
       readFileSync(join(repo, "specs", "a-light-colour-mode", "nodes", "node_1.md"), "utf8"),
     ).toContain("A high-contrast mode.");
+  });
+});
+
+describe("each role's effort, beside its model", () => {
+  it("keeps the default effort per role through the host and a restart", async () => {
+    const { service, options } = fixture();
+    const settings = SettingsSchema.parse({ executorEffort: "high", reviewerEffort: "low" });
+    await service.request({ kind: "saveSettings", settings });
+    expect((await service.snapshot()).settings).toMatchObject({ executorEffort: "high", reviewerEffort: "low" });
+    await service.shutdown();
+    const restarted = new DesktopService(options);
+    trackService(restarted);
+    expect((await restarted.snapshot()).settings).toMatchObject({ executorEffort: "high", reviewerEffort: "low" });
+  });
+
+  it("hands the run each role's effort as it hands it the model, the ticket's own choice first", async () => {
+    let override: Record<string, unknown> | null = null;
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "run") {
+        override = JSON.parse(readFileSync(args[args.indexOf("--config") + 1]!, "utf8")) as Record<string, unknown>;
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return runProcess(binary, args, options);
+    };
+    const { service, repo } = fixture(runner);
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    await service.request({
+      kind: "saveSettings",
+      settings: SettingsSchema.parse({ executorEffort: "low", reviewerEffort: "low" }),
+    });
+    const run = async (): Promise<void> => {
+      const detail = await service.detail(registered.id, "PRB-1");
+      const ran = await finished(service, (await service.request({
+        kind: "run", repoId: registered.id, key: "PRB-1", digest: detail.digest,
+        approve: false, publish: false, resumeFrom: null,
+      })).id);
+      expect(ran.error).toBeNull();
+    };
+    await run();
+    expect(override).toMatchObject({ model: "claude-opus-5", effort: "low", reviewer_model: "claude-opus-5", reviewer_effort: "low" });
+    await service.request({
+      kind: "taskModels",
+      repoId: registered.id,
+      key: "PRB-1",
+      models: {
+        executorProvider: "codex-cli",
+        executorModel: "gpt-5.6-terra",
+        executorEffort: "ultra",
+        reviewerProvider: "claude-cli",
+        reviewerModel: "claude-fable-5-1",
+        reviewerEffort: "max",
+        draftingProvider: "codex-cli",
+        executorSkills: [],
+      },
+    });
+    await run();
+    expect(override).toMatchObject({
+      agent_provider: "codex-cli",
+      model: "gpt-5.6-terra",
+      effort: "ultra",
+      reviewer_provider: "claude-cli",
+      reviewer_model: "claude-fable-5-1",
+      reviewer_effort: "max",
+    });
+  });
+});
+
+describe("the pane a planning was left at (D-130)", () => {
+  it("records the pane without moving the revision, and keeps it through a restart", async () => {
+    const { service, repo, options } = fixture();
+    const opened = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: (await service.registerRepository(repo)).id } });
+    expect(opened.lastPane).toBeNull();
+    const visited = await service.request({ kind: "editingVisited", id: opened.id, pane: "explorer" });
+    expect(visited.lastPane).toBe("explorer");
+    // Not an edit: the revision a save was read at still holds, and a
+    // planning only looked around in is still one nothing was put into.
+    expect(visited.revision).toBe(opened.revision);
+    expect(untouchedPlanning(visited)).toBe(true);
+    expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === opened.id)?.lastPane).toBe("explorer");
+    await service.shutdown();
+    const restarted = new DesktopService(options);
+    trackService(restarted);
+    expect((await restarted.request({ kind: "editingRead", id: opened.id })).lastPane).toBe("explorer");
+  });
+
+  it("records the contract as the last place without moving the revision, keeps it through a restart, and a pane reached after clears it", async () => {
+    const { service, repo, options } = fixture();
+    const opened = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: (await service.registerRepository(repo)).id } });
+    expect(opened.lastView).toBeNull();
+    await service.request({ kind: "editingVisited", id: opened.id, pane: "impact" });
+    const atContract = await service.request({ kind: "editingContractVisited", id: opened.id });
+    expect(atContract.lastView).toBe("contract");
+    // The pane it was left from stays, for the contract's way back.
+    expect(atContract.lastPane).toBe("impact");
+    expect(atContract.revision).toBe(opened.revision);
+    expect(untouchedPlanning(atContract)).toBe(true);
+    expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === opened.id)?.lastView).toBe("contract");
+    await service.shutdown();
+    const restarted = new DesktopService(options);
+    trackService(restarted);
+    expect((await restarted.request({ kind: "editingRead", id: opened.id })).lastView).toBe("contract");
+    // Back on the pane it was left from is the last place again.
+    const back = await restarted.request({ kind: "editingVisited", id: opened.id, pane: "impact" });
+    expect(back.lastView).toBeNull();
+    expect(back.lastPane).toBe("impact");
+  });
+
+  it("refuses a pane planning mode does not have", async () => {
+    const { service, repo } = fixture();
+    const session = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: (await service.registerRepository(repo)).id } });
+    await expect(
+      service.request({ kind: "editingVisited", id: session.id, pane: "contract" } as never),
+    ).rejects.toThrow();
+    expect((await service.request({ kind: "editingRead", id: session.id })).lastPane).toBeNull();
+  });
+
+  it("refuses to start with a record without one, naming the file and the field once", async () => {
+    const { service, repo, options } = fixture();
+    const repoId = (await service.registerRepository(repo)).id;
+    const first = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
+    const second = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
+    await service.shutdown();
+    const path = join(options.dataDirectory, "workspace.json");
+    const stored = JSON.parse(readFileSync(path, "utf8")) as { editingSessions: Record<string, unknown>[] };
+    expect(stored.editingSessions.map((session) => session["id"]).sort()).toEqual([first.id, second.id].sort());
+    for (const session of stored.editingSessions) delete session["lastPane"];
+    writeFileSync(path, JSON.stringify(stored));
+    let failure: unknown = null;
+    try {
+      trackService(new DesktopService(options));
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain(path);
+    const message = (failure as Error).message;
+    // One failure across both records is named once, with both indexes.
+    expect(message).toContain("editingSessions[0,1].lastPane");
+    expect(message.match(/lastPane/g)).toHaveLength(1);
+    expect(message).toMatch(/correct the field or move the file aside\.$/i);
+  });
+
+  it("refuses to start with a record without its last view, naming the field", async () => {
+    const { service, repo, options } = fixture();
+    await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: (await service.registerRepository(repo)).id } });
+    await service.shutdown();
+    const path = join(options.dataDirectory, "workspace.json");
+    const stored = JSON.parse(readFileSync(path, "utf8")) as { editingSessions: Record<string, unknown>[] };
+    for (const session of stored.editingSessions) delete session["lastView"];
+    writeFileSync(path, JSON.stringify(stored));
+    expect(() => trackService(new DesktopService(options))).toThrow(/editingSessions\[0\]\.lastView/);
+  });
+});
+
+describe("each repository's unsent ask (D-131)", () => {
+  it("keeps each repository's text through a restart without a change event, and removes it on an empty text", async () => {
+    const changes: { kind: string; asks?: Record<string, string> }[] = [];
+    const { service, repo, options } = fixture(undefined, undefined, { changed: (change) => changes.push(change) });
+    const repoId = (await service.registerRepository(repo)).id;
+    expect((await service.snapshot()).asks).toEqual({});
+    const before = changes.length;
+    await service.request({ kind: "askSave", repoId, text: "Can you add a dark mode toggle" });
+    expect((await service.snapshot()).asks).toEqual({ [repoId]: "Can you add a dark mode toggle" });
+    // Sent at every pause in typing, it invalidates no read.
+    expect(changes.slice(before)).toEqual([]);
+    await service.shutdown();
+    const restarted = new DesktopService(options);
+    trackService(restarted);
+    expect((await restarted.snapshot()).asks).toEqual({ [repoId]: "Can you add a dark mode toggle" });
+    await restarted.request({ kind: "askSave", repoId, text: "" });
+    expect((await restarted.snapshot()).asks).toEqual({});
+    await restarted.shutdown();
+    const again = new DesktopService(options);
+    trackService(again);
+    expect((await again.snapshot()).asks).toEqual({});
+  });
+
+  it("refuses a repository that is not connected, and forgets a repository's text with it", async () => {
+    const { service, repo } = fixture();
+    const repoId = (await service.registerRepository(repo)).id;
+    await expect(service.request({ kind: "askSave", repoId: randomUUID(), text: "Anything" })).rejects.toThrow(
+      /no longer connected/,
+    );
+    await service.request({ kind: "askSave", repoId, text: "Can you add a dark mode toggle" });
+    await service.request({ kind: "forgetRepository", repoId });
+    expect((await service.snapshot()).asks).toEqual({});
   });
 });
 
@@ -1344,6 +1729,92 @@ describe("desktop bridge against the actual bundled CLI", () => {
     );
     expect(forbidden.state).toBe("failed");
   });
+  /** Run PRB-1 from the digest it has now, and wait for the job to settle. */
+  const runTicket = async (service: DesktopService, repoId: string, publish: boolean, approve: boolean): Promise<Job> =>
+    finished(
+      service,
+      (
+        await service.request({
+          kind: "run",
+          repoId,
+          key: "PRB-1",
+          digest: (await service.detail(repoId, "PRB-1")).digest,
+          approve,
+          publish,
+          resumeFrom: null,
+        })
+      ).id,
+    );
+  it("records a run's publication choice on its job, and keeps it across a restart", async () => {
+    // The CLI's own `run` and `principle` are stood in for; approving is real.
+    const runner: typeof runProcess = async (binary, args, options) =>
+      args[1] === "run" || args[1] === "principle"
+        ? { code: 0, stdout: "{}", stderr: "", cancelled: false }
+        : runProcess(binary, args, options);
+    const { service, repo, options } = fixture(runner);
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    // The job as it is first announced, copied then: a stop can be taken from
+    // that moment, before the operation behind it has started.
+    const announced = new Map<string, Job>();
+    options.changed = (change) => {
+      if (change.kind === "progress" && !announced.has(change.job.id))
+        announced.set(change.job.id, { ...change.job });
+    };
+    const published = await runTicket(service, registered.id, true, true);
+    const unpublished = await runTicket(service, registered.id, false, false);
+    const decided = await finished(
+      service,
+      (
+        await service.request({
+          kind: "decide",
+          repoId: registered.id,
+          key: "PRB-1",
+          answer: "Keep the retry button",
+          digest: (await service.detail(registered.id, "PRB-1")).digest,
+        })
+      ).id,
+    );
+    const jobs = [published, unpublished, decided];
+    expect(jobs.map((job) => [job.state, job.publish])).toEqual([
+      ["completed", true],
+      ["completed", false],
+      ["completed", false],
+    ]);
+    expect(jobs.map((job) => announced.get(job.id)?.publish)).toEqual([true, false, false]);
+    await service.shutdown();
+    const restarted = new DesktopService(options);
+    trackService(restarted);
+    const kept = (await restarted.snapshot()).jobs;
+    expect(jobs.map((job) => kept.find((entry) => entry.id === job.id)?.publish)).toEqual([true, false, false]);
+  });
+  it("keeps a ticket's last run in the job journal after forty later jobs, so its stopped page still opens", async () => {
+    // The loop stops short and `doctor` is the cheapest job there is: both stood in for.
+    const runner: typeof runProcess = async (binary, args, options) =>
+      args[1] === "run"
+        ? { code: 1, stdout: "", stderr: "The executor stopped", cancelled: false }
+        : args[1] === "doctor"
+          ? { code: 0, stdout: "{}", stderr: "", cancelled: false }
+          : runProcess(binary, args, options);
+    const { service, repo } = fixture(runner);
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    const earlier = await runTicket(service, registered.id, true, true);
+    const last = await runTicket(service, registered.id, true, true);
+    expect(last.state).toBe("failed");
+    const doctors: Job[] = [];
+    for (let count = 0; count < 41; count++) {
+      const job = await service.request({ kind: "doctor", repoId: registered.id, writeConfig: false });
+      await vi.waitFor(() => expect(job.state).toBe("completed"), { interval: 5 });
+      doctors.push(job);
+    }
+    const ids = (await service.snapshot()).jobs.map((job) => job.id);
+    expect(ids).toContain(last.id);
+    expect(ids).not.toContain(earlier.id);
+    expect(ids).not.toContain(doctors[0]!.id);
+    expect(ids).toEqual(expect.arrayContaining(doctors.slice(1).map((job) => job.id)));
+    expect(ids).toHaveLength(41);
+  });
   it("edits the actual manifest, preserves commands and refuses a stale save", async () => {
     const { service, repo } = fixture();
     const registered = await service.registerRepository(repo);
@@ -1662,8 +2133,15 @@ const fs = require('node:fs');
 const readline = require('node:readline');
 fs.writeFileSync(${JSON.stringify(argv)}, JSON.stringify(process.argv.slice(2)));
 const send = (event) => process.stdout.write(JSON.stringify(event) + '\n');
+// The spec folder a turn still in flight writes as the session winds down,
+// where one is, and whether that write waits for the folder to be deleted: a
+// session whose stdin has closed finishes the turn it is in.
+let windsDown = null;
+// Whether the turn in flight puts a group of questions as it winds down, after
+// its stdin has closed and before it exits.
+let asksAsItWindsDown = false;
 send({ type: 'started', session_id: 'sdk-session-1', spec: 'specs/activation-email/spec.md',
-  adr: 'docs/adr', model: null, tools: ['generate_plan', 'edit_plan', 'undo_edit', 'read_plan'] });
+  adr: 'docs/adr', model: null, tools: ['edit_plan', 'undo_edit', 'read_plan', 'ask_options'] });
 readline.createInterface({ input: process.stdin })
   .on('line', (line) => {
     fs.appendFileSync(${JSON.stringify(turns)}, line + '\n');
@@ -1687,10 +2165,174 @@ readline.createInterface({ input: process.stdin })
     }
     if (turn.text.includes('split the node'))
       send({ type: 'tool', tool: 'edit_plan', ok: true, detail: 'PRB-1: edit 2 — an edit' });
+    // A turn that moves the plan and the spec together, which is what the chat
+    // has to say out loud: the spec is on another pane.
+    if (turn.text.includes('change both')) {
+      const argv = process.argv.slice(2);
+      // --spec names the folder; the file under it is what the pane reads.
+      fs.appendFileSync(argv[argv.indexOf('--spec') + 1] + '/spec.md', '\nAnd the button says so.\n');
+      send({ type: 'tool', tool: 'edit_plan', ok: true, detail: 'PRB-1: edit 3 — tightened' });
+    }
+    // The interview writing the spec: said as the write is admitted, and then
+    // made, which is what leaves the turn with a drafted spec and no plan.
+    if (turn.text.includes('write the spec')) {
+      const argv = process.argv.slice(2);
+      send({ type: 'wrote_spec' });
+      fs.appendFileSync(argv[argv.indexOf('--spec') + 1] + '/spec.md', '\nAnd the spec says so.\n');
+    }
+    // A turn that writes the file and then edits it again: two admitted
+    // writes, which the session is entitled to make and which are one piece of
+    // news to whoever is watching the chat.
+    if (turn.text.includes('write it twice')) {
+      const argv = process.argv.slice(2);
+      const file = argv[argv.indexOf('--spec') + 1] + '/spec.md';
+      send({ type: 'wrote_spec' });
+      fs.appendFileSync(file, '\nAnd the spec says so.\n');
+      send({ type: 'wrote_spec' });
+      fs.appendFileSync(file, '\nAnd says it again.\n');
+    }
+    // A turn that writes the spec and then never ends, for the person who
+    // stops waiting: the file is written before the write is announced, so a
+    // test that has seen the note knows the bytes are there.
+    if (turn.text.includes('write and hang')) {
+      const argv = process.argv.slice(2);
+      fs.appendFileSync(argv[argv.indexOf('--spec') + 1] + '/spec.md', '\nAnd the spec says so.\n');
+      send({ type: 'wrote_spec' });
+      return;
+    }
+    // A turn that writes the spec and never ends until stdin closes, and then
+    // writes it once more before it exits, a while after the stop: the Claude
+    // session finishes the turn it is in after its stdin has closed. The
+    // second write comes 200 ms after the close, or, for 'write back after a
+    // delete', as soon as the folder has gone, or 2.5 s after the close where
+    // it has not: inside the host's grace before it signals.
+    if (turn.text.includes('write as it winds down') || turn.text.includes('write back after a delete')) {
+      const argv = process.argv.slice(2);
+      windsDown = { folder: argv[argv.indexOf('--spec') + 1],
+        waitsForTheDelete: turn.text.includes('write back after a delete') };
+      fs.appendFileSync(windsDown.folder + '/spec.md', '\nAnd the spec says so.\n');
+      send({ type: 'wrote_spec' });
+      return;
+    }
+    // A turn that writes the spec and never ends until stdin closes, and then
+    // puts a group of questions before it exits.
+    if (turn.text.includes('ask as it winds down')) {
+      const argv = process.argv.slice(2);
+      fs.appendFileSync(argv[argv.indexOf('--spec') + 1] + '/spec.md', '\nAnd the spec says so.\n');
+      send({ type: 'wrote_spec' });
+      asksAsItWindsDown = true;
+      return;
+    }
+    // A turn that writes the spec and then, a while after it is handed over,
+    // says a closing line of its own before it ends.
+    if (turn.text.includes('write then talk')) {
+      const argv = process.argv.slice(2);
+      fs.appendFileSync(argv[argv.indexOf('--spec') + 1] + '/spec.md', '\nAnd the spec says so.\n');
+      send({ type: 'wrote_spec' });
+      setTimeout(() => {
+        send({ type: 'message', message: { type: 'assistant', session_id: 'sdk-session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'The spec is written: read the Requirements first.' }] } } });
+        send({ type: 'idle' });
+      }, 300);
+      return;
+    }
+    // A turn that writes the spec and says a closing line inside the moment
+    // before the reading that hands it over, then ends once that has passed.
+    // With the same bytes put back, there is no note for the line to wait on.
+    if (turn.text.includes('write then close') || turn.text.includes('rewrite then close')) {
+      const argv = process.argv.slice(2);
+      const file = argv[argv.indexOf('--spec') + 1] + '/spec.md';
+      if (turn.text.includes('rewrite')) fs.writeFileSync(file, fs.readFileSync(file));
+      else fs.appendFileSync(file, '\nAnd the spec says so.\n');
+      send({ type: 'wrote_spec' });
+      setTimeout(() => {
+        send({ type: 'message', message: { type: 'assistant', session_id: 'sdk-session-1',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'That is the spec as I have it.' }] } } });
+      }, 100);
+      setTimeout(() => send({ type: 'idle' }), 700);
+      return;
+    }
+    // A turn that writes somewhere the session is allowed to write that is
+    // not the spec: no write is admitted against the spec, so nothing is
+    // announced and the spec is where it was.
+    if (turn.text.includes('write elsewhere')) {
+      const argv = process.argv.slice(2);
+      fs.appendFileSync(argv[argv.indexOf('--repo') + 1] + '/CONTEXT.md', '\nNotes.\n');
+    }
+    // And one whose admitted write puts the same text back: the event is the
+    // call being allowed, so it is said, and the file did not move.
+    if (turn.text.includes('rewrite the same spec')) {
+      const argv = process.argv.slice(2);
+      const file = argv[argv.indexOf('--spec') + 1] + '/spec.md';
+      send({ type: 'wrote_spec' });
+      fs.writeFileSync(file, fs.readFileSync(file));
+    }
+    // A group of questions put to the person and left standing, which is what
+    // holds the way on to the plan.
+    if (turn.text.includes('ask me'))
+      send({ type: 'asked', groups: [{ title: 'Which way', parts: [{ question: 'Which way?',
+        options: [{ label: 'This way', detail: null, recommended: true },
+                  { label: 'That way', detail: null, recommended: false }] }] }] });
+    // And one that moves only the plan, which says nothing extra.
+    if (turn.text.includes('plan only'))
+      send({ type: 'tool', tool: 'edit_plan', ok: true, detail: 'PRB-1: edit 4 — tightened' });
+    // And one that really moves the plan, through the CLI's own edit path as
+    // the interview's edit_plan tool does, so the change lands in the records
+    // the host reads.
+    if (turn.text.includes('reword the plan')) {
+      const argv = process.argv.slice(2);
+      require('node:child_process').execFileSync(process.execPath, [${JSON.stringify(resolve("../cli/dist/perbo.js"))},
+        'edit', 'PRB-1', '--author', 'interview', '--graph-edit',
+        JSON.stringify({ op: 'set_criterion', id: 'ac_1', text: 'A signup queues exactly one email',
+          expected_verification: { kind: 'test', assertion: 'signup.test.ts' } }),
+        '--repo', argv[argv.indexOf('--repo') + 1]], { stdio: 'ignore' });
+      send({ type: 'tool', tool: 'edit_plan', ok: true, detail: 'PRB-1: edit — reworded ac_1' });
+    }
+    // And one that writes more into a section than the record of a change
+    // holds, so the marking of the turn is refused where the turn was not.
+    if (turn.text.includes('write a long section')) {
+      const argv = process.argv.slice(2);
+      fs.appendFileSync(argv[argv.indexOf('--spec') + 1] + '/spec.md', '\n' + 'x'.repeat(13000) + '\n');
+    }
+    if (turn.text.includes('think out loud')) {
+      send({ type: 'message', message: { type: 'assistant', session_id: 'sdk-session-1',
+        message: { role: 'assistant', content: [{ type: 'text', text: "I'll look at what's here first." }] } } });
+      send({ type: 'tool', tool: 'read_plan', ok: true, detail: 'PRB-1: two nodes' });
+      // The middle of a turn: something worth reading, and more work after it.
+      send({ type: 'message', message: { type: 'assistant', session_id: 'sdk-session-1',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Node 2 is the cutover.' }] } } });
+      send({ type: 'tool', tool: 'read_plan', ok: true, detail: 'PRB-1: and its criteria' });
+    }
     send({ type: 'message', message: { type: 'assistant', session_id: 'sdk-session-1',
       message: { role: 'assistant', content: [{ type: 'text', text: 'You said: ' + turn.text }] } } });
+    // Every turn ends, which is what stops the dock saying the session is
+    // working — and what tells a line held through the turn that it was the
+    // whole of it.
+    send({ type: 'idle' });
   })
-  .on('close', () => { send({ type: 'ended', session_id: 'sdk-session-1', reason: 'the session ended' }); });
+  .on('close', () => {
+    const ended = () => send({ type: 'ended', session_id: 'sdk-session-1', reason: 'the session ended' });
+    if (asksAsItWindsDown) {
+      send({ type: 'asked', groups: [{ title: 'Which way', parts: [{ question: 'Which way?',
+        options: [{ label: 'This way', detail: null, recommended: true },
+                  { label: 'That way', detail: null, recommended: false }] }] }] });
+      return ended();
+    }
+    if (windsDown === null) return ended();
+    const { folder, waitsForTheDelete } = windsDown;
+    const write = () => {
+      fs.mkdirSync(folder, { recursive: true });
+      fs.appendFileSync(folder + '/spec.md', '\nWritten as the turn wound down.\n');
+      ended();
+    };
+    if (!waitsForTheDelete) return void setTimeout(write, 200);
+    const closedAt = Date.now();
+    const poll = setInterval(() => {
+      if (fs.existsSync(folder) && Date.now() - closedAt < 2500) return;
+      clearInterval(poll);
+      write();
+    }, 10);
+  });
 `,
       { mode: 0o700 },
     );
@@ -1750,6 +2392,63 @@ readline.createInterface({ input: process.stdin })
     };
   }
 
+  /**
+   * One planning with a spec and no plan, and a fake interview in place of the
+   * CLI's: the state the interview writes the spec in, before anybody has
+   * pressed Generate plan (D-102).
+   */
+  async function writing(
+    runs?: typeof runProcess,
+    also?: Partial<ServiceOptions>,
+  ): Promise<{
+    service: DesktopService;
+    repo: string;
+    repoId: string;
+    id: string;
+    changes: Change[];
+  }> {
+    const root = scratchDirectory("perbo-interview-");
+    const fake = fakeInterview(root);
+    const spawns: typeof startLineProcess = (binary, args, options) =>
+      startLineProcess(
+        binary,
+        args[1] === "interview" ? [fake.binary, ...args.slice(1)] : [...args],
+        options,
+      );
+    const made = fixture(runs, spawns, also);
+    const changes: Change[] = [];
+    made.options.changed = (change) => changes.push(change);
+    const registered = await made.service.registerRepository(made.repo);
+    const session = await made.service.request({
+      kind: "editingOpen",
+      target: { kind: "fresh", repoId: registered.id },
+    });
+    await saveSpec(made.service, {
+      kind: "specSave",
+      id: session.id,
+      repoId: registered.id,
+      title: "Activation email",
+      sections: SECTIONS,
+    });
+    return { service: made.service, repo: made.repo, repoId: registered.id, id: session.id, changes };
+  }
+
+  /** What the status line said a planning's turns were doing, in the order it said it. */
+  const doings = (changes: Change[], id: string): (string | null)[] =>
+    changes.flatMap((change) =>
+      change.kind === "interview" && change.sessionId === id ? [change.doing] : [],
+    );
+
+  /** Wait until the host has said the spec is being written. */
+  async function writingSaid(changes: Change[], id: string): Promise<void> {
+    const until = Date.now() + 20_000;
+    while (Date.now() < until) {
+      if (doings(changes, id).includes("writing_the_spec")) return;
+      await delay(10);
+    }
+    throw new Error("The host never said the spec was being written");
+  }
+
   /** The interview, once its own `started` event has reached the record. */
   async function running(service: DesktopService, id: string): Promise<void> {
     for (let count = 0; count < 400; count++) {
@@ -1759,18 +2458,40 @@ readline.createInterface({ input: process.stdin })
     throw new Error("The interview never reported a session");
   }
 
+  /** The session, once the turn it owes the person is over. */
+  async function settled(service: DesktopService, id: string): Promise<void> {
+    const until = Date.now() + 20_000;
+    while (Date.now() < until) {
+      if (!((await service.snapshot()).working ?? []).includes(id)) return;
+      await delay(10);
+    }
+    throw new Error("The interview never finished its turn");
+  }
+
   /** The conversation, once it says what the test is waiting for. */
   async function spoken(
     service: DesktopService,
     id: string,
     holds: (lines: InterviewEntry[]) => boolean,
   ): Promise<InterviewEntry[]> {
-    for (let count = 0; count < 400; count++) {
-      const lines = (await service.request({ kind: "editingRead", id })).conversation;
+    // A deadline rather than a count of polls: a poll costs a round trip to the
+    // service, and under a full run those are slow enough that four hundred of
+    // them is a much shorter wait than it looks. A child process has to start,
+    // read a turn and answer it, and that is what is being waited for.
+    const until = Date.now() + 20_000;
+    let lines: InterviewEntry[] = [];
+    while (Date.now() < until) {
+      lines = (await service.request({ kind: "editingRead", id })).conversation;
       if (holds(lines)) return lines;
       await delay(10);
     }
-    throw new Error("The interview never said what the test was waiting for");
+    // What it did say, so a failure names the shape it reached rather than only
+    // the shape it wanted.
+    throw new Error(
+      `The interview never said what the test was waiting for. It said: ${
+        lines.map((entry) => entry.line.kind).join(", ") || "nothing"
+      }`,
+    );
   }
   /** Retry an assertion while the child is still on its way out. */
   async function waitFor(holds: () => Promise<void>): Promise<void> {
@@ -1801,12 +2522,12 @@ readline.createInterface({ input: process.stdin })
     // The person's own words named the folder, and the argv is still derived
     // from the recorded slug rather than from anything a renderer sent.
     expect((await service.request({ kind: "editingRead", id: fresh.id })).specSlug).toBe(
-      "add-a-dark-mode-toggle",
+      "dark-mode-toggle",
     );
     const argv = JSON.parse(readFileSync(fake.argv, "utf8")) as string[];
     expect(argv.slice(argv.indexOf("--spec"), argv.indexOf("--spec") + 2)).toEqual([
       "--spec",
-      "specs/add-a-dark-mode-toggle",
+      "specs/dark-mode-toggle",
     ]);
     // The naming is said, and the turn it came from is part of the conversation.
     const lines = await spoken(service, fresh.id, (entries) =>
@@ -1816,6 +2537,94 @@ readline.createInterface({ input: process.stdin })
     );
     expect(kinds(lines)).toContain("turn");
     await service.request({ kind: "interviewStop", id: fresh.id });
+  });
+
+  describe("the chat's model (D-102)", () => {
+    const offering = (ids: string[]): NonNullable<ServiceOptions["modelCatalog"]> => async (provider) => ({
+      provider,
+      source: "sample",
+      discoveredAt: new Date().toISOString(),
+      models: ids.map((id) => ({ id, label: id, description: "", isDefault: false, efforts: [] })),
+    });
+    const startedOn = async (service: DesktopService, repoId: string, id: string, argv: string): Promise<string> => {
+      await service.request({ kind: "interviewStart", repoId, id });
+      await running(service, id);
+      const args = JSON.parse(readFileSync(argv, "utf8")) as string[];
+      await service.request({ kind: "interviewStop", id });
+      return args[args.indexOf("--model") + 1]!;
+    };
+
+    it("is Opus 5.5 where Claude Code's catalog lists it, and the record names it", async () => {
+      const { service, repoId, id, fake, options } = await planning();
+      options.modelCatalog = offering(["claude-opus-5[1m]", "claude-opus-5-5", "claude-sonnet-5"]);
+      expect(await startedOn(service, repoId, id, fake.argv)).toBe("claude-opus-5-5");
+      expect((await service.request({ kind: "editingRead", id })).interviewModel).toBe("claude-opus-5-5");
+    });
+
+    it("is the planning's own model where the catalog does not list Opus 5.5 or cannot be read", async () => {
+      const { service, repoId, id, fake, options } = await planning();
+      options.modelCatalog = async () => {
+        throw new Error("Provider CLI unavailable.");
+      };
+      expect(await startedOn(service, repoId, id, fake.argv)).toBe("claude-opus-5");
+      // Nothing was kept from a catalog that failed, so the next start reads it again.
+      options.modelCatalog = offering(["claude-sonnet-5"]);
+      expect(await startedOn(service, repoId, id, fake.argv)).toBe("claude-opus-5");
+    });
+
+    it("is read from the catalog the pickers last read, rather than asked for again", async () => {
+      const { service, repoId, id, fake, options } = await planning();
+      options.modelCatalog = offering(["claude-opus-5-5"]);
+      await service.request({ kind: "models", provider: "claude-cli" });
+      const asked = vi.fn(offering([]));
+      options.modelCatalog = asked;
+      expect(await startedOn(service, repoId, id, fake.argv)).toBe("claude-opus-5-5");
+      expect(asked).not.toHaveBeenCalled();
+    });
+
+    it("keeps the planning's own model where it drafts on Codex, and reads no catalog", async () => {
+      const { service, repoId, id, fake, options } = await planning();
+      const session = await service.request({ kind: "editingRead", id });
+      await service.request({
+        kind: "editingSave",
+        id,
+        revision: session.revision,
+        repoId,
+        form: {
+          ...session.form,
+          models: { ...session.form.models, draftingProvider: "codex-cli", executorProvider: "codex-cli", executorModel: "gpt-5.6-terra" },
+        },
+      });
+      const asked = vi.fn(offering(["claude-opus-5-5"]));
+      options.modelCatalog = asked;
+      expect(await startedOn(service, repoId, id, fake.argv)).toBe("gpt-5.6-terra");
+      expect(asked).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a planning with no plan is never read against its spec", () => {
+    it("starts no reading and says no refusal as the first turn on a fresh planning ends", async () => {
+      const { service, repoId } = await planning();
+      const fresh = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
+      await service.request({ kind: "interviewTurn", id: fresh.id, text: "Can you add a dark mode toggle" });
+      await spoken(service, fresh.id, (entries) =>
+        entries.some((entry) => entry.line.kind === "said" && entry.line.text.startsWith("You said:")),
+      );
+      await settled(service, fresh.id);
+      // Past the turn's end and whatever it started: a reading refused before
+      // its job began says so a few round trips after the idle.
+      for (let round = 0; round < 20; round++) await service.snapshot();
+      await delay(100);
+      const session = await service.request({ kind: "editingRead", id: fresh.id });
+      expect(session.key).toBeNull();
+      expect((await service.snapshot()).jobs.filter((job) => job.kind === "drift")).toEqual([]);
+      expect(
+        session.conversation.filter(
+          (entry) => entry.line.kind === "note" && entry.line.text.startsWith(REREAD_COULD_NOT_START),
+        ),
+      ).toEqual([]);
+      await service.request({ kind: "interviewStop", id: fresh.id });
+    });
   });
 
   it("relays each event in order and writes the person's turn to the child's stdin", async () => {
@@ -1845,6 +2654,824 @@ readline.createInterface({ input: process.stdin })
       entries.some((entry) => entry.line.kind === "note" && entry.line.text.includes("ended")),
     );
     await waitFor(async () => expect((await service.snapshot()).interviews).toEqual([]));
+  });
+
+  it("keeps a line that was the whole of a turn and drops one the session talked over", async () => {
+    // "I'll look at what's here first" and "Yes — the second node is the
+    // migration" arrive the same way, and only what comes after says which it
+    // was. A line the session then worked past was it announcing itself, which
+    // the dock's own indicator says better and keeps saying; a line with
+    // nothing after it is the answer, and dropping it loses the turn (D-102).
+    const { service, repoId, id } = await planning();
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+
+    await service.request({ kind: "interviewTurn", id, text: "why two nodes?" });
+    const plain = await spoken(service, id, (entries) =>
+      entries.some((entry) => entry.line.kind === "said"),
+    );
+    const answer = plain.at(-1)!.line;
+    expect(answer.kind === "said" && answer.text, "the answer is kept").toBe(
+      "You said: why two nodes?",
+    );
+
+    await service.request({ kind: "interviewTurn", id, text: "think out loud then answer" });
+    const both = await spoken(service, id, (entries) =>
+      entries.some(
+        (entry) => entry.line.kind === "said" && entry.line.text.includes("think out loud"),
+      ),
+    );
+    const since = both.slice(plain.length);
+    // The opening goes; everything after the session started working stays,
+    // because a line in the middle of a turn is the work being reported and
+    // dropping it would lose the middle of every turn.
+    expect(kinds(since)).toEqual(["turn", "tool", "said", "tool", "said"]);
+    expect(JSON.stringify(since), "the opening").not.toContain("look at what's here first");
+    expect(
+      since.some((entry) => entry.line.kind === "said" && entry.line.text === "Node 2 is the cutover."),
+      "the middle of the turn",
+    ).toBe(true);
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("says the spec moved where a turn moved both, and says nothing where it moved one", async () => {
+    // The two are one document in two places, and the interview writes both
+    // when a change asks for it (D-103). The spec is on another pane, so a
+    // person watching the chat never sees that half land — and what approving
+    // freezes is read from the contract, so they need it before they confirm.
+    const { service, repoId, id } = await planning();
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+
+    // A turn that changes the plan alone has nothing extra to report. Waited
+    // out to its end rather than to its last line: what a turn moved is read
+    // once the turn is over, and a second turn sent over the top of the first
+    // is measured against a spec the first had already moved.
+    await service.request({ kind: "interviewTurn", id, text: "plan only please" });
+    const first = await spoken(service, id, (entries) =>
+      entries.some((entry) => entry.line.kind === "said" && entry.line.text.includes("plan only")),
+    );
+    expect(
+      first.some((entry) => entry.line.kind === "note" && entry.line.text.includes("spec changed")),
+      "nothing to say about a spec that did not move",
+    ).toBe(false);
+    await settled(service, id);
+
+    await service.request({ kind: "interviewTurn", id, text: "change both of them" });
+    const said = await spoken(service, id, (entries) =>
+      entries.some((entry) => entry.line.kind === "note" && entry.line.text.includes("spec changed")),
+    );
+    const note = said.findLast((entry) => entry.line.kind === "note")!.line;
+    expect(note.kind === "note" && note.notable, "drawn to be read, not buried").toBe(true);
+    expect(note.kind === "note" && note.text).toContain("Spec pane");
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("says the spec is being written, and hands it over once it is", async () => {
+    // The interview writes the spec and stops (D-102). The spec is a pane
+    // away, so the chat says the writing is happening while it is; and once
+    // the bytes are there it says so too, in words and no button — the press
+    // that drafts the plan is at the foot of the Spec pane, and the note says
+    // where it is rather than putting a second one here.
+    const { service, repoId, id, changes } = await writing();
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "please write the spec" });
+    const said = await spoken(service, id, (entries) =>
+      entries.some((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC),
+    );
+    const notes = said.flatMap((entry) => (entry.line.kind === "note" ? [entry.line] : []));
+    // The writing is said while it happens, on the status line and not as a
+    // line of the conversation, which it would outlast.
+    const writingAt = changes.findIndex(
+      (change) => change.kind === "interview" && change.sessionId === id && change.doing === "writing_the_spec",
+    );
+    const noteAt = changes.findIndex(
+      (change) =>
+        change.kind === "interview" &&
+        change.entry?.line.kind === "note" &&
+        change.entry.line.text === INTERVIEW_WROTE_THE_SPEC,
+    );
+    expect(writingAt, "the writing is said while it happens").toBeGreaterThanOrEqual(0);
+    expect(notes.some((note) => note.text === "Writing the spec…")).toBe(false);
+    const written = notes.at(-1)!;
+    expect(written.text).toBe(
+      "The spec is written: read it, change it on the Spec pane or by asking here, or press Generate plan.",
+    );
+    expect(written.notable, "drawn to be read, not buried").toBe(true);
+    expect(written.offers, "the chat carries no press of its own").toBeUndefined();
+    // And in that order: the one that says it is happening comes first.
+    expect(writingAt).toBeLessThan(noteAt);
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("hands the spec over while the session is still composing, and says it once", async () => {
+    // The write lands and the session goes on writing prose about it, often
+    // for as long again. What the person is waiting for is already readable,
+    // so the chat says so then rather than at the turn's end — and the note
+    // that says it is the same one, said once however many endings come after
+    // it (D-102).
+    // A short gap, so the reading after the write is provably what speaks:
+    // the turn never ends, so nothing else can.
+    const { service, repoId, id } = await writing(undefined, { specSettleMs: 20 });
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    // The fake writes the file, announces the write and then never ends the
+    // turn: the middle of a turn, held open.
+    await service.request({ kind: "interviewTurn", id, text: "write and hang" });
+    const handed = (lines: InterviewEntry[]): InterviewEntry[] =>
+      lines.filter((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC);
+    const said = await spoken(service, id, (entries) => handed(entries).length > 0);
+    const note = handed(said).at(-1)!.line;
+    expect(note.kind).toBe("note");
+    expect(note.kind === "note" && note.text).toBe(
+      "The spec is written: read it, change it on the Spec pane or by asking here, or press Generate plan.",
+    );
+    expect(note.kind === "note" && note.notable, "drawn to be read, not buried").toBe(true);
+    expect(
+      note.kind === "note" && note.offers,
+      "words, and no press of the chat's own",
+    ).toBeUndefined();
+    // Mid-turn, which is the whole point: the session still owes the person a
+    // word and the way on is already theirs.
+    expect(
+      ((await service.snapshot()).working ?? []).includes(id),
+      "said before the turn is over, not at its end",
+    ).toBe(true);
+
+    // And the endings that come after this do not say it again: the stop, and
+    // the child going.
+    await service.request({ kind: "interviewStop", id });
+    await waitFor(async () => expect((await service.snapshot()).interviews).toEqual([]));
+    const after = (await service.request({ kind: "editingRead", id })).conversation;
+    expect(handed(after).length, "one piece of news, said once").toBe(1);
+  });
+
+  it("says nothing about a spec the turn left where it was", async () => {
+    // What the person is told is that the file moved, which is read off the
+    // bytes rather than off the session saying it wrote. A turn that wrote
+    // somewhere else has nothing to hand over, and neither has an admitted
+    // write that put the same text back.
+    const { service, repoId, id, changes } = await writing();
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    const handed = (lines: InterviewEntry[]): InterviewEntry[] =>
+      lines.filter((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC);
+
+    await service.request({ kind: "interviewTurn", id, text: "write elsewhere" });
+    await settled(service, id);
+    expect(
+      handed((await service.request({ kind: "editingRead", id })).conversation).length,
+      "a write outside the spec is not the spec being written",
+    ).toBe(0);
+
+    await service.request({ kind: "interviewTurn", id, text: "rewrite the same spec" });
+    await settled(service, id);
+    const after = (await service.request({ kind: "editingRead", id })).conversation;
+    expect(doings(changes, id), "the write was admitted and said").toContain("writing_the_spec");
+    expect(handed(after).length, "the bytes did not move, so there is no news").toBe(0);
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("says the spec is being written on the status line, and hands it over once a turn however many writes it admits", async () => {
+    // The session admits one write event per call, and a turn that writes the
+    // file and then edits it again admits two. The person is waiting through
+    // the same thing either way: the status line says so while it lasts and
+    // leaves nothing behind in the conversation, and the spec is handed over
+    // once.
+    const { service, repoId, id, changes } = await writing();
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    const writings = (lines: InterviewEntry[]): number =>
+      lines.filter((entry) => entry.line.kind === "note" && entry.line.text === "Writing the spec…")
+        .length;
+    const handed = (lines: InterviewEntry[]): number =>
+      lines.filter((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC).length;
+    await service.request({ kind: "interviewTurn", id, text: "write it twice please" });
+    const first = await spoken(service, id, (entries) =>
+      entries.some((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC),
+    );
+    expect(writings(first)).toBe(0);
+    expect(doings(changes, id)).toContain("writing_the_spec");
+    await settled(service, id);
+    // And the spec is handed over once, against the same two writes — the
+    // turn ending after it does not say it again.
+    expect(handed((await service.request({ kind: "editingRead", id })).conversation)).toBe(1);
+    expect(doings(changes, id).at(-1), "the line goes as the turn ends").toBeNull();
+
+    // Held for the turn and not for the session: the next turn's spec is news
+    // again, because the person waits through it again.
+    await service.request({ kind: "interviewTurn", id, text: "write it twice more" });
+    await settled(service, id);
+    expect(handed((await service.request({ kind: "editingRead", id })).conversation)).toBe(2);
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("drops what the session says after the spec is handed over, until the person speaks", async () => {
+    // The note says the spec is written and where to go from it. A closing
+    // line of the session's own after it says the same thing less well, and
+    // two outputs saying one thing is the chat repeating itself (D-102).
+    const { service, repoId, id } = await writing(undefined, { specSettleMs: 20 });
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "write then talk" });
+    await settled(service, id);
+    const after = (await service.request({ kind: "editingRead", id })).conversation;
+    expect(after.some((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC)).toBe(true);
+    expect(after.some((entry) => entry.line.kind === "said")).toBe(false);
+    // The next turn is answered as any turn is.
+    await service.request({ kind: "interviewTurn", id, text: "why two nodes?" });
+    await spoken(service, id, (entries) =>
+      entries.some((entry) => entry.line.kind === "said" && entry.line.text === "You said: why two nodes?"),
+    );
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("says no closing line ahead of the note when it lands before the reading after the write", async () => {
+    // The reading that hands the spec over is taken a moment after the write
+    // (SPEC_SETTLES_IN_MS), and a closing line can arrive inside that moment.
+    // It waits on the reading: the note is the turn's last line and the line
+    // is never shown (D-102).
+    const { service, repoId, id, changes } = await writing();
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "write then close" });
+    await settled(service, id);
+    const after = (await service.request({ kind: "editingRead", id })).conversation;
+    const last = after.at(-1)!.line;
+    expect(last.kind === "note" && last.text).toBe(INTERVIEW_WROTE_THE_SPEC);
+    expect(after.some((entry) => entry.line.kind === "said")).toBe(false);
+    expect(
+      changes.some(
+        (change) =>
+          change.kind === "interview" && change.sessionId === id && change.entry?.line.kind === "said",
+      ),
+      "never pushed to the dock either",
+    ).toBe(false);
+    // Where the reading finds the spec unmoved there is no note, and the line
+    // it waited on is said.
+    await service.request({ kind: "interviewTurn", id, text: "rewrite then close" });
+    await spoken(service, id, (entries) =>
+      entries.some((entry) => entry.line.kind === "said" && entry.line.text === "That is the spec as I have it."),
+    );
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("shows the lines of a turn the person queued after the note", async () => {
+    // The note silences the rest of its own turn, not the person's next one:
+    // a turn sent while the first is still in flight is answered as any is.
+    const { service, repoId, id } = await writing(undefined, { specSettleMs: 20 });
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "write and hang" });
+    await spoken(service, id, (entries) =>
+      entries.some((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC),
+    );
+    expect(((await service.snapshot()).working ?? []).includes(id), "the first turn is still in flight").toBe(true);
+    await service.request({ kind: "interviewTurn", id, text: "why two nodes?" });
+    await spoken(service, id, (entries) =>
+      entries.some((entry) => entry.line.kind === "said" && entry.line.text === "You said: why two nodes?"),
+    );
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("says a line of the session's is on its way while it holds one, and nothing once it is said", async () => {
+    // The turn's opening line is held until the turn shows what it was, and
+    // meanwhile the dock puts the session's bubble up with its dots (D-119).
+    // A line after work is said as it arrives, and nothing is held for it.
+    const { service, repoId, id, changes } = await planning();
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    let from = changes.length;
+    await service.request({ kind: "interviewTurn", id, text: "why two nodes?" });
+    await settled(service, id);
+    let said = doings(changes.slice(from), id);
+    expect(said, said.join(", ")).toContain("speaking");
+    expect(said.at(-1)).toBeNull();
+    from = changes.length;
+    await service.request({ kind: "interviewTurn", id, text: "split the node" });
+    await settled(service, id);
+    said = doings(changes.slice(from), id);
+    expect(said, said.join(", ")).not.toContain("speaking");
+    expect(said.at(-1)).toBeNull();
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("hands the spec over when the person stops before the write has been read", async () => {
+    // A person who stops a turn that had already written the spec still has
+    // the spec, so the way on is still theirs. The reading after the write is
+    // the usual way they are told; where the stop comes first it is the stop
+    // that tells them, and the reading it was still owed is dropped.
+    //
+    // A gap long enough that the reading cannot be what speaks here: the note
+    // this asserts on can only have come from the stop.
+    const { service, repoId, id, changes } = await writing(undefined, { specSettleMs: 60_000 });
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "write and hang" });
+    // The fake writes the file before it announces the write, so the status
+    // saying so is proof the bytes are on disk.
+    await writingSaid(changes, id);
+
+    await service.request({ kind: "interviewStop", id });
+    const after = (await service.request({ kind: "editingRead", id })).conversation;
+    const handed = after.filter(
+      (entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC,
+    );
+    expect(handed.length, "said once, by whichever of the two got there").toBe(1);
+    const note = handed[0]!.line;
+    expect(note.kind === "note" && note.notable, "drawn to be read, not buried").toBe(true);
+  });
+
+  it("stops the interview before it drafts, so one press does both", async () => {
+    // Asking the person to stop the interview and then press Generate plan is
+    // two presses for one act. The press does both: the host stops the child —
+    // which winds the turn up and hands the spec over — and then reads the
+    // file that turn left behind (D-102). Ordered here rather than in either
+    // surface, so the Spec pane, the chat's note and anything later get the
+    // one behaviour.
+    const events: string[] = [];
+    let planning: { service: DesktopService; repoId: string; id: string; changes: Change[] } | null = null;
+    const runs: typeof runProcess = async (binary, args, options) => {
+      if (!args.includes("--from-spec")) return runProcess(binary, args, options);
+      // Read at the moment the drafter is invoked, which is what makes the
+      // order observable: a stop that came after this would leave the turn
+      // still owed here.
+      const owed = ((await planning!.service.snapshot()).working ?? []).includes(planning!.id);
+      events.push(owed ? "drafted with the turn still owed" : "drafted with the turn wound up");
+      return { code: 1, stdout: "", stderr: "no drafter in this fixture", cancelled: false };
+    };
+    planning = await writing(runs);
+    const { service, repoId, id, changes } = planning;
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    // A turn that writes the spec and then never ends: the state a person is
+    // in when they have read enough and want the plan from it.
+    await service.request({ kind: "interviewTurn", id, text: "write and hang" });
+    await writingSaid(changes, id);
+    expect((await service.snapshot()).working ?? []).toContain(id);
+
+    const held = await finished(
+      service,
+      (await service.request({ kind: "generatePlan", repoId, id })).id,
+    );
+    expect(events).toEqual(["drafted with the turn wound up"]);
+    // The turn is over and the stop said what it always says: the spec is
+    // drafted and the way on from it is the person's.
+    expect((await service.snapshot()).working ?? []).not.toContain(id);
+    const after = (await service.request({ kind: "editingRead", id })).conversation;
+    expect(
+      after.some((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC),
+    ).toBe(true);
+    // The fixture has no drafter behind `admit`, so the job itself fails; what
+    // this test is about is what had already happened by the time it ran.
+    expect(held.state).toBe("failed");
+  });
+
+  it("drafts from the spec a stopped turn writes before its child exits", async () => {
+    // A stop ends the chat's stdin, and the session finishes the turn it is in
+    // after that, so the turn can still write the spec until the child exits.
+    // The press waits for the exit: the draft reads the file the turn left
+    // behind (D-102), and what `admit` reads is what it titles, hashes and
+    // seeds the plan's reading against its spec with.
+    const read: { spec: string; running: boolean }[] = [];
+    let planning: { service: DesktopService; id: string } | null = null;
+    const runs: typeof runProcess = async (binary, args, options) => {
+      const at = args.indexOf("--from-spec");
+      if (at < 0) return runProcess(binary, args, options);
+      // The bytes `admit` is handed, at the moment it is invoked.
+      read.push({
+        spec: readFileSync(join(args[args.indexOf("--repo") + 1]!, args[at + 1]!), "utf8"),
+        running: ((await planning!.service.snapshot()).interviews ?? []).includes(planning!.id),
+      });
+      return { code: 1, stdout: "", stderr: "no drafter in this fixture", cancelled: false };
+    };
+    const made = await writing(runs);
+    planning = made;
+    const { service, repoId, id, changes } = made;
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "write as it winds down" });
+    await writingSaid(changes, id);
+
+    await finished(service, (await service.request({ kind: "generatePlan", repoId, id })).id);
+    expect(read).toHaveLength(1);
+    expect(read[0]!.spec).toContain("And the spec says so.");
+    expect(read[0]!.spec, "the write the turn made after its stdin closed").toContain(
+      "Written as the turn wound down.",
+    );
+    expect(read[0]!.running, "the chat had exited when the draft began").toBe(false);
+  });
+
+  /**
+   * A chat on the planning mid-turn that writes the spec once more after its
+   * stdin closes, as soon as the spec folder has gone, and then exits: the
+   * turn a delete has to wait out, since a delete that removes the folder
+   * first has it written back.
+   */
+  async function windingDown(): Promise<Awaited<ReturnType<typeof writing>> & { folder: string }> {
+    const made = await writing();
+    await made.service.request({ kind: "interviewStart", repoId: made.repoId, id: made.id });
+    await running(made.service, made.id);
+    await made.service.request({ kind: "interviewTurn", id: made.id, text: "write back after a delete" });
+    await writingSaid(made.changes, made.id);
+    return { ...made, folder: join(made.repo, "specs", "activation-email") };
+  }
+
+  /** The spec folder, gone once the chat has exited and with it anything its turn writes. */
+  async function staysGone(service: DesktopService, id: string, folder: string): Promise<void> {
+    const until = Date.now() + 20_000;
+    while (((await service.snapshot()).interviews ?? []).includes(id)) {
+      if (Date.now() > until) throw new Error("The chat never exited");
+      await delay(10);
+    }
+    expect(existsSync(folder), "the spec folder goes with the work, and no turn wrote it back").toBe(false);
+  }
+
+  it("stops the chat and waits out its turn before deleting the planning's spec", async () => {
+    const { service, id, folder } = await windingDown();
+    await service.request({ kind: "editingDiscard", id });
+    expect((await service.snapshot()).interviews ?? [], "the chat has gone").not.toContain(id);
+    await staysGone(service, id, folder);
+  });
+
+  it("stops the chat of a planning over a ticket deleted from its contract, and waits out its turn", async () => {
+    // Deleting the work from the contract page discards the planning drafting
+    // it, and the planning's chat goes with it (D-102): stopped, and exited
+    // before the spec folder goes (D-129), or the turn it is in writes the
+    // spec back into a folder the delete removed.
+    const { service, repo, repoId, id, folder } = await windingDown();
+    await finished(service, (await service.request({ kind: "admit", repoId, draft })).id);
+    const at = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as {
+      state: string;
+      admission: { spec?: unknown };
+    };
+    ticket.state = "plan_review";
+    ticket.admission.spec = {
+      path: "specs/activation-email/spec.md",
+      content_sha256: "sha256:" + "0".repeat(64),
+      files: [],
+      names_that_resolved: null,
+      symbols_judged_at_approval: false,
+    };
+    writeFileSync(at, JSON.stringify(ticket));
+    // The planning takes the plan drafted from its spec as it is opened.
+    expect(
+      (await service.request({ kind: "editingOpen", target: { kind: "session", id } })).key,
+    ).toBe("PRB-1");
+    expect((await service.snapshot()).interviews ?? []).toContain(id);
+
+    await service.request({ kind: "discard", repoId, key: "PRB-1" });
+    expect((await service.request({ kind: "editingRead", id })).phase).toBe("discarded");
+    expect((await service.snapshot()).interviews ?? [], "the chat has gone").not.toContain(id);
+    await staysGone(service, id, folder);
+  });
+
+  it("refuses to draft a plan while a group of the interview's questions stands", async () => {
+    // The answers change the spec the draft would read, so a plan drafted now
+    // is drafted around a question the person can still see (D-117). Both
+    // surfaces withhold the press; this is the line behind them, so neither
+    // can be the one that counts for itself.
+    const { service, repoId, id } = await writing();
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "please write the spec" });
+    await settled(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "ask me" });
+    await settled(service, id);
+    expect((await service.request({ kind: "editingRead", id })).asking).not.toBeNull();
+
+    const held = await finished(
+      service,
+      (await service.request({ kind: "generatePlan", repoId, id })).id,
+    );
+    expect(held.state).toBe("failed");
+    expect(held.error).toBe(
+      "Answer the chat's questions first — its answers change the spec this drafts from.",
+    );
+    expect((await service.request({ kind: "editingRead", id })).key).toBeNull();
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("refuses to draft over a group of questions the turn puts as it winds down after the press", async () => {
+    // The press stops the chat and waits for it to exit, and the turn it was
+    // in can put a group of its own in that time. That group holds the draft
+    // as one standing before the press does (D-117).
+    let drafts = 0;
+    const runs: typeof runProcess = async (binary, args, options) => {
+      if (!args.includes("--from-spec")) return runProcess(binary, args, options);
+      drafts += 1;
+      return { code: 1, stdout: "", stderr: "no drafter in this fixture", cancelled: false };
+    };
+    const { service, repoId, id, changes } = await writing(runs);
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "ask as it winds down" });
+    await writingSaid(changes, id);
+    expect((await service.request({ kind: "editingRead", id })).asking, "nothing stands at the press").toBeNull();
+
+    const held = await finished(
+      service,
+      (await service.request({ kind: "generatePlan", repoId, id })).id,
+    );
+    expect(held.state).toBe("failed");
+    expect(held.error).toBe(
+      "Answer the chat's questions first — its answers change the spec this drafts from.",
+    );
+    expect(drafts, "nothing was drafted").toBe(0);
+    const after = await service.request({ kind: "editingRead", id });
+    expect(after.asking, "the group the turn put as it wound down").not.toBeNull();
+    expect(after.key).toBeNull();
+  });
+
+  it("leaves a planning whose first draft the drafter refused editable, so the next press drafts again", async () => {
+    // The chat writes and rewrites the spec, and the drafter refuses what it
+    // wrote. The refusal is the planning's error and nothing was admitted, so
+    // the Spec pane's next press is taken rather than refused unseen: a spec
+    // drafts one plan, and the CLI refuses a second ticket from it.
+    let drafts = 0;
+    const runs: typeof runProcess = async (binary, args, options) => {
+      if (!args.includes("--from-spec")) return runProcess(binary, args, options);
+      drafts += 1;
+      return {
+        code: 1,
+        stdout: "",
+        stderr: "error: the spec's Requirements section names no requirement.",
+        cancelled: false,
+      };
+    };
+    const { service, repoId, id } = await writing(runs);
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "please write the spec" });
+    await settled(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "write the spec again" });
+    await settled(service, id);
+
+    const press = async (): Promise<void> => {
+      const before = await service.request({ kind: "editingRead", id });
+      const submitted = await service.request({
+        kind: "editingSubmit",
+        id,
+        revision: before.revision,
+        operationId: randomUUID(),
+        intent: "generate",
+      });
+      await finished(service, submitted.operation!.jobId!);
+      for (let count = 0; count < 200; count++) {
+        if ((await service.request({ kind: "editingRead", id })).operation?.reconciled) return;
+        await delay(10);
+      }
+      throw new Error("The draft was never reconciled");
+    };
+    await press();
+    const refused = await service.request({ kind: "editingRead", id });
+    expect(refused).toMatchObject({ phase: "editing", key: null });
+    expect(refused.error).toContain("names no requirement");
+    await press();
+    expect(drafts).toBe(2);
+  });
+
+  it("leaves a planning whose first draft was stopped editable, so the next press drafts again", async () => {
+    // A stop before any ticket is read back admitted nothing, and a spec
+    // drafts one plan, so the Spec pane's next press is taken again.
+    let drafts = 0;
+    const runs: typeof runProcess = async (binary, args, options) => {
+      if (!args.includes("--from-spec")) return runProcess(binary, args, options);
+      drafts += 1;
+      if (drafts > 1) return { code: 1, stdout: "", stderr: "error: no drafter in this fixture", cancelled: false };
+      await new Promise<void>((resolve) => options.signal?.addEventListener("abort", () => resolve(), { once: true }));
+      return { code: 1, stdout: "", stderr: "", cancelled: true };
+    };
+    const { service, id } = await writing(runs);
+    const submit = async (): Promise<string> => {
+      const before = await service.request({ kind: "editingRead", id });
+      const submitted = await service.request({
+        kind: "editingSubmit",
+        id,
+        revision: before.revision,
+        operationId: randomUUID(),
+        intent: "generate",
+      });
+      return submitted.operation!.jobId!;
+    };
+    const reconciled = async (): Promise<void> => {
+      for (let count = 0; count < 200; count++) {
+        if ((await service.request({ kind: "editingRead", id })).operation?.reconciled) return;
+        await delay(10);
+      }
+      throw new Error("The draft was never reconciled");
+    };
+    const job = await submit();
+    for (let count = 0; count < 200 && drafts === 0; count++) await delay(10);
+    await service.request({ kind: "editingStop", id });
+    expect((await finished(service, job)).state).toBe("cancelled");
+    await reconciled();
+    const stopped = await service.request({ kind: "editingRead", id });
+    expect(stopped).toMatchObject({ phase: "editing", key: null });
+    expect(stopped.operation?.state).toBe("cancelled");
+    await finished(service, await submit());
+    await reconciled();
+    expect(drafts).toBe(2);
+  });
+
+  it("hands the plan over only where the turn moved the spec and there is no plan yet", async () => {
+    // A turn that only talks moved nothing, so there is nothing to hand over.
+    const alone = await writing();
+    await alone.service.request({ kind: "interviewStart", repoId: alone.repoId, id: alone.id });
+    await running(alone.service, alone.id);
+    await alone.service.request({ kind: "interviewTurn", id: alone.id, text: "why two nodes?" });
+    await settled(alone.service, alone.id);
+    const quiet = (await alone.service.request({ kind: "editingRead", id: alone.id })).conversation;
+    expect(quiet.some((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC)).toBe(false);
+    await alone.service.request({ kind: "interviewStop", id: alone.id });
+    // And a spec written beside a plan that already exists is a change to
+    // that plan, which the spec-moved note reports instead: there is no plan
+    // to generate.
+    const drafted = await planning();
+    await drafted.service.request({ kind: "interviewStart", repoId: drafted.repoId, id: drafted.id });
+    await running(drafted.service, drafted.id);
+    await drafted.service.request({ kind: "interviewTurn", id: drafted.id, text: "please write the spec" });
+    await settled(drafted.service, drafted.id);
+    const beside = (await drafted.service.request({ kind: "editingRead", id: drafted.id })).conversation;
+    expect(doings(drafted.changes, drafted.id)).toContain("writing_the_spec");
+    expect(beside.some((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC)).toBe(false);
+    await drafted.service.request({ kind: "interviewStop", id: drafted.id });
+  });
+
+  it("records what a turn changed of the spec and the plan as the last change, each turn replacing the one before", async () => {
+    // The panes mark the last change to the pair (D-128):
+    // what the turn wrote in the spec, and what it edited in the plan
+    // through the CLI's edit path, compared before and after the turn.
+    const { service, repoId, id } = await planning();
+    // The planning's first spec save writes into empty sections, which is
+    // not a change: the planning opens with nothing marked.
+    expect((await service.request({ kind: "editingRead", id })).change).toBeNull();
+    // A save that rewords the outcome and writes the first note into empty
+    // Notes: the outcome is a change, and the note's first writing is not, so
+    // its before is its after. The turn below that adds to the notes edits
+    // words that were there.
+    await saveSpec(service, {
+      kind: "specSave", id, repoId, title: "Activation email",
+      sections: { ...SECTIONS, outcome: SECTIONS.outcome + " Always.", notes: "A note." },
+    });
+    const standing = (await service.request({ kind: "editingRead", id })).change;
+    expect(standing!.spec!.before.notes).toBe("A note.");
+    expect(standing!.spec!.before.outcome).not.toBe(standing!.spec!.after.outcome);
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    // A turn that only talks changes nothing, and records nothing: the last
+    // change stands as it was.
+    await service.request({ kind: "interviewTurn", id, text: "why two nodes?" });
+    await settled(service, id);
+    expect((await service.request({ kind: "editingRead", id })).change).toEqual(standing);
+    // A turn that writes the spec: the sections before and after, and no plan side.
+    await service.request({ kind: "interviewTurn", id, text: "change both of them" });
+    await settled(service, id);
+    let change = (await service.request({ kind: "editingRead", id })).change;
+    expect(change).not.toBeNull();
+    expect(change!.plan).toBeNull();
+    expect(change!.spec).not.toBeNull();
+    expect(JSON.stringify(change!.spec!.before)).not.toContain("And the button says so.");
+    expect(JSON.stringify(change!.spec!.after)).toContain("And the button says so.");
+    expect(change!.spec!.before.requirements).toBe(change!.spec!.after.requirements);
+    expect(change!.spec!.before.outcome).toBe(change!.spec!.after.outcome);
+    // A turn that edits the plan through `perbo edit`: the promise before and
+    // after, and — the whole record replaced — no spec side left from the
+    // turn before.
+    await service.request({ kind: "interviewTurn", id, text: "please reword the plan" });
+    await settled(service, id);
+    change = (await service.request({ kind: "editingRead", id })).change;
+    expect(change!.spec).toBeNull();
+    expect(change!.plan).not.toBeNull();
+    expect(change!.plan!.before.criteria.find((each) => each.id === "ac_1")?.text).toBe("A signup queues one email");
+    expect(change!.plan!.after.criteria.find((each) => each.id === "ac_1")?.text).toBe("A signup queues exactly one email");
+    expect(change!.plan!.before.outcome).toBe(change!.plan!.after.outcome);
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("records an edit by hand, the Plan pane's Next and a spec save as the last change, and nothing where nothing differs", async () => {
+    // Each way a person moves the pair by hand lands as the one change the
+    // panes mark (D-128), replacing
+    // the one before it whole; an edit that moves no promise and a save of
+    // the same words leave the last change standing.
+    const { service, repoId, id } = await planning();
+    const read = async () => (await service.request({ kind: "editingRead", id })).change;
+    const graphEdit = async (edit: GraphEdit) =>
+      finished(service, (await service.request({ kind: "graphEdit", repoId, key: "PRB-1", edit })).id);
+    // The first spec save, which the planning opened with, is the spec's first writing and records nothing.
+    expect(await read()).toBeNull();
+    // A criterion reworded on the Graph pane: the promise before and after, and no spec side.
+    expect(await graphEdit({
+      op: "set_criterion", id: "ac_1", text: "A signup queues exactly one email",
+      expected_verification: { kind: "test", assertion: "signup.test.ts" },
+    })).toMatchObject({ state: "completed", error: null });
+    const reworded = await read();
+    expect(reworded!.spec).toBeNull();
+    expect(reworded!.plan!.before.criteria.map((each) => each.text)).toEqual(["A signup queues one email", "A failed send is retried"]);
+    expect(reworded!.plan!.after.criteria.map((each) => each.text)).toEqual(["A signup queues exactly one email", "A failed send is retried"]);
+    expect(reworded!.plan!.before.outcome).toBe(reworded!.plan!.after.outcome);
+    // The Plan pane's Next, which is the `edit` request over the flat plan: the promise before and after.
+    const detail = await service.detail(repoId, "PRB-1");
+    expect(await finished(service, (await service.request({
+      kind: "edit", repoId, key: "PRB-1", digest: detail.digest,
+      draft: {
+        ...twoCriteria,
+        criteria: [
+          { text: "A signup queues exactly one email", assertion: "signup.test.ts", kind: "test" },
+          { text: "A failed send is retried twice", assertion: "retry.test.ts", kind: "test" },
+        ],
+      },
+    })).id)).toMatchObject({ state: "completed", error: null });
+    const next = await read();
+    expect(next!.spec).toBeNull();
+    expect(next!.plan!.before.criteria.map((each) => each.text)).toEqual(["A signup queues exactly one email", "A failed send is retried"]);
+    expect(next!.plan!.after.criteria.map((each) => each.text)).toEqual(["A signup queues exactly one email", "A failed send is retried twice"]);
+    // A spec save that rewords a requirement: the sections before and after, no plan side, and the plan's change gone with the record it was in.
+    const rewordedSpec = { ...SECTIONS, requirements: "- A signup queues exactly one email.\n- A failed send is retried." };
+    await saveSpec(service, { kind: "specSave", id, repoId, title: "Activation email", sections: rewordedSpec });
+    const saved = await read();
+    expect(saved!.plan).toBeNull();
+    // As the file says them, ids and all: what the panes diff is the file's text.
+    expect(saved!.spec!.before.requirements).toContain("queues one email.");
+    expect(saved!.spec!.before.requirements).not.toContain("exactly");
+    expect(saved!.spec!.after.requirements).toContain("queues exactly one email.");
+    expect(saved!.spec!.before.outcome).toBe(saved!.spec!.after.outcome);
+    // The same words saved again change nothing, and record nothing.
+    await saveSpec(service, { kind: "specSave", id, repoId, title: "Activation email", sections: rewordedSpec });
+    expect(await read()).toEqual(saved);
+    // An edit that only arranges the graph moves no promise, and records nothing: the last change stands.
+    expect(await graphEdit({ op: "add_node", title: "Queue one email", criteria: ["ac_1"], new_criteria: [], paths: ["packages/auth/**"] })).toMatchObject({ state: "completed", error: null });
+    expect(await read()).toEqual(saved);
+  });
+
+  it("marks a criterion as long as the contract allows, and says in the chat where a change cannot be marked, without failing what made it", async () => {
+    // The record of a change is bounded as the contract is and no tighter:
+    // a criterion the contract holds is marked, however long. And where the
+    // record will not take the change — a spec section past what it holds —
+    // the marking is said in the chat, and the turn or the edit that made the
+    // change is not failed for it.
+    const { service, repoId, id } = await planning();
+    const read = async () => (await service.request({ kind: "editingRead", id })).change;
+    // Notes with words in, so the long write below is an edit of them rather
+    // than their first writing, which is not a change and is never recorded.
+    await saveSpec(service, { kind: "specSave", id, repoId, title: "Activation email", sections: { ...SECTIONS, notes: "A note." } });
+    const long = "A signup queues exactly one email, and never two, however the retry goes. ".repeat(5).trim();
+    expect(long.length).toBeGreaterThan(200);
+    const job = await finished(service, (await service.request({
+      kind: "graphEdit", repoId, key: "PRB-1",
+      edit: { op: "set_criterion", id: "ac_1", text: long, expected_verification: { kind: "test", assertion: "signup.test.ts" } },
+    })).id);
+    expect(job).toMatchObject({ state: "completed", error: null });
+    const marked = await read();
+    expect(marked?.plan?.after.criteria[0]?.text).toBe(long);
+    // A turn that writes 13,000 characters into the notes: the spec moved,
+    // the record of the change refuses the section, and the chat says so.
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "write a long section" });
+    await settled(service, id);
+    expect(await read()).toEqual(marked);
+    const session = await service.request({ kind: "editingRead", id });
+    expect(session.conversation.some(
+      (entry) => entry.line.kind === "note" && entry.line.text.startsWith("The change could not be marked on the panes:"),
+    )).toBe(true);
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("does not measure a turn against a spec whose file was there and would not read", async () => {
+    // A spec with no file yet is a spec of empty sections, whose first
+    // writing marks nothing; a file that is there and cannot be read is no
+    // reading at all, and nothing the turn did is measured against it, its
+    // edit to the plan included.
+    const { service, repoId, id, registered } = await planning();
+    const read = async () => (await service.request({ kind: "editingRead", id })).change;
+    // A standing change, which a turn measured against nothing would replace.
+    await saveSpec(service, {
+      kind: "specSave", id, repoId, title: "Activation email",
+      sections: { ...SECTIONS, outcome: SECTIONS.outcome + " Always." },
+    });
+    const standing = await read();
+    expect(standing!.spec!.before.outcome).not.toBe(standing!.spec!.after.outcome);
+    expect(standing!.plan).toBeNull();
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    const slug = (await service.request({ kind: "editingRead", id })).specSlug!;
+    const path = join(registered, "specs", slug, "spec.md");
+    const markdown = readFileSync(path, "utf8");
+    // A directory where the file was, which is there and will not read.
+    rmSync(path);
+    mkdirSync(path);
+    // The fake interview rewords a criterion through `perbo edit`, so the
+    // plan really moves in this turn.
+    await service.request({ kind: "interviewTurn", id, text: "please reword the plan" });
+    rmSync(path, { recursive: true });
+    writeFileSync(path, markdown);
+    await settled(service, id);
+    expect(JSON.stringify((await service.detail(repoId, "PRB-1")).contract)).toContain("A signup queues exactly one email");
+    expect(await read()).toEqual(standing);
+    await service.request({ kind: "interviewStop", id });
   });
 
   it("shows a command it may not run and a write it may not make as refused", async () => {
@@ -2459,11 +4086,13 @@ describe("UI v2 host behaviour", () => {
       detail: "Injected.",
     });
     expect(
-      usage.providers.find((provider) => provider.id === "claude")?.windows,
-    ).toBeNull();
-    expect(
-      usage.providers.find((provider) => provider.id === "claude")?.detail,
-    ).toMatch(/without spending a turn/);
+      usage.providers.find((provider) => provider.id === "claude"),
+    ).toMatchObject({
+      connected: true,
+      plan: "Max",
+      windows: [{ label: "5-hour limit", usedPercent: 9 }],
+      detail: "Injected Claude.",
+    });
     await expect(
       service.request({
         kind: "taskSummary",
@@ -2798,7 +4427,7 @@ describe("planning beside a run (SCP-335)", () => {
         id: opened.id,
         revision: opened.revision,
         repoId: registered.id,
-        form: { ...opened.form, draft: { ...draft, outcome }, step: 2 },
+        form: { ...opened.form, draft: { ...draft, outcome } },
       });
       return {
         id: saved.id,
@@ -2879,5 +4508,1675 @@ describe("planning beside a run (SCP-335)", () => {
     // Nothing is left in the way: the lane is free once the receipt is saved.
     const snapshot = await service.snapshot();
     expect(snapshot.jobs.filter((job) => ["running", "stopping"].includes(job.state))).toEqual([]);
+  });
+});
+
+/**
+ * `admit --from-spec` without a model.
+ *
+ * Drafting a plan from a spec is the one part of planning the desktop does not
+ * own, so the fake admits the same work from criteria and records the spec on
+ * the ticket, which is what the real command leaves behind.
+ */
+function drafting(
+  repo: () => string,
+  asked: string[][] = [],
+  standing: boolean[] = [],
+): typeof runProcess {
+  return async (binary, args, options) => {
+    const at = args.indexOf("--from-spec");
+    if (args[1] !== "admit" || at < 0) return runProcess(binary, args, options);
+    asked.push(args.slice(1, args.indexOf("--repo")));
+    // Whether the stopped ticket was still there when the admission ran.
+    standing.push(existsSync(join(repo(), ".perbo", "tickets", "PRB-1.json")));
+    const result = await runProcess(
+      binary,
+      [
+        args[0]!,
+        "admit",
+        "--prefix",
+        "PRB",
+        "--outcome",
+        "Every import goes through the current parser",
+        "--criterion",
+        "An upload of either dialect is read :: importer.test.ts :: test",
+        "--path",
+        "packages/import/**",
+        "--json",
+        ...args.slice(args.indexOf("--repo")),
+      ],
+      options,
+    );
+    if (result.code !== 0) return result;
+    const printed = JSON.parse(result.stdout) as { ticket: { key: string } };
+    const path = join(repo(), ".perbo", "tickets", `${printed.ticket.key}.json`);
+    const ticket = JSON.parse(readFileSync(path, "utf8")) as { admission: { spec?: unknown } };
+    ticket.admission.spec = {
+      path: args[at + 1]!,
+      content_sha256: "sha256:" + "0".repeat(64),
+      files: [],
+      names_that_resolved: null,
+      symbols_judged_at_approval: false,
+    };
+    writeFileSync(path, JSON.stringify(ticket));
+    return { ...result, stdout: JSON.stringify({ ticket }) };
+  };
+}
+
+describe("the plan read against the spec (D-128)", () => {
+  /** What `perbo drift KEY --json` prints, as the canned CLI answers it. */
+  const verdict = (findings: unknown[], dismissed = false) => ({
+    key: "PRB-1",
+    spec: "sha256:" + "a".repeat(64),
+    promises: "sha256:" + "b".repeat(64),
+    origin: "read",
+    findings,
+    dismissed,
+    checked_at: "2026-09-21T10:00:00.000Z",
+    model: null,
+    cached: false,
+  });
+  const finding = {
+    heading: "Criterion 1 and R1",
+    difference: "R1 asks for one email; criterion 1 promises two.",
+    options: [
+      { label: "Reword criterion 1 to say one email is queued.", detail: null, recommended: true },
+      { label: "Change R1 in the spec to ask for two emails.", detail: null, recommended: false },
+    ],
+  };
+  /**
+   * The CLI, with `drift` answered here rather than run: reading spends
+   * against a model, and what this checks is what the host asks of it and
+   * what it does with the answer.
+   */
+  function canned(
+    reply: unknown | ((args: string[]) => unknown) = verdict([finding]),
+    startProcess?: typeof startLineProcess,
+    /** Every other command; the bundled CLI where none is given. */
+    otherwise: typeof runProcess = runProcess,
+  ) {
+    const drifts: string[][] = [];
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "drift") {
+        // Up to the `--repo` every command carries, which is the fixture's.
+        const asked = args.slice(1, args.indexOf("--repo"));
+        drifts.push(asked);
+        // Awaited, so a reply can be held back: a reading that takes as long
+        // as the test needs it to is how what happens meanwhile is tested.
+        const answer = await (typeof reply === "function" ? (reply as (args: string[]) => unknown)(asked) : reply);
+        return { code: 0, stdout: JSON.stringify(answer), stderr: "", cancelled: false };
+      }
+      // The loop itself, where a test approves: nothing here runs an executor.
+      if (args[1] === "run") return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      return otherwise(binary, args, options);
+    };
+    return { ...fixture(runner, startProcess), drifts };
+  }
+  /** A second place the two have parted, for a reading that finds more than one. */
+  const second = {
+    heading: "Criterion 2 and R2",
+    difference: "R2 asks for a retry; criterion 2 promises none.",
+    options: [
+      { label: "Add a retry to criterion 2.", detail: null, recommended: true },
+      { label: "Drop R2 from the spec.", detail: null, recommended: false },
+    ],
+  };
+  /**
+   * An interview that answers every turn with a line and ends it, in place of
+   * the CLI's: what is under test is what the host does once a turn is over
+   * with problems open, and the fake's whole job is to end one.
+   */
+  function fakeAnswering(root: string): typeof startLineProcess {
+    const binary = join(root, "fake-answering.cjs");
+    writeFileSync(
+      binary,
+      String.raw`
+const readline = require('node:readline');
+const send = (event) => process.stdout.write(JSON.stringify(event) + '\n');
+send({ type: 'started', session_id: 'sdk-session-2', spec: 'specs/retry-on-failure/spec.md',
+  adr: 'docs/adr', model: null, tools: [] });
+readline.createInterface({ input: process.stdin })
+  .on('line', (line) => {
+    const turn = JSON.parse(line);
+    // A turn that never ends, for a test that stops the chat in the middle of one.
+    if (turn.text === 'Change R1 in the spec to ask for two emails.') return;
+    send({ type: 'message', message: { type: 'assistant', session_id: 'sdk-session-2',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'You said: ' + turn.text }] } } });
+    if (turn.text === 'ask me')
+      send({ type: 'asked', groups: [{ title: 'Its own question', parts: [{ question: 'Which way?',
+        options: [{ label: 'This way', detail: null, recommended: true },
+                  { label: 'That way', detail: null, recommended: false }] }] }] });
+    send({ type: 'idle' });
+  })
+  .on('close', () => { send({ type: 'ended', session_id: 'sdk-session-2', reason: 'the session ended' }); });
+`,
+      { mode: 0o700 },
+    );
+    return (spawned, args, options) =>
+      startLineProcess(
+        spawned,
+        args[1] === "interview" ? [binary, ...args.slice(1)] : [...args],
+        options,
+      );
+  }
+  /** The session, once the turn it owes the person is over. */
+  async function settled(service: DesktopService, id: string): Promise<void> {
+    const until = Date.now() + 20_000;
+    while (Date.now() < until) {
+      if (!((await service.snapshot()).working ?? []).includes(id)) return;
+      await delay(10);
+    }
+    throw new Error("The interview never finished its turn");
+  }
+  /** Every drift job the host has started, once none is still running. */
+  async function driftJobs(service: DesktopService, count: number): Promise<Job[]> {
+    const until = Date.now() + 20_000;
+    while (Date.now() < until) {
+      const jobs = (await service.snapshot()).jobs.filter((job) => job.kind === "drift");
+      if (jobs.length >= count && jobs.every((job) => !["running", "stopping"].includes(job.state)))
+        return jobs;
+      await delay(20);
+    }
+    throw new Error("The plan was not read again");
+  }
+  /** A planning over PRB-1, admitted the way the board admits one, with a spec beside it. */
+  async function planned(service: DesktopService, repoId: string): Promise<string> {
+    await finished(service, (await service.request({ kind: "admit", repoId, draft })).id);
+    const session = await service.request({
+      kind: "editingOpen",
+      target: { kind: "planning", repoId, key: "PRB-1" },
+    });
+    await saveSpec(service, {
+      kind: "specSave",
+      id: session.id,
+      repoId,
+      title: "Retry on failure",
+      sections: {
+        outcome: "The user can retry.",
+        requirements: "- The user can retry.",
+        no_gos: "",
+        rabbit_holes: "",
+        notes: "",
+      },
+    });
+    return session.id;
+  }
+  /** A planning over PRB-1 beside the answering interview, its readings replying from `replies` in turn. */
+  async function answering() {
+    const root = scratchDirectory("perbo-drift-");
+    const replies: unknown[] = [];
+    const made = canned(() => replies.shift(), fakeAnswering(root));
+    const registered = await made.service.registerRepository(made.repo);
+    return { ...made, replies, id: await planned(made.service, registered.id) };
+  }
+
+  it("runs drift on the ticket's own models and lands the verdict on the job", async () => {
+    const { service, repo, drifts } = canned();
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    await service.request({
+      kind: "taskModels",
+      repoId: registered.id,
+      key: "PRB-1",
+      models: {
+        executorProvider: "codex-cli",
+        executorModel: "gpt-6-astra",
+        executorEffort: null,
+        reviewerProvider: "anthropic",
+        reviewerModel: "claude-opus-5",
+        reviewerEffort: null,
+        draftingProvider: "codex-cli",
+        executorSkills: [],
+      },
+    });
+    const job = await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    expect(job.state).toBe("completed");
+    expect(job.kind).toBe("drift");
+    expect(job.label).toBe("Read the plan against the spec");
+    expect(lane(job.kind)).toBe("planning");
+    expect(drifts).toEqual([
+      ["drift", "PRB-1", "--provider", "codex-cli", "--model", "gpt-6-astra", "--json"],
+    ]);
+    expect(job.result).toEqual(verdict([finding]));
+  });
+
+  it("falls back to the settings' models, and fails the job on a print that is not a verdict", async () => {
+    const { service, repo, drifts } = canned({ findings: "not a verdict" });
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    const settings = (await service.snapshot()).settings;
+    const job = await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    expect(drifts[0]).toEqual([
+      "drift", "PRB-1", "--provider", settings.draftingProvider, "--model", settings.executorModel, "--json",
+    ]);
+    expect(job.state).toBe("failed");
+  });
+
+  it("refuses to read before there is a spec, before there is a plan, and once the plan is approved", async () => {
+    const { service, repo, drifts } = canned();
+    const registered = await service.registerRepository(repo);
+    // A plan and no spec.
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    const bare = await service.request({
+      kind: "editingOpen",
+      target: { kind: "planning", repoId: registered.id, key: "PRB-1" },
+    });
+    await expect(service.request({ kind: "driftCheck", id: bare.id })).rejects.toThrow(
+      "Write the spec before reading it against the plan.",
+    );
+    // A spec and no plan.
+    const fresh = await service.request({
+      kind: "editingOpen",
+      target: { kind: "fresh", repoId: registered.id },
+    });
+    await saveSpec(service, {
+      kind: "specSave",
+      id: fresh.id,
+      repoId: registered.id,
+      title: "Retry on failure",
+      sections: { outcome: "The user can retry.", requirements: "", no_gos: "", rabbit_holes: "", notes: "" },
+    });
+    await expect(service.request({ kind: "driftCheck", id: fresh.id })).rejects.toThrow(
+      "Draft a plan from the spec before reading the two against each other.",
+    );
+    // Both, and approved on disk, which is what the guard reads.
+    await saveSpec(service, {
+      kind: "specSave",
+      id: bare.id,
+      repoId: registered.id,
+      title: "Retry again",
+      sections: { outcome: "The user can retry.", requirements: "", no_gos: "", rabbit_holes: "", notes: "" },
+    });
+    const at = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as Record<string, unknown>;
+    writeFileSync(at, JSON.stringify({ ...ticket, approved_at: new Date().toISOString() }));
+    await expect(service.request({ kind: "driftCheck", id: bare.id })).rejects.toThrow(
+      /PRB-1 is approved, and what it promises was settled with it/,
+    );
+    await expect(service.request({ kind: "driftDismiss", id: bare.id })).rejects.toThrow(
+      /PRB-1 is approved/,
+    );
+    // None of them reached the CLI.
+    expect(drifts).toEqual([]);
+  });
+
+  it("dismisses through the CLI, directly and not as a job", async () => {
+    const { service, repo, drifts } = canned(verdict([finding], true));
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    const before = (await service.snapshot()).jobs.length;
+    expect(await service.request({ kind: "driftDismiss", id })).toBeNull();
+    expect(drifts).toEqual([["drift", "PRB-1", "--dismiss", "--json"]]);
+    expect((await service.snapshot()).jobs).toHaveLength(before);
+  });
+
+  it("redacts what the model said before it lands on the job, and fails a reading redaction empties", async () => {
+    const secret = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789";
+    const quoted = {
+      ...finding,
+      heading: "  Criterion 1\n and R1 ",
+      difference: `R1 quotes the key ${secret}; criterion 1 does not.`,
+      options: [
+        { ...finding.options[0], detail: `Drop ${secret} from the spec.` },
+        finding.options[1],
+      ],
+    };
+    const { service, repo } = canned(verdict([quoted]));
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    const job = await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    expect(job.state).toBe("completed");
+    const landed = job.result as { findings: typeof finding[] };
+    expect(landed.findings[0]?.heading).toBe("Criterion 1 and R1");
+    expect(landed.findings[0]?.difference).toBe("R1 quotes the key [redacted]; criterion 1 does not.");
+    expect(landed.findings[0]?.options[0]?.detail).toBe("Drop [redacted] from the spec.");
+    expect(JSON.stringify(job.result)).not.toContain(secret);
+    // A heading that was nothing but escape codes is no heading: the reading
+    // fails rather than putting a card about nothing to the person.
+    const blank = canned(verdict([{ ...finding, heading: "[31m[0m" }]));
+    const other = await blank.service.registerRepository(blank.repo);
+    const at = await planned(blank.service, other.id);
+    const failed = await finished(
+      blank.service,
+      (await blank.service.request({ kind: "driftCheck", id: at })).id,
+    );
+    expect(failed.state).toBe("failed");
+    expect(failed.error).toMatch(/heading did not survive redaction/);
+  });
+
+  it("records the problems on the planning as the reading lands, and puts the first as a question", async () => {
+    const { service, repo } = canned(verdict([finding, second]));
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    const before = (await service.request({ kind: "editingRead", id })).conversation.length;
+    const job = await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    expect(job.state).toBe("completed");
+    const session = await service.request({ kind: "editingRead", id });
+    // Both on the session, oldest first, and open.
+    expect(session.drift).toEqual({ open: [finding, second], resolved: false });
+    // The rail's list says so too, by count.
+    expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === id)?.drift).toEqual({
+      open: 2,
+      resolved: false,
+    });
+    // And the first is the question in front of the person: one group, its
+    // heading as the title, the difference as the question, the ways to close
+    // it as the answers, headed as which of how many.
+    expect(session.conversation).toHaveLength(before + 1);
+    const line = session.conversation.at(-1)!;
+    expect(line.line).toEqual({
+      kind: "asked",
+      groups: [
+        {
+          title: finding.heading,
+          parts: [{ question: finding.difference, options: finding.options }],
+        },
+      ],
+      drift: { open: 2 },
+    });
+    expect(session.asking).toEqual({ entry: line.n, answered: 0 });
+  });
+
+  it("puts nothing twice when a reading finds the same problems again, and records the next when they change", async () => {
+    let reply: unknown = verdict([finding, second]);
+    const { service, repo } = canned(() => reply);
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    const asked = (lines: { line: { kind: string } }[]) => lines.filter((entry) => entry.line.kind === "asked");
+    let session = await service.request({ kind: "editingRead", id });
+    expect(asked(session.conversation)).toHaveLength(1);
+    expect(session.drift?.open).toHaveLength(2);
+    // The first resolved: the second is what is open, and it is put.
+    reply = verdict([second]);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    session = await service.request({ kind: "editingRead", id });
+    expect(session.drift).toEqual({ open: [second], resolved: false });
+    const lines = asked(session.conversation);
+    expect(lines).toHaveLength(2);
+    expect(lines.at(-1)!.line).toMatchObject({
+      groups: [{ title: second.heading }],
+      drift: { open: 1 },
+    });
+  });
+
+  it("records resolved once a reading finds none after some, and says so with the contract on offer", async () => {
+    let reply: unknown = verdict([finding]);
+    const { service, repo } = canned(() => reply);
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    // None where none were ever open is nothing to record: no pane, no note.
+    reply = verdict([]);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    let session = await service.request({ kind: "editingRead", id });
+    expect(session.drift).toBeNull();
+    expect(session.conversation.some((entry) => entry.line.kind === "note" && "offers" in entry.line)).toBe(false);
+    reply = verdict([finding]);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    reply = verdict([]);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    session = await service.request({ kind: "editingRead", id });
+    expect(session.drift).toEqual({ open: [], resolved: true });
+    expect(session.conversation.at(-1)!.line).toEqual({
+      kind: "note",
+      text: "Every problem is resolved: the plan and the spec promise the same thing again.",
+      notable: true,
+      offers: "contract",
+    });
+    expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === id)?.drift).toEqual({
+      open: 0,
+      resolved: true,
+    });
+  });
+
+  it("reads the plan again once a turn ends with problems open, and not while none are", async () => {
+    const root = scratchDirectory("perbo-drift-");
+    const { service, repo, drifts } = canned(verdict([finding]), fakeAnswering(root));
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    // A turn with nothing open asks for no reading.
+    await service.request({ kind: "interviewTurn", id, text: "why one criterion?" });
+    await settled(service, id);
+    expect(drifts).toEqual([]);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    expect(drifts).toHaveLength(1);
+    // The answer to the problem in hand, as a card sends it: once the interview
+    // has finished the turn, the plan is read against the spec again.
+    await service.request({ kind: "interviewTurn", id, text: finding.options[0]!.label });
+    await settled(service, id);
+    const jobs = await driftJobs(service, 2);
+    expect(jobs.map((job) => job.state)).toEqual(["completed", "completed"]);
+    expect(drifts).toHaveLength(2);
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("forgets the problems when the person goes on past them, and when the plan is approved", async () => {
+    const { service, repo } = canned(verdict([finding]));
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    expect((await service.request({ kind: "editingRead", id })).drift?.open).toHaveLength(1);
+    await service.request({ kind: "driftDismiss", id });
+    expect((await service.request({ kind: "editingRead", id })).drift).toBeNull();
+    // Open again, then approved: what the plan promises is settled with it.
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    expect((await service.request({ kind: "editingRead", id })).drift?.open).toHaveLength(1);
+    const detail = await service.detail(registered.id, "PRB-1");
+    const ran = await finished(
+      service,
+      (
+        await service.request({
+          kind: "run",
+          repoId: registered.id,
+          key: "PRB-1",
+          digest: detail.digest,
+          approve: true,
+          publish: false,
+          resumeFrom: null,
+        })
+      ).id,
+    );
+    expect(ran.error).toBeNull();
+    expect((await service.request({ kind: "editingRead", id })).drift).toBeNull();
+  });
+
+  /** The problems put to the person so far: the asked lines that are the host's. */
+  const problemsPut = <T extends { line: { kind: string; drift?: unknown } }>(lines: T[]) =>
+    lines.filter((entry) => entry.line.kind === "asked" && entry.line.drift !== undefined);
+  /** The notes that offered the contract: one per round resolved, and never two for one. */
+  const resolvedNotes = (lines: { line: { kind: string; offers?: unknown } }[]) =>
+    lines.filter((entry) => entry.line.kind === "note" && entry.line.offers === "contract");
+  /** A reply held back until the test lets it go. */
+  function held<T>() {
+    let release!: (value: T) => void;
+    const promise = new Promise<T>((done) => {
+      release = done;
+    });
+    return { promise, release };
+  }
+
+  it("reads again after a resolved round, and problems found then re-open the record", async () => {
+    const root = scratchDirectory("perbo-drift-");
+    let reply: unknown = verdict([finding]);
+    const { service, repo, drifts } = canned(() => reply, fakeAnswering(root));
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    // The answer closes it: the round is resolved.
+    reply = verdict([]);
+    await service.request({ kind: "interviewTurn", id, text: finding.options[0]!.label });
+    await settled(service, id);
+    await driftJobs(service, 2);
+    let session = await service.request({ kind: "editingRead", id });
+    expect(session.drift).toEqual({ open: [], resolved: true });
+    // A turn after that — a hand rewording, say, told to the interview — is
+    // read again all the same: the record is resolved, and a resolved record
+    // is exactly what cannot know about an edit since.
+    reply = verdict([second]);
+    await service.request({ kind: "interviewTurn", id, text: "reword criterion 2 to promise a retry" });
+    await settled(service, id);
+    const jobs = await driftJobs(service, 3);
+    expect(jobs.map((job) => job.state)).toEqual(["completed", "completed", "completed"]);
+    expect(drifts).toHaveLength(3);
+    session = await service.request({ kind: "editingRead", id });
+    // Re-opened, and the problem put, as on a first reading.
+    expect(session.drift).toEqual({ open: [second], resolved: false });
+    expect(problemsPut(session.conversation).at(-1)!.line).toMatchObject({
+      groups: [{ title: second.heading }],
+      drift: { open: 1 },
+    });
+    expect(session.asking).not.toBeNull();
+    // And the rail's list lands the ticket on its plan while resolved, and on
+    // the problems while open: it carries both.
+    expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === id)?.drift).toEqual({
+      open: 1,
+      resolved: false,
+    });
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("puts the problem again when the answer did not close it and no card stands, and not over a card", async () => {
+    const root = scratchDirectory("perbo-drift-");
+    const { service, repo } = canned(verdict([finding]), fakeAnswering(root));
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    let session = await service.request({ kind: "editingRead", id });
+    expect(problemsPut(session.conversation)).toHaveLength(1);
+    expect(session.asking).not.toBeNull();
+    // Words of the person's own that are not one of the ways to close it take
+    // the card down; the reading finds the problem still there, and with no
+    // card standing to answer again, it is put again.
+    await service.request({ kind: "interviewTurn", id, text: "Leave criterion 1 as it is for now." });
+    await settled(service, id);
+    await driftJobs(service, 2);
+    session = await service.request({ kind: "editingRead", id });
+    expect(session.drift).toEqual({ open: [finding], resolved: false });
+    expect(problemsPut(session.conversation)).toHaveLength(2);
+    expect(session.asking).toEqual({ entry: session.conversation.at(-1)!.n, answered: 0 });
+    // Over a card that stands, the same reading puts nothing: the card is
+    // already there to answer.
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    session = await service.request({ kind: "editingRead", id });
+    expect(problemsPut(session.conversation)).toHaveLength(2);
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("takes a problem's card down when a clean reading finds it closed by hand, and offers the contract", async () => {
+    let reply: unknown = verdict([finding]);
+    const { service, repo } = canned(() => reply);
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    let session = await service.request({ kind: "editingRead", id });
+    expect(session.asking).not.toBeNull();
+    // Fixed on the Graph pane rather than answered: the card still stands,
+    // since nothing has read the plan again yet.
+    expect(await finished(service, (await service.request({
+      kind: "graphEdit", repoId: registered.id, key: "PRB-1",
+      edit: {
+        op: "set_criterion", id: "ac_1", text: "The user can retry, once",
+        expected_verification: { kind: "test", assertion: "The retry button is visible after failure" },
+      },
+    })).id)).toMatchObject({ state: "completed", error: null });
+    session = await service.request({ kind: "editingRead", id });
+    expect(session.asking).not.toBeNull();
+    // The reading on arrival finds nothing: the card comes down with the
+    // problems, and the way on is offered, rather than a card standing over
+    // a problem that is gone and holding the way on back for it.
+    reply = verdict([]);
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    session = await service.request({ kind: "editingRead", id });
+    expect(session.asking).toBeNull();
+    expect(session.drift).toEqual({ open: [], resolved: true });
+    expect(resolvedNotes(session.conversation)).toHaveLength(1);
+  });
+
+  it("holds a changed list behind a question the interview is asking of its own", async () => {
+    const { service, replies, id } = await answering();
+    const second = { ...finding, heading: "Criterion 2 and R2", difference: "R2 asks for a log; criterion 2 does not." };
+    replies.push(verdict([finding, second]));
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    // The person's own words, which the interview answers with a question of
+    // its own: that question now stands, waiting on them. The reading the
+    // turn owes finds the list changed.
+    replies.push(verdict([second]));
+    await service.request({ kind: "interviewTurn", id, text: "ask me" });
+    await settled(service, id);
+    let session = await service.request({ kind: "editingRead", id });
+    const own = session.conversation.find(
+      (entry) => entry.line.kind === "asked" && entry.line.drift === undefined,
+    )!;
+    expect(own).toBeDefined();
+    expect(session.asking).toEqual({ entry: own.n, answered: 0 });
+    // The changed list is recorded, and not put over the interview's
+    // question, which would be answered as if it were that question.
+    await driftJobs(service, 2);
+    session = await service.request({ kind: "editingRead", id });
+    expect(session.drift).toEqual({ open: [second], resolved: false });
+    expect(problemsPut(session.conversation)).toHaveLength(1);
+    expect(session.asking).toEqual({ entry: own.n, answered: 0 });
+    // Answered, the reading after puts the problem the record holds.
+    replies.push(verdict([second]));
+    await service.request({ kind: "interviewTurn", id, text: "This way" });
+    await settled(service, id);
+    await driftJobs(service, 3);
+    session = await service.request({ kind: "editingRead", id });
+    expect(problemsPut(session.conversation)).toHaveLength(2);
+    expect(problemsPut(session.conversation).at(-1)!.line).toMatchObject({
+      groups: [{ title: "Criterion 2 and R2" }],
+      drift: { open: 1 },
+    });
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  it("owes one reading to the turns that end while a reading is live, and says resolved once", async () => {
+    const { service, replies, id, drifts } = await answering();
+    replies.push(verdict([finding]));
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    // A reading that takes as long as two turns.
+    const slow = held<unknown>();
+    replies.push(slow.promise);
+    const live = await service.request({ kind: "driftCheck", id });
+    await service.request({ kind: "interviewTurn", id, text: finding.options[0]!.label });
+    await settled(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "and make sure the retry is logged" });
+    await settled(service, id);
+    // Neither turn started a reading over the live one.
+    expect(drifts).toHaveLength(2);
+    expect((await service.snapshot()).jobs.filter((job) => job.kind === "drift" && isLive(job))).toEqual([
+      expect.objectContaining({ id: live.id }),
+    ]);
+    // It lands, and the one reading the two turns are owed between them
+    // follows it: the plan is read as it stands now, and once is enough.
+    replies.push(verdict([]));
+    slow.release(verdict([finding]));
+    const jobs = await driftJobs(service, 3);
+    expect(jobs.map((job) => job.state)).toEqual(["completed", "completed", "completed"]);
+    await delay(100);
+    expect(drifts).toHaveLength(3);
+    let session = await service.request({ kind: "editingRead", id });
+    expect(session.drift).toEqual({ open: [], resolved: true });
+    expect(resolvedNotes(session.conversation)).toHaveLength(1);
+    // A clean reading after a resolved one is nothing new: no second note.
+    replies.push(verdict([]));
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    session = await service.request({ kind: "editingRead", id });
+    expect(resolvedNotes(session.conversation)).toHaveLength(1);
+    await service.request({ kind: "interviewStop", id });
+  });
+
+  describe("a reading an interview turn overlapped", () => {
+    it("puts nothing back that the turn was answering, and leaves the reading the turn owes to decide", async () => {
+      const { service, replies, id } = await answering();
+      replies.push(verdict([finding]));
+      await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+      // The Problems page's reading on arrival, read before the answer below
+      // reached the plan and landing after it: it still finds the problem.
+      const slow = held<unknown>();
+      replies.push(slow.promise);
+      const live = await service.request({ kind: "driftCheck", id });
+      await service.request({ kind: "interviewTurn", id, text: finding.options[0]!.label });
+      await settled(service, id);
+      let session = await service.request({ kind: "editingRead", id });
+      expect(session.asking).toBeNull();
+      // The reading the turn owes follows it, and finds the plan as the answer left it.
+      const owed = held<unknown>();
+      replies.push(owed.promise);
+      slow.release(verdict([finding]));
+      await finished(service, live.id);
+      session = await service.request({ kind: "editingRead", id });
+      expect(problemsPut(session.conversation)).toHaveLength(1);
+      expect(session.asking).toBeNull();
+      owed.release(verdict([]));
+      await driftJobs(service, 3);
+      session = await service.request({ kind: "editingRead", id });
+      expect(session.drift).toEqual({ open: [], resolved: true });
+      expect(problemsPut(session.conversation)).toHaveLength(1);
+      await service.request({ kind: "interviewStop", id });
+    });
+
+    it("reads again as it settles where the turn it overlapped had already ended", async () => {
+      const { service, replies, id } = await answering();
+      // The Problems page's first reading, held while a turn is sent and
+      // ends: with no record yet, the turn's end has nothing to read again.
+      const slow = held<unknown>();
+      replies.push(slow.promise);
+      const live = await service.request({ kind: "driftCheck", id });
+      await service.request({ kind: "interviewTurn", id, text: "make the retry wait a second" });
+      await settled(service, id);
+      // It lands with a problem, recorded and not put, and the reading its
+      // settling owes puts it, once.
+      replies.push(verdict([finding]));
+      slow.release(verdict([finding]));
+      await finished(service, live.id);
+      await driftJobs(service, 2);
+      const session = await service.request({ kind: "editingRead", id });
+      expect(session.drift).toEqual({ open: [finding], resolved: false });
+      expect(problemsPut(session.conversation)).toHaveLength(1);
+      expect(session.asking).toEqual({ entry: problemsPut(session.conversation)[0]!.n, answered: 0 });
+      await service.request({ kind: "interviewStop", id });
+    });
+  });
+
+  it("reads again when the chat is stopped in the middle of the turn that answered a card", async () => {
+    const { service, replies, id } = await answering();
+    replies.push(verdict([finding, second]));
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    // The card is answered, and the turn answering it never ends.
+    await service.request({ kind: "interviewTurn", id, text: finding.options[1]!.label });
+    let session = await service.request({ kind: "editingRead", id });
+    expect(session.asking).toBeNull();
+    expect((await service.snapshot()).working).toContain(id);
+    // Stopped, the turn is over and the reading it owed runs: the next card.
+    replies.push(verdict([second]), verdict([second]));
+    await service.request({ kind: "interviewStop", id });
+    await driftJobs(service, 2);
+    await delay(100);
+    await driftJobs(service, 2);
+    session = await service.request({ kind: "editingRead", id });
+    expect(session.drift).toEqual({ open: [second], resolved: false });
+    expect(problemsPut(session.conversation)).toHaveLength(2);
+    expect(problemsPut(session.conversation).at(-1)!.line).toMatchObject({
+      groups: [{ title: "Criterion 2 and R2" }],
+    });
+    expect(session.asking).toEqual({ entry: problemsPut(session.conversation).at(-1)!.n, answered: 0 });
+  });
+
+  it("records nothing from a reading that lands after the plan was approved or gone past", async () => {
+    // Approved on disk while the model read, as another process approves.
+    const slow = held<unknown>();
+    const { service, repo } = canned((args: string[]) => (args.includes("--dismiss") ? verdict([finding], true) : slow.promise));
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    const live = await service.request({ kind: "driftCheck", id });
+    const at = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as Record<string, unknown>;
+    writeFileSync(at, JSON.stringify({ ...ticket, approved_at: new Date().toISOString() }));
+    slow.release(verdict([finding]));
+    expect((await finished(service, live.id)).state).toBe("completed");
+    let session = await service.request({ kind: "editingRead", id });
+    expect(session.drift).toBeNull();
+    expect(problemsPut(session.conversation)).toHaveLength(0);
+    // Gone past while the model read: the person went on to the contract.
+    const again = held<unknown>();
+    const other = canned((args: string[]) => (args.includes("--dismiss") ? verdict([finding], true) : again.promise));
+    const elsewhere = await other.service.registerRepository(other.repo);
+    const past = await planned(other.service, elsewhere.id);
+    const reading = await other.service.request({ kind: "driftCheck", id: past });
+    await other.service.request({ kind: "driftDismiss", id: past });
+    again.release(verdict([finding]));
+    expect((await finished(other.service, reading.id)).state).toBe("completed");
+    session = await other.service.request({ kind: "editingRead", id: past });
+    expect(session.drift).toBeNull();
+    expect(problemsPut(session.conversation)).toHaveLength(0);
+  });
+
+  it("deletes the verdict with the rest of the ticket's records", async () => {
+    const { service, repo } = canned();
+    const registered = await service.registerRepository(repo);
+    await planned(service, registered.id);
+    const record = join(repo, ".perbo", "tickets", "PRB-1.drift.json");
+    writeFileSync(record, JSON.stringify({ ...verdict([]), key: undefined, cached: undefined }));
+    expect(existsSync(record)).toBe(true);
+    await service.request({ kind: "discard", repoId: registered.id, key: "PRB-1" });
+    expect(existsSync(record)).toBe(false);
+    expect(existsSync(join(repo, ".perbo", "tickets", "PRB-1.json"))).toBe(false);
+  });
+
+  /** The chat started beside a planning, once its own `started` event has reached the record. */
+  async function chatting(service: DesktopService, repoId: string, id: string): Promise<void> {
+    await service.request({ kind: "interviewStart", repoId, id });
+    for (let count = 0; count < 400; count++) {
+      if ((await service.request({ kind: "editingRead", id })).interviewSession !== null) return;
+      await delay(10);
+    }
+    throw new Error("The interview never reported a session");
+  }
+  /**
+   * Once the chat has gone and no command is running, and a moment after: a
+   * reading its stop or its exit started has started by then.
+   */
+  async function quiet(service: DesktopService, id: string): Promise<void> {
+    const until = Date.now() + 20_000;
+    for (;;) {
+      const snapshot = await service.snapshot();
+      if (!(snapshot.interviews ?? []).includes(id) && !snapshot.jobs.some(isLive)) break;
+      if (Date.now() > until)
+        throw new Error(
+          `The chat never went, or a command never settled: ${snapshot.jobs
+            .filter(isLive)
+            .map((job) => job.kind)
+            .join(", ")}`,
+        );
+      await delay(20);
+    }
+    await delay(300);
+  }
+  /** The chat's notes that a reading could not be started. */
+  const unstarted = (session: { conversation: InterviewEntry[] }): InterviewEntry[] =>
+    session.conversation.filter(
+      (entry) => entry.line.kind === "note" && entry.line.text.startsWith(REREAD_COULD_NOT_START),
+    );
+  const retrying = {
+    outcome: "The user can retry.",
+    requirements: "- The user can retry.",
+    no_gos: "",
+    rabbit_holes: "",
+    notes: "",
+  };
+
+  /**
+   * A planning that drafted PRB-1 from its spec, with a reading that found a
+   * problem and its chat running: work its own discard deletes whole. Every
+   * reading after the first is held until `later` is released.
+   */
+  async function draftedWithProblems() {
+    const root = scratchDirectory("perbo-drift-");
+    let repo = "";
+    const later = held<unknown>();
+    let reads = 0;
+    const made = canned(
+      () => (reads++ === 0 ? verdict([finding]) : later.promise),
+      fakeAnswering(root),
+      drafting(() => repo),
+    );
+    repo = made.repo;
+    const { service, drifts } = made;
+    const repoId = (await service.registerRepository(repo)).id;
+    const { id } = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
+    await saveSpec(service, { kind: "specSave", id, repoId, title: "Retry on failure", sections: retrying });
+    const before = await service.request({ kind: "editingRead", id });
+    const submitted = await service.request({
+      kind: "editingSubmit",
+      id,
+      revision: before.revision,
+      operationId: randomUUID(),
+      intent: "generate",
+    });
+    await finished(service, submitted.operation!.jobId!);
+    let session = await service.request({ kind: "editingRead", id });
+    for (let tries = 0; tries < 400 && session.key === null; tries += 1) {
+      await delay(10);
+      session = await service.request({ kind: "editingRead", id });
+    }
+    expect(session, "the ticket this planning drafted").toMatchObject({ key: "PRB-1", admitted: true });
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    expect((await service.request({ kind: "editingRead", id })).drift, "a reading that found a problem").not.toBeNull();
+    await chatting(service, repoId, id);
+    return {
+      service,
+      repo,
+      repoId,
+      id,
+      drifts,
+      later,
+      ticket: join(repo, ".perbo", "tickets", "PRB-1.json"),
+      spec: join(repo, "specs", "retry-on-failure"),
+    };
+  }
+
+  it("reads nothing again as a planning with problems open is thrown away, and deletes its work whole", async () => {
+    // Throwing the planning away stops its chat, and the stop and the chat's
+    // exit each end a turn. A reading started there holds the repository as
+    // the delete of its ticket checks, which left the ticket and the spec
+    // behind (D-129), and reads files the delete is removing.
+    const made = await draftedWithProblems();
+    try {
+      await made.service.request({ kind: "editingDiscard", id: made.id });
+      await quiet(made.service, made.id);
+      expect(existsSync(made.ticket), "the ticket").toBe(false);
+      expect(existsSync(made.spec), "the spec").toBe(false);
+      expect(made.drifts, "the one reading the pane asked for").toHaveLength(1);
+      expect((await made.service.snapshot()).jobs.filter((job) => job.kind === "drift")).toHaveLength(1);
+      expect(unstarted(await made.service.request({ kind: "editingRead", id: made.id })), "nor tried to").toEqual([]);
+      // And none is started for it on request: its plan went with it.
+      await expect(made.service.request({ kind: "driftCheck", id: made.id })).rejects.toThrow(
+        "This planning has been thrown away",
+      );
+    } finally {
+      made.later.release(verdict([finding]));
+    }
+  });
+
+  it("refuses to throw a planning away while a reading of its plan is running, and says why", async () => {
+    // The reading holds the repository, so the ticket this planning drafted
+    // cannot be deleted with it. Refused before anything goes, so the person
+    // finds the work as it was, and the reason (D-129).
+    const made = await draftedWithProblems();
+    try {
+      await made.service.request({ kind: "driftCheck", id: made.id });
+      await expect(made.service.request({ kind: "editingDiscard", id: made.id })).rejects.toThrow(
+        DELETE_WAITS_FOR_COMMANDS,
+      );
+      expect((await made.service.request({ kind: "editingRead", id: made.id })).phase).not.toBe("discarded");
+      expect(existsSync(made.ticket), "the ticket").toBe(true);
+      expect(existsSync(made.spec), "the spec").toBe(true);
+      expect((await made.service.snapshot()).interviews ?? [], "the chat").toContain(made.id);
+    } finally {
+      made.later.release(verdict([finding]));
+    }
+    await made.service.request({ kind: "interviewStop", id: made.id });
+  });
+
+  it("takes the spec folder with a planning thrown away after its ticket was deleted out of band", async () => {
+    // A ticket already gone names the folder no more than one the delete took,
+    // so the folder goes with the planning (D-129).
+    const made = await draftedWithProblems();
+    try {
+      rmSync(made.ticket);
+      await made.service.request({ kind: "editingDiscard", id: made.id });
+      expect((await made.service.request({ kind: "editingRead", id: made.id })).phase).toBe("discarded");
+      expect(existsSync(made.spec), "the spec folder").toBe(false);
+    } finally {
+      made.later.release(verdict([finding]));
+    }
+  });
+
+  it("says why a planning's ticket stays where it is thrown away over an open pull request", async () => {
+    // The one stage a delete does not reach (D-129): the planning goes, and
+    // the person is told why the work did not go with it.
+    const made = await draftedWithProblems();
+    try {
+      const record = JSON.parse(readFileSync(made.ticket, "utf8")) as Record<string, unknown>;
+      writeFileSync(made.ticket, JSON.stringify({ ...record, state: "pr_open" }));
+      await expect(made.service.request({ kind: "editingDiscard", id: made.id })).rejects.toThrow(
+        "PRB-1 has a pull request open",
+      );
+      expect(existsSync(made.ticket), "the ticket").toBe(true);
+      expect(existsSync(made.spec), "the spec its plan is read against").toBe(true);
+    } finally {
+      made.later.release(verdict([finding]));
+    }
+  });
+
+  it("reads nothing again as work with problems open is deleted from its contract, and leaves no verdict behind", async () => {
+    // The delete stops the chat of the planning over the ticket, and a reading
+    // started by that stop or by the chat's exit runs `perbo drift` while the
+    // files are removed, writing its verdict back beside a ticket that has gone.
+    const root = scratchDirectory("perbo-drift-");
+    let repo = "";
+    // What `perbo drift` leaves as it reads: its verdict beside the ticket.
+    const made = canned(() => {
+      writeFileSync(join(repo, ".perbo", "tickets", "PRB-1.drift.json"), JSON.stringify(verdict([finding])));
+      return verdict([finding]);
+    }, fakeAnswering(root));
+    repo = made.repo;
+    const { service, drifts } = made;
+    const repoId = (await service.registerRepository(repo)).id;
+    const id = await planned(service, repoId);
+    // Drafted from the spec the planning writes, as `admit --from-spec`
+    // records it, so the spec goes with the ticket.
+    const at = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as { admission: { spec?: unknown } };
+    ticket.admission.spec = {
+      path: "specs/retry-on-failure/spec.md",
+      content_sha256: "sha256:" + "0".repeat(64),
+      files: [],
+      names_that_resolved: null,
+      symbols_judged_at_approval: false,
+    };
+    writeFileSync(at, JSON.stringify(ticket));
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    expect((await service.request({ kind: "editingRead", id })).drift, "a reading that found a problem").not.toBeNull();
+    await chatting(service, repoId, id);
+
+    await service.request({ kind: "discard", repoId, key: "PRB-1" });
+    await quiet(service, id);
+    expect(existsSync(at), "the ticket").toBe(false);
+    expect(existsSync(join(repo, ".perbo", "tickets", "PRB-1.drift.json")), "the verdict").toBe(false);
+    expect(existsSync(join(repo, "specs", "retry-on-failure")), "the spec").toBe(false);
+    expect(drifts, "the one reading the pane asked for").toHaveLength(1);
+    expect((await service.snapshot()).jobs.filter((job) => job.kind === "drift")).toHaveLength(1);
+    expect(unstarted(await service.request({ kind: "editingRead", id })), "nor tried to").toEqual([]);
+  });
+});
+
+/**
+ * A run somebody stopped, and the two things the host does about it.
+ *
+ * The approved contract is frozen (ADR-0016), so there is no editing a stopped
+ * plan back into shape: the work is planned again from the spec it was drafted
+ * from, which mints a second ticket beside the stopped one, or it is deleted
+ * whole (D-129).
+ */
+describe("a stopped run's ticket", () => {
+  const slug = "retire-the-legacy-csv-importer";
+  const spec = `specs/${slug}/spec.md`;
+  /** The records a stop leaves: a spent ticket, its attempt, and the bundle that attempt sealed. */
+  const chosen = {
+    executorProvider: "codex-cli" as const,
+    executorModel: "gpt-6-astra",
+    executorEffort: null,
+    reviewerProvider: "anthropic" as const,
+    reviewerModel: "claude-opus-5",
+    reviewerEffort: null,
+    draftingProvider: "codex-cli" as const,
+    executorSkills: [],
+  };
+  async function stopped(runner?: typeof runProcess) {
+    const made = fixture(runner);
+    const repoId = (await made.service.registerRepository(made.repo)).id;
+    mkdirSync(join(made.repo, "specs", slug), { recursive: true });
+    writeFileSync(
+      join(made.repo, "specs", slug, "spec.md"),
+      "# Retire the legacy CSV importer\n\n## Outcome\n\nEvery import goes through the current " +
+        "parser.\n\n## Requirements\n\n- R1: An upload of either dialect is read.\n\n## No-Gos\n" +
+        "\n## Rabbit holes\n\n## Notes\n",
+    );
+    await finished(
+      made.service,
+      (await made.service.request({ kind: "admit", repoId, draft })).id,
+    );
+    // Chosen while the contract is still open to it, which is the only time
+    // the page offers the choice.
+    await made.service.request({ kind: "taskModels", repoId, key: "PRB-1", models: chosen });
+    const at = join(made.repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as {
+      ticket_id: string;
+      state: string;
+      approved_at: string | null;
+      admission: { spec?: unknown };
+    };
+    // Where a stop inside the executor's window leaves the record: the attempt
+    // sealed, the ticket failed, the contract still approved and frozen.
+    ticket.state = "failed";
+    ticket.approved_at = "2026-09-08T09:00:00.000Z";
+    ticket.admission.spec = {
+      path: spec,
+      content_sha256: "sha256:" + "0".repeat(64),
+      files: [],
+      names_that_resolved: null,
+      symbols_judged_at_approval: false,
+    };
+    writeFileSync(at, JSON.stringify(ticket));
+    const attempts = join(made.repo, ".perbo", "state", `${ticket.ticket_id}.attempts.json`);
+    mkdirSync(dirname(attempts), { recursive: true });
+    writeFileSync(
+      attempts,
+      JSON.stringify({
+        ticket_id: ticket.ticket_id,
+        attempts: [{ attempt_id: "att_1", termination: { reason: "cancelled" } }],
+      }),
+    );
+    const bundles = join(made.repo, ".perbo", "bundles", "bundles");
+    mkdirSync(bundles, { recursive: true });
+    const mine = join(bundles, "bundle_0000000000000415.json");
+    writeFileSync(
+      mine,
+      JSON.stringify({
+        bundle_id: "bundle_0000000000000415",
+        kind: "execution",
+        subject_id: "att_1",
+        ticket_id: ticket.ticket_id,
+        artifacts: [],
+      }),
+    );
+    const other = join(bundles, "bundle_0000000000000999.json");
+    writeFileSync(
+      other,
+      JSON.stringify({
+        bundle_id: "bundle_0000000000000999",
+        kind: "execution",
+        subject_id: "att_9",
+        ticket_id: "ticket_somebody_else",
+        artifacts: [],
+      }),
+    );
+    return { ...made, repoId, at, attempts, mine, other };
+  }
+
+  it("deletes the stopped ticket and its evidence, keeps the spec, and opens a planning over the plan drafted from it", async () => {
+    // The fixture's repository is not there until the fixture has made it, so
+    // the fake is given a way to ask for it rather than the path itself.
+    let repo = "";
+    const asked: string[][] = [];
+    const standing: boolean[] = [];
+    const made = await stopped(drafting(() => repo, asked, standing));
+    repo = made.repo;
+
+    const opened = await made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" });
+    // Drafted on the stopped ticket's own models, and the new plan keeps them:
+    // it is the same work, and pressing this is not choosing again.
+    expect(asked[0]).toEqual([
+      "admit", "--prefix", "PRB", "--from-spec", spec,
+      "--provider", "codex-cli", "--model", "gpt-6-astra", "--json",
+    ]);
+    // Deleted before the admission ran, so the new plan is named as the only
+    // plan this spec has.
+    expect(standing).toEqual([false]);
+    expect((await made.service.snapshot()).taskModels?.[`${made.repoId}:PRB-2`]).toEqual(chosen);
+    // A planning over the new plan, on the pane that holds it.
+    expect(["graph", "criteria"]).toContain(opened.pane);
+    const session = await made.service.request({ kind: "editingRead", id: opened.sessionId });
+    expect(session.key).toBe("PRB-2");
+    // The stopped ticket is gone, and everything recorded after its contract
+    // with it; another ticket's evidence was never asked about.
+    for (const suffix of [".json", ".contract.json", ".draft.json", ".approach.json"])
+      expect(existsSync(join(made.repo, ".perbo", "tickets", `PRB-1${suffix}`)), `PRB-1${suffix}`).toBe(false);
+    expect(existsSync(made.attempts), "the attempts record").toBe(false);
+    expect(existsSync(made.mine), "the bundle that attempt sealed").toBe(false);
+    expect(existsSync(made.other), "another ticket's bundle").toBe(true);
+    // The spec stays: the new plan was drafted from it.
+    expect(existsSync(join(made.repo, spec)), "the spec").toBe(true);
+    const snapshot = await made.service.snapshot();
+    expect(snapshot.tasks.map((row) => row.ticket.key)).toEqual(["PRB-2"]);
+    expect(snapshot.taskModels?.[`${made.repoId}:PRB-1`]).toBeUndefined();
+    const minted = JSON.parse(
+      readFileSync(join(made.repo, ".perbo", "tickets", "PRB-2.json"), "utf8"),
+    ) as { state: string; admission: { spec: { path: string } } };
+    expect(minted.state).toBe("plan_review");
+    expect(minted.admission.spec.path).toBe(spec);
+  });
+
+  it("says the stopped ticket is gone when the plan cannot be drafted again, and leaves the spec", async () => {
+    const made = await stopped(async (binary, args, options) =>
+      args[1] === "admit" && args.includes("--from-spec")
+        ? { code: 1, stdout: "", stderr: "the model refused", cancelled: false }
+        : runProcess(binary, args, options),
+    );
+    await expect(
+      made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" }),
+    ).rejects.toThrow(
+      /^PRB-1 was deleted and its plan could not be drafted again: .*the model refused.*\. Its spec is in Create's picker; draft the plan from there\.$/s,
+    );
+    expect(existsSync(made.at), "the stopped ticket").toBe(false);
+    expect(existsSync(join(made.repo, spec)), "the spec").toBe(true);
+  });
+
+  it("refuses to plan again a ticket that was not drafted from a spec", async () => {
+    const made = await stopped();
+    const at = join(made.repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as { admission: { spec: unknown } };
+    ticket.admission.spec = null;
+    writeFileSync(at, JSON.stringify(ticket));
+    await expect(
+      made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" }),
+    ).rejects.toThrow(/was not drafted from a spec, so there is no spec to start over from/);
+  });
+
+  it("deletes a ticket that has run whole: its records, its evidence and its spec", async () => {
+    const made = await stopped();
+    await made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" });
+    for (const suffix of [".json", ".contract.json", ".draft.json", ".approach.json"])
+      expect(
+        existsSync(join(made.repo, ".perbo", "tickets", `PRB-1${suffix}`)),
+        `PRB-1${suffix}`,
+      ).toBe(false);
+    expect(existsSync(made.attempts), "the attempts record").toBe(false);
+    expect(existsSync(made.mine), "the bundle that attempt sealed").toBe(false);
+    expect(existsSync(join(made.repo, "specs", slug)), "the spec it was drafted from").toBe(false);
+    // Another ticket's evidence was never asked about.
+    expect(existsSync(made.other), "another ticket's bundle").toBe(true);
+    expect((await made.service.snapshot()).tasks.some((row) => row.ticket.key === "PRB-1")).toBe(
+      false,
+    );
+  });
+
+  it("deletes each bundle by the file it was read from, never by the id that file records", async () => {
+    // A repository Perbo materializes is untrusted content (ADR-0030), and a
+    // bundle manifest is a file in it: `bundle_id` is whatever the JSON says.
+    // Rebuilding the path from that field makes an ordinary delete reach
+    // whatever the content names, so the file the listing actually read is the
+    // only one deleted.
+    const made = await stopped();
+    const { ticket_id } = JSON.parse(readFileSync(made.at, "utf8")) as { ticket_id: string };
+    const bundles = join(made.repo, ".perbo", "bundles", "bundles");
+    const near = join(made.repo, ".perbo", "victim.json");
+    const far = join(made.root, "victim.json");
+    writeFileSync(near, "{}");
+    writeFileSync(far, "{}");
+    for (const [name, id] of [
+      ["crafted-near.json", "../../victim"],
+      ["crafted-far.json", "../../../../victim"],
+    ])
+      writeFileSync(
+        join(bundles, name!),
+        JSON.stringify({
+          bundle_id: id,
+          kind: "execution",
+          subject_id: "att_1",
+          ticket_id,
+          artifacts: [],
+        }),
+      );
+
+    await made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" });
+
+    expect(existsSync(near), "a file inside the repository the id pointed at").toBe(true);
+    expect(existsSync(far), "a file outside the repository the id pointed at").toBe(true);
+    for (const name of ["crafted-near.json", "crafted-far.json"])
+      expect(existsSync(join(bundles, name)), name).toBe(false);
+  });
+
+  it("refuses to delete work whose pull request is open, and deletes it once that is settled", async () => {
+    // The one stage a delete does not reach: the pull request is on GitHub, and
+    // deleting the ticket would leave it standing with nothing here to read it
+    // against (D-129).
+    const made = await stopped();
+    const held = JSON.parse(readFileSync(made.at, "utf8")) as { state: string };
+    writeFileSync(made.at, JSON.stringify({ ...held, state: "pr_open" }));
+    await expect(
+      made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" }),
+    ).rejects.toThrow(/has a pull request open, and that is a record this machine does not own/);
+    expect(existsSync(join(made.repo, ".perbo", "tickets", "PRB-1.json"))).toBe(true);
+    expect(existsSync(join(made.repo, "specs", slug))).toBe(true);
+    // Merged on GitHub, and the work is the person's to delete again.
+    writeFileSync(made.at, JSON.stringify({ ...held, state: "merged" }));
+    await made.service.request({ kind: "discard", repoId: made.repoId, key: "PRB-1" });
+    expect(existsSync(join(made.repo, ".perbo", "tickets", "PRB-1.json"))).toBe(false);
+  });
+
+  it("refuses a stranded ticket in the CLI's own words, before it deletes or spends anything", async () => {
+    // A run killed outside the executor's window leaves the ticket saying
+    // `executing`, which is still the plan this spec has. The stopped ticket
+    // is deleted before the admission runs, so the host asks `admit`'s own
+    // question first, in its sentence, and nothing is deleted or started.
+    const seen: string[][] = [];
+    const made = await stopped(async (binary, args, options) => {
+      seen.push(args.slice(1, args.indexOf("--repo")));
+      return runProcess(binary, args, options);
+    });
+    const ticket = JSON.parse(readFileSync(made.at, "utf8")) as { state: string };
+    writeFileSync(made.at, JSON.stringify({ ...ticket, state: "executing" }));
+    // What the fixture itself ran is not what this test is reading.
+    seen.length = 0;
+
+    await expect(
+      made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" }),
+    ).rejects.toThrow(/PRB-1 was already drafted from specs\/.*, and one spec is one piece of work/);
+    expect(seen.some((argv) => argv[0] === "sync" || argv[0] === "admit")).toBe(false);
+    // Nothing was deleted: the stranded ticket is the plan this spec has.
+    expect((await made.service.snapshot()).tasks.map((row) => row.ticket.key)).toEqual(["PRB-1"]);
+    expect(existsSync(made.attempts), "the attempts record").toBe(true);
+    expect(existsSync(made.mine), "the bundle that attempt sealed").toBe(true);
+  });
+
+  it("refuses to plan again from a spec that is no longer there, before it spends a job", async () => {
+    // `admit` says this itself, but only after a job has been started and a
+    // model asked. A spec deleted in the person's own editor is the reachable
+    // way here, and the answer is the command's own sentence.
+    const seen: string[][] = [];
+    const made = await stopped(async (binary, args, options) => {
+      seen.push(args.slice(1, args.indexOf("--repo")));
+      return runProcess(binary, args, options);
+    });
+    rmSync(join(made.repo, "specs", slug), { recursive: true, force: true });
+    seen.length = 0;
+    await expect(
+      made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" }),
+    ).rejects.toThrow(/^no spec at .*specs\/retire-the-legacy-csv-importer\/spec\.md$/);
+    expect(seen.some((argv) => argv[0] === "admit"), "an admission was started").toBe(false);
+  });
+
+  it("builds the spec it drafts from out of the repository's own spec folder", async () => {
+    // `admission.spec.path` is a string read out of a repository file, and the
+    // guard written for it is `specSlugOf`: a recorded path whose folder is not
+    // this repository's spec folder names a spec this admission has no business
+    // reading, whatever the record says.
+    const seen: string[][] = [];
+    const made = await stopped(async (binary, args, options) => {
+      seen.push(args.slice(1, args.indexOf("--repo")));
+      return runProcess(binary, args, options);
+    });
+    const ticket = JSON.parse(readFileSync(made.at, "utf8")) as {
+      admission: { spec: { path: string } };
+    };
+    ticket.admission.spec.path = `../outside/${slug}/spec.md`;
+    writeFileSync(made.at, JSON.stringify(ticket));
+    seen.length = 0;
+    await expect(
+      made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" }),
+    ).rejects.toThrow(/was not drafted from a spec, so there is no spec to start over from/);
+    expect(seen.some((argv) => argv[0] === "admit"), "an admission was started").toBe(false);
+  });
+
+  describe("Plan it again where the pull request is open", () => {
+    it("is refused before anything is deleted or drafted, because that ticket is not deleted", async () => {
+      const seen: string[][] = [];
+      const made = await stopped(async (binary, args, options) => {
+        seen.push(args.slice(1, args.indexOf("--repo")));
+        return runProcess(binary, args, options);
+      });
+      const held = JSON.parse(readFileSync(made.at, "utf8")) as { state: string };
+      writeFileSync(made.at, JSON.stringify({ ...held, state: "pr_open" }));
+      seen.length = 0;
+      await expect(
+        made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" }),
+      ).rejects.toThrow(/PRB-1 is pr_open, which is past re-drafting/);
+      expect(seen.some((argv) => argv[0] === "admit"), "an admission was started").toBe(false);
+      expect(existsSync(made.at), "the ticket").toBe(true);
+      expect(existsSync(made.attempts), "the attempts record").toBe(true);
+      expect(existsSync(made.mine), "the bundle that attempt sealed").toBe(true);
+    });
+  });
+});
+
+describe("a ticket renamed while it is planned renames its spec (D-127)", () => {
+  const SPEC_MD =
+    "# a simple snake game that eats apples to grow longer and gets\n\n## Outcome\n\nA snake eats apples and grows.\n";
+
+  const digestOf = (bytes: Buffer | string): string => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+
+  /** A ticket on the board drafted from `specs/a-simple-snake-game/spec.md`, as `admit --from-spec` records it. */
+  async function planned(process?: typeof runProcess, also?: Partial<ServiceOptions>) {
+    const { service, repo } = fixture(process, undefined, also);
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    const specPath = join(repo, "specs", "a-simple-snake-game", "spec.md");
+    mkdirSync(dirname(specPath), { recursive: true });
+    writeFileSync(specPath, SPEC_MD);
+    const at = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as { admission: Record<string, unknown> };
+    ticket.admission["spec"] = {
+      path: "specs/a-simple-snake-game/spec.md",
+      content_sha256: digestOf(SPEC_MD),
+      files: [],
+      names_that_resolved: null,
+      symbols_judged_at_approval: false,
+    };
+    writeFileSync(at, JSON.stringify(ticket, null, 2));
+    return { service, repo, repoId: registered.id, specPath };
+  }
+
+  it("titles the spec with the new name, the folder and the rest of the file as they were", async () => {
+    const changes: Change[] = [];
+    const { service, repo, repoId, specPath } = await planned(undefined, { changed: (change) => void changes.push(change) });
+    await service.request({ kind: "rename", repoId, key: "PRB-1", title: "Snake game" });
+
+    expect(readFileSync(specPath, "utf8")).toBe(SPEC_MD.replace(/^# .*$/m, "# Snake game"));
+    expect(readdirSync(join(repo, "specs"))).toEqual(["a-simple-snake-game"]);
+    const snapshot = await service.snapshot();
+    expect(snapshot.titles?.[repoId + ":PRB-1"]).toBe("Snake game");
+    expect(snapshot.specs?.find((spec) => spec.slug === "a-simple-snake-game")?.title).toBe("Snake game");
+    expect(changes).toContainEqual(expect.objectContaining({ kind: "records", repoId, key: "PRB-1" }));
+  });
+
+  it("takes the name where the spec file has gone, and writes no spec", async () => {
+    const { service, repoId, specPath } = await planned();
+    rmSync(specPath);
+    await service.request({ kind: "rename", repoId, key: "PRB-1", title: "Snake game" });
+
+    expect(existsSync(specPath)).toBe(false);
+    expect((await service.snapshot()).titles?.[repoId + ":PRB-1"]).toBe("Snake game");
+  });
+
+  it("refuses the rename whole where the spec cannot be retitled, and the ticket keeps its name", async () => {
+    const changes: Change[] = [];
+    const { service, repo, repoId, specPath } = await planned(undefined, { changed: (change) => void changes.push(change) });
+    // A link at spec.md is a path the host refuses to write through.
+    const elsewhere = join(repo, "elsewhere.md");
+    writeFileSync(elsewhere, SPEC_MD);
+    rmSync(specPath);
+    symlinkSync(elsewhere, specPath);
+    const before = (await service.snapshot()).titles?.[repoId + ":PRB-1"];
+    changes.length = 0;
+    await expect(
+      service.request({ kind: "rename", repoId, key: "PRB-1", title: "Snake game" }),
+    ).rejects.toThrow(/symlink/);
+
+    expect((await service.snapshot()).titles?.[repoId + ":PRB-1"]).toBe(before);
+    expect(changes).not.toContainEqual(expect.objectContaining({ kind: "preferences" }));
+    expect(readFileSync(elsewhere, "utf8")).toBe(SPEC_MD);
+  });
+
+  it("carries the verdict the plan was read against its spec with to the renamed spec", async () => {
+    const { service, repo, repoId, specPath } = await planned();
+    const at = join(repo, ".perbo", "tickets", "PRB-1.drift.json");
+    const record = {
+      spec: digestOf(SPEC_MD),
+      promises: `sha256:${"1".repeat(64)}`,
+      origin: "read",
+      findings: [
+        {
+          heading: "The outcome",
+          difference: "The spec says the snake grows, and the plan does not.",
+          options: [
+            { label: "Make the plan say it grows.", detail: null, recommended: true },
+            { label: "Drop growing from the spec.", detail: null, recommended: false },
+          ],
+        },
+      ],
+      dismissed: true,
+      checked_at: "2026-09-01T00:00:00.000Z",
+      model: null,
+    };
+    writeFileSync(at, JSON.stringify(record, null, 2));
+    await service.request({ kind: "rename", repoId, key: "PRB-1", title: "Snake game" });
+
+    expect(JSON.parse(readFileSync(at, "utf8"))).toEqual({ ...record, spec: digestOf(readFileSync(specPath)) });
+    expect(digestOf(readFileSync(specPath))).not.toBe(record.spec);
+  });
+
+  it("refuses the rename whole where the verdict cannot be carried, and the spec keeps its title", async () => {
+    const { service, repo, repoId, specPath } = await planned();
+    const at = join(repo, ".perbo", "tickets", "PRB-1.drift.json");
+    const record = {
+      spec: digestOf(SPEC_MD),
+      promises: `sha256:${"1".repeat(64)}`,
+      origin: "drafted",
+      findings: [],
+      dismissed: false,
+      checked_at: "2026-09-01T00:00:00.000Z",
+      model: null,
+    };
+    writeFileSync(at, JSON.stringify(record, null, 2));
+    // The record reads and cannot be written, so carrying it forward fails.
+    chmodSync(at, 0o444);
+    const before = (await service.snapshot()).titles?.[repoId + ":PRB-1"];
+    try {
+      await expect(
+        service.request({ kind: "rename", repoId, key: "PRB-1", title: "Snake game" }),
+      ).rejects.toThrow();
+    } finally {
+      chmodSync(at, 0o644);
+    }
+
+    expect(readFileSync(specPath, "utf8")).toBe(SPEC_MD);
+    expect(JSON.parse(readFileSync(at, "utf8"))).toEqual(record);
+    expect((await service.snapshot()).titles?.[repoId + ":PRB-1"]).toBe(before);
+  });
+
+  it("keeps the person's name on the spec when the plan is drafted again", async () => {
+    // `admit --start-over` titles the spec with the name it drafts, as the
+    // CLI's own tests show; this stands in for that write.
+    const redraft: typeof runProcess = async (binary, args, options) => {
+      if (args[1] !== "admit" || !args.includes("--start-over")) return runProcess(binary, args, options);
+      const repo = args[args.indexOf("--repo") + 1]!;
+      const specPath = join(repo, "specs", "a-simple-snake-game", "spec.md");
+      writeFileSync(specPath, readFileSync(specPath, "utf8").replace(/^# .*$/m, "# Snake that grows"));
+      const ticket: unknown = JSON.parse(readFileSync(join(repo, ".perbo", "tickets", "PRB-1.json"), "utf8"));
+      return { code: 0, stdout: JSON.stringify({ ticket }), stderr: "", cancelled: false };
+    };
+    const { service, repoId, specPath } = await planned(redraft);
+    await service.request({ kind: "rename", repoId, key: "PRB-1", title: "Snake game" });
+    const session = await service.request({
+      kind: "editingOpen",
+      target: { kind: "planning", repoId, key: "PRB-1" },
+    });
+    const job = await service.request({ kind: "startOver", repoId, id: session.id, key: "PRB-1" });
+    expect((await finished(service, job.id)).state).toBe("completed");
+
+    expect(readFileSync(specPath, "utf8").split("\n")[0]).toBe("# Snake game");
+    expect((await service.snapshot()).titles?.[repoId + ":PRB-1"]).toBe("Snake game");
+  });
+
+  it("leaves an approved ticket's spec as approval read it", async () => {
+    const { service, repo, repoId, specPath } = await planned();
+    execFileSync(globalThis.process.execPath, [resolve("../cli/dist/perbo.js"), "approve", "PRB-1", "--repo", repo], {
+      stdio: "ignore",
+    });
+    await service.request({ kind: "rename", repoId, key: "PRB-1", title: "Snake game" });
+
+    expect(readFileSync(specPath, "utf8")).toBe(SPEC_MD);
+    expect((await service.snapshot()).titles?.[repoId + ":PRB-1"]).toBe("Snake game");
+  });
+});
+
+describe("what the host lets a person archive", () => {
+  it("files a stopped or finished ticket and refuses one its loop still carries", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "approve") return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      if (args[1] === "run") {
+        await held;
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return runProcess(binary, args, options);
+    };
+    const { service, repo } = fixture(runner);
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    const archive = (archived: boolean) =>
+      service.request({ kind: "archive", repoId: registered.id, keys: ["PRB-1"], archived });
+    const refusal = "PRB-1 is still in its loop. Archive it once it has finished or its run has stopped.";
+    await expect(archive(true)).rejects.toThrow(refusal);
+    const detail = await service.detail(registered.id, "PRB-1");
+    const run = await service.request({
+      kind: "run",
+      repoId: registered.id,
+      key: "PRB-1",
+      digest: detail.digest,
+      approve: true,
+      publish: false,
+      resumeFrom: null,
+    });
+    setTicketState(repo, "PRB-1", "executing");
+    await expect(archive(true)).rejects.toThrow(refusal);
+    release();
+    await finished(service, run.id);
+    // Nothing runs for it now: the run stopped where it stood.
+    await archive(true);
+    expect((await service.snapshot()).archived).toEqual([registered.id + ":PRB-1"]);
+    await archive(false);
+    setTicketState(repo, "PRB-1", "pr_open");
+    await expect(archive(true)).rejects.toThrow(refusal);
+    setTicketState(repo, "PRB-1", "failed");
+    await archive(true);
+    expect((await service.snapshot()).archived).toEqual([registered.id + ":PRB-1"]);
+  });
+
+  it("returns a filed ticket to Home for good once its loop starts again", async () => {
+    const runner: typeof runProcess = async (binary, args, options) =>
+      args[1] === "run"
+        ? { code: 0, stdout: "{}", stderr: "", cancelled: false }
+        : runProcess(binary, args, options);
+    const { service, repo } = fixture(runner);
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    setTicketState(repo, "PRB-1", "failed");
+    await service.request({ kind: "archive", repoId: registered.id, keys: ["PRB-1"], archived: true });
+    expect((await service.snapshot()).archived).toEqual([registered.id + ":PRB-1"]);
+    const run = await service.request({
+      kind: "run",
+      repoId: registered.id,
+      key: "PRB-1",
+      digest: (await service.detail(registered.id, "PRB-1")).digest,
+      approve: false,
+      publish: false,
+      resumeFrom: null,
+    });
+    expect((await service.snapshot()).archived).toEqual([]);
+    await finished(service, run.id);
+    // Stopped again, it stays on Home until it is filed again.
+    expect((await service.snapshot()).archived).toEqual([]);
+  });
+});
+
+describe("usage: who is connected, and why a provider has no windows", () => {
+  const signedInToBoth = () =>
+    fixture(async (binary, args, runOptions) =>
+      binary === "codex" || binary === "claude"
+        ? { code: 0, stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }), stderr: "", cancelled: false }
+        : runProcess(binary, args, runOptions),
+    );
+
+  it("keys connected on sign-in, says not installed apart from not signed in, and asks only a signed-in CLI", async () => {
+    const asked: string[] = [];
+    const { service, options } = fixture(async (binary, args, runOptions) => {
+      if (binary === "codex") throw new Error("spawn codex ENOENT");
+      if (binary === "claude")
+        return { code: 0, stdout: JSON.stringify({ loggedIn: false }), stderr: "", cancelled: false };
+      return runProcess(binary, args, runOptions);
+    });
+    const asking = (id: string) => async () => {
+      asked.push(id);
+      return { plan: null, windows: null, detail: "Asked." };
+    };
+    options.usageProbe = { claude: asking("claude"), codex: asking("codex") };
+    const usage = await service.request({ kind: "usage" });
+    const row = (id: string) => usage.providers.find((provider) => provider.id === id);
+    expect(row("codex")).toMatchObject({ connected: false, windows: null, detail: "Codex is not installed on this machine." });
+    expect(row("claude")).toMatchObject({ connected: false, windows: null, detail: "Claude Code is not signed in on this machine." });
+    expect(asked).toEqual([]);
+  });
+
+  it("draws a signed-in provider as connected even when it reports no window", async () => {
+    const { service, options } = signedInToBoth();
+    options.usageProbe = {
+      claude: async () => ({ plan: null, windows: null, detail: "No window." }),
+      codex: async () => ({ plan: null, windows: null, detail: "No window." }),
+    };
+    const usage = await service.request({ kind: "usage" });
+    expect(usage.providers.filter((provider) => provider.id !== "anthropic").map((provider) => provider.connected)).toEqual([true, true]);
+  });
+
+  it("asks both CLIs at once, so neither waits on the other", async () => {
+    const { service, options } = signedInToBoth();
+    const asked: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const holding = (id: string) => async () => {
+      asked.push(id);
+      await held;
+      return { plan: null, windows: null, detail: "Held." };
+    };
+    options.usageProbe = { claude: holding("claude"), codex: holding("codex") };
+    const usage = service.request({ kind: "usage" });
+    try {
+      await vi.waitFor(() => expect(asked.sort()).toEqual(["claude", "codex"]));
+    } finally {
+      release();
+    }
+    await usage;
+  });
+});
+
+describe("deleting a filed ticket", () => {
+  it("deletes a contract with everything it carries, whatever it has on record", async () => {
+    const { service, repo } = fixture();
+    const registered = await service.registerRepository(repo);
+    await finished(
+      service,
+      (await service.request({ kind: "admit", repoId: registered.id, draft }))
+        .id,
+    );
+    await finished(
+      service,
+      (
+        await service.request({
+          kind: "admit",
+          repoId: registered.id,
+          draft: { ...draft, outcome: "Second" },
+        })
+      ).id,
+    );
+    await service.request({
+      kind: "rename",
+      repoId: registered.id,
+      key: "PRB-1",
+      title: "Renamed",
+    });
+    const { ticket_id } = setTicketState(repo, "PRB-2", "plan_review");
+    mkdirSync(join(repo, ".perbo", "state"), { recursive: true });
+    writeFileSync(
+      join(repo, ".perbo", "state", `${ticket_id}.attempts.json`),
+      JSON.stringify({ ticket_id, attempts: [{ attempt_id: "att_1" }] }),
+    );
+    // A recorded attempt is not a reason for the work to stay: a piece of work
+    // is deleted whole at every stage, the loop included, and the evidence
+    // goes with it (D-129).
+    await service.request({ kind: "discard", repoId: registered.id, key: "PRB-2" });
+    expect(
+      existsSync(join(repo, ".perbo", "state", `${ticket_id}.attempts.json`)),
+      "the attempts record",
+    ).toBe(false);
+    await service.request({
+      kind: "discard",
+      repoId: registered.id,
+      key: "PRB-1",
+    });
+    const snapshot = await service.snapshot();
+    expect(snapshot.tasks.map((row) => row.ticket.key)).toEqual([]);
+    expect(snapshot.titles).toEqual({});
+    for (const suffix of [".json", ".contract.json", ".draft.json"])
+      expect(
+        existsSync(join(repo, ".perbo", "tickets", "PRB-1" + suffix)),
+      ).toBe(false);
+    await expect(
+      service.request({ kind: "discard", repoId: registered.id, key: "PRB-1" }),
+    ).rejects.toThrow(/no longer/);
+  });
+
+  it("takes its archive mark with it, because the key it names is never handed out again", async () => {
+    // Home never lists it while the delete goes because the page that pressed
+    // it hides the ticket until a read after the answer (the ui-v2 tests).
+    const { service, repo, changes } = fixture();
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    setTicketState(repo, "PRB-1", "failed");
+    await service.request({ kind: "archive", repoId: registered.id, keys: ["PRB-1"], archived: true });
+    changes.length = 0;
+    await service.request({ kind: "discard", repoId: registered.id, key: "PRB-1" });
+    const entry = registered.id + ":PRB-1";
+    const said = changes.filter((change) => change.kind === "preferences");
+    expect(said.length).toBeGreaterThan(0);
+    for (const change of said) expect(change.archived).not.toContain(entry);
+    const after = await service.snapshot();
+    expect(after.tasks.some((row) => row.ticket.key === "PRB-1")).toBe(false);
   });
 });

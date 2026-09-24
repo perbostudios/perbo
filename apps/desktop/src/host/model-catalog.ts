@@ -9,7 +9,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
+import { DEFAULT_ENV_ALLOW_LIST, EFFORT_LEVELS, scrubEnvironment, type EffortLevel, type EffortProvider } from "@perbo/contracts";
 import { ModelCatalogSchema, ProviderModelSchema } from "../shared/protocol.js";
 import type {
   ModelCatalog,
@@ -29,6 +29,7 @@ const ClaudeResponse = z.object({
           resolvedModel: z.string().optional(),
           displayName: z.string(),
           description: z.string().default(""),
+          supportedEffortLevels: z.array(z.string()).max(20).default([]),
         }),
       )
       .max(1000),
@@ -43,6 +44,10 @@ const CodexPage = z.object({
         description: z.string().default(""),
         hidden: z.boolean().default(false),
         isDefault: z.boolean().default(false),
+        supportedReasoningEfforts: z
+          .array(z.object({ reasoningEffort: z.string() }))
+          .max(20)
+          .default([]),
       }),
     )
     .max(1000),
@@ -56,10 +61,37 @@ const ApiPage = z.object({
   last_id: z.string().nullable(),
 });
 
+/**
+ * Claude Code in stream-json mode with repository instructions, hooks, tools,
+ * plugins and MCP servers off. The model catalog and the usage probe both speak
+ * control requests to it and never write a user message, so no turn starts.
+ */
+export const CLAUDE_METADATA_ARGS: readonly string[] = [
+  "-p",
+  "--input-format",
+  "stream-json",
+  "--output-format",
+  "stream-json",
+  "--verbose",
+  "--no-session-persistence",
+  "--setting-sources",
+  "user",
+  "--settings",
+  '{"disableAllHooks":true,"enabledPlugins":{}}',
+  "--strict-mcp-config",
+  "--mcp-config",
+  '{"mcpServers":{}}',
+  "--tools",
+  "",
+  "--disable-slash-commands",
+  "--no-chrome",
+  "--safe-mode",
+];
+
 /** Only metadata requests are sent. No prompt, thread, tool approval or inference turn. */
 export function metadataProcess<T = ProviderModel[]>(options: {
   binary: string;
-  args: string[];
+  args: readonly string[];
   cwd: string;
   env: NodeJS.ProcessEnv;
   timeoutMs: number;
@@ -174,6 +206,30 @@ export function metadataProcess<T = ProviderModel[]>(options: {
   });
 }
 
+/**
+ * The levels a catalog row reports that its provider's CLI takes, in the
+ * table's order. A level Perbo does not know is left out rather than guessed at,
+ * and a row reporting none offers no effort control.
+ */
+function efforts(provider: EffortProvider, reported: readonly string[]): EffortLevel[] {
+  return EFFORT_LEVELS[provider].filter((level) => reported.includes(level));
+}
+
+/**
+ * Claude Code names a row by its family ("Fable") and puts the version at the
+ * head of the description ("Fable 5.1 · Most capable…"); the head is the name a
+ * person tells the models apart by, and the rest describes it. A head that
+ * does not read as a family and a version ("Fable 5.1") is not a name, and the
+ * row keeps its display name and its whole description.
+ */
+function claudeRow(displayName: string, description: string): { label: string; description: string } {
+  const split = description.indexOf(" · ");
+  const head = split > 0 ? description.slice(0, split) : "";
+  return /^[A-Z][a-z]+ \d/.test(head)
+    ? { label: head, description: description.slice(split + 3) }
+    : { label: displayName, description };
+}
+
 function unique(models: ProviderModel[]): ProviderModel[] {
   const byId = new Map<string, ProviderModel>();
   for (const candidate of models) {
@@ -247,6 +303,7 @@ export async function discoverModels(
           label: model.display_name,
           description: "",
           isDefault: false,
+          efforts: [],
         })),
       );
       after = page.has_more ? page.last_id : null;
@@ -272,27 +329,7 @@ export async function discoverModels(
           cwd: scratch,
           env,
           timeoutMs,
-          args: [
-            "-p",
-            "--input-format",
-            "stream-json",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--no-session-persistence",
-            "--setting-sources",
-            "user",
-            "--settings",
-            '{"disableAllHooks":true,"enabledPlugins":{}}',
-            "--strict-mcp-config",
-            "--mcp-config",
-            '{"mcpServers":{}}',
-            "--tools",
-            "",
-            "--disable-slash-commands",
-            "--no-chrome",
-            "--safe-mode",
-          ],
+          args: CLAUDE_METADATA_ARGS,
           initial: {
             type: "control_request",
             request_id: "catalog",
@@ -319,9 +356,9 @@ export async function discoverModels(
               .filter((model) => !(model.value === "default" && aliasTarget !== undefined && named))
               .map((model) => ({
                 id: model.resolvedModel ?? model.value,
-                label: model.displayName,
-                description: model.description,
+                ...claudeRow(model.displayName, model.description),
                 isDefault: model.value === "default" || (named && model.resolvedModel === aliasTarget && model.resolvedModel !== undefined),
+                efforts: efforts("claude-cli", model.supportedEffortLevels),
               }));
           },
         });
@@ -386,6 +423,10 @@ export async function discoverModels(
                   label: model.displayName,
                   description: model.description,
                   isDefault: model.isDefault,
+                  efforts: efforts(
+                    "codex-cli",
+                    model.supportedReasoningEfforts.map((each) => each.reasoningEffort),
+                  ),
                 })),
             );
             if (!page.nextCursor) return collected;

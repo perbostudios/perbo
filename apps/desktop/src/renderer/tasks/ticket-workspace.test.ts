@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { projectTicket } from "./ticket-workspace.js";
+import { TicketStateSchema } from "@perbo/contracts";
+import { homeRows, homeTally, homeTone, projectTicket } from "./ticket-workspace.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import type { Job } from "../../shared/protocol.js";
 
@@ -13,7 +14,34 @@ async function fixture() {
   const job: Job = { id: crypto.randomUUID(), repoId: row.repoId, key: row.ticket.key, resultKey: null, kind: "run", state: "failed", label: "Run", startedAt: "2026-09-09T09:00:00.000Z", endedAt: "2026-09-09T09:01:00.000Z", log: "", error: "CLI exited with code 2", result: null };
   return { workspace, row, detail, job };
 }
+/**
+ * A run under way for a ticket mid-loop, and nothing for any other: a ticket
+ * mid-loop with nothing running it is a run that stopped.
+ */
+const underway = (state: string, job: Job): Job[] =>
+  ["provisioning", "executing", "verifying", "independent_review"].includes(state)
+    ? [{ ...job, state: "running", endedAt: null, error: null }]
+    : [];
 describe("ticket workspace projection", () => {
+  it("colours a Home row by where its journey stands", async () => {
+    const { workspace, row, detail, job } = await fixture();
+    const green = ["pr_open", "merged", "closed", "done", "deployed", "observing"];
+    const red = ["failed", "cancelled", "inconclusive", "rolled_back", "plan_invalid"];
+    const tones = Object.fromEntries(TicketStateSchema.options.map((state) => {
+      row.ticket.state = state;
+      workspace.jobs = underway(state, job);
+      return [state, projectTicket(workspace, row, detail).tone];
+    }));
+    expect(tones).toEqual(Object.fromEntries(TicketStateSchema.options.map((state) => [
+      state,
+      green.includes(state) ? "green" : red.includes(state) ? "red" : state === "changes_requested" ? "yellow" : null,
+    ])));
+    // A decision the loop is already acting on is not one waiting for the person.
+    row.ticket.state = "changes_requested";
+    workspace.jobs = [{ ...job, state: "running" }];
+    expect(projectTicket(workspace, row, detail).tone).toBeNull();
+  });
+
   it.each(["pr_open", "changes_requested", "provisioning"] as const)("honours canonical %s after a nonzero process exit", async (state) => {
     const { workspace, row, detail, job } = await fixture();
     row.ticket.state = state;
@@ -21,7 +49,7 @@ describe("ticket workspace projection", () => {
     workspace.jobs = [job];
     const before = structuredClone({ workspace, row, detail });
     const result = projectTicket(workspace, row, detail);
-    expect(result.primary.label).toBe(state === "pr_open" ? "Review result" : state === "changes_requested" ? "Answer" : "Review and recover");
+    expect(result.primary.label).toBe(state === "pr_open" ? "Review result" : state === "changes_requested" ? "Answer" : "See the stopped run");
     expect(result.recoverable).toBe(state === "provisioning");
     expect({ workspace, row, detail }).toEqual(before);
   });
@@ -33,7 +61,7 @@ describe("ticket workspace projection", () => {
     workspace.jobs = [other];
     expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: true, active: undefined, resultReady: true });
     workspace.jobs.push({ ...job, key: null, resultKey: row.ticket.key, state: "stopping" });
-    expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: true, resultReady: false, primary: { label: "Watch" }, screen: "loop" });
+    expect(projectTicket(workspace, row, detail)).toMatchObject({ busy: true, resultReady: false, primary: { label: "See the stopped run" }, screen: "stopped" });
     expect(projectTicket(workspace, row, detail, "output").screen).toBe("output");
   });
 
@@ -45,7 +73,7 @@ describe("ticket workspace projection", () => {
     detail.attempts.push({ ...detail.attempts[0]!, id: "later", review: null, reviewDecision: null, checks: [], verification: null });
     const result = projectTicket(workspace, row, detail);
     expect(result).toMatchObject({ resultReady: false, recoverable: true, evidence: { ready: false, verified: null, kind: "not-retained" } });
-    expect(result.primary.label).toBe("Review and recover");
+    expect(result.primary.label).toBe("See the stopped run");
   });
 
   it("distinguishes unloaded, stale and absent evidence", async () => {
@@ -108,7 +136,7 @@ describe("ticket workspace projection", () => {
     row.ticket.state = "executing";
     const result = projectTicket({ jobs: [], refreshingRepos: [] }, row, detail);
     expect(result.recoverable).toBe(true);
-    expect(result.primary.label).toBe("Review and recover");
+    expect(result.primary.label).toBe("See the stopped run");
   });
 
   it("withholds recovery while a completed command's canonical records are being refreshed", async () => {
@@ -119,5 +147,77 @@ describe("ticket workspace projection", () => {
     expect(projectTicket(workspace, row, detail).recoverable).toBe(true);
     row.ticket.state = "pr_open";
     expect(projectTicket(workspace, row, detail, "loop", true)).toMatchObject({ resultReady: false, screen: "loop", evidence: { ready: false } });
+  });
+});
+
+describe("where a Home ticket stands", () => {
+  it("sorts every state into a decision, a stop, the journey's end or none", async () => {
+    const { workspace, row, job } = await fixture();
+    const green = ["pr_open", "merged", "closed", "done", "deployed", "observing"];
+    const red = ["failed", "cancelled", "inconclusive", "rolled_back", "plan_invalid"];
+    const url = "https://github.com/example/repo/pull/1";
+    for (const state of TicketStateSchema.options) {
+      row.ticket.state = state;
+      row.ticket.delivery.pull_request_url = null;
+      workspace.jobs = underway(state, job);
+      expect([state, homeTone(workspace, row)]).toEqual([
+        state,
+        green.includes(state) ? "green" : red.includes(state) ? "red" : state === "changes_requested" ? "yellow" : null,
+      ]);
+    }
+    // An opened pull request is the journey's end, whether or not it is merged.
+    row.ticket.state = "pr_open";
+    row.ticket.delivery.pull_request_url = url;
+    expect(homeTone(workspace, row)).toBe("green");
+    expect(projectTicket(workspace, row).tone).toBe("green");
+  });
+
+  it("reads a run under way as none, a stop as red at once, and a decision being acted on as none", async () => {
+    const { workspace, row, job } = await fixture();
+    row.ticket.state = "executing";
+    workspace.jobs = [{ ...job, state: "running", endedAt: null, error: null }];
+    expect(homeTone(workspace, row)).toBeNull();
+    workspace.jobs = [{ ...job, state: "stopping", endedAt: null, error: null }];
+    expect(homeTone(workspace, row)).toBe("red");
+    workspace.jobs = [];
+    // Stranded mid-loop with nothing running for it: a stop outside the executor's window.
+    expect(homeTone(workspace, row)).toBe("red");
+    row.ticket.state = "changes_requested";
+    workspace.jobs = [{ ...job, kind: "decide", state: "running", endedAt: null, error: null }];
+    expect(homeTone(workspace, row)).toBeNull();
+  });
+
+  it("does not move while its repository's records are read again", async () => {
+    const { workspace, row, job } = await fixture();
+    row.ticket.state = "executing";
+    workspace.jobs = [{ ...job, state: "cancelled" }];
+    workspace.refreshingRepos = [row.repoId];
+    // The projection waits for the read before offering the stopped page; the tone does not.
+    expect(projectTicket(workspace, row).recoverable).toBe(false);
+    expect(homeTone(workspace, row)).toBe("red");
+    row.ticket.state = "changes_requested";
+    workspace.jobs = [];
+    expect(homeTone(workspace, row)).toBe("yellow");
+    // A run that completed while its ticket still reads mid-loop is the record not yet read.
+    row.ticket.state = "independent_review";
+    workspace.jobs = [{ ...job, state: "completed", error: null }];
+    expect(homeTone(workspace, row)).toBeNull();
+    workspace.refreshingRepos = [];
+    expect(homeTone(workspace, row)).toBe("red");
+  });
+
+  it("counts Home's tickets at each tone, leaving out the filed and the ones still being planned", async () => {
+    const { workspace } = await fixture();
+    const rows = homeRows(workspace);
+    expect(rows.some((row) => row.ticket.state === "plan_review")).toBe(false);
+    const tally = homeTally(workspace, rows);
+    expect(tally).toEqual({
+      yellow: rows.filter((row) => homeTone(workspace, row) === "yellow").length,
+      red: rows.filter((row) => homeTone(workspace, row) === "red").length,
+      green: rows.filter((row) => homeTone(workspace, row) === "green").length,
+    });
+    // The sample: a decision; a stopped run and two tickets mid-run with
+    // nothing running them; and an open pull request and a merge not yet filed.
+    expect(tally).toEqual({ yellow: 1, red: 3, green: 2 });
   });
 });

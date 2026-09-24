@@ -33,6 +33,11 @@ const session = (over: Record<string, unknown> = {}): EditingSession =>
     phase: "editing",
     error: null,
     operation: null,
+    drift: null,
+    change: null,
+    lastPane: null,
+    lastView: null,
+    interviewModel: null,
     ...over,
   });
 /** The rest of the host, as this module sees it: one session, one repository, no contract. */
@@ -55,6 +60,7 @@ function deps(
     },
     repository: () => repo,
     contract: () => ({ contract: { outcome: "P0" } as never }),
+    marks: { markChangeOn: () => undefined },
   };
 }
 const sections: SpecSections = {

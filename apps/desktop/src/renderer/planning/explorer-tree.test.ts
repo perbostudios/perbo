@@ -15,8 +15,7 @@ import { rowMark, viaLabel } from "./explorer-tree.js";
 const form = (prohibited: readonly string[]): EditingForm =>
   EditingFormSchema.parse({
     draft: { outcome: "", criteria: [], paths: [], prohibited },
-    models: {},
-    step: 1,
+    models: { executorEffort: null, reviewerEffort: null },
     editing: null,
     criterion: { text: "", assertion: "", kind: "test" },
     newPath: null,

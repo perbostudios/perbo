@@ -185,9 +185,13 @@ export function ImpactPane({ workspace, navigate, editor }: PageProps & { editor
             {view.index.commit === null ? "" : ` against ${view.index.commit.slice(0, 7)}`}
           </span>
         )}
-        <Button variant={view ? "secondary" : "primary"} onClick={check} disabled={impact.isFetching}>
-          {view ? "Check again" : "Check impact"}
-        </Button>
+        {/* The first check is asked for where the pane says nothing is checked
+            yet; the header offers only the check after it. */}
+        {view && (
+          <Button variant="secondary" onClick={check} disabled={impact.isFetching}>
+            Check again
+          </Button>
+        )}
       </div>
       {impact.error && <Notice tone="danger">{errorMessage(impact.error)}</Notice>}
       {failure && <Notice tone="danger">{failure}</Notice>}

@@ -4,6 +4,7 @@ import { Button, Notice, cx } from "../ui/index.js";
 import { bridge, errorMessage, useGraph } from "../workspace/index.js";
 import { draftHistory, graphHistory, latestUndoable } from "./history.js";
 import type { HistoryRow } from "./history.js";
+import { INTERVIEWER_NAME } from "../../shared/protocol.js";
 import type { useContractEditing } from "../contract-editor.js";
 
 /**
@@ -90,7 +91,7 @@ export function HistoryDrawer({ editor, onClose }: { editor: Editor; onClose: ()
         {rows.length === 0 ? (
           <p className="small muted">
             Nothing yet. Every change to this planning lands here, whether you made it by hand or
-            asked the interview for it.
+            asked the chat for it.
           </p>
         ) : (
           <ol className="hist-rows">
@@ -99,7 +100,7 @@ export function HistoryDrawer({ editor, onClose }: { editor: Editor; onClose: ()
                 <span className="hist-n">{row.n}</span>
                 <span className="hist-line">{row.summary}</span>
                 <small className={`author author--${row.author}`}>
-                  {row.author === "you" ? "you" : "the interview"}
+                  {row.author === "you" ? "you" : INTERVIEWER_NAME}
                 </small>
                 {row.replaced && <span className="small muted">replaced by a re-draft</span>}
                 {row.n === undoable?.n && (

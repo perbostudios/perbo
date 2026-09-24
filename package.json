@@ -19,7 +19,8 @@
     "desktop:dev": "pnpm desktop:build && pnpm --filter @perbo/desktop dev",
     "desktop:preview": "pnpm --filter @perbo/desktop preview",
     "desktop:start": "pnpm --filter @perbo/desktop start",
-    "desktop:package": "pnpm desktop:build && pnpm --filter @perbo/desktop package"
+    "desktop:package": "pnpm desktop:build && pnpm --filter @perbo/desktop package",
+    "desktop:run": "pnpm desktop:package && pnpm --filter @perbo/desktop launch"
   },
   "devDependencies": {
     "turbo": "2.10.12"

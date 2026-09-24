@@ -4,8 +4,12 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+
+
+LAUNCHES = ("desktop:run", "desktop:start")
 
 
 class SetupLocalTests(unittest.TestCase):
@@ -61,7 +65,7 @@ class SetupLocalTests(unittest.TestCase):
         self.assertEqual(len(installs), 2)
         self.assertEqual(installs[0]["args"], ["exec", "--yes", "--package=pnpm@9.15.9", "--", "pnpm", "install", "--frozen-lockfile", "--prod=false"])
         self.assertTrue(all(Path(call["cwd"]).resolve() == self.root.resolve() for call in calls))
-        self.assertFalse(any("desktop:start" in call["args"] for call in calls))
+        self.assertFalse(any(launch in call["args"] for call in calls for launch in LAUNCHES))
         self.assertEqual(self.profile.read_text(encoding="utf-8"), '{"existing":"preserve me"}')
         self.assertTrue(os.access(self.script, os.X_OK))
 
@@ -69,13 +73,14 @@ class SetupLocalTests(unittest.TestCase):
         result = self.run_setup()
         self.assertEqual(result.returncode, 0, result.stderr)
         commands = [call["args"][-1] for call in self.calls()]
-        self.assertEqual(commands[-2:], ["desktop:build", "desktop:start"])
+        launch = "desktop:run" if sys.platform == "darwin" else "desktop:start"
+        self.assertEqual(commands[-2:], ["desktop:build", launch])
 
     def test_failed_build_never_launches(self) -> None:
         result = self.run_setup(extra={"FAIL_BUILD": "1"})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Resolve the error above and rerun", result.stderr)
-        self.assertFalse(any("desktop:start" in call["args"] for call in self.calls()))
+        self.assertFalse(any(launch in call["args"] for call in self.calls() for launch in LAUNCHES))
 
     def test_failed_prerequisite_explains_remedy_before_installing(self) -> None:
         result = self.run_setup(extra={"FAIL_TOOL": "git"})

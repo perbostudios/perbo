@@ -264,6 +264,41 @@ describe("startLineProcess", () => {
     expect(close.code).toBe(0);
   });
 
+  it.skipIf(windows)(
+    "says the child has gone where something it started still holds its output",
+    async () => {
+      // The child prints the pid of a grandchild that inherits its stdout and
+      // outlives it, then exits: `close` waits for the grandchild, `exit` does not.
+      const out: string[] = [];
+      let closed = false;
+      const exited = new Promise<void>((resolve, reject) => {
+        startLineProcess(
+          process.execPath,
+          script(
+            "const c=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},20000)'],{stdio:'inherit'});" +
+              "process.stdout.write(c.pid+'\\n',()=>process.exit(0));",
+          ),
+          {
+            cwd: process.cwd(),
+            onLine: (line) => out.push(line),
+            onClose: () => {
+              closed = true;
+            },
+            onExit: resolve,
+            onError: reject,
+          },
+        );
+      });
+      try {
+        await exited;
+        expect(closed, "the grandchild still holds the output").toBe(false);
+        expect(out, "what the child wrote before it went was read first").toHaveLength(1);
+      } finally {
+        for (const pid of out) process.kill(Number(pid));
+      }
+    },
+  );
+
   it("says so rather than growing without a bound when one line never ends", async () => {
     const { out, stderr, close } = await lines(
       script(

@@ -27,6 +27,7 @@ function snapshot(rows: TaskRow[], over: Partial<Snapshot> = {}): Snapshot {
   return {
     tasks: rows,
     titles: {},
+    jobs: [],
     archived: rows.map((entry) => entry.repoId + ":" + entry.ticket.key),
     ...over,
   } as Snapshot;

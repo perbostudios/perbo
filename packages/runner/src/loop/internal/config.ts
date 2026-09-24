@@ -2,6 +2,9 @@ import { z } from "zod";
 import {
   DEFAULT_MERGE_MODE,
   DEFAULT_SPEC_FOLDER,
+  EFFORT_LEVELS,
+  EffortLevelSchema,
+  effortFits,
   ExecutorSkillsSchema,
   LimitsTableSchema,
   MaterializationManifestSchema,
@@ -140,6 +143,14 @@ export const TicketRunConfigSchema = z.strictObject({
   reviewer_model: z.string().min(1).nullable().default(null),
   reviewer_provider: z.enum(MODEL_PROVIDERS).default("claude-cli"),
   /**
+   * How hard the executor's model and the reviewer's model think, each in its
+   * own provider's words (`EFFORT_LEVELS`). Null sends nothing on Claude
+   * Code; Codex starts at medium and the API at high. A provider setting like
+   * the model: it changes neither the reviewer's prompt nor its policy (D-079).
+   */
+  effort: EffortLevelSchema.nullable().default(null),
+  reviewer_effort: EffortLevelSchema.nullable().default(null),
+  /**
    * The hard cap on remediation rounds (SCP-194), above the progress rule
    * rather than instead of it: a round that closed a finding earns the next
    * until this or the ticket budget stops it, and a round that closed nothing
@@ -221,6 +232,18 @@ export const TicketRunConfigSchema = z.strictObject({
    * reads nothing at all, because there is no pull request to read checks on.
    */
   delivery_checks_bound_ms: z.number().int().min(0).default(DEFAULT_DELIVERED_CHECKS_BOUND_MS),
+}).superRefine((value, context) => {
+  for (const [key, provider, effort] of [
+    ["effort", value.agent_provider, value.effort],
+    ["reviewer_effort", value.reviewer_provider, value.reviewer_effort],
+  ] as const) {
+    if (effort !== null && !effortFits(provider, effort))
+      context.addIssue({
+        code: "custom",
+        path: [key],
+        message: `${provider} takes ${EFFORT_LEVELS[provider].join(", ")}, not ${effort}`,
+      });
+  }
 }).transform((value) => ({ ...value, agent_binary: value.agent_binary ?? (value.agent_provider === "codex-cli" ? "codex" : "claude"), model: value.model ?? (value.agent_provider === "codex-cli" ? "gpt-5.6-terra" : "claude-opus-5") }));
 export type TicketRunConfig = z.infer<typeof TicketRunConfigSchema>;
 

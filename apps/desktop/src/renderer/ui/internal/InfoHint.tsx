@@ -59,9 +59,17 @@ export function InfoHint({
 
   const place = useCallback(() => {
     const anchor = dot.current?.getBoundingClientRect();
-    if (anchor === undefined) return;
+    const held = body.current;
+    if (anchor === undefined || !held) return;
     const width = Math.min(WIDTH, window.innerWidth - EDGE * 2);
-    const panel = body.current?.getBoundingClientRect().height ?? 0;
+    const drawn = held.getBoundingClientRect();
+    const panel = drawn.height;
+    // A transformed or filtered ancestor, which the page's entrance animation
+    // leaves behind, holds a fixed panel in place of the window, and `top` and
+    // `left` count from its corner. Where the panel is drawn, less where it
+    // was put, is that corner, so the window's edges are measured from it.
+    const originLeft = drawn.left - (parseFloat(held.style.left) || 0);
+    const originTop = drawn.top - (parseFloat(held.style.top) || 0);
     // Below the dot where there is room for it, above where there is not.
     const under = anchor.bottom + GAP;
     const top = under + panel > window.innerHeight - EDGE ? anchor.top - GAP - panel : under;
@@ -69,8 +77,8 @@ export function InfoHint({
     // either edge — the dock it hangs from can be narrower than the panel.
     const right = Math.min(window.innerWidth - EDGE, anchor.right);
     setAt({
-      top: Math.max(EDGE, top),
-      left: Math.max(EDGE, right - width),
+      top: Math.max(EDGE, top) - originTop,
+      left: Math.max(EDGE, right - width) - originLeft,
       width,
     });
   }, []);

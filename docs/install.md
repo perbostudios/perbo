@@ -24,9 +24,10 @@ Clone this repository and run:
 ```
 
 It checks Node and Git, fetches the pinned pnpm through npm's cache with no global install,
-installs the locked dependencies, builds the CLI and the desktop, and opens Perbo. Rerunning it
-preserves your profile, repositories and provider logins; add `--no-launch` to build without
-opening a window.
+installs the locked dependencies, builds the CLI and the desktop, and opens it. On macOS it packages
+the desktop as Perbo.app in `apps/desktop/release/<platform>/`, where it can be reopened without
+rebuilding; elsewhere it starts the desktop from the checkout. Rerunning it preserves your profile,
+repositories and provider logins; add `--no-launch` to build without opening a window.
 
 Without a checkout, a tagged release packs the CLI alone into a versioned archive:
 

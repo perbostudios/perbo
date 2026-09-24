@@ -44,6 +44,7 @@ export function scriptedDrafter(
 export const submits = (input: unknown) => [{ tool: SUBMIT_REVIEW_TOOL, input }];
 
 export const validDraft = {
+  name: "Activation email on signup",
   outcome: "New users receive an activation email within 60 seconds of signing up.",
   acceptance_criteria: [
     {
@@ -73,6 +74,7 @@ export const validDraft = {
  * without a model.
  */
 export const graphedDraft = {
+  name: "Queued and retried activation email",
   outcome: "New users receive an activation email within 60 seconds of signing up.",
   acceptance_criteria: [
     {

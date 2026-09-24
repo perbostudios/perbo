@@ -379,8 +379,14 @@ export interface InspectSubject {
   ticket: string;
   ticket_id: string;
   /**
-   * The outcome the attempts were made against. A ticket's is its title; a
-   * local run's is on the run record `perbo run` wrote before it started.
+   * What a ticket is called (D-127).
+   * `null` for work no ticket describes, which has only an outcome.
+   */
+  title: string | null;
+  /**
+   * The outcome the attempts were made against: a ticket's is its contract's,
+   * `null` where the contract cannot be read; a local run's is on the run
+   * record `perbo run` wrote before it started.
    */
   outcome: string | null;
   /** Where a local run's contract came from: `arguments`, or a pull request. */
@@ -536,6 +542,7 @@ export const attemptsRecordSubject: ResolveSubject = (storeDirectory, name) => {
     kind: "local",
     ticket: record?.label ?? name,
     ticket_id: record?.run_id ?? name,
+    title: null,
     outcome: record?.contract.outcome ?? null,
     contract_source: record?.source ?? null,
     refusal: record?.refusal ?? null,
@@ -2084,9 +2091,7 @@ const ticketFileSubject = (storeDirectory: string, key: string): InspectSubject 
     kind: "ticket",
     ticket: ticket.key,
     ticket_id: ticket.ticket_id,
-    // A ticket's contract is its own; what it is *for* is its title, which is
-    // the field a local run's outcome stands in the same column as.
-    outcome: ticket.title,
+    title: ticket.title,
     contract_source: null,
     // A ticket's history is on the ticket file; a refusal is recorded on the
     // record a run with no ticket writes about itself, and there is none here.
@@ -2123,13 +2128,13 @@ const ticketFileSubject = (storeDirectory: string, key: string): InspectSubject 
       spec: ticket.admission.spec ?? null,
     }),
     runs_started: runsStartedBy(ticket),
-    ...graphOf(storeDirectory, ticket),
+    ...planOf(storeDirectory, ticket),
   };
 };
 
 /**
- * The plan's graph and its size, read from the contract beside the ticket and
- * the approach beside that (D-100, D-104).
+ * The plan's outcome, its graph and its size, read from the contract beside
+ * the ticket and the approach beside that (D-100, D-104).
  *
  * The size counts over this checkout's tracked files, because that is where the
  * work would land; a contract that cannot be read leaves all of it null rather
@@ -2137,10 +2142,11 @@ const ticketFileSubject = (storeDirectory: string, key: string): InspectSubject 
  * still answerable, and an approach record that cannot be read, or names
  * another plan, is reported as the problem it is rather than as no order.
  */
-function graphOf(
+function planOf(
   storeDirectory: string,
   ticket: DisplayTicket,
 ): {
+  outcome: string | null;
   nodes: readonly PlanNode[] | null;
   edges: readonly GraphEdge[] | null;
   approach_problem: string | null;
@@ -2150,7 +2156,7 @@ function graphOf(
   try {
     contract = readContract(storeDirectory, ticket.key);
   } catch {
-    return { nodes: null, edges: null, approach_problem: null, size: null };
+    return { outcome: null, nodes: null, edges: null, approach_problem: null, size: null };
   }
   const nodes = planNodes(contract);
   let approachProblem: string | null = null;
@@ -2163,6 +2169,7 @@ function graphOf(
     }
   })();
   return {
+    outcome: contract.outcome,
     nodes: nodes.length > 0 ? nodes : null,
     edges: nodes.length > 0 && approachProblem === null ? (approach?.edges ?? []) : null,
     approach_problem: approachProblem,

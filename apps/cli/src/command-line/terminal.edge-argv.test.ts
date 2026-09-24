@@ -79,7 +79,7 @@ describe("the desktop host", () => {
     ]);
     expect(args).toMatchObject({
       prefix: "PRB",
-      title: "Search results paginate",
+      outcome: "Search results paginate",
       target: { repo: REPO, store: null },
     });
     expect(output.json).toBe(true);

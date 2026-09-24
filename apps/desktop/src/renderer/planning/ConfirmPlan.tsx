@@ -1,6 +1,7 @@
 import { Button } from "../ui/index.js";
 import type { PageProps } from "../shell/route.js";
 import type { useContractEditing } from "../contract-editor.js";
+import { confirmRoute, planApproved } from "./panes.js";
 
 type Editor = ReturnType<typeof useContractEditing>;
 
@@ -18,6 +19,9 @@ type Editor = ReturnType<typeof useContractEditing>;
  * the base — and carries the one approval there is. A second approval on a
  * pane that does not say what it is freezing would be a person agreeing to
  * something they were never shown.
+ *
+ * It goes where {@link confirmRoute} says every way from the plan to the
+ * contract goes.
  *
  * The Graph keeps its own footer rather than this one: it says the same thing
  * with the division's file count and the run queued ahead of it, which are
@@ -37,21 +41,26 @@ export function ConfirmPlan({
   // No plan, nothing to confirm: during the spec these panes are read while the
   // work is still being described, and there is no contract to go to yet.
   if (key === null) return null;
-  const approved =
-    workspace.tasks.find(
-      (row) => row.repoId === editor.repoId && row.ticket.key === key,
-    )?.ticket.approved_at != null;
+  const approved = planApproved(workspace, editor.repoId, key);
+  // A turn in flight may still move this plan, and what approving freezes is
+  // what the contract holds when it is read (ADR-0016). The way onward waits
+  // for the turn, and says so rather than going quiet.
+  const thinking = !approved && (workspace.working ?? []).includes(editor.session?.id ?? "");
   return (
     <div className="approve-actions pane-confirm">
       <span className="small muted">
         {approved
           ? "This contract is approved; what it froze is on its own page."
-          : "The contract is where approving freezes this."}
+          : thinking
+            ? "Waiting for the chat to finish this turn…"
+            : "The contract is where approving freezes this."}
       </span>
       <Button
         variant="primary"
-        disabled={busy}
-        onClick={() => navigate({ page: "task", repoId: editor.repoId, key, view: "contract" })}
+        disabled={busy || thinking}
+        onClick={() =>
+          navigate(confirmRoute({ repoId: editor.repoId, key, sessionId: editor.session?.id, approved }))
+        }
       >
         {approved ? "Open the contract" : "Confirm the plan"}
       </Button>

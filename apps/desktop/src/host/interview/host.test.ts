@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { createScratch } from "@perbo/test-support";
 import { InterviewHost, type InterviewDeps } from "./host.js";
 import { ContractEditing } from "../../shared/contract-editing.js";
@@ -51,6 +52,10 @@ class FakeInterview {
   stderr(text: string): void {
     this.options.onStderr?.(text);
   }
+  /** The child itself gone, with its output still held by something it started. */
+  exit(): void {
+    this.options.onExit?.();
+  }
   close(code: number, stopped = false): void {
     this.options.onClose?.({ code, stopped } as Parameters<
       NonNullable<LineProcessOptions["onClose"]>
@@ -59,7 +64,11 @@ class FakeInterview {
 }
 
 /** A whole interview host over an in-memory editing record and an in-memory child. */
-function host(repo: RegisteredRepository) {
+function host(
+  repo: RegisteredRepository,
+  /** The catalog the chat's model is read from; none by default, so it starts on the planning's own. */
+  known: InterviewDeps["catalogs"]["known"] = () => Promise.resolve(undefined),
+) {
   let records: EditingSession[] = [];
   const told: Change[] = [];
   const spawned: { args: string[]; child: FakeInterview }[] = [];
@@ -78,6 +87,7 @@ function host(repo: RegisteredRepository) {
     },
     stop: () => Promise.resolve(),
     id: () => crypto.randomUUID(),
+    specFolder: () => "specs",
     standing: () => [],
     setStanding: () => undefined,
   });
@@ -89,6 +99,12 @@ function host(repo: RegisteredRepository) {
         throw new Error("no contract in this test");
       },
     },
+    detail: () => Promise.reject(new Error("no detail in this test")),
+    marks: { pairOf: () => null, recordChangeSince: () => undefined },
+    catalogs: { known },
+    sessions: () => records,
+    draftedFrom: () => Promise.resolve(null),
+    reread: () => undefined,
     cli: {
       spawn: (args, _repo, options) => {
         const child = new FakeInterview(options);
@@ -127,15 +143,15 @@ describe("starting an interview", () => {
   it("refuses a planning that belongs to another repository", async () => {
     const w = host(repository());
     const session = await w.open();
-    expect(() =>
+    await expect(
       w.interviews.start(session.id, "80000000-0000-4000-8000-00000000000f"),
-    ).toThrow("This planning belongs to another repository.");
+    ).rejects.toThrow("This planning belongs to another repository.");
   });
 
   it("refuses to start before the spec has a name", async () => {
     const w = host(repository());
     const session = await w.open();
-    expect(() => w.interviews.start(session.id)).toThrow();
+    await expect(w.interviews.start(session.id)).rejects.toThrow();
     expect(w.spawned).toHaveLength(0);
     // A refusal leaves no interview behind for the snapshot to count.
     expect(w.interviews.running()).toEqual([]);
@@ -145,7 +161,7 @@ describe("starting an interview", () => {
     const w = host(repository());
     const session = await w.open();
     w.editing.recordSpec(session.id, "retry-a-failed-run");
-    const status = w.interviews.start(session.id);
+    const status = await w.interviews.start(session.id);
     expect(status.running).toBe(true);
     expect(w.spawned).toHaveLength(1);
     expect(w.spawned[0]?.args.slice(0, 3)).toEqual([
@@ -153,7 +169,7 @@ describe("starting an interview", () => {
       "--spec",
       "specs/retry-a-failed-run",
     ]);
-    w.interviews.start(session.id);
+    await w.interviews.start(session.id);
     expect(w.spawned).toHaveLength(1);
     expect(w.interviews.running()).toEqual([session.id]);
   });
@@ -162,12 +178,12 @@ describe("starting an interview", () => {
     const w = host(repository());
     const session = await w.open();
     w.editing.recordSpec(session.id, "retry-a-failed-run");
-    w.interviews.start(session.id);
+    await w.interviews.start(session.id);
     w.spawned[0]!.child.say(started("sdk-1"));
     expect(w.editing.read(session.id).interviewSession).toBe("sdk-1");
     expect(w.conversation(session.id).at(-1)?.line).toMatchObject({ kind: "note" });
     w.spawned[0]!.child.close(0);
-    w.interviews.start(session.id);
+    await w.interviews.start(session.id);
     expect(w.spawned[1]?.args).toContain("--session");
     expect(w.spawned[1]?.args).toContain("sdk-1");
   });
@@ -176,7 +192,7 @@ describe("starting an interview", () => {
     const w = host(repository());
     const session = await w.open();
     w.editing.recordSpec(session.id, "retry-a-failed-run");
-    w.interviews.start(session.id);
+    await w.interviews.start(session.id);
     w.spawned[0]!.child.say({
       type: "message",
       message: { type: "assistant", message: { content: [{ type: "text", text: "Hello" }] } },
@@ -190,7 +206,7 @@ describe("a person's turn", () => {
     const repo = repository();
     const w = host(repo);
     const session = await w.open();
-    w.interviews.turn(session.id, "Retry a failed run without losing its records");
+    await w.interviews.turn(session.id, "Retry a failed run without losing its records");
     expect(w.editing.read(session.id).specSlug).toBe("retry-a-failed-run-without-losing-its-records");
     expect(
       readFileSync(
@@ -204,7 +220,7 @@ describe("a person's turn", () => {
   it("asks for a title where the message names nothing", async () => {
     const w = host(repository());
     const session = await w.open();
-    expect(() => w.interviews.turn(session.id, "?!?!")).toThrow(/spec title first/);
+    await expect(w.interviews.turn(session.id, "?!?!")).rejects.toThrow(/spec title first/);
     expect(w.editing.read(session.id).specSlug).toBeNull();
     expect(w.spawned).toHaveLength(0);
   });
@@ -213,8 +229,8 @@ describe("a person's turn", () => {
     const w = host(repository());
     const session = await w.open();
     w.editing.recordSpec(session.id, "retry-a-failed-run");
-    w.interviews.start(session.id);
-    w.interviews.turn(session.id, "Start with the retry button");
+    await w.interviews.start(session.id);
+    await w.interviews.turn(session.id, "Start with the retry button");
     expect(w.spawned[0]?.child.written.join("")).toContain("Start with the retry button");
     expect(w.conversation(session.id).at(-1)?.line).toEqual({
       kind: "turn",
@@ -222,14 +238,14 @@ describe("a person's turn", () => {
     });
   });
 
-  it("says the interview is not listening where the child would not take it", async () => {
+  it("says the chat is not listening where the child would not take it", async () => {
     const w = host(repository());
     const session = await w.open();
     w.editing.recordSpec(session.id, "retry-a-failed-run");
-    w.interviews.start(session.id);
+    await w.interviews.start(session.id);
     w.spawned[0]!.child.accepts = false;
-    expect(() => w.interviews.turn(session.id, "Anybody there?")).toThrow(
-      "The interview is not listening.",
+    await expect(w.interviews.turn(session.id, "Anybody there?")).rejects.toThrow(
+      "The chat is not listening.",
     );
   });
 });
@@ -239,7 +255,7 @@ describe("stopping", () => {
     const w = host(repository());
     const session = await w.open();
     w.editing.recordSpec(session.id, "retry-a-failed-run");
-    w.interviews.start(session.id);
+    await w.interviews.start(session.id);
     expect(w.interviews.stop(session.id).running).toBe(true);
     expect(w.spawned[0]?.child.stopped).toBe(true);
     w.spawned[0]!.child.close(0, true);
@@ -250,13 +266,13 @@ describe("stopping", () => {
     const w = host(repository());
     const session = await w.open();
     w.editing.recordSpec(session.id, "retry-a-failed-run");
-    w.interviews.start(session.id);
+    await w.interviews.start(session.id);
     w.spawned[0]!.child.stderr("no provider is signed in\n");
     w.spawned[0]!.child.close(2);
     const last = w.conversation(session.id).at(-1)?.line;
     expect(last).toMatchObject({ kind: "note" });
     if (last?.kind !== "note") throw new Error("expected a note");
-    expect(last.text).toContain("The interview stopped with code 2.");
+    expect(last.text).toContain("The chat stopped with code 2.");
     expect(last.text).toContain("no provider is signed in");
   });
 
@@ -264,11 +280,72 @@ describe("stopping", () => {
     const w = host(repository());
     const session = await w.open();
     w.editing.recordSpec(session.id, "retry-a-failed-run");
-    w.interviews.start(session.id);
+    await w.interviews.start(session.id);
     const before = w.conversation(session.id).length;
     w.spawned[0]!.child.close(0, true);
     expect(w.conversation(session.id).length).toBe(before);
     expect(w.interviews.running()).toEqual([]);
+  });
+
+  it("settles a stopped chat's exit once the child has gone, though its output never closes", async () => {
+    // Something the chat started can hold its stdout past its own exit, and
+    // then `close` never comes: a draft or a delete waiting on the exit would
+    // wait for ever.
+    const w = host(repository());
+    const session = await w.open();
+    w.editing.recordSpec(session.id, "retry-a-failed-run");
+    await w.interviews.start(session.id);
+    w.interviews.stop(session.id);
+    const exited = w.interviews.exited(session.id).then(() => "exited");
+    w.spawned[0]!.child.exit();
+    await expect(Promise.race([exited, delay(200).then(() => "still waiting")])).resolves.toBe(
+      "exited",
+    );
+  });
+
+  /** A host whose catalog answers only when the test says, so a start can be caught before it spawns. */
+  function held() {
+    let answer: () => void = () => undefined;
+    const catalog = new Promise<undefined>((resolve) => {
+      answer = () => resolve(undefined);
+    });
+    return { w: host(repository(), () => catalog), answer };
+  }
+
+  it("spawns nothing for a planning thrown away while its chat was starting, and settles its exit", async () => {
+    // The chat's model is read from the catalog before it spawns, and a delete
+    // in that gap is over a chat that is not there yet.
+    const { w, answer } = held();
+    const session = await w.open();
+    w.editing.recordSpec(session.id, "retry-a-failed-run");
+    const starting = w.interviews.start(session.id);
+    expect(w.interviews.running(), "a chat on its way is one to stop").toEqual([session.id]);
+    w.editing.discard(session.id);
+    const exited = w.interviews.exited(session.id).then(() => "exited");
+    answer();
+    expect((await starting).running).toBe(false);
+    await expect(Promise.race([exited, delay(200).then(() => "still waiting")])).resolves.toBe(
+      "exited",
+    );
+    expect(w.spawned).toHaveLength(0);
+    expect(w.interviews.running()).toEqual([]);
+  });
+
+  it("spawns nothing for a chat stopped while it was starting, so what waits on its exit is not left waiting", async () => {
+    // Generate plan stops the chat and waits for it to exit: a chat spawned
+    // after that stop is one nothing stops, and the draft would wait for ever.
+    const { w, answer } = held();
+    const session = await w.open();
+    w.editing.recordSpec(session.id, "retry-a-failed-run");
+    const starting = w.interviews.start(session.id);
+    w.interviews.stop(session.id);
+    const exited = w.interviews.exited(session.id).then(() => "exited");
+    answer();
+    expect((await starting).running).toBe(false);
+    await expect(Promise.race([exited, delay(200).then(() => "still waiting")])).resolves.toBe(
+      "exited",
+    );
+    expect(w.spawned).toHaveLength(0);
   });
 
   it("ends every interview when the app closes", async () => {
@@ -277,8 +354,8 @@ describe("stopping", () => {
     const second = await w.open("fresh");
     w.editing.recordSpec(first.id, "retry-one");
     w.editing.recordSpec(second.id, "retry-two");
-    w.interviews.start(first.id);
-    w.interviews.start(second.id);
+    await w.interviews.start(first.id);
+    await w.interviews.start(second.id);
     expect(w.interviews.running()).toHaveLength(2);
     w.interviews.shutdown();
     expect(w.spawned.every((entry) => entry.child.stopped)).toBe(true);

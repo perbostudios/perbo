@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment } from "@perbo/contracts";
+import { DEFAULT_ENV_ALLOW_LIST, scrubEnvironment, type ProviderEffort } from "@perbo/contracts";
 import { DEFAULT_CLAUDE_MODEL } from "./defaults.js";
 import { ProviderError, providerFailureText } from "./failure.js";
 import {
@@ -91,6 +91,8 @@ function runCli(
 export interface ClaudeCliOptions {
   submitSchema: Record<string, unknown>;
   modelId?: string;
+  /** `--effort`; absent, none is passed and the CLI's own default applies. */
+  effort?: ProviderEffort<"claude-cli">;
   binary?: string;
   timeoutMs?: number;
   /** Injected by tests. Production scrubs the process environment. */
@@ -259,6 +261,7 @@ export function claudeCliModel(options: ClaudeCliOptions): ClaudeCliModel {
         "-p",
         "--model",
         modelId,
+        ...(options.effort ? ["--effort", options.effort] : []),
         // No built-in tools: file access goes back through RepoReader, and the
         // reviewer has no execution surface.
         "--tools",

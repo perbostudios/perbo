@@ -150,6 +150,11 @@ function applyToWorking(
           id: freeCriterion(),
           text: criterion.text,
           expected_verification: criterion.expected_verification,
+          // Carried through, so a criterion an edit writes says which
+          // requirement it answers and the node's page can name it (D-103).
+          ...(criterion.requirement_id === undefined
+            ? {}
+            : { requirement_id: criterion.requirement_id }),
         });
         working.criteria.push(added);
         return added.id;

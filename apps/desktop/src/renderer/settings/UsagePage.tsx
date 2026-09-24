@@ -7,18 +7,17 @@ import type { UsageLedger, UsageWindow } from "../../shared/protocol.js";
 
 export const dollars = (micros: number | null): string =>
   micros === null ? "—" : formatUsd(micros, 2);
-const resetLabel = (window: UsageWindow): string => {
+/** "Resets in 3 hr 45 min" inside a day, "Resets Sat 5:00 AM" in the person's locale beyond it, as Claude's own `/usage` words it; a reset already past shows nothing. */
+export const resetLabel = (window: UsageWindow): string => {
   if (!window.resetsAt) return "";
   const at = new Date(window.resetsAt);
-  if (Number.isNaN(at.getTime())) return "";
-  const minutes = Math.max(0, Math.round((at.getTime() - Date.now()) / 60_000));
-  const inWords =
-    minutes >= 24 * 60
-      ? `${Math.floor(minutes / (24 * 60))}d ${Math.floor((minutes % (24 * 60)) / 60)}h`
-      : minutes >= 60
-        ? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
-        : `${minutes}m`;
-  return `resets ${at.toLocaleString(undefined, { weekday: minutes >= 24 * 60 ? "short" : undefined, hour: "2-digit", minute: "2-digit" })} · in ${inWords}`;
+  if (Number.isNaN(at.getTime()) || at.getTime() <= Date.now()) return "";
+  const minutes = Math.max(1, Math.round((at.getTime() - Date.now()) / 60_000));
+  if (minutes >= 24 * 60)
+    return `Resets ${at.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `Resets in ${[hours && `${hours} hr`, rest && `${rest} min`].filter(Boolean).join(" ")}`;
 };
 export const monthLabel = (month: string): string => {
   const [year, index] = month.split("-").map(Number);
@@ -114,7 +113,7 @@ export function UsagePage({ navigate }: PageProps) {
             {report.providers.map((provider) => (
               <section className="outlined-card usage-provider" key={provider.id}>
                 <div className="card-heading">
-                  <span className={"connection-dot" + (provider.windows ? "" : " disconnected")} />
+                  <span className={"connection-dot" + (provider.connected ? "" : " disconnected")} />
                   <strong>
                     {provider.name}
                     {provider.plan ? ` · ${provider.plan}` : ""}

@@ -4,6 +4,7 @@ import type { CommandName } from "./names.js";
 import { admitCommandLine, approveCommandLine, listCommandLine } from "../commands/admit.js";
 import { agentCommandLine } from "../commands/agent.js";
 import { baselineCommandLine } from "../commands/baseline/index.js";
+import { driftCommandLine } from "../commands/drift.js";
 import { editCommandLine } from "../commands/edit/index.js";
 import { escapesCommandLine } from "../commands/escapes/index.js";
 import { indexCommandLine } from "../commands/symbol-index.js";
@@ -81,12 +82,13 @@ export type TerminalCommand =
  * Every command `perbo` carries, by the name it is typed as.
  *
  * The six that work against a repository with nothing admitted — doctor,
- * baseline, review, inspect, verdict, run — the twelve that build history
- * across machines — admission, its edits and approval, the work on record, the
- * pull-request read-back, the queue over the store, its endpoint, the session
- * that reads it and the interview that writes the spec, and the two measures
- * over it — and `index`, which reads the repository's own code and writes only
- * the symbol and import index built from it.
+ * baseline, review, inspect, verdict, run — the thirteen that build history
+ * across machines — admission, its edits, the plan read against its spec,
+ * approval, the work on record, the pull-request read-back, the queue over the
+ * store, its endpoint, the session that reads it and the interview that writes
+ * the spec, and the two measures over it — and `index`, which reads the
+ * repository's own code and writes only the symbol and import index built
+ * from it.
  *
  * A `Record` over the union rather than a list, so a name in
  * {@link CommandName} with no command here fails to compile instead of at the
@@ -105,6 +107,7 @@ export const COMMANDS: { readonly [Name in CommandName]: TerminalCommand } = {
   admit: admitCommandLine,
   approve: approveCommandLine,
   edit: editCommandLine,
+  drift: driftCommandLine,
   list: listCommandLine,
   sync: syncCommandLine,
   serve: serveCommandLine,

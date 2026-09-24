@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { replaceFile } from "@perbo/workspace";
-import { EditingSessionSchema, SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
+import {
+  EditingSessionSchema,
+  SettingsSchema,
+  TaskModelsSchema,
+  parseStored,
+} from "../../shared/protocol.js";
 
 /** A repository the person connected, as the profile records it. */
 export const RegisteredRepositorySchema = z.object({
@@ -35,6 +40,7 @@ export const JobSchema = z.object({
   editing: z
     .object({ sessionId: z.string().uuid(), operationId: z.string().uuid() })
     .optional(),
+  publish: z.boolean().optional(),
 });
 
 /** Everything this host keeps between launches, in one file. */
@@ -49,6 +55,11 @@ export const ProfileStateSchema = z.object({
   archived: z.array(z.string()).default([]),
   /** Whether the tickets already finished before this preference existed have been filed. */
   archivedSeeded: z.boolean().default(false),
+  /**
+   * Each repository's unsent answer to "What do you want to build?", by
+   * repository id (D-131).
+   */
+  asks: z.record(z.string(), z.string()),
   editingSessions: z.array(EditingSessionSchema).default([]),
 });
 export type ProfileState = z.infer<typeof ProfileStateSchema>;
@@ -84,7 +95,7 @@ export class Profile {
       ? z.record(z.string(), z.unknown()).parse(JSON.parse(readFileSync(path, "utf8")))
       : null;
     const state: ProfileState = stored
-      ? ProfileStateSchema.parse(stored)
+      ? parseStored(ProfileStateSchema, stored, path)
       : {
           version: 1,
           settings: SettingsSchema.parse({}),
@@ -94,6 +105,7 @@ export class Profile {
           taskModels: {},
           archived: [],
           archivedSeeded: true,
+          asks: {},
           editingSessions: [],
         };
     const legacy = z

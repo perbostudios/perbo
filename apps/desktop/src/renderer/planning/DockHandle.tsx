@@ -30,6 +30,11 @@ export function DockHandle({ width, limit }: { width: number; limit: number }) {
   // edge was free and drop that move.
   const holding = useRef<number | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Whether the pointer is over the edge with no button held. Not `:hover`,
+  // which is also true of a pointer that is selecting the spec's text and
+  // crosses the edge on the way: that person is not reaching for the edge,
+  // and lighting it up says they are about to resize the chat.
+  const [over, setOver] = useState(false);
   const bar = useRef<HTMLDivElement>(null);
   const release = (pointerId: number): void => {
     if (holding.current !== pointerId) return;
@@ -64,10 +69,10 @@ export function DockHandle({ width, limit }: { width: number; limit: number }) {
   return (
     <div
       ref={bar}
-      className={cx("dock-handle", dragging && "dock-handle--dragging")}
+      className={cx("dock-handle", over && "dock-handle--hover", dragging && "dock-handle--dragging")}
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize the interview"
+      aria-label="Resize the chat"
       aria-valuemin={MIN_DOCK_WIDTH}
       aria-valuemax={limit}
       aria-valuenow={width}
@@ -91,7 +96,10 @@ export function DockHandle({ width, limit }: { width: number; limit: number }) {
           // which is what the window listener below is for.
         }
       }}
+      onPointerEnter={(event) => setOver(event.buttons === 0)}
+      onPointerLeave={() => setOver(false)}
       onPointerMove={(event) => {
+        setOver(event.buttons === 0);
         if (holding.current !== event.pointerId) return;
         setDockWidth(widthFrom(event.clientX));
       }}

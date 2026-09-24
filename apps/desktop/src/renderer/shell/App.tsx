@@ -1,19 +1,18 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Brand, Button, HeaderSlotProvider, InkIcon, Notice, TitleBar } from "../ui/index.js";
-import { errorMessage, useWorkspace } from "../workspace/index.js";
+import { bridge, errorMessage, useWorkspace } from "../workspace/index.js";
+import { untouchedPlanning } from "../../shared/contract-editing.js";
 import { HomePage } from "../tasks/HomePage.js";
 import { Onboarding } from "../settings/Onboarding.js";
-import { projectTicket } from "../tasks/ticket-workspace.js";
-import { isFiled } from "../../shared/archive.js";
-import type { Settings } from "../../shared/protocol.js";
+import { PlanningPaneSchema, type Settings } from "../../shared/protocol.js";
+import { AskPage } from "../planning/AskPage.js";
 import { PlanningMode } from "../planning/PlanningMode.js";
-import { isPlanningPane } from "../planning/panes.js";
 import { CreateProvider } from "./create.js";
 import { Rail, RailToggle, SETTINGS_PAGES } from "./Rail.js";
 import { useRailSize } from "./rail-size.js";
 import { ShortcutProvider, useShortcut } from "./shortcuts.js";
-import type { Route, SettingsSection, TaskView } from "./route.js";
+import type { PageProps, Route, SettingsSection, TaskView } from "./route.js";
 import { ToastProvider } from "./Toast.js";
 const SettingsPage = lazy(() =>
   import("../settings/SettingsPage.js").then((module) => ({
@@ -45,7 +44,8 @@ function readRoute(): Route {
   const [page, repoId, key, view] = parts;
   // A session id is the host's identifier; a link carrying anything else is not a planning link.
   if (page === "planning" && repoId && UUID.test(repoId))
-    return { page, sessionId: repoId, pane: isPlanningPane(key) ? key : "spec" };
+    return { page, sessionId: repoId, pane: PlanningPaneSchema.safeParse(key).data ?? null };
+  if (page === "ask" && repoId) return { page, repoId };
   if (page === "task" && repoId && key)
     return {
       page,
@@ -58,6 +58,7 @@ function readRoute(): Route {
         "review",
         "merge",
         "decisions",
+        "stopped",
         "called-off",
         "complete",
         "explorer",
@@ -119,7 +120,7 @@ export function App() {
   }, []);
   const rail = useRailSize();
   const [route, setRoute] = useState<Route>(readRoute);
-  const navigate = (next: Route): void => {
+  const navigate: PageProps["navigate"] = (next, options) => {
     const hash =
       next.page === "task"
         ? [
@@ -131,9 +132,14 @@ export function App() {
             .map(encodeURIComponent)
             .join("/")
         : next.page === "planning"
-          ? ["planning", next.sessionId, next.pane].map(encodeURIComponent).join("/")
-          : next.page;
-    location.hash = hash;
+          ? ["planning", next.sessionId, ...(next.pane === null ? [] : [next.pane])]
+              .map(encodeURIComponent)
+              .join("/")
+          : next.page === "ask"
+            ? ["ask", next.repoId].map(encodeURIComponent).join("/")
+            : next.page;
+    if (options?.replace) history.replaceState(history.state, "", `#${hash}`);
+    else location.hash = hash;
     setRoute(next);
   };
   useEffect(() => {
@@ -141,6 +147,29 @@ export function App() {
     window.addEventListener("hashchange", changed);
     return () => window.removeEventListener("hashchange", changed);
   }, []);
+  // Leaving planning throws away a planning nothing was put into
+  // (D-129).
+  //
+  // Read off the route rather than off PlanningMode's unmount: the route moves
+  // once per leave, while an unmount also fires for StrictMode's double mount
+  // (main.tsx) and for the app being torn down — and closing Perbo is not
+  // clicking away. A pane change keeps the page, so it is not a leave either.
+  const leaving = useRef(route);
+  useEffect(() => {
+    const before = leaving.current;
+    leaving.current = route;
+    if (before.page !== "planning" || route.page === "planning") return;
+    const id = before.sessionId;
+    void (async () => {
+      const session = await bridge.request({ kind: "editingRead", id });
+      if (!untouchedPlanning(session)) return;
+      // At the revision the read came back with: anything that moves the
+      // planning in between refuses this discard, which is the answer that
+      // keeps it. A title the Spec pane held unsaved is not in between: the
+      // pane sends it as it unmounts, ahead of this read on the same bridge.
+      await bridge.request({ kind: "editingDiscard", id, revision: session.revision });
+    })().catch(() => undefined);
+  }, [route]);
   const appearance = workspace.data?.settings;
   useEffect(() => {
     if (appearance) applyAppearance(appearance);
@@ -156,7 +185,9 @@ export function App() {
     return (
       <main className="fatal">
         <h1>Your workspace couldn’t load.</h1>
-        <Notice tone="danger">{errorMessage(workspace.error)}</Notice>
+        <Notice key={workspace.errorUpdatedAt} tone="danger">
+          {errorMessage(workspace.error)}
+        </Notice>
         <Button
           onClick={() => {
             void workspace.refetch();
@@ -174,16 +205,15 @@ export function App() {
     route.page === "settings" || !settings
       ? "general"
       : (route.page as SettingsSection);
-  const attention = data.tasks.filter(
-    (row) => !isFiled(data, row) && projectTicket(data, row).attention,
-  ).length;
   // One frame per page or ticket: moving between a ticket's views must not remount it and lose where you were.
   const frameKey =
     route.page === "task"
       ? ["task", route.repoId, route.key].join("/")
       : route.page === "planning"
         ? ["planning", route.sessionId].join("/")
-        : route.page;
+        : route.page === "ask"
+          ? ["ask", route.repoId].join("/")
+          : route.page;
   const page = setup ? (
     <Onboarding {...props} />
   ) : route.page === "task" ? (
@@ -197,6 +227,8 @@ export function App() {
     />
   ) : route.page === "planning" ? (
     <PlanningMode {...props} sessionId={route.sessionId} pane={route.pane} />
+  ) : route.page === "ask" ? (
+    <AskPage key={route.repoId} {...props} repoId={route.repoId} />
   ) : settings ? (
     <SettingsPage {...props} section={section} />
   ) : (
@@ -210,19 +242,14 @@ export function App() {
           navigate={navigate}
           collapsed={!setup && rail.collapsed}
         >
-          <CreateProvider workspace={data} navigate={navigate}>
+          <CreateProvider workspace={data} navigate={navigate} route={route}>
           <HeaderSlotProvider>
             <div className="app-shell">
               {/* The bar is the drag region; the toggle and the header's controls punch no-drag holes in it. */}
               <TitleBar>{!setup && <RailToggle />}</TitleBar>
               <div className="app-body">
                 {!setup && !rail.collapsed && (
-                  <Rail
-                    route={route}
-                    navigate={navigate}
-                    attention={attention}
-                    drafts={data?.drafts}
-                  />
+                  <Rail route={route} navigate={navigate} workspace={data} />
                 )}
                 <main id="content" className="workspace-shell">
                   {data.errors.length > 0 && (

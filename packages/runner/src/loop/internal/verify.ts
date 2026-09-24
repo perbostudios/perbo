@@ -30,6 +30,7 @@ export function verifierModel(config: TicketRunConfig, keys: string[]): Model {
   return createModel(config.reviewer_provider, {
     submitSchema: closureVerifySchema(keys),
     modelId: config.reviewer_model,
+    effort: config.reviewer_effort,
   });
 }
 

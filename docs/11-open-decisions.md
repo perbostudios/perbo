@@ -91,14 +91,14 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-071 — Initiative before authority
 
 - Owner: Founder
-- Decision: models may originate candidate work. The drafter, the queue's tracker drafting and the interview all draft, and nothing a model drafts becomes canonical until a person approves it. A standing rule may act only on work already admitted, and no model output triggers it or supplies its parameters. Product preference, security stops, external commitments, and legal or financial authority stay with people.
+- Decision: models may originate candidate work. The drafter, the queue's tracker drafting and the chat all draft, and nothing a model drafts becomes canonical until a person approves it. A standing rule may act only on work already admitted, and no model output triggers it or supplies its parameters. Product preference, security stops, external commitments, and legal or financial authority stay with people.
 - Why: more initiative, not more sovereignty.
 - Changes if: drafted work adds more coordination than it removes.
 
 ### D-100 — Large work is one ticket with an execution graph
 
 - Owner: Founder
-- Decision: a plan may group its acceptance criteria into nodes, each naming the paths expected to satisfy them. Node criteria and paths are contract; the order between nodes is approach, along with the spec's No-Gos. The drafter proposes the first graph. After that the plan changes only by edits, made by hand or asked for in the interview, through one validated edit path that records its author. Any edit can be undone unless a later edit changed the same node, edge or spec section. The person approves once. Any ticket may carry a graph, there is no epic kind, and the drafter does not cap the number of criteria.
+- Decision: a plan may group its acceptance criteria into nodes, each naming the paths expected to satisfy them. Node criteria and paths are contract; the order between nodes is approach, along with the spec's No-Gos. The drafter proposes the first graph. After that the plan changes only by edits, made by hand or asked for in the chat, through one validated edit path that records its author. Any edit can be undone unless a later edit changed the same node, edge or spec section. The person approves once. Any ticket may carry a graph, there is no epic kind, and the drafter does not cap the number of criteria.
 - Why: approving several sibling contracts one at a time is the slicing a graph removes, and one ticket keeps one approval and one pull request.
 - Changes if: people split graph tickets by hand to get them reviewed or merged.
 - ADR: [ADR-0037](adr/0037-execution-graph.md).
@@ -107,23 +107,23 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-101 — Create opens planning mode
 
 - Owner: Founder
-- Decision: Create moves into the desktop's rail, first (⌘1; Home ⌘2, Archive ⌘3, Settings ⌘4; ⌘N still creates). It opens planning mode for one piece of work: Spec, Explorer and Impact panes, with a Graph pane second, under Spec, once a plan has been drafted and divided into nodes; the interview is docked beside them. Planning mode also opens for any ticket in `plan_review`. Drafting, impact checks, file reads and the interview run alongside a run; runs, decisions and publishing still take one at a time.
+- Decision: Create moves into the desktop's rail, first (⌘1; Home ⌘2, Archive ⌘3, Settings ⌘4; ⌘N still creates). It opens planning mode for one piece of work: Spec, Explorer and Impact panes, with a Graph pane second, under Spec, once a plan has been drafted and divided into nodes; the chat is docked beside them. Planning mode also opens for any ticket in `plan_review`. Drafting, impact checks, file reads and the chat run alongside a run; runs, decisions and publishing still take one at a time.
 - Why: planning the next piece of work while the last one runs is what the queue is for.
-- Built: Create first in the rail with ⌘1 to ⌘4, the picker, planning mode over a contract editing session whose Spec pane holds the spec ([D-103](#d-103--a-spec-is-a-folder-in-the-repository-committed-first)) and offers no second way to start a plan beside it, with the Explorer and Graph panes beside it and the interview docked beside whichever is open, and planning alongside a run; the explorer's reads and the interview's three requests are answered outside the job list, so a run never holds one up, the picker opens planning mode over a ticket in `plan_review`; and the Impact pane, which checks once when the planning first has a plan and by its button after that, because its answer is a fresh index of the whole tracked tree, with the count of what falls outside also on the contract page, which is the last screen where a scope can still be widened, answered outside the job list with the explorer's reads.
+- Built: Create first in the rail with ⌘1 to ⌘4, the picker, planning mode over a contract editing session whose Spec pane holds the spec ([D-103](#d-103--a-spec-is-a-folder-in-the-repository-committed-first)) and offers no second way to start a plan beside it, with the Explorer and Graph panes beside it and the chat docked beside whichever is open, and planning alongside a run; the explorer's reads and the chat's three requests are answered outside the job list, so a run never holds one up, the picker opens planning mode over a ticket in `plan_review`; and the Impact pane, which checks once when the planning first has a plan and by its button after that, because its answer is a fresh index of the whole tracked tree, with the count of what falls outside also on the contract page, which is the last screen where a scope can still be widened, answered outside the job list with the explorer's reads.
 
-### D-102 — The interview is the person's own session
+### D-102 — The chat is the person's own session
 
 - Owner: Founder
-- Decision: the interview is the person's own Claude Code or Codex session, run by `perbo interview` and shown as a chat in planning mode. Its Generate plan action brings the spec up to date and runs the drafter, admitting one ticket. After that it changes the plan only through the validated edit path, every edit recorded and the latest one undoable as D-100 says. The chat reports what is said nowhere else — the drafting, an undo, a refusal, and the edit an undo is still offered on — and not a call that only repeated itself, because what an edit changed is on the graph and a panel for each of fourteen buries the conversation they were asked for in. It may read anything and run read-only commands, may write only the spec folder, `CONTEXT.md` and the ADR folder, and cannot approve, publish or merge. Anything outside that is refused rather than asked: there are no permission prompts. Asking the person about the work is a different act and is what the interview is for: it may put questions with the answers to pick from, which become the person's own words when they pick one and never a way to allow something (D-117). It proposes no path marks, which are the person's own. Claude runs through the Claude Agent SDK and Codex through `codex app-server`. Paseo's design is followed in Perbo's own code; none of Paseo's code is copied.
+- Decision: the chat is the person's own Claude Code or Codex session, run by `perbo interview` and speaking in planning mode as the Architect. It writes the spec and stops there: generating the plan from it is the person's own press, made in one place — **Generate plan** at the foot of the Spec pane, under the spec it drafts from. Once a turn, as soon as the spec is written, or at the turn's end where that comes first, because the session goes on composing after the write and the spec is readable already, the chat puts a note saying the spec is written and naming the three ways on — read and change it on the Spec pane, ask for a change in the chat, or press Generate plan there. The note carries no press of its own, because anything more the person adds to the spec is at their own discretion, and for the rest of that turn nothing under it says the session is working, because nothing more is owed before the person may act, and nothing the session says after it is shown, because the note has said it. Pressed while the Architect is still talking, Generate plan stops the Architect, waits for its session to end and then drafts from the spec that turn left behind, so nobody has to end the conversation by hand and press again; the stopping is in the host behind the press, so every caller gets the one behaviour. The pane withholds that press while a group of questions the Architect asked still stands, and the host refuses it there too, because the answers change the spec it would draft from (D-117). The session is two conversations in turn under one name, the Chat: while there is no plan it questions the person and writes the spec, and once there is one every turn changes the spec and the plan together (D-128), the conversation from before the plan folded behind one line. Once there is a plan it changes it only through the validated edit path, every edit recorded and the latest one undoable as D-100 says. The chat reports what is said nowhere else — an undo, a refusal, and the edit an undo is still offered on — and not a call that only repeated itself, because what an edit changed is on the graph and a panel for each of fourteen buries the conversation they were asked for in. It may read anything and run read-only commands, may write only the spec folder, `CONTEXT.md` and the ADR folder, and cannot approve, publish or merge. Anything outside that is refused rather than asked: there are no permission prompts. Asking the person about the work is a different act and is what the chat is for: it may put questions with the answers to pick from, which become the person's own words when they pick one and never a way to allow something (D-117). It proposes no path marks, which are the person's own. Claude runs through the Claude Agent SDK and Codex through `codex app-server`; on Claude the chat runs on Claude Opus 5.5 wherever Claude Code's catalog offers it, and otherwise, as on Codex, on the planning's own drafting model. Paseo's design is followed in Perbo's own code; none of Paseo's code is copied.
 - Why: a person's own session gets the same trust model the endpoint gives it (D-109).
-- Built: `perbo interview`, which runs the person's own session — Claude Code through the Claude Agent SDK, Codex through `codex app-server` — with the bundled grilling and domain-modelling skills in its orientation and its own tools in-process, the interview's rules deciding every call behind either and the transport owning only how its provider is asked and what it streams back; the runner's write guard deciding every write before it runs, with this piece of work's own spec folder, `CONTEXT.md` and the ADR folder as the only writable paths and a list of read-only shapes bounding the commands it is asked about, holding every command that reading finds — the line's own invocations, and each one a substitution, a process substitution, an unquoted here-document body, a wrapper or a function body stands in front of, at any nesting depth — to that list, refusing a bare environment assignment that would set what a later shape resolves and runs in, refusing by name a flag that would let one of those shapes write or run a program, and refusing outright what that reading cannot resolve — a quoting, a command, a variable's value, or a program name a closure check finds unaccounted for — so that nothing but the listed read-only shapes runs, rather than promising that every way to disguise a write is named (SCP-355), each refusal reported rather than asked; `generate_plan`, which drafts one ticket from the spec and re-drafts that ticket rather than admitting a second; `edit_plan` and `undo_edit`, through the validated edit path with the interview as author; `read_plan`; `ask_options`, which puts what it cannot settle itself as groups of questions with the answers to pick from, one group at a time, answered as an ordinary turn in the options' own words; the streamed JSON-line protocol and the session id kept beside the spec; the same interview on Codex, behind one session interface, where `codex app-server` runs a thread with a read-only sandbox and an `untrusted` approval policy, so that every write and every command outside the set Codex itself trusts as read-only is asked about, each of those questions is answered by the interview's own judgement rather than reaching the person, the interview's tools are the thread's dynamic tools, and `--session` continues the thread through the app server's own resume; and the chat in planning mode, docked beside every pane, which the desktop host relays that protocol to — it spawns the command as a long-lived child with its argv built from the registered repository and the planning session's own records, shows each refusal as a refusal with nothing to answer, shows the plan edit an undo is still offered on as the plan's own record took it with an undo on its number, and keeps the conversation on the planning session so leaving and restarting come back to it.
+- Built: `perbo interview`, which runs the person's own session — Claude Code through the Claude Agent SDK, Codex through `codex app-server` — with the bundled grilling and domain-modelling skills in its orientation and its own tools in-process, the chat's rules deciding every call behind either and the transport owning only how its provider is asked and what it streams back; the runner's write guard deciding every write before it runs, with this piece of work's own spec folder, `CONTEXT.md` and the ADR folder as the only writable paths and a list of read-only shapes bounding the commands it is asked about, holding every command that reading finds — the line's own invocations, and each one a substitution, a process substitution, an unquoted here-document body, a wrapper or a function body stands in front of, at any nesting depth — to that list, refusing a bare environment assignment that would set what a later shape resolves and runs in, refusing by name a flag that would let one of those shapes write or run a program, and refusing outright what that reading cannot resolve — a quoting, a command, a variable's value, or a program name a closure check finds unaccounted for — so that nothing but the listed read-only shapes runs, rather than promising that every way to disguise a write is named (SCP-355), each refusal reported rather than asked; four tools and no more, which is the whole of the guarantee that it cannot admit, approve, publish or merge — there is no such tool to reach: `edit_plan` and `undo_edit`, through the validated edit path with the Architect as author; `read_plan`; `ask_options`, which puts what it cannot settle itself as groups of questions with the answers to pick from, one group at a time, answered as an ordinary turn in the options' own words; the streamed JSON-line protocol, which says as the write is admitted that the spec is being written, and the session id kept beside the spec; the same chat on Codex, behind one session interface, where `codex app-server` runs a thread with a read-only sandbox and an `untrusted` approval policy, so that every write and every command outside the set Codex itself trusts as read-only is asked about, each of those questions is answered by the chat's own judgement rather than reaching the person, the chat's tools are the thread's dynamic tools, and `--session` continues the thread through the app server's own resume; and the chat in planning mode, docked beside every pane, which the desktop host relays that protocol to — it spawns the command as a long-lived child with its argv built from the registered repository and the planning session's own records, shows each refusal as a refusal with nothing to answer, shows the plan edit an undo is still offered on as one line with an undo on its number, and a refused call of the chat's own tools as its name with the first sentence of why in one line under it, says the spec is being written on the chat's status line while it is, and puts the note once a turn, a moment after that write lands with no plan beside the spec and the file's bytes are read, or at the turn's end — of its own accord, stopped or dying — where that comes first, holding what the session says in that moment and dropping it once the note is said, or saying it where no note comes; withholds Generate plan while a question stands and drops it once the plan exists, the host refusing that press behind the pane and otherwise stopping the Architect and waiting for its child to exit before it drafts; reads itself Chat, folding the conversation from before the plan behind one line once there is one; and keeps the conversation on the planning session so leaving and restarting come back to it.
 
 ### D-103 — A spec is a folder in the repository, committed first
 
 - Owner: Founder
-- Decision: a spec lives at `specs/<slug>/spec.md` (the folder is configurable), under the headings Outcome, Requirements, No-Gos, Rabbit holes and Notes, naming code as `@Symbol` or by path. Each requirement carries an id, `R1` upward, written into the spec when the requirement is written and never reused. A criterion records the requirement it was drafted from, so the node a requirement lands in is derived from its criteria rather than written down a second time, and is shown beside the requirement's id, the requirement itself being read in the section it is written in. The folder also holds a page per node, `specs/<slug>/nodes/<node>.md`, generated from the spec and the graph: the node's title, the requirements derived to it, its criteria and their verification, its paths, and the spec's No-Gos. A node's page is regenerated whenever either changes, and the Notes section in it is written by hand and survives that. Only `spec.md` is drafted from. The drafter drafts from it as it drafts from an issue, and also reads the repository's `CONTEXT.md`, its ADR titles and `principles.md` as data. Admission records the spec's path and content hash. The loop commits the spec folder, with the interview's `CONTEXT.md` and ADR changes, as the first commit on the ticket's branch, and review reads the diff after that commit. `specs/**` is a standing prohibited path for the executor. A spec edited after approval, or naming code that no longer exists, is stale: a ticket that has not started returns to `plan_invalid`, and a running one is flagged and continues.
+- Decision: a spec lives at `specs/<slug>/spec.md` (the folder is configurable), under the headings Outcome, Requirements, No-Gos, Rabbit holes and Notes, naming code as `@Symbol` or by path. Each requirement carries an id, `R1` upward, written into the spec when the requirement is written and never reused. A criterion records the requirement it was drafted from, so the node a requirement lands in is derived from its criteria rather than written down a second time, and is shown beside the requirement's id, the requirement itself being read in the section it is written in. The folder also holds a page per node, `specs/<slug>/nodes/<node>.md`, generated from the spec and the graph: the node's title, the requirements derived to it, its criteria and their verification, its paths, and the spec's No-Gos. A node's page is regenerated whenever either changes, and the Notes section in it is written by hand and survives that. Only `spec.md` is drafted from. The drafter drafts from it as it drafts from an issue, and also reads the repository's `CONTEXT.md`, its ADR titles and `principles.md` as data. Admission records the spec's path and content hash. The CLI, and the desktop's panes and findings, read that path as recorded. The desktop's rename, delete, **Plan it again** and the picker's delete of a spec take it as the ticket's spec only where it is `<folder>/<slug>/spec.md` under the spec folder the repository configures, and treat a ticket recording any other path as drafted from no spec, because each of them ends in a write or a recursive delete. The loop commits the spec folder, with the chat's `CONTEXT.md` and ADR changes, as the first commit on the ticket's branch, and review reads the diff after that commit. `specs/**` is a standing prohibited path for the executor. A spec edited after approval, or naming code that no longer exists, is stale: a ticket that has not started returns to `plan_invalid`, and a running one is flagged and continues.
 - Why: a spec is intent upstream of the contract, and its staleness is detected rather than kept in step by hand ([ADR-0016](adr/0016-minimal-machine-maintained-planning.md)). A node reads on its own without giving a requirement a second place to be written, which would drift, and a re-draft moves a requirement between nodes with no edit to the spec.
-- Built: the spec folder and the slug the title takes, minted from the person's first turn to the interview where they have not titled the planning themselves (D-118), created when missing, with the folder itself `specs` unless `.perbo/config.json` names another under `specs`; the writer that gives each requirement its id and hands out no id twice; `perbo admit --from-spec <path>`, which reads `spec.md` under those headings, drafts from it as it drafts from an issue, records on the admission record the spec's path, its content hash and every file the loop commits with it — the spec's whole folder, and the `CONTEXT.md` and the files under the ADR folder (`docs/adr` unless `.perbo/config.json` names another under `adr`) that the checkout has changed — and takes the No-Gos from its own heading, with `--start-over <KEY>` re-drafting a ticket in `plan_review` from the same spec; a criterion recording the requirement id it was drafted from; the page per node, regenerated whenever the spec or the graph changes and keeping the Notes written in it by hand; the requirement's node beside it in the Spec pane, which writes the spec into the repository; the spec folder as a standing prohibited path for the executor; and the loop committing those recorded files as the branch's first commit past the contract's base, before the executor runs and with its own `Attempt:` trailer, refusing the run where one of them has changed or gone, and keeping every file that commit holds out of the change set the checks, the review, the verification and the pull request read. Staleness is read from the spec's own bytes against the hash approval recorded — approval and not admission, because D-103 makes an edit *after approval* the stale one and the spec is ordinarily edited in `plan_review` while the draft is read, with admission's hash — and the files the loop commits with it — left standing on a spec approval could not read — and from the `@Symbol` and path names in it against the names approval recorded the repository as having — which is what separates a name the repository has lost from one the plan is for and the work has yet to write — answered against `perbo index` and the checkout, every path judged after it resolves; `perbo run --ticket` reads it before it moves the ticket or makes a worktree and leaves a stale ticket at `plan_invalid`, `perbo inspect` prints it for every ticket drafted from a spec so a run in flight is flagged and not interrupted, a name the index cannot answer for is reported unjudged rather than refusing a run, a ticket approved before the recorded names existed has every name in its spec reported unjudged, only a path git tracks is recorded so a build output in one checkout cannot make a clone read the spec as stale, and approval over a tree the index cannot be believed against records no symbol at all — for the life of the ticket, and records that it happened, so every later reading of it reports the spec's `@Symbol` names as unjudged and names `perbo index` rather than calling the spec current. The reading says which moment it took the spec's bytes from: approval for a contract that has been approved, admission for a ticket still in `plan_review`.
+- Built: the spec folder and the slug the title takes, minted from the person's first turn to the chat where they have not titled the planning themselves (D-118), created when missing, with the folder itself `specs` unless `.perbo/config.json` names another under `specs`; the writer that gives each requirement its id and hands out no id twice; `perbo admit --from-spec <path>`, which reads `spec.md` under those headings, drafts from it as it drafts from an issue, records on the admission record the spec's path, its content hash and every file the loop commits with it — the spec's whole folder, and the `CONTEXT.md` and the files under the ADR folder (`docs/adr` unless `.perbo/config.json` names another under `adr`) that the checkout has changed — and takes the No-Gos from its own heading, with `--start-over <KEY>` re-drafting a ticket in `plan_review` from the same spec; a criterion recording the requirement id it was drafted from; the page per node, regenerated whenever the spec or the graph changes and keeping the Notes written in it by hand; the requirement's node beside it in the Spec pane, which writes the spec into the repository; the spec folder as a standing prohibited path for the executor; and the loop committing those recorded files as the branch's first commit past the contract's base, before the executor runs and with its own `Attempt:` trailer, refusing the run where one of them has changed or gone, and keeping every file that commit holds out of the change set the checks, the review, the verification and the pull request read. Staleness is read from the spec's own bytes against the hash approval recorded — approval and not admission, because D-103 makes an edit *after approval* the stale one and the spec is ordinarily edited in `plan_review` while the draft is read, with admission's hash — and the files the loop commits with it — left standing on a spec approval could not read — and from the `@Symbol` and path names in it against the names approval recorded the repository as having — which is what separates a name the repository has lost from one the plan is for and the work has yet to write — answered against `perbo index` and the checkout, every path judged after it resolves; `perbo run --ticket` reads it before it moves the ticket or makes a worktree and leaves a stale ticket at `plan_invalid`, `perbo inspect` prints it for every ticket drafted from a spec so a run in flight is flagged and not interrupted, a name the index cannot answer for is reported unjudged rather than refusing a run, a ticket approved before the recorded names existed has every name in its spec reported unjudged, only a path git tracks is recorded so a build output in one checkout cannot make a clone read the spec as stale, and approval over a tree the index cannot be believed against records no symbol at all — for the life of the ticket, and records that it happened, so every later reading of it reports the spec's `@Symbol` names as unjudged and names `perbo index` rather than calling the spec current. The reading says which moment it took the spec's bytes from: approval for a contract that has been approved, admission for a ticket still in `plan_review`.
 
 ### D-104 — Sizes, not forecasts
 
@@ -131,6 +131,13 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: a plan shows a size, S to XL, derived by fixed thresholds from its nodes, its criteria, and the files and packages in scope, with the counts beside it. S is 1 node, at most 4 criteria, 10 files and 1 package, the size of a ticket before graphs; M at most 3 nodes, 10 criteria, 25 files and 2 packages; L at most 6, 20, 50 and 3; XL beyond. A plan takes the largest size any of its counts reaches. Runs show usage as each provider reports it: tokens always, dollars where given. Nothing forecasts cost or time.
 - Why: a description of the graph forecasts nothing, and nothing measures a forecast (D-097).
 - Built: `perbo inspect` derives the size and shows it with its counts, marking the ones that set it, and the desktop's Graph pane shows the same size beside the graph, recomputed after every edit. Not built: a run's usage as each provider reports it.
+
+### D-127 — A ticket's name is the fewest words that tell it apart
+
+- Owner: Founder
+- Decision: a ticket is called what the drafter named it: as few words as tell this work apart from every other ticket in the repository's store, whatever its state. What it is, not what is being done to make it, and nothing that tells it apart from nothing — the file or folder it lands in, "a single file", "app", "page", the repository. No set length, and at most 60 characters. The drafter is shown every other ticket's name, however many, but for the one it is drafting again, and a name it returns that is already one of them, ignoring case and spacing, is passed over and not refused. Where nothing drafted a name, or the one drafted is taken, a ticket drafted from a spec is called by the spec's title, and failing that every ticket is called by its outcome. An edit never renames a ticket: the outcome may be reworded as often as a person likes and the name stays. The name is display only, a model's words shown as a label: the branch and the pull request are named from the approved outcome, and no name reaches a path, a branch or a command ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). A name a person gives in the desktop is kept on that machine, not on the ticket, and the drafter is not shown it. A ticket drafted from a spec and its spec carry one name: when admission names the ticket, `--start-over` included, the spec's title line is rewritten to that name, and when a person renames a ticket that is not yet approved, its spec's title follows. Only the title line moves; the folder keeps the slug it was minted with, which the admission record names. An approved ticket's spec is left as approval read it, because the run commits it against the hash approval recorded (D-103).
+- Why: a board is read by scanning it, and a name that repeats its neighbours' words or carries the whole outcome makes every row read alike. Only the other names say which words tell this one apart, so the drafter is shown them, and an exact repeat is caught by a check rather than by the prompt. An edit that renamed the ticket to its outcome would put back the sentence the name exists to replace. The Spec pane, the picker and the contract's head each show the work's name, and a spec titled one way beside a ticket named another reads as two pieces of work.
+- Built: `draftContract` in `@perbo/planning` shows the drafter a `names` block beside the board and requires the draft's `name` under this rule (`draft_v5`); `perbo admit` passes every ticket's title but the one `--start-over` names, and `ticketTitle` in `apps/cli/src/commands/admit.ts` chooses the drafted name, the spec's title, then the outcome, passing over one `sameName` (`@perbo/contracts`) finds taken; `perbo edit` leaves the title alone, and so does the desktop's sample host, which has no drafter and calls a sample ticket by its spec's title, or by its outcome where another ticket carries that title. The desktop drafts through `perbo admit --from-spec`, so it names tickets the same way. `retitleSpecFile` in `@perbo/planning` is the one writer of the spec's title line: `perbo admit` calls it once nothing can refuse the admission and records the spec's hash as renamed, so the drift verdict it seeds holds, and the desktop host calls it when a ticket not yet approved is renamed; the sample host titles its spec with `retitleSpec` at the same two moments.
 
 ### D-015 — Perbo reads code and never edits it
 
@@ -384,7 +391,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-093 — The Perbo desktop runs Claude Code and Codex
 
 - Owner: Founder
-- Decision: the desktop is a local app around the bundled CLI, built from the supplied hand-drawn assets and shared components. Claude Code and Codex plan, execute and review on the person's existing subscription logins; API credentials are optional. Each person authenticates with their own credential. Perbo never reads, stores or forwards a subscription credential, never pays for, resells or intermediates usage, and never modifies a provider's binary. The agent binary's path, version and hash are recorded on every attempt.
+- Decision: the desktop is a local app around the bundled CLI, built from the supplied hand-drawn assets and shared components. Claude Code and Codex plan, execute and review on the person's existing subscription logins; API credentials are optional. The executor and the reviewer each run on the model and the effort the person chose for that role, from the levels the provider's catalog reports for that model; the effort is a provider setting like the model and changes neither the reviewer's prompt nor its policy (D-079). Each person authenticates with their own credential. Perbo never reads, stores or forwards a subscription credential, never pays for, resells or intermediates usage, and never modifies a provider's binary. The agent binary's path, version and hash are recorded on every attempt.
 - Why: people already have these subscriptions, and the product runs where their agents already run.
 - Changes if: a provider's terms stop permitting it.
 - ADR: [ADR-0033](adr/0033-focrux-local-desktop-and-subscription-providers.md).
@@ -408,7 +415,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-097 — Perbo UI v2; the phone's surfaces follow pairing
 
 - Owner: Founder
-- Decision: the desktop follows the v2 boards (`design/perbo-v2`). The rail's settings pill holds General, Usage and Connections. General holds the name, the four moments the loop may interrupt a person, appearance and an away-from-keyboard hold. Usage reports a provider's plan windows only from the provider's own reply, and a spend ledger summed from retained attempts. Shortcuts are rebindable, except the two money bindings. Completed tickets stay on Home until archived by hand, and archiving is a desktop preference, never a ticket state. There is a dark theme, and motion is vendored from transitions.dev at a pinned commit. The desktop shows no forecast, and no phone surface until pairing lands; the phone boards are the target for that work.
+- Decision: the desktop follows the v2 boards (`design/perbo-v2`). The rail's settings pill holds General, Usage and Connections. General holds the name, the four moments the loop may interrupt a person, appearance and an away-from-keyboard hold. Usage reports a provider's plan windows only from the provider's own reply, and a spend ledger summed from retained attempts. Shortcuts are rebindable, except the two money bindings. Completed tickets, and tickets whose run stopped, stay on Home until archived by hand; a ticket the loop still carries cannot be archived, and archiving is a desktop preference, never a ticket state. There is a dark theme, and motion is vendored from transitions.dev at a pinned commit. The desktop shows no forecast, and no phone surface until pairing lands; the phone boards are the target for that work.
 - Why: nothing shown is invented; every number comes from a provider or the records.
 - Changes if: the desktop shows a number no provider reported, or a desktop preference changes a ticket's state.
 
@@ -608,23 +615,32 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: the repository says nothing about trademarks or patents beyond Apache-2.0's own terms, which grant no trademark rights and carry a patent licence. The Perbo name, logo and artwork are not licensed under Apache-2.0; all rights in them are reserved, and `NOTICE` names the files.
 - Why: the founder's choice. The artwork is the co-founder's; reserving it keeps the brand out of forks while the code stays Apache-2.0.
 
-### D-117 — The interview asks with answers to pick from
+### D-117 — The Architect asks with answers to pick from
 
 - Owner: Founder
-- Decision: the interview puts what it cannot settle from the repository, the spec or what the person
+- Decision: the Architect puts what it cannot settle from the repository, the spec or what the person
   has already said through `ask_options`, which carries groups of questions, each group's parts read
   together because one part's answer bears on another's. It asks for all of it in the one call and
   returns without waiting — a tool returns to the model, and one that waited on a person would hold
   the turn open — and the dock puts one group at a time, so what the session may ask cheaply the
   person is not asked cheaply. Every part offers at least two answers, may carry the session's own
   recommendation — which is put first, a person reading a list of answers reading the top of it — and
-  always carries two of the reader's own: leaving the choice to the interview, and saying the answer is
-  none of these, which brings the box back. While a group is in front of the person the box is not, so
-  there is one way to answer rather than two; their own words are never closed off, they are asked for. Picking sends the options' own wording as
-  an ordinary turn. How much of an asking has been answered is recorded on the planning rather than
+  always carries two of the reader's own: leaving it as the Architect's call, and saying the answer is
+  none of these, which opens a box for that part, inside that answer, while the group's other parts
+  stay pickable. So there is one way to answer rather than two — the card, with the chat's box away
+  while it stands — and their own words are never closed off, they are asked for. Picking and typing
+  send nothing: one bar across the card's foot sends the whole group, and only once every part is
+  answered — a pick clicked again being taken back and the arrow keys moving a pick without making
+  it until Enter or Space does — as one line a part in the option's wording
+  or the person's, as an ordinary turn. How much of an asking has been answered is recorded on the planning rather than
   counted back out of the turns, which cannot tell an answer from a question the person typed
-  instead: a turn that is not the group's answer ends the asking, because the session is about to
-  answer what was said and a card left standing would answer a question nobody is asking any more.
+  instead: a part answered in the person's own words still answers the group, because the letter it
+  goes under says which question it answers; a group of one part has no letter to say that with, so
+  what it sends is a sentence like any other. A turn that is not the group's answer ends the asking,
+  because the session is about to answer what was said and a card left standing would answer a
+  question nobody is asking any more. Reading the answer back off the turn rather than flagging it on
+  the way in means a person who types the lettered lines out themselves has answered, wherever they
+  typed them; that is the same widening as a person typing an option's wording out, and it is meant.
   The conversation keeps the questions either way, behind the line that says they were asked: a
   card holds what has to be read and what it wrote is there for the asking, so a chat of long
   accounts is a chat nobody reads. This is not a permission prompt: a call the guard refused is still reported and
@@ -636,18 +652,329 @@ This is the one home for the decisions that govern Perbo. Every other document c
   and not a token only the app understands, which also keeps what the session wrote out of every
   action parameter ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4): it reaches a turn and
   nothing else.
-- Built: `ask_options` and the `asked` event beside the interview's other tools, bounded at four
+- Built: `ask_options` and the `asked` event beside the Architect's other tools, bounded at four
   groups of four parts of eight options and refused at the tool above that; the host relaying it
   under the clipping and redaction every other field the session writes is given, flattening the
   whitespace a label goes back down as; the asking and the count answered recorded on the planning,
-  moved on by an answer and ended by anything else or by the line itself falling out of the
-  conversation's cap; and the dock's card, which puts one group with its parts lettered, holds Send
-  until every part is answered, and sends the options' own words.
+  moved on by an answer — a lettered line a part, whatever is said under the letter, so a part in the
+  person's own words moves it as a picked one does — and ended by anything else or by the line itself
+  falling out of the conversation's cap; and the card, in the dock and on the Problems pane alike,
+  which puts one group with its parts lettered, gives each part that said the answer is none of these
+  a box inside that answer, and sends from the bar at its foot, enabled once every part is picked or
+  said, each part lettered in the option's own words or the person's — a lettered part on one line, since a newline
+  under a letter would read as a part that was never answered — a lone part bare, which has no letter
+  to be read against and so goes down in the paragraphs it was written in.
+
+### D-128 — A plan may be rearranged freely and may not quietly promise something else
+
+- Owner: Founder
+- Decision: an edit may arrange a plan any way at all — nodes split, merged, re-pathed, edges drawn
+  and removed, a criterion moved between nodes, an assertion or a verification kind rewritten — and
+  none of that changes what the work is for. Two things do: the outcome, and a criterion's own
+  words. An edit changing either takes the spec with it, and the Architect is held to that in the
+  same turn: it is the only editor holding both documents (D-102), so an edit of a promise made
+  without writing the spec is refused, by name, saying what is still direct. The same holds the
+  other way about: when the Architect writes the spec while a plan is drafted, it moves the plan
+  to answer it in the same turn, or says in one line why the plan needs no change. A person is not
+  held to either — at the Graph pane, at the Spec pane, in their own editor, or through the
+  queue's endpoint with their own token — because a hand edit writes one document and not the
+  other: the person's own edit, and a chat turn that wrote the spec and judged the plan needs no
+  change, are the ways the two can still part, and reading the difference afterwards is the
+  answer to both. On the way from the plan to the contract a model reads the
+  spec's outcome and requirements against the plan's outcome and criteria and reports where the
+  words no longer promise the same thing — never how the plan is arranged and never how a
+  criterion is proven, because neither is a promise. The verdict is kept beside the ticket against
+  two hashes, the spec's bytes and the plan's promise texts, and holds while neither moves: an
+  arrangement edit keeps it, a plan just drafted has it by construction, a chat turn that moved
+  the plan carries it forward — only from a state that had it, so a hand edit never read is not
+  washed away by a later turn — a rename, which moves only the title line the reading never reads,
+  carries the verdict as it stands, and a hand edit of a promise or of the spec, or a chat turn that
+  wrote the spec and left the plan, lets it go. It is read on a page of its own between the plan
+  and the contract, and each difference is put, one at a time, as answers to pick from in D-117's shape, on that page and in the chat beside every
+  other, with the person's own words beside them; whichever they
+  pick goes to the Architect as an ordinary turn, so the spec and the plan move together under the
+  guard above, and nothing the model returned becomes anything but a turn
+  ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). It is advice and never a gate: the
+  person may go on to the contract with every difference open, and having done so is recorded
+  against the same two hashes, so the same reading is not put to them again at the same state. It
+  is a reading of words, apart from the id-level disagreements the contract page lists — a
+  requirement nothing cites, a citation pointing at nothing — which stay where they are. A
+  criterion an edit writes carries the requirement it answers, as a drafted one does, and a
+  criterion may not cite a requirement the spec does not carry.
+- Why: the two part only where something changes one document without the other, and asking the
+  Architect to write both in the same turn is a prompt, not a guarantee. Holding it is cheap because the rule is narrow: nearly
+  every edit is arrangement and cannot make the two disagree, so only a promise has to carry a spec
+  write, and the text is compared rather than assumed so that changing how a criterion is proven
+  stays direct. Refusing at the edit is the guarantee held from the side where the work is still in
+  hand, and it needs no reading, no model and no second record to go stale. Reading the difference
+  afterwards is the weaker answer — it detects what should not have happened — but it is the only
+  answer for a hand edit, which this rule deliberately leaves free, and it is bounded by the same
+  narrowness: a plan the chat moved with its spec agrees with it by construction, so a reading is
+  owed only where a hand moved a promise or the spec, or a chat turn wrote the spec without moving
+  the plan, and the verdict is keyed by exactly those two so that nothing else asks for one. A chat turn carries the verdict forward rather than
+  earning a fresh one because the guard already held that turn to the spec; it carries it only
+  from a state that had one, because a turn cannot vouch for a hand edit it did not see. The
+  difference goes back through the chat rather than through an edit of its own because the
+  Architect is the one editor holding both documents: an answer picked on the page moves the spec
+  and the plan under the same guard, where a direct edit would have to be held to it again. It is
+  advice because a check that gated the contract would be one people learn to click past, and
+  because a difference a person chose to keep is theirs to keep. A citation is checked where the
+  contract freezes rather than at every edit, so a drafter may leave a requirement uncited and no
+  later edit is refused over a state whoever is editing did not create.
+- Built: the chat's own guard, which refuses an `edit_plan` changing the outcome or a
+  criterion's words — writing them, adding or dropping a criterion whole, or taking back an edit
+  that did — where the spec was not written in the turn in hand, measured against a baseline taken
+  as each turn begins and again as each ends, so one spec write covers the edits made beside it,
+  the next change has to say so again, and a turn queued behind a running one is measured from where
+  that one finished rather than from before its write — and says in the refusal what is still
+  direct, so it does not read as a wall; the same rule stated in the session's orientation, so it
+  is met before it is hit, beside the rule that a spec write with a plan drafted moves the plan in
+  the same turn or says in one line why it needs no change; the reading, `perbo drift`, which
+  gives a model the spec's outcome and requirements and the plan's outcome and criteria, each
+  delimited as data, and takes back at most six differences, each with two to four answers in the
+  person's own voice and at most one recommended, refusing any other shape; the verdict at
+  `.perbo/tickets/<KEY>.drift.json`, keyed by the spec's bytes and the plan's promise texts — the
+  outcome and each criterion's words, sorted, so that ids and arrangement are not in it — with
+  where it came from, whether the person went on with it open, and the model's provenance where
+  one ran: written empty by `admit` as it drafts a plan from a spec, carried forward by the
+  chat at the end of a turn that moved the plan, from a verdict that stood as the turn began
+  and stayed the turn's own — a hand edit beside it is not carried — dismissed by
+  `perbo drift --dismiss` at the same state or refused, and printed back without a model wherever
+  the two hashes still match — a reading records its own verdict only where the spec and the plan
+  still match what it judged, keeps one that another reading or a dismissal wrote for that same
+  state, and a printed verdict's `cached: true` says no model ran for it or its result was not
+  recorded; the desktop's `driftCheck`, a job in
+  the same manner as drafting, and `driftDismiss`, which the host refuses for a session with no
+  spec, no plan or an approved ticket, and clears the differences the host keeps; and the
+  Problems pane between the plan and the contract, reached by every way from the plan to the
+  contract, which asks for the reading as it opens and goes on to the contract on its own when
+  nothing differs — problems resolved from another pane included — or the person went on before; where the reading finds differences the host
+  keeps them on the planning until the person goes on with them open or the contract is approved;
+  the pane hides the chat, and while any of them is open it sits in the rail after Impact, labelled
+  "Problems" — resolved, it is only the step every Confirm passes through — and opening the ticket
+  from Home or the picker lands there (D-130); it puts one problem at a time — the first still open, as a card
+  in the chat's own shape, recommended answer first and the person's own words last, with a
+  counter in its corner reading "Problem 1 of N" and "N more after this" — whose bar at its foot posts the
+  answer as a turn, says "Resolving the problem" while the Architect applies it and while the
+  plan is read against the spec again, which the host asks for on its own once the turn ends,
+  and shows the next problem when that reading records it — the same list found again is put
+  again only where no card stands to answer it, never over a question the Architect is
+  asking of its own, and never by a reading a chat turn overlapped, which resolves none
+  either, because it read a plan the turn's answer had not reached yet; the same problem is put in the chat as an asked line in D-117's shape headed
+  "Problem 1 of N", so it is answered from any other pane the same way and the same re-read
+  follows; once none is open the pane says "Every problem is resolved" and offers "Confirm the
+  plan" at its foot, to the right of "Back to the plan" — the work is still being planned, and the button is the way on to the contract — and the
+  chat's note saying the same offers it too; a question the Architect raises of its own stands
+  ahead of that resolved state, on the page as the thing to answer, headed "A question from the
+  Architect" with the counter hidden, and the way on is withheld on the page and in the chat until
+  it is answered and the plan read again; "Go on to the contract anyway"
+  and "Back to the plan" stay on every state, and an error shows with the way on and the way
+  back rather than as a wall; the citation check at
+  approval, where the contract is frozen and the spec travels with it, refusing a plan that cites
+  what its spec no longer states and passing over a spec it cannot read, as the rest of approval
+  does; the disagreements between the two listed on the contract page before the button that
+  freezes them — a requirement nothing answers, a citation pointing at nothing — beside the impact
+  count and in its manner, advice and never a gate;
+  `requirement_id` on every criterion an edit writes, including one an undo puts back, so a
+  node's page names the requirement rather than telling the executor it was drafted from nothing;
+  the criteria whose verification the draft did not propose marked on the page that freezes them,
+  because approving is the last place a changed assertion can be read; and the last change to the
+  pair marked where the two are read — the Spec pane's reading, the Graph's node cards and
+  inspector, the Plan pane — additions green and removals red and struck through, kept on the
+  planning as what the spec's sections and the plan's outcome and criteria said before and after,
+  recorded once a chat turn ends and once an edit by hand, a compile or a spec save lands, only
+  where words differ and never for the first words put into an empty spec section or a plan just
+  drafted, which are not an edit, and replaced whole by the next change, so that what a person
+  reads marked is always the one change they have not yet read; nothing is marked while a section
+  or a criterion is being edited.
+
+### D-129 — Before the loop is the picker's; the loop is Home's
+
+- Owner: Founder
+- Decision: Create's picker holds every piece of work before the loop — a planning with only a
+  name, a spec written under one, a spec the repository holds that no planning and no ticket
+  names, and a plan drafted and not yet approved. Home holds the tickets the loop is carrying.
+  Approving is the line between them, because approving is what starts the loop. Every row the
+  picker lists can be deleted where it is listed, and each asks first, in the words of the stage it
+  is at. Deleting takes all of it: the planning, the ticket it drafted and the spec folder they
+  came from, at every stage, the loop included, and the evidence goes with it: the attempts the
+  ticket recorded and the bundles those attempts sealed. One stage holds: a ticket whose pull
+  request is open is refused, because that pull request is a record outside this machine and
+  deleting the ticket would leave it standing with nothing here to read it against; it is closed
+  or merged on GitHub first, and the delete is offered again after that. A run that has been
+  stopped is deleted on its own page, which a stop lands on at once, which is the ticket's own for as
+  long as it is stopped, and which holds its name, that the run was stopped, and its three ways out — **Delete
+  this work**, **Plan it again** and **Continue the task** — as buttons named and nothing else,
+  beside **Open the contract** and **Watch what the agents did**. **Plan it again** puts the work
+  back before the loop: the stopped ticket is deleted as a delete takes it, attempts and evidence
+  included, but for the spec, which stays because the new plan is drafted from it; the ticket
+  leaves Home at the click, and the new plan is in the picker as planning to continue. Where the
+  plan cannot be drafted once the ticket is deleted, the refusal says the ticket was deleted and
+  that its spec is in the picker to draft the plan from. It is
+  offered only where the record is spent, and not where the pull request is open. Publishing a branch or pull
+  request needs the person's permission for that run, asked on the contract page as it starts;
+  **Continue the task** after a stop carries the permission the stopped run was given, and a
+  decision's run carries none. The spec is left only where something else still names it:
+  another planning writing the same file, or another ticket drafted from it, neither of which this
+  delete was asked about, and a plan still standing is read against the spec it names (D-103).
+  Opening a spec starts a planning already named to it, so the first save writes the folder that is
+  there rather than minting a second from the same title; a spec another planning is writing is not
+  offered, because one spec is one piece of work (D-103).
+  A planning opened fresh that holds nothing — no spec folder, no ticket, no turn to the chat
+  and no edit — is discarded as the person navigates from planning mode to any other page, because
+  a row nobody put anything into is not work to offer back. Anything put into it stays, whatever
+  the stage; leaving a page is what discards it, and closing Perbo is not leaving a page, so an
+  untouched planning is still there after a restart.
+- Why: a planning deleted without its spec leaves the writing reachable only through a record that
+  no longer exists, while the folder still holds its title, so starting the same work again is
+  refused for a folder the person has no way to open; the picker is the way back in. Deleting the
+  planning and leaving the writing puts the row straight back under the same title, which reads as
+  the delete having made a copy of the thing it removed, and keeping the record of a run the person
+  has said is over keeps a row on the board that stands for nothing, so a piece of work is one thing
+  and is deleted as one. The split follows: a board that mixes work being planned with work being
+  run is two jobs on one screen, and the picker is already where planning is resumed.
+- Built: the host's reading of the spec folder, skipping an entry it cannot parse rather than
+  refusing the rest; `specs` on the snapshot and `specSlug` on each open draft, which
+  `unclaimedSpecs` subtracts to find what nothing points at; the `spec` editing target, which
+  reuses the planning already writing that spec; `specDelete`, which takes a slug and never a path
+  and refuses a spec a ticket records or a planning is writing; `PRE_LOOP_STATES` beside the rule
+  about what Home files away, which keeps `draft`, `specifying` and `plan_review` off Home; a bin
+  on every picker row, each naming what it deletes; `ticketsNoDraftStandsFor`, which covers a
+  reviewing ticket by the spec a planning writes as well as by its key, so one spec is one row;
+  the adoption on open, which puts a ticket already drafted from this planning's spec onto the
+  planning — without claiming it made one it did not; `discardTicket` in `host/tickets/discard.ts`,
+  reached only through the host's `discardDrafted`, which takes the ticket,
+  its contract, its draft, its approach, the reading of its plan against its spec, the attempts
+  record and the bundle manifests those attempts sealed, and leaves the content-addressed objects
+  under them, because one of those bytes can be what another ticket's bundle names, and stops every
+  chat over the work and waits for its child to exit before anything is removed, because a turn in
+  flight writes the spec back and its edit would find the ticket gone; the delete on
+  the contract page and on the stopped-run page, each asking first in the words of the stage it is
+  at; `replan`, which asks `admit`'s spent-record question itself and then deletes the stopped
+  ticket through `discardDrafted` before it admits the new plan from the spec, so the new plan is
+  named as the only plan that spec has; the picker's delete marks, which Home reads too, so a
+  ticket being planned again is off Home before the host has answered; `StoppedScreen` and the ladder in `ticket-workspace.ts`, which land a run whose stop is still
+  settling on that page as well as one whose record says it stopped; `publish` on a run's job, which
+  **Continue the task** carries; `removeSpecFolder` and
+  `deleteDraftedFromSpec`, which take the ticket and the folder with the planning and hold the
+  slug to one folder name in the configured spec folder (D-103), because an admission record is a file in the repository and this ends
+  in a recursive delete; the planning's delete, `editingDiscard`, which, for a planning holding the ticket it
+  drafted, is refused before anything is discarded while a command runs in the repository,
+  leaving the planning, the ticket and the spec as they were, says a refusal found once the chat has exited — a pull request open — with the
+  planning already thrown away and the ticket kept, and takes the spec folder with the planning
+  where the ticket is already gone; the same reading in the sample host, and the same refusals of a delete in
+  the sentences `shared/discard.ts` holds for both, so it behaves as the host does; `untouchedPlanning` in `contract-editing.ts`, which is what holds nothing means;
+  and the route effect in `App.tsx`, which is the one place a leave from planning is seen, and
+  reads the session and discards it at the revision it read, so a save still in flight refuses the
+  discard rather than losing what it wrote; and the Spec pane's save, as it unmounts, of a title or
+  section typed and not yet saved, sent ahead of that read.
+
+### D-130 — Coming back to a planning is coming back to the pane
+
+- Owner: Founder
+- Decision: a planning reopens on the pane the person was last on in it, whether they left it for
+  Home, Archive or Settings or closed Perbo with it open. Every way back into a planning asks this
+  — the picker's rows, the ticket's own page, a link to the planning that names no pane, and the
+  contract's **Back to planning** — and it outranks where each of them would otherwise land: the
+  Graph for a divided plan, the Spec for a planning with no plan. Open problems outrank it in their
+  turn for the picker, the ticket's own page and a link with no pane: while a reading has problems
+  open, those land on the Problems pane (D-128). The
+  contract's way back is not held by them: it goes where the planning was left, else to the plan.
+  The ticket's own page and the contract's way back ask this only of the planning curating the
+  ticket, which is one with a graph it was divided into or a spec it was drafted from; a session
+  the ticket's own editor opened is not one, so that ticket stays on its own page. The reading
+  between the plan and the contract is not a pane a planning is left at, so it is never
+  remembered: every **Confirm the plan** passes through it, and
+  the pane remembered is the one the person confirmed from. Nor is a pane the planning does not
+  offer, reached by an address typed by hand. Where the pane left is one the planning no longer
+  offers — a Graph for a plan that is no longer divided — the way in lands where it otherwise
+  would. Moving between panes is not putting anything into a planning: it moves no revision, so a
+  planning opened fresh and only looked around in is still thrown away as the person leaves it
+  (D-129). A planning's contract is a place it is left at too: a
+  person who reached the contract of a plan still waiting for approval and left it, for anywhere or
+  by closing Perbo, comes back to the contract from the picker's row, the ticket's own page, a link
+  to the ticket that names no view and a restart, ahead of open problems and the pane, until
+  planning mode records a pane, which is then the last place. Once the plan is approved the
+  ticket's page lands by its state, and a stopped run on its stopped page; no other view of a
+  ticket is remembered, since each is where its state already sends the person.
+- Why: a person who steps away mid-thought — to check a ticket on Home, or for the night — comes
+  back to finish that thought, and a planning that reopens somewhere else makes them find their
+  place again every time. The rule each way in lands by is a good guess at where a person is going
+  where there is no record of where they were; where there is one, the record is better than the
+  guess. The pane is written as the person reaches it rather than as they leave,
+  because closing Perbo is not a leave the renderer sees, and a record written on the way out
+  would be lost on exactly the exit it is for.
+- Built: `lastPane` on the contract editing session, null until a pane has been visited, and on
+  each open draft; `lastView` beside it, "contract" or null and null at birth, and on each open
+  draft, the one record of the contract being the last place, on the session because a ticket's
+  page is only ever sent away from its contract while a planning holds its plan; the
+  `editingContractVisited` request, which carries the session id alone and is recorded by
+  `visitContract` in `contract-editing.ts`, and `visit` clearing `lastView` as it records a pane,
+  neither moving the revision, the same on the native host and the sample host; `TaskPage` sending it
+  as the contract of a plan waiting for approval is shown and not being redirected, and landing on
+  that contract, ahead of its problems and `leftAt`, while `lastView` says so; the picker's row
+  for such a planning opening its ticket's page; `PlanningPaneSchema` in the protocol, the one list of pane ids the record, the
+  routes and the rail share; the `editingVisited` request, which carries the session id and a pane
+  id and is recorded by `visit` in `contract-editing.ts`, leaving the revision alone and writing
+  nothing for the pane already recorded or for a discarded planning, the same on the native host and
+  the sample host; planning mode sending it once per pane it reaches, for a pane that `remembered` in
+  `renderer/planning/panes.ts` allows — every pane but the reading — and that `panesFor` offers;
+  `leftAt` there, which answers the recorded pane only where `panesFor` still offers it, and
+  `reopenPane`, which answers the Problems pane while problems are open, else `leftAt`, else the
+  Spec; the picker's rows, `TaskPage`'s redirect and planning mode's own route with no pane landing
+  by that order, the route replacing itself in the history with the pane it picks once the drafts
+  list names the planning; `curates` there, the one test of whether a planning curates its
+  ticket, which the contract screen finds its planning by and `TaskPage` asks before `leftAt`;
+  the contract's way back asking `leftAt` before the plan's own pane, whatever problems are open;
+  and the Spec pane's first read of the file keeping what was typed before it only in a field the
+  file leaves empty, so nothing typed replaces text of the file's the pane never showed.
+  A `workspace.json` holding a record that does not match the schema stops Perbo from starting,
+  with a message naming the file and each failing field, a failure shared by several records named
+  once with every index it holds at, and ending on what to do: correct the field or move the file
+  aside.
+
+### D-131 — A planning starts from its repository's question
+
+- Owner: Founder
+- Decision: a repository picked in Create's picker opens that repository's own page, not a
+  planning: the whole page beside the rail, and at its centre the question **What do you want to
+  build?** over one wide box, which is a line tall and grows as what is typed wraps. Picking it
+  creates nothing. The box has no attach control; in its bottom-right corner are the name of the
+  repository and the same send the chat's box has, muted while there is nothing to send. What is
+  typed and not sent is the repository's: each repository keeps its own, kept as it is typed, so
+  the page shows it again when the repository is picked again, after another repository's page and
+  after Perbo is closed and opened again. While the page is open Create reads as the current page,
+  no planning pane is under it, and the picker opened from it has that repository's row selected.
+  Enter or the send opens the planning and sends what is typed as its first turn, exactly as typing
+  it into the chat on the Spec pane does, so it names the spec (D-118); the repository's text is
+  then cleared, and the page goes on to the planning's Spec pane in its place, where the chat shows
+  the turn and the answer. Shift+Enter starts a new line, and a box empty or holding only spaces
+  sends nothing. A send the host refuses keeps the text, says why and leaves no planning behind. A
+  planning is never opened on the page, so it is never where a planning is left
+  (D-130), and a planning opened over a spec or a ticket never
+  lands on it.
+- Why: what a person picking a repository has in mind is what they want built, and the first thing
+  planning needs from them is that, in their own words. A spec form with a chat beside it asks them
+  to choose where to begin before they have begun. A piece of work exists once it has been asked
+  for: a planning made at the pick is an untitled row in the picker for words that were never
+  sent, and words half-typed for one repository are that repository's until they are sent.
+- Built: the `ask` route of the renderer (`#ask/<repoId>`), a page of its own beside the planning
+  route, which the picker's repository rows open and nothing else does; `AskPage` in
+  `renderer/planning/AskPage.tsx`, which keeps the text through `askSave` — a repository id and the
+  text, an empty text removing it — a moment after typing rests and as the box loses focus or the
+  page is left, and on send opens a `fresh` planning, sends the one `interviewTurn` the chat sends,
+  clears the repository's text and replaces the route with the Spec pane, and where the host
+  refuses keeps the text, says why and discards the planning it opened; `asks`, the host's
+  preference by repository id beside `titles` and `archived`, on the snapshot, removed with its
+  repository when that is disconnected, and required in a stored profile, which a new one writes empty; the picker selecting the repository's row when opened from its
+  page; the chat's `SendButton`, shared by both boxes; and the rail lighting Create, with
+  `aria-current`, and showing no planning panes on it. The sample host keeps `asks` in its
+  sample records and answers `askSave` as the host does.
 
 ### D-119 — A pause says which pause it is
 
 - Owner: Founder
-- Decision: the dock says the interview is working for as long as it owes the person a word, and
+- Decision: the dock says the Architect is working for as long as it owes the person a word, and
   says nothing once the next word is theirs. Which it is comes from the session's own report that
   its turn has ended — every transport knows this and each says it differently, so it is carried in
   one shape (`idle`) as the session's words are. A turn the person sends starts the waiting; the
@@ -658,19 +985,23 @@ This is the one home for the decisions that govern Perbo. Every other document c
   the conversation alone, exactly like one that has finished or fallen over. Read from the last
   line's kind the dock went quiet at the very moment the person most needed telling that something
   was still coming, and a person who thinks a tool has hung stops it.
-- Built: the `idle` event on the interview's protocol, emitted by the Claude transport when the SDK
+- Built: the `idle` event on the chat's protocol, emitted by the Claude transport when the SDK
   reports a turn's result and by the Codex transport when a turn ends however it ended; the host
-  counting what each planning is owed and carrying it on the interview's change beside the asking,
+  counting what each planning is owed and carrying it on the `interview` change beside the asking,
   clearing it when the child closes, the session ends or the person stops it; the snapshot listing
-  the plannings mid-turn, so a dock opened part way through one knows it; and the dock's own line,
-  which says *Working…* while a tool is the last thing to have happened and *Thinking…* otherwise.
+  the plannings mid-turn, so a dock opened part way through one knows it; and the dock's one status
+  line, which names what the turn is doing from the last line it put in the conversation — reading
+  what was said, thinking, changing the plan — and from the host where no line shows it: writing
+  the spec, and a line of the session's held back, for which the session's bubble stands with its
+  dots in place of the line until the words arrive, and only then: a line the host is not holding
+  is drawn as it arrives.
 
 ### D-118 — An untitled planning is named by its first turn
 
 - Owner: Founder
-- Decision: the interview writes `specs/<slug>/spec.md`, so a planning with no slug has nowhere to write. Where the person has not titled it in the Spec pane, the host cuts a title from their first turn — the first sentence, its opening dropped, clipped to a whole word within the slug's cap — writes the spec with it and records the slug, then starts the interview on that spec and sends the turn. The chat says which folder was named. A turn no folder name can come from is refused as before, naming the title it could not take. The folder is minted once and is not moved afterwards; the title in it stays editable.
-- Why: a person opening planning and typing what they want should be talking to the interview, not stopped by a field they have not found. Their own words name the folder, so nothing a model returned becomes a path ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). The naming is said rather than silent because a slug outlives the message it came from.
-- Built: `specTitleFromMessage` in `@perbo/planning`, the host naming the spec on the first turn and saying so as a note, and the browser preview doing the same.
+- Decision: the Architect writes `specs/<slug>/spec.md`, so a planning with no slug has nowhere to write. Where the person has not titled it in the Spec pane, the host cuts a title from their first turn — the first sentence, its opening dropped, clipped to a whole word within the slug's cap — writes the spec with it and records the slug, then starts the chat on that spec and sends the turn. The chat says which folder was named. A turn no folder name can come from is refused as before, naming the title it could not take. The folder is minted once and is not moved afterwards; the title in it stays editable. That cut names the folder and is no title, so the Architect writes the spec's title line when it first writes the spec, named as a ticket is rather than cut from the message, and shown the other tickets' names as the drafter is (D-127). Where it does not, the cut stays the title until admission gives the spec the ticket's name. The Spec pane shows the file's title, so it shows the Architect's as soon as the spec is written.
+- Why: a person opening planning and typing what they want should be talking to the Architect, not stopped by a field they have not found. Their own words name the folder, so nothing a model returned becomes a path ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). The naming is said rather than silent because a slug outlives the message it came from.
+- Built: `specTitleFromMessage` in `@perbo/planning`, the host naming the spec on the first turn and saying so as a note, and the sample host doing the same; `interviewOrientation` asking for the title line as a title, with every ticket's name but the one drafted from this spec in a `names` block.
 
 ### D-124 — `@perbo/contracts` holds what two packages share
 

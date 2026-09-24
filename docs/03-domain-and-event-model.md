@@ -99,6 +99,7 @@ A `StopVerdicts` record per ticket carries the change's `blocks`/`escalates`/dec
     PRB-118.contract.json        the PlanContract — immutable once approved
     PRB-118.draft.json           the draft: proposal, model provenance, edit history
     PRB-118.approach.json        the approach: the order between the plan's nodes and the spec's No-Gos
+    PRB-118.drift.json           the drift: where the plan's promises and the spec's words part, against their two hashes
   state/
     <ticket_id>.attempts.json    ExecutionAttempt[], appended on every run
     <ticket_id>.stops.json       StopVerdicts
@@ -111,4 +112,4 @@ A `StopVerdicts` record per ticket carries the change's `blocks`/`escalates`/dec
 
 `packages/contracts/src/store-layout.ts` is the code's one declaration of these paths: what a second process reads out of the store is named there and nowhere else.
 
-`admit` writes the ticket, its contract and its draft together, and the approach beside them where the plan has nodes or the spec states a No-Go. `edit` rewrites `.contract.json` and `.draft.json` as a pair; `approve` seals the contract and sets `approved_at`. `run` appends to `attempts.json`, writes a bundle per planning, execution, review and delivery step under `bundles/`, and seals the change set and check results onto the attempt that produced them. `sync` rewrites the ticket's `delivery` record and `stops.json` from what `gh` reports, and walks the ticket's state from that evidence. `verdict` appends to `verdicts.json`; `principle add` appends to `principles.md`. `review` run against a change nobody admitted writes only under `reviews/`, keyed by its own review id rather than a ticket.
+`admit` writes the ticket, its contract and its draft together, the approach beside them where the plan has nodes or the spec states a No-Go, and for a ticket drafted from a spec an empty `<KEY>.drift.json`, which the interview carries forward and `drift` rewrites and dismisses ([D-128](11-open-decisions.md)); the record's one reader and writer is `@perbo/planning`'s `drift-record.ts`, which the desktop host goes through too. `edit` rewrites `.contract.json` and `.draft.json` as a pair; `approve` seals the contract and sets `approved_at`. `run` appends to `attempts.json`, writes a bundle per planning, execution, review and delivery step under `bundles/`, and seals the change set and check results onto the attempt that produced them. `sync` rewrites the ticket's `delivery` record and `stops.json` from what `gh` reports, and walks the ticket's state from that evidence. `verdict` appends to `verdicts.json`; `principle add` appends to `principles.md`. `review` run against a change nobody admitted writes only under `reviews/`, keyed by its own review id rather than a ticket.

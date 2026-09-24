@@ -7,7 +7,7 @@ import { CODEX_INTERVIEW_ARGV, codexInterviewTransport } from "./codex.js";
 import { INTERVIEW_TOOL_NAMES, interviewCommandLine } from "./index.js";
 import { fakeAppServer, type ServerStep } from "./test-support/fake-app-server.js";
 import {
-  drafter,
+  draftFromSpec,
   events,
   refusals,
   repository,
@@ -32,9 +32,17 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 async function interview(
   steps: readonly ServerStep[],
-  extra: { argv?: readonly string[]; threadId?: string; turns?: number; cwd?: string } = {},
+  extra: {
+    argv?: readonly string[];
+    threadId?: string;
+    turns?: number;
+    cwd?: string;
+    /** A plan admitted from the spec before the session runs, as the person's press admits one. */
+    drafted?: boolean;
+  } = {},
 ) {
   const repo = repository(scratch);
+  if (extra.drafted === true) await draftFromSpec(repo);
   const server = fakeAppServer({
     root: mkdtempSync(join(scratch, "app-server-")),
     steps,
@@ -47,7 +55,6 @@ async function interview(
     cwd: extra.cwd ?? repo,
     deps: {
       transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
-      model: drafter(),
       turns: (async function* () {
         for (let i = 0; i < (extra.turns ?? 1); i += 1) {
           yield JSON.stringify({ type: "turn", text: `turn ${i}` });
@@ -248,7 +255,6 @@ describe("the interview's rules over the app server's approvals", () => {
         cwd: repo,
         deps: {
           transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
-          model: drafter(),
           turns: (async function* () {
             yield JSON.stringify({ type: "turn", text: "hello" });
           })(),
@@ -299,7 +305,6 @@ describe("the interview's rules over the app server's approvals", () => {
             binary: refusing,
             codexHome: server.codexHome,
           }),
-          model: drafter(),
           turns: (async function* () {
             yield JSON.stringify({ type: "turn", text: "hello" });
           })(),
@@ -349,7 +354,6 @@ describe("the interview's rules over the app server's approvals", () => {
       cwd: repo,
       deps: {
         transport: codexInterviewTransport({ binary: lingering, codexHome: server.codexHome }),
-        model: drafter(),
         turns: (async function* () {})(),
       },
     });
@@ -421,7 +425,6 @@ describe("the interview's rules over the app server's approvals", () => {
         cwd: repo,
         deps: {
           transport: codexInterviewTransport({ binary: dying, codexHome: server.codexHome }),
-          model: drafter(),
           turns: (async function* () {
             yield JSON.stringify({ type: "turn", text: "hello" });
           })(),
@@ -476,7 +479,6 @@ describe("the interview's rules over the app server's approvals", () => {
         cwd: repo,
         deps: {
           transport: codexInterviewTransport({ binary: noisy, codexHome: server.codexHome }),
-          model: drafter(),
           turns: (async function* () {
             yield JSON.stringify({ type: "turn", text: "hello" });
           })(),
@@ -507,13 +509,13 @@ describe("the interview's rules over the app server's approvals", () => {
     // A tool that takes no fields is called without an `arguments` key. What
     // reaches the tool then is the call it was made with rather than nothing,
     // which the tool's own schema would refuse as input it does not take.
-    const { server, code } = await interview([
-      writeSpec,
-      { kind: "toolNoArguments", tool: "generate_plan" },
-    ]);
+    const { server, code } = await interview(
+      [writeSpec, { kind: "toolNoArguments", tool: "read_plan" }],
+      { drafted: true },
+    );
     expect(code).toBe(EXIT_CODES.approve);
     expect(server.answers()[1]?.success).toBe(true);
-    expect(server.answers()[1]?.text).toContain("PRB-1");
+    expect(server.answers()[1]?.text).toContain("node_1");
   });
 
   it("refuses to run at all without the person's own Codex login", async () => {
@@ -531,7 +533,6 @@ describe("the interview's rules over the app server's approvals", () => {
             binary: join(scratch, "unused-binary"),
             codexHome: mkdtempSync(join(scratch, "codex-home-empty-")),
           }),
-          model: drafter(),
           turns: (async function* () {
             yield JSON.stringify({ type: "turn", text: "hello" });
           })(),
@@ -857,7 +858,6 @@ describe("resume (SCP-312 criterion 3)", () => {
       cwd: first.repo,
       deps: {
         transport: codexInterviewTransport({ binary: server.binary, codexHome: server.codexHome }),
-        model: drafter(),
         turns: (async function* () {
           yield JSON.stringify({ type: "turn", text: "carry on" });
         })(),

@@ -89,6 +89,14 @@ export function draftPath(key: string): StorePath {
   return [TICKETS_DIR, `${key}.draft.json`];
 }
 
+/**
+ * The plan read against the spec it was drafted from, kept against the spec's
+ * and the plan's hashes (D-128).
+ */
+export function driftPath(key: string): StorePath {
+  return [TICKETS_DIR, `${key}.drift.json`];
+}
+
 /** The approach a graphed plan or a spec with No-Gos was admitted with. */
 export function approachPath(key: string): StorePath {
   return [TICKETS_DIR, `${key}.approach.json`];

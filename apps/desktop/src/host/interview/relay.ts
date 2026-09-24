@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { InterviewEventSchema } from "@perbo/contracts";
 import { redact } from "../process.js";
+import { INTERVIEWER_NAME } from "../../shared/protocol.js";
 import type { InterviewEntry } from "../../shared/protocol.js";
 
 type Line = InterviewEntry["line"];
@@ -17,6 +18,14 @@ export type Relayed =
   | { kind: "line"; line: Line }
   /** A message carrying nothing to show: the chat is left as it is. */
   | { kind: "nothing" }
+  /**
+   * What the session said, redacted and clipped: the host decides whether it
+   * is said now, held, or dropped, because that depends on what the turn does
+   * next (D-102).
+   */
+  | { kind: "said"; text: string }
+  /** The session admitted a write to the spec; the file lands as the call returns. */
+  | { kind: "wroteSpec" }
   /** The session reported its own id, which `--session` continues (D-102). */
   | { kind: "started"; session: string; note: Line }
   /** A tool ran; `planMoved` where it wrote a plan edit the records now hold. */
@@ -75,7 +84,7 @@ export function relayed(line: string): Relayed {
       kind: "line",
       line: {
         kind: "note",
-        text: "The interview wrote a line this build could not read: it is not JSON.",
+        text: "The chat wrote a line this build could not read: it is not JSON.",
       },
     };
   }
@@ -90,7 +99,7 @@ export function relayed(line: string): Relayed {
       line: {
         kind: "note",
         text:
-          "The interview wrote a line this build could not read: it is not one of the interview's " +
+          "The chat wrote a line this build could not read: it is not one of the chat's " +
           `events (${why}).`,
       },
     };
@@ -115,9 +124,7 @@ export function relayed(line: string): Relayed {
   }
   if (event.type === "message") {
     const said = interviewSaid(event.message);
-    return said === null
-      ? { kind: "nothing" }
-      : { kind: "line", line: { kind: "said", text: redact(said).slice(0, 12_000) } };
+    return said === null ? { kind: "nothing" } : { kind: "said", text: redact(said).slice(0, 12_000) };
   }
   if (event.type === "refused")
     return {
@@ -142,6 +149,7 @@ export function relayed(line: string): Relayed {
       planMoved: event.ok && (event.tool === "edit_plan" || event.tool === "undo_edit"),
     };
   if (event.type === "idle") return { kind: "idle" };
+  if (event.type === "wrote_spec") return { kind: "wroteSpec" };
   if (event.type === "asked")
     return {
       kind: "asked",
@@ -159,7 +167,7 @@ export function relayed(line: string): Relayed {
       line: {
         kind: "asked",
         groups: event.groups.map((group) => ({
-          title: group.title === null ? null : said(group.title, 200, "The interview asks"),
+          title: group.title === null ? null : said(group.title, 200, `${INTERVIEWER_NAME} asks`),
           parts: group.parts.map((part) => ({
             question: said(part.question, 600, "(the question did not survive redaction)"),
             options: part.options.map((option) => ({
@@ -175,12 +183,23 @@ export function relayed(line: string): Relayed {
     kind: "ended",
     line: {
       kind: "note",
-      text: `The interview ended: ${redact(event.reason).slice(0, 2000)}.`,
+      text: `The chat ended: ${redact(event.reason).slice(0, 2000)}.`,
     },
   };
 }
 
+/**
+ * A model's text on its way to the person: redacted, its whitespace flattened
+ * and clipped to what the field holds — as every line the interview relay
+ * records is, so the same rule reads a question, an answer and a finding.
+ * Empty where nothing survived, which the caller decides about: a field its
+ * schema requires cannot be shown as nothing.
+ */
+export function readable(text: string, cap: number): string {
+  return redact(text).replace(/\s+/g, " ").trim().slice(0, cap).trim();
+}
+
 const said = (text: string, cap: number, empty: string): string => {
-  const kept = redact(text).replace(/\s+/g, " ").trim().slice(0, cap).trim();
+  const kept = readable(text, cap);
   return kept.length > 0 ? kept : empty;
 };

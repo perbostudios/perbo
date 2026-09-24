@@ -76,6 +76,7 @@ export async function execute(args: {
       prompt: brief.prompt,
       brief_records: brief.briefRecords,
       model: config.model,
+      effort: config.effort,
       profile: args.profile,
       ceilings,
       env: environment.env,

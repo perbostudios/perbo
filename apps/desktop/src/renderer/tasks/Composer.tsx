@@ -1,37 +1,48 @@
 import { Button, Dropdown, Field, IconButton, InkIcon, Notice, PageFooter } from "../ui/index.js";
 import { WaitScreen, WizardHeader } from "./wizard.js";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { MarkedCriterion, RemovedCriteria } from "../planning/ChangeMarks.js";
+import { changeKey, criteriaChange, type CriterionChange } from "../planning/change-marks.js";
 import {
   CriterionSchema,
   DraftSchema,
 } from "../../shared/protocol.js";
-import type { Detail, Draft, EditingTarget, TaskModels } from "../../shared/protocol.js";
+import type { Detail, Draft, EditingTarget } from "../../shared/protocol.js";
 import { useContractEditing } from "../contract-editor.js";
-import { ModelPicker, useProviders } from "../settings/ConnectionScreens.js";
 import type { PageProps } from "../shell/route.js";
 import { isLive } from "../../shared/jobs.js";
-export { contractDraft } from "../../shared/contract-editing.js";
+import { contractDraft } from "../../shared/contract-editing.js";
+import { confirmRoute, planApproved } from "../planning/panes.js";
 export function Composer({
-  workspace, navigate, existing, existingRepoId, onCancel, target: chosen,
-}: PageProps & { existing?: Detail; existingRepoId?: string; onCancel?: () => void; target?: EditingTarget }) {
+  workspace, navigate, existing, existingRepoId, onCancel, target: chosen, plan = false,
+}: PageProps & {
+  existing?: Detail;
+  existingRepoId?: string;
+  onCancel?: () => void;
+  target?: EditingTarget;
+  /**
+   * Whether this is planning mode's plan pane rather than the ticket's own
+   * editor. The criteria are the same; what differs is the way onward, which
+   * is a step in a flow rather than a compile, and what else the footer
+   * offers, because discarding here would discard the planning.
+   */
+  plan?: boolean;
+}) {
   // Planning mode hands over the session it holds; a ticket's own editor names the ticket.
   const target: EditingTarget = chosen ?? (existing && existingRepoId
     ? { kind: "ticket" as const, repoId: existingRepoId, key: existing.ticket.key }
     : { kind: "new" as const, repoId: workspace.repositories[0]?.id ?? "" });
   const editor = useContractEditing(target, workspace.settings, existing);
-  const { draft, step, models, editing, criterion: editedCriterion, newPath } = editor.form;
+  const { draft, editing, criterion: editedCriterion, newPath } = editor.form;
   const { repoId, record, session } = editor;
   const currentKey = session?.key ?? session?.operation?.resultKey;
   const setDraft = (draft: Draft): void => editor.update({ draft });
-  const setStep = (step: 1 | 2): void => editor.update({ step });
-  const setRepoId = (repoId: string): void => editor.update({}, repoId);
-  const setModels = (models: TaskModels): void => editor.update({ models });
   const setEditing = (editing: number | null): void => editor.update({ editing });
   const setEditedCriterion = (change: Draft["criteria"][number] | ((value: Draft["criteria"][number]) => Draft["criteria"][number])): void =>
     editor.update({ criterion: typeof change === "function" ? change(editedCriterion) : change });
   const setNewPath = (newPath: string | null): void => editor.update({ newPath });
-  const providers = useProviders(), handled = useRef<string | null>(session?.phase === "ready" ? session.operation?.id ?? null : null);
-  const submitted = useRef<"draft" | "compile" | "generate" | "startOver">("draft");
+  const handled = useRef<string | null>(session?.phase === "ready" ? session.operation?.id ?? null : null);
+  const compiling = useRef(false);
   const currentJob = workspace.jobs.find((job) => job.id === session?.operation?.jobId && job.repoId === repoId);
   // Only this session's own drafting holds its Start: planning runs beside a run and beside another session (D-101).
   const pending = Boolean(currentJob && isLive(currentJob));
@@ -40,39 +51,76 @@ export function Composer({
   useEffect(() => {
     if (session?.phase !== "ready" || !session.key || handled.current === session.operation?.id) return;
     handled.current = session.operation?.id ?? null;
-    // Always the ticket. Where a drafted ticket belongs — the graph it was
-    // divided into, or the contract — is a question about the ticket, and
-    // `TaskPage` answers it once for everybody: landing here and clicking the
-    // same ticket on Home have to agree, and a rule written twice does not.
+    if (plan) {
+      // In planning mode this screen is a stage the person is standing on
+      // rather than a form that has just been sent, so only what they pressed
+      // here leads anywhere. A plan drafted from the spec settles under them —
+      // planning decides where that lands, and it has a pane for it — and
+      // walking off to the ticket would take them off the page they came to
+      // read. Pressing Next is the one thing that means "on to the contract",
+      // the way every way there goes.
+      if (!compiling.current) return;
+      navigate(confirmRoute({
+        repoId: session.repoId,
+        key: session.key,
+        sessionId: session.id,
+        approved: planApproved(workspace, session.repoId, session.key),
+      }));
+      return;
+    }
+    // Otherwise, always the ticket. Where a drafted ticket belongs — the graph
+    // it was divided into, or the contract — is a question about the ticket,
+    // and `TaskPage` answers it once for everybody: landing here and clicking
+    // the same ticket on Home have to agree, and a rule written twice does not.
     navigate({ page: "task", repoId: session.repoId, key: session.key, view: "auto" });
     onCancel?.();
-  }, [session, navigate, onCancel]);
-  const start = (model: boolean): void => {
-    submitted.current = model ? "draft" : "compile";
-    editor.submit(submitted.current);
+  }, [session, navigate, onCancel, plan]);
+  // The last change to the plan's promise, marked on the rows
+  // (D-128). The rows carry no ids —
+  // the form holds the criteria as text — so each is matched to the change's
+  // after-criteria by its words, first unused match first, which is exact
+  // where the form shows the plan as the change left it and marks nothing
+  // where it does not. None while a criterion is being edited: the row is
+  // then a box, and the list is moving under it. Hooks, so ahead of the
+  // waits this screen returns early with.
+  const planChange = plan ? (session?.change?.plan ?? null) : null;
+  const lastChange = planChange === null ? null : changeKey(session?.change ?? null);
+  const changes = useMemo(
+    () => (planChange === null ? null : criteriaChange(planChange.before.criteria, planChange.after.criteria)),
+    [lastChange],
+  );
+  const rowChanges = useMemo((): (CriterionChange | undefined)[] => {
+    if (changes === null || planChange === null || editing !== null) return [];
+    const unused = [...planChange.after.criteria];
+    return draft.criteria.map((entry) => {
+      const at = unused.findIndex((criterion) => criterion.text === entry.text);
+      if (at < 0) return undefined;
+      const [matched] = unused.splice(at, 1);
+      return changes.of.get(matched!.id);
+    });
+  }, [changes, planChange, draft.criteria, editing]);
+  const compile = (): void => {
+    compiling.current = true;
+    editor.submit("compile");
   };
   const cancel = (): void => {
-    if (session?.phase === "working" || editor.submitting) editor.stop();
+    if (session?.phase === "working" || editor.submitting !== null) editor.stop();
     (onCancel ?? (() => navigate({ page: "home" })))();
   };
   if (editor.loading) return <div className="launch"><p>Restoring your saved contract edits…</p></div>;
-  if (editor.submitting || session?.phase === "working") {
-    const intent = editor.submitting ? submitted.current : session?.operation?.intent;
+  if (editor.submitting !== null || session?.phase === "working") {
+    const intent = editor.submitting ?? session?.operation?.intent;
     const drafting = intent === "generate" || intent === "startOver";
     return <WaitScreen
-      step={intent === "draft" ? 1 : 2}
-      title={intent === "draft"
-        ? "Drafting your acceptance criteria"
-        : intent === "generate"
-          ? "Drafting the plan from your spec"
-          : intent === "startOver"
-            ? "Drafting the plan again from your spec"
-            : "Compiling your contract"}
-      description={intent === "draft"
-        ? "Reading the packages your outcome touches, so the criteria say what must be proven rather than restating the title."
-        : drafting
-          ? "Reading the spec and the packages it names, and proposing the criteria, the scope and the execution graph. You will review the plan before anything runs."
-          : "Pinning the base commit and deriving the plan level from the scope. You will review the contract before the coding loop starts."}
+      bare={plan}
+      title={intent === "generate"
+        ? "Drafting the plan from your spec"
+        : intent === "startOver"
+          ? "Drafting the plan again from your spec"
+          : "Compiling your contract"}
+      description={drafting
+        ? "Reading the spec and the packages it names, and proposing the criteria, the scope and the execution graph. You will review the plan before anything runs."
+        : "Pinning the base commit and deriving the plan level from the scope. You will review the contract before the coding loop starts."}
       status={session?.operation?.state === "stopping" ? "Stopping…" : currentJob?.label ?? "Reading the recorded outcome…"}
       onCancel={cancel}
     />;
@@ -100,8 +148,22 @@ export function Composer({
     setEditing(index);
     setEditedCriterion({ ...criterion });
   };
-  const canDraft =
-    Boolean(repoId && draft.outcome.trim()) && !pending && !restoring;
+  // Whether anything here differs from the contract it was read from. What is
+  // compared is the criteria and the scope, which is the whole of what this
+  // screen edits; the outcome is not editable here at all.
+  const held = record === undefined ? null : contractDraft(record);
+  // Scope is compared as a set, as the contract page compares it: marking a
+  // path prohibited and allowed again leaves the same scope in a new order,
+  // and a plan whose scope did not change should not cost an edit to walk
+  // past. Criteria are compared in order, because their order is the order
+  // they are read in.
+  const sameSet = (a: readonly string[], b: readonly string[]): boolean =>
+    a.length === b.length && [...a].sort().every((each, at) => each === [...b].sort()[at]);
+  const changed =
+    held === null ||
+    JSON.stringify(draft.criteria) !== JSON.stringify(held.criteria) ||
+    !sameSet(draft.paths, held.paths) ||
+    !sameSet(draft.prohibited, held.prohibited);
   const valid =
     DraftSchema.safeParse(draft).success &&
     Boolean(repoId) &&
@@ -109,85 +171,11 @@ export function Composer({
     !restoring;
   const repo = workspace.repositories.find((repo) => repo.id === repoId);
   return (
-    <section className="screen" data-screen={step === 1 ? "s7" : "s9"}>
-      <WizardHeader step={step} />
-      {step === 1 ? (
-        <div className="wizard-body">
-          <Field id="repository" label="Repository">
-            <div className="repo-field">
-              <Dropdown
-                id="repository"
-                value={repoId}
-                disabled={Boolean(session?.key || session?.operation)}
-                onChange={(event) => setRepoId(event.target.value)}
-              >
-                <option value="" disabled>
-                  Choose a repository
-                </option>
-                {workspace.repositories.map((repo) => (
-                  <option value={repo.id} key={repo.id}>
-                    {repo.name}
-                  </option>
-                ))}
-              </Dropdown>
-            </div>
-          </Field>
-          <div>
-            <div className="outcome-label">
-              <label htmlFor="outcome">Outcome</label>
-              <span>
-                one sentence, in your words — this becomes the thing the
-                reviewer measures against
-              </span>
-            </div>
-            <textarea
-              id="outcome"
-              className="outcome-input"
-              autoFocus
-              value={draft.outcome}
-              maxLength={12_000}
-              placeholder="What should be true when this task is finished?"
-              onChange={(event) =>
-                setDraft({ ...draft, outcome: event.target.value })
-              }
-            />
-            <div className="outcome-foot">
-              <span className="handwritten">
-                no task name to invent — start with the outcome, and rename the
-                compiled task if you like
-              </span>
-              <span className="mono">{draft.outcome.length} characters</span>
-            </div>
-          </div>
-          <div className="confirm-models">
-            <div className="column-heading">
-              <strong>Confirm the models</strong>
-              <span className="small muted">
-                your defaults, changeable for this task only
-              </span>
-            </div>
-            <div className="row">
-              {(["executor", "reviewer"] as const).map((role) => (
-                <div className="role-card" key={role}>
-                  <span className="connection-dot" />
-                  <ModelPicker
-                    role={role}
-                    models={models}
-                    connections={providers.data}
-                    onChange={setModels}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-          {!repoId && (
-            <Button onClick={() => navigate({ page: "repositories" })}>
-              Add a repository
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="wizard-body criteria-body">
+    <section className="screen" data-screen="s9">
+      {/* Planning mode draws its own head over the pane; opened as the
+          ticket's own editor this is a page of its own and says so. */}
+      {!plan && <WizardHeader />}
+      <div className="wizard-body criteria-body">
           <div className="criteria-intro">
             <h2>Acceptance criteria</h2>
             <p>
@@ -301,7 +289,9 @@ export function Composer({
                     </>
                   ) : (
                     <>
-                      <p className="criterion-text">{entry.text}</p>
+                      <p className="criterion-text">
+                        <MarkedCriterion text={entry.text} change={rowChanges[index]} />
+                      </p>
                       <p className="criterion-note">
                         Expected {entry.kind}: {entry.assertion}
                       </p>
@@ -331,6 +321,11 @@ export function Composer({
                 />
               </div>
             ))}
+            {/* The criteria the last change took away, struck through where
+                the list ends, and not while a criterion is being edited. */}
+            {changes !== null && editing === null && (
+              <RemovedCriteria removed={changes.removed} className="criterion-editor" />
+            )}
             <button
               className="add-row"
               disabled={draft.criteria.length >= 4}
@@ -435,67 +430,61 @@ export function Composer({
                 . The runner enforces the approved scope.
               </span>
             </div>
-          </div>
         </div>
-      )}
+      </div>
       {(readError || currentJob?.error) && (
         <div className="workspace-errors">
           <Notice tone="danger">{readError ?? currentJob?.error}</Notice>
           <Button onClick={() => { void editor.retry(); }}>Retry saved edits</Button>
+          {/* From planning, the contract is reached the way every way there
+              goes; an error here is not a reason to skip the reading. */}
           <Button onClick={() => navigate(currentKey
-            ? { page: "task", repoId, key: currentKey, view: "contract" }
+            ? confirmRoute({
+                repoId,
+                key: currentKey,
+                sessionId: plan ? session?.id : null,
+                approved: planApproved(workspace, repoId, currentKey),
+              })
             : { page: "home" })}>
             {currentKey ? "Open the current contract" : "Check saved tasks"}
           </Button>
         </div>
       )}
+      {/* The footer's words on the left; the ways out, then the way on last,
+          in the bar's right corner. */}
       <PageFooter>
         <span role="status" className="small muted">{editor.saving ? "Saving edits…" : session ? "Edits saved on this device" : "Edits could not be restored"}</span>
-        <Button onClick={() => { void editor.discard().then((discarded) => { if (discarded) cancel(); }); }}>
-          Discard saved edits
-        </Button>
+        <span className="small muted">
+          Still free to change. Approving on the contract freezes them.
+        </span>
+        <span className="spacer" />
+        {!plan && (
+          <Button onClick={() => { void editor.discard().then((discarded) => { if (discarded) cancel(); }); }}>
+            Discard saved edits
+          </Button>
+        )}
+        {!plan && <Button onClick={cancel}>Cancel</Button>}
+        {/* One control onward, and what it does depends on whether anything
+            here moved. In planning this is the plan itself, and a person who
+            read it and changed nothing should not spend an edit on the way
+            past; where they did change something, the change goes through the
+            same validated path every other edit goes through (D-100). */}
         <Button
           variant="primary"
-          disabled={step === 1 ? !canDraft : !valid || pending}
+          disabled={!valid || pending}
           onClick={() => {
-            if (step === 1 && record) setStep(2);
-            else start(step === 1);
+            if (plan && !changed && currentKey && session)
+              navigate(confirmRoute({
+                repoId,
+                key: currentKey,
+                sessionId: session.id,
+                approved: planApproved(workspace, repoId, currentKey),
+              }));
+            else compile();
           }}
         >
-          {step === 1
-            ? record
-              ? "Review the criteria"
-              : "Draft the criteria"
-            : "Compile the contract"}
+          {plan ? "Next" : "Compile the contract"}
         </Button>
-        <Button onClick={step === 1 ? cancel : () => setStep(1)}>
-          {step === 1 ? "Cancel" : "Back"}
-        </Button>
-        {step === 1 && !record && (
-          <button
-            className="text-button small"
-            disabled={!repoId || !draft.outcome.trim() || restoring}
-            onClick={() => {
-              setStep(2);
-              if (!draft.criteria.length) {
-                setDraft({
-                  ...draft,
-                  criteria: [{ text: "", assertion: "", kind: "test" }],
-                });
-                setEditing(0);
-                setEditedCriterion({ text: "", assertion: "", kind: "test" });
-              }
-            }}
-          >
-            Write criteria myself
-          </button>
-        )}
-        <span className="spacer" />
-        <span className="small muted">
-          {step === 1
-            ? "Drafting uses your subscription. Coding starts after approval."
-            : "Still free to change. After step 3 these four fields freeze."}
-        </span>
       </PageFooter>
     </section>
   );
