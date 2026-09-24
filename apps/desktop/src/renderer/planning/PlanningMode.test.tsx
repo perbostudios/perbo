@@ -3975,6 +3975,123 @@ describe("the Graph pane (SCP-316)", () => {
       expect(shownAt, "the way on was drawn on a reading that never saw the answer").toBeNull();
     });
 
+    it("holds the wait on an answer while the Architect applies it, through a reading that landed ahead of its first reply", async () => {
+      const plan = await problems();
+      answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
+      answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
+      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
+      const landed = async (): Promise<number> =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter(
+          (job) => job.kind === "drift" && job.key === plan.key && !isLive(job),
+        ).length;
+      const settled = async (readings: number): Promise<void> =>
+        waitFor(
+          async () => {
+            const workspace = await sampleBridge.request({ kind: "snapshot" });
+            expect(workspace.working).not.toContain(plan.id);
+            expect(workspace.jobs.some((job) => job.kind === "drift" && isLive(job))).toBe(false);
+            expect(await landed()).toBeGreaterThan(readings);
+          },
+          { timeout: 5000 },
+        );
+      // The interview's own two groups over the resolved state, the first
+      // answered from the chat with words that move nothing, so the second is
+      // the one to answer here with the record still resolved.
+      let readings = await landed();
+      await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "ask me" });
+      await settled(readings);
+      readings = await landed();
+      await sampleBridge.request({
+        kind: "interviewTurn",
+        id: plan.id,
+        text: "a) Split at the read, and refuse it\nb) A unit test per node",
+      });
+      await settled(readings);
+      const second = await screen.findByRole("group", { name: "Question 2" }, { timeout: 5000 });
+      expect((await editingRead(plan.id)).drift).toEqual({ open: [], resolved: true });
+      // A reading is started the moment the answer is on the record, and the
+      // Architect's first reply is held back until that reading has landed:
+      // the reading never saw the answer, and it lands while the answer's
+      // line is still the last line the turn has led to.
+      let armed = false;
+      let delayed = false;
+      const later = globalThis.setTimeout;
+      const timers = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+        callback: () => void,
+        ms?: number,
+        ...rest: unknown[]
+      ) => {
+        // The sample host's reply to a turn is the one timer of 120ms.
+        if (armed && !delayed && ms === 120) {
+          delayed = true;
+          return later(callback, 1500, ...rest);
+        }
+        return later(callback, ms, ...rest);
+      }) as typeof setTimeout);
+      let answeredAt: string | null = null;
+      let appliedAt: string | null = null;
+      let repliedAt: number | null = null;
+      let shownAt: number | null = null;
+      let staleLandedAt: number | null = null;
+      let landedAt: number | null = null;
+      const look = (): void => {
+        if (
+          shownAt === null &&
+          [...document.querySelectorAll("button")].some((button) => button.textContent === "Confirm the plan")
+        )
+          shownAt = performance.now();
+      };
+      const watcher = new MutationObserver(look);
+      watcher.observe(document.body, { childList: true, subtree: true, attributes: true });
+      const unsubscribe = sampleBridge.subscribe((change) => {
+        if (armed && change.kind === "interview" && change.sessionId === plan.id && change.entry !== null) {
+          const { line, at } = change.entry;
+          if (answeredAt === null && line.kind === "turn") {
+            answeredAt = at;
+            queueMicrotask(() => void sampleBridge.request({ kind: "driftCheck", id: plan.id }));
+          } else if (
+            answeredAt !== null &&
+            !(line.kind === "asked" && line.drift !== undefined) &&
+            !(line.kind === "note" && line.offers === "contract")
+          ) {
+            appliedAt = at;
+            repliedAt ??= performance.now();
+          }
+        }
+        const job = "job" in change ? change.job : undefined;
+        if (
+          answeredAt === null ||
+          job === undefined ||
+          job.kind !== "drift" ||
+          job.key !== plan.key ||
+          isLive(job) ||
+          job.startedAt < answeredAt
+        )
+          return;
+        if (appliedAt === null || job.startedAt < appliedAt) staleLandedAt ??= performance.now();
+        else landedAt ??= performance.now();
+      });
+      try {
+        armed = true;
+        fireEvent.click(within(second).getByRole("radio", { name: /Delete it/ }));
+        sendGroup(second);
+        await waitFor(() => expect(landedAt).not.toBeNull(), { timeout: 8000 });
+        await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+      } finally {
+        watcher.disconnect();
+        unsubscribe();
+        timers.mockRestore();
+      }
+      // The order was forced: the stale reading landed before the Architect's
+      // first reply, and the answer's own reading after the turn.
+      expect(delayed).toBe(true);
+      expect(staleLandedAt, "no reading landed under the answer").not.toBeNull();
+      expect(repliedAt).not.toBeNull();
+      expect(staleLandedAt! < repliedAt!).toBe(true);
+      expect(repliedAt! < landedAt!).toBe(true);
+      expect(shownAt, "Confirm the plan was drawn while the Architect applied the answer").toBeNull();
+    });
+
     describe("confirming once the problems are resolved", () => {
       /** Nothing under way for the planning: no turn in flight and no reading live. */
       const quiet = async (plan: { id: string }): Promise<void> => {

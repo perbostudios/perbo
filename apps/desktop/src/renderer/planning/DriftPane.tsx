@@ -212,21 +212,25 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // The reading the answer is owed has landed once the answer is on the
   // record as a turn, that turn is owed no reading — the rule the chat's way
   // on to the contract holds to, so a reading that started before the answer
-  // was applied never counts as its reading — and none is running. That
-  // reading has decided the record, whatever it found. But the reading's job
-  // settles here a round trip ahead of the record it wrote, which this pane
-  // reads over the bridge: the wait holds until the record no longer shows
-  // the problem that was answered, or shows it put again, so the answered
-  // card is never up to be answered a second time. Where no problem was
-  // answered — the interview's own question over the resolved state — the
-  // reading landing is the whole of it, since a reading that recorded nothing
-  // leaves the record as it was.
+  // was applied never counts as its reading — none is running, and the
+  // Architect is no longer applying the answer. The chat's way on waits
+  // through the turn too: while it is in flight, a reading that started after
+  // the answer's line and landed ahead of the Architect's first reply looks
+  // like the answer's own. That reading has decided the record, whatever it
+  // found. But the reading's job settles here a round trip ahead of the
+  // record it wrote, which this pane reads over the bridge: the wait holds
+  // until the record no longer shows the problem that was answered, or shows
+  // it put again, so the answered card is never up to be answered a second
+  // time. Where no problem was answered — the interview's own question over
+  // the resolved state — the reading landing is the whole of it, since a
+  // reading that recorded nothing leaves the record as it was.
   const owing = owedReading(conversation, { drift, running }, newest);
   const reread =
     sent !== null &&
     owing.turn !== null &&
     owing.turn > sent.after &&
     !owing.owed &&
+    !thinking &&
     (newest === null || !isLive(newest));
   const decided =
     reread && (sent.problem === "" || problemKey(open) !== sent.problem || putAgain);

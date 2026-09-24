@@ -5419,6 +5419,20 @@ readline.createInterface({ input: process.stdin })
     await made.service.request({ kind: "interviewStop", id: made.id });
   });
 
+  it("takes the spec folder with a planning thrown away after its ticket was deleted out of band", async () => {
+    // A ticket already gone names the folder no more than one the delete took,
+    // so the folder goes with the planning (D-129).
+    const made = await draftedWithProblems();
+    try {
+      rmSync(made.ticket);
+      await made.service.request({ kind: "editingDiscard", id: made.id });
+      expect((await made.service.request({ kind: "editingRead", id: made.id })).phase).toBe("discarded");
+      expect(existsSync(made.spec), "the spec folder").toBe(false);
+    } finally {
+      made.later.release(verdict([finding]));
+    }
+  });
+
   it("says why a planning's ticket stays where it is thrown away over an open pull request", async () => {
     // The one stage a delete does not reach (D-129): the planning goes, and
     // the person is told why the work did not go with it.

@@ -277,10 +277,11 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       // and one another planning holds is that planning's.
       if (refused !== null && refused !== DELETE_TICKET_GONE && refused !== ANOTHER_PLANNING_HOLDS)
         throw new Error(refused);
-      // And the spec they came from, once nothing is left holding it. Not where
-      // the ticket refused to go: a plan still standing is read against the
-      // spec it names (D-103).
-      if (session.specSlug !== null && refused === null)
+      // And the spec they came from, once nothing is left holding it, a ticket
+      // already gone included: it names the folder no more than a deleted one
+      // does (D-129). Not where the ticket refused to go: a plan still standing
+      // is read against the spec it names (D-103).
+      if (session.specSlug !== null && (refused === null || refused === DELETE_TICKET_GONE))
         await removeSpecFolder(work, session.repoId, session.specSlug, {
           sessionId: request.id,
           claims: session.key,

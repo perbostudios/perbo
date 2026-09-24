@@ -1276,11 +1276,13 @@ export function nameSampleSpec(repoId: string, key: string, title: string): bool
 }
 /**
  * The ticket a drift request is about, as the host derives it from the
- * session: refused where there is no spec, no plan, or a plan that is
- * approved and so frozen, in the host's own words.
+ * session: refused where the planning has been thrown away, there is no spec,
+ * no plan, or a plan that is approved and so frozen, in the host's own words.
  */
 export function driftTarget(id: string): string {
   const session = editing.read(id);
+  if (session.phase === "discarded")
+    throw new Error("This planning has been thrown away, and its plan with it.");
   if (session.specSlug === null)
     throw new Error("Write the spec before reading it against the plan.");
   if (session.key === null)

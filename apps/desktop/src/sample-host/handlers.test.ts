@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { sampleBridge } from "./bridge.js";
-import { job, sampleInterviews, snapshot } from "./records.js";
+import { job, sampleInterviews, saveSpec, snapshot, specFiles } from "./records.js";
 import type { EditingSession, Job } from "../shared/protocol.js";
 
 /**
@@ -86,6 +86,39 @@ it("refuses to discard the planning that drafted its ticket while a command runs
   // finds the work as it was, planning and ticket both.
   expect(stored().find((each) => each.id === planning.id)?.phase).not.toBe("discarded");
   expect(onBoard("PRB-421")).toBe(true);
+});
+
+/** That planning writing the spec `slug`, whose file the sample holds. */
+function writing(planning: EditingSession, slug: string): void {
+  localStorage.setItem(
+    "perbo:preview-editing",
+    JSON.stringify(stored().map((each) => (each.id === planning.id ? { ...each, specSlug: slug } : each))),
+  );
+  saveSpec(slug, "# Retry on failure\n");
+}
+
+it("takes the spec with a planning thrown away after its ticket was deleted out of band", async () => {
+  const planning = await drafted("plan_review");
+  writing(planning, "retry-on-failure");
+  snapshot.tasks = snapshot.tasks.filter((row) => row.ticket.key !== "PRB-421");
+  await sampleBridge.request({ kind: "editingDiscard", id: planning.id });
+  expect(stored().find((each) => each.id === planning.id)?.phase).toBe("discarded");
+  expect(specFiles()["retry-on-failure"], "the spec").toBeUndefined();
+});
+
+it("refuses to read the plan of a planning thrown away against its spec, in the host's words", async () => {
+  // Over an open pull request, so the ticket and its plan stay where they are
+  // listed and only the planning goes: nothing but the planning being thrown
+  // away stands in the way of a reading.
+  const planning = await drafted("pr_open");
+  writing(planning, "retry-on-failure");
+  await expect(sampleBridge.request({ kind: "editingDiscard", id: planning.id })).rejects.toThrow(
+    "PRB-421 has a pull request open",
+  );
+  expect(onBoard("PRB-421")).toBe(true);
+  await expect(sampleBridge.request({ kind: "driftCheck", id: planning.id })).rejects.toThrow(
+    "This planning has been thrown away, and its plan with it.",
+  );
 });
 
 it("deletes the ticket once nothing holds it, and every planning over it with its chat", async () => {

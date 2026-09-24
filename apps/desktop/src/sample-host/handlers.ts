@@ -223,10 +223,11 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // planning holds is that planning's.
     if (refused !== null && refused !== DELETE_TICKET_GONE && refused !== ANOTHER_PLANNING_HOLDS)
       throw new Error(refused);
-    // And the spec they came from, once nothing is left holding it. Not where
-    // the ticket refused to go: a plan still standing is read against the spec
-    // it names (D-103).
-    if (held.specSlug !== null && refused === null) {
+    // And the spec they came from, once nothing is left holding it, a ticket
+    // already gone included: it names the folder no more than a deleted one
+    // does (D-129). Not where the ticket refused to go: a plan still standing
+    // is read against the spec it names (D-103).
+    if (held.specSlug !== null && (refused === null || refused === DELETE_TICKET_GONE)) {
       removeSpecFile(held.specSlug, { sessionId: request.id });
       emit({ kind: "records", repoId: held.repoId, key: null });
     }
