@@ -412,7 +412,7 @@ export type {
   TicketState,
   Wait,
 } from "./ticket.js";
-export { sameName } from "./ticket-name.js";
+export { sameName, TICKET_NAME_CAP } from "./ticket-name.js";
 export {
   commitCarriesArm,
   mergedAt,

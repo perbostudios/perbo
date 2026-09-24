@@ -4986,7 +4986,7 @@ select.add-chip {
   margin-left: 0;
   width: 100%;
 }
-.pane-confirm .small {
+.pane-confirm .muted {
   margin-right: auto;
 }
 /* The Problems pane, on the way to the contract: one problem at a time as a

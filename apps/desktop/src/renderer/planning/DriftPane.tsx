@@ -308,6 +308,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // is still planning, and the contract is where confirming it leads.
   const footer = (resolved = false): ReactNode => (
     <div className="approve-actions pane-confirm">
+      {problem !== undefined && <span className="small muted">Going on leaves the problems open.</span>}
       <Button onClick={back}>Back to the plan</Button>
       {resolved && (
         <Button variant="primary" onClick={contract}>
@@ -315,17 +316,14 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
         </Button>
       )}
       {problem !== undefined && (
-        <>
-          <span className="small muted">Going on leaves the problems open.</span>
-          <button
-            type="button"
-            className="text-button small"
-            disabled={busy}
-            onClick={() => void goOn()}
-          >
-            Go on to the contract anyway
-          </button>
-        </>
+        <button
+          type="button"
+          className="text-button small"
+          disabled={busy}
+          onClick={() => void goOn()}
+        >
+          Go on to the contract anyway
+        </button>
       )}
     </div>
   );
@@ -363,8 +361,8 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
           <Notice tone="danger">{error}</Notice>
         </div>
         <div className="approve-actions pane-confirm">
-          <Button onClick={back}>Back to the plan</Button>
           <span className="small muted">The contract is still where approving happens.</span>
+          <Button onClick={back}>Back to the plan</Button>
           <Button variant="primary" onClick={contract}>
             Go on to the contract anyway
           </Button>

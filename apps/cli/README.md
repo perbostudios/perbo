@@ -239,9 +239,9 @@ approve.**
 **The model drafts; the person approves.** `perbo admit --from owner/repo#412` reads the issue
 through local `gh`, hands its title and body to a model as delimited `trust="external"` data
 alongside the repository's tree, and takes back a constrained draft: one outcome, the criteria
-the work has, each with an assertion and a kind, a proposed scope of one to eight globs, a
-rationale and, where the work divides, the nodes and edges of an execution graph
-(`@perbo/planning`, prompt `draft_v5`). The draft is written beside the ticket as
+the work has, each with an assertion and a kind, a proposed scope of as many globs as the work
+lands in, a rationale and, where the work divides, the nodes and edges of an execution graph
+(`@perbo/planning`, prompt `draft_v6`). The draft is written beside the ticket as
 `<KEY>.draft.json` with the model, provider, tokens and cost that produced it, and the contract is
 created in `plan_review`. The ticket is named per D-127.
 **A draft is never executed; only an approved contract is.** The person's

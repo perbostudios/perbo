@@ -236,11 +236,10 @@ export function readLatestDraftEdit(path: string, by: InterviewEdit["author"]): 
   };
 }
 
-/** The entity keys of one side of an edit, clipped to what the line holds. */
+/** The entity keys of one side of an edit, every one, each clipped to what the line holds. */
 const entityKeys = (side: Record<string, unknown>): string[] =>
   Object.keys(side)
     .filter((key) => key.length > 0)
-    .slice(0, 200)
     .map((key) => key.slice(0, 200));
 
 /**

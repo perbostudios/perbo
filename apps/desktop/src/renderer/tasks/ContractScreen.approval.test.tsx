@@ -358,4 +358,22 @@ describe("contract verification approval", () => {
       }),
     ));
   });
+
+  it("adds a criterion past four, because the plan has as many as the work has (D-100)", async () => {
+    const five = Array.from({ length: 5 }, (_, at) => ({ ...criterion(), id: `AC-${at + 1}`, text: `Criterion ${at + 1}.` }));
+    const context = await contextFor(five);
+    captureEdits(context);
+    mount(
+      <Composer
+        {...context}
+        existing={context.detail}
+        existingRepoId={context.repoId}
+      />,
+    );
+    const add = (await screen.findByRole("button", { name: /Add a criterion/ })) as HTMLButtonElement;
+    expect(screen.getAllByRole("button", { name: /^Edit criterion \d+$/ })).toHaveLength(5);
+    expect(add.disabled).toBe(false);
+    fireEvent.click(add);
+    expect(await screen.findByRole("textbox", { name: "Criterion 6" })).toBeTruthy();
+  });
 });

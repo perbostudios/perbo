@@ -60,4 +60,4 @@ export type { SizeEstimate } from "./size.js";
 export { standingGlob, StandingProhibitedEntrySchema } from "./standing.js";
 export type { StandingProhibitedEntry } from "./standing.js";
 export type { SymbolIndex, UnsupportedRepository } from "./symbol-index.js";
-export { sameName } from "./ticket-name.js";
+export { sameName, TICKET_NAME_CAP } from "./ticket-name.js";

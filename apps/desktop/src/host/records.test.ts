@@ -338,14 +338,15 @@ describe("the edit the chat cards", () => {
     expect(() => InterviewEditSchema.parse(edit)).not.toThrow();
   });
 
-  it("clips the entity keys either side of an edit to what a line holds", () => {
+  it("keeps every entity key either side of an edit, each clipped to what a line holds", () => {
     const root = scratchDirectory("perbo-draft-keys-");
     const path = join(root, "PRB-1.draft.json");
     const keys = Array.from({ length: 240 }, (_, at) => `criterion:${"c".repeat(240)}${String(at)}`);
     writeFileSync(path, JSON.stringify(record("an edit", keys)));
 
     const edit = readLatestDraftEdit(path, "interview")!;
-    expect(edit.before).toHaveLength(200);
+    expect(edit.before).toHaveLength(240);
+    expect(edit.after).toHaveLength(240);
     expect(edit.before.every((key) => key.length <= 200)).toBe(true);
     expect(() => InterviewEditSchema.parse(edit)).not.toThrow();
   });

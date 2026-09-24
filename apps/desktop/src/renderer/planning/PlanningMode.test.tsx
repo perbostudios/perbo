@@ -2926,6 +2926,10 @@ describe("the Graph pane (SCP-316)", () => {
       );
       return plan;
     }
+    /** The Problems pane's footer, left to right: the note, then the way back, then the way on. */
+    const footerOrder = (): (string | null)[] =>
+      [...document.querySelector('[data-screen="drift"] .pane-confirm')!.children].map((each) => each.textContent);
+    const QUIET_WAY_ON = ["Going on leaves the problems open.", "Back to the plan", "Go on to the contract anyway"];
     /** That planning open on the Problems pane, with the first problem in front of the person. */
     async function problems(): Promise<{ id: string; repoId: string; key: string }> {
       const plan = await parted();
@@ -3572,13 +3576,13 @@ describe("the Graph pane (SCP-316)", () => {
       await screen.findByRole("heading", { name: "Execution graph" });
       location.hash = `planning/${plan.id}/drift`;
       await screen.findByRole("heading", { name: "Checking the plan against the spec" });
-      expect(screen.getByRole("button", { name: "Back to the plan" })).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Go on to the contract anyway" })).toBeTruthy();
+      expect(footerOrder()).toEqual(QUIET_WAY_ON);
       await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+      expect(footerOrder()).toEqual(QUIET_WAY_ON);
       // And while the answer is being resolved.
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
       await screen.findByRole("heading", { name: "Resolving the problem" });
-      expect(screen.getByRole("button", { name: "Go on to the contract anyway" })).toBeTruthy();
+      expect(footerOrder()).toEqual(QUIET_WAY_ON);
       fireEvent.click(screen.getByRole("button", { name: "Back to the plan" }));
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
     });
@@ -3626,8 +3630,11 @@ describe("the Graph pane (SCP-316)", () => {
       delete specs[slug];
       localStorage.setItem("perbo:preview-specs", JSON.stringify(specs));
       await screen.findByText(`specs/${slug}/spec.md could not be read.`, {}, { timeout: 5000 });
-      expect(screen.getByRole("button", { name: "Go on to the contract anyway" })).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Back to the plan" })).toBeTruthy();
+      expect(footerOrder()).toEqual([
+        "The contract is still where approving happens.",
+        "Back to the plan",
+        "Go on to the contract anyway",
+      ]);
       expect(screen.queryByRole("heading", { name: "Resolving the problem" })).toBeNull();
       expect(screen.queryByRole("group", { name: /Criterion \d and R\d/ })).toBeNull();
     });

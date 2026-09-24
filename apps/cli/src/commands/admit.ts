@@ -24,6 +24,7 @@ import {
   matchesAny,
   onePieceOfWork,
   sameName,
+  TICKET_NAME_CAP,
   ticketSourceLabel,
   transition,
   type AcceptanceCriterion,
@@ -42,7 +43,6 @@ import {
 import {
   type BoardEntry,
   CONTRACT_DRAFT_JSON_SCHEMA,
-  ContractDraftSchema,
   type DraftResult,
   type GitHubIssue,
   PlanningError,
@@ -1518,9 +1518,6 @@ function ticketTitle(resolved: Resolved, outcome: string, keepTitle: boolean): s
 }
 
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
-
-/** The longest name a ticket takes, the drafter's own bound (D-127). */
-const TICKET_NAME_CAP = ContractDraftSchema.shape.name.maxLength!;
 
 /**
  * A spec title `--keep-title` can keep: one no longer than a drafted name may

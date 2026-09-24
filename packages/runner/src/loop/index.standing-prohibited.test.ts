@@ -85,6 +85,30 @@ describe("the standing prohibited list reaches the write guard", () => {
     ).toBe("allowed");
   });
 
+  it("holds a standing list of as many entries as the repository declares", () => {
+    mkdirSync(join(root, "packages", "p249"), { recursive: true });
+    const globs = Array.from({ length: 250 }, (_, at) => `packages/p${at}/**`);
+    const prohibited = guardProhibitedPaths([], config(globs));
+    expect(prohibited).toEqual(globs);
+    const state: PreToolGuardState = {
+      root,
+      tmpdir: tmp,
+      cwd: root,
+      paths_allowed: ["packages/**"],
+      paths_prohibited: prohibited,
+      allow_list: [...profile.command_allow_list],
+      deny_list: [...profile.command_deny_list],
+    };
+    const decision = judgePreToolCall(
+      { tool_name: "Write", tool_use_id: "toolu_last", tool_input: { file_path: "packages/p249/x.ts" } },
+      state,
+      at,
+    ).decision;
+    expect(decision.answer).toBe("deny");
+    expect(decision.rule).toBe(ADMISSION_RULES.prohibited_path);
+    expect(decision.reason).toContain("packages/p249/**");
+  });
+
   it("leaves a repository that declares no list with the contract's own", () => {
     expect(guardProhibitedPaths(["infra/**"], config(undefined))).toEqual(["infra/**"]);
   });

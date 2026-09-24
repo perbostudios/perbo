@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { TICKET_NAME_CAP } from "@perbo/contracts/browser";
 import { IconButton } from "../ui/index.js";
 
 export function Rename({
@@ -42,7 +43,7 @@ export function Rename({
             autoFocus
             aria-label="Task name"
             value={value}
-            maxLength={200}
+            maxLength={TICKET_NAME_CAP}
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") save();

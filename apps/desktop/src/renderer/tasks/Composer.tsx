@@ -328,7 +328,6 @@ export function Composer({
             )}
             <button
               className="add-row"
-              disabled={draft.criteria.length >= 4}
               onClick={() => {
                 const index = draft.criteria.length;
                 setDraft({
@@ -343,9 +342,6 @@ export function Composer({
               }}
             >
               + <span>Add a criterion</span>
-              <span className="small">
-                3 is the suggested number · four stays reviewable
-              </span>
             </button>
           </div>
           <div className="scope-editor">

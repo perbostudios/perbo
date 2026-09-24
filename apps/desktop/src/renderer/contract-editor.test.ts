@@ -8,7 +8,7 @@ import { ContractEditing, editingForm, interviewProviderFor, interviewSessionArg
 import { WorkspaceReads } from "../host/workspace-reads.js";
 import { ContractEditor, flushContractEditors, useContractEditing } from "./contract-editor.js";
 import { bridge } from "./workspace/index.js";
-import { EditingSessionSchema, INTERVIEW_CONVERSATION_CAP, TaskModelsSchema } from "../shared/protocol.js";
+import { DraftSchema, EditingSessionSchema, INTERVIEW_CONVERSATION_CAP, TaskModelsSchema } from "../shared/protocol.js";
 import { READ_ATTEMPTS } from "../shared/read-generations.js";
 import type { Change, DesktopBridge, Detail, EditingSession, Job, ReplyMap, Request } from "../shared/protocol.js";
 import { sampleBridge } from "../sample-host/bridge.js";
@@ -174,6 +174,33 @@ describe("contract editing session interface", () => {
     const edited = f.editing.save(opened.id, opened.revision, repoId, { ...opened.form, newPath: "packages/unfinished" });
     expect(await new ContractEditing(f.io).open({ kind: "ticket", repoId, key: "PRB-421" })).toEqual(edited);
     expect(f.records()).toHaveLength(1);
+  });
+
+  it("takes a plan of twenty-five criteria as its result, and a session left unread by it on its next open", async () => {
+    const f = await fixture();
+    const sample = f.details.get(repoId + ":PRB-421")!;
+    if (!("acceptance_criteria" in sample.contract)) throw new Error("The sample is a flat plan");
+    const [first] = sample.contract.acceptance_criteria;
+    sample.contract.acceptance_criteria = Array.from({ length: 25 }, (_, at) => ({ ...first!, id: `ac_${at + 1}`, text: `Criterion ${at + 1}` }));
+    const initial = await f.editing.open({ kind: "new", repoId });
+    const saved = f.editing.save(initial.id, 0, repoId, { ...initial.form, draft });
+    await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "compile");
+    await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" });
+    expect(f.editing.read(saved.id)).toMatchObject({ key: "PRB-421", phase: "ready", error: null });
+    expect(f.editing.read(saved.id).form.draft.criteria).toHaveLength(25);
+
+    // A session recorded as the reconcile that could not read its result left it.
+    const [record] = f.records();
+    f.io.persist([{
+      ...record!, key: null, digest: null, phase: "outcome-unknown", form: saved.form,
+      error: "Your edits and operation were saved, but the recorded result could not be read: too_big",
+      operation: { ...record!.operation!, reconciled: false },
+    }]);
+    const restarted = new ContractEditing(f.io);
+    restarted.recover();
+    const opened = await restarted.open({ kind: "session", id: saved.id });
+    expect(opened).toMatchObject({ key: "PRB-421", phase: "editing", error: null, operation: { reconciled: true } });
+    expect(DraftSchema.parse(opened.form.draft).criteria).toHaveLength(25);
   });
 
   it("rejects invalid submissions and failed durable writes before launching work", async () => {

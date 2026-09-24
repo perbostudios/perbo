@@ -45,8 +45,7 @@ export const StandingProhibitedSchema = z
         .max(300)
         .transform((path) => ({ path, draft: null, source: STANDING_BY_HAND, added_at: null })),
     ]),
-  )
-  .max(200);
+  );
 
 /**
  * The list a configuration declares. A key holding something this cannot read

@@ -10,6 +10,7 @@ import {
   MAX_QUESTION_OPTIONS,
   MAX_QUESTION_PARTS,
   StandingProhibitedEntrySchema,
+  TICKET_NAME_CAP,
   type DecisionChoice,
   type GraphEdge,
   type SizeEstimate,
@@ -145,12 +146,12 @@ export const ProviderModelSchema = z.strictObject({
   description: z.string().max(2000),
   isDefault: z.boolean(),
   /** The effort levels the provider reports for this model, lowest first; none where it reports none. */
-  efforts: z.array(EffortLevelSchema).max(10),
+  efforts: z.array(EffortLevelSchema),
 });
 export type ProviderModel = z.infer<typeof ProviderModelSchema>;
 export const ModelCatalogSchema = z.strictObject({
   provider: ModelProviderSchema,
-  models: z.array(ProviderModelSchema).max(1000),
+  models: z.array(ProviderModelSchema),
   source: z.enum([
     "claude-code",
     "codex-app-server",
@@ -167,10 +168,10 @@ export const CriterionSchema = z.strictObject({
 });
 export const DraftSchema = z.strictObject({
   outcome: text,
-  criteria: z.array(CriterionSchema).min(1).max(20),
-  paths: z.array(z.string().trim().min(1).max(300)).min(1).max(40),
+  criteria: z.array(CriterionSchema).min(1),
+  paths: z.array(z.string().trim().min(1).max(300)).min(1),
   /** Paths the executor may not write even inside the allowed ones (D-105); admission passes each as `--prohibit`. */
-  prohibited: z.array(z.string().trim().min(1).max(300)).max(40).default([]),
+  prohibited: z.array(z.string().trim().min(1).max(300)).default([]),
 });
 export type Draft = z.infer<typeof DraftSchema>;
 /**
@@ -278,12 +279,12 @@ const editableCriterion = z.strictObject({
 export const EditingFormSchema = z.strictObject({
   draft: z.strictObject({
     outcome: z.string().max(12_000),
-    criteria: z.array(editableCriterion).max(20),
-    paths: z.array(z.string().max(300)).max(40),
-    prohibited: z.array(z.string().max(300)).max(40).default([]),
+    criteria: z.array(editableCriterion),
+    paths: z.array(z.string().max(300)),
+    prohibited: z.array(z.string().max(300)).default([]),
   }),
   models: TaskModelsSchema,
-  editing: z.number().int().min(0).max(19).nullable(),
+  editing: z.number().int().min(0).nullable(),
   criterion: editableCriterion,
   newPath: z.string().max(300).nullable(),
 });
@@ -393,8 +394,8 @@ export const InterviewEditSchema = z.strictObject({
   /** The edit this one undid, by its number, or null for an edit of its own. */
   undoes: z.number().int().min(1).nullable(),
   /** The entity keys it changed either side: `node:<id>`, `criterion:<id>`, `edge:<from>-><to>`. */
-  before: z.array(z.string().min(1).max(200)).max(200),
-  after: z.array(z.string().min(1).max(200)).max(200),
+  before: z.array(z.string().min(1).max(200)),
+  after: z.array(z.string().min(1).max(200)),
 });
 export type InterviewEdit = z.infer<typeof InterviewEditSchema>;
 /** Which asking a person is being put, and how many of its groups they have answered. */
@@ -686,15 +687,15 @@ export const EditingSessionSchema = z.strictObject({
   phase: z.enum(["editing", "working", "ready", "conflict", "outcome-unknown", "discarded"]),
   error: z.string().nullable(),
   operation: EditingOperationSchema.nullable(),
-  /** The draft's edits, oldest first, each undoable. Empty on a session from before it existed. */
-  history: z.array(DraftEditSchema).max(500).default([]),
+  /** The draft's edits, oldest first, each undoable. Empty until a path is marked. */
+  history: z.array(DraftEditSchema).default([]),
   /**
    * The interview's conversation, oldest first, so leaving planning mode and
-   * restarting the app both come back to it (D-102, D-095). Capped at
-   * {@link INTERVIEW_CONVERSATION_CAP}; defaulted so a session saved before
-   * the chat existed still parses.
+   * restarting the app both come back to it (D-102, D-095). Its writer keeps
+   * the last {@link INTERVIEW_CONVERSATION_CAP} lines; empty until the chat
+   * says something.
    */
-  conversation: z.array(InterviewEntrySchema).max(INTERVIEW_CONVERSATION_CAP).default([]),
+  conversation: z.array(InterviewEntrySchema).default([]),
   /**
    * The interview's own session id, as its `started` event reported it, which
    * `--session` continues after the process has gone. Null until one has run.
@@ -814,8 +815,8 @@ export const HELP_LINKS = {
     "https://github.com/perbostudios/perbo/blob/main/docs/08-security-autonomy-and-data.md",
 } as const;
 export const ManifestEditorSchema = z.strictObject({
-  entries: z.array(MaterializationEntrySchema).max(100),
-  offLimits: z.array(z.string().trim().min(1).max(300)).max(100),
+  entries: z.array(MaterializationEntrySchema),
+  offLimits: z.array(z.string().trim().min(1).max(300)),
 });
 export type ManifestEditor = z.infer<typeof ManifestEditorSchema>;
 /**
@@ -1192,10 +1193,11 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     digest: z.string().length(64),
     value: ManifestEditorSchema,
   }),
+  /** A name a person gives a ticket, held to a ticket's name's length (D-127). */
   z.strictObject({
     kind: z.literal("rename"),
     ...reference,
-    title: z.string().trim().min(1).max(200),
+    title: z.string().trim().min(1).max(TICKET_NAME_CAP),
   }),
   /**
    * Permanently deletes a piece of work whole, from the contract page and from
@@ -1218,7 +1220,7 @@ export const RequestSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("archive"),
     repoId: identifier,
-    keys: z.array(key).min(1).max(1000),
+    keys: z.array(key).min(1),
     archived: z.boolean(),
   }),
   z.strictObject({

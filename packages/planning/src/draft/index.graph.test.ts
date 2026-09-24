@@ -40,8 +40,8 @@ describe("the drafter proposes an execution graph", () => {
   it("returns one contract with nodes and suggested edges, under a new prompt version", async () => {
     const model = scriptedDrafter([submits(graphedDraft)]);
     const result = await draftContract(fromSpec(model));
-    expect(DRAFT_PROMPT_VERSION).toBe("draft_v5");
-    expect(result.model.prompt_version).toBe("draft_v5");
+    expect(DRAFT_PROMPT_VERSION).toBe("draft_v6");
+    expect(result.model.prompt_version).toBe("draft_v6");
     expect(result.draft.nodes).toEqual(graphedDraft.nodes);
     expect(result.draft.edges).toEqual([{ from: 0, to: 1 }]);
     // One draft is one contract is one ticket, whatever the graph's size.
@@ -223,6 +223,12 @@ describe("the JSON schema the provider enforces", () => {
     };
     expect(criteria.minItems).toBe(1);
     expect(criteria.maxItems).toBeUndefined();
+    const scope = schema.properties["proposed_scope"] as {
+      properties: Record<string, { minItems?: number; maxItems?: number }>;
+    };
+    expect(scope.properties["paths_allowed"]!.minItems).toBe(1);
+    expect(scope.properties["paths_allowed"]!.maxItems).toBeUndefined();
+    expect((schema.properties["name"] as { maxLength: number }).maxLength).toBe(60);
     expect(criteria.items.properties["requirement_id"]).toBeDefined();
     expect(criteria.items.required).not.toContain("requirement_id");
     const nodes = schema.properties["nodes"] as { items: { required: string[] } };
