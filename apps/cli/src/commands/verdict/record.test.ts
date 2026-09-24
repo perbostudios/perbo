@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   STOP_VERDICTS_SCHEMA_VERSION,
@@ -12,9 +14,11 @@ import {
   VerdictConflictError,
   activeVerdicts,
   mergeLocalVerdicts,
+  readLocalVerdictsOrWarn,
   recordVerdict,
   verdictFor,
   verdictKey,
+  verdictsPath,
   type LocalVerdict,
 } from "./record.js";
 
@@ -80,7 +84,7 @@ describe("the local verdicts record", () => {
   it("appends the first decision on a key", () => {
     const file = recordVerdict({ previous: null, verdict: verdict(), replace: false });
     expect(file.verdicts).toHaveLength(1);
-    expect(verdictFor(file.verdicts, "ticket_verdict0001", KEY_A)?.decision).toBe("endorse");
+    expect(verdictFor(file.verdicts, "ticket_verdict0001", KEY_A, "judgement")?.decision).toBe("endorse");
   });
 
   it("refuses a second decision on a decided key, naming the one that stands", () => {
@@ -113,13 +117,15 @@ describe("the local verdicts record", () => {
     expect(activeVerdicts(second.verdicts)[0]?.decision).toBe("override");
   });
 
-  it("keys a decision by its review and finding, joined by one U+0000", () => {
+  it("keys a decision by its review, its slot and its finding, joined by U+0000", () => {
     const row = verdict();
     const key = verdictKey(row);
-    // The separator is a character neither part can hold, so no pair of
-    // (review, finding) can collide with another by running together.
-    expect(key.split("\u0000")).toEqual([row.review.ticket_id, row.finding_key]);
-    expect([...key].filter((character) => character === "\u0000")).toHaveLength(1);
+    // The separator is a character no part can hold, so no (review, slot,
+    // finding) can collide with another by running together.
+    expect(key.split("\u0000")).toEqual([row.review.ticket_id, "judgement", row.finding_key]);
+    expect([...key].filter((character) => character === "\u0000")).toHaveLength(2);
+    // An answer to the finding takes the other slot, so neither replaces the other.
+    expect(verdictKey({ ...row, decision: "decide" }).split("\u0000")[1]).toBe("answer");
   });
 
   it("spells that separator as an escape, never as a byte in the source", () => {
@@ -281,5 +287,27 @@ describe("local decisions and pull-request answers are one population", () => {
       [verdict()],
     );
     expect(merged[0]?.shown_to_person).toBe(true);
+  });
+});
+
+describe("the record as `perbo run` reads it", () => {
+  const read = (write: (dir: string) => void) => {
+    const dir = mkdtempSync(join(tmpdir(), "perbo-verdicts-"));
+    write(dir);
+    const warnings: string[] = [];
+    const record = readLocalVerdictsOrWarn(dir, { stderr: (text: string) => warnings.push(text) } as never);
+    rmSync(dir, { recursive: true, force: true });
+    return { record, warnings };
+  };
+
+  it("says nothing where no decision was ever recorded", () => {
+    expect(read(() => undefined)).toEqual({ record: EMPTY_LOCAL_VERDICTS, warnings: [] });
+  });
+
+  it("warns, and reads nothing, where the file is there and cannot be read", () => {
+    const { record, warnings } = read((dir) => writeFileSync(verdictsPath(dir), "{ not json"));
+    expect(record).toEqual(EMPTY_LOCAL_VERDICTS);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/is not a readable verdicts record/);
   });
 });

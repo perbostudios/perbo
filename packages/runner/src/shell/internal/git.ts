@@ -1,6 +1,7 @@
 import type { Context } from "./command.js";
 import { judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
 import type { Word } from "./lexer.js";
+import { anchorOf, normalise } from "./path.js";
 
 /**
  * The `git` subcommands that only read.
@@ -22,6 +23,22 @@ const GIT_READ_ONLY = new Set([
   "var", "verify-commit", "verify-pack", "verify-tag", "version", "whatchanged",
 ]);
 
+/**
+ * The read-only verbs that take the diff options, whose `--output <file>`
+ * writes the command's output to that file instead of standard output. The
+ * verb reads; the option is a write, judged by where it lands. Diff options
+ * are not abbreviated (git keeps unknown options for the revision walk), so
+ * `--output` is only ever spelled whole, and `--output-indicator-*` is not it.
+ */
+const GIT_DIFF_OUTPUT = new Set([
+  "diff", "diff-files", "diff-index", "diff-tree", "log", "show", "whatchanged",
+]);
+
+const GIT_DIFF_OUTPUT_OPTION = new Set(["--output"]);
+
+/** `git format-patch`'s options that name the directory its patches land in. */
+const GIT_FORMAT_PATCH_DIRECTORY = new Set(["-o", "--output-directory"]);
+
 /** `git`'s global options that name a directory, and those that take a value. */
 const GIT_GLOBAL_DIRECTORIES = new Set(["-C", "--git-dir", "--work-tree"]);
 const GIT_GLOBAL_VALUES = new Set([
@@ -31,6 +48,9 @@ const GIT_GLOBAL_VALUES = new Set([
 /** Judge the directories a `git` command writes into. */
 export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
   const directories: Word[] = [];
+  // The directories `-C` moves git to, in order: a relative path an option
+  // names is read from where the last of them leaves it.
+  const moves: Word[] = [];
   let i = 0;
   while (i < rest.length) {
     const word = rest[i]!;
@@ -43,7 +63,10 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
       attached === null ? rest[i + 1] : { ...word, raw: attached, value: attached };
     if (GIT_GLOBAL_DIRECTORIES.has(name)) {
       const operand = take();
-      if (operand !== undefined) directories.push(operand);
+      if (operand !== undefined) {
+        directories.push(operand);
+        if (name === "-C") moves.push(operand);
+      }
       i += attached === null ? 2 : 1;
       continue;
     }
@@ -55,11 +78,6 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
   }
 
   const verb = rest[i]?.value ?? "";
-  if (verb.length === 0 || GIT_READ_ONLY.has(verb)) return [];
-  const operands = rest
-    .slice(i + 1)
-    .filter((word) => word.value.length > 0 && !word.value.startsWith("-"));
-
   const judge = (word: Word, label: string): WriteFinding[] =>
     pathFinding(
       label,
@@ -67,6 +85,41 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
       judgeTarget(word.value, context.scope, context.cwd, true),
       context.segment,
     );
+
+  // A path a verb writes through one of its options, wherever the verb's own
+  // options stand, read from the directory `-C` moved git to. A long option
+  // takes its value after `=` or as the next word, a short one attached
+  // (`-odir`) or as the next word.
+  const written = (names: ReadonlySet<string>, label: string): WriteFinding[] => {
+    const found: WriteFinding[] = [];
+    for (let j = i + 1; j < rest.length; j += 1) {
+      const word = rest[j]!;
+      if (word.value === "--") break;
+      let operand: Word | undefined;
+      if (names.has(word.value)) {
+        operand = rest[j + 1];
+        j += 1;
+      } else {
+        const name = [...names].find((option) =>
+          option.startsWith("--") ? word.value.startsWith(`${option}=`) : word.value.startsWith(option) && !word.value.startsWith("--"),
+        );
+        if (name === undefined) continue;
+        const value = word.value.slice(name.length + (name.startsWith("--") ? 1 : 0));
+        operand = { ...word, raw: value, value };
+      }
+      if (operand !== undefined) found.push(...judge(fromMoves(operand, moves, context), label));
+    }
+    return found;
+  };
+
+  if (GIT_DIFF_OUTPUT.has(verb)) {
+    const output = written(GIT_DIFF_OUTPUT_OPTION, `the file git ${verb} --output writes`);
+    if (output.length > 0) return output;
+  }
+  if (verb.length === 0 || GIT_READ_ONLY.has(verb)) return [];
+  const operands = rest
+    .slice(i + 1)
+    .filter((word) => word.value.length > 0 && !word.value.startsWith("-"));
 
   const findings = directories.flatMap((directory) =>
     judge(directory, `the directory git ${verb} works in`),
@@ -77,6 +130,9 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
   if (verb === "clone" && operands.length >= 2) {
     findings.push(...judge(operands[operands.length - 1]!, "the git clone destination"));
   }
+  if (verb === "format-patch") {
+    findings.push(...written(GIT_FORMAT_PATCH_DIRECTORY, "the directory git format-patch writes its patches to"));
+  }
   if (verb === "init" && operands.length >= 1) {
     findings.push(...judge(operands[0]!, "the git init destination"));
   }
@@ -84,4 +140,21 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
     findings.push(...judge(operands[1]!, "the git worktree destination"));
   }
   return findings;
+}
+
+/**
+ * A path an option names, read from where `-C` left git: relative to the last
+ * absolute `-C` and every relative one after it, as git itself reads it. With
+ * no `-C`, or an absolute path, it is the word as written.
+ */
+function fromMoves(word: Word, moves: readonly Word[], context: Context): Word {
+  const semantics = context.scope.semantics;
+  const absolute = (value: string): boolean =>
+    value.startsWith("~") || anchorOf(normalise(value, semantics), semantics) !== null;
+  if (moves.length === 0 || absolute(word.value)) return word;
+  let base = "";
+  for (const move of moves) {
+    base = absolute(move.value) || base === "" ? move.value : `${base}/${move.value}`;
+  }
+  return { ...word, value: `${base}/${word.value}` };
 }

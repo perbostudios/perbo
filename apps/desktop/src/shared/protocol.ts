@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   CriterionIdSchema,
+  DECISION_CHOICES,
   EffortLevelSchema,
   ExecutorSkillsSchema,
   GraphEditSchema,
@@ -9,6 +10,7 @@ import {
   MAX_QUESTION_OPTIONS,
   MAX_QUESTION_PARTS,
   StandingProhibitedEntrySchema,
+  type DecisionChoice,
   type GraphEdge,
   type SizeEstimate,
   type StandingProhibitedEntry,
@@ -1278,6 +1280,25 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     kind: z.literal("decide"),
     ...reference,
     answer: text,
+    /**
+     * The person's answer to each question that took a choice, by the
+     * finding's key: each is recorded on its finding
+     * (D-NEW-a-person-s-answer-closes-a-routed-finding). None where every
+     * question took the person's words alone. `answer` is every question's
+     * words together, recorded as a principle for the executor (D-065).
+     */
+    decisions: z.array(
+      z.strictObject({
+        findingKey: z.string().regex(/^[a-f0-9]{64}$/),
+        /**
+         * The person's own approach, the approach left to the executor, or
+         * the change shipped as it is for this finding: the first two hand
+         * it to the executor for one round, the third delivers it unchanged.
+         */
+        choice: z.enum(DECISION_CHOICES),
+        answer: text,
+      }),
+    ),
     digest: z.string().length(64),
   }),
   z.strictObject({
@@ -1551,6 +1572,11 @@ export interface DecisionQuestion {
   id: string;
   title: string;
   context: string;
+  /**
+   * The answers the finding takes (D-NEW-a-person-s-answer-closes-a-routed-finding);
+   * none where the question takes the person's words for a principle alone.
+   */
+  choices: readonly DecisionChoice[];
   options: {
     title: string;
     detail: string;

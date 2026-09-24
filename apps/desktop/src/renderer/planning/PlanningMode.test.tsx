@@ -5531,6 +5531,41 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     expect(within(dock()).queryAllByText(WORKING)).toHaveLength(0);
   });
 
+  it("offers Stop the chat while a turn is in flight and the dock's own send is unanswered", async () => {
+    // Stopping is the person's own way out of a turn (D-102): nothing the turn
+    // or the dock waits on holds it back.
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    await sampleBridge.request({ kind: "interviewStart", repoId: plan.repoId, id: plan.id });
+    const request = sampleBridge.request;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((done) => (release = done));
+    const spy = vi.spyOn(sampleBridge, "request").mockImplementation((async (input: Parameters<typeof request>[0]) => {
+      // The stop is held before the host has it, and the turn once it has.
+      if (input.kind === "interviewStop") await held;
+      const answer = await request.call(sampleBridge, input);
+      if (input.kind === "interviewTurn") await held;
+      return answer;
+    }) as typeof request);
+    try {
+      fireEvent.change(composer(), { target: { value: "why two nodes?" } });
+      fireEvent.keyDown(composer(), { key: "Enter" });
+      expect((await within(dock()).findAllByText(WORKING)).length).toBeGreaterThan(0);
+      const stop = within(dock()).getByRole("button", { name: "Stop the chat" }) as HTMLButtonElement;
+      expect(stop.disabled).toBe(false);
+      fireEvent.click(stop);
+      // Only a stop under way holds it.
+      await waitFor(() => expect(stop.disabled).toBe(true));
+      release();
+      await waitFor(() => expect(within(dock()).queryAllByText(WORKING)).toHaveLength(0));
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+  });
+
   it("says the interview is working until its answer lands", async () => {
     const plan = await planning();
     location.hash = `planning/${plan.id}/spec`;

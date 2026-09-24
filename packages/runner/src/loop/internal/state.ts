@@ -11,7 +11,7 @@ import { attemptId as makeAttemptId } from "@perbo/contracts";
 import type { ClosureVerification } from "@perbo/review";
 import type { Workspace } from "@perbo/workspace";
 import type { Decline } from "../../declines.js";
-import type { remediationToContinue } from "./continuation.js";
+import type { Direction, remediationToContinue } from "./continuation.js";
 
 /**
  * What one round of a run hands the next.
@@ -289,6 +289,13 @@ export interface RoundState {
    * itself, in the first round; null once that check has run.
    */
   readonly continuing: Continuation | null;
+  /**
+   * A person's words for each finding routed to them that they handed to the
+   * executor (D-NEW-a-person-s-answer-closes-a-routed-finding): what a
+   * remediation round's brief carries as data beside the finding it is about.
+   * Empty where no decision handed anything on.
+   */
+  readonly directions: readonly Direction[];
 }
 
 /** What one round hands the next beyond the counters and the round's own kind. */
@@ -374,6 +381,7 @@ export function initialRoundState(workspace: Workspace, continuing: Continuation
     previousChangedPaths: [],
     conflict: null,
     continuing,
+    directions: continuing?.directions ?? [],
   };
 }
 

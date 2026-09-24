@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { keepsPersonsTitle, openDrafts, promiseOf, titleChanged } from "../shared/contract-editing.js";
 import { DraftSchema, HELP_LINKS, RequestSchema, TaskModelsSchema } from "../shared/protocol.js";
-import { heldRepository } from "../shared/jobs.js";
+import { heldRepository, isRun } from "../shared/jobs.js";
 import { isArchivable, notArchivable } from "../shared/archive.js";
 import { specSlugOf } from "../shared/spec-slug.js";
 import { listExplorer, readExplorerFile } from "./explorer.js";
@@ -21,6 +21,8 @@ import {
 } from "./tickets/work.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { effectiveLimits, readManifest, saveManifest, specFolder } from "./repository/config.js";
+import { objectsPath } from "./repository/layout.js";
+import { findingsOnRecord } from "./records.js";
 import { recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
 import { openLogin } from "./providers/status.js";
 import { usageReport } from "./providers/usage.js";
@@ -29,7 +31,9 @@ import {
   admitFromSpecArgs,
   approveArgs,
   assertEditable,
+  assertDecidable,
   assertResumable,
+  decisionArgs,
   doctorArgs,
   doctorConfig,
   editArgs,
@@ -858,13 +862,25 @@ function loop(
   repo: RegisteredRepository,
   request: RequestOf<"run"> | RequestOf<"decide">,
 ): Job {
+  // A decision that answers findings carries on the run that stopped for it,
+  // and publishes as that run was going to: a decided delivery then opens the
+  // pull request that run would have (D-NEW-a-person-s-answer-closes-a-routed-
+  // finding). A principle alone publishes nothing.
+  const publish =
+    request.kind === "run"
+      ? request.publish
+      : request.decisions.length > 0 &&
+        ((m.profile.state.jobs as Job[])
+          .filter((job) => job.repoId === repo.id && job.key === request.key && isRun(job))
+          .at(-1)?.publish ??
+          false);
   const job = m.jobs.start(
     {
       repo,
       key: request.key,
       kind: request.kind,
       label: "Run engineering loop",
-      publish: request.kind === "run" ? request.publish : false,
+      publish,
     },
     async (job, run) => {
       m.tickets.assertDigest(repo, request.key, request.digest);
@@ -872,6 +888,18 @@ function loop(
       if (resumeFrom)
         assertResumable(await m.tickets.detail(repo.id, request.key), resumeFrom);
       if (request.kind === "decide") {
+        // Each answer closes its finding (D-NEW-a-person-s-answer-closes-a-
+        // routed-finding); the principle carries the same words to the executor.
+        const ticket = await m.tickets.ticket(repo, request.key);
+        assertDecidable(
+          findingsOnRecord(await m.tickets.bundles(repo), ticket.ticket_id, objectsPath(repo)),
+          request.decisions,
+        );
+        const author = m.profile.state.settings.name || "Local user";
+        for (const decision of request.decisions) {
+          await run.invoke(decisionArgs(request.key, decision, author));
+          if (run.signal.aborted) return;
+        }
         await run.invoke(principleArgs(request.answer));
         if (run.signal.aborted) return;
       }
@@ -883,7 +911,7 @@ function loop(
           runConfig(
             m.profile.state.taskModels[repo.id + ":" + request.key] ?? settings,
             effectiveLimits(repo, settings),
-            request.kind === "run" ? request.publish : false,
+            publish,
           ),
         ),
       );

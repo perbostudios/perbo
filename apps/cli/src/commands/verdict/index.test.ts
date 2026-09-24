@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
+  DECISION_WORDS,
   EXIT_CODES,
   ReviewArtifactSchema,
   SecretIndex,
@@ -23,7 +24,7 @@ import { escapesCommandLine } from "../escapes/index.js";
 import { inspectCommandLine } from "../inspect.js";
 import { stopsCommandLine } from "../stops.js";
 import { verdictCommandLine } from "./index.js";
-import { LocalVerdictSchema, LocalVerdictsSchema } from "./record.js";
+import { LocalVerdictSchema, LocalVerdictsSchema, decidedFindings } from "./record.js";
 import { FINDING_KEY, makeAttempt, makeReview, makeTicket } from "../../test-support/records.js";
 import { SPAWN_TEST_TIMEOUT_MS, gitEnvironment } from "@perbo/test-support";
 import { runCommandLine } from "../../command-line/terminal.js";
@@ -124,11 +125,11 @@ const KEYS = FINDINGS.map((finding) =>
 );
 const [STOP_ONE, STOP_TWO, STOP_THREE, ADVISORY] = KEYS;
 
-function reviewArtifact(): ReviewArtifact {
+function reviewArtifact(decision: ReviewArtifact["decision"] = "changes_requested"): ReviewArtifact {
   const base = makeReview({
     review_id: "rev_verdict0001",
     changeset_id: "cs_verdict0001",
-    decision: "changes_requested",
+    decision,
     cost_basis: "unavailable",
   });
   const template = base.findings[0]!;
@@ -144,7 +145,9 @@ function reviewArtifact(): ReviewArtifact {
       symbol: null,
       routing: finding.routing,
       blocking: finding.blocking,
-      closure: finding.blocking ? "human" : "executor",
+      // Every one names a person as its closer, the advisory one too: only the
+      // routing makes a finding a person's to answer (`routedToPerson`).
+      closure: "human",
       statement: finding.statement,
     })) satisfies Array<Record<string, unknown>> as Finding[],
   });
@@ -204,7 +207,40 @@ function stopsRecordFor(text: string, at: string): StopVerdicts {
  * the review artifact, and — when `pullRequest` is given — the stops record
  * `perbo sync` would have written from that body.
  */
-function storeWith(name: string, options: { pullRequest?: string; bundles?: boolean } = {}): {
+/** A finding in a family the executor is never handed (D-065). */
+const SECURITY = findingKey({ rule_id: "security.secret_in_diff", criterion_id: null, file: "src/env.ts", symbol: null });
+
+/** The review above with a `security.*` stop beside its findings. */
+function withSecurityFinding(review: ReviewArtifact): ReviewArtifact {
+  const template = review.findings[0]!;
+  return ReviewArtifactSchema.parse({
+    ...review,
+    findings: [
+      ...review.findings,
+      {
+        ...template,
+        key: SECURITY,
+        rule_id: "security.secret_in_diff",
+        criterion_id: null,
+        file: "src/env.ts",
+        routing: "blocks",
+        blocking: true,
+        closure: "human",
+        statement: "A credential is committed in src/env.ts.",
+      },
+    ],
+  });
+}
+
+function storeWith(
+  name: string,
+  options: {
+    pullRequest?: string;
+    bundles?: boolean;
+    securityFinding?: boolean;
+    decision?: ReviewArtifact["decision"];
+  } = {},
+): {
   repo: string;
   store: string;
 } {
@@ -252,7 +288,15 @@ function storeWith(name: string, options: { pullRequest?: string; bundles?: bool
       { name: "transcript.jsonl", media_type: "application/x-ndjson", body: "" },
     ]);
     write("review", "rev_verdict0001", { changeset_id: "cs_verdict0001", decision: "changes_requested", remediation_round: 0 }, [
-      { name: "review.json", media_type: "application/json", body: JSON.stringify(reviewArtifact()) },
+      {
+        name: "review.json",
+        media_type: "application/json",
+        body: JSON.stringify(
+          options.securityFinding
+            ? withSecurityFinding(reviewArtifact(options.decision))
+            : reviewArtifact(options.decision),
+        ),
+      },
     ]);
   }
 
@@ -1200,3 +1244,208 @@ describe("perbo verdict --stand-in labels the answer dogfood", () => {
     expect(streams.out()).toMatch(/dogfood stops excluded\s+1\s+answered by an AI stand-in/);
   });
 }, SPAWN_TEST_TIMEOUT_MS);
+
+describe("perbo verdict --decide records a person's answer that closes the finding", () => {
+  const decide = (repo: string, key: string, note: string | null, extra: string[] = [], now = NOW) =>
+    runCommandLine(verdictCommandLine, {
+      argv: [
+        "AYO-7",
+        "--decide",
+        key,
+        ...(note === null ? [] : ["--note", note]),
+        "--author",
+        AUTHOR,
+        "--repo",
+        repo,
+        ...extra,
+      ],
+      streams: recordStreams(),
+      cwd: repo,
+      now,
+    });
+
+  it("records the answer on the finding's key, and the loop reads it back with the words", async () => {
+    const { repo, store } = storeWith("decide");
+    expect(await decide(repo, STOP_ONE!, "Tokens expire when the session does; that is intended.")).toBe(0);
+    expect(await decide(repo, STOP_THREE!.slice(0, 12), "The infra edit is mine to make.")).toBe(0);
+
+    const rows = readVerdicts(store).verdicts;
+    expect(rows.map((row) => row.decision)).toEqual(["decide", "decide"]);
+    expect(rows[1]).toMatchObject({ finding_key: STOP_THREE, routing: "escalates" });
+    expect(decidedFindings(rows, TICKET_ID)).toEqual([
+      {
+        finding_key: STOP_ONE,
+        choice: "approach",
+        review_id: null,
+        note: "Tokens expire when the session does; that is intended.",
+        author: AUTHOR,
+        decided_at: NOW.toISOString(),
+      },
+      {
+        finding_key: STOP_THREE,
+        choice: "approach",
+        review_id: null,
+        note: "The infra edit is mine to make.",
+        author: AUTHOR,
+        decided_at: NOW.toISOString(),
+      },
+    ]);
+    // Another ticket's decisions are not this one's.
+    expect(decidedFindings(rows, "ticket_someoneelse01")).toEqual([]);
+  });
+
+  it("hands the loop only the answer that stands, and never a judgement that is not one", async () => {
+    const { repo, store } = storeWith("decide-replace");
+    expect(await decide(repo, STOP_ONE!, "first answer")).toBe(0);
+    expect(await decide(repo, STOP_ONE!, "second answer", ["--replace"], LATER)).toBe(0);
+    expect(
+      await runCommandLine(verdictCommandLine, {
+        argv: ["AYO-7", "--endorse", STOP_TWO!, "--note", "I wanted to be asked", "--author", AUTHOR, "--repo", repo],
+        streams: recordStreams(),
+        cwd: repo,
+        now: NOW,
+      }),
+    ).toBe(0);
+
+    const rows = readVerdicts(store).verdicts;
+    expect(rows).toHaveLength(3);
+    expect(decidedFindings(rows, TICKET_ID)).toEqual([
+      {
+        finding_key: STOP_ONE,
+        choice: "approach",
+        review_id: null,
+        note: "second answer",
+        author: AUTHOR,
+        decided_at: LATER.toISOString(),
+      },
+    ]);
+  });
+
+  it("keeps an answer and a stop answer on one finding apart: neither replaces the other", async () => {
+    const { repo, store } = storeWith("decide-slots");
+    const endorse = (extra: string[] = []) =>
+      runCommandLine(verdictCommandLine, {
+        argv: ["AYO-7", "--endorse", STOP_ONE!, "--author", AUTHOR, "--repo", repo, ...extra],
+        streams: recordStreams(),
+        cwd: repo,
+        now: NOW,
+      });
+    expect(await endorse()).toBe(0);
+    // An answer on the same key is its own decision, not a second stop answer.
+    expect(await decide(repo, STOP_ONE!, "first answer")).toBe(0);
+    expect(await decide(repo, STOP_ONE!, "second answer", ["--replace"], LATER)).toBe(0);
+    expect(await endorse(["--replace"])).toBe(0);
+
+    const rows = readVerdicts(store).verdicts;
+    const standing = rows.filter((row) => row.superseded_at === null);
+    expect(standing.map((row) => [row.decision, row.note])).toEqual([
+      ["decide", "second answer"],
+      ["endorse", null],
+    ]);
+    expect(decidedFindings(rows, TICKET_ID).map((row) => row.note)).toEqual(["second answer"]);
+    // The stop answer is still the one precision of stopping reads (D-060).
+    const streams = recordStreams();
+    await runCommandLine(stopsCommandLine, { argv: ["--repo", repo], streams, cwd: repo });
+    expect(streams.out()).toMatch(/precision of stopping\s+100%.*\(1 endorsed, 0 overridden\)/);
+  });
+
+  it("records which of the three a person chose, with the words each stands for", async () => {
+    const { repo, store } = storeWith("decide-choices");
+    expect(await decide(repo, STOP_ONE!, "Rotate tokens hourly.")).toBe(0);
+    expect(await decide(repo, STOP_TWO!, null, ["--choice", "let-it-decide"])).toBe(0);
+    expect(await decide(repo, STOP_THREE!, null, ["--choice", "ship-as-is"])).toBe(0);
+    expect(
+      decidedFindings(readVerdicts(store).verdicts, TICKET_ID).map((row) => [row.finding_key, row.choice, row.note]),
+    ).toEqual([
+      [STOP_ONE, "approach", "Rotate tokens hourly."],
+      [STOP_TWO, "let_it_decide", DECISION_WORDS.let_it_decide],
+      [STOP_THREE, "ship_as_is", DECISION_WORDS.ship_as_is],
+    ]);
+    expect(() => verdictCommandLine.read(["AYO-7", "--decide", STOP_ONE!, "--choice", "maybe"]).input).toThrow(
+      /is not one/,
+    );
+    expect(() => verdictCommandLine.read(["AYO-7", "--accept", STOP_ONE!, "--choice", "ship-as-is"]).input).toThrow(
+      /belongs to --decide/,
+    );
+    expect(() => LocalVerdictSchema.parse({ ...readyRow(), decision: "decide", note: "x" })).toThrow(/carries its choice/);
+  });
+
+  it("refuses to hand the executor a finding it is never handed", async () => {
+    const { repo, store } = storeWith("decide-never-handed", { securityFinding: true });
+    expect(() => decide(repo, SECURITY!, null, ["--choice", "let-it-decide"])).toThrow(/never handed/);
+    expect(() => decide(repo, SECURITY!, "Rotate it.")).toThrow(/never handed/);
+    expect(await decide(repo, SECURITY!, null, ["--choice", "ship-as-is"])).toBe(0);
+    expect(readVerdicts(store).verdicts.map((row) => row.choice)).toEqual(["ship_as_is"]);
+  });
+
+  it("refuses an answer on a review that did not judge the whole change, naming why", async () => {
+    for (const decision of ["incomplete", "error"] as const) {
+      const { repo, store } = storeWith(`decide-${decision}`, { decision });
+      for (const choice of ["approach", "let-it-decide", "ship-as-is"]) {
+        expect(() => decide(repo, STOP_ONE!, "Rotate tokens hourly.", ["--choice", choice]), decision).toThrow(
+          new RegExp(`ended ${decision}: it did not judge the whole change`),
+        );
+      }
+      expect(existsSync(join(store, "verdicts.json"))).toBe(false);
+    }
+  });
+
+  it("refuses the stand-in an answer, and never hands the loop one it recorded", async () => {
+    const { repo } = storeWith("decide-stand-in");
+    expect(() => verdictCommandLine.read(["AYO-7", "--decide", STOP_ONE!, "--note", "x", "--stand-in"]).input).toThrow(
+      /--stand-in cannot take it/,
+    );
+    const row = LocalVerdictSchema.parse({
+      ...readyRow(),
+      decision: "decide",
+      choice: "approach",
+      note: "x",
+      answered_by: "stand_in",
+    });
+    expect(decidedFindings([row], TICKET_ID)).toEqual([]);
+    expect(decidedFindings([{ ...row, answered_by: undefined }], TICKET_ID)).toHaveLength(1);
+    expect(repo.length).toBeGreaterThan(0);
+  });
+
+  it("carries the review a decision named by its id, and none where it named the ticket", async () => {
+    const { repo, store } = storeWith("decide-review-id");
+    expect(
+      await runCommandLine(verdictCommandLine, {
+        argv: ["rev_verdict0001", "--decide", STOP_TWO!, "--note", "on that review", "--author", AUTHOR, "--repo", repo],
+        streams: recordStreams(),
+        cwd: repo,
+        now: NOW,
+      }),
+    ).toBe(0);
+    expect(await decide(repo, STOP_ONE!, "on the ticket")).toBe(0);
+    expect(decidedFindings(readVerdicts(store).verdicts, TICKET_ID).map((row) => [row.finding_key, row.review_id])).toEqual([
+      [STOP_TWO, "rev_verdict0001"],
+      [STOP_ONE, null],
+    ]);
+  });
+
+  it("refuses a decision with no words, and one on a finding the review never routed to a person, whoever it named the closer", async () => {
+    const { repo, store } = storeWith("decide-refusals");
+    expect(() => verdictCommandLine.read(["AYO-7", "--decide", STOP_ONE!]).input).toThrow(/--note/);
+    expect(() => decide(repo, ADVISORY!, "an answer to nothing")).toThrow(/routed to a person/);
+    expect(existsSync(join(store, "verdicts.json"))).toBe(false);
+    expect(() =>
+      LocalVerdictSchema.parse({ ...readyRow(), decision: "decide", note: null }),
+    ).toThrow(/requires the person's answer/);
+  });
+}, SPAWN_TEST_TIMEOUT_MS);
+
+/** One whole row the schema accepts, for a refinement to be tested against. */
+function readyRow(): Record<string, unknown> {
+  return {
+    review: { reference: "AYO-7", ticket_id: TICKET_ID, ticket_key: "AYO-7", pull_request_url: null },
+    finding_key: STOP_ONE,
+    rule_id: "auth.token_never_expires",
+    routing: "blocks",
+    decision: "accept",
+    author: AUTHOR,
+    decided_at: NOW.toISOString(),
+    note: null,
+    superseded_at: null,
+  };
+}

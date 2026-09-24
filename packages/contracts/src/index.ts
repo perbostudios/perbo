@@ -263,6 +263,16 @@ export type {
   VerificationStrength,
   Waiver,
 } from "./review.js";
+export {
+  answersReview,
+  DECISION_CHOICES,
+  DECISION_WORDS,
+  decidable,
+  decisionChoicesFor,
+  NEVER_HANDED_FAMILIES,
+  routedToPerson,
+} from "./decision.js";
+export type { DecisionChoice } from "./decision.js";
 export { compareLevels, deriveActualRisk, derivePlannedRisk, maxLevel } from "./risk.js";
 export type { RiskDerivation } from "./risk.js";
 export { bundleId, BundleIdSchema, computeReplayability, RunBundleSchema } from "./runbundle.js";
@@ -363,6 +373,7 @@ export {
   attributionOnRecord,
   DELIVERY_ARMS,
   HAND_OFF_NOTE,
+  DECIDED_DELIVERY_NOTE,
   handOff,
   HandOffEvidenceError,
   IllegalTransitionError,

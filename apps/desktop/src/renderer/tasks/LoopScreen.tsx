@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
+import { DECISION_CHOICES, DECISION_WORDS } from "@perbo/contracts/browser";
 import { Button, InfoHint, InkIcon, Notice, NumberPop, PageHeader, SectionLabel, cx } from "../ui/index.js";
 import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { exclusiveJob, isRun } from "../../shared/jobs.js";
-import { decisionQuestions } from "../../shared/decisions.js";
+import { decisionQuestions, settledFindings } from "../../shared/decisions.js";
 import { WaitScreen } from "./wizard.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey, stageName } from "./ticket-workspace.js";
@@ -52,7 +53,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
   const [confirmed, setConfirmed] = useState<ReadonlySet<string>>(() => new Set());
   const acknowledged = ending !== null && (confirmed.has(ending.job.id) || endingConfirmed(ending.job.id));
   const whyLabel = ending?.title === "The run ended" ? "Why the run ended" : "Why it failed";
-  const questions: DecisionQuestion[] = decisionQuestions(review);
+  const questions: DecisionQuestion[] = decisionQuestions(review, settledFindings(detail));
   const observed = projection.observed;
   const paused = ticket.state === "changes_requested" && !active && questions.length > 0,
     stage = paused
@@ -390,9 +391,18 @@ function EndedCard({
     </div>
   );
 }
+/**
+ * What a person chose for one question: their own approach, the approach left
+ * to the executor, or the change shipped as it is for that finding
+ * (D-NEW-a-person-s-answer-closes-a-routed-finding). The first two hand the
+ * finding to the executor for one round; the third delivers it unchanged. A
+ * question that takes no choice records the words alone, as a principle.
+ */
+const ChoiceSchema = z.enum(DECISION_CHOICES);
+type Choice = z.infer<typeof ChoiceSchema>;
 const AnswersSchema = z.record(
   z.string(),
-  z.object({ text: z.string(), custom: z.boolean() }),
+  z.object({ text: z.string(), custom: z.boolean(), choice: ChoiceSchema }),
 );
 function DecisionOverlay(
   context: TaskContext & { questions: DecisionQuestion[] },
@@ -420,6 +430,9 @@ function DecisionOverlay(
   const action = useAction(),
     question = questions[index]!,
     selected = answers[question.id];
+  // A finding the executor is never handed takes only Ship as it is; a
+  // question that takes no choice takes the person's words for a principle.
+  const ownWords = question.choices.length === 0 || question.choices.includes("approach");
   const busy = Boolean(exclusiveJob(workspace.jobs));
   useEffect(() => {
     sessionStorage.setItem(storageKey, JSON.stringify(answers));
@@ -442,10 +455,10 @@ function DecisionOverlay(
   useEffect(() => {
     const answer = answers[questionId];
     setCustom(answer?.custom ? answer.text : "");
-    setCustomSelected(answer?.custom ?? question.options.length === 0);
+    setCustomSelected(answer?.custom ?? (question.options.length === 0 && ownWords));
   }, [questionId]);
-  const choose = (text: string, isCustom: boolean): void => {
-    setAnswers({ ...answers, [question.id]: { text, custom: isCustom } });
+  const choose = (text: string, isCustom: boolean, choice: Choice = "approach"): void => {
+    setAnswers({ ...answers, [question.id]: { text, custom: isCustom, choice } });
     setCustomSelected(isCustom);
     setError(null);
   };
@@ -489,6 +502,13 @@ function DecisionOverlay(
         repoId,
         key: detail.ticket.key,
         answer: text,
+        decisions: questions
+          .filter((question) => question.choices.length > 0)
+          .map((question) => ({
+            findingKey: question.id,
+            choice: answers[question.id]!.choice,
+            answer: answers[question.id]!.text.trim(),
+          })),
         digest: detail.digest,
       })
       .then((job) => {
@@ -548,9 +568,13 @@ function DecisionOverlay(
                     <div>
                       <p className="confirmation-question">{question.title}</p>
                       <strong>
-                        {answers[question.id]?.custom
-                          ? "Your answer — “" + answers[question.id]?.text + "”"
-                          : answers[question.id]?.text}
+                        {question.choices.length > 0 && answers[question.id]?.choice === "ship_as_is"
+                          ? "Ship as it is — the change is delivered unchanged for this"
+                          : question.choices.length > 0 && answers[question.id]?.choice === "let_it_decide"
+                            ? "Let it decide — the executor chooses within the contract"
+                            : answers[question.id]?.custom
+                              ? "Your answer — “" + answers[question.id]?.text + "”"
+                              : answers[question.id]?.text}
                       </strong>
                       {answers[question.id]?.custom && (
                         <p className="confirmation-authorship">
@@ -618,51 +642,72 @@ function DecisionOverlay(
                     )}
                   </label>
                 ))}
-                <label
-                  className={
-                    "choice choice--custom" +
-                    (customSelected ? " selected" : "")
-                  }
-                >
-                  <span className="choice-heading">
-                    <input
-                      type="radio"
-                      name="decision-choice"
-                      checked={customSelected}
-                      onChange={() => {
-                        setCustomSelected(true);
-                        // Picking it is the request to type, so the caret goes
-                        // with it. Done on the pick and not on the state, which
-                        // also turns true when an earlier answer is restored —
-                        // focus then would take the page off where it was.
-                        own.current?.focus();
+                {ownWords && (
+                  <label
+                    className={
+                      "choice choice--custom" +
+                      (customSelected ? " selected" : "")
+                    }
+                  >
+                    <span className="choice-heading">
+                      <input
+                        type="radio"
+                        name="decision-choice"
+                        checked={customSelected}
+                        onChange={() => {
+                          setCustomSelected(true);
+                          // Picking it is the request to type, so the caret goes
+                          // with it. Done on the pick and not on the state, which
+                          // also turns true when an earlier answer is restored —
+                          // focus then would take the page off where it was.
+                          own.current?.focus();
+                        }}
+                      />
+                      <strong>
+                        {question.options.length
+                          ? "Something else — tell it what to do"
+                          : "Tell it what the product should do"}
+                      </strong>
+                    </span>
+                    <textarea
+                      ref={own}
+                      aria-label="Your approach"
+                      placeholder="Type the approach in a sentence…"
+                      value={custom}
+                      onFocus={() => setCustomSelected(true)}
+                      onKeyDown={(event) => {
+                        // Enter sends what was typed, as Save and continue does;
+                        // Shift+Enter is a new line. Nothing typed, nothing sent.
+                        if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                        event.preventDefault();
+                        if (custom.trim()) advance();
+                      }}
+                      onChange={(event) => {
+                        setCustom(event.target.value);
+                        choose(event.target.value, true);
                       }}
                     />
-                    <strong>
-                      {question.options.length
-                        ? "Something else — tell it what to do"
-                        : "Tell it what the product should do"}
-                    </strong>
-                  </span>
-                  <textarea
-                    ref={own}
-                    aria-label="Your approach"
-                    placeholder="Type the approach in a sentence…"
-                    value={custom}
-                    onFocus={() => setCustomSelected(true)}
-                    onKeyDown={(event) => {
-                      // Enter sends what was typed, as Save and continue does;
-                      // Shift+Enter is a new line. Nothing typed, nothing sent.
-                      if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-                      event.preventDefault();
-                      if (custom.trim()) advance();
-                    }}
-                    onChange={(event) => {
-                      setCustom(event.target.value);
-                      choose(event.target.value, true);
-                    }}
-                  />
-                </label>
+                  </label>
+                )}
+                {question.choices.includes("ship_as_is") && (
+                  <label
+                    className={
+                      "choice choice--ship" +
+                      (!customSelected && selected?.choice === "ship_as_is" ? " selected" : "")
+                    }
+                  >
+                    <span className="choice-heading">
+                      <input
+                        type="radio"
+                        name="decision-choice"
+                        checked={!customSelected && selected?.choice === "ship_as_is"}
+                        onChange={() => choose(DECISION_WORDS.ship_as_is, false, "ship_as_is")}
+                      />
+                      <strong>Ship as it is</strong>
+                    </span>
+                    <p>Nothing is changed for this: the change is delivered as the review saw it.</p>
+                  </label>
+                )}
               </div>
             </>
           )}
@@ -688,20 +733,22 @@ function DecisionOverlay(
                   Can always change it before confirmation
                 </span>
                 <span className="spacer" />
-                <Button
-                  onClick={() => {
-                    choose(
-                      question.options.find((option) => option.recommended)
-                        ?.title ??
-                        "Choose an approach within the approved contract and scope; keep the choice in the task record.",
-                      false,
-                    );
-                    if (index + 1 === questions.length) setConfirm(true);
-                    else setIndex(index + 1);
-                  }}
-                >
-                  Let it decide
-                </Button>
+                {ownWords && (
+                  <Button
+                    onClick={() => {
+                      choose(
+                        question.options.find((option) => option.recommended)
+                          ?.title ?? DECISION_WORDS.let_it_decide,
+                        false,
+                        "let_it_decide",
+                      );
+                      if (index + 1 === questions.length) setConfirm(true);
+                      else setIndex(index + 1);
+                    }}
+                  >
+                    Let it decide
+                  </Button>
+                )}
                 <Button variant="primary" onClick={advance}>
                   Save and continue
                 </Button>

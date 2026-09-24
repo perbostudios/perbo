@@ -111,6 +111,33 @@ export const plans = new Map<string, PlanContract>();
 const approaches = new Map<string, ApproachRecord>();
 export const approved = new Set<string>();
 export const decisionsAnswered = new Set<string>();
+/** The answers recorded as principles, in order, as `.perbo/principles.md` holds them (D-065). */
+export const principlesRecorded: string[] = [];
+/**
+ * The answers a person gave on the "Decisions required" page, by ticket, as
+ * `perbo verdict --decide` records them: each closes its finding
+ * (D-NEW-a-person-s-answer-closes-a-routed-finding).
+ */
+export const decisionsTaken = new Map<
+  string,
+  Array<{
+    finding_key: string;
+    choice: "approach" | "let_it_decide" | "ship_as_is";
+    note: string;
+    decided_at: string;
+  }>
+>();
+/** Whether a decision on the ticket hands a finding to the executor for a round. */
+export function decisionsHandWork(key: string): boolean {
+  return (decisionsTaken.get(key) ?? []).some((row) => row.choice !== "ship_as_is");
+}
+/** Whether every finding the sample review routed to a person has an answer. */
+export function everyDecisionTaken(key: string): boolean {
+  const taken = new Set((decisionsTaken.get(key) ?? []).map((row) => row.finding_key));
+  return reviewFor(key)
+    .findings.filter((finding) => finding.routing === "blocks" || finding.routing === "escalates")
+    .every((finding) => taken.has(finding.key));
+}
 const criteriaText = [
   "A signup POST queues exactly one activation email.",
   "No email is sent for a duplicate signup inside five minutes.",
@@ -652,8 +679,20 @@ export function detail(key: string): Detail {
       partial: false,
       unavailable: 0,
     },
-    principles: "",
-    verdicts: [],
+    principles: principlesRecorded.map((principle) => `- ${principle}\n`).join(""),
+    // The rows `perbo verdict --decide` would hold for this ticket.
+    verdicts: (decisionsTaken.get(key) ?? []).map((row) => ({
+      review: { reference: key, ticket_id: ticket.ticket_id, ticket_key: key, pull_request_url: null },
+      finding_key: row.finding_key,
+      rule_id: "product.dead_letter",
+      routing: "escalates",
+      decision: "decide",
+      choice: row.choice,
+      author: "Sample person",
+      decided_at: row.decided_at,
+      note: row.note,
+      superseded_at: null,
+    })),
     effective: { stallMinutes: 12, ticketDollars: 2.5 },
     report: { sample: true },
   };
@@ -1432,9 +1471,15 @@ function liveFor(key: string, nodes: readonly { id: string; paths: readonly stri
             coverage: review.coverage,
             findings: review.findings,
           },
-          // What the round since that review closed (D-061), which is what
-          // takes the finding off the node the criterion belongs to.
-          closures: approved.has(key) ? [{ createdAt: closedAt, closed: [FINDING_KEY] }] : [],
+          // What the round since that review closed (D-061), and what a
+          // person decided, which is what takes the finding off the node the
+          // criterion belongs to.
+          closures: [
+            ...(approved.has(key) ? [{ createdAt: closedAt, closed: [FINDING_KEY] }] : []),
+            ...(decisionsTaken.get(key) ?? [])
+              .filter((row) => row.choice === "ship_as_is")
+              .map((row) => ({ createdAt: row.decided_at, closed: [row.finding_key] })),
+          ],
         },
     ticket.plan_version,
   );

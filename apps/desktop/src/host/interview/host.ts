@@ -653,9 +653,10 @@ export class InterviewHost {
       return;
     }
     if (read.kind === "idle") {
-      // One turn answered. The rest stay owed: a person who sent a second
-      // before the first came back is still waiting on it.
-      const owed = (this.owed.get(id) ?? 0) - 1;
+      // The turns this ending answered: one sent mid-turn can be answered
+      // inside the turn it was sent into. The rest stay owed: a person whose
+      // second turn gets an ending of its own is still waiting on it.
+      const owed = (this.owed.get(id) ?? 0) - read.turns;
       if (owed > 0) this.owed.set(id, owed);
       else {
         this.owed.delete(id);
@@ -668,8 +669,10 @@ export class InterviewHost {
       return;
     }
     if (read.kind === "ended") {
+      // The turn it was in ends with it, as any turn ends: what it moved is
+      // marked and handed over before the line that says the session is over.
       this.owed.delete(id);
-      this.sayWhatWasHeld(id);
+      this.endTurn(id);
       this.say(id, read.line);
       return;
     }

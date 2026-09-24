@@ -50,6 +50,15 @@ redact what it writes already depends on this one. Its false-positive behaviour 
 whole corpus by `packages/evaluation/test/credential-sweep.test.ts`, so a rule change is a
 measurement, not an edit.
 
+`decision.ts` is the single home for a person's answer to a finding the review routed to them
+([D-NEW-a-person-s-answer-closes-a-routed-finding](../../docs/11-open-decisions.md)): the three
+choices and the words each carries where the person typed none, `routedToPerson`, which says which
+findings take one, `decidable`, which says only a review that judged the whole change and stopped
+for a person takes any, `answersReview`, which says which review an answer answers, and
+`decisionChoicesFor`, which says a `security.*` or `context.*` finding takes only shipping it as it
+is. `perbo verdict --decide`, the loop and the desktop's decision screen read the same rules, so an
+answer one of them takes is one the others act on; it is browser-safe for the last.
+
 `review.ts` carries one deliberate asymmetry worth knowing about. A finding's `routing` is derived
 from `blocking` when it is absent, rather than defaulted, so an artifact written before D-051 stays
 scoreable — a plain default would silently relabel every blocking finding in an older artifact as

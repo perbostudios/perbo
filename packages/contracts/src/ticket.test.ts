@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DECIDED_DELIVERY_NOTE,
   HAND_OFF_NOTE,
   HandOffEvidenceError,
   IllegalTransitionError,
@@ -708,5 +709,19 @@ describe("SCP-252: a pull request closed without merging leaves pr_open", () => 
 
   it("counts a closed ticket as still moving, the way a failed one is", () => {
     expect(isActive(ticket({ state: "closed" }))).toBe(true);
+  });
+});
+
+describe("a delivery a person's decisions took (D-NEW-a-person-s-answer-closes-a-routed-finding)", () => {
+  it("moves provisioning to pr_open on the note that run writes, and on no other", () => {
+    const provisioning = ticket({ state: "provisioning" });
+    const moved = transition(provisioning, "pr_open", `${DECIDED_DELIVERY_NOTE} (111111111111)`);
+    expect(moved.state).toBe("pr_open");
+    expect(moved.history.at(-1)).toMatchObject({ from: "provisioning", to: "pr_open" });
+    expect(() => transition(provisioning, "pr_open", "a pull request is open")).toThrow(IllegalTransitionError);
+    // The row is from provisioning only: nothing else reaches pr_open on that note.
+    expect(() => transition(ticket({ state: "executing" }), "pr_open", DECIDED_DELIVERY_NOTE)).toThrow(
+      IllegalTransitionError,
+    );
   });
 });

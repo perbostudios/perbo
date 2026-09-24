@@ -325,6 +325,12 @@ describe("the picker's effort, its edges and its closed reading", () => {
       const body = new RegExp(`\\n${selector.replace(/[.>]/g, "\\$&")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
       expect(body, selector).toMatch(/filter: var\(--ink-filter\);/);
     }
+    // The reviewer's name is slate blue in light mode and amber in dark mode, both system and chosen.
+    expect(/\n\.reviewer-name \{([^}]*)\}/.exec(css)?.[1]).toMatch(/color: var\(--blue\);/);
+    for (const selector of [':root:not([data-theme="light"]) .reviewer-name', ':root[data-theme="dark"] .reviewer-name']) {
+      const body = new RegExp(`\\n\\s*${selector.replace(/[.()[\]:]/g, "\\$&")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+      expect(body, selector).toMatch(/color: var\(--amber\);/);
+    }
   });
 
   it("offers Codex's own levels, and none for a model that reports none", async () => {

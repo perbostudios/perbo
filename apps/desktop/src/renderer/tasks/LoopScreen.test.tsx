@@ -99,6 +99,134 @@ describe("the decision card", () => {
   });
 });
 
+describe("the three answers a question takes", () => {
+  /** PRB-412's one question answered by `pick`, confirmed, and the request it sent. */
+  const sent = async (pick: () => void, change?: (detail: Detail) => void) => {
+    // The decision is kept here rather than sent on: sent, the sample host
+    // would start the loop and move the ticket every later case reads.
+    const through = sampleBridge.request.bind(sampleBridge);
+    const request = vi.spyOn(sampleBridge, "request").mockImplementation((async (call: { kind: string }) =>
+      call.kind === "decide" ? failedRun({ kind: "decide", state: "running", endedAt: null }) : through(call as never)) as never);
+    try {
+      mount(context([], change));
+      pick();
+      const confirm = await screen.findByRole("dialog", { name: "Confirm your decisions" });
+      fireEvent.click(within(confirm).getByRole("button", { name: "Confirm and resume" }));
+      const decided = request.mock.calls.map(([call]) => call).find((call) => call.kind === "decide");
+      if (decided?.kind !== "decide") throw new Error("nothing was decided");
+      return decided;
+    } finally {
+      request.mockRestore();
+    }
+  };
+  const answered = async (pick: () => void): Promise<{ choice: string; answer: string }> =>
+    (await sent(pick)).decisions[0]!;
+
+  it("sends a typed approach as the person's own", async () => {
+    const decision = await answered(() => {
+      const dialog = screen.getByRole("dialog", { name: "Decisions required" });
+      fireEvent.change(within(dialog).getByRole("textbox", { name: "Your approach" }), {
+        target: { value: "Park it on the dead-letter queue." },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save and continue" }));
+    });
+    expect(decision).toMatchObject({ choice: "approach", answer: "Park it on the dead-letter queue." });
+  });
+
+  it("sends Let it decide as the approach left to the executor", async () => {
+    const decision = await answered(() => {
+      const dialog = screen.getByRole("dialog", { name: "Decisions required" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Let it decide" }));
+    });
+    expect(decision.choice).toBe("let_it_decide");
+    expect(decision.answer).toMatch(/^Choose an approach within the approved contract and scope/);
+  });
+
+  it("offers Ship as it is as a third choice, never the one selected, and says what it does", async () => {
+    mount(context([]));
+    const dialog = screen.getByRole("dialog", { name: "Decisions required" });
+    const ship = within(dialog).getByRole("radio", { name: /^Ship as it is/ }) as HTMLInputElement;
+    expect(ship.checked).toBe(false);
+    expect(within(dialog).getByText(/the change is delivered as the review saw it/)).toBeTruthy();
+    cleanup();
+    const decision = await answered(() => {
+      const again = screen.getByRole("dialog", { name: "Decisions required" });
+      fireEvent.click(within(again).getByRole("radio", { name: /^Ship as it is/ }));
+      fireEvent.click(within(again).getByRole("button", { name: "Save and continue" }));
+    });
+    expect(decision.choice).toBe("ship_as_is");
+  });
+
+  it("offers only Ship as it is on a finding the executor is never handed", () => {
+    mount(
+      context([], (detail) => {
+        detail.attempts.findLast((attempt) => attempt.review)!.review!.findings[0]!.rule_id = "security.secret_in_diff";
+      }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Decisions required" });
+    expect(within(dialog).queryByRole("textbox", { name: "Your approach" })).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "Let it decide" })).toBeNull();
+    fireEvent.click(within(dialog).getByRole("radio", { name: /^Ship as it is/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save and continue" }));
+    expect(screen.getByRole("dialog", { name: "Confirm your decisions" })).toBeTruthy();
+  });
+
+  it("asks for a principle alone where the loop acts on no answer, as it always has", async () => {
+    const lastReview = (detail: Detail) => detail.attempts.findLast((attempt) => attempt.review)!.review!;
+    const cases: Record<string, (detail: Detail) => void> = {
+      // A finding only its closer names a person.
+      advisory: (detail) => {
+        lastReview(detail).findings[0]!.routing = "advisory";
+      },
+      // A finding routed to a person, on a review that did not judge the whole change.
+      incomplete: (detail) => {
+        lastReview(detail).decision = "incomplete";
+      },
+      error: (detail) => {
+        lastReview(detail).decision = "error";
+      },
+    };
+    for (const [name, change] of Object.entries(cases)) {
+      mount(context([], change));
+      const dialog = screen.getByRole("dialog", { name: "Decisions required" });
+      expect(within(dialog).getByRole("textbox", { name: "Your approach" }), name).toBeTruthy();
+      expect(within(dialog).getByRole("button", { name: "Let it decide" }), name).toBeTruthy();
+      expect(within(dialog).queryByRole("radio", { name: /^Ship as it is/ }), name).toBeNull();
+      cleanup();
+      const request = await sent(() => {
+        const again = screen.getByRole("dialog", { name: "Decisions required" });
+        fireEvent.click(within(again).getByRole("button", { name: "Let it decide" }));
+      }, change);
+      expect(request.decisions, name).toEqual([]);
+      expect(request.answer, name).toMatch(/Choose an approach within the approved contract and scope/);
+      cleanup();
+      sessionStorage.clear();
+    }
+  });
+
+  it("asks nothing a standing answer already shipped as it is", () => {
+    mount(
+      context([], (detail) => {
+        const attempt = detail.attempts.findLast((entry) => entry.review)!;
+        const review = attempt.review!;
+        // The loop takes an answer as of the review's bundle, and so does this.
+        attempt.bundles = [
+          { kind: "review", subject_id: review.review_id, created_at: review.created_at, usage: { wall_clock_ms: 0 } } as never,
+        ];
+        detail.verdicts = review.findings.map((finding) => ({
+          review: { reference: "PRB-412" },
+          finding_key: finding.key,
+          decision: "decide",
+          choice: "ship_as_is",
+          decided_at: review.created_at,
+          superseded_at: null,
+        }));
+      }),
+    );
+    expect(screen.queryByRole("dialog", { name: "Decisions required" })).toBeNull();
+  });
+});
+
 describe("what ended the run", () => {
   it("says the review requested changes in a card, with its findings behind the i, and keeps it at the top of the steps once confirmed", () => {
     const run = failedRun();

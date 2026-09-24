@@ -23,6 +23,10 @@ import {
   approved,
   at,
   decisionsAnswered,
+  decisionsHandWork,
+  decisionsTaken,
+  everyDecisionTaken,
+  principlesRecorded,
   detail,
   draftFromSpec,
   driftEpoch,
@@ -830,9 +834,35 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       job.resultKey = request.key;
     }, 1000, owner),
   run: (request) => startWork(request.kind, request.repoId, request.key, request.publish),
-  decide: (request) => startWork(request.kind, request.repoId, request.key, false),
+  decide: (request) => {
+    // Each answer is recorded on its finding before the run, as the host does.
+    decisionsTaken.set(request.key, [
+      ...(decisionsTaken.get(request.key) ?? []).filter(
+        (row) => !request.decisions.some((decision) => decision.findingKey === row.finding_key),
+      ),
+      ...request.decisions.map((decision) => ({
+        finding_key: decision.findingKey,
+        choice: decision.choice,
+        note: decision.answer,
+        decided_at: new Date().toISOString(),
+      })),
+    ]);
+    // The principle, as the host records it beside the answers (D-065); one
+    // with no finding answered carries the run on as a principle alone does.
+    principlesRecorded.push(request.answer);
+    if (request.decisions.length === 0) decisionsAnswered.add(request.key);
+    // A decision that answers findings carries on the run that stopped for it,
+    // and publishes as that run was going to; a principle alone publishes
+    // nothing, as the host has it.
+    const stopped = snapshot.jobs
+      .filter((entry) => entry.repoId === request.repoId && entry.key === request.key && isRun(entry))
+      .at(-1);
+    const publish = request.decisions.length > 0 && (stopped?.publish ?? false);
+    return startWork(request.kind, request.repoId, request.key, publish);
+  },
   principle: (request) =>
     job(request.kind, request.repoId, request.key, () => {
+      principlesRecorded.push(request.answer);
       decisionsAnswered.add(request.key);
     }),
   verdict: (request) =>
@@ -910,7 +940,20 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
     repoId,
     key,
     () => {
-      if (!decisionsAnswered.has(key)) row.ticket.state = "changes_requested";
+      // Every finding routed to a person answered, on the change the review
+      // judged: the loop delivers — after one round verified closed where an
+      // answer handed a finding to the executor, and without one where every
+      // answer shipped it as it is — and a run that publishes nothing leaves
+      // no pull request (D-NEW-a-person-s-answer-closes-a-routed-finding).
+      if (kind === "decide" && everyDecisionTaken(key)) {
+        if (decisionsHandWork(key)) approved.add(key);
+        row.ticket.state = "pr_open";
+        if (publish) {
+          row.ticket.delivery.state = "open";
+          row.ticket.delivery.pull_request_number = 418;
+          row.ticket.delivery.pull_request_url = "https://github.com/example/webstore/pull/418";
+        }
+      } else if (!decisionsAnswered.has(key)) row.ticket.state = "changes_requested";
       else {
         row.ticket.state = "pr_open";
         row.ticket.delivery.state = "open";
@@ -926,7 +969,6 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
   opened.publish = publish;
   row.ticket.approved_at = at;
   row.ticket.state = "executing";
-  if (kind === "decide") decisionsAnswered.add(key);
   // A filed ticket whose loop starts again is back on Home, as the host has it.
   const entry = repoId + ":" + row.ticket.key;
   if (snapshot.archived?.includes(entry)) {

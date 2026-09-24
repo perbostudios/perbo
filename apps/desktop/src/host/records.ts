@@ -11,7 +11,15 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { CostBasisSchema, costOf, parseUnifiedDiff, rollCosts } from "@perbo/contracts";
+import {
+  CLOSURE_AUTHORITIES,
+  CostBasisSchema,
+  FINDING_ROUTINGS,
+  ReviewDecisionSchema,
+  costOf,
+  parseUnifiedDiff,
+  rollCosts,
+} from "@perbo/contracts";
 import type { Cost, Ticket } from "@perbo/contracts";
 import { assembleLiveGraph } from "../shared/graph-live.js";
 import type { LiveCheck, LiveNodeInput, LiveReview } from "../shared/graph-live.js";
@@ -507,6 +515,103 @@ const StoredReviewSchema = z.looseObject({
     .default([]),
 });
 
+const FindingsOnRecordSchema = z.looseObject({
+  decision: ReviewDecisionSchema,
+  findings: z.array(
+    z.looseObject({
+      key: z.string(),
+      rule_id: z.string(),
+      status: z.enum(["open", "resolved", "waived"]),
+      routing: z.enum(FINDING_ROUTINGS),
+      closure: z.enum(CLOSURE_AUTHORITIES).nullable().default(null),
+      statement: z.string(),
+      blocking_reason: z.string().default(""),
+    }),
+  ),
+});
+export type FindingsOnRecord = z.infer<typeof FindingsOnRecordSchema>;
+
+/**
+ * The findings of a ticket's last review as the loop reads it — the newest
+ * `rev_` bundle — which is what a person's answer has to be one the loop acts
+ * on against (D-NEW-a-person-s-answer-closes-a-routed-finding). Null where no
+ * review can be read.
+ */
+export function findingsOnRecord(
+  bundles: readonly BundleManifest[],
+  ticketId: string,
+  objectsDirectory: string,
+): FindingsOnRecord | null {
+  const review = bundles
+    .filter((bundle) => bundle.ticket_id === ticketId && bundle.kind === "review" && bundle.subject_id.startsWith("rev_"))
+    .sort((left, right) => (left.created_at ?? "").localeCompare(right.created_at ?? ""))
+    .at(-1);
+  const artifact = review?.artifacts.find((entry) => entry.name === "review.json" && entry.retained);
+  if (!artifact) return null;
+  try {
+    const text = readObject(join(objectsDirectory, artifact.sha256), artifact).text;
+    const parsed = FindingsOnRecordSchema.safeParse(JSON.parse(text ?? "null"));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One standing answer a person gave to a finding routed to them. */
+export interface Decision {
+  finding_key: string;
+  /** The review the person named by its id, or null where they named the ticket or its pull request. */
+  review_id: string | null;
+  decided_at: string;
+}
+
+const VerdictsRecordSchema = z.object({
+  verdicts: z.array(
+    z
+      .object({
+        review: z.object({ ticket_id: z.string(), reference: z.string() }).passthrough(),
+        finding_key: z.string(),
+        decision: z.string(),
+        choice: z.string().optional(),
+        decided_at: z.string(),
+        superseded_at: z.string().nullable(),
+      })
+      .passthrough(),
+  ),
+});
+
+/**
+ * The standing answers of one ticket that closed their finding as it stood —
+ * shipped as it is — in the verdicts record `perbo verdict` writes
+ * (D-NEW-a-person-s-answer-closes-a-routed-finding). An answer that handed the
+ * finding to the executor closes nothing by itself: the round's verification
+ * does, and the graph reads that where every closure is read. None where the
+ * file is absent or cannot be read: `perbo inspect` is where a broken record
+ * is reported, and a graph that failed on one would show nothing.
+ */
+export function readDecisions(path: string, ticketId: string): Decision[] {
+  if (!existsSync(path)) return [];
+  try {
+    const parsed = VerdictsRecordSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+    if (!parsed.success) return [];
+    return parsed.data.verdicts
+      .filter(
+        (row) =>
+          row.review.ticket_id === ticketId &&
+          row.decision === "decide" &&
+          row.choice === "ship_as_is" &&
+          row.superseded_at === null,
+      )
+      .map((row) => ({
+        finding_key: row.finding_key,
+        review_id: row.review.reference.startsWith("rev_") ? row.review.reference : null,
+        decided_at: row.decided_at,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * The records a plan's execution graph is read from (D-100, SCP-317), and
  * nothing derived from them: {@link assembleLiveGraph} is where the deriving
@@ -523,6 +628,12 @@ export function liveGraph(input: {
   attempts: readonly StoredAttempt[];
   bundles: readonly BundleManifest[];
   ticketId: string;
+  /**
+   * The person's answers to findings routed to them, each of which closes its
+   * finding as of when it was taken
+   * (D-NEW-a-person-s-answer-closes-a-routed-finding).
+   */
+  decisions: readonly Decision[];
   /** The plan the ticket carries now, which a review has to have judged. */
   planVersion?: number;
   objectsDirectory: string;
@@ -581,7 +692,12 @@ export function liveGraph(input: {
         .split(",")
         .map((key) => key.trim())
         .filter((key) => key.length > 0),
-    }));
+    }))
+    .concat(
+      input.decisions
+        .filter((row) => row.review_id === null || row.review_id === reviewBundle?.subject_id)
+        .map((row) => ({ createdAt: row.decided_at, closed: [row.finding_key] })),
+    );
 
   return assembleLiveGraph(
     input.nodes,

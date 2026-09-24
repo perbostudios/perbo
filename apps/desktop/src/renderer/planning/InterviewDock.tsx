@@ -139,6 +139,8 @@ export function InterviewDock({
   const [interviewOpen, setInterviewOpen] = useState(() => interviewShown.has(id ?? ""));
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A stop asked for and not yet answered: the one time Stop the chat waits.
+  const [stopping, setStopping] = useState(false);
   const [text, setText] = useState("");
   const chat = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
@@ -343,11 +345,15 @@ export function InterviewDock({
             History
           </button>
           <span className="spacer" />
+          {/* The person's own way out of a turn (D-102): offered while one is
+              in flight and while anything else the dock asked is. */}
           <Button
             className="small"
-            disabled={busy || id === null || !running}
+            disabled={stopping || id === null || !running}
             onClick={() => {
-              if (id !== null) void ask(() => bridge.request({ kind: "interviewStop", id }));
+              if (id === null) return;
+              setStopping(true);
+              void ask(() => bridge.request({ kind: "interviewStop", id })).finally(() => setStopping(false));
             }}
           >
             Stop the chat

@@ -137,6 +137,33 @@ const FORMS: Array<{ form: string; outside: string[]; inside: string[] }> = [
       "git -C /tmp/wt log --oneline",
     ],
   },
+  {
+    // The verb reads; the option writes, and is judged by where it lands.
+    form: "git … --output / format-patch -o",
+    outside: [
+      "git diff --output=../x",
+      `git diff --output ${OUTSIDE}/x.diff HEAD`,
+      "git log -p --output=~/x.log",
+      `git show --stat --output=${OUTSIDE}/x HEAD`,
+      "git diff-tree -p --output=../x HEAD",
+      `git -C ${OUTSIDE} diff --output=x.diff`,
+      "git -C src diff --output=../../x.diff",
+      `git format-patch -o ${OUTSIDE}/patches HEAD~1`,
+      `git format-patch -o${OUTSIDE}/patches HEAD~1`,
+      "git format-patch --output-directory=../patches HEAD~1",
+      'echo "$(git diff --output=../x)"',
+    ],
+    inside: [
+      "git diff --output=notes.diff",
+      `git diff --output ${ROOT}/src/x.diff HEAD`,
+      "git -C src diff --output=../x.diff",
+      "git log -p --output=src/x.log",
+      "git format-patch -o patches HEAD~1",
+      "git diff --output-indicator-new=+ HEAD",
+      "git diff -- --output=../x",
+      'echo "$(git diff --output=notes.diff)"',
+    ],
+  },
 ];
 
 describe("a shell writer judged by where its destination resolves", () => {
@@ -640,4 +667,36 @@ describe("the control: a writer whose whole effect is the paths it names", () =>
       expect(hookAnswer(command), command).toBe("allow");
     });
   }
+});
+
+describe("`git diff --output` inside the worktree and outside the contract's globs", () => {
+  const scoped = (command: string) =>
+    judgePreToolCall(
+      { tool_name: "Bash", tool_use_id: "toolu_output", tool_input: { command } },
+      {
+        root: ROOT,
+        tmpdir: null,
+        cwd: ROOT,
+        paths_allowed: ["src/**"],
+        paths_prohibited: ["src/secret/**"],
+        allow_list: [...profile.command_allow_list],
+        deny_list: [...profile.command_deny_list],
+      },
+      new Date("2026-09-04T00:00:00.000Z"),
+    ).decision;
+
+  it("is refused by the scope rule, as a redirect to the same path is", () => {
+    for (const command of ["git diff --output=notes.diff", "echo $(git diff --output=notes.diff)"]) {
+      expect(scoped(command), command).toMatchObject({ answer: "deny", rule: "write_outside_scope" });
+    }
+    expect(scoped("git diff > notes.diff")).toMatchObject({ rule: "write_outside_scope" });
+    expect(scoped("git diff --output=src/secret/x.diff")).toMatchObject({
+      answer: "deny",
+      rule: "write_prohibited_path",
+    });
+  });
+
+  it("is admitted inside the globs", () => {
+    expect(scoped("git diff --output=src/x.diff").decision).toBe("allowed");
+  });
 });

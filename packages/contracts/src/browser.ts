@@ -9,6 +9,16 @@
 export { APPROACH_SCHEMA_VERSION, approachProblems, ApproachRecordSchema } from "./approach.js";
 export type { ApproachRecord, GraphEdge } from "./approach.js";
 export { formatUsd } from "./cost.js";
+export {
+  answersReview,
+  DECISION_CHOICES,
+  DECISION_WORDS,
+  decidable,
+  decisionChoicesFor,
+  NEVER_HANDED_FAMILIES,
+  routedToPerson,
+} from "./decision.js";
+export type { DecisionChoice } from "./decision.js";
 export { EFFORT_LABELS, EFFORT_LEVELS, EffortLevelSchema } from "./effort.js";
 export type { EffortLevel } from "./effort.js";
 export { EXECUTOR_SKILLS, ExecutorSkillsSchema } from "./executor-skills.js";

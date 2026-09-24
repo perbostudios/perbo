@@ -476,6 +476,8 @@ export const USAGE = `perbo — contract to pull request, locally
 
   perbo verdict <review> --endorse|--override <stop key> [--note "..."]
   perbo verdict <review> --accept|--reject <finding key> [--note "..."]
+  perbo verdict <review> --decide <finding key>
+              [--choice approach|let-it-decide|ship-as-is] [--note "..."]
               [--author "..."] [--stand-in] [--replace] [--repo .]
               [--store <dir>] [--json]
       Answer a review here instead of on the pull request. <review> is a ticket
@@ -486,9 +488,18 @@ export const USAGE = `perbo — contract to pull request, locally
       names one — the same key the checkbox on the pull request carries, so a
       stop answered either way is one decision.
       --endorse and --override answer a stop, exactly as the two boxes do;
-      --accept and --reject judge any finding. The decision is written to
-      <store>/verdicts.json with who took it, when and the note; nothing leaves
-      this machine and nothing on the network is asked. Who took it is this
+      --accept and --reject judge any finding; --decide is your answer to a
+      finding the review routed to you. --choice approach (the default, with
+      your words in --note) or let-it-decide hands it to the executor for one
+      remediation round, checked closed rather than reviewed again;
+      ship-as-is settles it, and a run with nothing else open executes and
+      reviews nothing and goes on to delivery. A security.* or context.*
+      finding can only be shipped as it is. An answer is not a stop answer:
+      it sits beside one without replacing it, \`perbo stops\` does not count
+      it, and --stand-in cannot take it. The decision is
+      written to <store>/verdicts.json with who took it, when and the note;
+      nothing leaves this machine and nothing on the network is asked. Who
+      took it is this
       repository's own \`git config user.name\` and \`user.email\` — no account
       and no token — or --author where you name somebody else; where the
       repository names neither and --author is absent, nothing is recorded and

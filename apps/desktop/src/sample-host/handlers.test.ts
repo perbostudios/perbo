@@ -171,3 +171,23 @@ it("names a plan whose spec nobody titled as admit does, and the spec takes that
     spec: "# New users receive a confirmation email.",
   });
 });
+
+it("moves a ticket on a principle with no finding answered, as the principle alone does, and publishes nothing (D-065)", async () => {
+  const key = "PRB-412";
+  const state = () => snapshot.tasks.find((row) => row.ticket.key === key)!.ticket.state;
+  const digest = async () => (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
+  // The run that stops for it was going to publish.
+  await sampleBridge.request({ kind: "run", repoId, key, digest: await digest(), publish: true, approve: false, resumeFrom: null });
+  await vi.waitFor(() => expect(state()).not.toBe("executing"), { timeout: 5000 });
+  const decided = await sampleBridge.request({
+    kind: "decide",
+    repoId,
+    key,
+    digest: await digest(),
+    answer: "Keep dead letters apart.",
+    decisions: [],
+  });
+  expect(decided.publish).toBe(false);
+  await vi.waitFor(() => expect(state()).not.toBe("executing"), { timeout: 5000 });
+  expect(state()).toBe("pr_open");
+});

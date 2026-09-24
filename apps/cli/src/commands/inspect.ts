@@ -1324,8 +1324,13 @@ export function renderInspect(
   const paint: Paint = painter(options.color);
   const lines: string[] = [];
   // Only the decisions in force; a superseded one is on the record and in the
-  // JSON, and printing it beside the live one would read as two answers.
-  const decided = new Map(activeVerdicts(report.verdicts).map((verdict) => [verdict.finding_key, verdict]));
+  // JSON, and printing it beside the live one would read as two answers. A
+  // finding holds at most two: a judgement of it and a person's answer to it
+  // (D-NEW-a-person-s-answer-closes-a-routed-finding), each in its own slot.
+  const decided = new Map<string, LocalVerdict[]>();
+  for (const verdict of activeVerdicts(report.verdicts)) {
+    decided.set(verdict.finding_key, [...(decided.get(verdict.finding_key) ?? []), verdict]);
+  }
   lines.push("");
   lines.push(
     paint(
@@ -1761,7 +1766,9 @@ export function renderInspect(
         // The person's own answer, where they gave one here (SCP-181). It sits
         // under the finding it answers, because a decision read anywhere else
         // is a word without the thing it was about.
-        for (const line of verdictLines(decided.get(finding.key))) lines.push(paint(line, "warn"));
+        for (const verdict of decided.get(finding.key) ?? []) {
+          for (const line of verdictLines(verdict)) lines.push(paint(line, "warn"));
+        }
       }
       lines.push("");
     } else if (attempt.review_decision) {

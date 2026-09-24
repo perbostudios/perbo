@@ -1937,10 +1937,11 @@ export interface InterviewStreamed {
   /** Why the session ended, on the last one. */
   reason?: string;
   /**
-   * The provider has finished this turn and the next word is the person's.
-   * Each transport knows this in its own terms and says it in this one.
+   * The provider has finished a turn and the next word is the person's, with
+   * how many of the person's turns it answered. Each transport knows this in
+   * its own terms and says it in this one.
    */
-  idle?: boolean;
+  idle?: number;
 }
 
 /**
@@ -2201,12 +2202,12 @@ export async function interview(
   for await (const streamed of transport.run(session)) {
     if (streamed.session_id !== undefined) announce(streamed.session_id);
     if (streamed.message !== undefined) emit({ type: "message", message: streamed.message });
-    if (streamed.idle === true) {
+    if (streamed.idle !== undefined) {
       // A turn has ended, so a turn queued behind it is measured from here
       // rather than from the moment it was pulled (see `turns` above).
       turnEnded();
       permission.turnBegan();
-      emit({ type: "idle" });
+      emit({ type: "idle", turns: streamed.idle });
     }
     if (streamed.reason !== undefined) reason = streamed.reason;
   }

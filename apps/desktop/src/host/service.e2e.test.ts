@@ -822,8 +822,8 @@ describe("the graph while the work runs", () => {
     prohibited: [],
   };
   /** A ticket whose plan has two nodes, one path glob each. */
-  async function graphed() {
-    const made = fixture();
+  async function graphed(runner?: typeof runProcess) {
+    const made = fixture(runner);
     const registered = await made.service.registerRepository(made.repo);
     const repoId = registered.id;
     await finished(
@@ -1214,6 +1214,217 @@ describe("the graph while the work runs", () => {
     const second = live.nodes.find((node) => node.id === "node_2")!;
     expect(second.criteria[0]?.finding).toBeNull();
     expect(second.state).not.toBe("finding_open");
+  });
+
+  it("PRB-13: records each answer on its finding before the loop runs, and the graph reads them as decided", async () => {
+    // The CLI's `verdict`, `principle` and `run` are stood in for and their
+    // argv kept: a real `run` executes a coding agent, and what `verdict
+    // --decide` writes and what the loop does with it are proven in the CLI's
+    // and the runner's own tests (D-NEW-a-person-s-answer-closes-a-routed-finding).
+    const calls: string[][] = [];
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (["verdict", "principle", "run"].includes(args[1] ?? "")) {
+        calls.push(args.slice(1));
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return runProcess(binary, args, options);
+    };
+    const { service, repo, repoId, ticketId } = await graphed(runner);
+    const digest = (await service.detail(repoId, "PRB-1")).digest;
+    const lockfile = "7".repeat(64);
+    const workflow = "8".repeat(64);
+    const licence = "9".repeat(64);
+    const routedToPerson = (key: string, statement: string) => ({
+      key,
+      rule_id: "repository.observation",
+      criterion_id: "ac_2",
+      severity: "major",
+      status: "open",
+      routing: "blocks",
+      closure: "human",
+      outcome: "unknown",
+      statement,
+    });
+    record(repo, ticketId, {
+      attemptId: "att_0000000000000002",
+      artifacts: [
+        {
+          name: "change.diff",
+          body:
+            "diff --git a/packages/queue/retry.ts b/packages/queue/retry.ts\n" +
+            "--- a/packages/queue/retry.ts\n+++ b/packages/queue/retry.ts\n@@ -1 +1,2 @@\n+retry(three);\n",
+        },
+      ],
+      review: {
+        createdAt: "2026-09-24T09:00:00.000Z",
+        body: JSON.stringify({
+          review_id: "rev_one",
+          plan_version: 1,
+          created_at: "2026-09-24T09:00:00.000Z",
+          decision: "changes_requested",
+          coverage: [binding("ac_2", "met", "packages/queue/retry.test.ts", 88)],
+          findings: [
+            routedToPerson(lockfile, "The repository carries two lockfiles."),
+            routedToPerson(workflow, "No workflow runs the suite on a pull request."),
+            routedToPerson(licence, "The repository states no licence."),
+          ],
+        }),
+      },
+    });
+    const node = async () =>
+      (await service.request({ kind: "graphRead", repoId, key: "PRB-1" })).live.nodes.find(
+        (entry) => entry.id === "node_2",
+      )!;
+    expect((await node()).state).toBe("finding_open");
+
+    const job = await finished(
+      service,
+      (
+        await service.request({
+          kind: "decide",
+          repoId,
+          key: "PRB-1",
+          digest,
+          answer: "For task PRB-1:\n1. package-lock.json is authoritative.\n\n2. CI is out of scope.",
+          decisions: [
+            { findingKey: lockfile, choice: "approach", answer: "package-lock.json is authoritative." },
+            { findingKey: workflow, choice: "let_it_decide", answer: "CI is out of scope." },
+            { findingKey: licence, choice: "ship_as_is", answer: "Ship it as it is." },
+          ],
+        })
+      ).id,
+    );
+    expect(job.state).toBe("completed");
+    const shown = { principle: 3, run: 6, verdict: 8 } as Record<string, number>;
+    expect(calls.map((call) => call.slice(0, shown[call[0]!]))).toEqual([
+      ["verdict", "PRB-1", "--decide", lockfile, "--choice", "approach", "--note", "package-lock.json is authoritative."],
+      ["verdict", "PRB-1", "--decide", workflow, "--choice", "let-it-decide", "--note", "CI is out of scope."],
+      ["verdict", "PRB-1", "--decide", licence, "--choice", "ship-as-is", "--note", "Ship it as it is."],
+      ["principle", "add", "For task PRB-1:\n1. package-lock.json is authoritative.\n\n2. CI is out of scope."],
+      ["run", "--ticket", "PRB-1", "--config", expect.any(String), "--json"],
+    ]);
+    for (const call of calls.slice(0, 3)) expect(call.slice(10, 12)).toEqual(["--replace", "--json"]);
+
+    // What `perbo verdict --decide` leaves at the store's root, row for row.
+    // Only the finding shipped as it is is closed by the answer itself; the
+    // two handed to the executor are closed by the round's verification.
+    const answered = (choices: Record<string, string>, reference = "PRB-1") =>
+      writeFileSync(
+        join(repo, ".perbo", "verdicts.json"),
+        JSON.stringify({
+          schema_version: 1,
+          verdicts: Object.entries(choices).map(([finding_key, choice]) => ({
+            review: { reference, ticket_id: ticketId, ticket_key: "PRB-1", pull_request_url: null },
+            finding_key,
+            rule_id: "repository.observation",
+            routing: "blocks",
+            decision: "decide",
+            choice,
+            author: "Owen",
+            decided_at: "2026-09-24T09:30:00.000Z",
+            note: "decided",
+            superseded_at: null,
+          })),
+        }),
+      );
+    answered({ [lockfile]: "approach", [workflow]: "let_it_decide", [licence]: "ship_as_is" });
+    expect((await node()).criteria.map((criterion) => criterion.finding)).toEqual([
+      "The repository carries two lockfiles.",
+    ]);
+    const shipped = { [lockfile]: "ship_as_is", [workflow]: "ship_as_is", [licence]: "ship_as_is" };
+    // Answers that name another review by its id answer that review alone.
+    answered(shipped, "rev_two");
+    expect((await node()).state).toBe("finding_open");
+    answered(shipped, "rev_one");
+    const decided = await node();
+    expect(decided.state).not.toBe("finding_open");
+    expect(decided.criteria.every((criterion) => criterion.finding === null)).toBe(true);
+  });
+
+  it("records none of a person's answers where one of them is not one the loop acts on", async () => {
+    const calls: string[][] = [];
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (["verdict", "principle", "run"].includes(args[1] ?? "")) {
+        calls.push(args.slice(1));
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return runProcess(binary, args, options);
+    };
+    const { service, repo, repoId, ticketId } = await graphed(runner);
+    const digest = (await service.detail(repoId, "PRB-1")).digest;
+    const [product, secret, remediable] = ["4", "5", "6"].map((digit) => digit.repeat(64)) as [string, string, string];
+    const routed = (key: string, rule_id: string, routing: string) => ({
+      key,
+      rule_id,
+      criterion_id: "ac_2",
+      status: "open",
+      routing,
+      closure: "human",
+      statement: `${rule_id} stands.`,
+    });
+    record(repo, ticketId, {
+      attemptId: "att_0000000000000002",
+      artifacts: [],
+      review: {
+        createdAt: "2026-09-24T09:00:00.000Z",
+        body: JSON.stringify({
+          review_id: "rev_one",
+          decision: "escalate",
+          findings: [
+            routed(product, "product.preference", "escalates"),
+            routed(secret, "security.secret_in_diff", "blocks"),
+            routed(remediable, "test.missing_for_criterion", "remediable"),
+          ],
+        }),
+      },
+    });
+    const decide = async (decisions: { findingKey: string; choice: "approach" | "ship_as_is"; answer: string }[]) =>
+      finished(
+        service,
+        (await service.request({ kind: "decide", repoId, key: "PRB-1", digest, answer: "Answers.", decisions })).id,
+      );
+    const handedSecret = await decide([
+      { findingKey: product, choice: "approach", answer: "Round half-even." },
+      { findingKey: secret, choice: "approach", answer: "Rotate it." },
+    ]);
+    expect(handedSecret.state).toBe("failed");
+    expect(handedSecret.error).toContain("its only answer is Ship as it is");
+    const notRouted = await decide([
+      { findingKey: product, choice: "approach", answer: "Round half-even." },
+      { findingKey: remediable, choice: "ship_as_is", answer: "Ship it." },
+    ]);
+    expect(notRouted.state).toBe("failed");
+    expect(notRouted.error).toContain("not one the review routed to you");
+    expect(calls).toEqual([]);
+
+    expect(
+      (
+        await decide([
+          { findingKey: product, choice: "approach", answer: "Round half-even." },
+          { findingKey: secret, choice: "ship_as_is", answer: "Ship it." },
+        ])
+      ).state,
+    ).toBe("completed");
+    expect(calls.map((call) => call[0])).toEqual(["verdict", "verdict", "principle", "run"]);
+
+    // The same findings on a review that did not judge the whole change take
+    // no answer at all: it would settle a finding on a change nobody finished judging.
+    const review = (decision: string) =>
+      record(repo, ticketId, {
+        attemptId: "att_0000000000000002",
+        artifacts: [],
+        review: {
+          createdAt: "2026-09-24T10:00:00.000Z",
+          body: JSON.stringify({ review_id: "rev_one", decision, findings: [routed(product, "product.preference", "escalates")] }),
+        },
+      });
+    for (const decision of ["incomplete", "error"]) {
+      review(decision);
+      const unjudged = await decide([{ findingKey: product, choice: "ship_as_is", answer: "Ship it." }]);
+      expect(unjudged.state, decision).toBe("failed");
+      expect(unjudged.error).toContain(`The review ended ${decision}: it did not judge the whole change`);
+    }
+    expect(calls).toHaveLength(4);
   });
 
   it("does not let an older round's closure answer a finding a later review raised again", async () => {
@@ -1747,11 +1958,18 @@ describe("desktop bridge against the actual bundled CLI", () => {
       ).id,
     );
   it("records a run's publication choice on its job, and keeps it across a restart", async () => {
-    // The CLI's own `run` and `principle` are stood in for; approving is real.
-    const runner: typeof runProcess = async (binary, args, options) =>
-      args[1] === "run" || args[1] === "principle"
+    // The CLI's own `run`, `principle` and `verdict` are stood in for, and
+    // each run's configuration kept; approving is real.
+    const published: boolean[] = [];
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "run")
+        published.push(
+          (JSON.parse(readFileSync(args[args.indexOf("--config") + 1]!, "utf8")) as { publish: boolean }).publish,
+        );
+      return args[1] === "run" || args[1] === "principle" || args[1] === "verdict"
         ? { code: 0, stdout: "{}", stderr: "", cancelled: false }
         : runProcess(binary, args, options);
+    };
     const { service, repo, options } = fixture(runner);
     const registered = await service.registerRepository(repo);
     await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
@@ -1762,32 +1980,64 @@ describe("desktop bridge against the actual bundled CLI", () => {
       if (change.kind === "progress" && !announced.has(change.job.id))
         announced.set(change.job.id, { ...change.job });
     };
-    const published = await runTicket(service, registered.id, true, true);
-    const unpublished = await runTicket(service, registered.id, false, false);
-    const decided = await finished(
-      service,
-      (
-        await service.request({
-          kind: "decide",
-          repoId: registered.id,
-          key: "PRB-1",
-          answer: "Keep the retry button",
-          digest: (await service.detail(registered.id, "PRB-1")).digest,
-        })
-      ).id,
+    // The review the loop reads, routing the one finding each decision answers to a person.
+    const body = Buffer.from(
+      JSON.stringify({
+        findings: [
+          { key: "a".repeat(64), rule_id: "product.retry", status: "open", routing: "escalates", statement: "Keep the retry button?" },
+        ],
+        decision: "escalate",
+      }),
     );
-    const jobs = [published, unpublished, decided];
-    expect(jobs.map((job) => [job.state, job.publish])).toEqual([
-      ["completed", true],
-      ["completed", false],
-      ["completed", false],
-    ]);
-    expect(jobs.map((job) => announced.get(job.id)?.publish)).toEqual([true, false, false]);
+    const sha256 = createHash("sha256").update(body).digest("hex");
+    mkdirSync(join(repo, ".perbo", "bundles", "objects"), { recursive: true });
+    mkdirSync(join(repo, ".perbo", "bundles", "bundles"), { recursive: true });
+    writeFileSync(join(repo, ".perbo", "bundles", "objects", sha256), body);
+    writeFileSync(
+      join(repo, ".perbo", "bundles", "bundles", "bundle_00000000000000ab.json"),
+      JSON.stringify({
+        bundle_id: "bundle_00000000000000ab",
+        kind: "review",
+        created_at: "2026-09-10T10:00:00.000Z",
+        subject_id: "rev_one",
+        ticket_id: (await service.detail(registered.id, "PRB-1")).ticket.ticket_id,
+        artifacts: [{ name: "review.json", sha256, bytes: body.length, retained: true }],
+      }),
+    );
+    const decide = async (
+      decisions = [{ findingKey: "a".repeat(64), choice: "approach" as const, answer: "Keep the retry button" }],
+    ): Promise<Job> =>
+      finished(
+        service,
+        (
+          await service.request({
+            kind: "decide",
+            repoId: registered.id,
+            key: "PRB-1",
+            answer: "Keep the retry button",
+            decisions,
+            digest: (await service.detail(registered.id, "PRB-1")).digest,
+          })
+        ).id,
+      );
+    const publishing = await runTicket(service, registered.id, true, true);
+    const unpublished = await runTicket(service, registered.id, false, false);
+    // A decision that answers findings carries on the run that stopped for
+    // it, and publishes as it was going to; a principle alone publishes nothing.
+    const decidedLocally = await decide();
+    const republished = await runTicket(service, registered.id, true, false);
+    const decidedPublishing = await decide();
+    const principled = await decide([]);
+    const jobs = [publishing, unpublished, decidedLocally, republished, decidedPublishing, principled];
+    const choices = [true, false, false, true, true, false];
+    expect(jobs.map((job) => [job.state, job.publish])).toEqual(choices.map((choice) => ["completed", choice]));
+    expect(published).toEqual(choices);
+    expect(jobs.map((job) => announced.get(job.id)?.publish)).toEqual(choices);
     await service.shutdown();
     const restarted = new DesktopService(options);
     trackService(restarted);
     const kept = (await restarted.snapshot()).jobs;
-    expect(jobs.map((job) => kept.find((entry) => entry.id === job.id)?.publish)).toEqual([true, false, false]);
+    expect(jobs.map((job) => kept.find((entry) => entry.id === job.id)?.publish)).toEqual(choices);
   });
   it("keeps a ticket's last run in the job journal after forty later jobs, so its stopped page still opens", async () => {
     // The loop stops short and `doctor` is the cheapest job there is: both stood in for.
@@ -2250,7 +2500,7 @@ readline.createInterface({ input: process.stdin })
       setTimeout(() => {
         send({ type: 'message', message: { type: 'assistant', session_id: 'sdk-session-1',
           message: { role: 'assistant', content: [{ type: 'text', text: 'The spec is written: read the Requirements first.' }] } } });
-        send({ type: 'idle' });
+        send({ type: 'idle', turns: 1 });
       }, 300);
       return;
     }
@@ -2267,7 +2517,7 @@ readline.createInterface({ input: process.stdin })
         send({ type: 'message', message: { type: 'assistant', session_id: 'sdk-session-1',
           message: { role: 'assistant', content: [{ type: 'text', text: 'That is the spec as I have it.' }] } } });
       }, 100);
-      setTimeout(() => send({ type: 'idle' }), 700);
+      setTimeout(() => send({ type: 'idle', turns: 1 }), 700);
       return;
     }
     // A turn that writes somewhere the session is allowed to write that is
@@ -2326,7 +2576,7 @@ readline.createInterface({ input: process.stdin })
     // Every turn ends, which is what stops the dock saying the session is
     // working — and what tells a line held through the turn that it was the
     // whole of it.
-    send({ type: 'idle' });
+    send({ type: 'idle', turns: 1 });
   })
   .on('close', () => {
     const ended = () => send({ type: 'ended', session_id: 'sdk-session-1', reason: 'the session ended' });
@@ -4523,6 +4773,7 @@ describe("planning beside a run (SCP-335)", () => {
         key: "PRB-1",
         digest: second.digest,
         answer: "Take the smaller change.",
+        decisions: [{ findingKey: "a".repeat(64), choice: "approach" as const, answer: "Take the smaller change." }],
       },
       { kind: "sync" as const, repoId: registered.id, key: "PRB-1" },
       { kind: "doctor" as const, repoId: registered.id, writeConfig: false },
@@ -4828,7 +5079,7 @@ readline.createInterface({ input: process.stdin })
       send({ type: 'asked', groups: [{ title: 'Its own question', parts: [{ question: 'Which way?',
         options: [{ label: 'This way', detail: null, recommended: true },
                   { label: 'That way', detail: null, recommended: false }] }] }] });
-    send({ type: 'idle' });
+    send({ type: 'idle', turns: 1 });
   })
   .on('close', () => { send({ type: 'ended', session_id: 'sdk-session-2', reason: 'the session ended' }); });
 `,

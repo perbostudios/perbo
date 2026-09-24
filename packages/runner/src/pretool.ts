@@ -21,6 +21,7 @@ import {
 } from "./admission.js";
 import { PERBO_AGENT_ROLE_NAMES, isSubagentTool, judgeSubagentStart, SUBAGENT_TOOL_NAMES } from "./agents.js";
 import { writeBriefRecord, type BriefRecords } from "./brief.js";
+import { READ_ONLY_ORIENTATION } from "./profile.js";
 import { describeShellCwd } from "./prohibited.js";
 import { UNKNOWN_CWD, everySegment, type CommandSegment } from "./shell/index.js";
 import { HOST_TEMPORARY_DIRECTORY } from "./scratch.js";
@@ -649,11 +650,14 @@ export const EFFECT_FREE_VERBS = new Set(["cd", "pushd", "popd", "pwd", "echo", 
  * Whether the runner has positive grounds to admit this line, or nothing to say.
  *
  * Grounds means at least one command on the line is one the guard judged — a
- * verb that writes to a path it names, or one whose effects are already
- * accounted for — and no command on it is one the guard has not judged and the
- * allow-list does not carry. `mkdir -p a && script -q /dev/null node x.js`
- * therefore has nothing to say: the `mkdir` is vouched for and the `script` is
- * not, and vouching for the line would admit both.
+ * verb that writes to a path it names, one whose effects are already accounted
+ * for, or a read-only orientation command the allow-list carries — and no
+ * command on it is one the guard has not judged and the allow-list does not
+ * carry. `git diff $(git merge-base HEAD main)` is admitted on the last of these
+ * grounds, where the outer list alone would have to vouch for a substitution.
+ * `mkdir -p a && script -q /dev/null node x.js` has nothing to say: the `mkdir`
+ * is vouched for and the `script` is not, and vouching for the line would
+ * admit both.
  */
 function vouchesFor(
   segments: readonly CommandSegment[],
@@ -675,8 +679,13 @@ function vouchesFor(
       grounds = true;
       continue;
     }
-    if (allow_list.some((entry) => matchesListEntry(entry, "Bash", segment.text))) continue;
-    return false;
+    if (!allow_list.some((entry) => matchesListEntry(entry, "Bash", segment.text))) return false;
+    // A listed read-only orientation command writes nothing under any flag, so
+    // it is grounds as `echo` is; any other listed command leaves the line to
+    // the outer list, which admits it by the same entry.
+    if (READ_ONLY_ORIENTATION.some((entry) => matchesListEntry(entry, "Bash", segment.text))) {
+      grounds = true;
+    }
   }
   return grounds;
 }

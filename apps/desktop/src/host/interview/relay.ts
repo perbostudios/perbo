@@ -31,8 +31,8 @@ export type Relayed =
   /** A tool ran; `planMoved` where it wrote a plan edit the records now hold. */
   | { kind: "tool"; line: Omit<ToolLine, "edit">; planMoved: boolean }
   | { kind: "asked"; line: AskedLine }
-  /** The session finished its turn: the next word is the person's (D-119). */
-  | { kind: "idle" }
+  /** The session finished a turn, answering this many of the person's: the next word is theirs (D-119). */
+  | { kind: "idle"; turns: number }
   /** The session is over, so nothing further is owed to the person. */
   | { kind: "ended"; line: Line };
 
@@ -148,7 +148,7 @@ export function relayed(line: string): Relayed {
       },
       planMoved: event.ok && (event.tool === "edit_plan" || event.tool === "undo_edit"),
     };
-  if (event.type === "idle") return { kind: "idle" };
+  if (event.type === "idle") return { kind: "idle", turns: event.turns };
   if (event.type === "wrote_spec") return { kind: "wroteSpec" };
   if (event.type === "asked")
     return {

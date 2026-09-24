@@ -1,11 +1,18 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+  DECISION_CHOICES,
+  DECISION_WORDS,
   DOGFOOD_ANSWERER,
   EXIT_CODES,
   StopVerdictsSchema,
   TicketKeySchema,
+  decidable,
+  decisionChoicesFor,
+  routedToPerson,
   stateDir,
+  type DecisionChoice,
+  type ReviewDecision,
   type StopRouting,
   type Ticket,
 } from "@perbo/contracts";
@@ -45,6 +52,7 @@ import {
   readLocalVerdicts,
   recordVerdict,
   verdictFor,
+  verdictSlot,
   verdictsPath,
   writeLocalVerdicts,
   VERDICT_DECISIONS,
@@ -60,7 +68,10 @@ import {
  * it needs a pull request, a network and a credential for a decision that is
  * about this checkout and nobody else. This command is the same answer, taken
  * here: `--endorse`/`--override` for a stop, `--accept`/`--reject` for any
- * finding, written to `<store>/verdicts.json` with who, when and why.
+ * finding, and `--decide` with `--note` for the person's answer to a finding
+ * routed to them, which closes it for the loop
+ * (D-NEW-a-person-s-answer-closes-a-routed-finding) — written to
+ * `<store>/verdicts.json` with who, when and why.
  *
  * Nothing in it leaves the machine, and nothing in it asks the network — the
  * findings it resolves a key against are already on disk: the review artifacts
@@ -95,6 +106,8 @@ export const VerdictInputSchema = z.discriminatedUnion("list", [
     /** The finding key, whole or by any unambiguous prefix. */
     key: z.string().min(1),
     note: z.string().nullable(),
+    /** `--choice`, on `--decide` only: what the person chose for the finding. */
+    choice: z.enum(DECISION_CHOICES).nullable(),
     author: z.string().nullable(),
     replace: z.boolean(),
     /**
@@ -112,12 +125,20 @@ export type VerdictInput = z.infer<typeof VerdictInputSchema>;
 export type VerdictRecordInput = Extract<VerdictInput, { list: false }>;
 export type VerdictListInput = Extract<VerdictInput, { list: true }>;
 
-/** The four decisions, each spelled as the flag that takes it. */
+/** What a person may choose for a finding routed to them, as `--choice` spells it. */
+const CHOICE_FLAGS: Record<string, DecisionChoice> = {
+  approach: "approach",
+  "let-it-decide": "let_it_decide",
+  "ship-as-is": "ship_as_is",
+};
+
+/** The five decisions, each spelled as the flag that takes it. */
 const DECISION_FLAGS = {
   "--endorse": "endorse",
   "--override": "override",
   "--accept": "accept",
   "--reject": "reject",
+  "--decide": "decide",
 } as const satisfies Record<`--${string}`, VerdictDecision>;
 
 type DecisionFlag = keyof typeof DECISION_FLAGS;
@@ -137,6 +158,8 @@ const VERDICT_FLAGS = {
   "--override": decisionFlag("--override"),
   "--accept": decisionFlag("--accept"),
   "--reject": decisionFlag("--reject"),
+  "--decide": decisionFlag("--decide"),
+  "--choice": valueFlag(),
   "--note": valueFlag(),
   "--author": valueFlag(),
   "--replace": switchFlag(),
@@ -197,6 +220,7 @@ function readVerdict(argv: readonly string[]): {
     }
     const writing = [
       note === null ? null : "--note",
+      flags["--choice"] === undefined ? null : "--choice",
       author === null ? null : "--author",
       replace ? "--replace" : null,
       standIn ? "--stand-in" : null,
@@ -208,12 +232,35 @@ function readVerdict(argv: readonly string[]): {
   }
   if (taken === null) {
     throw new UsageError(
-      "verdict needs one decision: --endorse or --override <stop key>, or --accept or " +
-        "--reject <finding key>",
+      "verdict needs one decision: --endorse or --override <stop key>, --accept or " +
+        "--reject <finding key>, or --decide <finding key> --note <your answer>",
     );
   }
   if (note !== null && note.trim() === "") {
     throw new UsageError("--note requires text; leave it out to record no note");
+  }
+  if (taken === "--decide" && standIn) {
+    throw new UsageError(
+      "--decide closes a finding routed to a person, and only a person answers one: " +
+        "--stand-in cannot take it (D-121)",
+    );
+  }
+  const choiceFlag = flags["--choice"] ?? null;
+  if (choiceFlag !== null && taken !== "--decide") {
+    throw new UsageError("--choice belongs to --decide: it says what you chose for the finding");
+  }
+  const choice =
+    taken !== "--decide" ? null : choiceFlag === null ? "approach" : CHOICE_FLAGS[choiceFlag] ?? null;
+  if (taken === "--decide" && choice === null) {
+    throw new UsageError(
+      `--choice ${choiceFlag} is not one: approach (your own, the default), let-it-decide, or ship-as-is`,
+    );
+  }
+  if (choice === "approach" && note === null) {
+    throw new UsageError(
+      "--decide records your answer to the finding: give your approach with --note \"<your answer>\", " +
+        "or choose --choice let-it-decide or --choice ship-as-is",
+    );
   }
   return {
     input: readInput(VerdictInputSchema, {
@@ -221,7 +268,9 @@ function readVerdict(argv: readonly string[]): {
       list: false,
       decision: DECISION_FLAGS[taken],
       key: flags[taken]!,
-      note,
+      // A choice with no words of its own carries the words it stands for.
+      note: note ?? (choice === null || choice === "approach" ? null : DECISION_WORDS[choice]),
+      choice,
       author,
       replace,
       standIn,
@@ -239,6 +288,13 @@ export interface KnownFinding {
   finding_key: string;
   rule_id: string;
   routing: StopRouting | null;
+  /**
+   * Whether `--decide` can answer it: a finding a run's own review routed to a
+   * person, which is what the loop reads an answer on (`routedToPerson`).
+   */
+  to_person: boolean;
+  /** The decision of the run's own review that raised it; null where no run's review did. */
+  review_decision: ReviewDecision | null;
   source: string;
 }
 
@@ -283,6 +339,8 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
         finding_key: finding.key,
         rule_id: finding.rule_id,
         routing: stopRoutingOf(finding.routing),
+        to_person: false,
+        review_decision: null,
         source: `the review ${review.review_id}`,
       });
     }
@@ -294,6 +352,8 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
         finding_key: finding.key,
         rule_id: finding.rule_id,
         routing: stopRoutingOf(finding.routing),
+        to_person: routedToPerson(finding),
+        review_decision: attempt.review?.decision ?? null,
         source: "the review artifact",
       });
     }
@@ -303,6 +363,8 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
         finding_key: decline.finding_key,
         rule_id: prior?.rule_id ?? DECLINED_RULE_UNRECORDED,
         routing: "declined",
+        to_person: false,
+        review_decision: null,
         source: prior?.source ?? "the executor's decline",
       });
     }
@@ -312,6 +374,8 @@ export function knownFindings(dir: string, subject: InspectSubject): KnownFindin
       finding_key: stop.finding_key,
       rule_id: stop.rule_id,
       routing: stop.routing,
+      to_person: found.get(stop.finding_key)?.to_person ?? false,
+      review_decision: found.get(stop.finding_key)?.review_decision ?? null,
       source: "the pull request",
     });
   }
@@ -652,6 +716,29 @@ export function verdict(input: VerdictInput, context: CommandContext): VerdictRe
         "Use --accept or --reject to judge the finding itself",
     );
   }
+  // A finding the executor is never handed (D-065) cannot be handed to it by a
+  // decision either: its only answers are shipping it as it is, or a change a
+  // person makes by hand.
+  if (args.decision === "decide" && args.choice !== null && !decisionChoicesFor(finding.rule_id).includes(args.choice)) {
+    throw new UsageError(
+      `${finding.finding_key.slice(0, 12)} (${finding.rule_id}) is a finding the executor is never ` +
+        "handed (D-065), so it cannot be handed an approach: choose --choice ship-as-is, or change it by hand",
+    );
+  }
+  if (args.decision === "decide" && !finding.to_person) {
+    throw new UsageError(
+      `--decide answers an open finding a run's review routed to a person, and ` +
+        `${finding.finding_key.slice(0, 12)} (${finding.rule_id}) is not one. ` +
+        "Use --accept or --reject to judge the finding itself",
+    );
+  }
+  if (args.decision === "decide" && finding.review_decision !== null && !decidable({ decision: finding.review_decision })) {
+    throw new UsageError(
+      `${finding.finding_key.slice(0, 12)} (${finding.rule_id}) is on a review that ended ` +
+        `${finding.review_decision}: it did not judge the whole change, so an answer would settle a finding ` +
+        "on a change nobody finished judging, and it takes none. `perbo principle add` carries your words to the executor",
+    );
+  }
 
   // Who decided. `--author` names them where it is given; otherwise the
   // repository does, through the two config lines git already asks every
@@ -686,6 +773,7 @@ export function verdict(input: VerdictInput, context: CommandContext): VerdictRe
     // The same rule for the same reason: absent is a person, which is what
     // every row written at this command line before `--stand-in` existed was.
     ...(args.standIn ? { answered_by: DOGFOOD_ANSWERER } : {}),
+    ...(args.choice === null ? {} : { choice: args.choice }),
     decided_at: context.now.toISOString(),
     note: args.note,
     superseded_at: null,
@@ -694,7 +782,12 @@ export function verdict(input: VerdictInput, context: CommandContext): VerdictRe
   // Read before the write and written whole: a refusal below leaves the file
   // exactly as it was, which is what makes a refused second decision safe.
   const previous = readLocalVerdicts(dir);
-  const standing = verdictFor(previous.verdicts, subject.ticket_id, finding.finding_key);
+  const standing = verdictFor(
+    previous.verdicts,
+    subject.ticket_id,
+    finding.finding_key,
+    verdictSlot(args.decision),
+  );
   let next;
   try {
     next = recordVerdict({ previous, verdict: taking, replace: args.replace });

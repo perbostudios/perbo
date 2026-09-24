@@ -74,6 +74,12 @@ export interface VerificationFacts {
   openFindings: readonly Finding[];
   /** D-065: findings this run's executor declared no-determinable-practice for. */
   declines: number;
+  /**
+   * The findings a person handed to the executor
+   * (D-NEW-a-person-s-answer-closes-a-routed-finding): one still open when a
+   * round stalls or exhausts its attempts goes back to that person.
+   */
+  handed: ReadonlySet<string>;
   remediationRound: number;
   maxRounds: number;
   /** What the ticket has spent, and the budget it is spent against. */
@@ -120,6 +126,19 @@ export function routeVerification(facts: VerificationFacts): Step {
   const stillOpen = facts.openFindings.filter((finding) =>
     verification.open_keys.includes(finding.key),
   );
+  // A round that stalls or exhausts its attempts with a finding a person
+  // handed to the executor still open gives it back to them
+  // (D-NEW-a-person-s-answer-closes-a-routed-finding).
+  const backToPerson = (stop: Stop): Stop =>
+    stillOpen.some((finding) => facts.handed.has(finding.key))
+      ? {
+          next: "stop",
+          end: {
+            outcome: "escalated",
+            detail: `${stop.end.detail}; a finding a person handed to the executor is still open, so it is theirs to decide again`,
+          },
+        }
+      : stop;
   if (stillOpen.length === 0) {
     return {
       next: "stop",
@@ -154,7 +173,7 @@ export function routeVerification(facts: VerificationFacts): Step {
   const closedHere = verification.per_finding.filter((row) => row.status === "closed").length;
   const openKeys = stillOpen.map((finding) => finding.key);
   if (closedHere === 0) {
-    return {
+    return backToPerson({
       next: "stop",
       end: {
         outcome: "remediation_stalled",
@@ -164,13 +183,13 @@ export function routeVerification(facts: VerificationFacts): Step {
           `same evidence. Still open: ${openKeys.join(", ")}` +
           declinedNote,
       },
-    };
+    });
   }
   const closedAndRemaining =
     `remediation round ${remediationRound} closed ${closedHere} finding(s) and ` +
     `${stillOpen.length} remain, but `;
   if (remediationRound >= maxRounds) {
-    return {
+    return backToPerson({
       next: "stop",
       end: {
         outcome: "remediation_exhausted",
@@ -181,10 +200,10 @@ export function routeVerification(facts: VerificationFacts): Step {
           `Still open: ${openKeys.join(", ")}` +
           declinedNote,
       },
-    };
+    });
   }
   if (facts.budget !== null && facts.spend.priced > 0 && facts.spend.micros >= facts.budget) {
-    return {
+    return backToPerson({
       next: "stop",
       end: {
         outcome: "remediation_exhausted",
@@ -197,7 +216,7 @@ export function routeVerification(facts: VerificationFacts): Step {
           `${openKeys.join(", ")}` +
           declinedNote,
       },
-    };
+    });
   }
   return {
     next: "advance",
@@ -365,6 +384,7 @@ export async function verifyRound(args: {
     toVerify,
     openFindings: state.openFindings,
     declines: ledger.declines.length,
+    handed: new Set(state.directions.map((direction) => direction.finding_key)),
     remediationRound: state.remediationRound,
     maxRounds: args.maxRounds,
     spend: ledger.spend(),

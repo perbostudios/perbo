@@ -2260,6 +2260,14 @@ textarea {
 .reviewer-name {
   color: var(--blue);
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .reviewer-name {
+    color: var(--amber);
+  }
+}
+:root[data-theme="dark"] .reviewer-name {
+  color: var(--amber);
+}
 .transcript-entry p {
   font-size: calc(12.5px * var(--text-scale));
   color: var(--ink);

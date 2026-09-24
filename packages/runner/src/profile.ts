@@ -42,6 +42,25 @@ export const DEFAULT_AGENT_TOOLS = [
 ] as const;
 
 /**
+ * Read-only orientation the executor reaches for bare and inside `$(…)`, such
+ * as `git diff $(git merge-base HEAD main)`. None of the four writes a file, a
+ * ref or the index under any flag, or reaches the network (short of a
+ * `core.fsmonitor` in a configuration the executor cannot write), which `git diff`,
+ * `git log` and `git show` (`--output`) and `git status` (its index refresh)
+ * cannot say. That is why the write guard takes a line's use of one of these,
+ * where the allow list carries it, as grounds to admit the line, as it takes
+ * `echo` (`pretool.ts`). `date` sets the clock only for root, and `sudo` is
+ * denied; the deny list names the two direct spellings, `-s` and `--set`, all
+ * the same.
+ */
+export const READ_ONLY_ORIENTATION = [
+  "Bash(git rev-parse:*)",
+  "Bash(git merge-base:*)",
+  "Bash(git ls-files:*)",
+  "Bash(date:*)",
+] as const;
+
+/**
  * Command patterns the agent may run. Read-only Git is permitted so it can
  * orient; every mutating Git verb is absent, because the runner performs the
  * commit, the push and the pull request itself and the agent never sees a token.
@@ -63,6 +82,7 @@ export const DEFAULT_COMMAND_ALLOW_LIST = [
   "Bash(git diff:*)",
   "Bash(git log:*)",
   "Bash(git show:*)",
+  ...READ_ONLY_ORIENTATION,
   "Bash(node:*)",
   "Bash(pnpm test:*)",
   "Bash(pnpm run:*)",
@@ -137,6 +157,11 @@ export const DEFAULT_COMMAND_DENY_LIST = [
   "Bash(cargo publish:*)",
   "Bash(pip install:*)",
   "Bash(sudo:*)",
+  // `date`'s setting flags, beside its read forms on the allow list. The
+  // operating system refuses every spelling of a clock change to a user who is
+  // not root; these make the direct spelling's refusal the runner's own.
+  "Bash(date -s:*)",
+  "Bash(date --set:*)",
   "WebFetch",
   "WebSearch",
 ] as const;

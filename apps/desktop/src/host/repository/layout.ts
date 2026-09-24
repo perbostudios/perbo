@@ -71,6 +71,10 @@ export function objectsPath(repo: RegisteredRepository): string {
 export function objectPath(repo: RegisteredRepository, sha256: string): string {
   return storePath(repo, bundleObjectPath(sha256));
 }
+/** The local verdicts record `perbo verdict` writes at the store's root. */
+export function verdictsPath(repo: RegisteredRepository): string {
+  return storePath(repo, ["verdicts.json"]);
+}
 export function principlesPath(repo: RegisteredRepository): string {
   return storePath(repo, principlesSegments());
 }

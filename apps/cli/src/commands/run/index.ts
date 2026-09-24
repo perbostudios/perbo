@@ -73,6 +73,7 @@ import {
   type MergedTicketContext,
 } from "@perbo/runner";
 import {
+  DECIDED_DELIVERY_NOTE,
   TICKET_TRANSITIONS,
   TicketSchema,
   admittedSpecFiles,
@@ -135,6 +136,7 @@ import type { Streams } from "../../streams.js";
 import { derivedBranch, recordDelivery } from "../sync.js";
 import { specStaleness } from "../../spec/staleness.js";
 import { listTickets, readApproachRecord } from "../../store/tickets.js";
+import { decidedFindings, readLocalVerdictsOrWarn } from "../verdict/record.js";
 
 /**
  * `perbo run` and `perbo doctor` (SCP-016 through SCP-020, SCP-094).
@@ -804,13 +806,36 @@ export const TICKET_RUNS: TicketRuns = {
     }
     const moved = applyObservedPath(
       recordDelivery(readTicket(work.dir, work.key), result, at),
-      statesObserved(result),
+      observedPath(result),
       at,
     );
     writeTicket(work.dir, moved);
     return moved.state;
   },
 };
+
+/**
+ * The states a run's result proves. A delivery a person's decisions took
+ * without a round proves only that the run provisioned and then went where an
+ * approval goes, and its row says why in the words the lifecycle's guard reads
+ * (D-NEW-a-person-s-answer-closes-a-routed-finding); every other run is walked
+ * through what its rounds prove.
+ */
+export function observedPath(result: TicketRunResult): ReturnType<typeof statesObserved> {
+  if (result.outcome === "approved" && result.rounds.length === 0 && result.decided.length > 0) {
+    return [
+      { to: "provisioning", note: "worktree provisioned and materialized" },
+      {
+        to: "pr_open",
+        note:
+          `${DECIDED_DELIVERY_NOTE} (${result.decided
+            .map((row) => row.finding_key.slice(0, 12))
+            .join(", ")}) on the commit the review judged; nothing was executed or reviewed again`,
+      },
+    ];
+  }
+  return statesObserved(result);
+}
 
 async function runExecute(options: ExecuteOptions): Promise<number> {
   const { args, streams } = options;
@@ -1116,6 +1141,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
     );
   }
 
+  const decisionsStore = admitted?.dir ?? local?.store ?? null;
   let result: TicketRunResult;
   try {
     result = await runTicket({
@@ -1128,6 +1154,18 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
         delivery_checks_bound_ms: deliveryBoundMs,
       },
       contract,
+      // D-NEW-a-person-s-answer-closes-a-routed-finding: the answers a person
+      // gave to findings routed to them, which close those findings. Read from
+      // this store's verdicts record; a record that cannot be read is named on
+      // stderr and closes nothing.
+      ...(decisionsStore === null
+        ? {}
+        : {
+            decided: decidedFindings(
+              readLocalVerdictsOrWarn(decisionsStore, streams).verdicts,
+              contract.ticket_id,
+            ),
+          }),
       ...(options.hooks ? { hooks: options.hooks } : {}),
       ...(progress ? { onProgress: progress } : {}),
       // A run with no ticket has nowhere else to put the pull request: the
@@ -1895,27 +1933,26 @@ export function runsStartedBy(ticket: Pick<Ticket, "history">): number {
  *
  * A guarded row is only a route for the record that satisfies its guard, and
  * the search skips the rest: every guard reads `delivery`, which a transition
- * carries across unchanged, so a row this ticket cannot take at the start is a
- * row it cannot take at any step of the walk. Searching without that found
+ * carries across unchanged, or the note the step would write, which is known
+ * before the step is taken — so a row this ticket cannot take at the start is
+ * a row it cannot take at any step of the walk. Searching without that found
  * routes `transition` then refused, which reached a person as a stack trace
  * rather than as the refusal below.
  */
 export function reopen(ticket: Ticket, note: string): Ticket {
+  const noteFor = (to: TicketState): string =>
+    to === "ready" ? note : `reopened through ${to} to start a new attempt`;
   const queue: Array<{ at: TicketState; via: TicketState[] }> = [{ at: ticket.state, via: [] }];
   const seen = new Set<TicketState>([ticket.state]);
   while (queue.length > 0) {
     const { at, via } = queue.shift()!;
     for (const row of TICKET_TRANSITIONS) {
-      if (row.from !== at || seen.has(row.to) || !(row.when?.(ticket) ?? true)) continue;
+      if (row.from !== at || seen.has(row.to) || !(row.when?.(ticket, noteFor(row.to)) ?? true)) continue;
       const route = [...via, row.to];
       if (row.to === "ready") {
         let current = ticket;
         for (const to of route) {
-          current = transition(
-            current,
-            to,
-            to === "ready" ? note : `reopened through ${to} to start a new attempt`,
-          );
+          current = transition(current, to, noteFor(to));
         }
         return current;
       }

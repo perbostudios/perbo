@@ -91,7 +91,7 @@ what leaves the machine, uninstall — is [`docs/install.md`](../../docs/install
 | `baseline` | Times your direct-agent workflow, to compare against Perbo later |
 | `review` | Reviews a change on its own — `review --pr owner/repo#412` needs nothing admitted, no ticket, nothing beyond the pull request itself |
 | `inspect` | Reads back a run's attempts and reviews |
-| `verdict` | Records your endorse or override on a stop, or accept or reject on a finding |
+| `verdict` | Records your endorse or override on a stop, accept or reject on a finding, or your answer to a finding routed to you, which closes it |
 | `run` | Runs the loop end to end: write, check, review, fix, and — with `--publish` — open the pull request |
 
 `admit`, `approve`, `edit`, `list`, `sync`, `serve`, `agent`, `interview`, `drift`, `mcp`, `stops`, `escapes` and `principle` build a ticket queue across many repositories on top of the same loop. `index` is the one command that reads your code rather than your records. `perbo --help` has every command and flag; [docs/04](../../docs/04-ticket-workspace-and-review.md) is the specification.
@@ -123,6 +123,7 @@ perbo drift PRB-1 --repo . [--provider anthropic|claude-cli|codex-cli] [--model 
 perbo stops [--json] [--since <ISO date>] [--by-week]
 perbo verdict <review> --endorse|--override <stop key> [--note "..."] [--replace]
 perbo verdict <review> --accept|--reject <finding key> [--note "..."] [--replace]
+perbo verdict <review> --decide <finding key> [--choice approach|let-it-decide|ship-as-is] [--note "..."] [--replace]
 perbo verdict --list <change> [--json]
 perbo principle add "a product answer no general practice can settle" [--repo .]
 perbo principle list [--repo .]
