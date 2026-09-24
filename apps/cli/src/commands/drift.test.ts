@@ -320,7 +320,7 @@ describe("perbo drift", () => {
     expect(read.verdict.dismissed).toBe(false);
   });
 
-  it("leaves a record written while it read, and prints that one", async () => {
+  it("leaves a record for the same state written while it read, and prints that one", async () => {
     const { repo, specPath, dir } = await drafted1();
     await reword(repo, "A signup POST queues exactly two activation emails.");
     // Another reading of the same state lands and is dismissed while this
@@ -345,6 +345,65 @@ describe("perbo drift", () => {
     expect(readDriftRecord(dir, "PRB-1")).toEqual(landed);
     expect(read.verdict).toEqual({ ...landed, key: "PRB-1", cached: true });
     expect(read.streams.err()).toContain("changed while this reading ran");
+  });
+
+  it("records its own reading over one a slower reading of an older state wrote while it read", async () => {
+    const { repo, specPath, dir } = await drafted1();
+    const older = expectedKey(repo, specPath);
+    await reword(repo, "A signup POST queues exactly two activation emails.");
+    const judged = expectedKey(repo, specPath);
+    // A reading begun before the rewording lands while this one's model is
+    // still reading, and writes its verdict for the words as they were.
+    const stale = {
+      ...older,
+      origin: "read" as const,
+      findings: [],
+      dismissed: false,
+      checked_at: "2026-09-21T10:00:05.000Z",
+      model: null,
+    };
+    const slow = scripted([submits({ findings: [finding] })]);
+    const turn = slow.turn.bind(slow);
+    slow.turn = async (request) => {
+      writeFileSync(driftRecordPath(dir, "PRB-1"), `${JSON.stringify(stale, null, 2)}\n`);
+      return turn(request);
+    };
+    const read = await drift(repo, slow);
+    expect(slow.requests).toHaveLength(1);
+    expect(read.verdict.cached).toBe(false);
+    expect(read.verdict).toMatchObject({ ...judged, origin: "read", findings: [finding] });
+    expect(readDriftRecord(dir, "PRB-1")).toMatchObject({ ...judged, origin: "read", findings: [finding] });
+    expect(read.streams.err()).not.toContain("while this reading ran");
+  });
+
+  it("records nothing where the spec moved under the reading, and keeps the record written for the new state", async () => {
+    const { repo, specPath, dir } = await drafted1();
+    await reword(repo, "A signup POST queues exactly two activation emails.");
+    const judged = expectedKey(repo, specPath);
+    const slow = scripted([submits({ findings: [finding] })]);
+    const turn = slow.turn.bind(slow);
+    let landed: Record<string, unknown> = {};
+    slow.turn = async (request) => {
+      // The spec is edited, and a reading of the edited pair lands, while
+      // this one's model is still reading the pair as it was.
+      writeFileSync(specPath, SPEC.replace("exactly one activation email", "exactly two activation emails"));
+      landed = {
+        ...expectedKey(repo, specPath),
+        origin: "read",
+        findings: [],
+        dismissed: false,
+        checked_at: "2026-09-21T10:00:05.000Z",
+        model: null,
+      };
+      writeFileSync(driftRecordPath(dir, "PRB-1"), `${JSON.stringify(landed, null, 2)}\n`);
+      return turn(request);
+    };
+    const read = await drift(repo, slow);
+    expect(slow.requests).toHaveLength(1);
+    expect(landed.spec).not.toBe(judged.spec);
+    expect(readDriftRecord(dir, "PRB-1")).toEqual(landed);
+    expect(read.verdict).toEqual({ ...landed, key: "PRB-1", cached: true });
+    expect(read.streams.err()).toContain("spec or plan changed while this reading ran");
   });
 
   it("is seeded again by a re-draft from the spec", async () => {

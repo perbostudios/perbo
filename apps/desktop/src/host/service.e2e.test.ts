@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -5906,6 +5907,35 @@ describe("a ticket renamed while it is planned renames its spec (D-127)", () => 
 
     expect(JSON.parse(readFileSync(at, "utf8"))).toEqual({ ...record, spec: digestOf(readFileSync(specPath)) });
     expect(digestOf(readFileSync(specPath))).not.toBe(record.spec);
+  });
+
+  it("refuses the rename whole where the verdict cannot be carried, and the spec keeps its title", async () => {
+    const { service, repo, repoId, specPath } = await planned();
+    const at = join(repo, ".perbo", "tickets", "PRB-1.drift.json");
+    const record = {
+      spec: digestOf(SPEC_MD),
+      promises: `sha256:${"1".repeat(64)}`,
+      origin: "drafted",
+      findings: [],
+      dismissed: false,
+      checked_at: "2026-09-01T00:00:00.000Z",
+      model: null,
+    };
+    writeFileSync(at, JSON.stringify(record, null, 2));
+    // The record reads and cannot be written, so carrying it forward fails.
+    chmodSync(at, 0o444);
+    const before = (await service.snapshot()).titles?.[repoId + ":PRB-1"];
+    try {
+      await expect(
+        service.request({ kind: "rename", repoId, key: "PRB-1", title: "Snake game" }),
+      ).rejects.toThrow();
+    } finally {
+      chmodSync(at, 0o644);
+    }
+
+    expect(readFileSync(specPath, "utf8")).toBe(SPEC_MD);
+    expect(JSON.parse(readFileSync(at, "utf8"))).toEqual(record);
+    expect((await service.snapshot()).titles?.[repoId + ":PRB-1"]).toBe(before);
   });
 
   it("keeps the person's name on the spec when the plan is drafted again", async () => {

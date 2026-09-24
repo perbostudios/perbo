@@ -740,7 +740,10 @@ This is the one home for the decisions that govern Perbo. Every other document c
   chat at the end of a turn that moved the plan, from a verdict that stood as the turn began
   and stayed the turn's own — a hand edit beside it is not carried — dismissed by
   `perbo drift --dismiss` at the same state or refused, and printed back without a model wherever
-  the two hashes still match; the desktop's `driftCheck`, a job in
+  the two hashes still match — a reading records its own verdict only where the spec and the plan
+  still match what it judged, keeps one that another reading or a dismissal wrote for that same
+  state, and a printed verdict's `cached: true` says no model ran for it or its result was not
+  recorded; the desktop's `driftCheck`, a job in
   the same manner as drafting, and `driftDismiss`, which the host refuses for a session with no
   spec, no plan or an approved ticket, and clears the differences the host keeps; and the
   Problems pane between the plan and the contract, reached by every way from the plan to the

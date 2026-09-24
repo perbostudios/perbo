@@ -4,6 +4,7 @@ import {
   EMPTY_SPEC_TEXT,
   PlanningError,
   SpecConflict,
+  assertNoSymlink,
   driftHash,
   parseSpec,
   readDriftRecord,
@@ -14,6 +15,7 @@ import {
   writeNodePages,
   writeSpecFile,
 } from "@perbo/planning";
+import { retitleSpec } from "@perbo/planning/browser";
 import type { Ticket } from "@perbo/contracts";
 import { specFolder } from "../repository/config.js";
 import { perboPath } from "../repository/layout.js";
@@ -113,7 +115,10 @@ export function repositorySpecs(repo: RegisteredRepository): SpecRow[] {
  *
  * The verdict the plan was read against its spec with is carried to the
  * renamed bytes where it was keyed on the bytes before: the title line is not
- * what the reading reads (D-128).
+ * what the reading reads (D-128). It is written before the spec, so a record
+ * that cannot be written refuses the rename with the spec as it was; a spec
+ * write that fails after it leaves a record keyed to bytes that are not on
+ * disk, which vouches for nothing and costs the next visit a reading.
  */
 export async function nameSpecAfterRename(
   tickets: { list(repo: RegisteredRepository): Promise<{ tickets: Ticket[] }> },
@@ -129,21 +134,28 @@ export async function nameSpecAfterRename(
   const path = `${folder}/${slug}/spec.md`;
   const at = safePath(repo, ...path.split("/"));
   if (!existsSync(at)) return false;
+  // The renamed bytes are worked out before either file is written, from the
+  // file as the retitle reads it, so every refusal the retitle makes comes
+  // before the drift record moves.
+  assertNoSymlink(repo.path, path);
   const before = driftHash(readFileSync(at));
+  const after = driftHash(retitleSpec(readSpecText(at).markdown, title));
+  if (after !== before) carryDriftToRetitle(perboPath(repo), key, before, after);
   retitleSpecFile({ repositoryRoot: repo.path, path, title });
-  const after = driftHash(readFileSync(at));
-  if (after === before) return true;
-  const store = perboPath(repo);
+  return true;
+}
+
+/** The drift record keyed on the spec's bytes before a retitle, keyed on them after it. */
+function carryDriftToRetitle(store: string, key: string, before: string, after: string): void {
   let record;
   try {
     record = readDriftRecord(store, key);
   } catch (error) {
     // A record that does not read is left for `perbo drift` to name.
-    if (error instanceof PlanningError) return true;
+    if (error instanceof PlanningError) return;
     throw error;
   }
   if (record !== null && record.spec === before) writeDriftRecord(store, key, { ...record, spec: after });
-  return true;
 }
 
 /**

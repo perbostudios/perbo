@@ -23,6 +23,7 @@ import {
   type Grammar,
 } from "../command-line/grammar.js";
 import {
+  driftKeyFor,
   planPromise,
   promisesHash,
   readDriftRecord,
@@ -183,24 +184,44 @@ export async function drift(
     checked_at: context.now.toISOString(),
     model: read.model,
   };
-  // Another reading, a dismissal or a re-draft's seed may have written the
-  // record while the model read. That record is newer than the state this
-  // reading began from, so it stands, and what is printed is it: the verdict
-  // on the page is the one on disk, and `cached` says no model ran for it.
+  // The record may have been written while the model read: by a dismissal or
+  // another reading of this same state, by a slower reading of an older one,
+  // or by a re-draft's seed. One keyed to the state this reading read stands,
+  // and it is what is printed, with `cached` saying no model ran for it.
+  // Otherwise this reading is recorded only where the spec and the plan still
+  // are what it judged; where they moved under it, the record on disk is kept
+  // and printed with `cached` (this reading's own where there is none), because
+  // this reading's result was not recorded.
   const now = readDriftRecord(dir, key);
-  if (now !== null && !sameRecord(now, existing)) {
+  if (now !== null && now.spec === at.spec && now.promises === at.promises) {
     context.diagnostics.stderr(
       `${key}'s drift record changed while this reading ran, so it is kept and this reading is not recorded\n`,
     );
     return print(now, true);
   }
-  writeDriftRecord(dir, key, record);
-  return print(record, false);
+  const still = stateNow(repositoryRoot, recorded.path, dir, key);
+  if (still !== null && still.spec === at.spec && still.promises === at.promises) {
+    writeDriftRecord(dir, key, record);
+    return print(record, false);
+  }
+  context.diagnostics.stderr(
+    `${key}'s spec or plan changed while this reading ran, so this reading is not recorded\n`,
+  );
+  return print(now ?? record, true);
 }
 
-/** Whether the record on disk is still the one a reading began from. */
-const sameRecord = (a: DriftRecord, b: DriftRecord | null): boolean =>
-  b !== null && JSON.stringify(a) === JSON.stringify(b);
+/**
+ * The two hashes as the spec and the plan stand now, or null where either
+ * cannot be read: a pair that cannot be read is not the one a reading judged.
+ */
+function stateNow(repositoryRoot: string, specPath: string, dir: string, key: string): DriftKey | null {
+  try {
+    assertNoSymlink(repositoryRoot, specPath);
+    return driftKeyFor({ repositoryRoot, specPath, contract: readContract(dir, key) });
+  } catch {
+    return null;
+  }
+}
 
 const DRIFT_FLAGS = {
   "--repo": valueFlag(),
