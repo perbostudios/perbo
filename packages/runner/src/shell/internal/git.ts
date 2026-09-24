@@ -34,8 +34,6 @@ const GIT_DIFF_OUTPUT = new Set([
   "diff", "diff-files", "diff-index", "diff-tree", "log", "show", "whatchanged",
 ]);
 
-const GIT_DIFF_OUTPUT_OPTION = new Set(["--output"]);
-
 /** `git format-patch`'s options that name the directory its patches land in. */
 const GIT_FORMAT_PATCH_DIRECTORY = new Set(["-o", "--output-directory"]);
 
@@ -145,7 +143,7 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
     if (option !== null) return [option];
   }
   if (GIT_DIFF_OUTPUT.has(verb)) {
-    const output = written(GIT_DIFF_OUTPUT_OPTION, `the file git ${verb} --output writes`);
+    const output = written(new Set(["--output"]), `the file git ${verb} --output writes`);
     if (output.length > 0) return output;
   }
   if (verb.length === 0 || GIT_READ_ONLY.has(verb)) return [];

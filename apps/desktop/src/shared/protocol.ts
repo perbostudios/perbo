@@ -1290,11 +1290,6 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     decisions: z.array(
       z.strictObject({
         findingKey: z.string().regex(/^[a-f0-9]{64}$/),
-        /**
-         * The person's own approach, the approach left to the executor, or
-         * the change shipped as it is for this finding: the first two hand
-         * it to the executor for one round, the third delivers it unchanged.
-         */
         choice: z.enum(DECISION_CHOICES),
         answer: text,
       }),

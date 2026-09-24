@@ -3,10 +3,6 @@ import type { DecisionChoice, Finding, ReviewArtifact } from "@perbo/contracts";
 /**
  * A person's answer to a finding the review routed to them, and how it is
  * recorded on the finding (D-NEW-a-person-s-answer-closes-a-routed-finding).
- *
- * Here rather than in the loop because two readers need it: the loop, which
- * records the answer on the finding, and the pull request body, which lists
- * what a person decided apart from what a per-rule suppression waived.
  */
 
 /** Whether a choice hands the finding to the executor. */
@@ -45,7 +41,7 @@ const DECISION_WAIVER_DAYS = 90;
  * How a waiver a person's decision wrote is told from a per-rule suppression:
  * its audit id is the finding's key under this prefix.
  */
-export const DECIDED_AUDIT_PREFIX = "decided_";
+const DECIDED_AUDIT_PREFIX = "decided_";
 
 /** Whether a finding carries a person's decision rather than a suppression. */
 export function isDecided(finding: Finding): boolean {

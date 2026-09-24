@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { DECISION_CHOICES, DECISION_WORDS } from "@perbo/contracts/browser";
+import { DECISION_CHOICES, DECISION_WORDS, type DecisionChoice } from "@perbo/contracts/browser";
 import { Button, InfoHint, InkIcon, Notice, NumberPop, PageHeader, SectionLabel, cx } from "../ui/index.js";
 import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { exclusiveJob, isRun } from "../../shared/jobs.js";
@@ -391,18 +391,9 @@ function EndedCard({
     </div>
   );
 }
-/**
- * What a person chose for one question: their own approach, the approach left
- * to the executor, or the change shipped as it is for that finding
- * (D-NEW-a-person-s-answer-closes-a-routed-finding). The first two hand the
- * finding to the executor for one round; the third delivers it unchanged. A
- * question that takes no choice records the words alone, as a principle.
- */
-const ChoiceSchema = z.enum(DECISION_CHOICES);
-type Choice = z.infer<typeof ChoiceSchema>;
 const AnswersSchema = z.record(
   z.string(),
-  z.object({ text: z.string(), custom: z.boolean(), choice: ChoiceSchema }),
+  z.object({ text: z.string(), custom: z.boolean(), choice: z.enum(DECISION_CHOICES) }),
 );
 function DecisionOverlay(
   context: TaskContext & { questions: DecisionQuestion[] },
@@ -457,7 +448,7 @@ function DecisionOverlay(
     setCustom(answer?.custom ? answer.text : "");
     setCustomSelected(answer?.custom ?? (question.options.length === 0 && ownWords));
   }, [questionId]);
-  const choose = (text: string, isCustom: boolean, choice: Choice = "approach"): void => {
+  const choose = (text: string, isCustom: boolean, choice: DecisionChoice = "approach"): void => {
     setAnswers({ ...answers, [question.id]: { text, custom: isCustom, choice } });
     setCustomSelected(isCustom);
     setError(null);

@@ -202,11 +202,6 @@ function stopsRecordFor(text: string, at: string): StopVerdicts {
   });
 }
 
-/**
- * A store as the loop leaves one: the ticket, its attempt, the bundles holding
- * the review artifact, and — when `pullRequest` is given — the stops record
- * `perbo sync` would have written from that body.
- */
 /** A finding in a family the executor is never handed (D-065). */
 const SECURITY = findingKey({ rule_id: "security.secret_in_diff", criterion_id: null, file: "src/env.ts", symbol: null });
 
@@ -232,6 +227,11 @@ function withSecurityFinding(review: ReviewArtifact): ReviewArtifact {
   });
 }
 
+/**
+ * A store as the loop leaves one: the ticket, its attempt, the bundles holding
+ * the review artifact, and — when `pullRequest` is given — the stops record
+ * `perbo sync` would have written from that body.
+ */
 function storeWith(
   name: string,
   options: {
@@ -1391,7 +1391,6 @@ describe("perbo verdict --decide records a person's answer that closes the findi
   });
 
   it("refuses the stand-in an answer, and never hands the loop one it recorded", async () => {
-    const { repo } = storeWith("decide-stand-in");
     expect(() => verdictCommandLine.read(["AYO-7", "--decide", STOP_ONE!, "--note", "x", "--stand-in"]).input).toThrow(
       /--stand-in cannot take it/,
     );
@@ -1404,7 +1403,6 @@ describe("perbo verdict --decide records a person's answer that closes the findi
     });
     expect(decidedFindings([row], TICKET_ID)).toEqual([]);
     expect(decidedFindings([{ ...row, answered_by: undefined }], TICKET_ID)).toHaveLength(1);
-    expect(repo.length).toBeGreaterThan(0);
   });
 
   it("carries the review a decision named by its id, and none where it named the ticket", async () => {

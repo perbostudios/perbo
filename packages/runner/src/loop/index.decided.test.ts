@@ -92,9 +92,14 @@ function makeConfig(repositoryRoot: string, over: Record<string, unknown> = {}) 
 }
 
 /** Two findings only a person can close, as PRB-13's review routed them. */
-const forPerson: Finding[] = [
+const forPerson: Finding[] = (
+  [
+    ["1", "lockfile", "The repository carries two lockfiles; which one is authoritative is not stated."],
+    ["2", "ci", "No workflow runs the suite on a pull request."],
+  ] as const
+).map(([digit, symbol, statement]) =>
   finding({
-    key: "1".repeat(64),
+    key: digit.repeat(64),
     rule_id: "repository.observation",
     criterion_id: null,
     blocking: true,
@@ -103,25 +108,11 @@ const forPerson: Finding[] = [
     closure: "human",
     file: null,
     line: null,
-    symbol: "lockfile",
-    statement: "The repository carries two lockfiles; which one is authoritative is not stated.",
+    symbol,
+    statement,
     outcome: "unknown",
   }),
-  finding({
-    key: "2".repeat(64),
-    rule_id: "repository.observation",
-    criterion_id: null,
-    blocking: true,
-    blocking_reason: "semantic: a person decides",
-    routing: "blocks",
-    closure: "human",
-    file: null,
-    line: null,
-    symbol: "ci",
-    statement: "No workflow runs the suite on a pull request.",
-    outcome: "unknown",
-  }),
-];
+);
 
 /** A finding the executor closes, beside one a person decides. */
 const escalating = finding({
@@ -171,6 +162,13 @@ const writeFeature = (worktree: string) => {
   mkdirSync(join(worktree, "src"), { recursive: true });
   writeFileSync(join(worktree, "src", "feature.ts"), "export const total = 1;\n");
 };
+
+/** An executor that closes what it is handed. */
+const fixing = () =>
+  agentDouble((worktree) => {
+    mkdirSync(join(worktree, "src"), { recursive: true });
+    writeFileSync(join(worktree, "src", "fix.ts"), "export const fixed = true;\n");
+  });
 
 /** Every call that would spend money fails the test. */
 const noModel = {
@@ -399,11 +397,6 @@ describe("a person's answers to the findings routed to them", () => {
 });
 
 describe("a person's answer that hands the finding to the executor", () => {
-  const fixing = () =>
-    agentDouble((worktree) => {
-      mkdirSync(join(worktree, "src"), { recursive: true });
-      writeFileSync(join(worktree, "src", "fix.ts"), "export const fixed = true;\n");
-    });
   const leavesOpen = (seen: Array<{ findings: Array<{ key: string }> }>) =>
     (async (input: { findings: Array<{ key: string }> }) => {
       seen.push(input);
@@ -561,12 +554,6 @@ describe("a decided finding beside one the executor can close", () => {
     return { contract, config, reviews };
   }
 
-  const fixing = () =>
-    agentDouble((worktree) => {
-      mkdirSync(join(worktree, "src"), { recursive: true });
-      writeFileSync(join(worktree, "src", "fix.ts"), "export const fixed = true;\n");
-    });
-
   it("remediates only the open one, and delivers once it is closed", async () => {
     const { contract, config, reviews } = await escalated();
     const agent = fixing();
@@ -686,7 +673,7 @@ describe("an answer to a review that did not judge the whole change", () => {
   }, 180_000);
 });
 
-function sealOnBranch(repo: Repository, contract: PlanContract, files: Record<string, string>): string {
+function sealOnBranch(repo: Repository, contract: PlanContract, files: Record<string, string>): void {
   const branch = branchName({ ticket_key: TICKET_KEY, ticket_id: contract.ticket_id, outcome: contract.outcome });
   const path = join(scratch("perbo-prior-"), "wt");
   repo.git("worktree", "add", path, branch);
@@ -696,7 +683,5 @@ function sealOnBranch(repo: Repository, contract: PlanContract, files: Record<st
   }
   git(path, "add", "-A");
   git(path, "commit", "-qm", `by hand: ${Object.keys(files).join(", ")}`);
-  const head = git(path, "rev-parse", "HEAD").trim();
   repo.git("worktree", "remove", "--force", path);
-  return head;
 }

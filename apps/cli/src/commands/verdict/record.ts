@@ -238,7 +238,6 @@ export function decidedFindings(
       (row) =>
         row.review.ticket_id === ticket_id &&
         row.decision === "decide" &&
-        row.note !== null &&
         row.answered_by !== DOGFOOD_ANSWERER,
     )
     .map((row) => ({

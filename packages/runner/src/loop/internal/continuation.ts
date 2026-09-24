@@ -187,7 +187,7 @@ export function judgedOnRecord(input: { bundles: BundleStore; ticket_id: string 
  * and absent from the last one's open set, which is the authoritative one
  * because each round narrows it.
  */
-export function closedByRound(
+function closedByRound(
   judged: Pick<NonNullable<ReturnType<typeof judgedOnRecord>>, "openKeys" | "givenKeys">,
   key: string,
 ): boolean {
@@ -357,7 +357,7 @@ export async function confirmContinuation(
  * its base. Asked before the merge-up, so what is compared with a judged commit
  * is the work on the branch and not the base moving under it.
  */
-export async function branchHead(worktree: string, base_commit: string): Promise<string | null> {
+async function branchHead(worktree: string, base_commit: string): Promise<string | null> {
   const onBranch = await commitsSince({ worktree, base_commit });
   return onBranch[onBranch.length - 1] ?? null;
 }

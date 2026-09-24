@@ -15,7 +15,6 @@ export {
   DECISION_WORDS,
   decidable,
   decisionChoicesFor,
-  NEVER_HANDED_FAMILIES,
   routedToPerson,
 } from "./decision.js";
 export type { DecisionChoice } from "./decision.js";

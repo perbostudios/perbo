@@ -677,21 +677,24 @@ describe("the control: a writer whose whole effect is the paths it names", () =>
   }
 });
 
+/** A command through the hook, under the contract's two lists. */
+const judged = (command: string, paths_allowed: string[], paths_prohibited: string[] = []) =>
+  judgePreToolCall(
+    { tool_name: "Bash", tool_use_id: "toolu_scoped", tool_input: { command } },
+    {
+      root: ROOT,
+      tmpdir: null,
+      cwd: ROOT,
+      paths_allowed,
+      paths_prohibited,
+      allow_list: [...profile.command_allow_list, "Bash(find:*)"],
+      deny_list: [...profile.command_deny_list],
+    },
+    new Date("2026-09-04T00:00:00.000Z"),
+  ).decision;
+
 describe("`git diff --output` inside the worktree and outside the contract's globs", () => {
-  const scoped = (command: string) =>
-    judgePreToolCall(
-      { tool_name: "Bash", tool_use_id: "toolu_output", tool_input: { command } },
-      {
-        root: ROOT,
-        tmpdir: null,
-        cwd: ROOT,
-        paths_allowed: ["src/**"],
-        paths_prohibited: ["src/secret/**"],
-        allow_list: [...profile.command_allow_list],
-        deny_list: [...profile.command_deny_list],
-      },
-      new Date("2026-09-04T00:00:00.000Z"),
-    ).decision;
+  const scoped = (command: string) => judged(command, ["src/**"], ["src/secret/**"]);
 
   it("is refused by the scope rule, as a redirect to the same path is", () => {
     for (const command of ["git diff --output=notes.diff", "echo $(git diff --output=notes.diff)"]) {
@@ -710,21 +713,6 @@ describe("`git diff --output` inside the worktree and outside the contract's glo
 });
 
 describe("a write to a whole directory, through the hook", () => {
-  const judged = (command: string, paths_allowed: string[], paths_prohibited: string[] = []) =>
-    judgePreToolCall(
-      { tool_name: "Bash", tool_use_id: "toolu_directory", tool_input: { command } },
-      {
-        root: ROOT,
-        tmpdir: null,
-        cwd: ROOT,
-        paths_allowed,
-        paths_prohibited,
-        allow_list: [...profile.command_allow_list, "Bash(find:*)"],
-        deny_list: [...profile.command_deny_list],
-      },
-      new Date("2026-09-04T00:00:00.000Z"),
-    ).decision;
-
   const ROOT_WRITES = [
     "rm -rf .",
     "rm -rf ./",

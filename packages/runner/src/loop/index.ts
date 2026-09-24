@@ -304,15 +304,9 @@ async function runLockedTicket(
   const decided = args.decided ?? [];
   let decidedOn: DecidedFinding[] = [];
 
-  /**
-   * D-NEW-a-person-s-answer-closes-a-routed-finding: the last review stopped on
-   * findings only a person can close, the person answered every one, and the
-   * branch is still the commit that review judged. Nothing is executed and
-   * nothing is reviewed again — a fresh review would raise the same findings
-   * for the same person to answer again — and the run goes where a review that
-   * requested no change goes. A branch that has moved carries work nobody
-   * judged, and is run and reviewed as any other.
-   */
+  // D-NEW-a-person-s-answer-closes-a-routed-finding: a delivery on a person's
+  // answers (`decidedDelivery`), taken only while the branch is the commit that
+  // review judged; a branch that has moved carries work nobody judged.
   const decidedNow =
     resumeSource !== null || config.relevel
       ? null
