@@ -366,6 +366,15 @@ export const INTERVIEW_WROTE_THE_SPEC =
   "The spec is written: read it, change it on the Spec pane or by asking here, or press Generate " +
   "plan.";
 /**
+ * The note a reading puts once every problem between the plan and the spec is
+ * resolved (D-128). It is words and carries no press: every pane the chat sits
+ * beside but the Spec pane has Confirm the plan already. Here because the
+ * chat's reckoning of what a turn is owed tells this note by its words, as a
+ * line the reading put rather than one the turn led to.
+ */
+export const EVERY_PROBLEM_RESOLVED =
+  "Every problem is resolved: the plan and the spec promise the same thing again.";
+/**
  * One plan edit the interview made, as the ticket's own draft record holds it
  * (D-100), so the chat's card carries an Undo on its number.
  *
@@ -489,13 +498,6 @@ export const InterviewEntrySchema = z.strictObject({
       kind: z.literal("note"),
       text,
       /**
-       * What the note offers to do, where it offers anything, so a person
-       * reading the chat from another pane has the way on from there: the
-       * contract, once every problem between the plan and the spec is
-       * resolved.
-       */
-      offers: z.literal("contract").optional(),
-      /**
        * Whether this is something to notice rather than something to know.
        *
        * A note is ordinarily the quietest line in the chat, which is right for
@@ -594,6 +596,27 @@ export const EditingSessionSchema = z.strictObject({
    * defaulted so a session saved before specs existed still parses.
    */
   specSlug: specSlugText.nullable().default(null),
+  /**
+   * The title the host cut from the person's first turn to name this
+   * planning's spec folder (D-118), or null where the folder was named any
+   * other way. The cut is no title, so the planning is Untitled while its
+   * spec still states it.
+   */
+  specCut: z.string().min(1).max(500).nullable(),
+  /**
+   * Who last wrote the title this planning's spec states, and that title: the
+   * person, from the Spec pane's title field, or the Architect, in a turn of
+   * the chat. Null until one of them titles it; the cut is no title (D-118).
+   *
+   * A plan is drafted with `admit --keep-title` while the person's is the
+   * title the spec still states, so the ticket takes their name and the spec
+   * keeps it; otherwise the drafter names the ticket and the spec takes that
+   * name (D-127). The title is kept beside the writer so a title the file no
+   * longer states is not mistaken for the person's.
+   */
+  named: z
+    .strictObject({ by: z.enum(["person", "architect"]), title: z.string().min(1).max(500) })
+    .nullable(),
   /**
    * The asking being put to the person and how much of it they have answered
    * (D-117), as {@link AskingSchema} holds it.
@@ -726,6 +749,12 @@ export interface OpenDraft {
    * row {@link Snapshot.specs} exists to offer.
    */
   specSlug: string | null;
+  /**
+   * What the spec it writes is titled, or null while it has no spec, or one
+   * whose title is still the cut its folder was named from (D-118): the
+   * planning is Untitled until the Architect or the person titles it.
+   */
+  title: string | null;
 }
 /**
  * A spec folder this repository holds, by the slug that names it and the title
@@ -1181,6 +1210,8 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    * empty text removes it.
    */
   z.strictObject({ kind: z.literal("askSave"), repoId: identifier, text: z.string().max(12_000) }),
+  /** A ticket's page opened, written as the time Home orders it by within its colour; a desktop preference. */
+  z.strictObject({ kind: z.literal("ticketOpened"), ...reference }),
   /** Files completed tickets away from Home (S4); a desktop preference, never a Ticket state. */
   z.strictObject({
     kind: z.literal("archive"),
@@ -1336,6 +1367,8 @@ export interface Snapshot {
   archived?: string[];
   /** Each repository's unsent answer to "What do you want to build?", by repository id. */
   asks?: Record<string, string>;
+  /** When each ticket's page was last opened, `repoId:key` to an ISO time. */
+  lastOpened?: Record<string, string>;
   power?: PowerState;
   sequence?: number;
   repositoryErrors?: Record<string, string[]>;
@@ -1429,6 +1462,11 @@ export const ChangeSchema = z.discriminatedUnion("kind", [
     doing: z.enum(INTERVIEW_DOING).nullable().default(null),
   }),
   z.object({ kind: z.literal("power"), sequence: z.number().int().nonnegative(), power: PowerStateSchema }),
+  /**
+   * When each ticket's page was last opened. Nothing a read returned has moved
+   * when one opens, so it is patched where it is and no read is taken again.
+   */
+  z.object({ kind: z.literal("opened"), sequence: z.number().int().nonnegative(), lastOpened: z.record(z.string(), z.iso.datetime()) }),
 ]);
 export type Change = z.infer<typeof ChangeSchema>;
 export type ChangeInput = Change extends infer T ? T extends Change ? Omit<T, "sequence"> : never : never;
@@ -1529,6 +1567,8 @@ export interface TaskSummary {
   costBasis: "priced" | "unpriced" | "none";
   diff: { files: number; additions: number; deletions: number } | null;
   note: string | null;
+  /** The contract's outcome sentence, the line under the title on its contract page; null where the contract cannot be read. */
+  outcome: string | null;
 }
 /** A provider's own account of its plan, and the ledger this machine keeps (S6E). */
 export interface UsageWindow {
@@ -1611,6 +1651,7 @@ export interface ReplyMap {
   rename: null;
   archive: null;
   askSave: null;
+  ticketOpened: null;
   discard: null;
   doctor: Job;
   admit: Job;

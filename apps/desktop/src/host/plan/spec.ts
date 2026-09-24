@@ -20,7 +20,7 @@ import type { Ticket } from "@perbo/contracts";
 import { specFolder } from "../repository/config.js";
 import { perboPath } from "../repository/layout.js";
 import { safePath } from "../repository/paths.js";
-import { sectionsOf } from "../../shared/contract-editing.js";
+import { sectionsOf, titleChanged } from "../../shared/contract-editing.js";
 import { SPEC_SLUG } from "../../shared/protocol.js";
 import { specSlugOf } from "../../shared/spec-slug.js";
 import type { ContractEditing } from "../../shared/contract-editing.js";
@@ -37,7 +37,7 @@ import type {
 
 /** What reading and writing a spec needs of the rest of the host. */
 export interface SpecDeps {
-  editing: Pick<ContractEditing, "read" | "recordSpec">;
+  editing: Pick<ContractEditing, "read" | "recordSpec" | "personTitled">;
   repository(id: string): RegisteredRepository;
   contract(repo: RegisteredRepository, key: string): { contract: Detail["contract"] };
   marks: Pick<ChangeMarks, "markChangeOn">;
@@ -54,6 +54,23 @@ const EMPTY_SECTIONS: SpecSections = {
 /** The file this planning's spec is written to, inside the repository's spec folder. */
 export function specPath(repo: RegisteredRepository, slug: string): string {
   return safePath(repo, ...`${specFolder(repo)}/${slug}/spec.md`.split("/"));
+}
+
+/**
+ * The title each spec states, by repository id and slug, for the drafts list
+ * to name a planning by: null where the repository or the file has gone or
+ * the file cannot be read.
+ */
+export function specTitles(
+  repository: (id: string) => RegisteredRepository,
+): (repoId: string, slug: string) => string | null {
+  return (repoId, slug) => {
+    try {
+      return readSpecText(specPath(repository(repoId), slug)).text.title;
+    } catch {
+      return null;
+    }
+  };
 }
 
 /**
@@ -283,6 +300,10 @@ export function saveSpec(
     throw error;
   }
   deps.editing.recordSpec(request.id, written.slug);
+  // A title this save changed from the one its writer read is one the person
+  // typed: the plan is drafted under it (D-127). A save of a section alone
+  // sends the title it read, and names nobody.
+  if (titleChanged(request)) deps.editing.personTitled(request.id, request.title);
   refreshNodePages(deps, repo, request.id, written.path);
   // The change this save made, on every planning writing this spec: a save of
   // the same words changes nothing and marks nothing. The save has landed

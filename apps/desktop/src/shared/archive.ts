@@ -19,16 +19,19 @@ const PRE_LOOP_STATES: readonly string[] = ["draft", "specifying", "plan_review"
 export const isPreLoop = (row: { ticket: { state: string } }): boolean =>
   PRE_LOOP_STATES.includes(row.ticket.state);
 
-/** Where a ticket's journey ends: a pull request opened, merged or closed without merge, and what follows a merge. */
-export const JOURNEY_END_STATES: readonly string[] = ["pr_open", "merged", "closed", "done", "deployed", "observing"];
+/** Where a ticket's journey ends once its merge is decided: merged, or closed without merge, and what follows a merge. */
+export const DECIDED_STATES: readonly string[] = ["merged", "closed", "done", "deployed", "observing"];
+/** Where a ticket's journey ends: a pull request opened and waiting on the merge decision, or that decision made. */
+export const JOURNEY_END_STATES: readonly string[] = ["pr_open", ...DECIDED_STATES];
 /** The states from which the loop will not carry a ticket to that end unless a person starts it again. */
 export const GIVEN_UP_STATES: readonly string[] = ["failed", "cancelled", "inconclusive", "rolled_back", "plan_invalid"];
 
 /**
- * Whether a ticket may be filed in the archive: the loop has let go of it,
- * because it finished or because its run stopped. A ticket the loop still
- * carries — running, waiting on a decision, a merge or the queue — stays on
- * Home, and the host refuses to file it (S4).
+ * Whether a ticket may be filed in the archive: the person has decided its
+ * merge, merged or closed without merge, or its run stopped. A ticket the loop
+ * still carries — running, waiting on a decision or the queue — and one whose
+ * pull request still waits on the merge decision stay on Home, and the host
+ * refuses to file them (S4). Nothing is filed but by hand.
  */
 export function isArchivable(
   snapshot: Pick<Snapshot, "jobs">,
@@ -37,12 +40,18 @@ export function isArchivable(
   const { jobs, stoppedShort } = ticketRun(snapshot, row);
   return (
     !jobs.some((job) => isLive(job) && isRun(job)) &&
-    (isArchived(row.ticket.state) || GIVEN_UP_STATES.includes(row.ticket.state) || stoppedShort)
+    (DECIDED_STATES.includes(row.ticket.state) || GIVEN_UP_STATES.includes(row.ticket.state) || stoppedShort)
   );
 }
-/** What the host and the sample host answer when asked to file a ticket the loop still carries. */
-export const notArchivable = (key: string): string =>
-  `${key} is still in its loop. Archive it once it has finished or its run has stopped.`;
+/**
+ * What the host and the sample host answer when asked to file a ticket that
+ * cannot be: one whose pull request waits on the merge decision, or one the
+ * loop still carries.
+ */
+export const notArchivable = (key: string, state: string): string =>
+  state === "pr_open"
+    ? `${key} waits on the merge decision. Archive it once its pull request is merged or closed.`
+    : `${key} is still in its loop. Archive it once it has finished or its run has stopped.`;
 
 /** Filed away from Home by hand (S4). A ticket that could be filed and is not stays on Home. */
 export const isFiled = (

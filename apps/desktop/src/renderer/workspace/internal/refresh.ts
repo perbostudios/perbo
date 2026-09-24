@@ -15,6 +15,7 @@ export class WorkspaceRefresh {
   private readonly jobs = new Map<string, { job: Job; sequence: number }>();
   private preferences: Extract<Change, { kind: "preferences" }> | undefined;
   private power: Extract<Change, { kind: "power" }> | undefined;
+  private opened: Extract<Change, { kind: "opened" }> | undefined;
   private users = 0;
   private unsubscribe: (() => void) | undefined;
   constructor(client: QueryClient, connection: DesktopBridge) { this.client = client; this.connection = connection; }
@@ -42,10 +43,12 @@ export class WorkspaceRefresh {
     }
     const preferences = this.preferences && this.preferences.sequence > (snapshot.sequence ?? -1) ? this.preferences : undefined;
     const power = this.power && this.power.sequence > (snapshot.sequence ?? -1) ? this.power.power : undefined;
+    const opened = this.opened && this.opened.sequence > (snapshot.sequence ?? -1) ? this.opened.lastOpened : undefined;
     return {
       ...snapshot, jobs: [...jobs.values()].slice(-40), refreshingRepos: [...this.pending],
       ...(preferences ? { settings: preferences.settings, titles: preferences.titles, taskModels: preferences.taskModels, archived: preferences.archived, asks: preferences.asks } : {}),
       ...(power ? { power } : {}),
+      ...(opened ? { lastOpened: opened } : {}),
     };
   }
   private markPending(repoId: string): void {
@@ -144,6 +147,12 @@ export class WorkspaceRefresh {
     if (change.kind === "power") {
       if (this.power && this.power.sequence > change.sequence) return;
       this.power = change;
+      this.patch((snapshot) => this.merge(snapshot));
+      return;
+    }
+    if (change.kind === "opened") {
+      if (this.opened && this.opened.sequence > change.sequence) return;
+      this.opened = change;
       this.patch((snapshot) => this.merge(snapshot));
       return;
     }

@@ -1,7 +1,9 @@
 import { useEffect } from "react";
+import type { ReactNode } from "react";
 import { Button, Notice } from "../ui/index.js";
 import { bridge, errorMessage, useDetail } from "../workspace/index.js";
 import type { PageProps, TaskView } from "../shell/route.js";
+import type { TaskContext } from "./task-context.js";
 import { Composer } from "./Composer.js";
 import { ExplorerScreen } from "./ExplorerScreen.js";
 import { ContractScreen } from "./ContractScreen.js";
@@ -19,6 +21,7 @@ import {
 } from "./ReviewScreens.js";
 import { WaitScreen } from "./wizard.js";
 import { deletes, useCreate } from "../shell/create.js";
+import { DELETE_TICKET_GONE } from "../../shared/discard.js";
 export function TaskPage({
   workspace,
   navigate,
@@ -41,6 +44,10 @@ export function TaskPage({
   const show = (view: TaskView): void =>
     navigate({ page: "task", repoId, key: taskKey, view });
   const resultReady = projection?.resultReady;
+  // Opening a ticket is what orders Home within each colour, most recent first.
+  useEffect(() => {
+    void bridge.request({ kind: "ticketOpened", repoId, key: taskKey }).catch(() => undefined);
+  }, [repoId, taskKey]);
   useEffect(() => {
     if (view === "loop" && resultReady) show("review");
   }, [resultReady, view]);
@@ -122,7 +129,18 @@ export function TaskPage({
         <p>Reading the task and its evidence…</p>
       </div>
     );
-  if ((query.error && !(deleting && detail)) || !detail)
+  // A ticket deleted elsewhere — the store says it is gone and the listing no
+  // longer holds it — has no page to keep. Not one this page is deleting,
+  // which keeps the page it was on until the delete settles.
+  const gone =
+    !deleting &&
+    query.error instanceof Error &&
+    query.error.message === DELETE_TICKET_GONE &&
+    !workspace.tasks.some((row) => row.repoId === repoId && row.ticket.key === taskKey);
+  // Otherwise only a ticket never read is a page that could not load. Once one
+  // is held, a read that fails is a refresh that failed: the page keeps what it
+  // read, says the refresh failed, and the next read replaces it.
+  if (!detail || gone)
     return (
       <div className="launch">
         <Notice key={query.errorUpdatedAt} tone="danger">
@@ -148,7 +166,23 @@ export function TaskPage({
         existingRepoId={repoId}
       />
     );
-  const screen = projection!.screen;
+  // A ticket being deleted from under this page is expected to fail its reads.
+  const stale = query.error && !deleting && (
+    <div className="workspace-errors">
+      <Notice key={query.errorUpdatedAt} tone="warning">
+        This ticket could not be read again: {errorMessage(query.error)} What is
+        shown is the last reading, until the next refresh reads it.
+      </Notice>
+    </div>
+  );
+  return (
+    <>
+      {stale}
+      {taskScreen(projection!.screen, context)}
+    </>
+  );
+}
+function taskScreen(screen: Exclude<TaskView, "auto">, context: TaskContext): ReactNode {
   if (screen === "output") return <OutputScreen {...context} />;
   if (screen === "merge") return <MergeScreen {...context} />;
   if (screen === "called-off")

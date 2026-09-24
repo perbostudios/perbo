@@ -4,7 +4,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type PropsWithChildren } from "react";
 import type { StandingProhibitedEntry } from "@perbo/contracts";
-import { ContractEditing, editingForm, interviewProviderFor, interviewSessionArgs, sameProblems, untouchedPlanning } from "../shared/contract-editing.js";
+import { ContractEditing, editingForm, interviewProviderFor, interviewSessionArgs, keepsPersonsTitle, sameProblems, untouchedPlanning } from "../shared/contract-editing.js";
 import { WorkspaceReads } from "../host/workspace-reads.js";
 import { ContractEditor, flushContractEditors, useContractEditing } from "./contract-editor.js";
 import { bridge } from "./workspace/index.js";
@@ -576,6 +576,8 @@ describe("a planning that holds nothing (D-129)", () => {
       resumeNew: false,
       lastPane: null,
       lastView: null,
+      specCut: null,
+      named: null,
       drift: null,
       change: null,
       form: editingForm(models),
@@ -638,6 +640,47 @@ describe("a planning that holds nothing (D-129)", () => {
 
   it("is still a planning that was only looked around in", () => {
     expect(untouchedPlanning(born({ lastPane: "explorer" }))).toBe(true);
+  });
+});
+
+describe("who named the spec (D-127)", () => {
+  it("is nobody at birth, and a record without it is not a session", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    expect(session.named).toBeNull();
+    const without: Record<string, unknown> = { ...session };
+    delete without["named"];
+    expect(EditingSessionSchema.safeParse(without).success).toBe(false);
+  });
+
+  it("keeps the person's title while the spec states it, and not once the Architect retitles it", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    f.editing.personTitled(session.id, "  Dark   mode ");
+    const named = f.editing.read(session.id);
+    expect(named.named).toEqual({ by: "person", title: "Dark mode" });
+    expect(keepsPersonsTitle(named, "Dark mode")).toBe(true);
+    // A title the spec no longer states is not the person's.
+    expect(keepsPersonsTitle(named, "Theme switch")).toBe(false);
+    expect(keepsPersonsTitle(named, null)).toBe(false);
+    // A turn that ends on the person's own title changed nothing of it.
+    f.editing.architectTitled(session.id, "Dark mode");
+    expect(f.editing.read(session.id).named).toEqual({ by: "person", title: "Dark mode" });
+    f.editing.architectTitled(session.id, "Theme switch");
+    const retitled = f.editing.read(session.id);
+    expect(retitled.named).toEqual({ by: "architect", title: "Theme switch" });
+    expect(keepsPersonsTitle(retitled, "Theme switch")).toBe(false);
+    // And the person naming it again is theirs again.
+    f.editing.personTitled(session.id, "Night mode");
+    expect(keepsPersonsTitle(f.editing.read(session.id), "Night mode")).toBe(true);
+  });
+
+  it("does not take the cut for the Architect's title (D-118)", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    f.editing.recordSpec(session.id, "dark-mode", "Dark mode");
+    f.editing.architectTitled(session.id, "Dark mode");
+    expect(f.editing.read(session.id).named).toBeNull();
   });
 });
 

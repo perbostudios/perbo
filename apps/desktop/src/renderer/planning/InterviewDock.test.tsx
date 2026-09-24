@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
-import { foldAllowList, handedOver, sayWorking, waitsOnWords } from "./InterviewDock.js";
+import { QuestionCard, ToolCard, foldAllowList, handedOver, sayWorking, waitsOnWords } from "./InterviewDock.js";
+
+afterEach(cleanup);
 
 describe("what the dock says the session is doing", () => {
   it("names the work in hand rather than calling every pause thinking", () => {
@@ -19,14 +23,12 @@ describe("what the dock says the session is doing", () => {
     expect(sayWorking(undefined)).toBe("Reading the repository…");
   });
 
-  it("says nothing under the note that is already the whole status", () => {
-    // The spec is written, the note says so and names the three ways on. A
-    // line under it saying the session is working reads as more being owed
-    // before the person may act, and nothing is: the spec is readable now
-    // (D-102).
+  it("says the turn is finishing under the note that hands the spec over", () => {
+    // The spec is written and the note says so, and Generate plan waits for
+    // the turn to end (D-102): the line under the note says it is still going.
     expect(
       sayWorking({ kind: "note", text: INTERVIEW_WROTE_THE_SPEC, notable: true } as never),
-    ).toBeNull();
+    ).toBe("Finishing this turn…");
     // Any other note is not that note, and the pause under it is still a
     // pause.
     expect(
@@ -114,9 +116,10 @@ describe("the dock's answers, its status line and the interview behind the chat"
   /** A line of a conversation, for reading one without a session. */
   const entry = (n: number, line: unknown) => ({ n, at: "2026-09-23T00:00:00.000Z", line }) as never;
 
-  it("puts no line under the note that hands the spec over, for the rest of its turn", () => {
-    // The note is the status for the rest of the turn it is said in,
-    // whatever the session does after it (D-102); the next turn starts over.
+  it("reads the note that hands the spec over as standing for the rest of its turn", () => {
+    // From the note on, nothing the session says in that turn is shown and
+    // the line under it says only that the turn is finishing (D-102); the
+    // next turn starts over.
     const turn = entry(1, { kind: "turn", text: "write it" });
     const note = entry(2, { kind: "note", text: INTERVIEW_WROTE_THE_SPEC, notable: true });
     const tool = entry(3, { kind: "tool", tool: "read_plan", ok: true, detail: "", edit: null });
@@ -143,5 +146,153 @@ describe("the dock's answers, its status line and the interview behind the chat"
     expect(waitsOnWords([turn, said("Which one?"), entry(3, { kind: "note", text: "The chat ended: gone." })], 0)).toBe(
       false,
     );
+  });
+});
+
+describe("the two answers every part carries", () => {
+  const group = {
+    title: "How the queue is split",
+    parts: [
+      {
+        question: "Where does the split go?",
+        options: [
+          { label: "Split at the read", detail: null, recommended: true },
+          { label: "Split at the write", detail: null, recommended: false },
+        ],
+      },
+    ],
+  };
+  const card = () => {
+    render(<QuestionCard group={group} number={1} of={1} standing="interview" busy={false} onSend={() => undefined} />);
+    return within(screen.getByRole("group", { name: "How the queue is split" }));
+  };
+  const radio = (named: RegExp): HTMLInputElement => screen.getByRole("radio", { name: named });
+  const answer = (named: RegExp): HTMLElement => radio(named).closest("label")!;
+  /** The first rule in the renderer's stylesheet with exactly this selector, up to its closing brace. */
+  const cssRule = (selector: string): string => {
+    const css = readFileSync(`${import.meta.dirname}/../styles.css`, "utf8");
+    const at = css.indexOf(`\n${selector} {`);
+    expect(at, selector).toBeGreaterThanOrEqual(0);
+    return css.slice(at, css.indexOf("}", at));
+  };
+
+  it("draws each with the circle every answer carries, filled while it is the pick", () => {
+    card();
+    for (const named of [/Something else/, /Architect's call/, /Split at the read/]) {
+      // The same radio as an offered answer's, drawn: none of them hidden.
+      expect(radio(named).className, String(named)).toBe("");
+      expect(answer(named).querySelector(".choice-heading > input[type=radio]")).toBe(radio(named));
+    }
+    expect(answer(/Architect's call/).classList.contains("choice--paired")).toBe(true);
+    fireEvent.click(radio(/Architect's call/));
+    expect(radio(/Architect's call/).checked).toBe(true);
+    expect(answer(/Architect's call/).classList.contains("selected")).toBe(true);
+    expect(radio(/Something else/).checked).toBe(false);
+  });
+
+  it("takes a pick back when it is clicked again, the pair's as the offered ones'", () => {
+    card();
+    for (const named of [/Architect's call/, /Split at the write/]) {
+      fireEvent.click(radio(named));
+      expect(radio(named).checked, String(named)).toBe(true);
+      fireEvent.click(radio(named));
+      expect(radio(named).checked, String(named)).toBe(false);
+      expect(answer(named).classList.contains("selected"), String(named)).toBe(false);
+    }
+  });
+
+  it("keeps Something else picked while its box is typed in, takes it back only from the card around the box, and keeps the words", () => {
+    const found = card();
+    fireEvent.click(radio(/Something else/));
+    const box = found.getByLabelText("Your own words") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "At the queue" } });
+    // Picked, and seen to be, while it is typed in.
+    expect(radio(/Something else/).checked).toBe(true);
+    expect(answer(/Something else/).classList.contains("selected")).toBe(true);
+    // A click in the box is the person typing, not a take-back.
+    fireEvent.click(box);
+    expect(found.getByLabelText("Your own words")).toBe(box);
+    expect(radio(/Something else/).checked).toBe(true);
+    // A click on the opened card around the box takes it back.
+    fireEvent.click(answer(/Something else/));
+    expect(found.queryByLabelText("Your own words")).toBeNull();
+    expect(radio(/Something else/).checked).toBe(false);
+    expect(answer(/Something else/).classList.contains("selected")).toBe(false);
+    // And picked again, what was typed is there.
+    fireEvent.click(radio(/Something else/));
+    expect((found.getByLabelText("Your own words") as HTMLTextAreaElement).value).toBe("At the queue");
+  });
+
+  it("fits each half's circle and words between its borders from the narrowest dock up", () => {
+    // Measured in the preview at the dock's 252px and 300px: the label's size
+    // is the half's width less exactly what the rules below put around it.
+    expect(cssRule(".choice--paired")).toContain("padding: 15px 6px;");
+    expect(cssRule(".choice--paired .choice-heading")).toContain("gap: 5px;");
+    expect(cssRule(".choice--paired input")).toContain("width: 15px;");
+    expect(cssRule(".choice--paired input:checked")).toContain("width: 16px;");
+    // Half the 6px gap, 2px of border a side once picked, 6px of padding a
+    // side, the 15px circle and the 5px to the label.
+    expect(cssRule(".choice--paired strong")).toContain(
+      "font-size: min(calc(12.5px * var(--text-scale)), calc((50cqw - 3px - 4px - 12px - 15px - 5px) / 7.2));",
+    );
+    expect(cssRule(".choice-pair")).toContain("gap: 6px;");
+  });
+
+  it("gives the box one ink outline and nothing pulsing, the caret its only motion", () => {
+    const found = card();
+    fireEvent.click(radio(/Something else/));
+    const box = found.getByLabelText("Your own words");
+    // Empty, and waiting on the person's words: still no pulse on it.
+    expect(box.className).toBe("");
+    expect(cssRule(".asked-part .choice--custom textarea")).toContain("border: 1.5px solid var(--ink);");
+    // The focus ring would be a second outline beside the border: focus
+    // thickens the border itself instead, so a keyboard sees where it is.
+    const focused = cssRule(".asked-part .choice--custom textarea:focus-visible");
+    expect(focused).toContain("outline: none;");
+    expect(focused).toContain("border-width: 2.5px;");
+    expect(focused).not.toContain("box-shadow");
+    const css = readFileSync(`${import.meta.dirname}/../styles.css`, "utf8");
+    expect(css).not.toContain("textarea.awaiting-words");
+  });
+});
+
+describe("a refused call's card", () => {
+  const refused = (detail: string) =>
+    ({ kind: "tool", tool: "edit_plan", ok: false, detail, edit: null }) as const;
+  const card = (line: Parameters<typeof ToolCard>[0]["line"]) => {
+    render(<ToolCard line={line} edit={null} onUndo={null} undoable={null} busy={false} />);
+    return document.querySelector(".tool-card") as HTMLElement;
+  };
+
+  it("says the first sentence of a longer reason in full, with the whole reason behind an i after it", () => {
+    const detail =
+      "node_404 is not in this plan, which has node_1 and node_2 and nothing else that an edge could be drawn to. " +
+      "read_plan reads the nodes it has, and an edge may only join two of them.";
+    const why = card(refused(detail)).querySelector(".tool-why") as HTMLElement;
+    expect(why.firstChild?.textContent).toBe(
+      "Refused: node_404 is not in this plan, which has node_1 and node_2 and nothing else that an edge could be drawn to.",
+    );
+    expect(within(why).getByRole("button", { name: "Why it was refused: Changing the plan" }).textContent).toBe("i");
+    expect(within(why).getByRole("tooltip", { hidden: true }).textContent).toBe(detail);
+  });
+
+  it("puts no i under a reason that is one sentence", () => {
+    const why = card(refused("node_404 is not in this plan.")).querySelector(".tool-why") as HTMLElement;
+    expect(why.textContent).toBe("Refused: node_404 is not in this plan.");
+    expect(within(why).queryByRole("button")).toBeNull();
+  });
+
+  it("keeps a call that worked to its one line", () => {
+    const shown = card({ kind: "tool", tool: "read_plan", ok: true, detail: "Two nodes. One edge.", edit: null });
+    expect(shown.querySelector(".tool-why")).toBeNull();
+    expect([...shown.children].map((child) => child.className)).toEqual(["tool-head"]);
+  });
+
+  it("wraps the reason over the lines it needs rather than cutting it to one", () => {
+    const css = readFileSync(`${import.meta.dirname}/../styles.css`, "utf8");
+    const at = css.indexOf("\n.tool-why {");
+    const rule = css.slice(at, css.indexOf("}", at));
+    expect(at).toBeGreaterThanOrEqual(0);
+    for (const cut of ["nowrap", "ellipsis", "overflow: hidden"]) expect(rule).not.toContain(cut);
   });
 });

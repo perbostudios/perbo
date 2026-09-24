@@ -224,7 +224,8 @@ describe("UI v2", () => {
     fireEvent.click(screen.getByLabelText("Filter tickets"));
     fireEvent.click(screen.getByRole("option", { name: "Show · needs you" }));
     // A finding to answer needs you; an open pull request is the journey's end.
-    expect(screen.getAllByRole("button", { name: /Answer|Merge/ })).toHaveLength(1);
+    expect(document.querySelectorAll(".task-list .task-card")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Activation email never sent on signup" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Backfill the audit table" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Rate-limit the invite endpoint" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Split the settings page into tabs" })).toBeNull();
@@ -661,10 +662,49 @@ describe("Home row colours and what may be archived", () => {
     // Mid-run with nothing running them: runs that stopped short.
     expect(await tones("Rate-limit the invite endpoint")).toEqual(["task-card--red"]);
     expect(await tones("Cache the pricing table response")).toEqual(["task-card--red"]);
-    // The note and the primary button stay what they were.
+    // The note stays what it was; the card opens the stopped page itself.
     const stopped = await card("Retire the legacy CSV importer");
     expect(within(stopped).getByText(/The run stopped\. Its work and evidence have been retained/)).toBeTruthy();
-    expect(within(stopped).getByRole("button", { name: "See the stopped run" })).toBeTruthy();
+    expect(within(stopped).queryByRole("button", { name: "See the stopped run" })).toBeNull();
+  });
+
+  it("puts a ticket whose page was just opened first among its colour", async () => {
+    mount();
+    const greens = async (): Promise<string[]> => {
+      await card("Backfill the audit table");
+      return [...document.querySelectorAll(".task-list .task-card--green")].map((entry) => entry.getAttribute("aria-label") ?? "");
+    };
+    const before = await greens();
+    expect(before).toHaveLength(2);
+    const opened = await card(before[1]!);
+    const key = "PRB-" + opened.querySelector(".task-key")!.textContent!.slice(1);
+    fireEvent.click(opened);
+    await waitFor(async () => {
+      const snapshot = await sampleBridge.request({ kind: "snapshot" });
+      expect(Object.keys(snapshot.lastOpened ?? {})).toContain(snapshot.repositories[0]!.id + ":" + key);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    await waitFor(async () => expect(await greens()).toEqual([before[1], before[0]]));
+  });
+
+  it("reads a ticket's detail once as its page opens, the opening itself reading nothing again", async () => {
+    const original = bridge.request.bind(bridge);
+    const asked: Request[] = [];
+    vi.spyOn(bridge, "request").mockImplementation(((request: Request) => {
+      asked.push(request);
+      return original(request);
+    }) as typeof bridge.request);
+    mount();
+    fireEvent.click(await card("Activation email never sent on signup"));
+    await waitFor(() => expect(asked.some((request) => request.kind === "ticketOpened")).toBe(true));
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    // Long enough for a change the opening sent to be followed by a read, were it followed by one.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    const key = asked.find((request) => request.kind === "ticketOpened")!;
+    expect(
+      asked.filter((request) => request.kind === "detail" && "key" in key && request.key === key.key),
+    ).toHaveLength(1);
   });
 
   it("archives a stopped ticket from Home, opens its stopped page from the Archive, and refuses a running one", async () => {
@@ -809,7 +849,7 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     vi.useRealTimers();
   });
 
-  it("cycles the Home badge yellow, red, green, a decision held seven seconds and the others four", async () => {
+  it("cycles the Home badge yellow, red, green, each colour held ten seconds", async () => {
     const workspace = await board([
       ["changes_requested", null], ["pr_open", pr], ["failed", null], ["merged", pr], ["closed", pr], ["executing", null],
     ]);
@@ -817,7 +857,7 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     rail(workspace);
     expect(shows()).toEqual(["rail-badge--yellow", "1"]);
     expect(dot().getAttribute("aria-label")).toBe("1 ticket needs action");
-    at(6_700);
+    at(9_700);
     expect(shows()).toEqual(["rail-badge--yellow", "1"]);
     expect(dot().className).not.toContain("rail-badge--leaving");
     // It shrinks away just before the next colour, and grows back in as it.
@@ -827,12 +867,12 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     expect(shows()).toEqual(["rail-badge--red", "1"]);
     expect(dot().className).toContain("rail-badge--swapped");
     expect(dot().getAttribute("aria-label")).toBe("1 stopped");
-    at(3_850);
+    at(9_850);
     expect(shows()).toEqual(["rail-badge--red", "1"]);
     at(150);
     expect(shows()).toEqual(["rail-badge--green", "3"]);
     expect(dot().getAttribute("aria-label")).toBe("3 completed");
-    at(3_850);
+    at(9_850);
     expect(shows()).toEqual(["rail-badge--green", "3"]);
     at(150);
     expect(shows()).toEqual(["rail-badge--yellow", "1"]);
@@ -845,9 +885,9 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     vi.useFakeTimers();
     rail(two);
     expect(shows()).toEqual(["rail-badge--red", "1"]);
-    at(4_050);
+    at(10_050);
     expect(shows()).toEqual(["rail-badge--green", "1"]);
-    at(4_050);
+    at(10_050);
     expect(shows()).toEqual(["rail-badge--red", "1"]);
     cleanup();
     rail(one);
@@ -895,8 +935,12 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     const workspace = await board([
       ["changes_requested", null], ["failed", null], ["cancelled", null], ["pr_open", pr], ["merged", pr], ["merged", pr], ["executing", null],
     ]);
-    // Each ticket newer than the one before it, so the colour, not the age, puts the answer first.
-    workspace.tasks.forEach((row, index) => (row.ticket.updated_at = `2026-09-0${index + 1}T09:00:00.000Z`));
+    // Each ticket opened after the one before it, so the colour, not the opening, puts the completed first.
+    workspace.lastOpened = Object.fromEntries(
+      workspace.tasks.map((row, index) => [row.repoId + ":" + row.ticket.key, `2026-09-0${index + 1}T09:00:00.000Z`]),
+    );
+    // And each moved before the one before it, so newest first reads the other way within a colour.
+    workspace.tasks.forEach((row, index) => (row.ticket.updated_at = `2026-09-0${9 - index}T09:00:00.000Z`));
     home(workspace);
     const greeting = document.querySelector(".home-heading p")!.textContent ?? "";
     expect(greeting).toContain("one waiting on you");
@@ -904,9 +948,10 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     const cards = (): string[] =>
       [...document.querySelectorAll(".task-list .task-card")].map((card) => card.getAttribute("aria-label") ?? "");
     expect(cards()).toEqual([
+      "Ticket 5 merged", "Ticket 4 merged", "Ticket 3 pr_open",
       "Ticket 0 changes_requested",
       "Ticket 2 cancelled", "Ticket 1 failed",
-      "Ticket 6 executing", "Ticket 5 merged", "Ticket 4 merged", "Ticket 3 pr_open",
+      "Ticket 6 executing",
     ]);
     const show = (option: string): string[] => {
       fireEvent.click(screen.getByLabelText("Filter tickets"));
@@ -917,30 +962,47 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     expect(show("stopped")).toEqual(["Ticket 2 cancelled", "Ticket 1 failed"]);
     expect(show("completed")).toEqual(["Ticket 5 merged", "Ticket 4 merged", "Ticket 3 pr_open"]);
     expect(show("running")).toEqual(["Ticket 6 executing"]);
+    const sort = (option: string): string[] => {
+      fireEvent.click(screen.getByLabelText("Sort tickets"));
+      fireEvent.click(screen.getByRole("option", { name: option }));
+      return cards();
+    };
+    show("all");
+    // Colour first under every age order too.
+    expect(sort("Newest first")).toEqual([
+      "Ticket 3 pr_open", "Ticket 4 merged", "Ticket 5 merged",
+      "Ticket 0 changes_requested",
+      "Ticket 1 failed", "Ticket 2 cancelled",
+      "Ticket 6 executing",
+    ]);
+    expect(sort("Oldest first")).toEqual([
+      "Ticket 5 merged", "Ticket 4 merged", "Ticket 3 pr_open",
+      "Ticket 0 changes_requested",
+      "Ticket 2 cancelled", "Ticket 1 failed",
+      "Ticket 6 executing",
+    ]);
     // The loop has let go of a merged or stopped ticket; an open pull request still waits on its merge.
     expect(screen.getByRole("button", { name: "Archive all 4" })).toBeTruthy();
   });
 
-  it("sets each card's buttons together at its end, Archive last and an icon alone", async () => {
-    const workspace = await board([["failed", null], ["merged", pr], ["changes_requested", null]]);
+  it("carries Archive alone, an icon at the end of its line, where the loop has let go and the merge is decided", async () => {
+    const workspace = await board([["failed", null], ["merged", pr], ["changes_requested", null], ["pr_open", pr]]);
     workspace.jobs = [run(workspace.tasks[0]!, "stopped", "cancelled")];
     home(workspace);
-    const buttons = (name: string): HTMLElement[] => {
-      const card = screen.getByRole("button", { name });
-      const actions = card.querySelector<HTMLElement>(".task-card-actions")!;
-      return [...actions.children] as HTMLElement[];
-    };
+    const buttons = (name: string): HTMLElement[] =>
+      [...screen.getByRole("button", { name }).querySelectorAll<HTMLElement>(".task-card-description button")];
     const stopped = buttons("Ticket 0 failed");
-    expect(stopped.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["See the stopped run", "Archive"]);
     const merged = buttons("Ticket 1 merged");
-    expect(merged.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["Report", "Archive"]);
-    for (const archive of [stopped.at(-1)!, merged.at(-1)!]) {
-      expect(archive.textContent).toBe("");
-      expect(archive.getAttribute("title")).toBe("Archive");
-      expect(archive.querySelector("img")).toBeTruthy();
+    for (const line of [stopped, merged]) {
+      expect(line.map((button) => button.getAttribute("aria-label"))).toEqual(["Archive"]);
+      expect(line[0]!.textContent).toBe("");
+      expect(line[0]!.getAttribute("title")).toBe("Archive");
+      expect(line[0]!.querySelector("img")).toBeTruthy();
+      expect(line[0]!.parentElement!.lastElementChild).toBe(line[0]);
     }
-    // A ticket the loop still carries has no Archive, and its one button is still in the row.
-    expect(buttons("Ticket 2 changes_requested").map((button) => button.textContent)).toEqual(["Answer"]);
+    // A decision the loop waits on, and a merge still to decide: nothing.
+    expect(buttons("Ticket 2 changes_requested")).toEqual([]);
+    expect(buttons("Ticket 3 pr_open")).toEqual([]);
   });
 
   it("opens the Create picker from Home's empty state with nothing selected", async () => {

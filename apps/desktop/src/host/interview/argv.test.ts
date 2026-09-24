@@ -48,6 +48,8 @@ const session = (over: Record<string, unknown> = {}): EditingSession =>
     change: null,
     lastPane: null,
     lastView: null,
+    specCut: null,
+    named: null,
     interviewModel: null,
     ...over,
   });

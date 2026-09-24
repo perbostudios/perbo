@@ -168,6 +168,7 @@ export function ConnectionsPage({ workspace, navigate }: PageProps) {
                   <ModelPicker
                     role={role}
                     compact
+                    connectionDot={false}
                     models={workspace.settings}
                     connections={providers.data}
                     onChange={(models) => {

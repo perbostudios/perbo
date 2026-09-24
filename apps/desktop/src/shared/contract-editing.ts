@@ -14,6 +14,7 @@ import {
   DraftSchema,
   EditingFormSchema,
   EditingSessionSchema,
+  EVERY_PROBLEM_RESOLVED,
   INTERVIEW_CONVERSATION_CAP,
   InterviewEntrySchema,
   RequestSchema,
@@ -262,8 +263,16 @@ export function untouchedPlanning(session: EditingSession): boolean {
   );
 }
 
-/** The sessions a person can pick up again, newest first. Both hosts put this on the snapshot. */
-export function openDrafts(records: readonly EditingSession[]): OpenDraft[] {
+/**
+ * The sessions a person can pick up again, newest first. Both hosts put this
+ * on the snapshot, each reading a spec's title from where it keeps specs
+ * (`specTitle`, null where there is none), and a title that is still the cut
+ * the folder was named from is none (D-118).
+ */
+export function openDrafts(
+  records: readonly EditingSession[],
+  specTitle: (repoId: string, slug: string) => string | null,
+): OpenDraft[] {
   return records
     .filter((record) => record.phase !== "discarded")
     .map((record) => ({
@@ -280,10 +289,43 @@ export function openDrafts(records: readonly EditingSession[]): OpenDraft[] {
           : { open: record.drift.open.length, resolved: record.drift.resolved },
       scope: { paths: [...record.form.draft.paths], prohibited: [...record.form.draft.prohibited] },
       specSlug: record.specSlug,
+      title: titleOfSpec(record, specTitle),
       lastPane: record.lastPane,
       lastView: record.lastView,
     }))
     .reverse();
+}
+
+function titleOfSpec(
+  record: EditingSession,
+  specTitle: (repoId: string, slug: string) => string | null,
+): string | null {
+  if (record.specSlug === null) return null;
+  const title = specTitle(record.repoId, record.specSlug)?.trim() ?? "";
+  return title.length === 0 || title === record.specCut ? null : title;
+}
+
+/** A title on one line, as the spec's title line and a ticket's name hold it. */
+const oneLineTitle = (title: string): string => title.replace(/\s+/g, " ").trim().slice(0, 500);
+
+/**
+ * Whether a spec save changed the title its writer read: the person typed
+ * one. Spacing alone changes no title.
+ */
+export const titleChanged = (save: { title: string; base: { title: string } }): boolean =>
+  oneLineTitle(save.title) !== oneLineTitle(save.base.title);
+
+/**
+ * Whether the plan is drafted under the name the person gave the work, with
+ * `admit --keep-title` (D-127): they were the last to title this planning's
+ * spec, and the spec still states that title.
+ */
+export function keepsPersonsTitle(session: EditingSession, specTitle: string | null): boolean {
+  return (
+    session.named?.by === "person" &&
+    specTitle !== null &&
+    oneLineTitle(specTitle) === session.named.title
+  );
 }
 
 /** Local editable work and its operation receipts, never canonical Ticket state. */
@@ -382,6 +424,8 @@ export class ContractEditing {
           // writes the folder that is already there rather than minting a
           // second from the same title.
           specSlug: target.kind === "spec" ? target.slug : null,
+          specCut: null,
+          named: null,
           lastPane: null,
           lastView: null,
           drift: null,
@@ -460,13 +504,54 @@ export class ContractEditing {
   /**
    * Which spec this planning writes (D-103), so reopening the session opens the
    * same one. Set by the host the first time a spec is saved; the text itself
-   * lives in the repository, not here.
+   * lives in the repository, not here. `cut` is the title the host cut from
+   * the person's first turn where that is what named the folder (D-118).
    */
-  recordSpec(id: string, slug: string): EditingSession {
+  recordSpec(id: string, slug: string, cut: string | null = null): EditingSession {
     return this.update(id, (session) => {
       if (session.specSlug === slug) return;
       session.specSlug = slug;
+      session.specCut = cut;
       session.revision++;
+    });
+  }
+
+  /**
+   * The person titled this planning's spec from the Spec pane: the name they
+   * gave is the one the plan is drafted under and the spec keeps (D-127).
+   */
+  personTitled(id: string, title: string): void {
+    const given = oneLineTitle(title);
+    if (given.length === 0) return;
+    this.update(id, (session) => {
+      session.named = { by: "person", title: given };
+    });
+  }
+
+  /**
+   * Who named the spec, carried from the planning of a stopped plan to the
+   * one over the plan drafted again from the same spec: the name is the
+   * spec's, and planning it again does not take it from the person (D-127).
+   */
+  carryNamed(id: string, named: EditingSession["named"]): void {
+    if (named === null) return;
+    this.update(id, (session) => {
+      session.named = { ...named };
+    });
+  }
+
+  /**
+   * A turn of the chat left this planning's spec with a title other than the
+   * one it began with: the Architect titled it. A title that is still the cut
+   * names nobody's work (D-118), and one that is already the recorded name was
+   * not changed by the turn, whoever saved it while the turn ran.
+   */
+  architectTitled(id: string, title: string): void {
+    const written = oneLineTitle(title);
+    this.update(id, (session) => {
+      if (written.length === 0 || written === session.specCut) return;
+      if (session.named !== null && written === session.named.title) return;
+      session.named = { by: "architect", title: written };
     });
   }
 
@@ -710,9 +795,8 @@ export class ContractEditing {
    * on the session, and the first of them is put to the person as a question
    * of the interview's own shape, so the Problems pane and the chat show the
    * same card and either answers it with a turn. None found, after some were,
-   * is the reading that resolved them: recorded so, and said as the note that
-   * offers the contract — once, since a reading that finds none after that is
-   * nothing new. A reading the person went on past clears them, and problems
+   * is the reading that resolved them: recorded so, and said as a note —
+   * once, since a reading that finds none after that is nothing new. A reading the person went on past clears them, and problems
    * found again after a resolved round re-open them: a hand rewording after
    * the round is what that is.
    *
@@ -763,7 +847,8 @@ export class ContractEditing {
       // A problem's card still up was closed by hand rather than answered —
       // the person moved the plan or the spec themselves, and this reading
       // found nothing — so the card comes down with the problems: left
-      // standing, the chat would keep it and withhold the way on for it.
+      // standing, it would put a problem that is gone, and the Problems page
+      // would withhold the way on for it.
       if (standing?.kind === "asked" && standing.drift !== undefined) {
         this.endAsking(id);
         askingChanged();
@@ -771,9 +856,8 @@ export class ContractEditing {
       this.recordDrift(id, []);
       say({
         kind: "note",
-        text: "Every problem is resolved: the plan and the spec promise the same thing again.",
+        text: EVERY_PROBLEM_RESOLVED,
         notable: true,
-        offers: "contract",
       });
       return;
     }

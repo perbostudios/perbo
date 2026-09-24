@@ -130,6 +130,14 @@ describe("the local verdicts record", () => {
     expect(source.indexOf(0)).toBe(-1);
   });
 
+  it("replaces the record whole, since `perbo inspect` reads it while a run is live", () => {
+    const writer = /export function writeLocalVerdicts[\s\S]*?\n\}/.exec(
+      readFileSync(new URL("./record.ts", import.meta.url), "utf8"),
+    )?.[0];
+    expect(writer).toMatch(/replaceFile\(verdictsPath\(dir\)/);
+    expect(writer).not.toMatch(/writeFileSync/);
+  });
+
   it("keeps decisions on different keys and different reviews apart", () => {
     const one = recordVerdict({ previous: null, verdict: verdict(), replace: false });
     const two = recordVerdict({ previous: one, verdict: verdict({ finding_key: KEY_B }), replace: false });

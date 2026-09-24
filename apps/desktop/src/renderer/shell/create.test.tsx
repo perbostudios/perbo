@@ -1,24 +1,24 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { ticketsNoDraftStandsFor, titleOfDraft, unclaimedSpecs } from "./create.js";
-import type { OpenDraft, Snapshot } from "../../shared/protocol.js";
+import { nameOfRoute, ticketsNoDraftStandsFor, titleOfDraft, unclaimedSpecs } from "./create.js";
+import { openDrafts } from "../../shared/contract-editing.js";
+import type { EditingSession, OpenDraft, Snapshot } from "../../shared/protocol.js";
 
-it("names a planning by its spec, then by the plan's own shorter name", () => {
-  const spec = { repoId: "repo-1", slug: "a-clock-app", title: "A clock app" };
-  const writing = { repoId: "repo-1", specSlug: "a-clock-app", key: null, outcome: "" } as OpenDraft;
-  const held = { specs: [spec], tasks: [], titles: {} } as unknown as Parameters<typeof titleOfDraft>[0];
+type Named = Parameters<typeof titleOfDraft>[0];
 
-  // During the interview there is no outcome and no ticket, and "Untitled
-  // work" would stand beside a spec the person has already titled.
+it("names a planning by its spec, then by the plan's own shorter name, and Untitled before either", () => {
+  const writing = { repoId: "repo-1", specSlug: "a-clock-app", key: null, outcome: "", title: "A clock app" } as OpenDraft;
+  const held = { tasks: [], titles: {} } as unknown as Named;
+
+  // During the interview there is no ticket: the spec's title.
   expect(titleOfDraft(held, writing)).toBe("A clock app");
 
   // Once a plan is drafted, its ticket's title — not the outcome, which is a
   // sentence stating what will be true and reads as a paragraph in a list.
   const planned = {
-    specs: [spec],
     titles: {},
     tasks: [{ repoId: "repo-1", ticket: { key: "PRB-2", title: "Clock app" } }],
-  } as unknown as Parameters<typeof titleOfDraft>[0];
+  } as unknown as Named;
   expect(
     titleOfDraft(planned, {
       ...writing,
@@ -27,10 +27,56 @@ it("names a planning by its spec, then by the plan's own shorter name", () => {
     }),
   ).toBe("Clock app");
 
-  // And with none of them, the row still says something.
-  expect(titleOfDraft({ specs: [], tasks: [], titles: {} } as unknown as Parameters<typeof titleOfDraft>[0], writing)).toBe(
-    "Untitled work",
-  );
+  // And before the spec is titled the planning is Untitled, whatever else it
+  // holds: no outcome and no words of the person's stand in for a name.
+  expect(titleOfDraft(held, { ...writing, title: null, outcome: "A person can read the time." })).toBe("Untitled");
+});
+
+describe("the title the drafts list carries (D-118)", () => {
+  const session = (over: Partial<EditingSession> = {}) =>
+    ({ id: "s-1", repoId: "repo-1", key: null, admitted: false, phase: "editing", nodes: 0, drift: null,
+      specSlug: "dark-mode-toggle", specCut: null, named: null, lastPane: null, lastView: null,
+      form: { draft: { outcome: "", criteria: [], paths: [], prohibited: [] } }, ...over }) as unknown as EditingSession;
+  const titled = (title: string | null) => () => title;
+
+  it("is the spec's title", () => {
+    expect(openDrafts([session()], titled("Dark mode toggle"))[0]!.title).toBe("Dark mode toggle");
+  });
+
+  it("is none while the spec still states the cut of the first turn that named its folder", () => {
+    const cut = session({ specCut: "Dark mode toggle" });
+    expect(openDrafts([cut], titled("Dark mode toggle"))[0]!.title).toBeNull();
+    // And the spec's own the moment the Architect or the person titles it.
+    expect(openDrafts([cut], titled("A dark mode for the store"))[0]!.title).toBe("A dark mode for the store");
+  });
+
+  it("is none with no spec, or a spec with no file to read", () => {
+    expect(openDrafts([session({ specSlug: null })], titled("Anything"))[0]!.title).toBeNull();
+    expect(openDrafts([session()], titled(null))[0]!.title).toBeNull();
+  });
+});
+
+describe("the name in the top bar", () => {
+  const workspace = {
+    tasks: [{ repoId: "repo-1", ticket: { key: "PRB-2", title: "Clock app" } }],
+    titles: { "repo-1:PRB-2": "Wall clock" },
+    drafts: [
+      { id: "s-1", repoId: "repo-1", key: null, title: null },
+      { id: "s-2", repoId: "repo-1", key: null, title: "Dark mode" },
+    ],
+  } as unknown as Snapshot;
+
+  it("is a planning's own on its panes, Untitled before it has one", () => {
+    expect(nameOfRoute(workspace, { page: "planning", sessionId: "s-1", pane: "spec" })).toBe("Untitled");
+    expect(nameOfRoute(workspace, { page: "planning", sessionId: "s-2", pane: "graph" })).toBe("Dark mode");
+  });
+
+  it("is none on a ticket's own pages, which name it themselves, and on a page about no one piece of work", () => {
+    for (const view of ["contract", "loop", "stopped"] as const)
+      expect(nameOfRoute(workspace, { page: "task", repoId: "repo-1", key: "PRB-2", view })).toBeNull();
+    expect(nameOfRoute(workspace, { page: "home" })).toBeNull();
+    expect(nameOfRoute(workspace, { page: "ask", repoId: "repo-1" })).toBeNull();
+  });
 });
 
 it("lists a drafted plan once, under the planning that is writing its spec", () => {

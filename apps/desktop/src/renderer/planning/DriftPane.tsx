@@ -210,11 +210,10 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
         : [],
     )[0] ?? null;
   // The reading the answer is owed has landed once the answer is on the
-  // record as a turn, that turn is owed no reading — the rule the chat's way
-  // on to the contract holds to, so a reading that started before the answer
-  // was applied never counts as its reading — none is running, and the
-  // Architect is no longer applying the answer. The chat's way on waits
-  // through the turn too: while it is in flight, a reading that started after
+  // record as a turn, that turn is owed no reading — so a reading that
+  // started before the answer was applied never counts as its reading — none
+  // is running, and the Architect is no longer applying the answer. The wait
+  // holds through the turn too: while it is in flight, a reading that started after
   // the answer's line and landed ahead of the Architect's first reply looks
   // like the answer's own. That reading has decided the record, whatever it
   // found. But the reading's job settles here a round trip ahead of the

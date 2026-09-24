@@ -218,7 +218,6 @@ export function PlanningMode({
           <InterviewDock
             workspace={workspace}
             editor={editor}
-            navigate={navigate}
             historyOpen={history}
             onHistory={() => setHistory((shown) => !shown)}
             width={dock}

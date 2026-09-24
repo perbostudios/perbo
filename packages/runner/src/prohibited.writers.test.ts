@@ -273,10 +273,11 @@ describe("ordinary work, left alone", () => {
  * An interpreter handed its program on the command line (`-c`, `-e`, `--eval`).
  *
  * The program decides at run time where it writes, so neither the shell parse
- * nor the seal can answer for it: what is read is the code as text. A path in
- * it that resolves outside the worktree refuses, and so does a call that writes
- * at all — and the refusal names the interpreter, because "some inline code
- * wrote something" is not a record anyone can act on.
+ * nor the seal can answer for it: what is read is the code as text. A write in
+ * it that lands outside the worktree refuses, and so does a call that writes
+ * where the guard cannot place it — and the refusal names the interpreter,
+ * because "some inline code wrote something" is not a record anyone can act
+ * on. A path the code only reads or prints is not a write.
  */
 describe("an interpreter carrying inline code", () => {
   const named = (command: string, interpreter: string) => {
@@ -292,11 +293,16 @@ describe("an interpreter carrying inline code", () => {
     named(`node -e 'fs.appendFileSync("log.txt","x")'`, "node");
   });
 
-  it("refuses a path outside the worktree, naming the interpreter", () => {
-    named(`python3 -c "print(open('/etc/passwd').read())"`, "python3");
-    named(`node -e "console.log(require('${OUTSIDE}/config.json'))"`, "node");
-    named(`node -e "console.log('${OUTSIDE}/x')"`, "node");
-    named(`python3 -c "print('../../escape.txt')"`, "python3");
+  it("refuses a write outside the worktree, naming the interpreter", () => {
+    named(`python3 -c "open('/etc/passwd', 'a')"`, "python3");
+    named(`node -e "require('fs').writeFileSync('${OUTSIDE}/config.json', 'x')"`, "node");
+    named(`python3 -c "open('../../escape.txt', 'w')"`, "python3");
+  });
+
+  it("allows a path outside the worktree that the code only reads or prints", () => {
+    allowed(`python3 -c "print(open('/etc/passwd').read())"`);
+    allowed(`node -e "console.log('${OUTSIDE}/x')"`);
+    allowed(`python3 -c "print('../../escape.txt')"`);
   });
 
   it("refuses code it cannot read at all, naming the interpreter", () => {
@@ -365,10 +371,15 @@ describe("an interpreter whose program arrives on standard input", () => {
     named(heredoc("ruby", "'RB'", "File.write('x', 'y')"), "ruby");
   });
 
-  it("refuses a heredoc body carrying a path outside the worktree", () => {
-    named(heredoc("python3", "'PY'", `print(open('${OUTSIDE}/config.json').read())`), "python3");
-    named(heredoc("python3", "'PY'", "print(open('/etc/passwd').read())"), "python3");
-    named(heredoc("node", "'JS'", `console.log('${OUTSIDE}/x')`), "node");
+  it("refuses a heredoc body writing outside the worktree", () => {
+    named(heredoc("python3", "'PY'", `open('${OUTSIDE}/config.json', 'w')`), "python3");
+    named(heredoc("python3", "'PY'", "import os", "os.remove('/etc/passwd')"), "python3");
+    named(heredoc("node", "'JS'", `require('fs').rmSync('${OUTSIDE}/x')`), "node");
+  });
+
+  it("allows a heredoc body that only reads or prints a path outside the worktree", () => {
+    allowed(heredoc("python3", "'PY'", `print(open('${OUTSIDE}/config.json').read())`));
+    allowed(heredoc("node", "'JS'", `console.log('${OUTSIDE}/x')`));
   });
 
   it("refuses a body the shell builds before the interpreter sees it", () => {
@@ -396,7 +407,8 @@ describe("an interpreter whose program arrives on standard input", () => {
   it("reads the text a pipe puts in front of it", () => {
     named(`echo "open('/etc/hosts','w')" | python3`, "python3");
     named(`printf '%s' "require('fs').unlinkSync('x')" | node`, "node");
-    named(`echo "print(open('${OUTSIDE}/x').read())" | python3`, "python3");
+    named(`echo "open('${OUTSIDE}/x', 'w')" | python3`, "python3");
+    allowed(`echo "print(open('${OUTSIDE}/x').read())" | python3`);
     allowed(`echo "print(1 + 1)" | python3`);
     allowed(`echo "console.log(1 + 1)" | node`);
   });

@@ -53,13 +53,13 @@ export const ProfileStateSchema = z.object({
   taskModels: z.record(z.string(), TaskModelsSchema).default({}),
   /** Completed tickets filed away from Home by hand (S4), as `repoId:key`. */
   archived: z.array(z.string()).default([]),
-  /** Whether the tickets already finished before this preference existed have been filed. */
-  archivedSeeded: z.boolean().default(false),
   /**
    * Each repository's unsent answer to "What do you want to build?", by
    * repository id (D-131).
    */
   asks: z.record(z.string(), z.string()),
+  /** When each ticket's page was last opened, as `repoId:key` to an ISO time; Home orders by it. */
+  lastOpened: z.record(z.string(), z.iso.datetime()),
   editingSessions: z.array(EditingSessionSchema).default([]),
 });
 export type ProfileState = z.infer<typeof ProfileStateSchema>;
@@ -104,8 +104,8 @@ export class Profile {
           titles: {},
           taskModels: {},
           archived: [],
-          archivedSeeded: true,
           asks: {},
+          lastOpened: {},
           editingSessions: [],
         };
     const legacy = z

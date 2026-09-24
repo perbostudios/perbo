@@ -22,10 +22,9 @@ import { discoverModels } from "./model-catalog.js";
 import { ModelCatalogs } from "./providers/catalogs.js";
 import { ChangeMarks } from "./plan/marks.js";
 import { DriftReadings } from "./plan/drift.js";
-import { repositorySpecs } from "./plan/spec.js";
+import { repositorySpecs, specTitles } from "./plan/spec.js";
 import { draftedFrom } from "./tickets/work.js";
 import { probeProviders } from "./providers/status.js";
-import { seedArchived } from "./profile/preferences.js";
 import { readStanding, specFolder, writeStanding } from "./repository/config.js";
 import type { TicketRecords } from "./tickets/open.js";
 import type { SpecDeps } from "./plan/spec.js";
@@ -183,7 +182,8 @@ export class DesktopService {
         converse: (id, line, at) => this.editing.converse(id, line, at),
         recordInterview: (id, session, provider, model) =>
           this.editing.recordInterview(id, session, provider, model),
-        recordSpec: (id, slug) => this.editing.recordSpec(id, slug),
+        recordSpec: (id, slug, cut) => this.editing.recordSpec(id, slug, cut),
+        architectTitled: (id, title) => this.editing.architectTitled(id, title),
         beginAsking: (id, entry) => this.editing.beginAsking(id, entry),
         answerAsking: (id, text) => this.editing.answerAsking(id, text),
         countNodes: (id, nodes, digest, plan) => this.editing.countNodes(id, nodes, digest, plan),
@@ -317,11 +317,6 @@ export class DesktopService {
         this.state.repositories.map((repo) => this.tickets.repositorySnapshot(repo.id)),
       );
       const tasks = records.flatMap((entry) => entry.tasks);
-      if (
-        !records.some((entry) => entry.errors.length) &&
-        seedArchived(this.state, tasks)
-      )
-        this.profile.save();
       return {
         version: this.options.version,
         settings: this.state.settings,
@@ -334,11 +329,12 @@ export class DesktopService {
         sequence: this.changes.sequence,
         archived: this.state.archived,
         asks: this.state.asks,
+        lastOpened: this.state.lastOpened,
         power: this.power.state,
         repositoryErrors: Object.fromEntries(
           records.map((entry) => [entry.repository.id, entry.errors]),
         ),
-        drafts: openDrafts(this.state.editingSessions),
+        drafts: openDrafts(this.state.editingSessions, specTitles((id) => this.repository(id))),
         specs: this.state.repositories.flatMap((repo) => {
           try {
             return repositorySpecs(this.repository(repo.id));

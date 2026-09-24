@@ -112,11 +112,21 @@ export function codexCommandDecision(
       spec_folder: state.spec_folder ?? null,
     },
   });
+  /**
+   * Every command the line runs, each judged as itself: a nested shell's
+   * wrapper runs nothing of its own and stands for its nested segments, and a
+   * substitution's segments run beside the command they stand in. A segment
+   * that writes is judged as the hook judges it — by where the writes land,
+   * which the decision above already answered — so `echo "$(rm -rf src/x)"`
+   * is judged as `rm -rf src/x` is.
+   */
   const eligible = (segment: (typeof inspection.segments)[number]): boolean => {
     if (segment.unreadablePrograms.length > 0) return false;
-    if (segment.nested.length > 0)
-      return segment.accounted && segment.nested.every(eligible);
+    if (!segment.accounted) return false;
+    if (!segment.substitutions.every(eligible)) return false;
+    if (segment.nested.length > 0) return segment.nested.every(eligible);
     return (
+      segment.mutating ||
       segment.programs.length === 0 ||
       segment.programs.every((program) => EFFECT_FREE_VERBS.has(program)) ||
       state.allow_list.some((entry) =>

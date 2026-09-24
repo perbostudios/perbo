@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import {
@@ -12,7 +12,7 @@ import {
   type StopVerdict,
   type StopVerdicts,
 } from "@perbo/contracts";
-import { git } from "@perbo/workspace";
+import { git, replaceFile } from "@perbo/workspace";
 import type { Diagnostics } from "../../diagnostics.js";
 
 /**
@@ -397,7 +397,8 @@ export function readLocalVerdictsOrWarn(dir: string, diagnostics: Diagnostics | 
 
 export function writeLocalVerdicts(dir: string, file: LocalVerdicts): void {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(verdictsPath(dir), `${JSON.stringify(LocalVerdictsSchema.parse(file), null, 2)}\n`);
+  // Replaced whole: `perbo inspect` reads it while a run is live.
+  replaceFile(verdictsPath(dir), `${JSON.stringify(LocalVerdictsSchema.parse(file), null, 2)}\n`);
 }
 
 /**

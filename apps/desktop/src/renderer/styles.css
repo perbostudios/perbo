@@ -124,7 +124,7 @@ code {
   flex-direction: column;
   background: var(--paper);
 }
-/* The top bar spans the window: on macOS the traffic lights, then the sidebar toggle, then the current page's header. The rail and the page sit beneath it. */
+/* The top bar spans the window: on macOS the traffic lights, then the sidebar toggle, then, in planning, the planning's name, then the current page's header. The rail and the page sit beneath it. */
 .titlebar {
   height: 48px;
   flex: none;
@@ -172,7 +172,20 @@ code {
   color: var(--ink);
   background: rgba(var(--ink-rgb), 0.08);
 }
+/* The name of the planning the page is a pane of, right of the toggle: as much of it as the bar leaves room for. */
+.titlebar-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+  margin-left: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: 600 calc(13px * var(--text-scale))/1.4 var(--font);
+}
+/* Positioned, so the revealed rail (rail-reveal.tsx) slides over the page from its left edge. */
 .app-body {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -296,6 +309,27 @@ code {
   width: 8px;
   height: 1.5px;
   background: var(--line-strong);
+}
+/* The hidden rail, brought back by the pointer (rail-reveal.tsx): the rail
+   sliding in over the page from the left and back out when the pointer leaves
+   it; without motion (tokens.css) it appears and goes in place. */
+.rail-reveal {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 35;
+  display: flex;
+  /* Past its own width by the shadow's reach, so none of it shows while hidden. */
+  transform: translateX(calc(-100% - 32px));
+  transition: transform var(--duration-quick) var(--ease-smooth-out);
+}
+.rail-reveal.is-revealed {
+  transform: none;
+  transition-duration: var(--duration-fast);
+}
+.rail-reveal .rail {
+  box-shadow: 8px 0 24px rgba(var(--shadow-rgb), 0.14);
 }
 .empty-actions {
   display: inline-flex;
@@ -999,7 +1033,7 @@ textarea {
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  background: var(--blue);
+  background: var(--green);
   flex: none;
 }
 .connection-dot.disconnected {
@@ -1087,6 +1121,7 @@ textarea {
 .default-row > img {
   width: 10px;
   height: 7px;
+  filter: var(--ink-filter);
 }
 .default-row:last-child {
   border-top: 1.5px solid rgba(var(--ink-rgb), 0.12);
@@ -1241,6 +1276,9 @@ textarea {
   gap: 10px;
   width: 100%;
   text-align: left;
+}
+.model-picker > button > img {
+  filter: var(--ink-filter);
 }
 .model-popup {
   position: absolute;
@@ -1728,6 +1766,9 @@ textarea {
   padding: 12px 14px;
   background: var(--soft);
 }
+.step-history > div.ended {
+  border-left: 2.5px solid var(--danger);
+}
 .step-history > div.queued {
   opacity: 0.5;
   background: transparent;
@@ -1773,6 +1814,7 @@ textarea {
 .loop-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
 }
 .decision-overlay {
@@ -1952,8 +1994,22 @@ textarea {
   padding: 11px 20px;
 }
 .decision-actions > .small {
-  text-align: right;
   line-height: 1.5;
+}
+.ended-sentence {
+  font-size: calc(15px * var(--text-scale));
+  font-weight: 500;
+  line-height: 1.5;
+}
+.ended-log {
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px 14px;
+  font: calc(11.5px * var(--text-scale)) var(--mono);
+  white-space: pre-wrap;
+  background: var(--soft);
+  border-radius: 8px;
 }
 .decision-confirmations {
   display: flex;
@@ -2607,6 +2663,9 @@ textarea {
 .pagination-button:hover:not(:disabled) {
   opacity: 1;
 }
+.pagination-button img {
+  filter: var(--ink-filter);
+}
 .archive-filters .dropdown-trigger {
   padding: 10px 14px;
   border-radius: 11px 8px 12px 9px;
@@ -2729,7 +2788,7 @@ textarea {
 }
 .provider-row .provider-status {
   text-align: right;
-  color: var(--blue);
+  color: var(--green);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -2741,7 +2800,7 @@ textarea {
   height: 19px;
   flex: none;
   border-radius: 50%;
-  background: var(--blue);
+  background: var(--green);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2879,8 +2938,32 @@ textarea {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-height: 0;
   padding: 24px 30px;
   gap: 18px;
+}
+/* The loop page holds still and its steps scroll inside their own box; where
+   the window is too short for even that — the smallest window, large text, a
+   notice above — the page scrolls rather than cut its buttons off. */
+.screen--loop {
+  overflow: auto;
+}
+.loop-body > * {
+  flex: none;
+}
+.loop-body > .loop-steps {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 96px;
+}
+.loop-steps > .step-history {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.loop-steps > .step-history > div {
+  flex: none;
 }
 .loop-heading {
   display: flex;
@@ -4927,12 +5010,6 @@ select.add-chip {
 .drift-resolved h3 {
   margin: 0;
 }
-/* The way on a note offers sits on its own line, at the note's right, with
-   room above it so the offer reads apart from the sentence it follows. */
-.msg-offer {
-  display: block;
-  margin: 12px 0 2px auto;
-}
 /* The last change to the spec and the plan, marked where it stands
    (D-128): what it added highlighted
    green, what it took away red and struck through. Both on the theme's own
@@ -5281,11 +5358,20 @@ select.add-chip {
 }
 /* The box a part is answered in when its answer is none of the offered ones.
    Shorter than the one on a decision, because it sits inside a card that has
-   the rest of the group under it and a dock's width to do it in. */
+   the rest of the group under it and a dock's width to do it in. One ink
+   outline and the caret are the whole of its look, and nothing pulses. Focus
+   thickens that same outline rather than adding a ring beside it, the
+   padding giving back what the border takes so the words do not move. */
 .asked-part .choice--custom textarea {
   min-height: 62px;
   height: 62px;
   margin-top: 2px;
+  border: 1.5px solid var(--ink);
+}
+.asked-part .choice--custom textarea:focus-visible {
+  outline: none;
+  border-width: 2.5px;
+  padding: 10px 12px;
 }
 .asked-head b {
   font-size: calc(12.5px * var(--text-scale));
@@ -5400,10 +5486,10 @@ select.add-chip {
 /* The two answers every part carries, side by side under the offered ones:
    its own words on the left, the interview's judgement on the right. Opened,
    its own words take the whole row and grow down into the box.
-   They are actions rather than answers to read, so they are drawn as buttons:
-   no radio to see, the label centred, each half the row, and as tall as an
-   answer above them. Their words stay on one line and shrink together with the
-   card's width rather than wrap, down to what the narrowest dock gives them. */
+   Each carries an answer's circle beside its label, the two centred, each
+   half the row and as tall as an answer above them. Their words stay on one
+   line and shrink together with the card's width rather than wrap, down to
+   what the narrowest dock gives them. */
 .choice-pair {
   display: flex;
   gap: 6px;
@@ -5412,11 +5498,24 @@ select.add-chip {
   flex: 1 1 0;
   min-width: 0;
 }
-/* The pair's radio is out of the flow and placed against its own answer, so
-   focusing it (the click on its answer does) scrolls nothing to find it. */
+/* Each half is 50cqw less half the 6px gap; inside it, 2px of border a side
+   once picked, 6px of padding a side, a 15px circle and 5px to the label. The
+   label's size is what is left over, per the ~7.2px "Something else" runs
+   at each pixel of size, so the circle and the words fit between the borders
+   from the narrowest dock (252px) up, and stop growing at an answer's size. */
 .choice--paired {
-  position: relative;
-  padding: 15px 11px;
+  padding: 15px 6px;
+}
+.choice--paired .choice-heading {
+  gap: 5px;
+}
+.choice--paired input {
+  width: 15px;
+  height: 15px;
+}
+.choice--paired input:checked {
+  width: 16px;
+  height: 16px;
 }
 /* An answer's heading is its 18px radio with 7px under it, 19px and 8px once
    picked; the pair's is the same height with its label in the middle. */
@@ -5432,18 +5531,7 @@ select.add-chip {
 .choice--paired strong {
   flex: none;
   white-space: nowrap;
-  font-size: clamp(calc(10.5px * var(--text-scale)), 4.9cqw, calc(12.5px * var(--text-scale)));
-}
-.choice input.unseen {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-.choice--paired:has(input.unseen:focus-visible) {
-  outline: 2px solid var(--ink);
-  outline-offset: -2px;
+  font-size: min(calc(12.5px * var(--text-scale)), calc((50cqw - 3px - 4px - 12px - 15px - 5px) / 7.2));
 }
 .choice-pair--open > .choice--custom .choice-heading {
   margin-bottom: 8px;
@@ -5486,14 +5574,13 @@ select.add-chip {
   }
 }
 
-/* A box waiting on words only the person can type: the composer's rim, or the
-   own-words box on a card, pulses in the accent until they begin. Steady for a
-   person who asked for less motion. */
+/* A box waiting on words only the person can type: the composer's rim pulses
+   in the accent until they begin. Steady for a person who asked for less
+   motion. */
 .awaiting-words {
   animation: awaiting-words 1600ms ease-in-out infinite;
 }
-.composer-box.awaiting-words,
-.choice--custom textarea.awaiting-words {
+.composer-box.awaiting-words {
   border-style: solid;
   border-color: var(--accent);
 }
@@ -5650,16 +5737,16 @@ select.add-chip {
     transition: none;
   }
 }
-/* Why a tool was refused, which the card shows rather than holds back: one
-   muted line under its name. */
+/* Why a call was refused: its first sentence whole, wrapping over as few lines
+   as it needs, and the `i` with the rest of the reason after it. */
 .tool-why {
   align-self: stretch;
   margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: calc(11.5px * var(--text-scale));
   color: var(--muted);
+}
+.tool-why .info-hint {
+  margin-left: 5px;
 }
 .tool-detail {
   margin: 0;
@@ -5868,14 +5955,19 @@ select.add-chip {
   background: var(--red-paper);
 }
 
-/* ── Home's counts (S4): the card's buttons, and the rail's Home badge in
+/* ── Home's counts (S4): the card's Archive, and the rail's Home badge in
    yellow, red and green ──────────────────────────────────────────────────── */
-/* A card's buttons sit together at its right edge, Archive the last of them. */
-.task-card-description > .task-card-actions {
-  flex: none;
-}
+/* Archive, the one button a card carries, at its right edge. */
 .task-card-description .task-card-archive {
+  flex: none;
   padding: 8px 10px;
+}
+/* The contract's outcome, one line reaching the card's other end. */
+.task-card-description > .task-card-outcome {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .rail-badge .rail-badge--red {
   background: var(--red);

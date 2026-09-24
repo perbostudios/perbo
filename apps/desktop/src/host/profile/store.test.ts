@@ -50,6 +50,7 @@ const stored = {
   repositories: [],
   jobs: [],
   asks: {},
+  lastOpened: {},
 };
 
 describe("the profile's record", () => {
@@ -59,15 +60,21 @@ describe("the profile's record", () => {
     expect(state.taskModels).toEqual({});
     expect(state.archived).toEqual([]);
     expect(state.editingSessions).toEqual([]);
-    // A profile from before the archive preference has not been seeded, so the
-    // first complete listing files what had already finished.
-    expect(state.archivedSeeded).toBe(false);
   });
 
   it("refuses a record without each repository's unsent ask", () => {
     const without: Record<string, unknown> = { ...stored };
     delete without["asks"];
     expect(() => ProfileStateSchema.parse(without)).toThrow(/asks/);
+  });
+
+  it("refuses a record without the time each ticket was last opened", () => {
+    const without: Record<string, unknown> = { ...stored };
+    delete without["lastOpened"];
+    expect(() => ProfileStateSchema.parse(without)).toThrow(/lastOpened/);
+    expect(() =>
+      ProfileStateSchema.parse({ ...stored, lastOpened: { "repo:PRB-1": "yesterday" } }),
+    ).toThrow(/lastOpened/);
   });
 
   it("refuses a repository the app could not have registered", () => {
@@ -103,11 +110,12 @@ describe("the profile's record", () => {
 });
 
 describe("opening the profile", () => {
-  it("starts one where there is none, with the tickets already finished counted as filed", () => {
+  it("starts one where there is none, with nothing filed and no ticket opened", () => {
     const path = directory();
     const profile = Profile.open(path);
     expect(profile.state.repositories).toEqual([]);
-    expect(profile.state.archivedSeeded).toBe(true);
+    expect(profile.state.archived).toEqual([]);
+    expect(profile.state.lastOpened).toEqual({});
     expect(existsSync(profile.path)).toBe(false);
   });
 
@@ -142,6 +150,7 @@ describe("opening the profile", () => {
     const root = directory({
       version: 1,
       asks: {},
+      lastOpened: {},
       settings,
       repositories: [],
       jobs: [],
@@ -159,6 +168,7 @@ describe("opening the profile", () => {
     const root = directory({
       version: 1,
       asks: {},
+      lastOpened: {},
       settings: { ...SettingsSchema.parse({}), notifications: false, notifyOn },
       repositories: [],
       jobs: [],
@@ -170,6 +180,7 @@ describe("opening the profile", () => {
     const root = directory({
       version: 1,
       asks: {},
+      lastOpened: {},
       settings: SettingsSchema.parse({}),
       repositories: [],
       jobs: [job(), job({ id: "80000000-0000-4000-8000-000000000003", state: "stopping" })],
@@ -186,6 +197,7 @@ describe("opening the profile", () => {
     const root = directory({
       version: 1,
       asks: {},
+      lastOpened: {},
       settings: SettingsSchema.parse({}),
       repositories: [],
       jobs: [job({ state: "completed", endedAt: "2026-09-19T09:01:00.000Z", error: null })],
@@ -214,6 +226,7 @@ describe("opening the profile", () => {
     const root = directory({
       version: 1,
       asks: {},
+      lastOpened: {},
       settings: SettingsSchema.parse({}),
       repositories: [{ id: "80000000-0000-4000-8000-000000000002", name: "a", path: "/a" }],
       jobs: [],

@@ -29,7 +29,7 @@ export interface CreateApi {
   /** Open with no row selected, as Home's empty state does: nothing there was pointed at. */
   openUnselected: () => void;
   toggle: () => void;
-  /** Pointer entered the Create control or the panel: open, and hold it open. */
+  /** Pointer entered the rail's Create control: open beside the rail, and hold it open. */
   enter: () => void;
   /** Pointer left them: close a short beat later, so crossing the gap does not. */
   leave: () => void;
@@ -97,13 +97,18 @@ export function CreateProvider({
 }: {
   workspace: Snapshot;
   navigate: (route: Route) => void;
-  /** Where the person is: on a repository's question page, the picker selects that repository's row. */
+  /** Where the person is, whose row the picker opens selected. */
   route: Route;
   children: ReactNode;
 }) {
   const [isOpen, setOpen] = useState(false);
   // Whether the picker opens with a row selected, which Enter takes.
   const [selectTop, setSelectTop] = useState(true);
+  // Whether it was opened from the rail's own Create control, which is on
+  // screen only while the rail is: shown, or revealed over the page while the
+  // toggle hides it. The picker opens beside the rail then, and at the
+  // window's edge when a shortcut or a page opened it with the rail hidden.
+  const [fromRail, setFromRail] = useState(false);
   const client = useQueryClient();
   // What the picker, or a stopped run's Plan it again, has been asked to
   // delete and the host has not finished deleting, held here rather than in
@@ -149,9 +154,10 @@ export function CreateProvider({
       closeTimer.current = null;
     }
   };
-  const opener = (select: boolean) => (): void => {
+  const opener = (select: boolean, rail = false) => (): void => {
     cancelClose();
     setSelectTop(select);
+    setFromRail(rail);
     setOpen(true);
   };
   const open = opener(true);
@@ -163,6 +169,7 @@ export function CreateProvider({
   const toggle = (): void => {
     cancelClose();
     setSelectTop(true);
+    setFromRail(true);
     setOpen((current) => !current);
   };
   // Hover intent: the panel opens as the pointer reaches the Create control and
@@ -170,7 +177,7 @@ export function CreateProvider({
   // after the pointer leaves both, so moving across the gap between them (or a
   // brush past) does not shut it. The delay is the far side of transitions.dev's
   // panel-reveal timing, so an accidental leave is forgiven within it.
-  const enter = (): void => open();
+  const enter = opener(true, true);
   const leave = (): void => {
     cancelClose();
     closeTimer.current = setTimeout(() => setOpen(false), 180);
@@ -185,11 +192,13 @@ export function CreateProvider({
         <Picker
           workspace={withoutDeleting(workspace, deleting)}
           selectTop={selectTop}
-          asking={route.page === "ask" ? route.repoId : null}
+          besideRail={fromRail}
+          route={route}
           remove={remove}
           error={error}
           setError={setError}
           close={close}
+          hold={cancelClose}
           navigate={(route) => {
             close();
             navigate(route);
@@ -240,8 +249,12 @@ export function withDraft(snapshot: Snapshot, session: EditingSession): Snapshot
   return {
     ...snapshot,
     drafts: [
-      // Listed as the host lists it, so the row is the one its refresh brings.
-      ...openDrafts([session]),
+      // Listed as the host lists it, so the row is the one its refresh brings:
+      // titled by its spec as the snapshot last read the spec folder.
+      ...openDrafts(
+        [session],
+        (repoId, slug) => snapshot.specs?.find((spec) => spec.repoId === repoId && spec.slug === slug)?.title ?? null,
+      ),
       ...(snapshot.drafts ?? []).filter((draft) => draft.id !== session.id),
     ],
   };
@@ -307,21 +320,34 @@ interface Row {
 type Bin = { label: string; confirm: string; remove: () => Promise<void> };
 /**
  * What to call a planning: its ticket's name, else the title of the spec it is
- * writing (D-127). The spec's title is
- * looked up on the snapshot, which already carries it for the rows that offer
- * a spec with no planning at all (D-103).
+ * writing (D-127), else Untitled — never the cut of the person's first turn
+ * that named the spec's folder, which the drafts list leaves off (D-118). Both
+ * names are read off the snapshot: the drafts list, with each spec's title, is
+ * read again on every editing change — any write to a planning's record, and a
+ * Spec-pane save of a new title — and the tickets and their names on a records
+ * or preferences change, besides the workspace's own polling.
  */
-export function titleOfDraft(
-  workspace: Pick<Snapshot, "specs" | "tasks" | "titles">,
-  draft: OpenDraft,
-): string {
-  // The ticket's name first: the one a person gave it on this machine, else
-  // the one on the ticket.
-  const ticket = workspace.tasks.find((row) => row.repoId === draft.repoId && row.ticket.key === draft.key);
-  const planned = ticket && (workspace.titles?.[draft.repoId + ":" + draft.key] ?? ticket.ticket.title);
-  // Then the spec's: during the interview there is no ticket and no outcome.
-  const named = workspace.specs?.find((spec) => spec.repoId === draft.repoId && spec.slug === draft.specSlug)?.title;
-  return planned?.trim() || named?.trim() || draft.outcome.trim() || "Untitled work";
+export function titleOfDraft(workspace: Pick<Snapshot, "tasks" | "titles">, draft: OpenDraft): string {
+  return ticketName(workspace, draft.repoId, draft.key) ?? (draft.title?.trim() || "Untitled");
+}
+
+/** A ticket's name: the one a person gave it on this machine, else the one on the ticket; null where no ticket is listed. */
+function ticketName(workspace: Pick<Snapshot, "tasks" | "titles">, repoId: string, key: string | null): string | null {
+  const ticket = workspace.tasks.find((row) => row.repoId === repoId && row.ticket.key === key);
+  if (!ticket) return null;
+  return (workspace.titles?.[repoId + ":" + ticket.ticket.key] ?? ticket.ticket.title).trim() || null;
+}
+
+/**
+ * The name of the planning a page is a pane of, for the top bar beside the
+ * sidebar toggle; null on every other page — a ticket's own pages, the
+ * contract among them, carry its name themselves — and for a planning the
+ * drafts list no longer holds.
+ */
+export function nameOfRoute(workspace: Snapshot, route: Route): string | null {
+  if (route.page !== "planning") return null;
+  const draft = workspace.drafts?.find((entry) => entry.id === route.sessionId);
+  return draft ? titleOfDraft(workspace, draft) : null;
 }
 
 /**
@@ -372,25 +398,31 @@ function confirmDelete(stage: "name" | "spec" | "plan", title: string): string {
 function Picker({
   workspace,
   selectTop,
-  asking,
+  besideRail,
+  route,
   remove,
   error,
   setError,
   navigate,
   close,
+  hold,
 }: {
   workspace: Snapshot;
   selectTop: boolean;
-  /** The repository whose question page the picker was opened over, whose row it selects. */
-  asking: string | null;
+  /** Whether the rail's own Create control opened it, so the rail is on screen beside it. */
+  besideRail: boolean;
+  /** Where the picker was opened from, whose row it opens selected. */
+  route: Route;
   remove: (own: string, also: readonly string[], request: () => Promise<unknown>) => Promise<void>;
   error: string | null;
   setError: (error: string | null) => void;
   navigate: (route: Route) => void;
   close: () => void;
+  /** The pointer is over the panel: hold it open. */
+  hold: () => void;
 }) {
   const rail = useRailSize();
-  const { enter, leave } = useCreate();
+  const { leave } = useCreate();
   const client = useQueryClient();
   // The bin that has been clicked and not yet answered. Held here rather
   // than asked through `window.confirm`: a native modal takes the pointer out
@@ -554,14 +586,35 @@ function Picker({
     run: () => navigate({ page: "ask", repoId: repo.id }),
   }));
   const rows = [...start, ...resume];
+  // The row of the work the picker was opened over: a repository's question
+  // page is that repository's; every page of one piece of work — a pane of
+  // its planning, its contract, its loop — is that work's own row, its
+  // planning's where one stands for it, else its ticket's.
+  const here = ((): string | null => {
+    if (route.page === "ask") return "repo:" + route.repoId;
+    if (route.page === "planning") return "draft:" + route.sessionId;
+    if (route.page !== "task") return null;
+    const row = reviewing.find((each) => each.repoId === route.repoId && each.ticket.key === route.key);
+    const planning = drafts.find(
+      (draft) =>
+        draft.repoId === route.repoId &&
+        (draft.key === route.key || (row !== undefined && ticketsNoDraftStandsFor([row], [draft]).length === 0)),
+    );
+    return planning ? "draft:" + planning.id : "ticket:" + route.repoId + ":" + route.key;
+  })();
   // The selected row, none until a key or the pointer picks one where the
-  // picker opened with nothing selected. Opened over a repository's question
-  // page, that repository's row; else the top planning still open, so Enter
-  // resumes it; else the top row.
+  // picker opened with nothing selected. Opened over a piece of work, that
+  // work's row, and none where the picker does not list it — a ticket in its
+  // loop is past planning, and selecting another piece of work would say the
+  // person was somewhere they are not. Opened anywhere else, the top planning
+  // still open, so Enter resumes it; else the top row.
   const [at, setAt] = useState<number | null>(() => {
     if (!selectTop) return null;
-    const asked = start.findIndex((entry) => entry.id === "repo:" + asking);
-    return asked >= 0 ? asked : drafts.length > 0 ? start.length : 0;
+    if (here !== null) {
+      const current = rows.findIndex((entry) => entry.id === here);
+      return current >= 0 ? current : null;
+    }
+    return drafts.length > 0 ? start.length : 0;
   });
   // Binning a draft shrinks the list: clamp the cursor so Enter never targets a
   // row that is gone, and the focus effect below (which also runs when the count
@@ -667,9 +720,9 @@ function Picker({
         aria-label="Plan a piece of work"
         ref={ref}
         tabIndex={-1}
-        style={{ left: rail.collapsed ? 14 : RAIL_WIDTH + 8 }}
+        style={{ left: rail.collapsed && !besideRail ? 14 : RAIL_WIDTH + 8 }}
         onKeyDown={onKeyDown}
-        onMouseEnter={enter}
+        onMouseEnter={hold}
         onMouseLeave={confirming === null ? leave : undefined}
       >
         <h3>Plan a piece of work</h3>

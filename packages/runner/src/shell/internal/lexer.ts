@@ -3,7 +3,10 @@ export interface Word {
   raw: string;
   /** Quotes and escapes removed. */
   value: string;
-  /** Command bodies found in `$(…)` or backticks outside single quotes. */
+  /**
+   * Command bodies found in `$(…)`, backticks or `<(…)` outside single quotes,
+   * and inside the arithmetic of a `$((…))`.
+   */
   substitutions: string[];
   /** True when an unexpanded `$name` or `${name}` survives in the value. */
   variable: boolean;
@@ -43,7 +46,17 @@ export type StdinSource =
 export type Item =
   | { kind: "word"; word: Word }
   | { kind: "redirect"; redirect: Redirect }
-  | { kind: "stdin"; source: StdinSource }
+  | {
+      kind: "stdin";
+      source: StdinSource;
+      /**
+       * The command bodies the shell runs to build this input: a `$(…)` in a
+       * here-string, in a file name or in an unquoted here-document's body, and
+       * the body of a `< <(…)`. They run before the command does, whatever it
+       * makes of the input.
+       */
+      substitutions: string[];
+    }
   | { kind: "operator"; text: string };
 
 const WORD_BREAK = new Set([">", "<", "|", ";", "&", "(", ")"]);
@@ -69,10 +82,7 @@ function readOperator(text: string, from: number): string | null {
 
 /** Read the body of a `$(…)` or a backtick pair, tracking nesting and quotes. */
 function readSubstitution(text: string, from: number): { body: string; end: number } | null {
-  if (text.startsWith("`", from)) {
-    const close = text.indexOf("`", from + 1);
-    return close === -1 ? null : { body: text.slice(from + 1, close), end: close + 1 };
-  }
+  if (text.startsWith("`", from)) return readBackticks(text, from);
   let depth = 1;
   let quote: string | null = null;
   for (let i = from + 2; i < text.length; i += 1) {
@@ -97,6 +107,110 @@ function readSubstitution(text: string, from: number): { body: string; end: numb
     }
   }
   return null;
+}
+
+/**
+ * A backtick pair's body, as the shell runs it.
+ *
+ * Inside backticks a backslash before a backtick, a `$` or another backslash
+ * is removed and the character after it kept, so `` \` `` opens a
+ * substitution nested in this one rather than closing it: bash runs
+ * `` echo `echo \`rm x\`` `` as `echo `rm x``, which runs `rm`. Before any
+ * other character the backslash stays.
+ */
+function readBackticks(text: string, from: number): { body: string; end: number } | null {
+  let body = "";
+  for (let i = from + 1; i < text.length; i += 1) {
+    const ch = text[i]!;
+    if (ch === "\\") {
+      const next = text[i + 1];
+      if (next === "`" || next === "$" || next === "\\") {
+        body += next;
+        i += 1;
+      } else {
+        body += ch;
+      }
+      continue;
+    }
+    if (ch === "`") return { body, end: i + 1 };
+    body += ch;
+  }
+  return null;
+}
+
+/**
+ * True where the `(` that opens `body` closes at its last character, quotes
+ * and escapes read: `(1 + 2)` is one group, and `(a) ; (b)` is two.
+ */
+function oneGroup(body: string): boolean {
+  if (!body.startsWith("(")) return false;
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i]!;
+    if (quote !== null) {
+      if (ch === "\\" && quote === '"') i += 1;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "\\") {
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) return i === body.length - 1;
+    }
+  }
+  return false;
+}
+
+/**
+ * The command bodies a substitution starting at `from` runs.
+ *
+ * `$((…))` is arithmetic, not a command: its text runs nothing, and only a
+ * substitution written inside it does. It is arithmetic only where the inner
+ * `(` closes at the end, as bash and zsh read it: `$((a) ; (b))` is a command
+ * substitution running two subshells, and runs `a` and `b`.
+ */
+function substitutionBodies(text: string, from: number, body: string): string[] {
+  const arithmetic = text.startsWith("$((", from) && oneGroup(body);
+  return arithmetic ? substitutionsIn(body.slice(1, -1)) : [body];
+}
+
+/**
+ * The command bodies in text the shell expands without splitting it into
+ * words — an unquoted here-document's body, an arithmetic expression — where a
+ * quote is a character and only a backslash, a `$(…)` and a backtick pair mean
+ * anything.
+ */
+export function substitutionsIn(text: string): string[] {
+  const bodies: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i]!;
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (ch === "`" || (ch === "$" && text[i + 1] === "(")) {
+      const read = readSubstitution(text, i);
+      if (read === null) {
+        bodies.push(text.slice(i + (ch === "`" ? 1 : 2)));
+        break;
+      }
+      bodies.push(...substitutionBodies(text, i, read.body));
+      i = read.end;
+      continue;
+    }
+    i += 1;
+  }
+  return bodies;
 }
 
 /** What a backslash inside double quotes escapes, as bash reads it. */
@@ -145,7 +259,7 @@ function readWord(text: string, from: number): { word: Word; end: number; balanc
         i = text.length;
         continue;
       }
-      substitutions.push(read.body);
+      substitutions.push(...substitutionBodies(text, i, read.body));
       value += text.slice(i, read.end);
       i = read.end;
       continue;
@@ -482,6 +596,25 @@ export function tokenize(
       if (opened === 1 && segment[i] === ">") {
         // `<>` opens the named file for writing as well as for reading.
         i += 1;
+      } else if (opened === 1 && segment[i] === "(") {
+        // `<(…)` is a process substitution: the shell runs its body and hands
+        // the command a path to read the output from, so it is an operand of
+        // the command whose body is a command in its own right, as a `$(…)` is.
+        const read = readSubstitution(segment, i - 1);
+        const end = read?.end ?? segment.length;
+        if (read === null) balanced = false;
+        const raw = segment.slice(i - 1, end);
+        items.push({
+          kind: "word",
+          word: {
+            raw,
+            value: raw,
+            substitutions: read === null ? [segment.slice(i + 1)] : [read.body],
+            variable: false,
+          },
+        });
+        i = end;
+        continue;
       } else {
         // An input redirect names where the command's standard input comes
         // from. Nothing is written through one — and for a command whose
@@ -492,12 +625,33 @@ export function tokenize(
         const descriptor = segment[i] === "&";
         if (descriptor) i += 1;
         while (segment[i] === " " || segment[i] === "\t") i += 1;
+        if (opened === 1 && !descriptor && segment.startsWith("<(", i)) {
+          // `< <(…)`: the input is a process substitution's output, which the
+          // line does not spell, and its body is a command the shell runs.
+          const read = readSubstitution(segment, i);
+          const end = read?.end ?? segment.length;
+          if (read === null) balanced = false;
+          items.push({
+            kind: "stdin",
+            source: { kind: "opaque", raw: `<${segment.slice(start, end)}` },
+            substitutions: read === null ? [segment.slice(i + 2)] : [read.body],
+          });
+          i = end;
+          continue;
+        }
         const read = readWord(segment, i);
         if (!read.balanced) balanced = false;
         const raw = `${"<".repeat(opened)}${segment.slice(start, read.end)}`;
+        const source = stdinSource(read.word, opened, descriptor, raw, heredocs);
         items.push({
           kind: "stdin",
-          source: stdinSource(read.word, opened, descriptor, raw, heredocs),
+          source,
+          substitutions:
+            source.kind === "heredoc"
+              ? source.expanded
+                ? substitutionsIn(source.body)
+                : []
+              : read.word.substitutions,
         });
         i = read.end === i ? i + 1 : read.end;
         continue;
@@ -544,12 +698,22 @@ export function tokenize(
     while (segment[i] === " " || segment[i] === "\t") i += 1;
     const substitution = /^>?\(/.exec(segment.slice(i));
     if (substitution !== null) {
-      const close = segment.indexOf(")", i);
-      const end = close === -1 ? segment.length : close + 1;
+      // `>(…)`: the command writes into a process whose body is a command of
+      // its own. Where the output goes cannot be placed, and the body is read
+      // as a `$(…)`'s is.
+      const paren = i + substitution[0].length - 1;
+      const read = readSubstitution(segment, paren - 1);
+      const end = read?.end ?? segment.length;
+      if (read === null) balanced = false;
       items.push({
         kind: "redirect",
         redirect: {
-          target: { raw: segment.slice(i, end), value: "", substitutions: [], variable: false },
+          target: {
+            raw: segment.slice(i, end),
+            value: "",
+            substitutions: read === null ? [segment.slice(paren + 1)] : [read.body],
+            variable: false,
+          },
           reason: "a process substitution",
         },
       });

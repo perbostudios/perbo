@@ -269,7 +269,13 @@ describe("interactive desktop flows", () => {
 
   it("keeps a decision pending when leaving, lets it be rewritten, and resumes after confirmation", async () => {
     mount();
-    fireEvent.click(await screen.findByRole("button", { name: "Answer" }));
+    // The card waiting on an answer is the one to click.
+    const answer = async (): Promise<void> => {
+      const card = await screen.findByRole("button", { name: "Activation email never sent on signup" });
+      expect(card.className).toContain("task-card--yellow");
+      fireEvent.click(card);
+    };
+    await answer();
     let dialog = await screen.findByRole("dialog", { name: "Decisions required" });
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Save and continue" }),
@@ -283,7 +289,7 @@ describe("interactive desktop flows", () => {
     );
     // Left and come back: the answer is still here and still unsent.
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Answer" }));
+    await answer();
     dialog = await screen.findByRole("dialog", { name: "Decisions required" });
     expect(
       (
@@ -359,11 +365,12 @@ describe("interactive desktop flows", () => {
       />,
       { wrapper },
     );
-    expect(screen.getByText(/No pull request was created/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Review result" })).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: "Merge" }),
-    ).toBeNull();
+    // Its card is at the journey's end and says what the contract promised,
+    // and nothing on it speaks of a pull request or a merge.
+    const card = screen.getByRole("button", { name: row.ticket.title });
+    expect(card.className).toContain("task-card--green");
+    expect(await within(card).findByText(detail.contract.outcome)).toBeTruthy();
+    expect(within(card).queryByText(/pull request|merge/i)).toBeNull();
     home.unmount();
     client.setQueryData(["detail", row.repoId, row.ticket.key], detail);
     render(
@@ -504,6 +511,11 @@ describe("interactive desktop flows", () => {
       newer.ticket.state = "ready";
       newer.ticket.updated_at = "2026-09-09T00:00:00.000Z";
         workspace.tasks = [newer, row];
+      // The newer ticket opened last, so where both run it comes first.
+      workspace.lastOpened = {
+        [row.repoId + ":" + row.ticket.key]: "2026-09-01T00:00:00.000Z",
+        [newer.repoId + ":" + newer.ticket.key]: "2026-09-09T00:00:00.000Z",
+      };
       workspace.jobs = outcome === "unrecorded" ? [] : [{
         id: "home-run",
         repoId: row.repoId,
@@ -523,10 +535,11 @@ describe("interactive desktop flows", () => {
       mountTaskFromHome(workspace, row.repoId, detail);
       const card = screen.getByRole("button", { name: row.ticket.title });
       if (outcome === "running") {
-        expect(screen.queryByRole("button", { name: "See the stopped run" })).toBeNull();
+        expect(card.className).not.toContain("task-card--red");
+        expect(card.querySelector(".stage-pill")!.textContent).not.toBe("loop stopped");
         expect(screen.queryByText("1 stopped")).toBeNull();
         expect(document.querySelector(".task-card")).not.toBe(card);
-        fireEvent.click(within(card).getByRole("button", { name: "Watch" }));
+        fireEvent.click(card);
         expect(screen.queryByRole("button", { name: "See the stopped run" })).toBeNull();
         expect((screen.getByRole("button", { name: "Stop the loop" }) as HTMLButtonElement).disabled).toBe(false);
         return;
@@ -535,7 +548,8 @@ describe("interactive desktop flows", () => {
         // A stop asked and not yet finished is the stopped run already: the
         // person said it is over, and the record catches up on its own page.
         expect(screen.getByText("1 stopped")).toBeTruthy();
-        fireEvent.click(within(card).getByRole("button", { name: "See the stopped run" }));
+        expect(card.querySelector(".stage-pill")!.textContent).toBe("loop stopped");
+        fireEvent.click(card);
         expect(screen.getByRole("heading", { name: "The run was stopped" })).toBeTruthy();
         expect((screen.getByRole("button", { name: "Continue the task" }) as HTMLButtonElement).disabled).toBe(true);
         return;
@@ -543,7 +557,8 @@ describe("interactive desktop flows", () => {
       expect(screen.getByText("1 stopped")).toBeTruthy();
       expect(document.querySelector(".task-card")).toBe(card);
       expect(within(card).getByText(/The run stopped/)).toBeTruthy();
-      fireEvent.click(within(card).getByRole("button", { name: "See the stopped run" }));
+      expect(card.querySelector(".stage-pill")!.textContent).toBe("loop stopped");
+      fireEvent.click(card);
       expect(screen.getByRole("heading", { name: "The run was stopped" })).toBeTruthy();
       expect(detail.ticket.state).toBe("provisioning");
       expect(workspace.jobs[0]?.state).toBe(outcome === "unrecorded" ? undefined : outcome);
@@ -587,19 +602,27 @@ describe("interactive desktop flows", () => {
       mountTaskFromHome(workspace, row.repoId, detail);
       const card = screen.getByRole("button", { name: row.ticket.title });
       if (state === "changes_requested") {
-        expect(within(card).queryByRole("button", { name: "See the stopped run" })).toBeNull();
-        fireEvent.click(within(card).getByRole("button", { name: "Answer" }));
+        expect(card.className).toContain("task-card--yellow");
+        fireEvent.click(card);
+        // What ended the run is said first, from the attempt it recorded rather
+        // than the job's exit, and the decision follows once it is read.
+        const ended = screen.getByRole("dialog", { name: "The run ended" });
+        expect(ended.querySelector(".ended-sentence")?.textContent).toMatch(/^The review escalated the change to you\./);
+        expect(ended.querySelector(".ended-log")).toBeNull();
+        expect(screen.queryByText("CLI exited with code 2.")).toBeNull();
+        fireEvent.click(within(ended).getByRole("button", { name: "Got it" }));
         const dialog = screen.getByRole("dialog", { name: "Decisions required" });
         expect(within(dialog).getByText(question)).toBeTruthy();
         expect(screen.getByRole("heading", { name: "Paused for a decision" })).toBeTruthy();
         expect(screen.queryByRole("button", { name: "See the stopped run" })).toBeNull();
       } else if (state === "pr_open") {
-        expect(within(card).queryByRole("button", { name: "See the stopped run" })).toBeNull();
-        fireEvent.click(within(card).getByRole("button", { name: "Review result" }));
+        expect(card.className).toContain("task-card--green");
+        fireEvent.click(card);
         expect(screen.getByRole("heading", { name: "Review the result" })).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Start the loop" })).toBeNull();
       } else {
-        fireEvent.click(within(card).getByRole("button", { name: "See the stopped run" }));
+        expect(card.querySelector(".stage-pill")!.textContent).toBe("loop stopped");
+        fireEvent.click(card);
         expect(screen.getByRole("heading", { name: "The run was stopped" })).toBeTruthy();
         expect(screen.queryByRole("dialog", { name: "Decisions required" })).toBeNull();
       }
@@ -664,7 +687,8 @@ describe("interactive desktop flows", () => {
         detail.attempts = detail.attempts.map((attempt) => ({ ...attempt, bundles: [] }));
       mountTaskFromHome(workspace, row.repoId, detail);
       const card = screen.getByRole("button", { name: row.ticket.title });
-      fireEvent.click(within(card).getByRole("button", { name: "See the stopped run" }));
+      expect(card.className).toContain("task-card--red");
+      fireEvent.click(card);
       expect(screen.getByRole("heading", { name: "The run was stopped" })).toBeTruthy();
       const sent = holdRun();
       fireEvent.click(screen.getByRole("button", { name: "Continue the task" }));
@@ -694,7 +718,8 @@ describe("interactive desktop flows", () => {
       stoppedRun.publish = wanted;
       mountTaskFromHome(workspace, row.repoId, detail);
       const card = screen.getByRole("button", { name: row.ticket.title });
-      fireEvent.click(within(card).getByRole("button", { name: "See the stopped run" }));
+      expect(card.className).toContain("task-card--red");
+      fireEvent.click(card);
       expect(screen.queryByRole("checkbox")).toBeNull();
       const sent = holdRun();
       fireEvent.click(screen.getByRole("button", { name: "Continue the task" }));
@@ -813,6 +838,47 @@ describe("interactive desktop flows", () => {
         await home();
         await openByLink(plan);
         expect(on("stopped")).toBe(true);
+      } finally {
+        const live = await liveRun(plan.repoId, plan.key);
+        if (live) {
+          await sampleBridge.request({ kind: "cancel", jobId: live.id });
+          await gone(live.id);
+        }
+      }
+    });
+
+    /**
+     * Approving rewrites the ticket's record twice within the first seconds —
+     * `perbo approve`, then the run moving it on — and a read of the store that
+     * lands on a record mid-write is answered with the host's sentence for a
+     * ticket it cannot find. A read that fails once the page holds the ticket
+     * is a refresh that failed, not a page that did: the loop stays, and the
+     * read that follows replaces what it shows.
+     */
+    it("stays on the loop when a read of the ticket fails while approving moves it", async () => {
+      const plan = await compiled("Stay on the loop");
+      const original = bridge.request.bind(bridge);
+      let approved = false,
+        failing = true,
+        failed = 0;
+      vi.spyOn(bridge, "request").mockImplementation(((request: Parameters<typeof original>[0]) => {
+        if (request.kind === "run") approved = true;
+        if (approved && failing && request.kind === "detail") {
+          failed++;
+          return Promise.reject(new Error("This task is no longer in the repository's ticket store."));
+        }
+        return original(request);
+      }) as typeof bridge.request);
+      try {
+        fireEvent.click(screen.getByRole("button", { name: "Approve · start the loop" }));
+        await waitFor(() => expect(failed).toBeGreaterThan(0), { timeout: 8000 });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+        expect(on("s12") || on("s10")).toBe(true);
+        expect(screen.getByText(/This task is no longer in the repository's ticket store\./)).toBeTruthy();
+        failing = false;
+        await waitFor(() => expect(screen.queryByText(/no longer in the repository's ticket store/)).toBeNull(), { timeout: 8000 });
+        expect(on("s12") || on("stopped") || on("s13")).toBe(true);
       } finally {
         const live = await liveRun(plan.repoId, plan.key);
         if (live) {
@@ -1424,7 +1490,8 @@ describe("Plan it again on a stopped run (D-129)", () => {
       request.kind === "replan" ? held.then(() => original(request)) : original(request)) as typeof host.request);
     mountFresh();
     const card = await screen.findByRole("button", { name: title });
-    fireEvent.click(within(card).getByRole("button", { name: "See the stopped run" }));
+    expect(card.className).toContain("task-card--red");
+    fireEvent.click(card);
     fireEvent.click(await screen.findByRole("button", { name: "Plan it again" }));
     // At once: the host still holds the ticket, and Home does not list it.
     expect((await original({ kind: "snapshot" })).tasks.some((task) => task.ticket.key === "PRB-415")).toBe(true);
@@ -1456,7 +1523,9 @@ describe("Plan it again on a stopped run (D-129)", () => {
         ? Promise.reject(new Error("PRB-415 was not drafted from a spec"))
         : original(request)) as typeof host.request);
     mountFresh();
-    fireEvent.click(within(await screen.findByRole("button", { name: title })).getByRole("button", { name: "See the stopped run" }));
+    const card = await screen.findByRole("button", { name: title });
+    expect(card.className).toContain("task-card--red");
+    fireEvent.click(card);
     fireEvent.click(await screen.findByRole("button", { name: "Plan it again" }));
     // The reason stays on the page it was pressed on.
     expect(await screen.findByText(/was not drafted from a spec/)).toBeTruthy();
@@ -1554,7 +1623,8 @@ describe("deleting a stopped run", () => {
     detail.ticket = row.ticket;
     mountTaskFromHome(after, repoId, detail);
     const card = screen.getByRole("button", { name: row.ticket.title });
-    fireEvent.click(within(card).getByRole("button", { name: "See the stopped run" }));
+    expect(card.className).toContain("task-card--red");
+    fireEvent.click(card);
     fireEvent.click(screen.getByRole("button", { name: "Delete this work" }));
     const asking = await screen.findByRole("dialog", { name: "Delete #415?" });
     fireEvent.click(within(asking).getByRole("button", { name: "Delete permanently" }));

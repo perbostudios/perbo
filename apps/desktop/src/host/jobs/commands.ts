@@ -69,9 +69,14 @@ export function doctorArgs(configPath: string, writeConfig: boolean): string[] {
   return ["doctor", "--json", "--config", configPath, ...(writeConfig ? ["--write-config"] : [])];
 }
 
+/**
+ * `admit --from-spec`, with `--keep-title` where the person gave the spec the
+ * title it states: the ticket takes their name and the spec keeps it (D-127).
+ */
 export function admitFromSpecArgs(
   spec: string,
   startOver: string | null,
+  keepTitle: boolean,
   provider: string,
   model: string,
 ): string[] {
@@ -82,6 +87,7 @@ export function admitFromSpecArgs(
     "--from-spec",
     spec,
     ...(startOver === null ? [] : ["--start-over", startOver]),
+    ...(keepTitle ? ["--keep-title"] : []),
     "--provider",
     provider,
     "--model",

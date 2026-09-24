@@ -6,7 +6,7 @@ import {
   discardEditingFor,
   forgetRepository,
   forgetTicket,
-  seedArchived,
+  recordOpened,
   setArchived,
 } from "./preferences.js";
 
@@ -29,6 +29,8 @@ const session = (over: Record<string, unknown>): Record<string, unknown> => ({
   change: null,
   lastPane: null,
   lastView: null,
+  specCut: null,
+  named: null,
   interviewModel: null,
   ...over,
 });
@@ -45,6 +47,7 @@ function profile(over: Record<string, unknown> = {}): ProfileState {
     titles: { [alpha + ":PRB-1"]: "Renamed", [beta + ":PRB-9"]: "Another repository's" },
     taskModels: { [alpha + ":PRB-1"]: TaskModelsSchema.strip().parse(SettingsSchema.parse({})) },
     archived: [alpha + ":PRB-1", alpha + ":PRB-2", beta + ":PRB-9"],
+    lastOpened: { [alpha + ":PRB-1"]: "2026-09-20T09:00:00.000Z", [beta + ":PRB-9"]: "2026-09-21T09:00:00.000Z" },
     ...over,
   });
 }
@@ -57,6 +60,7 @@ describe("forgetRepository", () => {
     expect(state.titles).toEqual({ [beta + ":PRB-9"]: "Another repository's" });
     expect(state.taskModels).toEqual({});
     expect(state.archived).toEqual([beta + ":PRB-9"]);
+    expect(state.lastOpened).toEqual({ [beta + ":PRB-9"]: "2026-09-21T09:00:00.000Z" });
   });
 
   it("leaves a repository whose id is not the one forgotten", () => {
@@ -68,18 +72,32 @@ describe("forgetRepository", () => {
 });
 
 describe("forgetTicket", () => {
-  it("drops that one ticket's title, models and archive mark", () => {
+  it("drops that one ticket's title, models, archive mark and last opening", () => {
     const state = profile();
     forgetTicket(state, alpha, "PRB-1");
     expect(state.titles).toEqual({ [beta + ":PRB-9"]: "Another repository's" });
     expect(state.taskModels).toEqual({});
     expect(state.archived).toEqual([alpha + ":PRB-2", beta + ":PRB-9"]);
+    expect(state.lastOpened).toEqual({ [beta + ":PRB-9"]: "2026-09-21T09:00:00.000Z" });
   });
 
   it("leaves the same key in another repository alone", () => {
     const state = profile({ archived: [alpha + ":PRB-1", beta + ":PRB-1"] });
     forgetTicket(state, alpha, "PRB-1");
     expect(state.archived).toEqual([beta + ":PRB-1"]);
+  });
+});
+
+describe("recordOpened", () => {
+  it("writes the time a ticket's page opened, replacing the last one and no other", () => {
+    const state = profile();
+    recordOpened(state, alpha, "PRB-1", new Date("2026-09-24T10:30:00.000Z"));
+    recordOpened(state, alpha, "PRB-2", new Date("2026-09-24T10:31:00.000Z"));
+    expect(state.lastOpened).toEqual({
+      [alpha + ":PRB-1"]: "2026-09-24T10:30:00.000Z",
+      [alpha + ":PRB-2"]: "2026-09-24T10:31:00.000Z",
+      [beta + ":PRB-9"]: "2026-09-21T09:00:00.000Z",
+    });
   });
 });
 
@@ -125,33 +143,5 @@ describe("discardEditingFor", () => {
     });
     expect(discardEditingFor(state, alpha, "PRB-1")).toEqual([]);
     expect(state.editingSessions.map((entry) => entry.phase)).toEqual(["editing", "editing"]);
-  });
-});
-
-describe("seedArchived", () => {
-  const row = (key: string, state: string): { repoId: string; ticket: { key: string; state: string } } => ({
-    repoId: alpha,
-    ticket: { key, state },
-  });
-
-  it("files what had already finished, once", () => {
-    const state = profile({ archived: [], archivedSeeded: false });
-    expect(
-      seedArchived(state, [row("PRB-1", "merged"), row("PRB-2", "executing"), row("PRB-3", "closed")]),
-    ).toBe(true);
-    expect(state.archived).toEqual([alpha + ":PRB-1", alpha + ":PRB-3"]);
-    expect(state.archivedSeeded).toBe(true);
-  });
-
-  it("does nothing on a profile that has already been seeded", () => {
-    const state = profile({ archived: [], archivedSeeded: true });
-    expect(seedArchived(state, [row("PRB-1", "merged")])).toBe(false);
-    expect(state.archived).toEqual([]);
-  });
-
-  it("keeps what the person had already filed by hand", () => {
-    const state = profile({ archived: [alpha + ":PRB-9"], archivedSeeded: false });
-    seedArchived(state, [row("PRB-1", "merged")]);
-    expect(state.archived).toEqual([alpha + ":PRB-9", alpha + ":PRB-1"]);
   });
 });

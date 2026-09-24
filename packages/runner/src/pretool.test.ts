@@ -94,10 +94,8 @@ describe("what the guard vouches for", () => {
   it("says nothing about a verb it has no grounds for, so the outer list decides", () => {
     // `allow` here would run it: a hook's admission bypasses `--allowedTools`
     // entirely. Silence is what keeps `script -q /dev/null …` refused, and the
-    // same silence is what stops the runner refusing `pwd`, which the agent's
-    // own layer has always admitted with no entry of its own.
+    // same silence leaves `ls -la` to the list that carries it.
     expect(judgeBash("script -q /dev/null node build.js").decision.answer).toBe("defer");
-    expect(judgeBash("pwd").decision.answer).toBe("defer");
     expect(judgeBash("ls -la").decision.answer).toBe("defer");
     // And one unvouched command on the line takes the whole line with it.
     expect(judgeBash("mkdir -p a && script -q /dev/null node x.js").decision.answer).toBe("defer");

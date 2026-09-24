@@ -7,6 +7,7 @@ import { bridge } from "../workspace/index.js";
 import { useContractEditing } from "../contract-editor.js";
 import { changeKey, textMarks } from "./change-marks.js";
 import { SpecSection } from "./SpecSection.js";
+import { useTurnSending } from "./InterviewDock.js";
 import { INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
 import type { Change, ExportedName, SpecSections, SpecView } from "../../shared/protocol.js";
 import type { PageProps } from "../shell/route.js";
@@ -157,6 +158,15 @@ export function SpecPane({
   // a resend that finds nothing left to send — anything else leaves the next
   // save read against a base the person can no longer see.
   const refused = useRef<SpecView | null>(null);
+  // The title a file's title line gives the field: none while it is still the
+  // cut the host named the folder from (D-118), which is no title, and no
+  // plan has been drafted. The field is then empty, for the person to name
+  // the work or for the Architect's title to fill once it replaces the cut in
+  // the file; once a plan is drafted the title line is the ticket's name
+  // (D-127), whatever its words.
+  const cut = (editor.session?.key ?? null) === null ? (editor.session?.specCut ?? null) : null;
+  const titleIn = (source: SpecView | null | undefined): string =>
+    source === null || source === undefined || source.title === cut ? "" : source.title;
 
   // One save at a time. Two in flight would each read the file without the
   // other's ids and number the same requirements twice; a section left while a
@@ -242,7 +252,7 @@ export function SpecPane({
     // under it; what was typed over one the file fills goes, because the pane
     // never showed that text and saving against it would replace it unseen.
     if (first) {
-      if (view.title !== "") setTitle(null);
+      if (titleIn(view) !== "") setTitle(null);
       setEdited((current) =>
         Object.fromEntries(
           Object.entries(current).filter(
@@ -258,7 +268,7 @@ export function SpecPane({
   }, [view]);
 
   const sections: SpecSections = { ...(view?.sections ?? EMPTY), ...edited };
-  const shownTitle = title ?? view?.title ?? "";
+  const shownTitle = title ?? titleIn(view);
   // The last change to the spec, as marks placed in each section's after-text
   // (D-128). Diffed once per change
   // rather than per render or per session read: a keystroke in one section
@@ -292,7 +302,11 @@ export function SpecPane({
     // live query: the file may have moved again since, and that move has to
     // come back refused in its turn rather than be read as if this writer
     // had already seen it.
-    const wanted = { title: shownTitle, sections: { ...sections, ...over }, base: refused.current ?? view };
+    // A title the person has not typed, or has typed blank, is the file's,
+    // the cut included: a save of a section leaves the title line as it is
+    // rather than being held back for want of one.
+    const typed = title !== null && title.trim().length > 0 ? title : null;
+    const wanted = { title: typed ?? view.title, sections: { ...sections, ...over }, base: refused.current ?? view };
     if (wanted.title.trim().length === 0) return null;
     if (
       wanted.title === view.title &&
@@ -386,23 +400,28 @@ export function SpecPane({
   // being asked — the answers land in a spec the contract was already drafted
   // from.
   const asked = editor.session?.asking ?? null;
-  // A turn the interview is still taking, which is not a reason to withhold
-  // the press: the press ends the turn and drafts from what it wrote, so one
-  // press does both and nobody has to stop the interview by hand first. It is
-  // what the sentence under the button says instead.
-  const midTurn = (workspace.working ?? []).includes(sessionId);
+  // A turn the chat is still taking, from the moment the person sends it —
+  // over the bridge, before the host has said it is under way — to the
+  // moment the host says it is over. The press waits for it: whatever the
+  // person last asked the chat for reaches the spec before the drafter reads
+  // it (D-102).
+  const sending = useTurnSending(sessionId);
+  const midTurn = sending || (workspace.working ?? []).includes(sessionId);
   // The drafter reads the file, so the press is offered once a title and an
   // outcome are in it: `parseSpec` refuses a spec without either.
   const stated = Boolean(view?.slug) && (view?.sections.outcome.trim().length ?? 0) > 0;
-  const ready = stated && asked === null;
   // Why a plan cannot be drafted from this stated spec yet, or null where it
   // can. One sentence, read under this pane's own button, which is held while
   // it says anything: this is the one press that turns a spec into a plan
   // (D-102), so a person who cannot make it reads why before they reach for it
   // rather than after.
-  const notReady = ready
-    ? null
-    : "Answer the chat's questions first — its answers change the spec this drafts from.";
+  const notReady =
+    asked !== null
+      ? "Answer the chat's questions first — its answers change the spec this drafts from."
+      : midTurn
+        ? "The chat is still talking. Generate plan is yours once it has finished this turn."
+        : null;
+  const ready = stated && notReady === null;
   // What the drafter refused the last press with, said where the press was
   // made: the job runs on the working screen, and the pane it hands back to is
   // the only place a person looks for why no plan came of it.
@@ -619,11 +638,9 @@ export function SpecPane({
                   </Button>
                   <span className="small muted">
                     {notReady ??
-                      (midTurn
-                        ? "The chat is still talking. Pressing stops it and drafts the plan from the spec as it stands."
-                        : drafted
-                          ? "The chat has drafted the spec: read it and change what you want first. Press once, and the drafter turns it into a contract and an execution graph."
-                          : "Press once. The drafter turns the spec into a contract and an execution graph.")}
+                      (drafted
+                        ? "The chat has drafted the spec: read it and change what you want first. Press once, and the drafter turns it into a contract and an execution graph."
+                        : "Press once. The drafter turns the spec into a contract and an execution graph.")}
                   </span>
                 </>
               ) : (

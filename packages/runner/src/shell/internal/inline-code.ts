@@ -7,6 +7,7 @@ import {
   type InlineStatementForm,
 } from "./inline-tables.js";
 import type { Word } from "./lexer.js";
+import { inspectSegments } from "./line.js";
 import { allowedPathsSentence, prohibitedPathsSentence, type Cwd } from "./scope.js";
 
 /** The receiver `write_text` is read on: a `Path` built from one literal. */
@@ -29,16 +30,19 @@ const INLINE_CONTROL = /^(for|while|if|elif|else)\b([\s\S]*)$/;
 /**
  * The languages this guard tells apart, which is as far as its reading goes.
  *
- * One question turns on it and one only: a backtick. In JavaScript it opens a
+ * The question that turns on it most is a backtick. In JavaScript it opens a
  * template literal, which is a string. In Perl, Ruby and PHP it runs a shell
- * command, which is the thing this guard exists to refuse.
+ * command, which is the thing this guard exists to refuse. The others are
+ * where a program writes without a call: `awk`'s own `>` redirect, and the
+ * `exec` that runs a command in Perl, Ruby and PHP and Python code in Python.
  */
-type InlineLanguage = "js" | "python" | "shellish" | "other";
+type InlineLanguage = "js" | "python" | "shellish" | "awk" | "other";
 
 function inlineLanguage(verb: string): InlineLanguage {
   if (verb === "node" || verb === "nodejs" || verb === "deno" || verb === "bun") return "js";
   if (verb.startsWith("python") || verb.startsWith("pypy")) return "python";
   if (verb === "perl" || verb === "ruby" || verb === "php") return "shellish";
+  if (verb.endsWith("awk")) return "awk";
   return "other";
 }
 
@@ -73,33 +77,6 @@ export function unwrapped(raw: string): string {
   return text;
 }
 
-/** The quoted strings in a piece of source, whatever quote the language uses. */
-function stringLiterals(code: string): string[] {
-  const found: string[] = [];
-  let i = 0;
-  while (i < code.length) {
-    const quote = code[i]!;
-    if (quote !== '"' && quote !== "'" && quote !== "`") {
-      i += 1;
-      continue;
-    }
-    let value = "";
-    let j = i + 1;
-    while (j < code.length && code[j] !== quote) {
-      if (code[j] === "\\") {
-        value += code[j + 1] ?? "";
-        j += 2;
-        continue;
-      }
-      value += code[j];
-      j += 1;
-    }
-    found.push(value);
-    i = j + 1;
-  }
-  return found;
-}
-
 /**
  * The source with every string literal replaced by a token that stands for it.
  *
@@ -107,13 +84,16 @@ function stringLiterals(code: string): string[] {
  * text is data rather than code: a `>` inside a string is not a redirect, and
  * `rm -rf /` inside one is not a command. Masking them first is what lets the
  * rest of the scan be a plain character-and-name check. The literals are kept
- * so the two places that need to see one — a file mode and a module name — can.
+ * for the places that read one: a file mode, a module name, the destination of
+ * a write and the command a spawn runs. So is the body of every Perl, Ruby or
+ * PHP backtick, which is a shell command whose writes are read like any other.
  */
 function maskLiterals(
   code: string,
   language: InlineLanguage,
-): { masked: string; literals: string[]; spawned: boolean } {
+): { masked: string; literals: string[]; spawned: boolean; commands: string[] } {
   const literals: string[] = [];
+  const commands: string[] = [];
   let masked = "";
   let spawned = false;
   let i = 0;
@@ -139,6 +119,7 @@ function maskLiterals(
       // Perl, Ruby and PHP run what is between backticks. The backtick is kept
       // so the expression check trips on it, and named so the refusal says why.
       spawned = true;
+      commands.push(value);
       masked += "`";
     } else {
       masked += `§${literals.length}§`;
@@ -146,7 +127,7 @@ function maskLiterals(
     }
     i = j + 1;
   }
-  return { masked, literals, spawned };
+  return { masked, literals, spawned, commands };
 }
 
 /** Everything after a comment marker on each line, which runs nothing. */
@@ -179,6 +160,18 @@ function splitStatements(masked: string): string[] {
   }
   statements.push(current);
   return statements.map((statement) => statement.trim()).filter((statement) => statement !== "");
+}
+
+/**
+ * The names this code binds itself. An assigned name — a binding, a loop
+ * variable — carries the answer of an expression the scan already read, so a
+ * method on it is judged by the method's name. An imported name is a module,
+ * and a module's attributes are judged by their full dotted name only: that is
+ * the line that keeps `import os` from meaning `os.remove`.
+ */
+interface BoundNames {
+  assigned: Set<string>;
+  imported: Set<string>;
 }
 
 /** The vocabulary the table adds up to, read once per piece of code. */
@@ -286,13 +279,23 @@ function guardedCall(
   name: string,
   masked: string,
   at: number,
+  method: boolean,
   literals: string[],
   vocabulary: InlineVocabulary,
 ): string | null {
   const last = name.split(".").pop()!;
   if (last === "open") {
+    // The function `open(path, mode)` takes its mode second; a method —
+    // `Path(…).open(mode)`, whatever `.open` is called on — takes it first.
+    // Either may spell it `mode=`, and a keyword argument is not a position.
     const args = callArguments(masked, at);
-    const mode = args[1];
+    const keyword = args
+      .map((argument) => /^mode\s*=(?!=)\s*([\s\S]*)$/.exec(argument)?.[1])
+      .find((value) => value !== undefined);
+    const positional = args.filter(
+      (argument) => argument !== "" && !/^[A-Za-z_]\w*\s*=(?!=)/.test(argument),
+    );
+    const mode = keyword ?? positional[method ? 0 : 1];
     if (mode === undefined) return null;
     const literal = literalArgument(mode, literals);
     if (literal !== null && READ_MODE.test(literal)) return null;
@@ -320,11 +323,15 @@ function plainWrite(
   name: string,
   masked: string,
   at: number,
+  method: boolean,
   literals: string[],
 ): { target: string } | { reason: string } | null {
   const last = name.split(".").pop()!;
   const rule = PLAIN_WRITE_CALLS.find((entry) => entry.name === last);
   if (rule === undefined) return null;
+  // `open(path, mode)` is the function. A method `.open` names its file on the
+  // receiver, which is `guardedCall`'s to refuse in a write mode.
+  if (rule.name === "open" && method) return null;
   const args = callArguments(masked, at);
   if (rule.name === "open") {
     // A read mode, or a mode this scan cannot read at all, is not a write it
@@ -359,7 +366,7 @@ function plainWrite(
 function unreadableExpression(
   expression: string,
   vocabulary: InlineVocabulary,
-  bound: Set<string>,
+  bound: BoundNames,
   literals: string[],
   destinations: string[],
 ): string | null {
@@ -373,6 +380,16 @@ function unreadableExpression(
       ? "a backtick runs a shell command"
       : `\`${offending}\` is not a character a read-only expression may contain`;
   }
+  // A call on something other than a name — `f[0](…)`, `(f)(…)`, `g()(…)` —
+  // calls a value this scan never read as a callee: `[os.remove][0]('/x')`
+  // runs `os.remove` without a name in call position anywhere.
+  if (/[\])]\s*\(/.test(text)) {
+    return "a call on a subscript or a parenthesised value is not a callee this table can name";
+  }
+  // A dunder reaches the machinery behind a name: `os.__dict__['system']` is
+  // `os.system` spelled so no table sees it.
+  const dunder = /\.\s*(__[A-Za-z0-9_]*__)(?![\w$])/.exec(text);
+  if (dunder !== null) return `\`${dunder[1]}\` is not a name the read-only table knows`;
   // The calls first, then the same text with each call's name blanked, so a
   // callee is never read a second time as a bare value.
   let remaining = text;
@@ -393,7 +410,8 @@ function unreadableExpression(
     // A plain write to a literal path is a shape this guard reads, whatever the
     // table makes of the name: the destination is what decides it, and the pass
     // that resolves paths answers that.
-    const plain = plainWrite(name, text, match.index, literals);
+    const method = segments.length > 1 || before.endsWith(".");
+    const plain = plainWrite(name, text, match.index, method, literals);
     if (plain !== null) {
       if ("reason" in plain) return plain.reason;
       destinations.push(plain.target);
@@ -404,12 +422,12 @@ function unreadableExpression(
     // A method on a receiver this scan cannot name — a literal, a subscript,
     // the result of another call — is judged by its method name alone.
     const onUnnamedReceiver = segments.length === 1 && before.endsWith(".");
-    const onBoundName = segments.length > 1 && bound.has(segments[0]!);
+    const onBoundName = segments.length > 1 && bound.assigned.has(segments[0]!);
     const known = vocabulary.calls.has(name)
       ? true
       : (onUnnamedReceiver || onBoundName) && vocabulary.methods.has(segments[segments.length - 1]!);
     if (!known) return `\`${name}\` is not a call the read-only table names`;
-    const guard = guardedCall(name, text, match.index, literals, vocabulary);
+    const guard = guardedCall(name, text, match.index, method, literals, vocabulary);
     if (guard !== null) return guard;
     blank(match.index, match[1]!.length);
     match = INLINE_CALL.exec(text);
@@ -429,7 +447,12 @@ function unreadableExpression(
       // statement that is itself an assignment was read as a binding before it
       // reached here.
       /^\s*=(?![=>])/.test(remaining.slice(name.index + name[0].length)) ||
-      bound.has(segments[0]!) ||
+      bound.assigned.has(segments[0]!) ||
+      // A module as a value is the module; an attribute of one is a value only
+      // where the table names it, in `names` below or as a call. `os.remove`
+      // passed around as a value is `os.remove` called later.
+      (bound.imported.has(segments[0]!) &&
+        (segments.length === 1 || vocabulary.calls.has(dotted))) ||
       // A field reference (`$1`) or a variable read (`$path`) is a value, and
       // reading a value writes nothing.
       dotted.startsWith("$") ||
@@ -539,7 +562,7 @@ function unreadableImport(
 function unreadableStatement(
   statement: string,
   vocabulary: InlineVocabulary,
-  bound: Set<string>,
+  bound: BoundNames,
   literals: string[],
   destinations: string[],
   depth = 0,
@@ -600,7 +623,7 @@ function unreadableStatement(
 function unreadableHeader(
   header: string,
   vocabulary: InlineVocabulary,
-  bound: Set<string>,
+  bound: BoundNames,
   literals: string[],
   destinations: string[],
 ): string | null {
@@ -633,10 +656,10 @@ function readInlineCode(
   if (spawned) return { construct: "a backtick runs a shell command", destinations };
   const vocabulary = inlineVocabulary();
   const statements = splitStatements(withoutComments(masked, language));
-  const bound = assignedNames(statements);
+  const bound: BoundNames = { assigned: assignedNames(statements), imported: new Set() };
   for (const statement of statements) {
     for (const name of importedNames(statement)) {
-      if (name !== "") bound.add(name);
+      if (name !== "") bound.imported.add(name);
     }
   }
   for (const statement of statements) {
@@ -647,14 +670,528 @@ function readInlineCode(
 }
 
 /**
+ * A string that names a resource by its scheme — `https://registry.npmjs.org/x`,
+ * `file:///etc/hosts` — rather than a file by its path. It is never a
+ * destination this reading judges: read as a path, `https://host/x` resolves to
+ * a directory called `https:` that nothing in the code writes to.
+ */
+const SCHEME_URL = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
+
+/**
+ * Which operands of a call name a file it writes. A list is those operands by
+ * position; `each` is every operand (`File.delete(a, b)`); `mode` is an `open`,
+ * which writes only where its mode is a literal that writes.
+ */
+type WriteOperands = readonly number[] | "each" | "mode";
+
+/** How a spawn call is handed its command: one shell string, or an argv. */
+type SpawnForm = "shell" | "argv";
+
+const byModule = <T>(entries: Record<string, Record<string, T>>) =>
+  new Map(
+    Object.entries(entries).map(([module, calls]) => [module, new Map(Object.entries(calls))]),
+  );
+
+/**
+ * The calls that write a file, by the module that owns them, and which of
+ * their operands is the file.
+ *
+ * A call is placed by its module, so `os.remove` is a write and `list.remove`
+ * is not. The module is the one the code bound that name to — an `import … as`,
+ * a `require`, a destructured binding, a plain alias — or the name itself where
+ * the runtime supplies it unloaded: `fs` in `node -e`, `Deno`, `Bun`, `File`.
+ * `builtins` is a bare call nothing bound. A copy or a link writes its
+ * destination and reads its source; a rename or a move writes both, because
+ * the source is gone afterwards.
+ */
+const WRITE_CALLS = byModule<WriteOperands>({
+  fs: {
+    writeFile: [0], writeFileSync: [0], appendFile: [0], appendFileSync: [0],
+    createWriteStream: [0], open: "mode", openSync: "mode",
+    rename: [0, 1], renameSync: [0, 1], unlink: [0], unlinkSync: [0], rm: [0], rmSync: [0],
+    rmdir: [0], rmdirSync: [0], mkdir: [0], mkdirSync: [0], mkdtemp: [0], mkdtempSync: [0],
+    copyFile: [1], copyFileSync: [1], cp: [1], cpSync: [1],
+    symlink: [1], symlinkSync: [1], link: [1], linkSync: [1],
+    truncate: [0], truncateSync: [0], chmod: [0], chmodSync: [0], chown: [0], chownSync: [0],
+    utimes: [0], utimesSync: [0],
+    // `fs-extra`, which is read as `fs`.
+    outputFile: [0], outputFileSync: [0], outputJson: [0], outputJsonSync: [0],
+    writeJson: [0], writeJsonSync: [0], remove: [0], removeSync: [0],
+    copy: [1], copySync: [1], move: [0, 1], moveSync: [0, 1],
+    ensureDir: [0], ensureDirSync: [0], ensureFile: [0], ensureFileSync: [0],
+    emptyDir: [0], emptyDirSync: [0], mkdirp: [0], mkdirs: [0],
+  },
+  os: {
+    remove: [0], unlink: [0], rmdir: [0], removedirs: [0], mkdir: [0], makedirs: [0],
+    rename: [0, 1], renames: [0, 1], replace: [0, 1], symlink: [1], link: [1],
+    truncate: [0], chmod: [0], chown: [0], lchown: [0], utime: [0], mkfifo: [0],
+  },
+  shutil: {
+    rmtree: [0], copy: [1], copy2: [1], copyfile: [1], copytree: [1], copymode: [1],
+    copystat: [1], move: [0, 1], make_archive: [0], unpack_archive: [1],
+  },
+  io: { open: "mode" },
+  codecs: { open: "mode" },
+  builtins: {
+    open: "mode", fopen: "mode",
+    // Perl's and PHP's own names for the same acts.
+    unlink: "each", mkdir: [0], rmdir: [0], rename: [0, 1], file_put_contents: [0],
+    copy: [1], touch: [0], symlink: [1], link: [1],
+  },
+  Deno: {
+    writeFile: [0], writeFileSync: [0], writeTextFile: [0], writeTextFileSync: [0],
+    remove: [0], removeSync: [0], mkdir: [0], mkdirSync: [0], rename: [0, 1],
+    renameSync: [0, 1], copyFile: [1], copyFileSync: [1], create: [0], createSync: [0],
+    truncate: [0], truncateSync: [0], symlink: [1], symlinkSync: [1],
+    link: [1], linkSync: [1], chmod: [0], chmodSync: [0],
+  },
+  Bun: { write: [0] },
+  File: {
+    write: [0], binwrite: [0], delete: "each", unlink: "each", rename: [0, 1], open: "mode",
+    new: "mode", symlink: [1], link: [1], truncate: [0],
+  },
+  IO: { write: [0], binwrite: [0] },
+  FileUtils: {
+    rm: [0], rm_r: [0], rm_rf: [0], rm_f: [0], remove: [0], rmdir: [0], rmtree: [0],
+    remove_dir: [0], remove_file: [0], mkdir: [0], mkdir_p: [0], makedirs: [0], touch: [0],
+    cp: [1], cp_r: [1], copy: [1], copy_file: [1], mv: [0, 1], move: [0, 1],
+    ln: [1], ln_s: [1], ln_sf: [1], install: [1],
+  },
+});
+
+/**
+ * The methods a `Path` built from a literal writes that path with, and which
+ * other operands it writes besides: `Path('a').rename('b')` removes `a` and
+ * creates `b`. `open` writes it only in a write mode.
+ */
+const PATH_WRITES = new Map<string, readonly number[]>([
+  ["write_text", []], ["write_bytes", []], ["touch", []], ["mkdir", []], ["rmdir", []],
+  ["unlink", []], ["chmod", []], ["symlink_to", []], ["hardlink_to", []],
+  ["rename", [0]], ["replace", [0]], ["open", []],
+]);
+
+/**
+ * The calls that run a shell command or a program, by module. Their command is
+ * read by this guard's own shell reading, so `execSync('rm -rf /tmp/x')` is the
+ * write `rm -rf /tmp/x` is, and `execSync('command -v node')` is the read it is.
+ */
+const SPAWN_CALLS = byModule<SpawnForm>({
+  child_process: {
+    exec: "shell", execSync: "shell", spawn: "argv", spawnSync: "argv",
+    execFile: "argv", execFileSync: "argv",
+  },
+  os: { system: "shell", popen: "shell" },
+  subprocess: {
+    run: "argv", call: "argv", check_call: "argv", check_output: "argv", Popen: "argv",
+    getoutput: "shell", getstatusoutput: "shell",
+  },
+  Bun: { spawn: "argv", spawnSync: "argv" },
+  Open3: { capture2: "argv", capture2e: "argv", capture3: "argv", popen3: "argv" },
+  IO: { popen: "argv" },
+  builtins: { system: "argv", popen: "shell", shell_exec: "shell", passthru: "shell" },
+});
+
+/**
+ * Method names no library uses for anything but a write or a spawn, placed
+ * whatever they are called on: `require('fs').writeFileSync`, a path module
+ * someone named `p`, a receiver this scan cannot name at all. Every other name
+ * needs its module, which is what keeps `list.remove('x')` from being a write.
+ */
+const UNMISTAKABLE = new Set([
+  "writeFile", "writeFileSync", "appendFile", "appendFileSync", "createWriteStream",
+  "outputFile", "outputFileSync", "rmSync", "rmdirSync", "unlinkSync", "mkdirSync",
+  "renameSync", "copyFileSync", "cpSync", "symlinkSync", "truncateSync",
+  "writeTextFile", "writeTextFileSync", "rmtree", "makedirs", "removedirs", "copyfile",
+  "copytree", "execSync", "execFileSync", "spawnSync", "check_call", "check_output",
+  "Popen", "getoutput",
+]);
+
+/** The first module a table files a method under, for a name placed without one. */
+function unmistakable<T>(table: Map<string, Map<string, T>>, method: string): T | undefined {
+  if (!UNMISTAKABLE.has(method)) return undefined;
+  for (const calls of table.values()) {
+    const found = calls.get(method);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/** The module a load names, with the spellings that load the same one folded. */
+function moduleOf(spelled: string): string {
+  const name = spelled.replace(/^node:/, "").split(".")[0] ?? "";
+  if (name === "fs/promises" || name === "fs-extra" || name === "graceful-fs") return "fs";
+  if (name === "posix" || name === "nt") return "os";
+  return name;
+}
+
+const knownModule = (module: string) => WRITE_CALLS.has(module) || SPAWN_CALLS.has(module);
+
+/** What a name in the code is bound to: a module, or one member of it. */
+interface Binding {
+  module: string;
+  member: string | null;
+}
+
+interface Bindings {
+  modules: Map<string, Binding>;
+  /** Names bound to a `Path` built from a literal, and that literal. */
+  paths: Map<string, string>;
+}
+
+const NAME = String.raw`[A-Za-z_$][\w$]*`;
+const MEMBERS = String.raw`((?:\s*\.\s*[A-Za-z_$][\w$]*)*)`;
+const LOAD = String.raw`(?:await\s+)?(?:require|import|__import__)\s*\(\s*§(\d+)§\s*\)`;
+const BOUND_LOAD = new RegExp(String.raw`\b(${NAME})\s*=\s*${LOAD}${MEMBERS}`, "g");
+const DESTRUCTURED_LOAD = new RegExp(String.raw`\{([^{}]*)\}\s*=\s*${LOAD}${MEMBERS}`, "g");
+const ES_DEFAULT = new RegExp(
+  String.raw`\bimport\s+(?:\*\s*as\s+)?(${NAME})\s*(?:,\s*\{[^{}]*\}\s*)?from\s*§(\d+)§`,
+  "g",
+);
+const ES_NAMED = new RegExp(
+  String.raw`\bimport\s*(?:${NAME}\s*,\s*)?\{([^{}]*)\}\s*from\s*§(\d+)§`,
+  "g",
+);
+const ALIAS = new RegExp(
+  String.raw`\b(${NAME})\s*=(?![=>])\s*(${NAME})${MEMBERS}\s*(?=[;\n,)}]|$)`,
+  "g",
+);
+const PATH_BINDING = new RegExp(
+  String.raw`\b(${NAME})\s*=\s*(?:pathlib\s*\.\s*)?Path\s*\(\s*§(\d+)§\s*\)\s*(?=[;\n,)}]|$)`,
+  "g",
+);
+
+/** The last name of a `.a.b` member chain, where there is one. */
+const lastMember = (members: string | undefined) =>
+  members?.split(".").map((part) => part.trim()).filter((part) => part !== "").pop() ?? null;
+
+/**
+ * The names this code binds to a module or to a `Path`, in either language's
+ * spelling. A name the scan cannot trace is simply not here, and a call on it
+ * is placed only by an unmistakable method name.
+ */
+function bindingsOf(code: string, statements: readonly string[], literals: string[]): Bindings {
+  const modules = new Map<string, Binding>();
+  const paths = new Map<string, string>();
+  const loaded = (index: string) => moduleOf(literals[Number(index)] ?? "");
+  const eachPart = (list: string, separator: RegExp, bind: (name: string, local: string) => void) => {
+    for (const part of list.split(",")) {
+      const [name, local] = part.split(separator).map((word) => word.trim().replace(/\s*=[\s\S]*$/, ""));
+      if (name !== undefined && /^[A-Za-z_$][\w$]*$/.test(name)) bind(name, local || name);
+    }
+  };
+  for (const match of code.matchAll(BOUND_LOAD)) {
+    modules.set(match[1]!, { module: loaded(match[2]!), member: lastMember(match[3]) });
+  }
+  for (const match of code.matchAll(DESTRUCTURED_LOAD)) {
+    const module = loaded(match[2]!);
+    eachPart(match[1]!, /\s*:\s*/, (name, local) => modules.set(local, { module, member: name }));
+  }
+  for (const match of code.matchAll(ES_DEFAULT)) {
+    modules.set(match[1]!, { module: loaded(match[2]!), member: null });
+  }
+  for (const match of code.matchAll(ES_NAMED)) {
+    const module = loaded(match[2]!);
+    eachPart(match[1]!, /\s+as\s+/, (name, local) => modules.set(local, { module, member: name }));
+  }
+  for (const statement of statements) {
+    const python = /^import\s+([\w.\s,]+)$/.exec(statement);
+    if (python !== null) {
+      for (const part of python[1]!.split(",")) {
+        const [module, local] = part.trim().split(/\s+as\s+/);
+        if (module === undefined || module === "") continue;
+        const name = local ?? module.split(".")[0]!;
+        modules.set(name.trim(), { module: moduleOf(module), member: null });
+      }
+    }
+    const from = /^from\s+([\w.]+)\s+import\s+\(?([^()]*)\)?$/.exec(statement);
+    if (from !== null) {
+      const module = moduleOf(from[1]!);
+      eachPart(from[2]!, /\s+as\s+/, (name, local) => modules.set(local, { module, member: name }));
+    }
+  }
+  for (const match of code.matchAll(PATH_BINDING)) {
+    const path = literals[Number(match[2])];
+    if (path !== undefined) paths.set(match[1]!, path);
+  }
+  // Twice, so an alias of an alias is traced too.
+  for (let pass = 0; pass < 2; pass += 1) {
+    for (const match of code.matchAll(ALIAS)) {
+      const [, local, head, members] = match;
+      const bound = modules.get(head!);
+      const module = bound?.module ?? (knownModule(moduleOf(head!)) ? moduleOf(head!) : null);
+      if (module === null || local === head) continue;
+      modules.set(local!, { module, member: lastMember(members) ?? bound?.member ?? null });
+    }
+  }
+  return { modules, paths };
+}
+
+/** A call, placed: the module that owns it, its method, and a literal `Path` it is made on. */
+interface Callee {
+  module: string | null;
+  method: string;
+  path: string | null;
+}
+
+/** A module loaded in place, or a `Path` built from a literal, standing before a `.`. */
+const LOADED_RECEIVER = /\b(?:require|import|__import__)\s*\(\s*(§\d+§)\s*\)\s*\.$/;
+
+function calleeOf(name: string, before: string, literals: string[], bound: Bindings): Callee {
+  const segments = name.split(".");
+  const method = segments.pop()!;
+  if (before.endsWith(".")) {
+    // A receiver this scan did not name: a module loaded in place, a `Path`
+    // built from a literal, or something else it cannot place.
+    const loaded = LOADED_RECEIVER.exec(before)?.[1];
+    const path = PATH_RECEIVER.exec(before)?.[1];
+    return {
+      module: loaded === undefined ? null : moduleOf(literalArgument(loaded, literals) ?? ""),
+      method,
+      path: path === undefined ? null : literalArgument(path, literals),
+    };
+  }
+  const head = segments[0];
+  if (head === undefined) {
+    const member = bound.modules.get(method);
+    if (member !== undefined) {
+      return { module: member.module, method: member.member ?? method, path: null };
+    }
+    return { module: "builtins", method, path: null };
+  }
+  if (segments.length === 1 && bound.paths.has(head)) {
+    return { module: null, method, path: bound.paths.get(head)! };
+  }
+  return { module: bound.modules.get(head)?.module ?? moduleOf(head), method, path: null };
+}
+
+/** The literals an array literal holds, where it is one made only of literals. */
+function literalArray(argument: string | undefined, literals: string[]): string[] | null {
+  const array = argument === undefined ? null : /^\[([\s\S]*)\]$/.exec(argument.trim());
+  if (array === null || array === undefined) return null;
+  const items = array[1]!.split(",").map((item) => item.trim()).filter((item) => item !== "");
+  const values = items.map((item) => literalArgument(item, literals));
+  return values.every((value): value is string => value !== null) ? values : null;
+}
+
+/** The literal an argument or an option spelled `name=` or `name:` holds, if any. */
+function namedLiteral(args: readonly string[], names: string, literals: string[]): string | null | undefined {
+  const text = args.join(",");
+  if (!new RegExp(String.raw`\b(?:${names})\b`).test(text)) return undefined;
+  const spelled = new RegExp(String.raw`\b(?:${names})\s*[:=]\s*(§\d+§)`).exec(text);
+  return spelled === null ? null : literalArgument(spelled[1]!, literals);
+}
+
+/** A mode that writes, in any of the languages' spellings: `w`, `a+`, `r+`, `x`, Perl's `>`. */
+const WRITE_MODE = /[wax+>]/;
+/** Perl's mode, which comes before the path and may carry it: `'>'`, `'>>out.txt'`. */
+const PERL_MODE = /^\s*(\+?>>?|\+<)\s*([\s\S]*)$/;
+
+/** The files an `open` writes: its path, where its mode is a literal that writes. */
+function openedForWriting(args: readonly string[], literals: string[]): string[] {
+  const literal = (at: number) => (args[at] === undefined ? null : literalArgument(args[at], literals));
+  // A mode this scan cannot read is not a write it can place, and the
+  // read-only table refuses the call for it; no mode at all is a read.
+  const mode = namedLiteral(args, "mode|flags?", literals) ?? literal(1);
+  if (mode === null || !WRITE_MODE.test(mode)) return [];
+  const perl = PERL_MODE.exec(mode);
+  if (perl !== null) {
+    const carried = perl[2]!.trim();
+    const path = carried !== "" ? carried : literal(2);
+    return path === null ? [] : [path];
+  }
+  const path = literal(0) ?? namedLiteral(args, "file", literals) ?? null;
+  return path === null ? [] : [path];
+}
+
+/** The literal files one call writes, where it is a write this table places. */
+function writtenBy(call: Callee, args: readonly string[], literals: string[]): string[] {
+  const literal = (at: number) => (args[at] === undefined ? null : literalArgument(args[at], literals));
+  const pick = (positions: readonly number[]) =>
+    positions.map(literal).filter((value): value is string => value !== null);
+  if (call.path !== null) {
+    const others = PATH_WRITES.get(call.method);
+    if (others === undefined) return [];
+    if (call.method === "open") {
+      const mode = namedLiteral(args, "mode", literals) ?? literal(0);
+      return mode !== null && WRITE_MODE.test(mode) ? [call.path] : [];
+    }
+    return [call.path, ...pick(others)];
+  }
+  const operands =
+    (call.module === null ? undefined : WRITE_CALLS.get(call.module)?.get(call.method)) ??
+    unmistakable(WRITE_CALLS, call.method);
+  if (operands === undefined) return [];
+  if (operands === "mode") return openedForWriting(args, literals);
+  if (operands === "each") return pick(args.map((_, at) => at));
+  return pick(operands);
+}
+
+/** Quote one argv word for the shell reading, so it stays the one word it was. */
+const shellWord = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`;
+
+/** The shell command one call runs, where it is a spawn this table places and its command is literal. */
+function spawnedBy(
+  call: Callee,
+  args: readonly string[],
+  literals: string[],
+  language: InlineLanguage,
+): string | null {
+  const literal = (at: number) => (args[at] === undefined ? null : literalArgument(args[at], literals));
+  const form =
+    (call.module === null ? undefined : SPAWN_CALLS.get(call.module)?.get(call.method)) ??
+    unmistakable(SPAWN_CALLS, call.method) ??
+    // Perl's, Ruby's and PHP's `exec` runs a command; Python's runs Python.
+    (language === "shellish" && call.module === "builtins" && call.method === "exec"
+      ? "argv"
+      : undefined);
+  if (form === undefined) return null;
+  if (form === "shell") return literal(0);
+  const listed = literalArray(args[0], literals);
+  if (listed !== null) return listed.map(shellWord).join(" ");
+  const program = literal(0);
+  if (program === null) return null;
+  const rest = literalArray(args[1], literals);
+  if (rest !== null) return [program, ...rest].map(shellWord).join(" ");
+  // `system('rm', '-rf', 'x')` is an argv; `system('rm -rf x')`,
+  // `subprocess.run('…', shell=True)` and `spawn('…', {shell: true})` are
+  // shell text. Read as shell text, a lone program name is the same word.
+  const words: string[] = [];
+  for (let at = 0; literal(at) !== null; at += 1) words.push(literal(at)!);
+  return words.length > 1 ? words.map(shellWord).join(" ") : program;
+}
+
+/** A shell command the code runs, and the directory its call names for it. */
+interface SpawnedCommand {
+  text: string;
+  /** The `cwd` option: absent, a literal, or null where it is not a literal. */
+  cwd: string | null | undefined;
+}
+
+/**
+ * Where a piece of inline code writes, as far as the code says.
+ *
+ * `targets` are the literal files its write calls name. `commands` are the shell
+ * commands it hands a spawn, which this guard's shell reading judges. `chdir`
+ * is a directory the code moves to, which every relative target is then judged
+ * from.
+ */
+interface WriteSites {
+  targets: string[];
+  commands: SpawnedCommand[];
+  chdir: string | null | undefined;
+}
+
+/**
+ * Read the places a piece of inline code writes: the target of a write call,
+ * a redirect or a writer inside a command it spawns, and nothing else.
+ *
+ * A string the code carries anywhere else is not a write. `{shell: '/bin/zsh'}`
+ * names the program a spawn runs its command with, `{cwd: '/tmp'}` where it runs
+ * it, `readFileSync('/etc/hosts')` a file it reads; the runner judges writes,
+ * not reads (docs/08). And a string in a position this reading does not
+ * recognise is not a write either: this reader refuses what it cannot read, and
+ * that refusal is the `unreadable_program` finding below, which the read-only
+ * table gives every program it cannot show writes nothing. Called a write, the
+ * same string would turn "the guard could not read this" into "the guard saw a
+ * write outside the worktree" and end the attempt for it, which is the
+ * difference `WriteCause` exists to keep (SCP-234).
+ */
+function writeSites(source: string, language: InlineLanguage): WriteSites {
+  const { masked, literals, commands } = maskLiterals(source, language);
+  const code = withoutComments(masked, language);
+  const statements = splitStatements(code);
+  const bound = bindingsOf(code, statements, literals);
+  const sites: WriteSites = {
+    targets: [],
+    commands: commands.map((text) => ({ text, cwd: undefined })),
+    chdir: undefined,
+  };
+  // A copy of the pattern: `matchAll` starts where the shared one's last
+  // `exec` left off, and the read-only scan stops mid-walk.
+  for (const match of code.matchAll(new RegExp(INLINE_CALL.source, "g"))) {
+    const name = match[1]!.replace(/\s+/g, "");
+    const before = code.slice(0, match.index).trimEnd();
+    const call = calleeOf(name, before, literals, bound);
+    const args = callArguments(code, match.index);
+    if (call.method === "chdir") {
+      sites.chdir = args[0] === undefined ? null : literalArgument(args[0], literals);
+      continue;
+    }
+    sites.targets.push(...writtenBy(call, args, literals));
+    const command = spawnedBy(call, args, literals, language);
+    if (command !== null) {
+      sites.commands.push({ text: command, cwd: namedLiteral(args.slice(1), "cwd", literals) });
+    }
+  }
+  if (language === "awk") {
+    // `awk` writes with a redirect in its own program text, and runs a command
+    // by piping into or out of one.
+    for (const match of code.matchAll(/>>?\s*(§\d+§)/g)) {
+      const target = literalArgument(match[1]!, literals);
+      if (target !== null) sites.targets.push(target);
+    }
+    for (const match of code.matchAll(/\|\s*&?\s*(§\d+§)|(§\d+§)\s*\|\s*getline/g)) {
+      const command = literalArgument(match[1] ?? match[2]!, literals);
+      if (command !== null) sites.commands.push({ text: command, cwd: undefined });
+    }
+  }
+  if (language === "other") {
+    // AppleScript's `do shell script`.
+    for (const match of code.matchAll(/\bdo\s+shell\s+script\s+(§\d+§)/g)) {
+      const command = literalArgument(match[1]!, literals);
+      if (command !== null) sites.commands.push({ text: command, cwd: undefined });
+    }
+  }
+  return sites;
+}
+
+/** The directory a `cwd` option or a `chdir` names, judged from where the code starts. */
+function directoryAt(option: string | null | undefined, context: Context, cwd: Cwd): Cwd {
+  if (option === undefined) return cwd;
+  if (option === null || SCHEME_URL.test(option)) return { path: cwd.path, unknown: true };
+  const destination = judgeTarget(option, context.scope, cwd, false);
+  if (destination.kind === "unresolvable" || destination.resolved === null) {
+    return { path: cwd.path, unknown: true };
+  }
+  return { path: destination.resolved, unknown: false };
+}
+
+/**
+ * The writes a command the code spawns makes, read as the shell line it is.
+ *
+ * Only the findings that place a destination are kept. Anything else the shell
+ * reading says about the command — a program it cannot read, a line it cannot
+ * account for — is already said about the code that runs it: no spawn is on the
+ * read-only table, so that code is refused as `unreadable_program` whatever the
+ * command is.
+ */
+function spawnedFindings(
+  command: SpawnedCommand,
+  how: string,
+  context: Context,
+  cwd: Cwd,
+): WriteFinding[] {
+  const start = directoryAt(command.cwd, context, cwd);
+  const reading = inspectSegments(command.text, context.scope, start, context.depth + 1);
+  return reading.findings
+    .filter((finding) => finding.target !== null && (finding.cause ?? "outside_target") === "outside_target")
+    .map((finding) => ({
+      ...finding,
+      detail: `the code passed to ${how} runs \`${command.text.slice(0, 120)}\`, and in it ${finding.detail}`,
+    }));
+}
+
+/**
  * Judge one piece of inline code, given the interpreter and option that took it.
  *
- * Two passes, in this order. The first reads the paths written in the code and
- * refuses one that resolves outside the root, which is the same question a
- * redirect target is asked. The second asks whether the code is a shape the
- * table above can show writes nothing, and refuses it when it is not — which is
- * every shape the table does not name, that being the point. Only the sentence
- * a refusal carries is still drawn from the write-call list.
+ * Two passes, in this order. The first reads where the code writes — the
+ * target of each write call, and each redirect or writer in a command it
+ * spawns — and refuses a destination that resolves outside the root or the
+ * contract, which is the same question a redirect target is asked. The second
+ * asks whether the code is a shape the table above can show writes nothing,
+ * and refuses it when it is not — which is every shape the table does not name,
+ * that being the point. Only the sentence a refusal carries is still drawn from
+ * the write-call list.
  */
 export function inlineCodeFindings(
   verb: string,
@@ -677,20 +1214,19 @@ export function inlineCodeFindings(
   }
   const findings: WriteFinding[] = [];
   const source = unwrapped(code.raw.length > 0 ? code.raw : code.value);
-  const read = readInlineCode(source, inlineLanguage(verb));
-  // Every path the code spells: the ones written like paths, and the
-  // destination of every plain write call — which is a path however short it
-  // looks, `notes.md` as much as `/etc/hosts` (SCP-234).
-  const paths = stringLiterals(source).filter(
-    (literal) => literal.includes("/") || literal.startsWith("~"),
-  );
+  const language = inlineLanguage(verb);
+  const read = readInlineCode(source, language);
+  const sites = writeSites(source, language);
+  const here = directoryAt(sites.chdir, context, cwd);
   const judged = new Set<string>();
-  // A path in the code is a path on disk, not shell text: a `~` or a `$` in it
-  // is a character the interpreter reads literally.
-  for (const literal of [...paths, ...read.destinations]) {
-    if (judged.has(literal)) continue;
+  // Every destination the code writes, which is a path however short it looks,
+  // `notes.md` as much as `/etc/hosts` (SCP-234). A path in the code is a path
+  // on disk, not shell text: a `~` or a `$` in it is a character the
+  // interpreter reads literally.
+  for (const literal of [...sites.targets, ...read.destinations]) {
+    if (judged.has(literal) || SCHEME_URL.test(literal)) continue;
     judged.add(literal);
-    const destination = judgeTarget(literal, context.scope, cwd, false);
+    const destination = judgeTarget(literal, context.scope, here, false);
     if (destination.kind === "inside") continue;
     findings.push({
       detail:
@@ -712,6 +1248,9 @@ export function inlineCodeFindings(
       rule: ruleOf(destination),
       cause: "outside_target",
     });
+  }
+  for (const command of sites.commands) {
+    findings.push(...spawnedFindings(command, how, context, here));
   }
   if (read.construct === null) return findings;
   const text = source.replace(INLINE_STREAM_WRITES, "");

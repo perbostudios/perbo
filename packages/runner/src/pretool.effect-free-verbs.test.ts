@@ -34,6 +34,7 @@ const FORMS: Record<string, string> = {
   cd: "cd src",
   pushd: "pushd src",
   popd: "popd",
+  pwd: "pwd",
   echo: "echo x",
   printf: "printf x",
   true: "true",

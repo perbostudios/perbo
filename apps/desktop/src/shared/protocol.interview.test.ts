@@ -111,6 +111,8 @@ describe("the conversation an editing session keeps", () => {
     resumeNew: false,
     lastPane: null,
     lastView: null,
+    specCut: null,
+    named: null,
     drift: null,
     change: null,
     form: editingForm(TaskModelsSchema.strip().parse(SettingsSchema.parse({}))),

@@ -4,7 +4,7 @@ import { InterviewTurnSchema, encodeInterviewTurn, planNodes } from "@perbo/cont
 import { redact } from "../process.js";
 import { readLatestDraftEdit } from "../records.js";
 import { ticketPath } from "../repository/layout.js";
-import { mintSpecFromTitle, specPath } from "../plan/spec.js";
+import { mintSpecFromTitle, specPath, specTitles } from "../plan/spec.js";
 import { specTitleFromMessage } from "@perbo/planning";
 import {
   INTERVIEW_NEEDS_A_TITLE,
@@ -48,6 +48,7 @@ export interface InterviewDeps {
     | "converse"
     | "recordInterview"
     | "recordSpec"
+    | "architectTitled"
     | "beginAsking"
     | "answerAsking"
     | "countNodes"
@@ -163,6 +164,14 @@ export class InterviewHost {
    */
   private readonly specAtTurn = new Map<string, string | null>();
   private readonly planMovedThisTurn = new Set<string>();
+  /**
+   * The title the spec stated when the turn began, so a turn that leaves it
+   * stating another is recorded as the Architect titling it (D-127). Moved on
+   * to the title each ending read, so the ending a closing session reports
+   * after a stop measures only what came after the stop; dropped when the
+   * interview closes.
+   */
+  private readonly titleAtTurn = new Map<string, string | null>();
   /**
    * The pair as it stood when the turn began, keyed by planning, so the turn can
    * be measured once it is over; null where it could not be read then, and the
@@ -296,6 +305,7 @@ export class InterviewHost {
         // went is written, and the way on from it is the person's whether the
         // session is still there or not.
         this.endTurn(id);
+        this.titleAtTurn.delete(id);
         this.deps.reread(id);
         this.say(
           id,
@@ -313,6 +323,7 @@ export class InterviewHost {
         this.live.delete(id);
         gone();
         this.owed.delete(id);
+        this.titleAtTurn.delete(id);
         this.say(id, { kind: "note", text: redact(error.message).slice(0, 12_000) });
       },
     });
@@ -357,6 +368,7 @@ export class InterviewHost {
     // turns' work together.
     const owed = (this.owed.get(id) ?? 0) + 1;
     const specBefore = owed === 1 ? this.specDigest(id) : null;
+    const titleBefore = owed === 1 ? this.specTitle(id) : null;
     const pairBefore = owed === 1 ? this.deps.marks.pairOf(id, live.repoId) : null;
     if (!live.child.write(encodeInterviewTurn(turn)))
       throw new Error(
@@ -370,6 +382,7 @@ export class InterviewHost {
     this.afterTheNote.delete(id);
     if (owed === 1) {
       this.specAtTurn.set(id, specBefore);
+      this.titleAtTurn.set(id, titleBefore);
       this.pairAtTurn.set(id, pairBefore);
       this.planMovedThisTurn.delete(id);
       this.heldSaid.delete(id);
@@ -588,7 +601,7 @@ export class InterviewHost {
       throw new Error(INTERVIEW_NEEDS_A_TITLE, { cause: error });
     }
     const written = mintSpecFromTitle(repo, title);
-    this.deps.editing.recordSpec(id, written.slug);
+    this.deps.editing.recordSpec(id, written.slug, title);
     // The folder is minted once and never moves, so the person is told what it
     // was called while the spec is still empty enough to start again.
     // That the title can be changed is what an editable field says by being
@@ -748,6 +761,7 @@ export class InterviewHost {
     this.saySpecIsDrafted(id);
     this.sayWhatWaitedOnTheNote(id);
     this.saySpecMovedToo(id);
+    this.recordArchitectsTitle(id);
     this.deps.marks.recordChangeSince(id, this.pairAtTurn.get(id), this.live.get(id)?.repoId);
     this.pairAtTurn.delete(id);
     this.doing.delete(id);
@@ -780,6 +794,9 @@ export class InterviewHost {
       this.specChecks.delete(id);
       this.saySpecIsDrafted(id);
       this.sayWhatWaitedOnTheNote(id);
+      // The title the write gave the spec names the planning from now, not
+      // from the turn's end (D-118).
+      this.recordArchitectsTitle(id);
     }, this.deps.specSettleMs ?? SPEC_SETTLES_IN_MS);
     timer.unref?.();
     this.specChecks.set(id, timer);
@@ -825,6 +842,36 @@ export class InterviewHost {
       return createHash("sha256").update(readFileSync(specPath(repo, session.specSlug))).digest("hex");
     } catch {
       return null;
+    }
+  }
+
+  /** The title this planning's spec states, or null where there is no spec to read. */
+  private specTitle(id: string): string | null {
+    try {
+      const session = this.deps.editing.read(id);
+      if (session.specSlug === null) return null;
+      return specTitles(this.deps.repository)(session.repoId, session.specSlug);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Record the Architect titling the spec, where the turn left it stating a
+   * title other than the one it began with (D-127). Only the first reading
+   * after a turn begins measures from its start: the next is measured from
+   * this one.
+   */
+  private recordArchitectsTitle(id: string): void {
+    if (!this.titleAtTurn.has(id)) return;
+    const before = this.titleAtTurn.get(id) ?? null;
+    const now = this.specTitle(id);
+    this.titleAtTurn.set(id, now);
+    if (now === null || now === before) return;
+    try {
+      this.deps.editing.architectTitled(id, now);
+    } catch {
+      // The planning has gone, and its name with it.
     }
   }
 

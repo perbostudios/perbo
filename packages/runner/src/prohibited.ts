@@ -11,6 +11,7 @@ import {
   inspectWritePath,
   readCommandLine,
   resolveScope,
+  everySegment,
   splitCommandSegments,
   type CommandSegment,
   type Cwd,
@@ -59,7 +60,7 @@ export interface ProhibitedHit {
    * placed outside the worktree; `unreadable_program` is an interpreter's
    * program the guard could not classify, which refuses the command and shows
    * no write at all — so it is not something to end an attempt over. Absent on
-   * every hit a command pattern decided: those name an act, not a destination.
+   * every hit a command or program rule decided: those name an act, not a destination.
    */
   cause?: WriteCause;
 }
@@ -89,8 +90,8 @@ const GIT_GLOBAL_FLAG = String.raw`-{1,2}[A-Za-z][\w-]*(?:=\S+)?(?:\s+[^\s-]\S*)
  * The verb may be quoted. `git "push" --force` is the same push, and a rule
  * that reads the quote as part of the word refuses nothing.
  *
- * Every rule is also case-insensitive, because this targets a case-insensitive
- * filesystem where `Git push --force` runs.
+ * Every rule built with `git` below is also case-insensitive, because this
+ * targets a case-insensitive filesystem where `Git push --force` runs.
  */
 const QUOTE = String.raw`["']?`;
 /**
@@ -168,7 +169,6 @@ const COMMAND_RULES: CommandRule[] = [
     detail: "a migration or command against a non-local connection string",
   },
   { action: "external_communication", pattern: /\bgh\s+issue\s+comment\b/, detail: "commenting on an issue" },
-  { action: "external_communication", pattern: /\b(mail|sendmail|mailx)\b/, detail: "sending mail" },
   {
     action: "external_communication",
     pattern: /\b(curl|wget)\b[^\n]*\b(hooks\.slack\.com|discord\.com\/api\/webhooks|api\.telegram\.org)/,
@@ -179,6 +179,110 @@ const COMMAND_RULES: CommandRule[] = [
   { action: "enable_own_tooling", pattern: /\bclaude\s+mcp\b/, detail: "connecting a tool server" },
   { action: "enable_own_tooling", pattern: /\bclaude\s+plugin/, detail: "installing a plugin" },
 ];
+
+/**
+ * A rule whose act is running a program, whatever its arguments: the program is
+ * one the segment runs, not a word that appears on its line.
+ *
+ * The shell reader says what each segment runs — the basename behind `sudo`,
+ * `env VAR=x`, `command`, `exec`, `nohup`, `xargs`, `time` and the rest of its
+ * wrapper table, the body of a `sh -c`, an `eval` or a `bash <<EOF`, the body of
+ * every `$(…)`, backtick pair and `<(…)`/`>(…)` as a segment of its own, the
+ * program behind `find -exec` and `rg --pre`, the program a path spells — so
+ * these rules ask it rather than a pattern. `grep -iE 'e-?mail' letter.md`
+ * searches for the word and runs `grep`; `echo x | sudo sendmail -t` runs
+ * `sendmail`.
+ *
+ * Where the reader has no reliable answer the name is a hit on a spelling,
+ * which is the safe direction for a rule whose whole job is refusing:
+ *
+ * - anywhere in a segment it could not account for, such as `sh notify.sh`;
+ * - anywhere in a segment running one of `LAUNCHERS`, programs that run an
+ *   argument as a program in a way the reader does not model —
+ *   `make --eval='t:;@mail …'`, `watch mail …`;
+ * - as a word in a segment running one of `STAGERS`, because a program staged
+ *   under another name is still that program: `ln -s /usr/sbin/sendmail t &&
+ *   ./t -t` runs `sendmail` as `t`. A directory named `mail` is not a word
+ *   whose last component is the name, so `ls src/mail` and `cat
+ *   /var/mail/x` are not hits;
+ * - as an absolute or home-relative path in a segment running one of
+ *   `COPIERS`, which stage a program by copying its bytes: `cat
+ *   /usr/sbin/sendmail > t && chmod +x t && ./t`. Only a path from `/` or `~`
+ *   counts, because these read files all day and `cat templates/mail` in a
+ *   repository is a file called `mail`, not the program. A glob that expands
+ *   to the program (`cat /usr/sbin/sendm* > t`) is not seen.
+ *
+ * Names compare case-insensitively, because a case-insensitive filesystem runs
+ * `MAIL` as `mail`.
+ *
+ * What neither reading sees, and nothing else stops: a script the attempt
+ * writes and then runs (`echo 'mail …' > n.sh && sh n.sh`, a Makefile it
+ * wrote), a program run through configuration rather than the line (`git -c
+ * alias.x='!mail …' x`, `tar --to-command=mail`), and a `case` pattern's `)`
+ * inside a substitution, which the reader takes for the substitution's end and
+ * zsh does not (`$(case x in x) mail …;; esac)`). The write guard does not
+ * read `make --eval` recipes either.
+ */
+interface ProgramRule {
+  action: ProhibitedAction;
+  programs: readonly string[];
+  detail: string;
+}
+
+const PROGRAM_RULES: ProgramRule[] = [
+  { action: "external_communication", programs: ["mail", "sendmail", "mailx"], detail: "sending mail" },
+];
+
+/**
+ * Programs that run another program named in their arguments, where the shell
+ * reader does not find that program: `make`'s `--eval` and `-E` take makefile
+ * text whose recipes run, and the rest take the program as an operand after
+ * options this reader has no table for.
+ */
+const LAUNCHERS = new Set([
+  "make",
+  "gmake",
+  "watch",
+  "parallel",
+  "script",
+  "setsid",
+  "flock",
+  "caffeinate",
+  "arch",
+  "chroot",
+  "unbuffer",
+]);
+
+/** Programs that put a program at a path under a name of the caller's choosing. */
+const STAGERS = new Set(["ln", "cp", "mv", "install", "chmod"]);
+
+/** Programs that copy a file's bytes wherever the caller says, a program's included. */
+const COPIERS = new Set(["cat", "dd", "tee"]);
+
+function runsProgram(segment: CommandSegment, rule: ProgramRule): boolean {
+  const names = rule.programs.join("|");
+  const anywhere = new RegExp(String.raw`\b(?:${names})\b`, "i");
+  // A word whose last component is the name: `sendmail`, `/usr/sbin/sendmail`,
+  // `./mail`. Not `mailbox`, `mail.txt` or `src/mail/x`.
+  const word = new RegExp(
+    String.raw`(?:^|[\s"'=(\`])(?:[^\s"'\`;&|<>()]*/)?(?:${names})(?=$|[\s"'\`;&|<>()])`,
+    "i",
+  );
+  // The same, spelled from the root or from home: `/usr/sbin/sendmail`,
+  // `if=/usr/bin/mail`, `~/bin/mail`. Not `mail` or `templates/mail`.
+  const path = new RegExp(
+    String.raw`(?:^|[\s"'=(\`])[/~](?:[^\s"'\`;&|<>()]*/)?(?:${names})(?=$|[\s"'\`;&|<>()])`,
+    "i",
+  );
+  return everySegment([segment]).some((inner) => {
+    const runs = inner.programs.map((program) => program.toLowerCase());
+    if (!inner.accounted) return anywhere.test(inner.text);
+    if (runs.some((program) => LAUNCHERS.has(program)) && anywhere.test(inner.text)) return true;
+    if (runs.some((program) => STAGERS.has(program)) && word.test(inner.text)) return true;
+    if (runs.some((program) => COPIERS.has(program)) && path.test(inner.text)) return true;
+    return runs.some((program) => rule.programs.includes(program));
+  });
+}
 
 /**
  * `pnpm install` with no package argument restores the lockfile and is how a
@@ -361,6 +465,15 @@ export function inspectCommandWithCwd(
       if (seen.has(key)) continue;
       seen.add(key);
       hits.push({ action: rule.action, detail: `${sentence}: ${segment.slice(0, 200)}` });
+    }
+  }
+  for (const segment of read.segments) {
+    for (const rule of PROGRAM_RULES) {
+      if (!runsProgram(segment, rule)) continue;
+      const key = `${rule.action}|${rule.detail}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      hits.push({ action: rule.action, detail: `${rule.detail}: ${segment.text.slice(0, 200)}` });
     }
   }
   const writes: WriteFinding[] = [];

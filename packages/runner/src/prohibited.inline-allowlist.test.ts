@@ -130,6 +130,59 @@ describe("the reach-arounds, refused because the table does not name them", () =
 });
 
 /**
+ * A callee the scan never sees as a name, and a file opened for writing
+ * through a method.
+ *
+ * Each of these runs a write through a shape the call pass has no name for: a
+ * callee that is a subscript or a parenthesised value, a dunder that reaches a
+ * module's own dictionary, a module attribute carried as a value and called
+ * later, and `.open` on a receiver — whose mode is its first operand, not its
+ * second. Every one is refused as a program the guard cannot show writes
+ * nothing.
+ */
+describe("the computed callees and the write-mode methods, refused", () => {
+  const cases: Array<[string, string]> = [
+    ["a callee reached through a dunder", `python3 -c "import os; os.__dict__['system']('touch /tmp/x')"`],
+    ["a subscripted callee", `python3 -c "import os; [os.remove][0]('/tmp/x')"`],
+    ["a parenthesised callee", `python3 -c "import os; (os.remove)('/tmp/x')"`],
+    ["a module attribute bound as a value", `python3 -c "import os; f = os.remove; f('/tmp/x')"`],
+    ["a module attribute passed as a value", `python3 -c "import os; print(list(map(os.remove, ['/tmp/x'])))"`],
+    // One row per check, each refused by that check alone.
+    ["a subscripted callee off an assigned alias", `python3 -c "import os; x = os; [x.remove][0]('/tmp/x')"`],
+    ["a dunder on an assigned alias", `python3 -c "import os; x = os; print(x.__dict__)"`],
+    ["a module attribute called as a sort key", `python3 -c "import os; print(sorted(['/tmp/x'], key=os.remove))"`],
+    ["`.open('w')` on a resolved `Path`", `python3 -c "from pathlib import Path; Path('/tmp/x').resolve().open('w')"`],
+    [
+      "`.open('w')` on a subscript, as `print`'s file",
+      `python3 -c "from pathlib import Path; print('x', file=sorted(Path('/tmp/v').glob('*'))[0].open('w'))"`,
+    ],
+    [
+      "`.open('w')` on a loop variable",
+      ["python3 <<'PY'", "from pathlib import Path", "for p in Path('/tmp/v').iterdir():", "    print('x', file=p.resolve().open('w'))", "PY"].join("\n"),
+    ],
+    ["`.open(mode='w')`", `python3 -c "import pathlib; pathlib.Path('/tmp/x').resolve().open(mode='w')"`],
+  ];
+  for (const [name, command] of cases) {
+    it(`refuses ${name}`, () => {
+      const found = writes(command);
+      expect(found.length, command).toBeGreaterThan(0);
+    });
+  }
+
+  it("still allows `.open` on a `Path` in a read mode, or with none", () => {
+    for (const command of [
+      `python3 -c "import pathlib; print(pathlib.Path('notes.md').open().read())"`,
+      `python3 -c "import pathlib; print(pathlib.Path('notes.md').resolve().open('r').read())"`,
+      `python3 -c "import pathlib; print(pathlib.Path('notes.md').open(mode='rb').read())"`,
+      `python3 -c "print(open('notes.md', encoding='utf-8').read())"`,
+      `python3 -c "import os; print(os.sep)"`,
+    ]) {
+      expect(hits(command), command).toEqual([]);
+    }
+  });
+});
+
+/**
  * The lines SCP-190's third criterion names, and the ones the suites around it
  * already ran. A read-only table that refuses these is not shippable.
  */
@@ -161,6 +214,18 @@ describe("the read-only shapes, still allowed", () => {
     `python3 -c "import sys; print(sys.version)"`,
     `python3 -c "import os; print(os.environ.get('HOME'))"`,
     `python3 -c "import platform; print(platform.python_version())"`,
+    // A module's constants and the standard streams, as values.
+    `python3 -c "import json,sys; print(json.load(sys.stdin)['version'])"`,
+    ["python3 <<'PY'", "import sys", "for l in sys.stdin:", "    print(l)", "PY"].join("\n"),
+    `python3 -c "import sys; print('x', file=sys.stdout)"`,
+    `python3 -c "import sys; print('x', file=sys.stderr)"`,
+    ...["I", "IGNORECASE", "M", "MULTILINE", "S", "DOTALL", "X", "VERBOSE"].map(
+      (flag) => `python3 -c "import re; print(re.sub('a', 'b', 'A', flags=re.${flag}))"`,
+    ),
+    ...["pi", "e", "inf", "tau", "nan"].map((constant) => `python3 -c "import math; print(math.${constant})"`),
+    ...["ascii_letters", "digits", "punctuation"].map(
+      (alphabet) => `python3 -c "import string; print(string.${alphabet})"`,
+    ),
     // Binding a name to a read-only expression.
     `node -e "const x = 1 + 1; console.log(x)"`,
     // The same shapes arriving on standard input.
@@ -181,14 +246,14 @@ describe("the read-only shapes, still allowed", () => {
 /**
  * The two halves of the reading, kept apart.
  *
- * A path outside the root refuses on the first pass whatever the code around it
- * does, and a shape the table cannot vouch for refuses on the second whatever
+ * A write outside the root refuses on the first pass whatever the code around
+ * it does, and a shape the table cannot vouch for refuses on the second whatever
  * paths it names. Asserted separately because a guard that only ever fired on
  * one of them would pass most of the file above.
  */
 describe("the pass that refused, and what it said", () => {
-  it("refuses a path outside the root even inside an allowed shape", () => {
-    const detail = writes(`python3 -c "print(open('${OUTSIDE}/config.json').read())"`)
+  it("refuses a write outside the root even inside an allowed shape", () => {
+    const detail = writes(`python3 -c "open('${OUTSIDE}/config.json', 'w')"`)
       .map((hit) => hit.detail)
       .join("\n");
     expect(detail).toContain("outside the worktree");

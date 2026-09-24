@@ -109,7 +109,7 @@ describe("graphEditArgs", () => {
 
 describe("the admission commands", () => {
   it("prefixes every ticket it admits", () => {
-    expect(admitFromSpecArgs("specs/a/spec.md", null, "claude-cli", "opus")).toEqual([
+    expect(admitFromSpecArgs("specs/a/spec.md", null, false, "claude-cli", "opus")).toEqual([
       "admit",
       "--prefix",
       "PRB",
@@ -125,11 +125,33 @@ describe("the admission commands", () => {
   });
 
   it("starts over only where a ticket is being replaced", () => {
-    expect(admitFromSpecArgs("specs/a/spec.md", "PRB-1", "claude-cli", "opus")).toContain(
+    expect(admitFromSpecArgs("specs/a/spec.md", "PRB-1", false, "claude-cli", "opus")).toContain(
       "--start-over",
     );
-    expect(admitFromSpecArgs("specs/a/spec.md", null, "claude-cli", "opus")).not.toContain(
+    expect(admitFromSpecArgs("specs/a/spec.md", null, false, "claude-cli", "opus")).not.toContain(
       "--start-over",
+    );
+  });
+
+  it("keeps the spec's title only where the person gave it (D-127)", () => {
+    expect(admitFromSpecArgs("specs/a/spec.md", null, true, "claude-cli", "opus")).toEqual([
+      "admit",
+      "--prefix",
+      "PRB",
+      "--from-spec",
+      "specs/a/spec.md",
+      "--keep-title",
+      "--provider",
+      "claude-cli",
+      "--model",
+      "opus",
+      "--json",
+    ]);
+    expect(admitFromSpecArgs("specs/a/spec.md", "PRB-1", true, "claude-cli", "opus")).toEqual(
+      expect.arrayContaining(["--start-over", "PRB-1", "--keep-title"]),
+    );
+    expect(admitFromSpecArgs("specs/a/spec.md", null, false, "claude-cli", "opus")).not.toContain(
+      "--keep-title",
     );
   });
 

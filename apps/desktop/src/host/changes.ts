@@ -62,4 +62,12 @@ export class Changes {
   power(power: PowerState): void {
     this.deps.emit({ kind: "power", power, sequence: ++this.count });
   }
+
+  /**
+   * When each ticket's page was last opened. Saved by the caller and never
+   * invalidating: opening a page moves nothing any read returned.
+   */
+  opened(lastOpened: Record<string, string>): void {
+    this.deps.emit({ kind: "opened", lastOpened: { ...lastOpened }, sequence: ++this.count });
+  }
 }

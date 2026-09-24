@@ -144,7 +144,7 @@ export function planApproved(workspace: Snapshot, repoId: string, key: string): 
 /**
  * Where confirming a plan goes, from every place that offers it: the Graph's
  * footer and its shortcut, the pane footer the other panes share, the Spec's
- * way to the plan, the criteria's Next and the chat's note.
+ * way to the plan and the criteria's Next.
  *
  * By way of the reading of the plan against its spec (D-128), which is the
  * one step between the plan and the contract and lands on the contract by

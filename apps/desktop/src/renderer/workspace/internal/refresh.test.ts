@@ -221,6 +221,19 @@ describe("workspace refresh interface", () => {
     expect(observer.getCurrentResult().error?.message).toBe("Missing focused ticket");
   });
 
+  it("patches when a ticket's page opened without reading anything again, keeping the newest opening", async () => {
+    const f = await fixture();
+    f.observeDetail();
+    const entry = f.row.repoId + ":" + f.row.ticket.key;
+    f.emit({ kind: "opened", sequence: 2, lastOpened: { [entry]: "2026-09-24T10:00:00.000Z" } });
+    f.emit({ kind: "opened", sequence: 1, lastOpened: {} });
+    expect(f.requests).toEqual([]);
+    expect(f.client.getQueryData<Snapshot>(["workspace"])!.lastOpened).toEqual({ [entry]: "2026-09-24T10:00:00.000Z" });
+    // A preferences change after it carries no openings, so it leaves this one standing.
+    f.emit({ kind: "preferences", sequence: 3, settings: f.snapshot.settings, titles: {}, taskModels: {}, archived: [], asks: {} });
+    expect(f.client.getQueryData<Snapshot>(["workspace"])!.lastOpened).toEqual({ [entry]: "2026-09-24T10:00:00.000Z" });
+  });
+
   it("refreshes per-task model choices together with a compiled contract", async () => {
     const f = await fixture();
     const taskModels = { [f.row.repoId + ":" + f.row.ticket.key]: TaskModelsSchema.strip().parse({ ...f.snapshot.settings, executorModel: "explicit-choice" }) };
@@ -269,7 +282,7 @@ describe("hooks read through the guard", () => {
   it("takes a task summary again when the records moved while it was in flight", async () => {
     const f = hooks();
     const summary = (note: string): TaskSummary =>
-      ({ branch: null, attempts: 1, latestAttemptAt: null, costMicros: null, costBasis: "none", diff: null, note });
+      ({ branch: null, attempts: 1, latestAttemptAt: null, costMicros: null, costBasis: "none", diff: null, note, outcome: null });
     const held = deferred<TaskSummary>();
     let reads = 0;
     f.request.mockImplementation(async (input) => {

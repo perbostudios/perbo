@@ -22,7 +22,7 @@ import {
 import { PERBO_AGENT_ROLE_NAMES, isSubagentTool, judgeSubagentStart, SUBAGENT_TOOL_NAMES } from "./agents.js";
 import { writeBriefRecord, type BriefRecords } from "./brief.js";
 import { describeShellCwd } from "./prohibited.js";
-import { UNKNOWN_CWD, type CommandSegment } from "./shell/index.js";
+import { UNKNOWN_CWD, everySegment, type CommandSegment } from "./shell/index.js";
 import { HOST_TEMPORARY_DIRECTORY } from "./scratch.js";
 
 /**
@@ -632,8 +632,8 @@ function callerOf(call: PreToolCall): string | null {
  * `cd` and its family move the shell, which is SCP-170's tracking and decides
  * the *next* line's relative targets rather than this one. `echo` and `printf`
  * write only where a redirect points, and the redirect's target has already
- * been resolved by the time this is read. `true`, `false` and `:` do nothing at
- * all.
+ * been resolved by the time this is read. `pwd` prints where the shell stands.
+ * `true`, `false` and `:` do nothing at all.
  *
  * They are not on the `--allowedTools` list and must not be: that list is
  * matched by prefix, so `Bash(cd:*)` on it would admit `cd x && rm -rf /`
@@ -643,12 +643,17 @@ function callerOf(call: PreToolCall): string | null {
  * redirect. A program that acts on its own does not — `curl -o` writes without
  * one, and is on the deny-list.
  */
-export const EFFECT_FREE_VERBS = new Set(["cd", "pushd", "popd", "echo", "printf", "true", "false", ":"]);
-
-/** Every command a line runs, the ones inside a nested shell included. */
-function everySegment(segments: readonly CommandSegment[]): CommandSegment[] {
-  return segments.flatMap((segment) => [segment, ...everySegment(segment.nested)]);
-}
+export const EFFECT_FREE_VERBS = new Set([
+  "cd",
+  "pushd",
+  "popd",
+  "pwd",
+  "echo",
+  "printf",
+  "true",
+  "false",
+  ":",
+]);
 
 /**
  * Whether the runner has positive grounds to admit this line, or nothing to say.
@@ -666,6 +671,9 @@ function vouchesFor(
 ): boolean {
   let grounds = false;
   for (const segment of everySegment(segments)) {
+    // A segment the reader could not account for runs something it could not
+    // name, which is no ground to vouch for anything.
+    if (!segment.accounted) return false;
     if (segment.mutating) {
       grounds = true;
       continue;

@@ -931,3 +931,69 @@ describe("the spec takes the ticket's name", () => {
     expect(readFileSync(other.specPath, "utf8").split("\n")[0]).toBe(`# ${drafted.outcome}`);
   });
 });
+
+describe("--keep-title: the spec's title is a name a person gave the work", () => {
+  // D-127: a name the person gave is kept for the spec, the ticket and the
+  // plan, so the drafter's proposal is not used and the spec is left as it is.
+  const named = (name: string) => scripted([submits({ ...drafted, name })]);
+
+  it("names the ticket after the spec's title and leaves the spec's bytes as they were", async () => {
+    const { repo, specPath } = repository();
+    const { code } = await admitFromSpec(repo, specPath, named("Activation email retries"), ["--keep-title"]);
+    expect(code).toBe(EXIT_CODES.approve);
+    const dir = storeDir(repo, null);
+    expect(readTicket(dir, "PRB-1").title).toBe("Activation email");
+    expect(readFileSync(specPath, "utf8")).toBe(SPEC);
+    expect(readTicket(dir, "PRB-1").admission.spec?.content_sha256).toBe(hashOf(specPath));
+    expect(readDriftRecord(dir, "PRB-1")?.spec).toBe(hashOf(specPath));
+  });
+
+  it("keeps the person's name where another ticket already carries it", async () => {
+    const { repo, specPath } = repository();
+    await admitTyped(repo, "Activation email");
+    await admitFromSpec(repo, specPath, named("Activation email retries"), ["--keep-title"]);
+    expect(readTicket(storeDir(repo, null), "PRB-2").title).toBe("Activation email");
+    expect(readFileSync(specPath, "utf8")).toBe(SPEC);
+  });
+
+  it("keeps the title the person gave the spec since, when the ticket is drafted again", async () => {
+    const { repo, specPath } = repository();
+    await admitFromSpec(repo, specPath, named("Activation email retries"));
+    const retitled = readFileSync(specPath, "utf8").replace(/^# .*\n/, "# Welcome email\n");
+    writeFileSync(specPath, retitled);
+    const { code } = await admitFromSpec(repo, specPath, named("Retried activation email"), [
+      "--start-over",
+      "PRB-1",
+      "--keep-title",
+    ]);
+    expect(code).toBe(EXIT_CODES.approve);
+    const dir = storeDir(repo, null);
+    expect(readTicket(dir, "PRB-1").title).toBe("Welcome email");
+    expect(readFileSync(specPath, "utf8")).toBe(retitled);
+    expect(readTicket(dir, "PRB-1").admission.spec?.content_sha256).toBe(hashOf(specPath));
+  });
+
+  it("refuses a title longer than a ticket's name may be, before a model is asked, and writes nothing", async () => {
+    const long = "Activation email " + "x".repeat(44);
+    expect(long).toHaveLength(61);
+    const { repo, specPath } = repository(SPEC.replace("# Activation email\n", `# ${long}\n`));
+    const before = readFileSync(specPath, "utf8");
+    const model = named("Activation email retries");
+    await expect(admitFromSpec(repo, specPath, model, ["--keep-title"])).rejects.toThrow(
+      "the spec's title is 61 characters, and a ticket's name is at most 60 (D-127): shorten the title, then draft the plan again",
+    );
+    expect(model.requests).toHaveLength(0);
+    expect(listTickets(storeDir(repo, null))).toEqual([]);
+    expect(readFileSync(specPath, "utf8")).toBe(before);
+    // Sixty is a name it keeps.
+    const fits = repository(SPEC.replace("# Activation email\n", `# ${long.slice(0, 60)}\n`));
+    await admitFromSpec(fits.repo, fits.specPath, named("Activation email retries"), ["--keep-title"]);
+    expect(readTicket(storeDir(fits.repo, null), "PRB-1").title).toBe(long.slice(0, 60));
+  });
+
+  it("is refused without a spec to keep the title of", () => {
+    expect(() =>
+      admitCommandLine.read(["--from-file", "issue.md", "--keep-title"]).input,
+    ).toThrow(/--keep-title names the ticket after its spec's title, so it needs the spec/);
+  });
+});

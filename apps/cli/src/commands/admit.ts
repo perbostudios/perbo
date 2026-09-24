@@ -42,6 +42,7 @@ import {
 import {
   type BoardEntry,
   CONTRACT_DRAFT_JSON_SCHEMA,
+  ContractDraftSchema,
   type DraftResult,
   type GitHubIssue,
   PlanningError,
@@ -254,6 +255,8 @@ const ADMISSION_FIELDS = {
   fromSpec: z.string().nullable(),
   /** A ticket in `plan_review` to re-draft from that spec, keeping its key (D-103). */
   startOver: namedTicketKey("--start-over").nullable(),
+  /** The spec's title is the name a person gave the work: the ticket takes it as it stands (D-127). */
+  keepTitle: z.boolean(),
   provider: z.enum(DRAFT_PROVIDERS, {
     error: "--provider must be 'anthropic', 'claude-cli' or 'codex-cli'",
   }),
@@ -268,6 +271,7 @@ type Admission = {
   fromFile: string | null;
   fromSpec: string | null;
   startOver: string | null;
+  keepTitle: boolean;
   approve?: boolean;
 };
 
@@ -294,6 +298,15 @@ const admissionRules = (input: Admission, ctx: z.RefinementCtx): void => {
         `${sources.map(([flag]) => flag).join(" and ")} are mutually exclusive: one contract is ` +
         `drafted from one document. Got ` +
         sources.map(([flag, value]) => `${flag} '${value}'`).join(" and "),
+    });
+  }
+  // The title kept is a spec's, so there is one source it can be kept from.
+  if (input.keepTitle && input.fromSpec === null) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        "--keep-title names the ticket after its spec's title, so it needs the spec: " +
+        "perbo admit --from-spec specs/<slug>/spec.md --keep-title",
     });
   }
   if (input.startOver === null) return;
@@ -362,6 +375,7 @@ const ADMIT_FLAGS = {
   "--from-file": valueFlag(),
   "--from-spec": valueFlag(),
   "--start-over": valueFlag(),
+  "--keep-title": switchFlag(),
   "--provider": valueFlag(),
   "--model": valueFlag(),
   "--manual-reviewer": valueFlag(),
@@ -412,6 +426,7 @@ export function defaultAdmission(target: StoreTarget): DraftAdmission {
     fromFile: null,
     fromSpec: null,
     startOver: null,
+    keepTitle: false,
     provider: "claude-cli",
     model: null,
     manualReviewer: null,
@@ -462,6 +477,7 @@ function readAdmission(argv: readonly string[]): {
       fromFile: flags["--from-file"] ?? null,
       fromSpec: flags["--from-spec"] ?? null,
       startOver: flags["--start-over"] ?? null,
+      keepTitle: flags["--keep-title"] === true,
       provider: flags["--provider"] ?? "claude-cli",
       model: flags["--model"] ?? null,
       manualReviewer: flags["--manual-reviewer"] ?? null,
@@ -1154,6 +1170,7 @@ async function resolveDrafted(input: Admitting): Promise<Resolved> {
   let names: string[];
   try {
     ({ issue, path: sourcePath, spec } = await readSource(input));
+    if (args.keepTitle) assertKeepableTitle(issue.title);
     // A spec is kept in the repository it is drafted for and committed with
     // the change (D-103), so its recorded path is repository-relative; one
     // outside the repository has no such path, and is refused before a model
@@ -1481,24 +1498,48 @@ function assertNotAlreadyDrafted(input: Admitting): void {
  * is kept either way: the run that produced it is paid for, and a name is a
  * label a person can change.
  *
+ * With `--keep-title` the spec's title is a name a person gave the work, and
+ * the ticket takes it as it stands, whatever the drafter proposed and whatever
+ * another ticket is called: the person chose it (D-127). The outcome stands in
+ * only for a spec with no title.
+ *
  * Display only: the branch is named from the outcome, and so is the pull
  * request, never from this (ADR-0023 §4). An edit never renames a ticket.
  */
-function ticketTitle(resolved: Resolved, outcome: string): string {
+function ticketTitle(resolved: Resolved, outcome: string, keepTitle: boolean): string {
+  const specTitle = resolved.spec === null ? "" : (resolved.issue?.title.replace(/\s+/g, " ").trim() ?? "");
+  if (keepTitle) return specTitle.length > 0 ? specTitle : outcome;
   // Flattened because it is a model's words shown as a title (ADR-0023 §4).
   const drafted = (resolved.drafted?.draft.name ?? "").replace(/\s+/g, " ").trim();
-  const specTitle = resolved.spec === null ? "" : (resolved.issue?.title.trim() ?? "");
   const named = [drafted, specTitle].find(
     (name) => name.length > 0 && !resolved.names.some((taken) => sameName(name, taken)),
   );
   return named ?? outcome;
 }
 
+/** The longest name a ticket takes, the drafter's own bound (D-127). */
+const TICKET_NAME_CAP = ContractDraftSchema.shape.name.maxLength!;
+
+/**
+ * A spec title `--keep-title` can keep: one no longer than a drafted name may
+ * be. Refused rather than cut, before a model is asked anything, because the
+ * name is the person's and only they can say which words go (D-127).
+ */
+function assertKeepableTitle(title: string): void {
+  const kept = title.replace(/\s+/g, " ").trim();
+  if (kept.length > TICKET_NAME_CAP)
+    throw new UsageError(
+      `the spec's title is ${kept.length} characters, and a ticket's name is at most ` +
+        `${TICKET_NAME_CAP} (D-127): shorten the title, then draft the plan again`,
+    );
+}
+
 /**
  * The spec a ticket was drafted from, titled with the ticket's name, with its
  * hash as it now stands (D-127). Called
  * once everything that can refuse the admission has been asked, so a refused
- * one leaves the spec as it was.
+ * one leaves the spec as it was. Not called with `--keep-title`, where the
+ * ticket is named after the spec and the spec's title line is already its name.
  */
 function nameSpecAfterTicket<T extends { path: string; content_sha256: string }>(
   repositoryRoot: string,
@@ -1564,7 +1605,7 @@ function admitted(input: Admitting, started: number, resolved: Resolved): Admiss
     schema_version: TICKET_SCHEMA_VERSION,
     ticket_id,
     key,
-    title: ticketTitle(resolved, resolved.outcome),
+    title: ticketTitle(resolved, resolved.outcome, args.keepTitle),
     state: "plan_review",
     priority: args.priority,
     labels: args.labels,
@@ -1641,7 +1682,7 @@ function admitted(input: Admitting, started: number, resolved: Resolved): Admiss
   // with no ticket, contract or snapshot written. The key issued above stays
   // issued, as every key once issued does.
   assertPagesWritable(repositoryRoot, resolved, contract);
-  if (ticket.admission.spec !== null)
+  if (ticket.admission.spec !== null && !args.keepTitle)
     ticket = TicketSchema.parse({
       ...ticket,
       admission: { ...ticket.admission, spec: nameSpecAfterTicket(repositoryRoot, ticket.admission.spec, ticket.title) },
@@ -1951,8 +1992,8 @@ function redraft(
   // spec folder, nodes folder or page that is a link refuses the re-draft
   // with the ticket, its contract and its snapshot as they were.
   assertPagesWritable(repositoryRoot, resolved, contract);
-  const title = ticketTitle(resolved, contract.outcome);
-  const spec = nameSpecAfterTicket(repositoryRoot, resolved.spec, title);
+  const title = ticketTitle(resolved, contract.outcome, args.keepTitle);
+  const spec = args.keepTitle ? resolved.spec : nameSpecAfterTicket(repositoryRoot, resolved.spec, title);
   writeContract(dir, ticket, contract);
   writeDraftSnapshot(dir, snapshot);
   // Drafted again from the spec, so it agrees with it again: whatever the

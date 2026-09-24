@@ -348,7 +348,7 @@ export function summariseTicket(input: {
   attemptsError: string | null;
   bundles: BundleManifest[];
   objectsDirectory: string;
-}): TaskSummary {
+}): Omit<TaskSummary, "outcome"> {
   const { ticket, attempts, bundles } = input;
   const latest = attempts.at(-1);
   const cost = rollCosts(attempts.map(attemptCost));

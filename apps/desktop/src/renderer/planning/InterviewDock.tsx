@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent,
+} from "react";
 import { Button, InfoHint, LineIcon, Notice, ThinkingStatus, cx } from "../ui/index.js";
 import { useQueryClient } from "@tanstack/react-query";
 import { bridge, errorMessage, useGraph } from "../workspace/index.js";
-import { isLive, newestReading } from "../../shared/jobs.js";
 import { graphHistory, latestUndoable } from "./history.js";
-import { owedReading } from "./owed-reading.js";
 import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS } from "../../shared/contract-editing.js";
 import { AskedHandle } from "./AskedHandle.js";
 import { askedHeightLimit, useAskedHeight } from "../shell/asked-size.js";
@@ -22,8 +28,6 @@ import type {
   Snapshot,
 } from "../../shared/protocol.js";
 import type { useContractEditing } from "../contract-editor.js";
-import type { PageProps } from "../shell/route.js";
-import { confirmRoute, planApproved } from "./panes.js";
 
 /**
  * The interview, docked beside whichever pane is open (D-101, D-102).
@@ -64,22 +68,41 @@ function mergeConversation(
  */
 const interviewShown = new Set<string>();
 
+/**
+ * The plannings with a turn on its way to the host from this window: sent,
+ * and not yet answered by the request that took it. The host says a turn is
+ * under way once it has it, and a chat that has to start first takes a while
+ * to get there; in that time the turn is in flight all the same, and the Spec
+ * pane holds Generate plan for it as it does for a turn the host reports.
+ */
+const turnsSending = new Map<string, number>();
+const sendingListeners = new Set<() => void>();
+function markSending(id: string, by: 1 | -1): void {
+  const count = (turnsSending.get(id) ?? 0) + by;
+  if (count > 0) turnsSending.set(id, count);
+  else turnsSending.delete(id);
+  for (const listener of sendingListeners) listener();
+}
+/** Whether a turn this window sent to this planning's chat is still on its way to the host. */
+export function useTurnSending(id: string): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      sendingListeners.add(listener);
+      return () => sendingListeners.delete(listener);
+    },
+    () => turnsSending.has(id),
+  );
+}
+
 export function InterviewDock({
   workspace,
   editor,
-  navigate,
   historyOpen,
   onHistory,
   width,
 }: {
   workspace: Snapshot;
   editor: Editor;
-  /**
-   * The way to the contract, for the note that offers it once every problem
-   * between the plan and the spec is resolved: the chat is beside every pane
-   * but Problems, and the way on is offered where the person is.
-   */
-  navigate: PageProps["navigate"];
   historyOpen: boolean;
   onHistory: () => void;
   /** How wide the person has dragged it, from the shell's own record. */
@@ -199,7 +222,9 @@ export function InterviewDock({
   // picked option is the person's own sentence and nothing more (ADR-0023 §4).
   const sendText = (turn: string, onRefused?: () => void): void => {
     if (id === null || turn.length === 0 || busy) return;
+    markSending(id, 1);
     void ask(() => bridge.request({ kind: "interviewTurn", id, text: turn })).then((sent) => {
+      markSending(id, -1);
       if (!sent) onRefused?.();
     });
   };
@@ -251,14 +276,16 @@ export function InterviewDock({
   // Until something is pushed, what the snapshot says: a dock opened part way
   // through a turn missed the change that said so.
   const inFlight = busyTurn === null ? (workspace.working ?? []).includes(id ?? "") : busyTurn;
-  // None of it once the spec-written note stands in this turn: the note is
-  // the status, the person can act on it now, and anything under it saying
-  // work is in hand reads as more being owed before they may (D-102).
-  const told = inFlight && !handedOver(conversation);
+  // Said for the whole of the turn, the part after the spec-written note
+  // included: Generate plan is held until the turn is over (D-102), so the
+  // chat says the turn is still going for as long as the press waits on it.
+  const told = inFlight;
+  const handed = handedOver(conversation);
   // The session has words for the person that are not shown yet: its bubble
   // stands at the foot of the log with the dots, in place of the status line,
-  // until they are.
-  const speaking = told && doingTurn === "speaking";
+  // until they are. Not once the spec-written note stands, since nothing the
+  // session says after it is shown.
+  const speaking = told && doingTurn === "speaking" && !handed;
   // The one status line at the foot of the log, saying what the turn is doing
   // as it moves from reading the person's answer to thinking, writing the spec
   // and changing the plan, or null where there is none to show. Writing the
@@ -266,25 +293,12 @@ export function InterviewDock({
   // rest is read from the last line the turn put in the conversation.
   const working = useMemo(() => {
     if (!told || speaking) return null;
+    // Whatever the session does after the note is not shown, so neither is
+    // what it is doing: only that the turn is still going.
+    if (handed) return FINISHING;
     if (doingTurn === "writing_the_spec") return "Writing the spec…";
     return sayWorking(conversation.at(-1)?.line, conversation.at(-2)?.line);
-  }, [told, speaking, doingTurn, conversation]);
-
-  // Whether the way on to the contract is withheld from the note that offers
-  // it: while a question stands, the interview's own or a problem's, and
-  // while the interview is still applying an answer or the plan is being read
-  // against the spec again after one — the Problems page waits through the
-  // same three, and the answer's effect on the record is not known until
-  // that reading has landed. The note reads without its button meanwhile.
-  const newest = key === null ? null : newestReading(workspace.jobs, repoId, key);
-  const reading = newest !== null && isLive(newest);
-  // The button is held until the person's last turn has had the reading it
-  // is owed, one started at or after the turn was applied. Derived from the
-  // record and the jobs as they stand, never from an effect, because a single
-  // render with the button drawn is the flash this is here to prevent.
-  const { owed } = owedReading(conversation, { drift: session?.drift, running }, newest);
-  const withheld =
-    key === null || asking !== null || working !== null || speaking || reading || owed;
+  }, [told, speaking, handed, doingTurn, conversation]);
 
   const dropped = (conversation[0]?.n ?? 1) - 1;
   // What the log draws: every line but a tool call that only repeated itself.
@@ -388,19 +402,6 @@ export function InterviewDock({
               onUndo={key !== null ? undo : null}
               undoable={undoable}
               busy={busy}
-              onContract={
-                withheld
-                  ? null
-                  : () =>
-                      navigate(
-                        confirmRoute({
-                          repoId,
-                          key,
-                          sessionId: id,
-                          approved: planApproved(workspace, repoId, key),
-                        }),
-                      )
-              }
             />
           ),
         )}
@@ -571,6 +572,9 @@ const SOMETHING_ELSE: Choice = {
   recommended: false,
 };
 
+/** The status while the turn winds up after the spec-written note, which Generate plan waits on. */
+const FINISHING = "Finishing this turn…";
+
 /**
  * What the session is doing, in the words of the last thing it did.
  *
@@ -583,21 +587,16 @@ const SOMETHING_ELSE: Choice = {
  * It is a reading of what happened, not a report from the session, so it is
  * written as what is in hand rather than as a claim about the next moment.
  *
- * Null where the last line is already the whole status, which no line about
- * work in hand improves on.
  */
 export function sayWorking(
   line: InterviewEntry["line"] | undefined,
   previous?: InterviewEntry["line"],
-): string | null {
+): string {
   if (line === undefined) return "Reading the repository…";
-  // The spec is written and the note says so, and the three ways on from it
-  // are on the note. Nothing is added by saying the session is also still
-  // talking: the note is the status, the person can act on it now, and a line
-  // under it saying work is in hand reads as more being owed before they may
-  // — which is exactly the thing that is not true. Whatever the session says
-  // next appends below the note as any line does.
-  if (line.kind === "note" && line.text === INTERVIEW_WROTE_THE_SPEC) return null;
+  // The spec is written and the note says so, and the session is winding the
+  // turn up: Generate plan waits on that (D-102), so the status says it is
+  // going on rather than falling quiet under the note.
+  if (line.kind === "note" && line.text === INTERVIEW_WROTE_THE_SPEC) return FINISHING;
   // An answer to a problem between the plan and the spec: the session is
   // applying it, and the plan is read again once it has.
   if (line.kind === "turn" && previous?.kind === "asked" && previous.drift !== undefined)
@@ -617,7 +616,8 @@ export function sayWorking(
 
 /**
  * Whether the note that hands the written spec over has been said since the
- * person's last turn: from there on the note is what the turn says (D-102).
+ * person's last turn: from there on nothing the session says in that turn is
+ * shown (D-102).
  */
 export function handedOver(conversation: readonly InterviewEntry[]): boolean {
   return (
@@ -734,7 +734,8 @@ export function problemHead(open: number): string {
  * whole group as one turn, and is only enabled once every part has an answer,
  * because a half-answered group asked again is worse than one not yet sent. A
  * pick clicked again is taken back, which is how a person changes their mind
- * before they send.
+ * before they send; Something else is taken back by a click on its opened
+ * answer around the box, since a click in the box is the person typing.
  *
  * A part whose answer is none of the offered ones is said in a box of its own,
  * inside that part's answer, so the group's other parts stay pickable and the
@@ -785,8 +786,8 @@ export function QuestionCard({
   const [picked, setPicked] = useState<Record<number, number>>({});
   // What the person has typed for each part they said the answer to is none of
   // the offered ones. Kept per part and not thrown away when they pick an
-  // option instead, so changing their mind twice does not cost them the
-  // sentence they wrote.
+  // option instead or take Something else back, so changing their mind twice
+  // does not cost them the sentence they wrote.
   const [own, setOwn] = useState<Record<number, string>>({});
   // The part whose box is to take the caret as soon as it is there. Picking
   // "Something else" is already the start of typing the answer, so the next
@@ -888,17 +889,21 @@ export function QuestionCard({
         key={at}
       >
         <span className="choice-heading">
-          {/* The pair are actions rather than lines to read, so their radio
-              is there for the keyboard and the accessible name, and unseen. */}
+          {/* The circle every answer carries, the pair's included: filled
+              while it is the pick, and while the box it opened is being
+              typed in. */}
           <input
             type="radio"
-            className={paired ? "unseen" : undefined}
             name={`asked-${number}-${index}`}
             checked={chosen}
             disabled={busy}
             // A click on the pick already made takes it back: a radio fires
             // no change for that click, so it is read here. Space on it is
-            // the keyboard's way of making it, and is not a take-back.
+            // the keyboard's way of making it, and is not a take-back. A click
+            // anywhere on the answer reaches here through its label but one
+            // in the box Something else opened, which is the box's own: so
+            // that answer is taken back by its opened card around the box,
+            // and never by typing in it.
             onClick={() => {
               if (chosen) answer();
             }}
@@ -938,7 +943,6 @@ export function QuestionCard({
               // carries on from.
               held.setSelectionRange(held.value.length, held.value.length);
             }}
-            className={cx((own[index] ?? "").trim().length === 0 && "awaiting-words")}
             aria-label={ownLabel(index)}
             value={own[index] ?? ""}
             disabled={busy}
@@ -1024,20 +1028,12 @@ function Line({
   onUndo,
   undoable,
   busy,
-  onContract,
 }: {
   entry: InterviewEntry;
   onUndo: ((n: number) => void) | null;
   /** The edit the plan's history says an undo may take back, or null for none. */
   undoable: number | null;
   busy: boolean;
-  /**
-   * The way to the contract, for a note that offers it; null where there is
-   * no ticket to go to, or while a question, a turn or a reading stands
-   * between the person and confirming, and the note then reads without its
-   * button.
-   */
-  onContract: (() => void) | null;
 }) {
   const line = entry.line;
   if (line.kind === "turn")
@@ -1056,7 +1052,10 @@ function Line({
     );
   // A note the host marked is about a page the person is not on, so it is
   // drawn to be read rather than to be scrolled past. It is told, not warned:
-  // nothing has gone wrong, so it takes no danger colour.
+  // nothing has gone wrong, so it takes no danger colour. A note is words and
+  // never a press: the one saying the spec is written leaves drafting to the
+  // foot of the Spec pane, and the one saying every problem is resolved
+  // leaves confirming to the Confirm the plan every other pane carries.
   if (line.kind === "note")
     return (
       <p
@@ -1064,16 +1063,6 @@ function Line({
         {...(line.notable ? { role: "note", "aria-label": "Worth knowing" } : {})}
       >
         {line.text}
-        {/* The way on, where the note offers one, from any pane the chat is
-            beside: the contract, once every problem between the plan and the
-            spec is resolved. The note saying the spec is written offers none
-            — the press that drafts the plan is at the foot of the Spec pane,
-            under the spec it drafts from, and there alone. */}
-        {line.offers === "contract" && onContract !== null && (
-          <Button variant="primary" className="small msg-offer" onClick={onContract}>
-            Confirm the plan
-          </Button>
-        )}
       </p>
     );
   // The questions are put one group at a time under the conversation, and they
@@ -1166,10 +1155,12 @@ function Line({
  * tense it happened in. What an edit changed is on the graph and in the spec,
  * where the person reads it, so the card does not say it again. An
  * `edit_plan` or an `undo_edit` carries the edit the plan's own record took
- * from it, and the undo D-100 allows is on its number. A refused call adds one
- * muted line under it: the first sentence of why, cut to the line.
+ * from it, and the undo D-100 allows is on its number. A refused call adds a
+ * muted line under it: the first sentence of why, whole, over as many lines
+ * as it takes, with the rest of the reason behind an `i` after it where there
+ * is more than that sentence.
  */
-function ToolCard({
+export function ToolCard({
   line,
   edit,
   onUndo,
@@ -1204,14 +1195,24 @@ function ToolCard({
           </button>
         )}
       </div>
-      {!line.ok && <p className="tool-why">Refused: {firstSentence(line.detail)}</p>}
+      {!line.ok && (
+        <p className="tool-why">
+          {`Refused: ${firstSentence(line.detail)}`}
+          {firstSentence(line.detail) !== flat(line.detail) && (
+            <InfoHint text={line.detail} label={`Why it was refused: ${toolName(line.tool, false)}`} />
+          )}
+        </p>
+      )}
     </div>
   );
 }
 
+/** What a tool said, on one line: its whitespace run together. */
+const flat = (text: string): string => text.trim().replace(/\s+/g, " ");
+
 /** The first sentence of what a tool said, or all of it where it has no end to a sentence. */
 export function firstSentence(text: string): string {
-  const flat = text.trim().replace(/\s+/g, " ");
-  const end = flat.search(/[.!?](\s|$)/);
-  return end < 0 ? flat : flat.slice(0, end + 1);
+  const said = flat(text);
+  const end = said.search(/[.!?](\s|$)/);
+  return end < 0 ? said : said.slice(0, end + 1);
 }

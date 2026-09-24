@@ -52,7 +52,12 @@ export interface CommandSegment {
    * decision turn on where the writes landed rather than on the verb's name.
    */
   mutating: boolean;
-  /** The programs the segment runs, by basename, with the wrappers stripped. */
+  /**
+   * The programs the segment runs, by basename, with the wrappers stripped:
+   * its own, the one a `find -exec` or an `rg --pre` runs, and those of the
+   * nested shells in `nested`. Not those of its `substitutions`, which are
+   * segments of their own.
+   */
   programs: string[];
   /**
    * Each command the segment runs, normalised to the program's basename and the
@@ -70,14 +75,29 @@ export interface CommandSegment {
   invocations: string[];
   /**
    * The segments a nested shell of this one runs: the body of a `sh -c`, an
-   * `eval` or a `pnpm exec -c`, each read as a command in its own right.
+   * `eval`, a `pnpm exec -c` or a `bash <<EOF`, each read as a command in its
+   * own right.
    *
    * They are kept apart from the segment that wrapped them because the wrapper
-   * inherits their `mutating` flag, and a caller deciding a command by where
-   * its writes land needs the command that writes rather than the one standing
-   * around it.
+   * inherits their `mutating` flag and their programs, and a caller deciding a
+   * command by where its writes land needs the command that writes rather than
+   * the one standing around it. The wrapper runs nothing of its own.
    */
   nested: CommandSegment[];
+  /**
+   * The segments of every `$(…)`, backtick pair and process substitution the
+   * segment carries — in its words, its redirects, its here-strings and its
+   * unquoted here-documents — each read as a command in its own right, which
+   * the shell runs before the segment's own command.
+   *
+   * The segment's own command is still its own, so unlike a nested shell's
+   * these hand it neither their programs nor their `mutating` flag: `echo
+   * "$(mail …)"` runs `echo` and, as a segment of its own, `mail`, and a
+   * caller judging the line by what it runs judges each. They do hand it their
+   * findings, their invocations, their unreadable programs and whether they
+   * could be accounted for, which are about the line rather than the verb.
+   */
+  substitutions: CommandSegment[];
   /**
    * What the parser could not read but did not refuse. A wrapper option its
    * table does not know, on a line that names no command for the wrapper to
@@ -96,6 +116,19 @@ export interface CommandSegment {
    * not because of what one did.
    */
   unreadablePrograms: string[];
+}
+
+/**
+ * Every command the segments run: each segment, the ones inside a nested shell
+ * of it, and the ones a substitution on it runs before its own command, each
+ * to be judged as itself.
+ */
+export function everySegment(segments: readonly CommandSegment[]): CommandSegment[] {
+  return segments.flatMap((segment) => [
+    segment,
+    ...everySegment(segment.nested),
+    ...everySegment(segment.substitutions),
+  ]);
 }
 
 /** What reading a command line yields: what it writes, where it stands, what it runs. */
@@ -121,6 +154,79 @@ const LEGACY_RULES: Array<{ pattern: RegExp; detail: string }> = [
   { pattern: /\b(cp|mv|rm|chmod|chown)\b[^\n]*\s~\//, detail: "touching a path under $HOME" },
 ];
 
+/** True where `command`'s leading options include `-v` or `-V`, which look a name up. */
+function looksUp(words: readonly Word[]): boolean {
+  for (const { value } of words) {
+    if (value === "--" || !value.startsWith("-") || value === "-") return false;
+    if (/^-[pvV]+$/.test(value) && /[vV]/.test(value)) return true;
+  }
+  return false;
+}
+
+/** `rg`'s options that take a value, as a separate word or attached. */
+const RG_VALUES = new Set([
+  "-e", "--regexp", "-f", "--file", "-g", "--glob", "--iglob", "-t", "--type", "-T",
+  "--type-not", "--type-add", "--type-clear", "-A", "--after-context", "-B", "--before-context",
+  "-C", "--context", "-m", "--max-count", "-j", "--threads", "-M", "--max-columns",
+  "-d", "--max-depth", "--max-filesize", "-E", "--encoding", "-r", "--replace", "--pre",
+  "--pre-glob", "--sort", "--sortr", "--color", "--colors", "--path-separator",
+  "--context-separator", "--field-context-separator", "--field-match-separator", "--engine",
+  "--dfa-size-limit", "--regex-size-limit", "--ignore-file", "--hostname-bin",
+  "--hyperlink-format", "--generate",
+]);
+
+/**
+ * The command an `rg --pre <program>` runs, as words: the program, then the
+ * paths the search reads (`.` where it names none), each of which the program
+ * is handed a file under. Null where there is no `--pre`. An option not in
+ * `RG_VALUES` is read as a flag, which every other `rg` option is.
+ */
+function rgPreprocessor(rest: readonly Word[]): Word[] | null {
+  let program: Word | null = null;
+  let patternGiven = false;
+  const positionals: Word[] = [];
+  for (let at = 0; at < rest.length; at += 1) {
+    const word = rest[at]!;
+    const value = word.value;
+    if (word.redirect === true) continue;
+    if (value === "--") {
+      positionals.push(...rest.slice(at + 1).filter((after) => after.redirect !== true));
+      break;
+    }
+    if (!value.startsWith("-") || value === "-") {
+      positionals.push(word);
+      continue;
+    }
+    let name: string;
+    let attached: string | null;
+    if (value.startsWith("--")) {
+      const eq = value.indexOf("=");
+      name = eq === -1 ? value : value.slice(0, eq);
+      attached = eq === -1 ? null : value.slice(eq + 1);
+    } else {
+      // A short cluster: flags until one that takes a value, which is the rest
+      // of the cluster or the next word.
+      let letter = 1;
+      while (letter < value.length && !RG_VALUES.has(`-${value[letter]}`)) letter += 1;
+      if (letter === value.length) continue;
+      name = `-${value[letter]}`;
+      attached = letter + 1 < value.length ? value.slice(letter + 1) : null;
+    }
+    if (!RG_VALUES.has(name)) continue;
+    const operand =
+      attached !== null ? { ...word, raw: attached, value: attached } : rest[at + 1];
+    if (attached === null) at += 1;
+    if (name === "-e" || name === "--regexp" || name === "-f" || name === "--file") {
+      patternGiven = true;
+    }
+    if (name === "--pre" && operand !== undefined) program = operand;
+  }
+  if (program === null) return null;
+  const paths = patternGiven ? positionals : positionals.slice(1);
+  const dot: Word = { raw: ".", value: ".", substitutions: [], variable: false };
+  return [program, ...(paths.length > 0 ? paths : [dot])];
+}
+
 interface Analysis {
   findings: WriteFinding[];
   /** Set when the command moves the shell, so the rest of the line moves with it. */
@@ -141,6 +247,8 @@ interface Analysis {
   invocations: string[];
   /** The segments a nested shell of this command ran, as `CommandSegment.nested`. */
   nested: CommandSegment[];
+  /** The segments its substitutions ran, as `CommandSegment.substitutions`. */
+  substitutions: CommandSegment[];
   /** What the parser could not read but did not refuse, as `CommandSegment.notes`. */
   notes: string[];
   /** A program word this command could not read, as `CommandSegment.unreadablePrograms`. */
@@ -241,6 +349,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     programs,
     invocations,
     nested: nestedSegments,
+    substitutions: [],
     notes,
     unreadablePrograms,
   });
@@ -551,6 +660,11 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       continue;
     }
     const wrapper = WRAPPERS.get(program);
+    if (program === "command" && looksUp(words.slice(i + 1))) {
+      // `command -v gh` and `command -V gh` say what `gh` would be, and run
+      // nothing at all.
+      return stopHere();
+    }
     if (wrapper !== undefined) {
       const from = i;
       i += 1;
@@ -746,6 +860,22 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         invocations.push(...inner.invocations);
         unreadablePrograms.push(...inner.unreadablePrograms);
       }
+    } else if (verb === "rg") {
+      programs.push(verb);
+      // `--pre <program>` runs that program with each file the search reads
+      // as its operand, so it is read as the command `<program> <paths…>`,
+      // the way a `find -exec` body is: what it writes and what it runs are
+      // the line's.
+      const pre = rgPreprocessor(rest);
+      if (pre !== null) {
+        const inner = analyzeWords(pre, { ...context, cwd, stdin: undefined });
+        findings.push(...inner.findings);
+        if (!inner.accounted) accounted = false;
+        if (inner.mutating) mutating = true;
+        programs.push(...inner.programs);
+        invocations.push(...inner.invocations);
+        unreadablePrograms.push(...inner.unreadablePrograms);
+      }
     } else {
       programs.push(verb);
     }
@@ -779,6 +909,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     programs,
     invocations,
     nested: nestedSegments,
+    substitutions: [],
     notes,
     unreadablePrograms,
   };
@@ -802,6 +933,7 @@ function analyzeSegment(
   const programs: string[] = [];
   const invocations: string[] = [];
   const nestedSegments: CommandSegment[] = [];
+  const substitutionSegments: CommandSegment[] = [];
   const notes: string[] = [];
   const unreadablePrograms: string[] = [];
   let cwd = context.cwd;
@@ -828,6 +960,7 @@ function analyzeSegment(
       return;
     }
     const words: Word[] = [];
+    const bodies: string[] = [];
     for (const item of group) {
       if (item.kind === "word") {
         words.push(item.word);
@@ -837,6 +970,7 @@ function analyzeSegment(
       if (item.kind === "stdin") {
         // The last one wins, as it does in the shell.
         stdin = item.source;
+        bodies.push(...item.substitutions);
         continue;
       }
       const { target, reason } = item.redirect;
@@ -854,10 +988,18 @@ function analyzeSegment(
       );
       if (target !== null) words.push({ ...target, redirect: true });
     }
-    // Every `$(…)` and backtick body is a command in its own right.
-    for (const word of words) {
-      for (const body of word.substitutions) {
-        findings.push(...inspectSegments(body, context.scope, cwd, context.depth + 1).findings);
+    // Every `$(…)`, backtick and process-substitution body is a command in its
+    // own right, run before this one, and kept as a segment of its own
+    // (`CommandSegment.substitutions` says what it hands this one).
+    for (const word of words) bodies.push(...word.substitutions);
+    for (const body of bodies) {
+      const inner = inspectSegments(body, context.scope, cwd, context.depth + 1);
+      findings.push(...inner.findings);
+      substitutionSegments.push(...inner.segments);
+      for (const segment of inner.segments) {
+        invocations.push(...segment.invocations);
+        unreadablePrograms.push(...segment.unreadablePrograms);
+        if (!segment.accounted) accounted = false;
       }
     }
     const analysis = analyzeWords(words, { ...context, cwd, stdin });
@@ -909,6 +1051,7 @@ function analyzeSegment(
     programs,
     invocations,
     nested: nestedSegments,
+    substitutions: substitutionSegments,
     notes,
     unreadablePrograms,
   };
@@ -988,6 +1131,7 @@ export function inspectSegments(
       programs: analysis.programs,
       invocations: analysis.invocations,
       nested: analysis.nested,
+      substitutions: analysis.substitutions,
       notes: analysis.notes,
       accounted: analysis.accounted && balanced,
       unreadablePrograms: analysis.unreadablePrograms,

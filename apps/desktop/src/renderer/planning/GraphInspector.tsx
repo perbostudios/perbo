@@ -56,6 +56,11 @@ export function GraphInspector({
   const others = view.nodes.filter((each) => each.id !== node.id);
   const after = view.edges.filter((edge) => edge.to === node.id);
   const before = view.edges.filter((edge) => edge.from === node.id);
+  // What each side's chip offers: every other node on neither side already.
+  // One on this side would be a second edge, and one on the other side a
+  // cycle, and the plan refuses both.
+  const joined = new Set([...after.map((edge) => edge.from), ...before.map((edge) => edge.to)]);
+  const offered = others.filter((each) => !joined.has(each.id));
   /** The path being typed, or null while the "+ path" chip is closed. */
   const [path, setPath] = useState<string | null>(null);
   const notes = node.page === null ? "" : nodePageNotes(node.page.text);
@@ -118,24 +123,27 @@ export function GraphInspector({
                       </span>
                     );
                   })}
-                  <select
-                    className="add-chip"
-                    aria-label={`Add a node this one comes ${side}`}
-                    value=""
-                    disabled={busy}
-                    onChange={(event) => {
-                      const [from, to]: [string, string] =
-                        side === "after" ? [event.target.value, node.id] : [node.id, event.target.value];
-                      apply({ op: "add_edge", from, to });
-                    }}
-                  >
-                    <option value="">{`+ ${side}`}</option>
-                    {others.map((each) => (
-                      <option key={each.id} value={each.id}>
-                        {each.id} {each.title}
-                      </option>
-                    ))}
-                  </select>
+                  {/* Nothing left to join on either side: no chip to offer nothing. */}
+                  {offered.length > 0 && (
+                    <select
+                      className="add-chip"
+                      aria-label={`Add a node this one comes ${side}`}
+                      value=""
+                      disabled={busy}
+                      onChange={(event) => {
+                        const [from, to]: [string, string] =
+                          side === "after" ? [event.target.value, node.id] : [node.id, event.target.value];
+                        apply({ op: "add_edge", from, to });
+                      }}
+                    >
+                      <option value="">{`+ ${side}`}</option>
+                      {offered.map((each) => (
+                        <option key={each.id} value={each.id}>
+                          {each.id} {each.title}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </div>
             ))}
@@ -197,9 +205,13 @@ export function GraphInspector({
               )}
             </div>
             <datalist id={`graph-paths-${node.id}`}>
-              {view.pathsAllowed.map((glob) => (
-                <option key={glob} value={glob} />
-              ))}
+              {/* The paths the node does not already name: one it names is
+                  already a chip in this row. */}
+              {view.pathsAllowed
+                .filter((glob) => !node.paths.includes(glob))
+                .map((glob) => (
+                  <option key={glob} value={glob} />
+                ))}
             </datalist>
           </div>
           {/* The Notes section of the node's generated page: the one part of

@@ -168,7 +168,7 @@ either. It reads anything and runs read-only commands; that spec's own folder, `
 ADR folder are the only places it may write, and a write outside them is refused rather than put to
 you — there are no permission prompts, and a refusal is streamed and printed with the rule that
 refused it. It writes the spec's `#` line as a title, named as a ticket is and shown the other tickets' names
-(D-127), and admission rewrites it to the ticket's name. It writes the spec and stops there: drafting one ticket from it is yours, through
+(D-127), and admission rewrites it to the ticket's name unless it is given `--keep-title` (D-127). It writes the spec and stops there: drafting one ticket from it is yours, through
 `admit --from-spec` or Generate plan in the app. `edit_plan` and `undo_edit` change that plan
 afterwards through the same validated path `edit --graph-edit` uses, recorded as the interview's and
 undoable; `read_plan` reads it back; `ask_options` puts what it cannot settle itself to you as groups
@@ -266,7 +266,9 @@ in the repository (D-103): the same prompt and the same `trust="external"` block
 two things a spec adds. Its requirement ids are the only ones a criterion may cite, and a draft
 citing one the spec does not carry is refused; its No-Gos are read from the `## No-Gos` heading and
 never drafted. The ticket's name becomes the spec's title: its `#` line is rewritten to the name,
-and nothing else in the file or the folder's name moves (D-127).
+and nothing else in the file or the folder's name moves (D-127). With `--keep-title`, for a spec a
+person titled, it is the other way round: the ticket takes the spec's title as it stands, at most
+60 characters, and the spec is left as it is (D-127).
 The ticket records the spec's repository-relative path and the SHA-256 of the spec as admission
 leaves it, and beside them every file the loop commits with the spec, each with its own
 hash: the spec's whole folder but for the interview's session record, and the `CONTEXT.md` and the
@@ -296,7 +298,7 @@ spec while the pull request carries it.
 ticket's plan again: the same key, `ticket_id` and `plan_id`, a new plan version, and the drafted
 graph, criteria and scope replacing what stood, so the graph edits made since the last draft go with
 them. The spec's edits and its No-Gos survive because they are in the file, and its title is
-rewritten to the name drafted again. The replaced edits stay
+rewritten to the name drafted again, unless `--keep-title` keeps it as the ticket's name (D-127). The replaced edits stay
 in `PRB-1.draft.json` marked replaced — they stop counting towards `edit_count`, and `--undo` cannot
 reach across the re-draft. It admits no other ticket, refuses a ticket that is not in `plan_review`,
 and, like every other drafting flag, cannot approve in the same command.

@@ -23,6 +23,7 @@ export {
 } from "./internal/scope.js";
 export type { WriteCause, WriteFinding, WriteRule } from "./internal/destination.js";
 export type { CommandReading, CommandSegment } from "./internal/line.js";
+export { everySegment } from "./internal/line.js";
 export { splitCommandSegments } from "./internal/lexer.js";
 export { WRITERS, type WriterSpec } from "./internal/writers.js";
 

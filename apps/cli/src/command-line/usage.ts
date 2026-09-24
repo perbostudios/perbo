@@ -122,7 +122,7 @@ export const USAGE = `perbo — contract to pull request, locally
   perbo admit --outcome "..." --criterion "what :: how it is proven" --path "src/**"
   perbo admit --from owner/repo#412 [--provider claude-cli] [--model <id>]
   perbo admit --from-file issue.md [--provider claude-cli] [--model <id>]
-  perbo admit --from-spec specs/<slug>/spec.md [--provider claude-cli]
+  perbo admit --from-spec specs/<slug>/spec.md [--provider claude-cli] [--keep-title]
   perbo admit --from-spec specs/<slug>/spec.md --start-over PRB-1
       Admit one piece of work. Creates a native ticket and its plan contract
       against HEAD, in plan_review. With --from, a model drafts the outcome,
@@ -156,6 +156,9 @@ export const USAGE = `perbo — contract to pull request, locally
       every other ticket's name, which it is shown. A name another ticket
       carries, or none, falls to the spec's title, and that to the outcome.
       A spec's title line is rewritten to the name; its folder keeps its slug.
+      --keep-title is for a spec a person titled: the ticket takes the spec's
+      title as it stands, the drafter's name is not used, and the spec is
+      left as it is. A title longer than a name's 60 characters is refused.
       However large the issue, the draft is one contract and admits one
       ticket. The level is derived from the scope; --level may raise it,
       never lower it. Admitting takes
@@ -539,6 +542,9 @@ Drafting for admit
                           the same spec. The same key, a new plan version, and
                           the graph edits since the last draft dropped, kept in
                           the log marked replaced. Only a ticket in plan_review
+  --keep-title            with --from-spec: name the ticket after the spec's
+                          title as it stands, not the drafter's name, and leave
+                          the spec's title line as it is
   --provider <name>       'claude-cli' (default, the locally installed \`claude\` and
                           its own login), 'anthropic' (ANTHROPIC_API_KEY) or
                           'codex-cli'; the drafter uses the reviewer's transport

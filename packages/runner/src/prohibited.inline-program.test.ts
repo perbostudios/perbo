@@ -61,8 +61,16 @@ describe("a program that reads one file inside the worktree", () => {
     expect(hits(`python3 -c "${code}"`)).toEqual([]);
   });
 
-  it("still refuses the same shape reading a file outside the worktree", () => {
+  it("allows the same shape reading a file outside the worktree, which is not a write", () => {
     const command = TICKET_FOUR.replace("backlog/issues.json", `${OUTSIDE}/issues.json`);
+    expect(hits(command)).toEqual([]);
+  });
+
+  it("refuses the same shape writing outside the worktree, as a shown write", () => {
+    const command = TICKET_FOUR.replace(
+      "open('backlog/issues.json')",
+      `open('${OUTSIDE}/issues.json', 'w')`,
+    );
     const found = writes(command);
     expect(found.length).toBeGreaterThan(0);
     expect(found[0]?.detail).toContain("outside the worktree");

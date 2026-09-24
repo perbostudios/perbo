@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TICKET_STATES, TicketStateSchema } from "@perbo/contracts";
-import { isArchivable, isFiled, isPreLoop } from "./archive.js";
+import { isArchivable, isFiled, isPreLoop, notArchivable } from "./archive.js";
 import type { Job, TaskRow } from "./protocol.js";
 
 const row = (state: string): Pick<TaskRow, "repoId" | "ticket"> =>
@@ -20,6 +20,8 @@ describe("what may be archived", () => {
       "merged",
       "closed",
       "done",
+      "deployed",
+      "observing",
       "plan_invalid",
       "failed",
       "cancelled",
@@ -38,6 +40,24 @@ describe("what may be archived", () => {
     }
     expect(isArchivable({ jobs: [job("running")] }, row("failed"))).toBe(false);
     expect(isArchivable({ jobs: [] }, row("pr_open"))).toBe(false);
+  });
+
+  it("keeps a completed ticket on Home until its merge is decided, then files it", () => {
+    // Green while its pull request waits on the person's merge decision, and
+    // nothing to file: the decision is still to be made.
+    expect(isArchivable({ jobs: [] }, row("pr_open"))).toBe(false);
+    // Merged, or closed without merge: decided, and filed from Home like a stop.
+    expect(isArchivable({ jobs: [] }, row("merged"))).toBe(true);
+    expect(isArchivable({ jobs: [] }, row("closed"))).toBe(true);
+  });
+
+  it("names the merge decision when refusing an open pull request, and the loop otherwise", () => {
+    expect(notArchivable("PRB-1", "pr_open")).toBe(
+      "PRB-1 waits on the merge decision. Archive it once its pull request is merged or closed.",
+    );
+    expect(notArchivable("PRB-1", "executing")).toBe(
+      "PRB-1 is still in its loop. Archive it once it has finished or its run has stopped.",
+    );
   });
 
   it("files a merged ticket while a command other than its loop runs for it", () => {

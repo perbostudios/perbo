@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import { StoredAdmissionSchema } from "./admission.js";
@@ -27,7 +27,7 @@ import {
 } from "@perbo/contracts";
 import { ContractDraftSchema, DraftModelRecordSchema } from "@perbo/planning";
 import { AttemptsRecordError, lastAttemptBranch, readAttemptsRecord } from "@perbo/runner";
-import { branchName, recordedBranch } from "@perbo/workspace";
+import { branchName, recordedBranch, replaceFile } from "@perbo/workspace";
 import { listLocalRuns, type LocalRunRecord } from "../commands/run/local.js";
 import { StoreError, repositoryRootOf, storeDir, storedRepositoryRoot } from "./index.js";
 
@@ -343,7 +343,7 @@ export function writeTicket(dir: string, ticket: Ticket): string {
     );
   }
   mkdirSync(join(dir, ...ticketsDir()), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(stored, null, 2)}\n`);
+  replaceFile(path, `${JSON.stringify(stored, null, 2)}\n`);
   return path;
 }
 
@@ -364,7 +364,7 @@ export function writeContract(dir: string, ticket: Ticket, contract: PlanContrac
       );
     }
   }
-  writeFileSync(path, `${JSON.stringify(contract, null, 2)}\n`);
+  replaceFile(path, `${JSON.stringify(contract, null, 2)}\n`);
   return path;
 }
 
@@ -380,7 +380,7 @@ export function writeContract(dir: string, ticket: Ticket, contract: PlanContrac
 export function writeApproachRecord(dir: string, key: string, approach: ApproachRecord): string {
   mkdirSync(join(dir, ...ticketsDir()), { recursive: true });
   const path = approachPath(dir, key);
-  writeFileSync(path, `${JSON.stringify(ApproachRecordSchema.parse(approach), null, 2)}\n`);
+  replaceFile(path, `${JSON.stringify(ApproachRecordSchema.parse(approach), null, 2)}\n`);
   return path;
 }
 
@@ -559,7 +559,7 @@ export type DraftSnapshot = z.infer<typeof DraftSnapshotSchema>;
 export function writeDraftSnapshot(dir: string, snapshot: DraftSnapshot): string {
   mkdirSync(join(dir, ...ticketsDir()), { recursive: true });
   const path = draftPath(dir, snapshot.key);
-  writeFileSync(path, `${JSON.stringify(DraftSnapshotSchema.parse(snapshot), null, 2)}\n`);
+  replaceFile(path, `${JSON.stringify(DraftSnapshotSchema.parse(snapshot), null, 2)}\n`);
   return path;
 }
 
@@ -664,7 +664,7 @@ export function recordIssued(dir: string, key: string): void {
   const sequence = readSequence(dir);
   if ((sequence[prefix] ?? 0) >= number) return;
   mkdirSync(join(dir, ...ticketsDir()), { recursive: true });
-  writeFileSync(
+  replaceFile(
     sequencePath(dir),
     `${JSON.stringify({ ...sequence, [prefix]: number }, null, 2)}\n`,
   );
