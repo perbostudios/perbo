@@ -1,4 +1,4 @@
-import { insideAllowedPaths, matchesAny } from "@perbo/contracts";
+import { matchesAny } from "@perbo/contracts";
 import {
   anchorOf,
   comparable,
@@ -63,9 +63,9 @@ export type Destination =
   | { kind: "outside"; resolved: string }
   /**
    * Inside the worktree, outside the contract's globs (SCP-195). `at` is the
-   * destination relative to the root, which is the spelling the contract, the
-   * change set and the review all use — and the one the executor has to
-   * recognise as a file it may not write.
+   * destination relative to the root, `.` for the root itself, which is the
+   * spelling the contract, the change set and the review all use — and the one
+   * the executor has to recognise as a path it may not write.
    */
   | { kind: "outside_scope"; resolved: string; at: string; allowed: readonly string[] }
   /**
@@ -160,30 +160,42 @@ export function judgeTarget(target: string, scope: ResolvedScope, cwd: Cwd, shel
   // refused as prohibited (D-105). The other order would tell the reader to
   // widen the contract to reach a path the contract forbids.
   const prohibitedFold = (value: string) => prohibitedComparable(value, scope.semantics);
-  if (matchesAny(prohibitedFold(at), scope.paths_prohibited.map(prohibitedFold))) {
+  if (covers(prohibitedFold(at), scope.paths_prohibited.map(prohibitedFold))) {
     return {
       kind: "prohibited_path",
       resolved: walked.path,
-      at,
+      at: at || ".",
       prohibited: scope.paths_prohibited,
     };
   }
-  if (scope.paths_allowed.length === 0 || insideAllowedPaths(fold(at), scope.paths_allowed.map(fold))) {
+  if (scope.paths_allowed.length === 0 || covers(fold(at), scope.paths_allowed.map(fold))) {
     return { kind: "inside", resolved: walked.path };
   }
-  return { kind: "outside_scope", resolved: walked.path, at, allowed: scope.paths_allowed };
+  return { kind: "outside_scope", resolved: walked.path, at: at || ".", allowed: scope.paths_allowed };
+}
+
+/**
+ * Whether globs cover a write to `at`, a repository-relative path with the
+ * root as `""`. A write to a directory reaches everything under it, so a glob
+ * covers a directory whose whole contents it matches: `<dir>/**` covers
+ * `<dir>`, and only `**` covers the root. Both lists are read this way, so a
+ * directory a prohibited glob empties is refused and one the allowed globs
+ * admit whole is admitted.
+ */
+function covers(at: string, globs: readonly string[]): boolean {
+  const contents = globs.filter((glob) => glob === "**" || glob.endsWith("/**"));
+  return (at !== "" && matchesAny(at, globs)) || matchesAny(at, contents.map((glob) => glob.slice(0, -3)));
 }
 
 /**
  * A destination inside the worktree as the path relative to the root — the
- * spelling the contract, the change set and the review all use — or null where
- * the contract's paths have nothing to say about it.
+ * spelling the contract, the change set and the review all use, with the root
+ * itself as `""` — or null where the contract's paths have nothing to say
+ * about it.
  *
- * Two things inside the root are never judged by them. The scratch directory is
- * the runner's own: it is excluded from every list the seal builds, so no
- * contract names it and nothing written there can be a scope escape or a
- * prohibited path. And the root itself is not a repository-relative path at
- * all; there is nothing for a glob to match.
+ * The scratch directory is the runner's own: it is excluded from every list
+ * the seal builds, so no contract names it and nothing written there can be a
+ * scope escape or a prohibited path.
  */
 function repositoryRelative(resolved: string, root: string, scope: ResolvedScope): string | null {
   if (scope.tmpdir !== null) {
@@ -191,11 +203,10 @@ function repositoryRelative(resolved: string, root: string, scope: ResolvedScope
     const tmpdir = comparable(scope.tmpdir, scope.semantics);
     if (path === tmpdir || path.startsWith(`${tmpdir}/`)) return null;
   }
-  const at = resolved.slice(root.length + 1);
   // Already in the contract's spelling: a glob is written with `/` whatever the
   // platform's separator, and the resolver holds that one alphabet on every
   // host, so the path it is matched against needs no further conversion.
-  return at.length === 0 ? null : at;
+  return resolved.slice(root.length + 1);
 }
 
 export function destinationSentence(label: string, raw: string, destination: Destination): string | null {

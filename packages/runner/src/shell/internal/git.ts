@@ -112,7 +112,7 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
     const found: WriteFinding[] = [];
     for (let j = i + 1; j < rest.length; j += 1) {
       const word = rest[j]!;
-      if (word.value === "--") break;
+      if (word.value === "--" || word.value === "--end-of-options") break;
       let operand: Word | undefined;
       if (names.has(word.value)) {
         operand = rest[j + 1];
@@ -141,7 +141,7 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
   // Words a wrapper hands a verb that writes through an option are read as its
   // options too, so one of them can be that option.
   if (GIT_DIFF_OUTPUT.has(verb) || verb === "format-patch") {
-    const option = suppliedAsOption(`git ${verb}`, rest.slice(i + 1), context);
+    const option = suppliedAsOption(`git ${verb}`, rest.slice(i + 1), context, false, true);
     if (option !== null) return [option];
   }
   if (GIT_DIFF_OUTPUT.has(verb)) {

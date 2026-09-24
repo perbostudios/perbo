@@ -161,6 +161,9 @@ const FORMS: Array<{ form: string; outside: string[]; inside: string[] }> = [
       "git format-patch -o patches HEAD~1",
       "git diff --output-indicator-new=+ HEAD",
       "git diff -- --output=../x",
+      // After `--end-of-options` the word is a revision, not the option.
+      "git diff --end-of-options --output=../x",
+      "git format-patch --end-of-options -o ../patches HEAD~1",
       'echo "$(git diff --output=notes.diff)"',
     ],
   },
@@ -703,5 +706,76 @@ describe("`git diff --output` inside the worktree and outside the contract's glo
 
   it("is admitted inside the globs", () => {
     expect(scoped("git diff --output=src/x.diff").decision).toBe("allowed");
+  });
+});
+
+describe("a write to a whole directory, through the hook", () => {
+  const judged = (command: string, paths_allowed: string[], paths_prohibited: string[] = []) =>
+    judgePreToolCall(
+      { tool_name: "Bash", tool_use_id: "toolu_directory", tool_input: { command } },
+      {
+        root: ROOT,
+        tmpdir: null,
+        cwd: ROOT,
+        paths_allowed,
+        paths_prohibited,
+        allow_list: [...profile.command_allow_list, "Bash(find:*)"],
+        deny_list: [...profile.command_deny_list],
+      },
+      new Date("2026-09-04T00:00:00.000Z"),
+    ).decision;
+
+  const ROOT_WRITES = [
+    "rm -rf .",
+    "rm -rf ./",
+    "rm -rf src/..",
+    "cd src && rm -rf ..",
+    `cp -r ${OUTSIDE} .`,
+    "mv notes.md .",
+    "find . -exec rm {} ;",
+    "find . -delete",
+  ];
+
+  it("refuses the worktree root under a scope that does not admit all of it", () => {
+    for (const command of ROOT_WRITES) {
+      expect(judged(command, ["src/**"]), command).toMatchObject({
+        answer: "deny",
+        rule: "write_outside_scope",
+      });
+    }
+  });
+
+  it("admits the worktree root under `**`", () => {
+    for (const command of ROOT_WRITES) {
+      expect(judged(command, ["**"]).decision, command).toBe("allowed");
+    }
+  });
+
+  it("still moves into the root and reads it under a scope", () => {
+    for (const command of ["cd .", "cd src && cd ..", "ls .", "cat ./notes.md"]) {
+      expect(judged(command, ["src/**"]).decision, command).toBe("allowed");
+    }
+  });
+
+  it("refuses a directory its own prohibited glob covers", () => {
+    for (const [command, prohibited] of [
+      ["rm -rf src/secret", "src/secret/**"],
+      ["rm -rf src/secret/", "src/secret/**"],
+      ["rm -rf .perbo", ".perbo/**"],
+      ["find .perbo -delete", ".perbo/**"],
+      ["rm -rf pkg/.perbo", "**/.perbo/**"],
+    ] as const) {
+      expect(judged(command, ["**"], [prohibited]), command).toMatchObject({
+        answer: "deny",
+        rule: "write_prohibited_path",
+      });
+    }
+    // The spec folder, prohibited whatever the contract names (D-103).
+    expect(judged("rm -rf specs", ["**"])).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+  });
+
+  it("admits a directory the scope covers whole, and refuses one it covers in part", () => {
+    expect(judged("rm -rf src", ["src/**"]).decision).toBe("allowed");
+    expect(judged("rm -rf src", ["src/lib/**"])).toMatchObject({ answer: "deny", rule: "write_outside_scope" });
   });
 });

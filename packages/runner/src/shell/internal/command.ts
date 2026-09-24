@@ -64,7 +64,10 @@ export function suppliedDestination(
 /**
  * The words a wrapper supplies, where the command behind it still reads them
  * as options: a placeholder that begins a word before the command's `--`, or
- * words appended to a line with no `--`. What the wrapper reads is not the
+ * words appended to a line with no `--`. A command that reads `revisions`
+ * (`git diff`, `log`, `show`, `format-patch`) also ends its options at
+ * `--end-of-options`, which keeps the words after it revisions where `--`
+ * would make them paths. What the wrapper reads is not the
  * line's to vouch for — `touch -- 'sub/-t..'; ls sub | xargs -I{} cp {} out`
  * runs GNU `cp -t.. out` — so a word that begins with `-` there is an option,
  * which can move where the command writes. `dd` reads no options, but an
@@ -76,10 +79,13 @@ export function suppliedAsOption(
   rest: readonly Word[],
   context: Context,
   takesAssignments = false,
+  revisions = false,
 ): WriteFinding | null {
   const supplied = context.supplied;
   if (supplied === undefined) return null;
-  const ends = takesAssignments ? -1 : rest.findIndex((word) => word.value === "--");
+  const ends = takesAssignments
+    ? -1
+    : rest.findIndex((word) => word.value === "--" || (revisions && word.value === "--end-of-options"));
   const placeholder = supplied.placeholder;
   const at =
     placeholder === null
@@ -98,8 +104,12 @@ export function suppliedAsOption(
     : `where ${verb} still reads options, so one that begins with - is an option rather than a ` +
       `path — ${
         placeholder === null
-          ? "end the line with -- to keep them paths"
-          : `put -- before it, or a prefix such as ./${placeholder}`
+          ? revisions
+            ? "end the line with --end-of-options to keep them revisions, or with -- to make them paths"
+            : "end the line with -- to keep them paths"
+          : revisions
+            ? "put --end-of-options before it to keep it a revision, or -- to make it a path"
+            : `put -- before it, or a prefix such as ./${placeholder}`
       }`;
   return {
     detail: `${how}, ${read}: ${context.segment.slice(0, 200)}`,

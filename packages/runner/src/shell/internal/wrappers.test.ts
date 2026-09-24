@@ -410,15 +410,20 @@ describe("an xargs behind another", () => {
  * `git format-patch -o`, `rg --pre`, which runs a program — behind a wrapper
  * that supplies it words. Those words land where the verb still reads its
  * options, so one can be that option: each is refused unless `--` keeps them
- * paths. A relative `--output` under a `-C` the placeholder fills lands where
- * the supplied words say, and a `--pre` program the placeholder stands in is
- * not one the line names.
+ * paths, or, for git's revision-reading verbs, `--end-of-options` keeps them
+ * revisions. A relative `--output` under a `-C` the placeholder fills lands
+ * where the supplied words say, and a `--pre` program the placeholder stands in
+ * is not one the line names.
  */
 const OPTION_A_WRAPPER_SUPPLIES = [
   "git ls-files | xargs git diff",
   "xargs git log --oneline",
   "xargs -I{} git show {}",
+  "echo HEAD | xargs -I{} git show {}",
+  "git log --format=%H -n3 | xargs git show --stat",
+  "ls | xargs git log --oneline",
   "xargs git format-patch",
+  "xargs -I{} git show --output={} --end-of-options HEAD",
   "git ls-files | xargs rg foo",
   "xargs -I{} rg foo {}",
   "xargs -J % git -C % diff --output=x.diff",
@@ -426,10 +431,18 @@ const OPTION_A_WRAPPER_SUPPLIES = [
   "xargs -I{} rg --pre ./{} foo -- src",
 ];
 
-/** The same, with `--` keeping the supplied words paths, or with no wrapper in front. */
+/**
+ * The same, with `--` keeping the supplied words paths, `--end-of-options`
+ * keeping them revisions, or with no wrapper in front.
+ */
 const OPTION_THE_LINE_SPELLS = [
   "git ls-files | xargs git diff --",
-  "xargs -I{} git show -- {}",
+  "xargs -I{} git show --end-of-options {}",
+  "echo HEAD | xargs -I{} git show --end-of-options {}",
+  "git log --format=%H -n3 | xargs git show --stat --end-of-options",
+  "ls | xargs git log --oneline --end-of-options",
+  "xargs git format-patch --end-of-options",
+  "xargs git diff --end-of-options --output=x.diff",
   "git ls-files | xargs rg foo --",
   "xargs -I{} rg foo -- {}",
   "xargs -J % git -C % log",
@@ -450,4 +463,14 @@ describe("a word a wrapper supplies where a verb writes through an option", () =
       expect(decision(command), command).toBe("allowed");
     });
   }
+
+  it("names --end-of-options as the way to keep git's revisions", () => {
+    expect(sentence("ls | xargs git log --oneline")).toContain(
+      "end the line with --end-of-options to keep them revisions, or with -- to make them paths",
+    );
+    expect(sentence("echo HEAD | xargs -I{} git show {}")).toContain(
+      "put --end-of-options before it to keep it a revision, or -- to make it a path",
+    );
+    expect(sentence("xargs -I{} rg foo {}")).toContain("put -- before it, or a prefix such as ./{}");
+  });
 });

@@ -100,13 +100,13 @@ describe("the Claude transport refuses a prohibited path inside the allowed ones
     }
   });
 
-  it("matches a path the way the reviewer does, so `src/generated` is not `src/generated/**`", () => {
-    // The glob is the contract's own, read with `matchesAny` — the reviewer's
-    // match, over a change set that lists files and never directories. So the
-    // directory word itself is not a match here either, and `rm -r` on it
-    // reaches the seal as the deletion of every file under it, where the
-    // reviewer's `scope.prohibited_path` blocks it. Two matches, one rule.
-    expect(judgeBash("rm -r src/generated").answer).toBe("allow");
+  it("refuses the directory itself, since a write to it reaches every file under it", () => {
+    // The reviewer's change set lists files and never directories, so the
+    // review sees `rm -r src/generated` only as the files it deleted. The
+    // guard reads `src/generated/**` as covering the directory it empties.
+    const decision = judgeBash("rm -r src/generated");
+    expect(decision.answer).toBe("deny");
+    expect(decision.rule).toBe(ADMISSION_RULES.prohibited_path);
   });
 
   it("admits the rest of the allowed paths, so the rule is the contract's and not the glob's", () => {
