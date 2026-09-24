@@ -44,7 +44,7 @@ function archived(cost: TaskSummary["costMicros"]): { row: TaskRow; workspace: S
 }
 
 function costCell(): string {
-  const cells = within(screen.getByRole("table", { name: "Completed tickets" })).getAllByRole(
+  const cells = within(screen.getByRole("table", { name: "Archived tickets" })).getAllByRole(
     "cell",
   );
   // ID, Ticket name, Repo, Diff, Criteria, Cost, Merged, (restore).

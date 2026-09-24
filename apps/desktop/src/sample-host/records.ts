@@ -1,8 +1,10 @@
 import {
   EditingSessionSchema,
   INTERVIEW_NEEDS_A_TITLE,
+  INTERVIEW_WROTE_THE_SPEC,
   PREVIEW_BYTE_CAP,
   TaskModelsSchema,
+  parseStored,
 } from "../shared/protocol.js";
 import {
   applyGraphEdit,
@@ -13,26 +15,52 @@ import {
   renderNodePage,
   renderSpec,
   requirementNodes,
+  retitleSpec,
   specSlug,
   specTitleFromMessage,
   undoGraphEdit,
   type GraphEditOutcome,
   type Spec,
+  assertionsChangedSinceDraft,
+  promiseTexts,
+  type DriftFinding,
+  type DriftVerdict,
 } from "@perbo/planning/browser";
 import {
+  EFFORT_LEVELS,
   isNeverReadPath,
   planNodes,
   planSizeCounts,
+  sameName,
   sizeEstimate,
   type ApproachRecord,
+  type EffortLevel,
   type StandingProhibitedEntry,
 } from "@perbo/contracts/browser";
-import { ContractEditing, interviewProviderFor, type EditingOwner } from "../shared/contract-editing.js";
+import {
+  ContractEditing,
+  interviewModelFor,
+  interviewProviderFor,
+  REREAD_COULD_NOT_START,
+  sectionsOf,
+  specFindings,
+  turnOverlapped,
+  type EditingOwner,
+  type PromisePair,
+  type TurnMark,
+} from "../shared/contract-editing.js";
+import { ChangeMarks } from "../shared/change-marks.js";
 import { assembleLiveGraph } from "../shared/graph-live.js";
-import { busyMessage, exclusiveJob, lane } from "../shared/jobs.js";
+import { busyMessage, exclusiveJob, heldRepository, isLive, journal, lane } from "../shared/jobs.js";
+import {
+  DELETE_TICKET_GONE,
+  DELETE_WAITS_FOR_COMMANDS,
+  deletePullRequestOpen,
+} from "../shared/discard.js";
 import type {
   PlanContract,
   ReviewArtifact,
+  RunBundle,
   SymbolIndex,
   Ticket,
   UnsupportedRepository,
@@ -50,12 +78,16 @@ import type {
   TaskSummary,
   Change,
   ChangeInput,
+  EditingSession,
+  ModelCatalog,
+  ModelProvider,
   SpecSections,
   SpecView,
   GraphCriterionView,
   GraphEditView,
   GraphLiveView,
   GraphView,
+  InterviewDoing,
   InterviewEntry,
   InterviewStatus,
 } from "../shared/protocol.js";
@@ -78,13 +110,16 @@ export const plans = new Map<string, PlanContract>();
 const approaches = new Map<string, ApproachRecord>();
 export const approved = new Set<string>();
 export const decisionsAnswered = new Set<string>();
-export const criteriaText = [
+const criteriaText = [
   "A signup POST queues exactly one activation email.",
   "No email is sent for a duplicate signup inside five minutes.",
   "A send failure is retried three times, then dead-lettered.",
 ];
 const activationOutcome =
   "New users receive an activation email within 60 seconds of signing up.";
+/** The sample whose run was stopped, and the spec it was drafted from. */
+const stoppedKey = "PRB-415";
+const stoppedSlug = "retire-the-legacy-csv-importer";
 let next = 422;
 /** The next sample ticket a sample admission hands back, keyed in sequence. */
 export function newSampleTicket(title: string, state: Ticket["state"]): Ticket {
@@ -166,7 +201,10 @@ function sample(number: number, title: string, state: Ticket["state"]): Ticket {
     approved_at: state === "plan_review" ? null : at,
     admitted_at: at,
     updated_at: at,
-    admission: { elapsed_ms: 100, criteria_source: "typed", criteria_count: 3 },
+    // `spec` is null and not left out: the host's ticket reads back through
+    // its schema, which defaults it, and a page that asks whether a ticket
+    // was drafted from a spec reads the same answer here.
+    admission: { elapsed_ms: 100, criteria_source: "typed", criteria_count: 3, spec: null },
     delivery: {
       state:
         state === "merged"
@@ -198,6 +236,10 @@ const home = [
   row(377, "Backfill the audit table", "pr_open"),
   row(398, "Rate-limit the invite endpoint", "executing"),
   row(404, "Cache the pricing table response", "verifying"),
+  // The run somebody stopped. Its ticket is `failed` and its attempt sealed,
+  // which is where a stop inside the executor's window leaves the record, and
+  // the stopped page is what it opens on.
+  row(415, "Retire the legacy CSV importer", "failed"),
   row(421, "Split the settings page into tabs", "plan_review"),
 ];
 home.forEach((row, index) => {
@@ -274,10 +316,30 @@ export const initial: Snapshot = {
     },
   ],
   tasks: [...home, ...archive],
-  jobs: [],
+  // The run somebody stopped, as the journal keeps it. A stop aborts the job
+  // and the CLI seals the attempt; what marks the ticket as one to pick up
+  // again is this record beside it, because nothing is running for it now.
+  jobs: [
+    {
+      id: "80000000-0000-4000-8000-000000000415",
+      repoId,
+      key: stoppedKey,
+      resultKey: null,
+      kind: "run",
+      label: "Run engineering loop",
+      state: "cancelled",
+      startedAt: "2026-09-08T04:10:00.000Z",
+      endedAt: "2026-09-08T04:22:00.000Z",
+      log: "Interactive sample. No CLI or repository is accessed.",
+      error: null,
+      result: null,
+      publish: false,
+    },
+  ],
   errors: [],
   titles: {},
   taskModels: {},
+  asks: {},
   // Every sample ticket that finished before today is filed; #409 stays on Home in green until it is archived by hand (S4).
   archived: archive.filter((row) => row.ticket.key !== "PRB-409").map((row) => row.repoId + ":" + row.ticket.key),
   power: { holding: false, detail: null, since: null },
@@ -351,6 +413,9 @@ export const emit = (input: ChangeInput = { kind: "records", repoId: null, key: 
   const change = { ...input, sequence: snapshot.sequence };
   for (const listener of listeners) listener(structuredClone(change));
 };
+/** The preferences as they now stand, as the host announces them after any of them changes. */
+export const emitPreferences = (): void =>
+  emit({ kind: "preferences", settings: snapshot.settings, asks: snapshot.asks ?? {}, titles: snapshot.titles ?? {}, taskModels: snapshot.taskModels ?? {}, archived: snapshot.archived ?? [] });
 export function ticketRow(key: string): TaskRow {
   const row = snapshot.tasks.find((row) => row.ticket.key === key);
   if (!row) throw new Error("Sample task not found.");
@@ -409,6 +474,52 @@ const sampleChecks: { name: string; status: string; node: string | null }[] = [
   { name: "Tests", status: "passed", node: "node_1" },
   { name: "Tests", status: "failed", node: "node_2" },
 ];
+/**
+ * The execution bundle the stopped attempt sealed (ADR-0013, ADR-0026).
+ *
+ * A stop inside the executor's window terminates the attempt and still writes
+ * this, which is why `--resume-from` has something to be given: the stopped
+ * page offers the last attempt's retained changes on the strength of it.
+ */
+const stoppedBundle: RunBundle = {
+  schema_version: 1,
+  bundle_id: "bundle_" + "415a".repeat(4),
+  kind: "execution",
+  created_at: at,
+  subject_id: "preview-attempt-" + stoppedKey,
+  ticket_id: "ticket_preview_415",
+  inputs: { base_commit: base, resumed_from: null },
+  context_manifest: [],
+  versions: {
+    code: "0.1.0",
+    prompt: "interview@1",
+    policy: "policy@1",
+    model: "sonnet-class",
+    tool: "claude-code",
+  },
+  usage: {
+    input_tokens: 41_200,
+    output_tokens: 6_140,
+    cost_micros: 430_000,
+    cost_basis: "transport_reported",
+    cost_partial: true,
+    wall_clock_ms: 11 * 60_000,
+  },
+  artifacts: [],
+  errors: [],
+  transitions: [
+    { at, from: "executing", to: "failed", reason: "the attempt did not complete: terminated" },
+  ],
+  retention: { class: "replay_retained", expires_at: null },
+  redaction: {
+    secret_content_sha256: [],
+    secret_value_count: 0,
+    redactions: 0,
+    excluded_paths: [],
+  },
+  replayability: "forensic",
+  replayability_reason: "The attempt was stopped, so its context bytes were not retained.",
+};
 /**
  * The review on record. A remediation round does not replace it: a round is
  * verified rather than reviewed again (D-061), so this stays escalating and
@@ -482,7 +593,11 @@ export function detail(key: string): Detail {
       .filter((check) => check.node === null)
       .map((check) => ({ name: check.name, status: check.status, detail: "Sample result" })),
     verification: null,
-    bundles: [],
+    // A stopped attempt still seals its execution bundle, and that bundle is
+    // what another attempt carries on from. The sample's other attempts retain
+    // nothing, so both offers the stopped page makes — carrying on, and
+    // starting the attempt again — are there to see.
+    bundles: key === stoppedKey ? [stoppedBundle] : [],
   } satisfies Detail["attempts"][number];
   const closing = {
     ...reviewed,
@@ -507,6 +622,23 @@ export function detail(key: string): Detail {
   return {
     ticket,
     contract,
+    // Read as the host reads it: the spec's requirements against the plan's
+    // citations, both from the sample's own records.
+    specFindings: (() => {
+      const slug = specOf.get(ticket.key);
+      if (slug === undefined || !("acceptance_criteria" in contract)) return [];
+      return specFindings(readSpecSections(specFiles()[slug] ?? "").requirements, contract.acceptance_criteria);
+    })(),
+    // Read as the host reads it, from the sample's own edit records.
+    changedAssertions: assertionsChangedSinceDraft(
+      (graphEdits.get(ticket.key) ?? []).map((edit) => ({
+        before: edit.before,
+        undone: edit.undone,
+        replaced: edit.replaced,
+        undoes: edit.undoes,
+      })),
+      "acceptance_criteria" in contract ? contract.acceptance_criteria : [],
+    ),
     digest: String(ticket.plan_version).repeat(64),
     attempts,
     cost: {
@@ -559,6 +691,7 @@ const LABELS: Record<string, string> = {
   edit: "Update task contract",
   graphEdit: "Change the plan's graph",
   graphUndo: "Undo a plan edit",
+  drift: "Read the plan against the spec",
   run: "Run engineering loop",
   decide: "Run engineering loop",
   doctor: "Check repository readiness",
@@ -573,6 +706,8 @@ export function job(
   operation: (job: Job) => void,
   delay = 1000,
   owner?: EditingOwner,
+  /** Called once the job has settled and been said, however it ended. */
+  settled?: () => void,
 ): Job {
   const blocking = lane(kind) === "exclusive" ? exclusiveJob(snapshot.jobs) : undefined;
   if (blocking) throw new Error(busyMessage(blocking.label));
@@ -591,7 +726,7 @@ export function job(
     result: null,
     ...(owner ? { editing: owner } : {}),
   };
-  snapshot.jobs = [...snapshot.jobs.slice(-39), job];
+  snapshot.jobs = journal([...snapshot.jobs, job]);
   if (owner) editing.started(owner, job);
   emit({ kind: "progress", job });
   setTimeout(
@@ -608,7 +743,10 @@ export function job(
       void editing.settled(job).catch((error: unknown) => {
         job.error = String(error);
         job.state = "failed";
-      }).finally(() => emit({ kind: "records", repoId: repository, key: job.resultKey ?? key, job }));
+      }).finally(() => {
+        emit({ kind: "records", repoId: repository, key: job.resultKey ?? key, job });
+        settled?.();
+      });
     },
     new URLSearchParams(location.search).has("slow") ? 8000 : delay,
   );
@@ -836,6 +974,30 @@ export function sampleRead(id: string, requested: string): ExplorerFile {
  * would; what it stands in for is the filesystem, which a browser has none of.
  */
 const SPECS_KEY = "perbo:preview-specs";
+/**
+ * Take the sample spec folder with the work it described, as the host does.
+ *
+ * Deleting a piece of work deletes all of it, at every stage; the writing is
+ * left only where another planning is still writing it or another ticket was
+ * drafted from it (D-129).
+ */
+export function removeSpecFile(slug: string, except: { sessionId: string | null }): void {
+  const held = editingRecords().some(
+    (each) => each.id !== except.sessionId && each.specSlug === slug && each.phase !== "discarded",
+  );
+  if (held) return;
+  // No ticket is excused: one still on the board is one that still names this
+  // file, whether or not the caller meant to delete it, and a plan is read
+  // against the spec it names (D-103).
+  const drafted = snapshot.tasks.some(
+    (each) => each.ticket.admission.spec?.path === `specs/${slug}/spec.md`,
+  );
+  if (drafted) return;
+  const { [slug]: gone, ...rest } = specFiles();
+  void gone;
+  localStorage.setItem(SPECS_KEY, JSON.stringify(rest));
+}
+
 export const specFiles = (): Record<string, string> => {
   try {
     const raw: unknown = JSON.parse(localStorage.getItem(SPECS_KEY) ?? "{}");
@@ -909,7 +1071,231 @@ interface PreviewGraphEdit extends GraphEditView {
 }
 const graphEdits = new Map<string, PreviewGraphEdit[]>();
 /** Which spec a sample ticket was drafted from, as admission records it (D-103). */
-const specOf = new Map<string, string>();
+export const specOf = new Map<string, string>();
+/**
+ * The spec the stopped sample was drafted from, and the admission record that
+ * says so.
+ *
+ * Planning the work again reads this file and admits a new plan from it, so
+ * the file has to be in the sample repository's folder — written once, and
+ * left as it is where the sample workspace already holds it, because a person
+ * who edited it is reading their own words back.
+ */
+specOf.set(stoppedKey, stoppedSlug);
+ticketRow(stoppedKey).ticket.admission.spec = {
+  path: `specs/${stoppedSlug}/spec.md`,
+  content_sha256: "sha256:" + "0".repeat(64),
+  files: [],
+  names_that_resolved: null,
+  symbols_judged_at_approval: false,
+};
+if (specFiles()[stoppedSlug] === undefined)
+  saveSpec(
+    stoppedSlug,
+    [
+      "# Retire the legacy CSV importer",
+      "",
+      "## Outcome",
+      "",
+      "Every import goes through the current parser, and the legacy path is gone.",
+      "",
+      "## Requirements",
+      "",
+      "- R1: An upload of either dialect is read by the current parser.",
+      "- R2: A file the parser refuses is reported with the line it stopped at.",
+      "- R3: The legacy importer and its routes are removed.",
+      "",
+      "## No-Gos",
+      "",
+      "- Nothing is sent to an address that has unsubscribed.",
+      "",
+      "## Rabbit holes",
+      "",
+      "## Notes",
+      "",
+    ].join("\n"),
+  );
+
+/**
+ * The drift verdict kept beside each sample ticket, as `perbo drift` keeps it
+ * at `.perbo/tickets/<KEY>.drift.json`
+ * (D-128): keyed by the spec and the
+ * plan's promise texts, and held while neither moves.
+ */
+export const driftRecords = new Map<string, DriftVerdict>();
+/**
+ * A sample digest: the shape `perbo drift` keys its record by, over the same
+ * bytes, so a verdict holds and lets go exactly when the real one would. Not
+ * SHA-256 — the renderer has no synchronous one, and what is being stood in
+ * for is the key, not the hash.
+ */
+function sampleDigest(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return "sha256:" + hash.toString(16).padStart(8, "0").repeat(8);
+}
+/** The two keys a verdict is held by, for this ticket as it stands now. */
+export function driftKeys(key: string): { spec: string; promises: string } | null {
+  const slug = specOf.get(key);
+  const plan = plans.get(key);
+  if (slug === undefined || plan === undefined) return null;
+  const criteria = "acceptance_criteria" in plan ? plan.acceptance_criteria : [];
+  return {
+    spec: sampleDigest(specFiles()[slug] ?? ""),
+    promises: sampleDigest(JSON.stringify(promiseTexts({ outcome: plan.outcome, criteria }))),
+  };
+}
+/**
+ * The sample's reading of the plan against the spec: where a criterion's
+ * words no longer answer the requirement it cites, where a requirement has no
+ * criterion, and where the outcome has parted. A plan `draftFromSpec` made
+ * agrees by construction; one a person reworded on the Plan or Graph pane, or
+ * whose spec they edited, is what this finds. The options are in the person's
+ * own voice, as the real reading's are, because picking one sends its words
+ * to the interview as a turn (ADR-0023 §4).
+ */
+export function sampleDriftFindings(key: string): DriftFinding[] {
+  const slug = specOf.get(key);
+  const plan = plans.get(key);
+  if (slug === undefined || plan === undefined || !("acceptance_criteria" in plan)) return [];
+  const read = readSpecSections(specFiles()[slug] ?? "");
+  const findings: DriftFinding[] = [];
+  const outcome = read.text.outcome.split("\n")[0] ?? "";
+  if (outcome.trim() !== plan.outcome.trim())
+    findings.push({
+      heading: "The outcome",
+      difference: `The spec's Outcome says "${outcome.trim()}"; the plan's outcome says "${plan.outcome.trim()}".`,
+      options: [
+        { label: `Reword the plan's outcome to say: ${outcome.trim()}`, detail: null, recommended: true },
+        { label: `Change the spec's Outcome to say: ${plan.outcome.trim()}`, detail: null, recommended: false },
+      ],
+    });
+  const stated = read.requirements.flatMap((each) =>
+    each.id === null ? [] : [{ id: each.id, text: each.text }],
+  );
+  const answered = new Set<string>();
+  plan.acceptance_criteria.forEach((criterion, index) => {
+    const cited = stated.find((each) => each.id === criterion.requirement_id);
+    if (cited === undefined) {
+      // A criterion that cites nothing — a compile on the Plan pane numbers
+      // them afresh — answers a requirement in the same words, or promises
+      // something the spec does not ask for.
+      const worded = stated.find((each) => each.text.trim() === criterion.text.trim());
+      if (worded !== undefined) {
+        answered.add(worded.id);
+        return;
+      }
+      findings.push({
+        heading: `Criterion ${index + 1}`,
+        difference: `Criterion ${index + 1} promises "${criterion.text}", which no requirement in the spec asks for.`,
+        options: [
+          { label: `Drop criterion ${index + 1} from the plan.`, detail: null, recommended: false },
+          {
+            label: `Add a requirement to the spec for: ${criterion.text}`,
+            detail: "The spec takes the plan's promise.",
+            recommended: true,
+          },
+        ],
+      });
+      return;
+    }
+    answered.add(cited.id);
+    if (cited.text.trim() === criterion.text.trim()) return;
+    // The recommendation is written second here, as a model may write it in
+    // any place: the card is what puts it first, and a sample that already
+    // had it first would show nothing of that.
+    findings.push({
+      heading: `Criterion ${index + 1} and ${cited.id}`,
+      difference: `${cited.id} asks for "${cited.text}"; criterion ${index + 1} promises "${criterion.text}".`,
+      options: [
+        {
+          label: `Change ${cited.id} in the spec to say: ${criterion.text}`,
+          detail: "The spec takes the plan's words.",
+          recommended: false,
+        },
+        {
+          label: `Reword criterion ${index + 1} to say: ${cited.text}`,
+          detail: "The plan goes back to what the spec asks for.",
+          recommended: true,
+        },
+      ],
+    });
+  });
+  for (const requirement of stated)
+    if (!answered.has(requirement.id))
+      findings.push({
+        heading: requirement.id,
+        difference: `The spec states ${requirement.id}, "${requirement.text}", and no criterion answers it.`,
+        options: [
+          { label: `Add a criterion for ${requirement.id}: ${requirement.text}`, detail: null, recommended: true },
+          { label: `Drop ${requirement.id} from the spec.`, detail: null, recommended: false },
+        ],
+      });
+  return findings.slice(0, 6);
+}
+/** Keep this verdict for the ticket, at the state it was read. */
+export function recordDrift(
+  key: string,
+  origin: DriftVerdict["origin"],
+  findings: DriftFinding[],
+  cached: boolean,
+  keys = driftKeys(key),
+): DriftVerdict {
+  if (keys === null) throw new Error("This ticket was not drafted from a spec.");
+  const verdict: DriftVerdict = {
+    ...keys,
+    origin,
+    findings,
+    dismissed: false,
+    checked_at: new Date().toISOString(),
+    model: null,
+    key,
+    cached,
+  };
+  driftRecords.set(key, verdict);
+  return verdict;
+}
+/**
+ * The spec of a ticket still being planned, titled with the name the person
+ * gave it, as the host titles it; an approved one's spec is left as approval
+ * read it. The verdict keyed on the bytes before is carried to the renamed
+ * bytes, as the host carries it. True where the spec was renamed.
+ */
+export function nameSampleSpec(repoId: string, key: string, title: string): boolean {
+  const renamed = snapshot.tasks.find((row) => row.repoId === repoId && row.ticket.key === key);
+  const slug = renamed?.ticket.admission.spec?.path.split("/").at(-2);
+  const markdown = slug === undefined ? undefined : specFiles()[slug];
+  if (slug === undefined || markdown === undefined || renamed?.ticket.approved_at) return false;
+  const named = retitleSpec(markdown, title);
+  saveSpec(slug, named);
+  const record = driftRecords.get(key);
+  if (record?.spec === sampleDigest(markdown)) driftRecords.set(key, { ...record, spec: sampleDigest(named) });
+  return true;
+}
+/**
+ * The ticket a drift request is about, as the host derives it from the
+ * session: refused where the planning has been thrown away, there is no spec,
+ * no plan, or a plan that is approved and so frozen, in the host's own words.
+ */
+export function driftTarget(id: string): string {
+  const session = editing.read(id);
+  if (session.phase === "discarded")
+    throw new Error("This planning has been thrown away, and its plan with it.");
+  if (session.specSlug === null)
+    throw new Error("Write the spec before reading it against the plan.");
+  if (session.key === null)
+    throw new Error("Draft a plan from the spec before reading the two against each other.");
+  const row = snapshot.tasks.find((each) => each.ticket.key === session.key);
+  if (row?.ticket.approved_at)
+    throw new Error(
+      `${session.key} is approved, and what it promises was settled with it. The spec is no ` +
+        "longer this page's to read it against.",
+    );
+  return session.key;
+}
 export const graphLog = (key: string): PreviewGraphEdit[] => {
   const held = graphEdits.get(key);
   if (held) return held;
@@ -986,7 +1372,6 @@ export function writeGraphEdit(
     log.filter((edit) => edit.author === "you" && !edit.replaced).flatMap((edit) => edit.changes),
   ).size;
   ticket.updated_at = new Date().toISOString();
-  ticket.title = outcome.contract.outcome;
 }
 
 /** `perbo edit --undo <n>`, with D-100's rule about a later edit in the way. */
@@ -1126,6 +1511,21 @@ export function graphView(repoId: string, key: string): GraphView {
 }
 
 /**
+ * What a ticket drafted from a spec is called, as `admit` calls it where
+ * nothing drafted a name, which is always here because the sample has no
+ * drafter: the spec's title, unless another ticket in the repository carries
+ * it, else the plan's outcome (D-127).
+ * Read after the plan is drafted, which is where the outcome comes from.
+ */
+function specTicketName(repo: string, key: string, markdown: string): string {
+  const title = readSpecSections(markdown).text.title.trim();
+  const taken = snapshot.tasks.some(
+    (row) => row.repoId === repo && row.ticket.key !== key && sameName(row.ticket.title, title),
+  );
+  return title.length > 0 && !taken ? title : plans.get(key)!.outcome;
+}
+
+/**
  * Draft a plan from a spec, as `admit --from-spec` does: one criterion per
  * requirement, each citing it, grouped into two nodes so a requirement's node
  * is something to look at.
@@ -1133,6 +1533,20 @@ export function graphView(repoId: string, key: string): GraphView {
 export function draftFromSpec(key: string, markdown: string, slug: string): void {
   const read = readSpecSections(markdown);
   const plan = plans.get(key)!;
+  // The spec this plan was drafted from, as the CLI records it on admission.
+  // Written here because the picker reads it: a ticket is what says a spec has
+  // a plan, and a ticket the CLI admitted has no editing session to say it
+  // instead (D-129). A sample hash, since nothing
+  // here judges staleness — the shape is what is being stood in for.
+  const row = snapshot.tasks.find((each) => each.ticket.key === key);
+  if (row)
+    row.ticket.admission.spec = {
+      path: `specs/${slug}/spec.md`,
+      content_sha256: "sha256:" + "0".repeat(64),
+      files: [],
+      names_that_resolved: null,
+      symbols_judged_at_approval: false,
+    };
   plan.outcome = read.text.outcome.split("\n")[0] || read.text.title || "Untitled work";
   if (!("acceptance_criteria" in plan)) return;
   const carried = read.requirements.filter((each) => each.id !== null);
@@ -1170,17 +1584,28 @@ export function draftFromSpec(key: string, markdown: string, slug: string): void
       .map((line) => line.replace(/^[-*]\s*/, "").trim())
       .filter((line) => line.length > 0),
   });
+  // Named as `admit` names it, and the spec titled with that name as `admit`
+  // titles it, before the verdict below is keyed on the spec
+  // (D-127).
+  if (row) {
+    row.ticket.title = specTicketName(row.repoId, key, markdown);
+    saveSpec(slug, retitleSpec(markdown, row.ticket.title));
+  }
   specOf.set(key, slug);
+  // A plan just drafted agrees with its spec by construction, and the verdict
+  // says so at these hashes, as `admit` seeds it.
+  recordDrift(key, "drafted", [], false);
 }
 
-export const editingRecords = () => EditingSessionSchema.array().parse(JSON.parse(localStorage.getItem("perbo:preview-editing") ?? "[]"));
+export const editingRecords = () => parseStored(EditingSessionSchema.array(), JSON.parse(localStorage.getItem("perbo:preview-editing") ?? "[]"), 'localStorage["perbo:preview-editing"]');
+function persistEditing(records: EditingSession[]): void {
+  const previous = editingRecords();
+  localStorage.setItem("perbo:preview-editing", JSON.stringify(records));
+  for (const record of records) if (JSON.stringify(previous.find((entry) => entry.id === record.id)) !== JSON.stringify(record)) emit({ kind: "editing", sessionId: record.id });
+}
 export const editing = new ContractEditing({
   records: editingRecords,
-  persist: (records) => {
-    const previous = EditingSessionSchema.array().parse(JSON.parse(localStorage.getItem("perbo:preview-editing") ?? "[]"));
-    localStorage.setItem("perbo:preview-editing", JSON.stringify(records));
-    for (const record of records) if (JSON.stringify(previous.find((entry) => entry.id === record.id)) !== JSON.stringify(record)) emit({ kind: "editing", sessionId: record.id });
-  },
+  persist: persistEditing,
   repository: (id) => {
     if (!snapshot.repositories.some((repo) => repo.id === id)) throw new Error("This sample repository is no longer connected.");
   },
@@ -1192,6 +1617,8 @@ export const editing = new ContractEditing({
   start: (request, owner) => answer(request, owner),
   stop: async (jobId) => { await answer({ kind: "cancel", jobId }); },
   id: () => crypto.randomUUID(),
+  // The sample repository keeps its specs in the default folder.
+  specFolder: () => "specs",
   standing: (id) => standingFor(id),
   setStanding: (id, entries) => {
     writeStanding(id, entries);
@@ -1210,8 +1637,21 @@ editing.recover();
  * and behaves the same when it reaches one.
  */
 export const sampleInterviews = new Set<string>();
-/** The sample sessions working on what they will say next, as the host tracks. */
-export const sampleWorking = new Set<string>();
+/**
+ * How many turns each sample session owes the person, as the host counts
+ * them: a second turn sent before the first is answered is owed too, and the
+ * session is working until the last of them is over.
+ */
+export const sampleWorking = new Map<string, number>();
+export const isWorking = (id: string): boolean => sampleWorking.has(id);
+/**
+ * What each sample turn in flight is doing that its lines do not show yet, as
+ * the host keeps it: writing the spec, or holding a line still to be said.
+ * Cleared by the next line the turn records.
+ */
+const sampleDoing = new Map<string, InterviewDoing>();
+const doingOf = (id: string): InterviewDoing | null =>
+  isWorking(id) ? (sampleDoing.get(id) ?? null) : null;
 const sampleTurns = new Map<string, number>();
 /** Whether this planning is still there to be spoken to. */
 function stillThere(id: string): boolean {
@@ -1230,29 +1670,30 @@ export function askingOf(id: string): { entry: number; answered: number } | null
     return null;
   }
 }
-/** Say what the asking is now, with no line to add — the host's own push. */
+/** Push this planning's interview as it stands, with the line just added, if any — the host's own push. */
+function interviewChanged(id: string, entry: InterviewEntry | null): void {
+  const running = sampleInterviews.has(id);
+  emit({ kind: "interview", sessionId: id, running, entry, asking: askingOf(id), working: isWorking(id), doing: doingOf(id) });
+}
+/** Say what the asking is now, with no line to add. */
 export function askingChanged(id: string): void {
-  emit({
-    kind: "interview",
-    sessionId: id,
-    running: sampleInterviews.has(id),
-    entry: null,
-    asking: askingOf(id),
-    working: sampleWorking.has(id),
-  });
+  interviewChanged(id, null);
 }
 /** Kept as the host keeps it, so the conversation survives a reload here too. */
 export function converse(id: string, line: InterviewEntry["line"]): InterviewEntry {
   const entry = editing.converse(id, line, new Date().toISOString());
-  emit({
-    kind: "interview",
-    sessionId: id,
-    running: sampleInterviews.has(id),
-    entry,
-    asking: askingOf(id),
-    working: sampleWorking.has(id),
-  });
+  if (line.kind !== "note") sampleDoing.delete(id);
+  interviewChanged(id, entry);
   return entry;
+}
+/**
+ * The sample session's own words, as the host relays them: none once the note
+ * has handed the written spec over and the person has said nothing since,
+ * because the note is what the turn says (D-102).
+ */
+function sessionSaid(id: string, text: string): void {
+  if (afterTheNote.has(id)) return;
+  converse(id, { kind: "said", text });
 }
 export function interviewStatus(id: string): InterviewStatus {
   const session = editing.read(id);
@@ -1287,6 +1728,39 @@ export function nameSpecFromTurn(id: string, text: string): void {
   editing.recordSpec(id, slug);
   converse(id, { kind: "note", text: `Named specs/${slug} from your first message.` });
 }
+/**
+ * The preview's model catalogs, shaped as each provider reports its own,
+ * efforts included; the API reports none, so its rows offer no effort control.
+ */
+export function sampleCatalog(provider: ModelProvider): ModelCatalog {
+  const rows: [string, string, string, EffortLevel[]][] =
+    provider === "codex-cli"
+      ? [
+          ["o-class", "O-class", "Sample reviewer", ["low", "medium", "high", "xhigh"]],
+          ["codex-sample", "Codex sample", "Sample coding model", ["low", "medium", "high"]],
+        ]
+      : provider === "anthropic"
+        ? [["claude-opus-5", "Claude Opus 5", "Sample API model", []]]
+        : [
+            ["claude-opus-5", "Opus 5", "Sample · best for everyday, complex tasks", [...EFFORT_LEVELS["claude-cli"]]],
+            ["claude-opus-5-5", "Opus 5.5", "Sample · the chat's model where it is offered", [...EFFORT_LEVELS["claude-cli"]]],
+            ["claude-fable-5-1", "Fable 5.1", "Sample · hardest and longest-running tasks", [...EFFORT_LEVELS["claude-cli"]]],
+            ["claude-sonnet-5", "Sonnet 5", "Sample · routine tasks", [...EFFORT_LEVELS["claude-cli"]]],
+            ["claude-haiku-4-5", "Haiku 4.5", "Sample · no effort setting", []],
+          ];
+  return {
+    provider,
+    source: "sample",
+    discoveredAt: new Date().toISOString(),
+    models: rows.map(([id, label, description, efforts], index) => ({
+      id,
+      label,
+      description,
+      isDefault: index === 0,
+      efforts,
+    })),
+  };
+}
 export function startSampleInterview(id: string): InterviewStatus {
   if (sampleInterviews.has(id)) return interviewStatus(id);
   const session = editing.read(id);
@@ -1294,13 +1768,313 @@ export function startSampleInterview(id: string): InterviewStatus {
     throw new Error(INTERVIEW_NEEDS_A_TITLE);
   const provider = interviewProviderFor(session.form.models);
   sampleInterviews.add(id);
-  emit({ kind: "interview", sessionId: id, running: true, entry: null, asking: askingOf(id), working: sampleWorking.has(id) });
-  editing.recordInterview(id, "sample-session", provider);
+  askingChanged(id);
+  // The chat's model, chosen from the sample catalog as the host chooses it from the provider's.
+  const model = interviewModelFor(session.form.models, sampleCatalog("claude-cli").models.map((row) => row.id));
+  editing.recordInterview(id, "sample-session", provider, model);
   converse(id, {
     kind: "note",
     text: `Writing specs/${session.specSlug}/spec.md and docs/adr.`,
   });
   return interviewStatus(id);
+}
+/**
+ * The end of the sample's interview, as the host's stop ends a real one:
+ * stopping ends the turn, and what the turn had already written is written, so
+ * the way on from a drafted spec is the person's whether the session is still
+ * there or not and the note is said on this ending as it is on the turn's own
+ * (D-102).
+ *
+ * Its own function because Generate plan makes the same ending: one press
+ * stops the interview and drafts from what it left behind.
+ */
+/** The chat of a planning that has been discarded, ended with it (D-102). */
+export function endPlanningChat(id: string): void {
+  sampleInterviews.delete(id);
+  sampleWorking.delete(id);
+  emit({ kind: "interview", sessionId: id, running: false, entry: null, asking: askingOf(id), working: false, doing: null });
+}
+export function stopSampleInterview(id: string): void {
+  sampleInterviews.delete(id);
+  sampleWorking.delete(id);
+  windUpTurn(id);
+  askingChanged(id);
+  converse(id, { kind: "note", text: "The chat ended: you stopped it." });
+  void rereadDrift(id);
+}
+/**
+ * The end of a sample turn, as the host reports one: the session is no longer
+ * working, the asking is said as it stands, and — with a record of problems
+ * between the plan and the spec on the planning — the plan is read against
+ * the spec again, since the turn was the answer to one, or a hand edit after
+ * a resolved round (D-128).
+ */
+function endSampleTurn(id: string): void {
+  const owed = (sampleWorking.get(id) ?? 0) - 1;
+  if (owed > 0) sampleWorking.set(id, owed);
+  else {
+    sampleWorking.delete(id);
+    windUpTurn(id);
+  }
+  askingChanged(id);
+  if (owed <= 0) void rereadDrift(id);
+}
+
+/**
+ * What the host does as a turn ends, however it ends. The spec is written and
+ * the plan is the person's to generate from it, said where the write did not
+ * say it: only where this planning holds no plan yet, and only where the spec
+ * actually moved. And the change is marked on the panes, where the turns moved
+ * anything: measured from the first turn owed to the end of the last, as the
+ * host measures them, so a turn queued behind another is not lost from the
+ * marks.
+ */
+function windUpTurn(id: string): void {
+  saySpecIsDrafted(id, pairAtTurn.get(id));
+  saidDrafted.delete(id);
+  afterTheNote.delete(id);
+  sampleDoing.delete(id);
+  marks.recordChangeSince(id, pairAtTurn.get(id));
+  pairAtTurn.delete(id);
+}
+
+/**
+ * The sessions already handed the written spec this turn, as the host keeps
+ * them: the write says it and the turn's endings say it where the write did
+ * not, and the person needs it once.
+ */
+const saidDrafted = new Set<string>();
+/**
+ * The sessions whose written spec has been handed over since the person last
+ * said anything, as the host keeps them: what the session says meanwhile is
+ * not shown.
+ */
+export const afterTheNote = new Set<string>();
+
+/**
+ * The note the host puts once a turn has written the spec with no plan beside
+ * it (D-102): the interview writes the spec and stops there, so the next act
+ * is the person's — read and change it on the Spec pane, ask for a change in
+ * the chat, or press Generate plan at the foot of the Spec pane. Words and no
+ * button, as the host puts it.
+ */
+function saySpecIsDrafted(id: string, before: PromisePair | null | undefined): void {
+  if (saidDrafted.has(id)) return;
+  if (before === undefined) return;
+  let session;
+  try {
+    session = editing.read(id);
+  } catch {
+    return;
+  }
+  if (session.key !== null) return;
+  const now = session.specSlug === null ? null : specSectionsAt(session.specSlug);
+  // A pair the sample could not read at the turn's start is a spec it had
+  // nothing of, which is the very turn this is for: the first one.
+  if (now === null || JSON.stringify(now) === JSON.stringify(before?.spec ?? null)) return;
+  saidDrafted.add(id);
+  afterTheNote.add(id);
+  converse(id, { kind: "note", text: INTERVIEW_WROTE_THE_SPEC, notable: true });
+}
+
+/** The five sections of a spec as its file says them, or null where there is no file. */
+export function specSectionsAt(slug: string): SpecSections | null {
+  const markdown = specFiles()[slug];
+  return markdown === undefined ? null : sectionsOf(readSpecSections(markdown).text);
+}
+/** The pair as it stood when the first turn owed began, keyed by planning, as the host keeps it. */
+export const pairAtTurn = new Map<string, PromisePair | null>();
+/**
+ * The change marks (D-128) over the sample's records, marked as the host marks
+ * them (D-120): the sample's specs are one set whatever the repository, and a
+ * ticket's plan is the contract it holds. A line the chat would say of a
+ * planning that has gone is not said.
+ */
+export const marks = new ChangeMarks<{ readonly id: string }>({
+  read: (id) => editing.read(id),
+  sessions: () => editingRecords(),
+  repository: (id) => ({ id }),
+  spec: (_repo, slug) => specSectionsAt(slug),
+  contract: (_repo, key) => {
+    const plan = plans.get(key);
+    if (plan === undefined) throw new Error(`${key} has no contract.`);
+    return plan;
+  },
+  recordChange: (id, change) => editing.recordChange(id, change),
+  say: (id, line) => {
+    if (stillThere(id)) converse(id, line);
+  },
+  // The sample's errors are its own words, with no credential in them.
+  redact: (text) => text,
+});
+
+/**
+ * The plannings with a reading of their plan against the spec in flight, as
+ * the host keeps them: from the moment one is asked for until its job has
+ * settled. A second asked for meanwhile is owed instead.
+ */
+export const readings = new Set<string>();
+/** The plannings owed another reading once the one in flight settles. */
+const rereadOwed = new Set<string>();
+/**
+ * How many times each ticket's problems have been forgotten — dismissed or
+ * approved past — so a reading that started before one and lands after it
+ * knows the state it read is gone.
+ */
+export const driftEpoch = new Map<string, number>();
+
+/** A reading's job has settled: the next one owed to the planning starts. */
+export function readingSettled(id: string): void {
+  readings.delete(id);
+  if (rereadOwed.delete(id)) void rereadDrift(id);
+}
+
+/**
+ * Read the plan against the spec again, as the host does once a turn ends
+ * with a record on the planning: never over a reading already in flight, but
+ * never lost either — a turn that ends while one is running is owed its
+ * reading, which starts as that one settles, and however many turns end
+ * meanwhile owe one reading between them. A reading that cannot be started
+ * is said in the chat, because the page is waiting on it.
+ */
+async function rereadDrift(id: string): Promise<void> {
+  if (!stillThere(id)) return;
+  const session = editing.read(id);
+  if (session.drift === null || session.key === null) return;
+  const key = session.key;
+  const live = snapshot.jobs.some((job) => job.kind === "drift" && job.key === key && isLive(job));
+  if (readings.has(id) || live) {
+    rereadOwed.add(id);
+    return;
+  }
+  readings.add(id);
+  try {
+    // The host reads the ticket before the reading's job starts, and the page
+    // is between the turn's end and the reading for that long: the same gap
+    // here, so the page is held to the same rule.
+    await new Promise((done) => setTimeout(done, 0));
+    await answer({ kind: "driftCheck", id });
+  } catch (error) {
+    readings.delete(id);
+    rereadOwed.delete(id);
+    if (!stillThere(id)) return;
+    converse(id, {
+      kind: "note",
+      text: `${REREAD_COULD_NOT_START}: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+}
+
+/**
+ * The problems over a ticket are forgotten — on one planning, or on every
+ * planning over it — and a reading of it in flight is told so, as the host
+ * tells one.
+ */
+export function forgetDrift(key: string, only: string | null): void {
+  driftEpoch.set(key, (driftEpoch.get(key) ?? 0) + 1);
+  for (const record of editingRecords())
+    if (
+      (only === null ? record.key === key : record.id === only) &&
+      record.phase !== "discarded" &&
+      record.drift !== null
+    )
+      editing.clearDrift(record.id);
+}
+
+/**
+ * Land a reading on the planning it was of, as the host does: nothing is
+ * recorded on a plan the person went past — dismissed or approved — while it
+ * was read (D-128).
+ */
+export function driftLanded(
+  id: string,
+  key: string,
+  epoch: number,
+  before: TurnMark,
+  verdict: DriftVerdict,
+): void {
+  if ((driftEpoch.get(key) ?? 0) !== epoch) return;
+  const row = snapshot.tasks.find((each) => each.ticket.key === key);
+  if (row === undefined || row.ticket.approved_at) return;
+  if (!stillThere(id)) return;
+  const overlapped = turnOverlapped(before, editing.read(id), isWorking(id));
+  if (overlapped && !isWorking(id)) rereadOwed.add(id);
+  editing.landDrift(id, verdict, overlapped, (line) => converse(id, line), () => askingChanged(id));
+}
+
+/**
+ * The sample interview applying an answer to a problem, where the answer is
+ * one of the shapes its own reading offers: a criterion reworded to the
+ * spec's words, through the same edit path the Graph pane uses, or a
+ * requirement reworded to the plan's, as a spec write. Anything else is not
+ * an answer the sample knows how to apply, and the turn is answered as any
+ * other. Returns whether it applied one.
+ */
+function applyDriftAnswer(id: string, key: string, text: string): boolean {
+  const plan = plans.get(key);
+  if (plan === undefined || !("acceptance_criteria" in plan)) return false;
+  const reword = /^Reword criterion (\d+) to say: (.+)$/.exec(text.trim());
+  if (reword !== null) {
+    const criterion = plan.acceptance_criteria[Number(reword[1]) - 1];
+    if (criterion === undefined) return false;
+    const wording = reword[2]!.trim();
+    writeGraphEdit(
+      key,
+      (state) =>
+        applyGraphEdit(
+          state,
+          {
+            op: "set_criterion",
+            id: criterion.id,
+            text: wording,
+            expected_verification: criterion.expected_verification,
+          },
+          [],
+        ),
+      null,
+      undefined,
+      "interview",
+    );
+    const made = graphLog(key).at(-1)!;
+    converse(id, {
+      kind: "tool",
+      tool: "edit_plan",
+      ok: true,
+      detail: `${key}: edit ${String(made.n)} — ${made.summary}`,
+      edit: {
+        n: made.n,
+        author: made.author,
+        summary: made.summary,
+        undone: made.undone,
+        undoes: made.undoes,
+        before: Object.keys(made.before),
+        after: made.keys,
+      },
+    });
+    emit({ kind: "records", repoId: ticketRow(key).repoId, key });
+    return true;
+  }
+  const respec = /^Change (R\d+) in the spec to say: (.+)$/.exec(text.trim());
+  if (respec !== null) {
+    const slug = editing.read(id).specSlug;
+    const markdown = slug === null ? undefined : specFiles()[slug];
+    if (slug === null || markdown === undefined) return false;
+    const read = readSpecSections(markdown);
+    const wording = respec[2]!.trim();
+    const lines = read.text.requirements.split("\n");
+    const at = lines.findIndex((line) => line.trim().startsWith(`- ${respec[1]}:`));
+    if (at < 0) return false;
+    lines[at] = `- ${respec[1]}: ${wording}`;
+    const rendered = renderSpec(
+      { ...read.text, requirements: lines.join("\n") },
+      { highWater: read.highWater, existing: read.requirements },
+    );
+    saveSpec(slug, rendered.markdown);
+    sessionSaid(id, `Changed ${respec[1]} in the spec to say: ${wording}`);
+    emit({ kind: "records", repoId: ticketRow(key).repoId, key });
+    return true;
+  }
+  return false;
 }
 /**
  * The sample's answer to one turn: the first is refused something it may not
@@ -1312,6 +2086,25 @@ export function answerSampleTurn(id: string, text: string): void {
   if (!stillThere(id)) return;
   const turns = (sampleTurns.get(id) ?? 0) + 1;
   sampleTurns.set(id, turns);
+  // Asking in its own words, with nothing to pick: what a session does when
+  // the answer is the person's to write, and what the composer's rim is for.
+  if (/\bask me plainly\b/i.test(text)) {
+    // The turn's opening line, which the host holds until the turn shows what
+    // it was — here, the whole of it — and the dock shows the session's
+    // bubble with its dots meanwhile.
+    sampleDoing.set(id, "speaking");
+    askingChanged(id);
+    setTimeout(() => {
+      if (!sampleWorking.has(id) || !stillThere(id)) return;
+      sessionSaid(id, "What should the dark mode start from — the light palette, or a palette of its own?");
+      // And the turn ends a moment after it, as a real one does once its
+      // last words are out: the question waits on the person only from there.
+      setTimeout(() => {
+        if (sampleWorking.has(id) && stillThere(id)) endSampleTurn(id);
+      }, 400);
+    }, 150);
+    return;
+  }
   // Asking with options, as the real session does through ask_options: two
   // groups, so the sample shows them put one at a time, and the first has two
   // parts that are read together.
@@ -1356,9 +2149,8 @@ export function answerSampleTurn(id: string, text: string): void {
     askingChanged(id);
     // The session closes the turn it asked in, as both transports do: the card
     // has to survive this.
-    converse(id, { kind: "said", text: "Questions are with you — the first group is above." });
-    sampleWorking.delete(id);
-    askingChanged(id);
+    sessionSaid(id, "Questions are with you — the first group is above.");
+    endSampleTurn(id);
     return;
   }
   if (turns === 1)
@@ -1368,34 +2160,86 @@ export function answerSampleTurn(id: string, text: string): void {
       rule: "allow_list",
       target: "pnpm test",
       reason:
-        "pnpm test is not one of the read-only shapes this session may run. The interview reads " +
+        "pnpm test is not one of the read-only shapes this session may run. The chat reads " +
         "the test files instead.",
     });
   const key = editing.read(id).key;
   const plan = key === null ? null : plans.get(key);
   const criterion =
     plan && "acceptance_criteria" in plan ? plan.acceptance_criteria[0] : undefined;
-  // The two tool calls the sample otherwise never makes, each asked for by
-  // name. The dock keeps or drops a card by which tool made it, and a rule with
-  // no way to reach two of its three arms is a rule nothing can check.
-  if (/\bdraft it\b/i.test(text) && key !== null) {
-    // No edit on it: a drafting is the admission, not a change to a plan that
-    // already exists, so `edit` is null exactly as the host reports it.
-    converse(id, {
-      kind: "tool",
-      tool: "generate_plan",
-      ok: true,
-      detail:
-        `admitted ${key} in plan_review from specs/${editing.read(id).specSlug ?? "this spec"}. ` +
-        "A person reads and approves it; this session cannot.\n" +
-        "flagged   1 issue-authored attempt — read as data, not followed",
-      edit: null,
-    });
-    // The turn is over, and saying so is what takes "Working…" off the dock.
-    // A branch that returned without it left the sample saying it was working
-    // for ever, which is the one thing this pane must never do.
-    sampleWorking.delete(id);
+  // An answer to a problem between the plan and the spec, in the words the
+  // sample's own reading offered: applied as the real interview applies a
+  // turn, through the edit path for the plan and a spec write for the spec,
+  // so the reading that follows the turn finds the problem closed and puts
+  // the next. What is matched is the sentence the person picked or typed,
+  // and it moves the plan or the spec the way any turn of theirs does; it
+  // reaches no path, command or argument (ADR-0023 §4).
+  if (key !== null && plan && "acceptance_criteria" in plan && applyDriftAnswer(id, key, text)) {
+    endSampleTurn(id);
+    return;
+  }
+  // The interview writing the spec, asked for by name: the one thing it does
+  // that the sample otherwise never shows, and the turn it ends with the note
+  // that hands the plan to the person.
+  const slug = editing.read(id).specSlug;
+  const markdown = slug === null ? undefined : specFiles()[slug];
+  if (/\bwrite the spec\b/i.test(text) && slug !== null && markdown !== undefined) {
+    // Said as the write is admitted, which is where the host says it: the spec
+    // is a pane away and writing it is what the person waits through, so the
+    // status line says so until it is written.
+    sampleDoing.set(id, "writing_the_spec");
     askingChanged(id);
+    setTimeout(() => {
+      if (!sampleWorking.has(id) || !stillThere(id)) return;
+      const read = readSpecSections(markdown);
+      const rendered = renderSpec(
+        {
+          ...read.text,
+          outcome:
+            "A month view shows the days of one month, and a day shows what is on it.",
+        },
+        { highWater: read.highWater, existing: read.requirements },
+      );
+      saveSpec(slug, rendered.markdown);
+      // And that it is written, right after the write, as the host says it:
+      // the spec is readable now and the next act is the person's. No wait
+      // before the reading here, where the host defers one — the sample writes
+      // the file itself, so the bytes are already there on the line after the
+      // write.
+      saySpecIsDrafted(id, pairAtTurn.get(id));
+      // And goes on working after it, as a real session can: a quiet tool
+      // call the chat does not draw, which the dock would otherwise read as
+      // work in hand under the note (D-102).
+      converse(id, { kind: "tool", tool: "read_plan", ok: true, detail: "No plan yet.", edit: null });
+      // And the session goes on composing after it, as a real one can: what
+      // it says once the note is out is not shown, because the note is what
+      // the turn says (D-102). The turn ends there, and saying so is what
+      // takes the turn off the dock — a branch that returned without it would
+      // leave the sample saying it is working for ever, which is the one
+      // thing this pane must never do. Dropped where the turn has already been
+      // wound up under it, by the press that drafts or by a stop.
+      setTimeout(() => {
+        if (!sampleWorking.has(id) || !stillThere(id)) return;
+        sessionSaid(id, "That is the spec as I have it. Tell me what to change, or generate the plan.");
+        endSampleTurn(id);
+      }, 400);
+    }, 150);
+    return;
+  }
+  // The interview writing the Requirements in a form of its own — numbered
+  // paragraphs rather than `- R1:` items — as a real session writing the file
+  // with its own tools can. The pane reads them as requirements with no id,
+  // and the drafter reads no requirement at all.
+  if (/\bwrite the requirements\b/i.test(text) && slug !== null && markdown !== undefined) {
+    saveSpec(
+      slug,
+      markdown.replace(
+        /^## Requirements\n[^#]*/m,
+        "## Requirements\n\nR1. A toggle in the header switches the theme.\n\n" +
+          "R2. The choice is kept across reloads.\n\n",
+      ),
+    );
+    endSampleTurn(id);
     return;
   }
   // A tool that was refused. The dock keeps these where it drops the ones that
@@ -1412,8 +2256,7 @@ export function answerSampleTurn(id: string, text: string): void {
         "name two of them.",
       edit: null,
     });
-    sampleWorking.delete(id);
-    askingChanged(id);
+    endSampleTurn(id);
     return;
   }
   if (/\btake it back\b/i.test(text) && key !== null) {
@@ -1437,8 +2280,7 @@ export function answerSampleTurn(id: string, text: string): void {
         },
       });
       emit({ kind: "records", repoId: ticketRow(key).repoId, key });
-      sampleWorking.delete(id);
-      askingChanged(id);
+      endSampleTurn(id);
       return;
     }
   }
@@ -1478,20 +2320,76 @@ export function answerSampleTurn(id: string, text: string): void {
     });
     emit({ kind: "records", repoId: ticketRow(key).repoId, key });
   }
-  // A line, then a pause before the rest of the same turn — which is the shape
-  // a real session takes when it reads the repository before answering, and the
-  // pause the dock has to keep saying it is working through.
-  converse(id, { kind: "said", text: "I'll look at what's already here before I answer." });
+  // A line that reports something, then a pause before the rest of the same
+  // turn — which is the shape a real session takes, and the pause the dock has
+  // to keep saying it is working through. Not an announcement of what it is
+  // about to do: the host drops one of those before anything has been done,
+  // and the indicator says it better.
+  sessionSaid(id, "Nothing here sets a colour mode yet.");
+
+  // Asked to take its time, it pauses for longer than a line's words take to
+  // replace its dots, so the pause itself is there to be seen.
+  const pause = /\btake your time\b/i.test(text) ? 900 : 60;
   setTimeout(() => {
     // The rest of a turn can land after the planning it belongs to has gone —
     // a pane left, a test ended — and a sample session speaking into a session
     // that is not there throws where nothing is waiting to catch it.
     if (!stillThere(id)) return;
-    converse(id, {
-      kind: "said",
-      text: `Noted: “${text}”. This is the sample workspace, so nothing here reaches a provider.`,
-    });
-    sampleWorking.delete(id);
-    askingChanged(id);
-  }, 60);
+    sessionSaid(
+      id,
+      `Noted: “${text}”. This is the sample workspace, so nothing here reaches a provider.`,
+    );
+    endSampleTurn(id);
+  }, pause);
+}
+
+/**
+ * Delete a sample ticket with everything kept beside it, as the host's
+ * `discardTicket` deletes its files, and answer with the reason it stays where
+ * it does, in the host's words and in the host's order (D-129): a command
+ * running in the repository holds every delete, and a ticket whose pull
+ * request is open is the one stage a delete does not reach. The attempts and
+ * the bundles they sealed are held beside the ticket here rather than in a
+ * store of their own, so they go with it.
+ */
+export function discardTicket(repoId: string, key: string): string | null {
+  if (heldRepository(snapshot.jobs, repoId)) return DELETE_WAITS_FOR_COMMANDS;
+  const row = snapshot.tasks.find((entry) => entry.repoId === repoId && entry.ticket.key === key);
+  if (row === undefined) return DELETE_TICKET_GONE;
+  if (row.ticket.state === "pr_open") return deletePullRequestOpen(key);
+  snapshot.tasks = snapshot.tasks.filter((entry) => entry !== row);
+  plans.delete(key);
+  approaches.delete(key);
+  graphEdits.delete(key);
+  approved.delete(key);
+  specOf.delete(key);
+  // The reading of the plan against its spec goes with the plan, as the host
+  // drops `<KEY>.drift.json` beside the ticket.
+  driftRecords.delete(key);
+  // Its preferences, as the host forgets them: a key is never handed out
+  // again, so once the ticket is gone they name nothing.
+  const entry = repoId + ":" + key;
+  const { [entry]: title, ...titles } = snapshot.titles ?? {};
+  const { [entry]: models, ...taskModels } = snapshot.taskModels ?? {};
+  void title;
+  void models;
+  snapshot.titles = titles;
+  snapshot.taskModels = taskModels;
+  snapshot.archived = (snapshot.archived ?? []).filter((item) => item !== entry);
+  // And every planning over it, as the host discards them, with their chats
+  // (D-102): a planning over a ticket that is gone has nothing left to open.
+  const over = (session: EditingSession): boolean =>
+    session.repoId === repoId && session.key === key && session.phase !== "discarded";
+  const sessions = editingRecords();
+  persistEditing(
+    sessions.map((session) =>
+      over(session)
+        ? { ...session, phase: "discarded", resumeNew: false, revision: session.revision + 1 }
+        : session,
+    ),
+  );
+  for (const session of sessions.filter(over)) endPlanningChat(session.id);
+  emitPreferences();
+  emit({ kind: "records", repoId, key: null });
+  return null;
 }

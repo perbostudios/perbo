@@ -8,6 +8,7 @@ import {
   configPath as configSegments,
   contractPath,
   draftPath,
+  driftPath,
   principlesPath as principlesSegments,
   ticketFilePath,
   type StorePath,
@@ -34,6 +35,7 @@ const TICKET_FILE = {
   ".contract.json": contractPath,
   ".draft.json": draftPath,
   ".approach.json": approachPath,
+  ".drift.json": driftPath,
 } as const;
 
 export function perboPath(repo: RegisteredRepository): string {
@@ -55,6 +57,13 @@ export function attemptsPath(repo: RegisteredRepository, ticketId: string): stri
 }
 export function bundlesPath(repo: RegisteredRepository): string {
   return storePath(repo, bundleManifestsDir());
+}
+/**
+ * One bundle manifest, by the name `readdirSync` gave its file: never a name
+ * built from what the manifest records, which is repository content.
+ */
+export function bundleManifestPath(repo: RegisteredRepository, file: string): string {
+  return storePath(repo, [...bundleManifestsDir(), file]);
 }
 export function objectsPath(repo: RegisteredRepository): string {
   return storePath(repo, bundleObjectsDir());

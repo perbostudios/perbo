@@ -1,7 +1,7 @@
 import { isNeverReadPath } from "@perbo/contracts";
 import { impactReport, readSpecText } from "@perbo/planning";
-import { specFolder } from "../repository/config.js";
 import { safePath } from "../repository/paths.js";
+import { specPath } from "./spec.js";
 import { trackedFiles, type Execute } from "../repository/git.js";
 import { readSymbolIndex } from "../symbols.js";
 import type { Cli } from "../cli.js";
@@ -54,12 +54,7 @@ export async function impactView(deps: ImpactDeps, id: string): Promise<ImpactVi
   const spec =
     session.specSlug === null
       ? null
-      : readSpecText(
-          safePath(
-            repo,
-            ...`${specFolder(repo)}/${session.specSlug}/spec.md`.split("/"),
-          ),
-        ).markdown;
+      : readSpecText(specPath(repo, session.specSlug)).markdown;
   const report = impactReport({
     scope: session.form.draft.paths,
     tracked,

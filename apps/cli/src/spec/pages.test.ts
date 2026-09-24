@@ -111,6 +111,7 @@ function scriptedWithCount(script: Array<Array<{ tool: string; input: unknown }>
 }
 
 const drafted = {
+  name: "Activation email",
   outcome: "New users receive an activation email within 60 seconds of signing up.",
   acceptance_criteria: [
     { text: "A signup POST queues one activation email.", assertion: "one message is queued", kind: "test", requirement_id: "R1" },

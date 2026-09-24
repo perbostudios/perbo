@@ -245,17 +245,21 @@ describe("the endpoint", () => {
       }
     }
     const listed = await rpc(endpoint.url, token, call("list_tickets", { all: true }));
-    const tickets = (listed.json?.result as { structuredContent: { tickets: Array<{ state: string; approved_at: string | null }> } }).structuredContent.tickets;
+    const tickets = (listed.json?.result as { structuredContent: { tickets: Array<{ key: string; title: string; state: string; approved_at: string | null }> } }).structuredContent.tickets;
     expect(tickets.every((ticket) => ticket.state === "plan_review" && ticket.approved_at === null)).toBe(true);
     // The same for an edit: a value shaped like a flag is a value.
-    const key = tickets.length > 0 ? (listed.json?.result as { structuredContent: { tickets: Array<{ key: string }> } }).structuredContent.tickets[0]!.key : null;
-    if (key !== null) {
-      const edited = await rpc(endpoint.url, token, call("edit_ticket", { key, outcome: "--repo=/nowhere" }));
-      const shown = edited.json?.result as { isError?: boolean; content: Array<{ text: string }> };
-      expect(shown.isError).toBeFalsy();
-      const after = await rpc(endpoint.url, token, call("inspect_ticket", { key }));
-      expect(JSON.stringify((after.json?.result as { structuredContent: unknown }).structuredContent)).toContain("--repo=/nowhere");
-    }
+    const first = tickets[0];
+    expect(first).toBeDefined();
+    const key = first!.key;
+    const edited = await rpc(endpoint.url, token, call("edit_ticket", { key, outcome: "--repo=/nowhere" }));
+    const shown = edited.json?.result as { isError?: boolean; content: Array<{ text: string }> };
+    expect(shown.isError).toBeFalsy();
+    const after = await rpc(endpoint.url, token, call("inspect_ticket", { key }));
+    const report = (after.json?.result as { structuredContent: { title: string; outcome: string | null } })
+      .structuredContent;
+    expect(report.outcome).toBe("--repo=/nowhere");
+    // The ticket's name stays what it was (D-127).
+    expect(report.title).toBe(first!.title);
   });
 
   it("appends a typed prohibition or generated glob to the command's own defaults, never in their place", async () => {

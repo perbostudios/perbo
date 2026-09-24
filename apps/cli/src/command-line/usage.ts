@@ -152,10 +152,14 @@ export const USAGE = `perbo — contract to pull request, locally
       and either of the last two drops the drafted graph with what it
       replaced. The drafter is shown the tickets in
       flight and may propose --depends-on among them, and may open a few
-      files. However large the issue, the draft is one contract and admits
-      one ticket. The level is derived from the scope; --level may raise it,
-      never lower it. Admitting takes ownership of this one thing; a backlog
-      is never migrated.
+      files. It names the ticket in the fewest words that tell it apart from
+      every other ticket's name, which it is shown. A name another ticket
+      carries, or none, falls to the spec's title, and that to the outcome.
+      A spec's title line is rewritten to the name; its folder keeps its slug.
+      However large the issue, the draft is one contract and admits one
+      ticket. The level is derived from the scope; --level may raise it,
+      never lower it. Admitting takes
+      ownership of this one thing; a backlog is never migrated.
 
   perbo approve PRB-1 [--repo .] [--store <dir>] [--json]
       Approve the contract. It is immutable from that moment; --json is
@@ -304,10 +308,12 @@ export const USAGE = `perbo — contract to pull request, locally
       writes that spec's folder, CONTEXT.md and the ADR folder, and nothing
       else. Anything outside that is refused rather than put to you: there are
       no permission prompts, and on Codex the app server's own approval
-      requests are answered by the same rules rather than reaching you. Its
-      generate_plan tool drafts one ticket from the spec, and after that
-      edit_plan and undo_edit change the plan through the validated edit path,
-      recorded as the interview's. It cannot approve, publish or merge. Your
+      requests are answered by the same rules rather than reaching you. It
+      writes the spec and stops there: drafting the plan from it is yours,
+      through perbo admit --from-spec or Generate plan in the app. Once there
+      is one, its edit_plan and undo_edit change the plan through the validated
+      edit path, recorded as the interview's, and read_plan reads it back. It
+      holds no tool that drafts, approves, publishes or merges. Your
       turns arrive as JSON lines on stdin; every event leaves as one on stdout.
       The session id is printed and kept beside the spec, so --session <id>
       continues the conversation: the SDK's session on Claude, and the app
@@ -331,7 +337,7 @@ export const USAGE = `perbo — contract to pull request, locally
       it on return; a contract that no longer parses is refused with its
       issues listed and the file left as edited. With --outcome, --criterion
       or --path, edit without an editor: each replaces the whole of its part.
-      Only a ticket in plan_review may be edited.
+      Only a ticket in plan_review may be edited. An edit never renames it.
 
       --prohibit replaces the prohibited paths; --no-prohibit empties them. An
       edit naming neither leaves the list as it stands, so the last
@@ -351,6 +357,24 @@ export const USAGE = `perbo — contract to pull request, locally
 
       One edit at a time: --graph-edit, --undo and the flag edits are separate
       paths and cannot be combined.
+
+  perbo drift PRB-1 [--provider claude-cli] [--model <id>] [--dismiss] [--json] [--repo .] [--store <dir>]
+      Read the plan against the spec it was drafted from, and say where the
+      two no longer promise the same thing: the plan's outcome and each
+      criterion's own words against the spec's Outcome and Requirements, and
+      never how the plan is arranged or how a criterion is proven. Each
+      difference comes with ways to close it, in the words to send to the
+      interview. The verdict is written beside the ticket as
+      PRB-1.drift.json, keyed by the spec's bytes and the plan's promises, and
+      printed as JSON on stdout whether or not --json is given; while neither
+      moves, running it again prints the same verdict and calls no model. A
+      plan just drafted agrees with its spec, and an interview edit of the
+      plan is held to the spec, so it is your own edit of one or the other, or
+      an interview turn that wrote the spec and left the plan, that gives it
+      something to read. It is advice and not a gate: the exit code is 0
+      whatever it finds. --dismiss records that you went on to the contract
+      with the differences open, so the same reading is not put to you again
+      at the same state; it calls no model and needs a verdict at this state.
 
   perbo inspect PRB-1 [--attempt <id>] [--json] [--repo .] [--store <dir>]
   perbo inspect <local run id> [--attempt <id>] [--json]

@@ -71,23 +71,28 @@ describe("perbo edit", () => {
     await expect(edit(repo, null, "--outcome", "x")).rejects.toThrow(/immutable \(ADR-0016\)/);
   });
 
-  it("refuses a criterion that starts citing a requirement nothing drafted it from", async () => {
+  it("takes a citation of a requirement nothing drafted it from, and refuses to freeze it", async () => {
     // A hand edit can write anything the schema shape allows, and
-    // `requirement_id` is shaped `R<n>` whatever spec exists. The set a
-    // criterion may cite is the set the contract already carried (D-103).
+    // `requirement_id` is shaped `R<n>` whatever spec exists. The edit path
+    // takes it: the plan and the spec are settled against each other once,
+    // where it matters, which is the moment approving freezes the contract
+    // (ADR-0016) — refusing here as well would make the same check twice and
+    // stop a person part-way through a change they are still making (D-103).
     const { repo, dir } = admitted("edit-requirement-id");
     const editor = rewrite("cite-nothing", 'c.acceptance_criteria[0].requirement_id = "R9";');
-    await expect(edit(repo, editor)).rejects.toThrow(/R9/);
-    // As with every other refusal on this path, the edited file is left for
-    // the person to fix — and the counter-seal still holds the contract that
-    // was agreed, so nothing was recorded as an edit.
-    await expect(edit(repo, editor)).rejects.toThrow(/left as you edited it/);
-    expect(readTicket(dir, "PRB-1").admission.edit_count).toBeNull();
-    // Without the counter-seal the on-disk file is all there is, and it now
-    // carries the refused citation: the set a criterion may cite comes from the
-    // spec, not from that file, so the run is refused again.
-    rmSync(join(dir, "tickets", "PRB-1.draft.json"));
-    await expect(edit(repo, editor)).rejects.toThrow(/R9/);
+    expect(await edit(repo, editor), "the edit is taken").toBe(0);
+    const cited = readContract(dir, "PRB-1");
+    expect(hasAcceptanceCriteria(cited) ? cited.acceptance_criteria[0]!.requirement_id : null).toBe("R9");
+    // And approving is where it is settled. Nothing was drafted from a spec
+    // here, so there is no document the citation could be answering.
+    const approve = () =>
+      runCommandLine(approveCommandLine, { argv: ["PRB-1", "--repo", repo], streams: recordStreams(), cwd: repo });
+    expect(approve).toThrow(/ac_1 cites R9/);
+    expect(readTicket(dir, "PRB-1").approved_at).toBeNull();
+    // Taking it back leaves a contract that freezes.
+    const undo = rewrite("cite-nothing-undo", "delete c.acceptance_criteria[0].requirement_id;");
+    expect(await edit(repo, undo)).toBe(0);
+    expect(approve()).toBe(0);
   });
 
   it("refuses a hand edit to the nodes, naming --graph-edit, and leaves the file as edited", async () => {
@@ -145,6 +150,7 @@ describe("perbo edit", () => {
   it("opens the contract in $EDITOR by argv, re-validates it and derives the level again", async () => {
     const { repo, dir } = admitted("edit-interactive");
     const before = readContract(dir, "PRB-1");
+    const named = readTicket(dir, "PRB-1").title;
     const editor = rewrite(
       "grow-scope",
       'c.outcome = "Search results are paginated at 25 per page.";\nc.scope.paths_allowed.push("packages/auth/**");',
@@ -160,8 +166,12 @@ describe("perbo edit", () => {
     expect(after.base.context_manifest_hash).not.toBe(before.base.context_manifest_hash);
     expect(after.base.base_commit).toBe(before.base.base_commit);
 
+    // An edit never renames the ticket (D-127):
+    // it keeps the name it was admitted with, though that was the old outcome.
     const ticket = readTicket(dir, "PRB-1");
-    expect(ticket.title).toBe(after.outcome);
+    expect(named).toBe(before.outcome);
+    expect(ticket.title).toBe(named);
+    expect(ticket.title).not.toBe(after.outcome);
     expect(ticket.admission.derived_level).toBe("P2");
     expect(ticket.state).toBe("plan_review");
   });

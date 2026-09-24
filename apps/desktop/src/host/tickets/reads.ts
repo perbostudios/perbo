@@ -8,14 +8,18 @@ import {
   ReviewArtifactSchema,
   RunBundleSchema,
   TicketSchema,
+  hasAcceptanceCriteria,
 } from "@perbo/contracts";
 import type { Ticket } from "@perbo/contracts";
+import { assertionsChangedSinceDraft, readSpecText } from "@perbo/planning";
+import { specFindings } from "../../shared/contract-editing.js";
 import { judgingChecks } from "../../shared/checks.js";
 import { redact, requireSuccess } from "../process.js";
-import { listBundles, readAttempts, summariseTicket } from "../records.js";
+import { listBundles, readAttempts, readDraftEditRecordsOrNone, summariseTicket } from "../records.js";
 import type { BundleManifest } from "../records.js";
 import { effectiveLimits } from "../repository/config.js";
 import { attemptsPath, bundlesPath, objectsPath, principlesPath, ticketPath } from "../repository/layout.js";
+import { safePath } from "../repository/paths.js";
 import type { Cli } from "../cli.js";
 import type { RepositoryRegistry } from "../repository/registry.js";
 import type { WorkspaceReads } from "../workspace-reads.js";
@@ -201,9 +205,17 @@ export class TicketReads {
     );
     const principles = principlesPath(repo);
     const limits = effectiveLimits(repo, this.deps.settings()).limits;
+    const held = this.contract(repo, key);
     return {
       ticket,
-      ...this.contract(repo, key),
+      ...held,
+      specFindings: readSpecFindings(repo, ticket, held.contract),
+      // Read from the same records the plan's history is drawn from, so the two
+      // can never disagree about which edits are in force.
+      changedAssertions: assertionsChangedSinceDraft(
+        readDraftEditRecordsOrNone(ticketPath(repo, key, ".draft.json")),
+        hasAcceptanceCriteria(held.contract) ? held.contract.acceptance_criteria : [],
+      ),
       attempts: report.attempts.map((attempt) => ({
         id: attempt.attempt_id,
         run: attempt.run,
@@ -277,4 +289,27 @@ export class TicketReads {
       },
     );
   }
+}
+
+/**
+ * Where this plan and the spec it was drafted from disagree, as
+ * {@link specFindings} reads them off this ticket's spec file.
+ *
+ * A spec that cannot be read says nothing rather than everything: the whole
+ * plan would otherwise read as dangling the moment the file moved.
+ */
+function readSpecFindings(
+  repo: RegisteredRepository,
+  ticket: Ticket,
+  contract: Detail["contract"],
+): Detail["specFindings"] {
+  const at = ticket.admission.spec?.path;
+  if (at === undefined || at === null || !hasAcceptanceCriteria(contract)) return [];
+  let requirements;
+  try {
+    requirements = readSpecText(safePath(repo, ...at.split("/"))).requirements;
+  } catch {
+    return [];
+  }
+  return specFindings(requirements, contract.acceptance_criteria);
 }

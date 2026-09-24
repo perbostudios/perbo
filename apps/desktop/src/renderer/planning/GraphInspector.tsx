@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
-import { Button, Dialog, LineIcon, cx } from "../ui/index.js";
+import { Button, Dialog, cx } from "../ui/index.js";
 import { VERIFICATION_KINDS, type GraphEdit } from "@perbo/contracts/browser";
+import { nodePageNotes } from "@perbo/planning/browser";
+import { MarkedCriterion, RemovedCriteria } from "./ChangeMarks.js";
+import type { CriteriaChange, CriterionChange } from "./change-marks.js";
 import type {
   GraphCriterionState,
   GraphCriterionView,
@@ -10,9 +13,11 @@ import type {
 } from "../../shared/protocol.js";
 
 /**
- * One node, open: its criteria and its paths, which are contract; the order
- * around it, which is approach; and the page generated for it beside the spec,
- * read-only because every line of it is derived (D-100, D-103).
+ * One node, open: its criteria and its paths, which are contract, and the
+ * order around it, which is approach (D-100), as controls, with the Notes a
+ * person wrote on the node's page (D-103). The criteria take one half and
+ * scroll; the order, the paths and the Notes are one block in the other. What
+ * the node's card already reads out is not repeated here.
  *
  * Each control produces one {@link GraphEdit} and hands it up. Nothing here
  * holds a draft of the plan: the text being typed is local until it is left,
@@ -25,6 +30,7 @@ const KINDS = VERIFICATION_KINDS.filter((kind) => kind !== "manual");
 export function GraphInspector({
   view,
   node,
+  changes,
   live,
   busy,
   apply,
@@ -33,6 +39,13 @@ export function GraphInspector({
 }: {
   view: GraphView;
   node: GraphNodeView;
+  /**
+   * The last change to the plan's promise, or null for none to mark
+   * (D-128). A criterion it took away
+   * belongs to no node now, so it is shown struck through at the end of this
+   * list, whichever node is open.
+   */
+  changes: CriteriaChange | null;
   /** What the run's records say about this node, or undefined for a node they do not name. */
   live: GraphNodeLive | undefined;
   busy: boolean;
@@ -43,7 +56,9 @@ export function GraphInspector({
   const others = view.nodes.filter((each) => each.id !== node.id);
   const after = view.edges.filter((edge) => edge.to === node.id);
   const before = view.edges.filter((edge) => edge.from === node.id);
-  const [path, setPath] = useState("");
+  /** The path being typed, or null while the "+ path" chip is closed. */
+  const [path, setPath] = useState<string | null>(null);
+  const notes = node.page === null ? "" : nodePageNotes(node.page.text);
   const setPaths = (paths: string[]): void => {
     if (paths.length === 0) return;
     apply({ op: "set_node_paths", id: node.id, paths });
@@ -73,14 +88,59 @@ export function GraphInspector({
             <CriterionEdit
               key={criterion.id}
               criterion={criterion}
+              change={changes?.of.get(criterion.id)}
               state={live?.criteria.find((each) => each.id === criterion.id)}
               busy={busy}
               apply={apply}
             />
           ))}
+          {changes !== null && <RemovedCriteria removed={changes.removed} />}
         </div>
-        <div className="insp-side">
-          <div>
+        <div className="insp-block">
+          <div className="insp-order">
+            {(["after", "before"] as const).map((side) => (
+              <div key={side}>
+                <span className="section-label">{`Comes ${side}`}</span>
+                <div className="path-chips">
+                  {(side === "after" ? after : before).map((edge) => {
+                    const other = side === "after" ? edge.from : edge.to;
+                    return (
+                      <span key={other} className="path-chip">
+                        {other}
+                        <button
+                          type="button"
+                          disabled={busy}
+                          aria-label={`Remove the edge ${edge.from} to ${edge.to}`}
+                          onClick={() => apply({ op: "remove_edge", from: edge.from, to: edge.to })}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                  <select
+                    className="add-chip"
+                    aria-label={`Add a node this one comes ${side}`}
+                    value=""
+                    disabled={busy}
+                    onChange={(event) => {
+                      const [from, to]: [string, string] =
+                        side === "after" ? [event.target.value, node.id] : [node.id, event.target.value];
+                      apply({ op: "add_edge", from, to });
+                    }}
+                  >
+                    <option value="">{`+ ${side}`}</option>
+                    {others.map((each) => (
+                      <option key={each.id} value={each.id}>
+                        {each.id} {each.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="insp-paths">
             <span className="section-label">Paths expected to satisfy them</span>
             <div className="path-chips">
               {node.paths.map((each) => (
@@ -99,115 +159,76 @@ export function GraphInspector({
                   </button>
                 </span>
               ))}
+              {path === null ? (
+                <button
+                  type="button"
+                  className="add-chip"
+                  aria-label="Add a path or glob"
+                  disabled={busy}
+                  onClick={() => setPath("")}
+                >
+                  + path
+                </button>
+              ) : (
+                <input
+                  className="add-chip add-chip--open"
+                  aria-label="Add a path or glob"
+                  placeholder="a path or glob, then ↵"
+                  list={`graph-paths-${node.id}`}
+                  autoFocus
+                  value={path}
+                  disabled={busy}
+                  onChange={(event) => setPath(event.target.value)}
+                  onBlur={() => {
+                    if (path.trim() === "") setPath(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setPath(null);
+                      return;
+                    }
+                    if (event.key !== "Enter") return;
+                    const wanted = path.trim();
+                    if (wanted === "" || node.paths.includes(wanted)) return;
+                    setPaths([...node.paths, wanted]);
+                    setPath(null);
+                  }}
+                />
+              )}
             </div>
-            <input
-              className="mini-input"
-              aria-label="Add a path or glob"
-              placeholder="+ add a path or glob, then ↵"
-              list={`graph-paths-${node.id}`}
-              value={path}
-              disabled={busy}
-              onChange={(event) => setPath(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
-                const wanted = path.trim();
-                if (wanted === "" || node.paths.includes(wanted)) return;
-                setPaths([...node.paths, wanted]);
-                setPath("");
-              }}
-            />
             <datalist id={`graph-paths-${node.id}`}>
               {view.pathsAllowed.map((glob) => (
                 <option key={glob} value={glob} />
               ))}
             </datalist>
           </div>
-          <div>
-            <span className="section-label">Comes after</span>
-            <div className="path-chips">
-              {after.map((edge) => (
-                <span key={edge.from} className="path-chip">
-                  {edge.from}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    aria-label={`Remove the edge ${edge.from} to ${edge.to}`}
-                    onClick={() => apply({ op: "remove_edge", from: edge.from, to: edge.to })}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              <select
-                className="select-mini"
-                aria-label="Add a node this one comes after"
-                value=""
-                disabled={busy}
-                onChange={(event) =>
-                  apply({ op: "add_edge", from: event.target.value, to: node.id })
-                }
-              >
-                <option value="">+ after…</option>
-                {others.map((each) => (
-                  <option key={each.id} value={each.id}>
-                    {each.id} {each.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div>
-            <span className="section-label">Comes before</span>
-            <div className="path-chips">
-              {before.map((edge) => (
-                <span key={edge.to} className="path-chip">
-                  {edge.to}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    aria-label={`Remove the edge ${edge.from} to ${edge.to}`}
-                    onClick={() => apply({ op: "remove_edge", from: edge.from, to: edge.to })}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              <select
-                className="select-mini"
-                aria-label="Add a node this one comes before"
-                value=""
-                disabled={busy}
-                onChange={(event) => apply({ op: "add_edge", from: node.id, to: event.target.value })}
-              >
-                <option value="">+ before…</option>
-                {others.map((each) => (
-                  <option key={each.id} value={each.id}>
-                    {each.id} {each.title}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* The Notes section of the node's generated page: the one part of
+              it a person writes, kept across regeneration, and read-only here
+              because it is edited in the file (D-103). Everything above it on
+              the page is the node's card over again. */}
+          <div className="insp-notes">
+            <span className="section-label">
+              Notes
+              <span className="ro-chip">read-only</span>
+            </span>
+            {node.page === null ? (
+              <p className="small muted">
+                This plan was not drafted from a spec, so its nodes have no page to write notes on.
+              </p>
+            ) : notes.length === 0 ? (
+              <p className="small muted">
+                No notes yet. Write them under Notes in <code>{node.page.path}</code>.
+              </p>
+            ) : (
+              <pre className="code node-notes" aria-label={`Notes in ${node.page.path}`}>
+                {notes}
+              </pre>
+            )}
           </div>
           <p className="small muted">
             Criteria and paths become contract when you approve. The order is a suggestion to the
             executor.
           </p>
-        </div>
-        <div className="insp-page">
-          <span className="section-label">
-            {node.page === null ? "Generated page" : node.page.path}
-            <span className="ro-chip">read-only</span>
-          </span>
-          {node.page === null ? (
-            <p className="small muted">
-              This plan was not drafted from a spec, so there is no page to generate. A spec gives
-              every node one (<LineIcon name="spec" size={12} /> D-103).
-            </p>
-          ) : (
-            <pre className="code node-page" aria-label={node.page.path}>
-              {node.page.text}
-            </pre>
-          )}
         </div>
       </div>
     </section>
@@ -245,17 +266,28 @@ function CriterionState({ state }: { state: GraphCriterionState }) {
 /** One criterion's text and how it is proven; both go in one `set_criterion`. */
 function CriterionEdit({
   criterion,
+  change,
   state,
   busy,
   apply,
 }: {
   criterion: GraphCriterionView;
+  /** How the last change left this criterion, or undefined for untouched. */
+  change: CriterionChange | undefined;
   state: GraphCriterionState | undefined;
   busy: boolean;
   apply: (edit: GraphEdit) => void;
 }) {
   const [text, setText] = useState(criterion.text);
   useEffect(() => setText(criterion.text), [criterion.text]);
+  // The words as the last change left them, marked, under the box that
+  // edits them: a textarea cannot carry a mark inside it. Not while the
+  // person is typing in it, since the words are then moving.
+  const marked =
+    change !== undefined &&
+    (change.kind === "changed" || change.kind === "added") &&
+    text === criterion.text &&
+    change.text === criterion.text;
   const set = (next: { text?: string; kind?: GraphCriterionView["kind"] }): void => {
     const kind = next.kind ?? criterion.kind;
     apply({
@@ -293,6 +325,11 @@ function CriterionEdit({
             if (wanted !== criterion.text) set({ text: wanted });
           }}
         />
+        {marked && (
+          <p className="crit-change" aria-label={`Criterion ${criterion.id} as the last change left it`}>
+            <MarkedCriterion text={criterion.text} change={change} />
+          </p>
+        )}
         <div className="kind-seg" role="group" aria-label={`How ${criterion.id} is proven`}>
           {KINDS.map((kind) => (
             <button

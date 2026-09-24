@@ -28,7 +28,7 @@ function repository(name: string): string {
 
 const typed = (repo: string) => ({
   ...defaultAdmission({ repo, store: null }),
-  title: "Search results paginate",
+  outcome: "Search results paginate",
   criteria: ["a page holds 20 :: a unit test asserts it :: test"],
   paths: ["src/search/**"],
 });

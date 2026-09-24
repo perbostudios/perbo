@@ -94,4 +94,5 @@ console.log(
 );
 if (flags.includes("--no-launch"))
   console.log("Run this script again without --no-launch to open the desktop.");
-else pnpm(["desktop:start"]);
+// On macOS, packaged as Perbo.app so the Dock names it Perbo.
+else pnpm([process.platform === "darwin" ? "desktop:run" : "desktop:start"]);

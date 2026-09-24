@@ -21,7 +21,9 @@ import {
   isDependencyPath,
   isMigrationPath,
   isSecurityPath,
+  matchesAny,
   onePieceOfWork,
+  sameName,
   ticketSourceLabel,
   transition,
   type AcceptanceCriterion,
@@ -53,6 +55,8 @@ import {
   fetchGitHubIssue,
   readIssueFile,
   readSpecFile,
+  readSpecText,
+  retitleSpecFile,
 } from "@perbo/planning";
 import { ProviderError, createModel, type Model, type ModelProvider } from "@perbo/model";
 import { RepoReader } from "@perbo/review";
@@ -60,7 +64,6 @@ import { formatDuration, formatHumanElapsed } from "../duration.js";
 import { QUEUE_HOLDING_STATES } from "../scheduling.js";
 import { UsageError, readInput } from "../usage-error.js";
 import {
-  aliasFlag,
   listFlag,
   parseArgv,
   switchFlag,
@@ -73,6 +76,7 @@ import type { Diagnostics } from "../diagnostics.js";
 import type { NarratedCommand, ReportCommand } from "../command-line/table.js";
 import { prohibitedSpecPaths, regenerateNodePages, specCommitFiles } from "../spec/pages.js";
 import { specBaseline } from "../spec/staleness.js";
+import { seedDrift } from "../store/drift.js";
 import {
   TicketStoreError,
   assertContractMatches,
@@ -205,7 +209,7 @@ const ADMISSION_FIELDS = {
       `key reads like PRB-118. Got '${String(issue.input)}'`,
   }),
   /** One sentence: what will be true afterwards. It becomes the contract's outcome. */
-  title: z.string().nullable(),
+  outcome: z.string().nullable(),
   criteria: z.array(z.string()),
   criteriaFile: z.string().nullable(),
   paths: z.array(z.string()),
@@ -342,9 +346,6 @@ const ADMIT_FLAGS = {
   "--store": valueFlag(),
   "--prefix": valueFlag(),
   "--outcome": valueFlag(),
-  // The spelling `perbo admit --title` has always taken, recorded as the
-  // outcome it is: one field, so the last of the two given wins.
-  "--title": aliasFlag("--outcome"),
   "--criterion": listFlag(),
   "--criteria-file": valueFlag(),
   "--path": listFlag(),
@@ -394,7 +395,7 @@ export function defaultAdmission(target: StoreTarget): DraftAdmission {
   return {
     target,
     prefix: DEFAULT_PREFIX,
-    title: null,
+    outcome: null,
     criteria: [],
     criteriaFile: null,
     paths: [],
@@ -442,7 +443,7 @@ function readAdmission(argv: readonly string[]): {
     input: readInput(AdmissionInputSchema, {
       target: { repo: flags["--repo"] ?? ".", store: flags["--store"] ?? null },
       prefix: flags["--prefix"] ?? DEFAULT_PREFIX,
-      title: flags["--outcome"] ?? null,
+      outcome: flags["--outcome"] ?? null,
       criteria: [...(flags["--criterion"] ?? [])],
       criteriaFile: flags["--criteria-file"] ?? null,
       paths: [...(flags["--path"] ?? [])],
@@ -732,58 +733,75 @@ export function assembleContract(args: {
 }
 
 /**
- * What `approve` will not sign: a P3 contract whose decision fields nobody has
- * stated. Approving them unstated would make the level a label rather than a
- * decision.
+ * The segments of a judging glob before its first wildcard: the place it
+ * names. `.perbo/**` names `.perbo`, `SECURITY.md` names itself, and a glob
+ * that starts with a wildcard names none.
  */
-/** The literal text before a glob's first wildcard: the part that names a real place. */
-function staticPrefix(glob: string): string {
-  const cut = glob.search(/[*?[{]/);
-  return cut === -1 ? glob : glob.slice(0, cut);
+function literalSegments(glob: string): string[] {
+  const segments: string[] = [];
+  for (const segment of glob.split("/")) {
+    if (/[*?]/.test(segment)) break;
+    if (segment.length > 0) segments.push(segment);
+  }
+  return segments;
+}
+
+/**
+ * Whether a scope glob can match a path inside the place a judging glob
+ * names, under the one meaning of a path glob that `matchesAny` applies
+ * (`@perbo/contracts`, `glob-conformance.json`). A judging glob with a
+ * wildcard is read as every path inside its place: the place's segments and
+ * at least one more. The scope is walked beside the place segment by segment.
+ * A scope segment holding `**` crosses into the place once the text before it
+ * matches the place's segment beside it, so `**`, `**` leading to `*.ts`,
+ * `pack**` and `packages/**` reach inside `packages/review/**` and `apps**`
+ * does not. Any other scope segment has to match the place's segment beside
+ * it: `*.md` never matches `.perbo`, because a single `*` stays within one
+ * segment. A scope with segments left once the place's run out reaches inside
+ * it, as `packages/review/prompt.ts` does. A scope that ends where the place
+ * does or before it, with no `**` on the way, matches only paths as deep as
+ * itself, which are the place or somewhere above it and never inside it: `*`
+ * does not reach `.perbo/**`, nor `docs/*` `docs/adr/**`, nor `packages` or
+ * `packages/review` `packages/review/**`.
+ */
+function reachesInside(scope: string, place: readonly string[]): boolean {
+  const segments = scope.split("/").filter((segment) => segment.length > 0);
+  for (let i = 0; i < segments.length && i < place.length; i += 1) {
+    const segment = segments[i] ?? "";
+    const here = place[i] ?? "";
+    const crossing = segment.indexOf("**");
+    // `**` takes the rest of this segment and every one after it, so only the
+    // text before it has to match here.
+    if (crossing !== -1) return matchesAny(here, [`${segment.slice(0, crossing)}*`]);
+    if (!matchesAny(here, [segment])) return false;
+  }
+  return segments.length > place.length;
 }
 
 /**
  * A scope that reaches into what judges the attempt is refused here, with the
- * reason, rather than at the seal after an attempt has run (D-045). Overlap is
- * decided on the static prefixes: either glob naming a place inside the other's
- * is an overlap. That refuses `packages/**` against a protected
- * `packages/review/**` too, deliberately — the answer is a narrower scope.
+ * reason, rather than at the seal after an attempt has run (D-045).
  */
-/** `a/b` is inside `a/b/…` and is `a/b` itself; it is not inside `a/bc`. */
-function inside(path: string, prefix: string): boolean {
-  const base = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix;
-  return path === base || path.startsWith(`${base}/`);
-}
-
 export function judgingOverlap(
   allowed: readonly string[],
   judging: readonly JudgingRule[],
 ): Array<{ scope: string; judging: JudgingRule }> {
   const overlaps: Array<{ scope: string; judging: JudgingRule }> = [];
   for (const scope of allowed) {
-    const s = staticPrefix(scope);
     for (const rule of judging) {
-      const j = staticPrefix(rule.path);
+      const place = literalSegments(rule.path);
       // A judging glob with no literal prefix (`**/*.pem`) names no place a
       // scope could be compared with; the seal still enforces it.
-      if (j.length === 0) continue;
-      // A scope with no literal prefix (`**`, `**/*.ts`) names every place,
-      // so it reaches every judging path there is.
-      if (s.length === 0 || inside(s, j) || inside(j, s)) overlaps.push({ scope, judging: rule });
+      if (place.length === 0) continue;
+      // A judging glob with no wildcard names one path, and the scope reaches
+      // it exactly when it matches that path: `*.md` reaches `SECURITY.md`.
+      const reaches = /[*?]/.test(rule.path) ? reachesInside(scope, place) : matchesAny(rule.path, [scope]);
+      if (reaches) overlaps.push({ scope, judging: rule });
     }
   }
   return overlaps;
 }
 
-/**
- * Every requirement id a criterion cites is one the spec carries.
- *
- * The schema checks the shape and stops there: what requirements exist is a
- * fact about a Markdown file, so the set is supplied here and by `perbo edit`,
- * which is the only other thing that writes a criterion. A contract with no
- * spec behind it cites nothing, and a citation on one is refused rather than
- * kept as a reference to nowhere.
- */
 export function assertRequirementsCarried(
   contract: PlanContract,
   requirementIds: readonly string[],
@@ -801,6 +819,11 @@ export function assertRequirementsCarried(
   );
 }
 
+/**
+ * What `approve` will not sign: a P3 contract whose decision fields nobody has
+ * stated. Approving them unstated would make the level a label rather than a
+ * decision.
+ */
 export function assertApprovable(
   contract: PlanContract,
   key: string,
@@ -950,6 +973,12 @@ export interface Resolved {
   spec: { path: string; content_sha256: string } | null;
   /** The requirement ids the spec carries, which a criterion may cite. */
   requirementIds: string[];
+  /**
+   * What every other ticket in the store is called: shown to the drafter, and
+   * what the name this ticket takes must differ from. Empty where nothing was
+   * drafted.
+   */
+  names: string[];
 }
 
 /** One admission under way: what was asked for, and what it is run against. */
@@ -1011,7 +1040,10 @@ function specReference(path: string): string {
   return `spec:${folder ?? segments[segments.length - 1] ?? "spec"}`;
 }
 
-/** The SHA-256 of the spec as read for drafting: the same bytes the drafter saw, not a second read. */
+/**
+ * The SHA-256 of a spec's text: the bytes the drafter saw rather than a second
+ * read, or those {@link nameSpecAfterTicket} wrote.
+ */
 const contentHash = (text: string): string =>
   `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 
@@ -1026,7 +1058,7 @@ function typedCriteria(input: Admitting): AcceptanceCriterion[] {
 
 function resolveTyped(input: Admitting): Resolved {
   const { args } = input;
-  if (!args.title) throw new UsageError("--outcome is required: one sentence, what will be true");
+  if (!args.outcome) throw new UsageError("--outcome is required: one sentence, what will be true");
   const criteria = typedCriteria(input);
   if (criteria.length === 0) {
     throw new UsageError(
@@ -1041,7 +1073,7 @@ function resolveTyped(input: Admitting): Resolved {
     );
   }
   return {
-    outcome: args.title,
+    outcome: args.outcome,
     criteria,
     paths: args.paths,
     prohibited: args.prohibited,
@@ -1055,6 +1087,7 @@ function resolveTyped(input: Admitting): Resolved {
     noGos: [],
     spec: null,
     requirementIds: [],
+    names: [],
   };
 }
 
@@ -1063,18 +1096,18 @@ function resolveTyped(input: Admitting): Resolved {
  * and scopes to keep clear of. Drafts awaiting approval are on it too — the
  * next ticket from the same epic follows one the person has not yet approved.
  */
-function board(dir: string, leftOff: (key: string) => void): BoardEntry[] {
+function board(dir: string, tickets: readonly Ticket[], leftOff: (key: string) => void): BoardEntry[] {
   const inFlight = new Set<string>(["plan_review", ...QUEUE_HOLDING_STATES]);
-  return listTickets(dir)
+  return tickets
     .filter((ticket) => inFlight.has(ticket.state))
     .flatMap((ticket) => {
       // A ticket whose contract cannot be read is stepped over, as `list`
       // steps over a ticket it cannot read: one broken record does not stop
       // every admission after it. Said, because the drafter is then told
       // that ticket is not in flight.
-      let paths_allowed: readonly string[];
+      let contract: PlanContract;
       try {
-        paths_allowed = readContract(dir, ticket.key).scope.paths_allowed;
+        contract = readContract(dir, ticket.key);
       } catch {
         leftOff(ticket.key);
         return [];
@@ -1084,8 +1117,8 @@ function board(dir: string, leftOff: (key: string) => void): BoardEntry[] {
           key: ticket.key,
           state: ticket.state,
           priority: ticket.priority,
-          outcome: ticket.title,
-          paths_allowed,
+          outcome: contract.outcome,
+          paths_allowed: contract.scope.paths_allowed,
           approved: ticket.approved_at !== null,
         },
       ];
@@ -1118,6 +1151,7 @@ async function resolveDrafted(input: Admitting): Promise<Resolved> {
   let sourcePath: string | null;
   let spec: Spec | null;
   let drafted: DraftResult;
+  let names: string[];
   try {
     ({ issue, path: sourcePath, spec } = await readSource(input));
     // A spec is kept in the repository it is drafted for and committed with
@@ -1153,6 +1187,14 @@ async function resolveDrafted(input: Admitting): Promise<Resolved> {
       }
     }
     const model = input.model ?? draftingModel(args.provider, args.model);
+    const store = storeDir(repositoryRoot, args.target.store);
+    const tickets = listTickets(store);
+    // Every ticket in the store, whatever its state, since a person's board
+    // shows them all — but the one being drafted again, whose own name is no
+    // name to tell it apart from (D-127).
+    names = tickets
+      .filter((ticket) => ticket.key !== args.startOver)
+      .map((ticket) => ticket.title);
     diagnostics.stderr(
       `read ${issue.reference}: ${issue.title}\ndrafting the contract with ${model.provider} ` +
         `${model.model_id}; nothing runs until you approve it\n`,
@@ -1172,9 +1214,10 @@ async function resolveDrafted(input: Admitting): Promise<Resolved> {
       repositoryId: repositoryId(repositoryRoot),
       defaultProhibited: args.prohibited,
       defaultGenerated: args.generated,
-      board: board(storeDir(repositoryRoot, args.target.store), (key) =>
+      board: board(store, tickets, (key) =>
         diagnostics.stderr(`${key} is in flight but its contract cannot be read; it is left off the board\n`),
       ),
+      names,
       reader: new RepoReader(repositoryRoot, DRAFT_READ_LIMITS),
       model,
     });
@@ -1232,7 +1275,7 @@ async function resolveDrafted(input: Admitting): Promise<Resolved> {
         }
       : { nodes: [], edges: [] };
   return {
-    outcome: args.title ?? drafted.draft.outcome,
+    outcome: args.outcome ?? drafted.draft.outcome,
     criteria,
     paths: args.paths.length > 0 ? args.paths : drafted.draft.proposed_scope.paths_allowed,
     prohibited: [...new Set([...args.prohibited, ...drafted.draft.proposed_scope.paths_prohibited_extra])],
@@ -1254,6 +1297,7 @@ async function resolveDrafted(input: Admitting): Promise<Resolved> {
             content_sha256: contentHash(issue.body),
           },
     requirementIds: spec?.requirements.map((requirement) => requirement.id) ?? [],
+    names,
   };
 }
 
@@ -1421,21 +1465,53 @@ function assertNotAlreadyDrafted(input: Admitting): void {
 }
 
 /**
- * What a ticket is called.
+ * What a ticket is called (D-127).
  *
- * A ticket drafted from a spec is that spec, so it carries the title the
- * person gave it: the board, the spec's folder and the planning pane all say
- * the same thing, and work somebody named is findable under the name they
- * used. Everything else is called by its outcome, which is the only sentence a
- * ticket drafted from an issue or a pasted file has to be called by.
+ * A ticket the drafter named is called that: the fewest words that tell it
+ * apart from every other ticket in the store, which the drafter was shown. It
+ * read the source and the repository before saying that, so it names what the
+ * plan turned out to be rather than what somebody asked for before any of it
+ * was known. Where another ticket already carries it, a spec's own title
+ * stands in: it is what the work was called while its spec was written.
+ * Failing both, or where nothing was drafted, the outcome — the only sentence
+ * a typed ticket has to be called by.
  *
- * The branch is not affected either way — `branchName` derives from the
- * outcome, not from this.
+ * A drafted name or a spec title another ticket already carries is passed
+ * over for the next; the outcome, the last, stands whatever it is. The draft
+ * is kept either way: the run that produced it is paid for, and a name is a
+ * label a person can change.
+ *
+ * Display only: the branch is named from the outcome, and so is the pull
+ * request, never from this (ADR-0023 §4). An edit never renames a ticket.
  */
 function ticketTitle(resolved: Resolved, outcome: string): string {
-  if (resolved.spec === null) return outcome;
-  const named = resolved.issue?.title.trim() ?? "";
-  return named.length > 0 ? named : outcome;
+  // Flattened because it is a model's words shown as a title (ADR-0023 §4).
+  const drafted = (resolved.drafted?.draft.name ?? "").replace(/\s+/g, " ").trim();
+  const specTitle = resolved.spec === null ? "" : (resolved.issue?.title.trim() ?? "");
+  const named = [drafted, specTitle].find(
+    (name) => name.length > 0 && !resolved.names.some((taken) => sameName(name, taken)),
+  );
+  return named ?? outcome;
+}
+
+/**
+ * The spec a ticket was drafted from, titled with the ticket's name, with its
+ * hash as it now stands (D-127). Called
+ * once everything that can refuse the admission has been asked, so a refused
+ * one leaves the spec as it was.
+ */
+function nameSpecAfterTicket<T extends { path: string; content_sha256: string }>(
+  repositoryRoot: string,
+  spec: T,
+  title: string,
+): T {
+  try {
+    const named = retitleSpecFile({ repositoryRoot, path: spec.path, title });
+    return { ...spec, content_sha256: contentHash(named) };
+  } catch (error) {
+    if (!(error instanceof PlanningError)) throw error;
+    throw new UsageError(`${spec.path} cannot take the ticket's name: ${error.message}`);
+  }
 }
 
 function admitted(input: Admitting, started: number, resolved: Resolved): AdmissionReport {
@@ -1565,8 +1641,18 @@ function admitted(input: Admitting, started: number, resolved: Resolved): Admiss
   // with no ticket, contract or snapshot written. The key issued above stays
   // issued, as every key once issued does.
   assertPagesWritable(repositoryRoot, resolved, contract);
+  if (ticket.admission.spec !== null)
+    ticket = TicketSchema.parse({
+      ...ticket,
+      admission: { ...ticket.admission, spec: nameSpecAfterTicket(repositoryRoot, ticket.admission.spec, ticket.title) },
+    });
   writeContract(dir, ticket, contract);
   writeDraftSnapshot(dir, snapshot);
+  // A plan just drafted from its spec agrees with it by construction, and the
+  // verdict is written beside it so the page between the plan and the
+  // contract finds one and calls no model
+  // (D-128).
+  if (resolved.spec !== null) seedDrift({ dir, key, repositoryRoot, specPath: resolved.spec.path, contract, now });
   // The approach, where there is one to record: a plan with nodes carries the
   // order between them, suggested or not yet, and a spec carries its No-Gos.
   // Neither is contract, so neither is counter-sealed and neither is frozen at
@@ -1865,8 +1951,13 @@ function redraft(
   // spec folder, nodes folder or page that is a link refuses the re-draft
   // with the ticket, its contract and its snapshot as they were.
   assertPagesWritable(repositoryRoot, resolved, contract);
+  const title = ticketTitle(resolved, contract.outcome);
+  const spec = nameSpecAfterTicket(repositoryRoot, resolved.spec, title);
   writeContract(dir, ticket, contract);
   writeDraftSnapshot(dir, snapshot);
+  // Drafted again from the spec, so it agrees with it again: whatever the
+  // last verdict found is over (D-128).
+  seedDrift({ dir, key, repositoryRoot, specPath: resolved.spec.path, contract, now });
   const approach: ApproachRecord | null =
     resolved.nodes.length > 0 || resolved.noGos.length > 0
       ? {
@@ -1882,7 +1973,7 @@ function redraft(
 
   const updated: Ticket = TicketSchema.parse({
     ...ticket,
-    title: ticketTitle(resolved, contract.outcome),
+    title,
     plan_version: contract.version,
     updated_at: now.toISOString(),
     admission: {
@@ -1891,7 +1982,7 @@ function redraft(
       criteria_source: resolved.criteriaSource,
       criteria_count: resolved.criteria.length,
       drafted_at: now.toISOString(),
-      spec: resolved.spec,
+      spec,
       // The person's clock and their edits both start again: this is a plan
       // they have not read yet.
       human_elapsed_ms: null,
@@ -2150,6 +2241,35 @@ export function recordedEdits(snapshot: DraftSnapshot): { count: number; changes
 }
 
 /**
+ * The requirement ids this ticket's spec carries now, for a check at approval.
+ *
+ * Read from the spec itself, at the path admission recorded: the record says
+ * which file, and the file says what it states. A ticket drafted from no spec
+ * carries no citations and states nothing.
+ */
+function specRequirementIdsAt(repositoryRoot: string, ticket: Ticket): string[] | null {
+  const spec = ticket.admission.spec;
+  if (spec === null) return [];
+  try {
+    // Read the way the pane that shows this reads it, not the strict parser.
+    // `parseSpec` refuses a spec with no Outcome, no Requirements heading or a
+    // repeated id — all of which the contract page reads happily and reports
+    // on. Using it here would make the gate most permissive exactly where the
+    // spec is most degraded: the page would say approving is refused while
+    // approving succeeded.
+    return readSpecText(resolve(repositoryRoot, spec.path)).requirements.flatMap(
+      (requirement) => (requirement.id === null ? [] : [requirement.id]),
+    );
+  } catch {
+    // A spec whose file is gone. Nothing can be checked against it, and
+    // approval does not refuse over it — the rest of approval leaves
+    // admission's hash and files standing for the same reason
+    // ({@link withNamesThatResolved}).
+    return null;
+  }
+}
+
+/**
  * What approving asks for: which store, and which ticket in it.
  *
  * `--json` is not part of it. The desktop passes the flag and this command has
@@ -2178,6 +2298,22 @@ export function approve(input: ApprovalInput, context: CommandContext): number {
   // that disagree is a contract with no agreed content to judge.
   assertContractSealed(existing, contract, draft);
   assertApprovable(contract, key, readJudgingPaths(dir));
+  // Approval freezes the contract (ADR-0016) and the spec it was drafted from
+  // is what the loop commits and the reviewer reads, so this is the moment the
+  // two must agree. Asked here and not while editing: what a person does
+  // between drafting and approving is theirs, and the plan and the spec are
+  // both files they can move. A citation pointing at nothing would be frozen
+  // into the record and printed on a node's page as provenance it does not
+  // have (D-103).
+  const statesNow = specRequirementIdsAt(resolve(context.cwd, input.target.repo), existing);
+  if (statesNow !== null)
+    assertRequirementsCarried(
+      contract,
+      statesNow,
+      existing.admission.spec?.path ?? null,
+      ". Approving freezes the contract, so this is settled first: fix the citation with " +
+        `perbo edit ${key}, or ask the interview, which writes the spec and the plan together`,
+    );
 
   // D-003's instrument, written here because this is the moment it ends: the
   // person's time from first seeing the contract, and how much of it they
@@ -2339,7 +2475,7 @@ function renderListing(document: ListJson): string {
   }));
   const keyWidth = Math.max(6, ...rows.map((row) => row.key.length));
   return (
-    `${"TICKET".padEnd(keyWidth)}  ${"STATE".padEnd(STATE_WIDTH)}  OUTCOME\n` +
+    `${"TICKET".padEnd(keyWidth)}  ${"STATE".padEnd(STATE_WIDTH)}  NAME\n` +
     rows
       .map(
         (row) =>

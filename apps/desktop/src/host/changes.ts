@@ -50,6 +50,7 @@ export class Changes {
       titles: state.titles,
       taskModels: state.taskModels,
       archived: state.archived,
+      asks: state.asks,
     });
   }
 

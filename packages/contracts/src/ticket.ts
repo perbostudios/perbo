@@ -425,7 +425,10 @@ export const TicketSchema = z.strictObject({
   schema_version: z.literal(TICKET_SCHEMA_VERSION),
   ticket_id: TicketIdSchema,
   key: TicketKeySchema,
-  /** One sentence. The same sentence becomes the plan contract's `outcome`. */
+  /**
+   * What the ticket is called (D-127).
+   * Display only: the plan contract's `outcome` is its own.
+   */
   title: z.string().min(1),
   state: TicketStateSchema,
   priority: TicketPrioritySchema,

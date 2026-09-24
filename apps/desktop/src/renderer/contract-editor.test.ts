@@ -4,18 +4,18 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type PropsWithChildren } from "react";
 import type { StandingProhibitedEntry } from "@perbo/contracts";
-import { ContractEditing, interviewProviderFor, interviewSessionArgs } from "../shared/contract-editing.js";
+import { ContractEditing, editingForm, interviewProviderFor, interviewSessionArgs, sameProblems, untouchedPlanning } from "../shared/contract-editing.js";
 import { WorkspaceReads } from "../host/workspace-reads.js";
 import { ContractEditor, flushContractEditors, useContractEditing } from "./contract-editor.js";
 import { bridge } from "./workspace/index.js";
-import { INTERVIEW_CONVERSATION_CAP, TaskModelsSchema } from "../shared/protocol.js";
+import { EditingSessionSchema, INTERVIEW_CONVERSATION_CAP, TaskModelsSchema } from "../shared/protocol.js";
 import { READ_ATTEMPTS } from "../shared/read-generations.js";
 import type { Change, DesktopBridge, Detail, EditingSession, Job, ReplyMap, Request } from "../shared/protocol.js";
 import { sampleBridge } from "../sample-host/bridge.js";
 
 const repoId = "10000000-0000-4000-8000-000000000001";
 const otherRepo = "10000000-0000-4000-8000-000000000002";
-const models = TaskModelsSchema.parse({});
+const models = TaskModelsSchema.parse({ executorEffort: null, reviewerEffort: null });
 const draft = { outcome: "Save the result", criteria: [{ text: "Saved", assertion: "The saved text can be read", kind: "test" as const }], paths: ["src/**"], prohibited: [] };
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -37,7 +37,7 @@ async function fixture() {
     return structuredClone(found);
   });
   const jobs: Job[] = [];
-  const start = vi.fn(async (request: Extract<Request, { kind: "draft" | "admit" | "edit" }>, owner: { sessionId: string; operationId: string }) => {
+  const start = vi.fn(async (request: Extract<Request, { kind: "admit" | "edit" }>, owner: { sessionId: string; operationId: string }) => {
     const job: Job = { id: crypto.randomUUID(), repoId: request.repoId, key: "key" in request ? request.key : null, kind: request.kind, label: "Compile", state: "running", startedAt: new Date().toISOString(), endedAt: null, log: "", resultKey: null, error: null, result: null, editing: owner };
     editing.started(owner, job);
     jobs.push(job);
@@ -49,7 +49,7 @@ async function fixture() {
     await editing.settled(job);
   });
   let standing: StandingProhibitedEntry[] = [];
-  const io = { records: () => records, persist, repository: (id: string) => { if (!repositories.has(id)) throw new Error("Disconnected"); }, defaults: () => models, detail, start, stop, id: () => crypto.randomUUID(), standing: () => [...standing], setStanding: (_id: string, entries: StandingProhibitedEntry[]) => { standing = [...entries]; } };
+  const io = { records: () => records, persist, repository: (id: string) => { if (!repositories.has(id)) throw new Error("Disconnected"); }, defaults: () => models, detail, start, stop, id: () => crypto.randomUUID(), specFolder: () => "specs", standing: () => [...standing], setStanding: (_id: string, entries: StandingProhibitedEntry[]) => { standing = [...entries]; } };
   const editing = new ContractEditing(io);
   const request = vi.fn(async <T extends Request>(input: T): Promise<ReplyMap[T["kind"]]> => {
     let result: unknown;
@@ -89,16 +89,16 @@ describe("contract editing session interface", () => {
     const initial = await f.editing.open({ kind: "new", repoId });
     const a = f.editing.save(initial.id, initial.revision, repoId, { ...initial.form, draft });
     const operation = crypto.randomUUID();
-    const running = await f.editing.submit(a.id, a.revision, operation, "draft");
-    expect(await f.editing.submit(a.id, a.revision, operation, "draft")).toEqual(running);
-    await expect(f.editing.submit(a.id, a.revision, operation, "compile")).rejects.toThrow(/different input/);
+    const running = await f.editing.submit(a.id, a.revision, operation, "compile");
+    expect(await f.editing.submit(a.id, a.revision, operation, "compile")).toEqual(running);
+    await expect(f.editing.submit(a.id, a.revision, operation, "generate")).rejects.toThrow(/different input/);
     const b = await f.editing.open({ kind: "ticket", repoId: otherRepo, key: "PRB-421" });
     const savedB = f.editing.save(b.id, b.revision, otherRepo, { ...b.form, criterion: { text: "B's unfinished text", assertion: "", kind: "test" } });
     const job = f.jobs[0]!;
     await f.editing.settled({ ...job, repoId: otherRepo, state: "completed", resultKey: "PRB-421" });
     expect(f.editing.read(a.id).phase).toBe("working");
     await f.editing.settled({ ...job, state: "completed", resultKey: "PRB-421" });
-    expect(f.editing.read(a.id)).toMatchObject({ key: "PRB-421", repoId, phase: "editing", form: { step: 2 } });
+    expect(f.editing.read(a.id)).toMatchObject({ key: "PRB-421", repoId, phase: "ready" });
     expect((await f.editing.open({ kind: "ticket", repoId, key: "PRB-421" })).id).toBe(a.id);
     expect(f.editing.read(b.id)).toEqual(savedB);
     expect(f.start).toHaveBeenCalledTimes(1);
@@ -121,7 +121,7 @@ describe("contract editing session interface", () => {
     const f = await fixture();
     const initial = await f.editing.open({ kind: "new", repoId });
     const saved = f.editing.save(initial.id, 0, repoId, { ...initial.form, draft });
-    await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "draft");
+    await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "compile");
     const reads = new WorkspaceReads(), held = deferred<Detail>();
     f.detail.mockImplementation((repo, key) => reads.read("detail:" + repo + ":" + key, repo, () => held.promise));
     const opening = f.editing.open({ kind: "ticket", repoId, key: "PRB-421" });
@@ -137,7 +137,7 @@ describe("contract editing session interface", () => {
     const f = await fixture();
     const initial = await f.editing.open({ kind: "new", repoId });
     const saved = f.editing.save(initial.id, 0, repoId, { ...initial.form, draft });
-    await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "draft");
+    await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "compile");
     const other = await f.editing.open({ kind: "ticket", repoId, key: "PRB-421" });
     const edited = f.editing.save(other.id, other.revision, repoId, { ...other.form, editing: 0, criterion: { text: "Keep this unfinished criterion", assertion: "", kind: "test" } });
     await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" });
@@ -150,8 +150,8 @@ describe("contract editing session interface", () => {
     });
     expect(f.records().filter((entry) => entry.key === "PRB-421")).toHaveLength(1);
     expect(await restarted.open({ kind: "session", id: conflict.id })).toEqual(conflict);
-    expect(await restarted.submit(conflict.id, saved.revision, conflict.operation!.id, "draft")).toEqual(conflict);
-    await expect(restarted.submit(conflict.id, conflict.revision, crypto.randomUUID(), "draft")).rejects.toThrow(/Restore/);
+    expect(await restarted.submit(conflict.id, saved.revision, conflict.operation!.id, "compile")).toEqual(conflict);
+    await expect(restarted.submit(conflict.id, conflict.revision, crypto.randomUUID(), "compile")).rejects.toThrow(/Restore/);
     restarted.discard(edited.id, edited.revision);
     const current = await restarted.open({ kind: "ticket", repoId, key: "PRB-421" });
     expect(current).toMatchObject({ key: "PRB-421", phase: "editing" });
@@ -165,7 +165,7 @@ describe("contract editing session interface", () => {
     const f = await fixture();
     const initial = await f.editing.open({ kind: "new", repoId });
     const saved = f.editing.save(initial.id, 0, repoId, { ...initial.form, draft });
-    await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "draft");
+    await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "compile");
     f.detail.mockRejectedValueOnce(new Error("Temporarily unavailable"));
     await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" });
     expect(f.editing.read(initial.id).phase).toBe("outcome-unknown");
@@ -179,7 +179,7 @@ describe("contract editing session interface", () => {
   it("rejects invalid submissions and failed durable writes before launching work", async () => {
     const f = await fixture();
     const initial = await f.editing.open({ kind: "new", repoId });
-    await expect(f.editing.submit(initial.id, initial.revision, crypto.randomUUID(), "draft")).rejects.toThrow();
+    await expect(f.editing.submit(initial.id, initial.revision, crypto.randomUUID(), "compile")).rejects.toThrow();
     const saved = f.editing.save(initial.id, initial.revision, repoId, { ...initial.form, draft });
     f.persist.mockImplementationOnce(() => { throw new Error("Disk full"); });
     await expect(f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "compile")).rejects.toThrow("Disk full");
@@ -231,6 +231,64 @@ describe("contract editing session interface", () => {
   });
 });
 
+describe("taking the ticket drafted from this planning's spec", () => {
+  it("fills a session that holds none, and does not claim that session made it", async () => {
+    // A ticket drafted from this planning's spec outside the app — at the
+    // command line — is reconciled by nothing: without this the session that
+    // wrote the spec still holds no ticket, the rail offers no Graph over a
+    // plan that exists, and the plan shows up in the picker as a second row
+    // for work that is one thing (D-101, D-103).
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "new", repoId });
+    expect(session.key, "nothing drafted yet").toBeNull();
+    const revision = session.revision;
+
+    const drafted = await f.io.detail(repoId, "PRB-421");
+    const taken = f.editing.adopt(session.id, drafted, 3);
+    expect(taken.key).toBe("PRB-421");
+    expect(taken.digest).toBe(drafted.digest);
+    // The contract's own scope, not `editingForm`'s placeholder: a session
+    // carrying a scope the contract does not is read as having unsaved paths,
+    // which blocks approving the plan it just drafted.
+    expect(taken.form.draft.paths).toEqual(drafted.contract.scope.paths_allowed);
+    expect(taken.form.draft.paths).not.toEqual(session.form.draft.paths);
+    expect(taken.form.draft.outcome).toBe(drafted.contract.outcome);
+    // The count the rail reads, which is drawn where no contract can be read.
+    expect(taken.nodes).toBe(3);
+    // And it did not make the ticket: this is a plan admitted at the command
+    // line, found by the planning that wrote its spec. Whether a planning made
+    // its ticket is what lets discarding it take the ticket rather than leave
+    // one behind, and discarding this one must leave work it did not do.
+    expect(taken.admitted).toBe(false);
+    expect(taken.resumeNew).toBe(false);
+    // And a save in flight is not made stale by a change the person did not
+    // make, as a chat line is not.
+    expect(taken.revision).toBe(revision);
+  });
+
+  it("leaves a session that already holds one alone", async () => {
+    // A session on a ticket re-drafted its own plan, and the key it has is the
+    // key to keep: taking another would move the planning onto somebody else's
+    // ticket behind their back.
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "ticket", repoId, key: "PRB-421" });
+    expect(session.key).toBe("PRB-421");
+    const other = await f.io.detail(otherRepo, "PRB-421");
+    other.ticket.key = "PRB-9";
+    const kept = f.editing.adopt(session.id, other, 3);
+    expect(kept.key).toBe("PRB-421");
+  });
+
+  it("leaves a discarded session alone", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "new", repoId });
+    f.editing.discard(session.id);
+    const gone = f.editing.adopt(session.id, await f.io.detail(repoId, "PRB-421"), 3);
+    expect(gone.phase).toBe("discarded");
+    expect(gone.key).toBeNull();
+  });
+});
+
 /**
  * SCP-313: the interview's conversation lives on the editing session, so
  * leaving planning mode and restarting the app both come back to it (D-102).
@@ -256,11 +314,46 @@ describe("the interview's conversation on an editing session", () => {
     expect(kept.at(-1)!.n).toBe(INTERVIEW_CONVERSATION_CAP + 2);
   });
 
+  it("ends an asking without a turn, and leaves its line to be read", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "new", repoId });
+    const at = "2026-01-01T00:00:00.000Z";
+    const asked = f.editing.converse(
+      session.id,
+      {
+        kind: "asked",
+        groups: [
+          {
+            title: "Criterion 1 and R1",
+            parts: [
+              {
+                question: "Which?",
+                options: [
+                  { label: "This", detail: null, recommended: true },
+                  { label: "That", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+        drift: { open: 1 },
+      },
+      at,
+    );
+    f.editing.beginAsking(session.id, asked.n);
+    expect(f.editing.read(session.id).asking).toEqual({ entry: asked.n, answered: 0 });
+    f.editing.endAsking(session.id);
+    const ended = f.editing.read(session.id);
+    expect(ended.asking).toBeNull();
+    expect(ended.conversation.at(-1)).toEqual(asked);
+    expect(ended.revision).toBe(session.revision);
+  });
+
   it("records the interview's own session id, which is what continues it", async () => {
     const f = await fixture();
     const session = await f.editing.open({ kind: "new", repoId });
     expect(session.interviewSession).toBeNull();
-    const recorded = f.editing.recordInterview(session.id, "sdk-session-1", "claude");
+    const recorded = f.editing.recordInterview(session.id, "sdk-session-1", "claude", "claude-opus-5");
     expect(recorded.interviewSession).toBe("sdk-session-1");
     expect(recorded.interviewProvider).toBe("claude");
   });
@@ -304,7 +397,7 @@ describe("editor binding lifecycle", () => {
     const disconnect = editor.connect();
     await vi.waitFor(() => expect(editor.getSnapshot().loading).toBe(false));
     editor.update({ draft });
-    editor.submit("draft");
+    editor.submit("compile");
     await flushContractEditors();
     const old = deferred<EditingSession>(), original = f.request.getMockImplementation()!;
     let reads = 0;
@@ -358,7 +451,7 @@ describe("editor binding lifecycle", () => {
     const saved = deferred<void>(), original = f.request.getMockImplementation()!;
     f.request.mockImplementation(async (request) => { if (request.kind === "editingSave") await saved.promise; return original(request); });
     editor.update({ draft });
-    editor.submit("draft");
+    editor.submit("compile");
     editor.stop();
     disconnect();
     let closed = false;
@@ -380,7 +473,7 @@ describe("editor binding lifecycle", () => {
     await flushContractEditors();
     const acknowledgment = deferred<void>(), original = f.request.getMockImplementation()!;
     f.request.mockImplementation(async (request) => { const reply = await original(request); if (request.kind === "editingSubmit") await acknowledgment.promise; return reply; });
-    editor.submit("draft");
+    editor.submit("compile");
     await vi.waitFor(() => expect(f.start).toHaveBeenCalledTimes(1));
     editor.stop();
     disconnect();
@@ -438,5 +531,164 @@ describe("which session an interview continues", () => {
   it("reads the provider off the planning's drafting choice", () => {
     expect(interviewProviderFor({ draftingProvider: "codex-cli" })).toBe("codex");
     expect(interviewProviderFor({ draftingProvider: "claude-cli" })).toBe("claude");
+  });
+});
+
+describe("whether two readings found the same problems (D-128)", () => {
+  const problem = (heading: string, difference: string, label = "Reword it.") => ({
+    heading,
+    difference,
+    options: [{ label, detail: null, recommended: true }],
+  });
+  const one = problem("Criterion 1 and R1", "R1 asks for one email; criterion 1 promises two.");
+  const two = problem("Criterion 2 and R2", "R2 asks for a retry; criterion 2 promises none.");
+
+  it("compares the places and the differences as a set, and not the options or the order", () => {
+    expect(sameProblems([one, two], [two, one])).toBe(true);
+    // Worded afresh: the ways to close it are the model's each reading, and
+    // a new wording of them is not a new problem.
+    expect(sameProblems([one], [{ ...one, options: [{ label: "Drop it.", detail: "Or so", recommended: false }] }])).toBe(true);
+    expect(sameProblems([], [])).toBe(true);
+  });
+
+  it("tells a different place, a different difference and a different count apart", () => {
+    expect(sameProblems([one], [two])).toBe(false);
+    expect(sameProblems([one], [{ ...one, difference: "R1 asks for one email; criterion 1 promises three." }])).toBe(false);
+    expect(sameProblems([one], [{ ...one, heading: "Criterion 1 and R2" }])).toBe(false);
+    expect(sameProblems([one, two], [one])).toBe(false);
+    expect(sameProblems([one], [one, two])).toBe(false);
+    // The same problem twice is one problem: what is compared is the set.
+    expect(sameProblems([one, one], [one])).toBe(true);
+  });
+});
+
+describe("a planning that holds nothing (D-129)", () => {
+  // What `editingOpen {kind:"fresh"}` mints, which is the one shape that holds
+  // nothing; each case below puts one thing into it.
+  const born = (over: Record<string, unknown> = {}): EditingSession =>
+    EditingSessionSchema.parse({
+      version: 1,
+      id: "20000000-0000-4000-8000-000000000001",
+      repoId,
+      key: null,
+      digest: null,
+      revision: 0,
+      resumeNew: false,
+      lastPane: null,
+      lastView: null,
+      drift: null,
+      change: null,
+      form: editingForm(models),
+      phase: "editing",
+      error: null,
+      operation: null,
+      interviewModel: null,
+      ...over,
+    });
+
+  it("is what a planning opened fresh and left alone is", () => {
+    expect(untouchedPlanning(born())).toBe(true);
+  });
+
+  it("is not a planning whose spec folder was written", () => {
+    expect(untouchedPlanning(born({ specSlug: "have-a-dark-mode" }))).toBe(false);
+  });
+
+  it("is not a planning opened over a ticket", () => {
+    expect(untouchedPlanning(born({ key: "PRB-421" }))).toBe(false);
+  });
+
+  it("is not a planning the person has said something to", () => {
+    // `converse` leaves the revision alone deliberately, so a turn is visible
+    // here and nowhere else.
+    const talked = born({
+      conversation: [{ n: 1, at: new Date().toISOString(), line: { kind: "turn", text: "add a dark mode" } }],
+    });
+    expect(talked.revision).toBe(0);
+    expect(untouchedPlanning(talked)).toBe(false);
+  });
+
+  it("is not a planning anything was edited in", () => {
+    expect(untouchedPlanning(born({ revision: 1 }))).toBe(false);
+  });
+
+  it("is not a planning with work in hand", () => {
+    expect(untouchedPlanning(born({ phase: "working" }))).toBe(false);
+    expect(
+      untouchedPlanning(
+        born({
+          operation: {
+            id: "20000000-0000-4000-8000-000000000002",
+            intent: "compile",
+            inputRevision: 0,
+            jobId: null,
+            state: "running",
+            resultKey: null,
+            error: null,
+            reconciled: false,
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("is not the session a new draft resumes", () => {
+    expect(untouchedPlanning(born({ resumeNew: true }))).toBe(false);
+  });
+
+  it("is still a planning that was only looked around in", () => {
+    expect(untouchedPlanning(born({ lastPane: "explorer" }))).toBe(true);
+  });
+});
+
+describe("the pane a planning was left at (D-130)", () => {
+  it("is none at birth, and a record without one is not a session", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    expect(session.lastPane).toBeNull();
+    const without: Record<string, unknown> = { ...session };
+    delete without["lastPane"];
+    expect(EditingSessionSchema.safeParse(without).success).toBe(false);
+  });
+
+  it("records the pane without moving the revision, so a save read before it still lands", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    const visited = f.editing.visit(session.id, "explorer");
+    expect(visited.lastPane).toBe("explorer");
+    expect(visited.revision).toBe(session.revision);
+    expect(untouchedPlanning(visited)).toBe(true);
+    expect(f.editing.read(session.id).lastPane).toBe("explorer");
+    const saved = f.editing.save(session.id, session.revision, repoId, { ...session.form, draft: { ...session.form.draft, outcome: "Written" } });
+    expect(saved.lastPane).toBe("explorer");
+  });
+
+  it("writes nothing for the pane it is already on, nor for a discarded planning", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    f.editing.visit(session.id, "impact");
+    const writes = f.persist.mock.calls.length;
+    f.editing.visit(session.id, "impact");
+    expect(f.persist.mock.calls.length).toBe(writes);
+    f.editing.discard(session.id);
+    const discarded = f.persist.mock.calls.length;
+    expect(f.editing.visit(session.id, "spec").lastPane).toBe("impact");
+    expect(f.persist.mock.calls.length).toBe(discarded);
+  });
+
+  it("records the contract as the last place, which a pane reached after clears, and writes nothing twice", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    expect(session.lastView).toBeNull();
+    f.editing.visit(session.id, "graph");
+    const atContract = f.editing.visitContract(session.id);
+    expect(atContract).toMatchObject({ lastView: "contract", lastPane: "graph", revision: session.revision });
+    const writes = f.persist.mock.calls.length;
+    f.editing.visitContract(session.id);
+    expect(f.persist.mock.calls.length).toBe(writes);
+    // The same pane it was left from is still a move back to it.
+    expect(f.editing.visit(session.id, "graph")).toMatchObject({ lastView: null, lastPane: "graph" });
+    f.editing.discard(session.id);
+    expect(f.editing.visitContract(session.id).lastView).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { interviewSaid, relayed } from "./relay.js";
+import { interviewSaid, readable, relayed } from "./relay.js";
 
 const line = (event: Record<string, unknown>): string => JSON.stringify(event);
 const said = (text: string): string =>
@@ -14,30 +14,30 @@ describe("relayed", () => {
       kind: "line",
       line: {
         kind: "note",
-        text: "The interview wrote a line this build could not read: it is not JSON.",
+        text: "The chat wrote a line this build could not read: it is not JSON.",
       },
     });
   });
 
-  it("says why a line is not one of the interview's events, clipped", () => {
+  it("says why a line is not one of the chat's events, clipped", () => {
     const read = relayed(line({ type: "unheard-of" }));
     if (read.kind !== "line" || read.line.kind !== "note") throw new Error("expected a note");
-    expect(read.line.text).toContain("it is not one of the interview's events");
+    expect(read.line.text).toContain("it is not one of the chat's events");
     expect(read.line.text.length).toBeLessThan(2_200);
   });
 
   it("reads what the session said, and nothing where it said nothing", () => {
     expect(relayed(said("Completed the change."))).toEqual({
-      kind: "line",
-      line: { kind: "said", text: "Completed the change." },
+      kind: "said",
+      text: "Completed the change.",
     });
     expect(relayed(said("   ")).kind).toBe("nothing");
   });
 
   it("redacts a credential the session put on the wire", () => {
     const read = relayed(said("The key is sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz"));
-    if (read.kind !== "line" || read.line.kind !== "said") throw new Error("expected a said line");
-    expect(read.line.text).not.toContain("sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz");
+    if (read.kind !== "said") throw new Error("expected what the session said");
+    expect(read.text).not.toContain("sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz");
   });
 
   it("clips a session id to what the record holds, and keeps it out of the chat", () => {
@@ -66,13 +66,17 @@ describe("relayed", () => {
     expect(relayed(line({ type: "idle" }))).toEqual({ kind: "idle" });
   });
 
+  it("says the session wrote the spec, and nothing of what it wrote", () => {
+    expect(relayed(line({ type: "wrote_spec" }))).toEqual({ kind: "wroteSpec" });
+  });
+
   it("redacts a credential the reason names, however many fields it runs to", () => {
     const many: Record<string, unknown> = { type: "started" };
     many["sk-ant-notreal0123456789"] = "x";
     for (let at = 0; at < 900; at += 1) many[`unrecognised_key_${at}`] = "x";
     const read = relayed(line(many));
     if (read.kind !== "line" || read.line.kind !== "note") throw new Error("expected a note");
-    expect(read.line.text.startsWith("The interview wrote a line this build")).toBe(true);
+    expect(read.line.text.startsWith("The chat wrote a line this build")).toBe(true);
     expect(read.line.text.length).toBeLessThan(2_200);
     expect(read.line.text).not.toContain("sk-ant-notreal0123456789");
   });
@@ -126,6 +130,28 @@ describe("relayed", () => {
     if (read.kind !== "asked") throw new Error("expected an asking");
     const group = read.line.groups[0]!;
     expect(group.title).toBe("A title across lines");
+    // A title redaction emptied is the interviewer asking, by its name.
+    const untitled = relayed(
+      line({
+        type: "asked",
+        groups: [
+          {
+            title: "\u001b[31m",
+            parts: [
+              {
+                question: "Which?",
+                options: [
+                  { label: "A", detail: null, recommended: true },
+                  { label: "B", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    if (untitled.kind !== "asked") throw new Error("expected an asking");
+    expect(untitled.line.groups[0]?.title).toBe("The Architect asks");
     expect(group.parts[0]?.question).toBe("Which way?");
     expect(group.parts[0]?.options[0]?.label).toBe("(unreadable answer)");
     expect(group.parts[0]?.options[1]).toMatchObject({
@@ -135,11 +161,22 @@ describe("relayed", () => {
     });
   });
 
-  it("says the interview ended, with its reason", () => {
+  it("says the chat ended, with its reason", () => {
     expect(relayed(line({ type: "ended", session_id: "s1", reason: "the session closed" }))).toEqual({
       kind: "ended",
-      line: { kind: "note", text: "The interview ended: the session closed." },
+      line: { kind: "note", text: "The chat ended: the session closed." },
     });
+  });
+});
+
+describe("readable", () => {
+  it("redacts, flattens and clips a model's text, and says nothing where nothing survived", () => {
+    expect(readable("one\n two\tthree", 200)).toBe("one two three");
+    expect(readable("abcdef", 3)).toBe("abc");
+    expect(readable("\u001b[31m", 200)).toBe("");
+    expect(readable("sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz", 200)).not.toContain(
+      "sk-ant-api03-0123456789abcdefghijklmnopqrstuvwxyz",
+    );
   });
 });
 

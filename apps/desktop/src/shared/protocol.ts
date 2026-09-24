@@ -1,5 +1,7 @@
 import { z } from "zod";
 import {
+  CriterionIdSchema,
+  EffortLevelSchema,
   ExecutorSkillsSchema,
   GraphEditSchema,
   MaterializationEntrySchema,
@@ -22,7 +24,42 @@ import type {
   VerificationStrength,
 } from "@perbo/contracts";
 import type { ImpactReport, SpecField } from "@perbo/planning/browser";
+import { DriftFindingSchema, MAX_DRIFT_FINDINGS } from "@perbo/planning/browser";
 import { BindingSchema, ShortcutActionSchema } from "./shortcuts.js";
+
+/**
+ * A record Perbo keeps between launches — the host's state file, and the
+ * sample host's planning records in its browser storage — read against the schema
+ * it is kept by, and refused whole where it does not match. The error names
+ * where it was read from and each field that failed, with Zod's own words for
+ * why: a failure repeated across a list's entries is named once, with every
+ * index it holds at, and the error ends on what the person can do about it.
+ */
+export function parseStored<S extends z.ZodType>(schema: S, value: unknown, where: string): z.output<S> {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  // Keyed by the path with its indexes taken out, and the message; each index
+  // position collects the indexes the failure holds at.
+  const groups = new Map<string, { path: (string | Set<number>)[]; message: string }>();
+  for (const issue of parsed.error.issues) {
+    const id = JSON.stringify([issue.path.map((part) => (typeof part === "number" ? "#" : String(part))), issue.message]);
+    const group = groups.get(id) ?? {
+      path: issue.path.map((part) => (typeof part === "number" ? new Set<number>() : String(part))),
+      message: issue.message,
+    };
+    issue.path.forEach((part, at) => {
+      if (typeof part === "number") (group.path[at] as Set<number>).add(part);
+    });
+    groups.set(id, group);
+  }
+  const fields = [...groups.values()]
+    .map(({ path, message }) => {
+      const named = path.map((part) => (typeof part === "string" ? `.${part}` : `[${[...part].join(",")}]`)).join("").replace(/^\./, "");
+      return `${named || "(the whole record)"}: ${message}`;
+    })
+    .join("; ");
+  throw new Error(`${where} holds a record Perbo cannot read — ${fields}. Correct the field or move the file aside.`);
+}
 
 const identifier = z.string().uuid();
 const key = z.string().regex(/^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]{0,6}$/);
@@ -51,6 +88,13 @@ export const SettingsSchema = z.strictObject({
   reviewerProvider: z
     .enum(["claude-cli", "codex-cli", "anthropic"])
     .default("claude-cli"),
+  /**
+   * How hard each role's model thinks, from the levels its catalog row offers
+   * (`EFFORT_LEVELS` in `packages/contracts/src/effort.ts`). Null sends nothing on Claude
+   * Code; Codex starts at medium and the API at high.
+   */
+  executorEffort: EffortLevelSchema.nullable().default(null),
+  reviewerEffort: EffortLevelSchema.nullable().default(null),
   draftingProvider: z.enum(["claude-cli", "codex-cli"]).default("claude-cli"),
   /**
    * Minutes without tool activity before a run is stopped (D-096). The one
@@ -82,6 +126,9 @@ export const TaskModelsSchema = SettingsSchema.pick({
   reviewerModel: true,
   draftingProvider: true,
   executorSkills: true,
+}).extend({
+  executorEffort: EffortLevelSchema.nullable(),
+  reviewerEffort: EffortLevelSchema.nullable(),
 });
 export type TaskModels = z.infer<typeof TaskModelsSchema>;
 export const ModelProviderSchema = z.enum([
@@ -95,6 +142,8 @@ export const ProviderModelSchema = z.strictObject({
   label: z.string().min(1).max(200),
   description: z.string().max(2000),
   isDefault: z.boolean(),
+  /** The effort levels the provider reports for this model, lowest first; none where it reports none. */
+  efforts: z.array(EffortLevelSchema).max(10),
 });
 export type ProviderModel = z.infer<typeof ProviderModelSchema>;
 export const ModelCatalogSchema = z.strictObject({
@@ -232,7 +281,6 @@ export const EditingFormSchema = z.strictObject({
     prohibited: z.array(z.string().max(300)).max(40).default([]),
   }),
   models: TaskModelsSchema,
-  step: z.union([z.literal(1), z.literal(2)]),
   editing: z.number().int().min(0).max(19).nullable(),
   criterion: editableCriterion,
   newPath: z.string().max(300).nullable(),
@@ -240,7 +288,7 @@ export const EditingFormSchema = z.strictObject({
 export type EditingForm = z.infer<typeof EditingFormSchema>;
 export const EditingOperationSchema = z.strictObject({
   id: identifier,
-  intent: z.enum(["draft", "compile", "generate", "startOver"]),
+  intent: z.enum(["compile", "generate", "startOver"]),
   inputRevision: z.number().int().nonnegative(),
   jobId: identifier.nullable(),
   state: z.enum(["accepted", "running", "stopping", "completed", "failed", "cancelled", "interrupted"]),
@@ -300,8 +348,23 @@ export const INTERVIEW_CONVERSATION_CAP = 400;
  * one at the next edit.
  */
 export const INTERVIEW_NEEDS_A_TITLE =
-  "Give this planning a spec title first. The interview writes specs/<slug>/spec.md, and the slug " +
+  "Give this planning a spec title first. The chat writes specs/<slug>/spec.md, and the slug " +
   "comes from the title.";
+/**
+ * What the host says once a turn has written the spec and there is no plan
+ * beside it (D-102): the spec is readable and the three ways on from it are
+ * the person's.
+ *
+ * Here for the reason {@link INTERVIEW_NEEDS_A_TITLE} is, and for one more:
+ * the chat recognises this note by its words. For the rest of the turn it is
+ * said in, the dock puts no status line under it, and the Spec pane reads it to know
+ * the spec on screen came from the interview — so the sentence is written once
+ * and the surfaces that say it and the surfaces that read it share the one
+ * spelling.
+ */
+export const INTERVIEW_WROTE_THE_SPEC =
+  "The spec is written: read it, change it on the Spec pane or by asking here, or press Generate " +
+  "plan.";
 /**
  * One plan edit the interview made, as the ticket's own draft record holds it
  * (D-100), so the chat's card carries an Undo on its number.
@@ -408,12 +471,55 @@ export const InterviewEntrySchema = z.strictObject({
         )
         .min(1)
         .max(MAX_QUESTION_GROUPS),
+      /**
+       * Set where the question is one of the host's, not the session's: a
+       * place the plan and the spec have parted, put to the person as the
+       * problem in hand (D-128). `open`
+       * is how many problems stood open as this one was put, so the card can
+       * say which it is of how many. The answer goes down as a turn like any
+       * other, which is how the interview closes it.
+       */
+      drift: z.strictObject({ open: z.number().int().positive() }).optional(),
     }),
-    /** The host's own word: the session started, ended, or wrote something unreadable. */
-    z.strictObject({ kind: z.literal("note"), text }),
+    /**
+     * The host's own word: the session started, ended, wrote something
+     * unreadable, or moved a file the person is not looking at.
+     */
+    z.strictObject({
+      kind: z.literal("note"),
+      text,
+      /**
+       * What the note offers to do, where it offers anything, so a person
+       * reading the chat from another pane has the way on from there: the
+       * contract, once every problem between the plan and the spec is
+       * resolved.
+       */
+      offers: z.literal("contract").optional(),
+      /**
+       * Whether this is something to notice rather than something to know.
+       *
+       * A note is ordinarily the quietest line in the chat, which is right for
+       * one that records what the chat itself just did. A note saying the spec
+       * moved is about a different page, and a person who does not read it
+       * does not find out; it is drawn to be read. Not a warning — nothing has
+       * gone wrong — so it carries no danger colour.
+       */
+      notable: z.boolean().optional(),
+    }),
   ]),
 });
 export type InterviewEntry = z.infer<typeof InterviewEntrySchema>;
+/**
+ * What a turn in flight is doing that its conversation does not show yet
+ * (D-119): writing the spec, or holding a line of the session's own that is
+ * still to be said. Set by the host from the events it relays, never from what
+ * the session said, and cleared by the next line the turn puts in the
+ * conversation, which the dock reads the rest of the turn's status from.
+ */
+export const INTERVIEW_DOING = ["writing_the_spec", "speaking"] as const;
+export type InterviewDoing = (typeof INTERVIEW_DOING)[number];
+/** What the chat calls the session that questions the person and writes the spec. */
+export const INTERVIEWER_NAME = "The Architect";
 /** Whether this planning has a live interview, and the conversation it holds (D-102). */
 export interface InterviewStatus {
   /** The editing session the interview belongs to. */
@@ -423,6 +529,43 @@ export interface InterviewStatus {
   interview: string | null;
   conversation: InterviewEntry[];
 }
+/** A spec folder's name as `specSlug` mints it, lowercase words joined by hyphens with no path separator; every reader of a spec folder's name holds it to this. */
+export const SPEC_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const specSlugText = z.string().max(120).regex(SPEC_SLUG, "a spec slug is lowercase words joined by hyphens");
+/**
+ * What a plan promises, as the reading of it against the spec and the marks
+ * on the last change both read it: the outcome and each criterion's words,
+ * by the criterion's id. Nothing else in the contract — the scope, the
+ * assertions, the arrangement — is a promise the spec makes. Bounded as the
+ * contract bounds them and no tighter: what the contract holds, this holds,
+ * so a change read off a contract is never refused by the record of it.
+ */
+const PlanPromiseSchema = z.strictObject({
+  outcome: z.string().min(1),
+  criteria: z.array(z.strictObject({ id: CriterionIdSchema, text: z.string().min(1) })),
+});
+export type PlanPromise = z.infer<typeof PlanPromiseSchema>;
+/**
+ * The last change to the spec and the plan's promise, whoever made it: the
+ * interview's turn, an edit by hand on the Graph or the Plan pane, a spec
+ * save, an answer that closed a problem. The panes mark what it added and
+ * what it took away, and the marks stand until the next change, which
+ * replaces this whole (D-128). A side
+ * the change did not move is null, so the panes on it mark nothing.
+ */
+const EditingChangeSchema = z.strictObject({
+  at: z.string().datetime(),
+  spec: z.strictObject({ before: SpecSectionsSchema, after: SpecSectionsSchema }).nullable(),
+  plan: z.strictObject({ before: PlanPromiseSchema, after: PlanPromiseSchema }).nullable(),
+});
+export type EditingChange = z.infer<typeof EditingChangeSchema>;
+/**
+ * The panes planning mode has, by the id its routes and its record name them
+ * with. The rail draws each from `renderer/planning/panes.ts`, which says what
+ * each one is and which of them a planning offers.
+ */
+export const PlanningPaneSchema = z.enum(["spec", "graph", "criteria", "explorer", "impact", "drift"]);
+export type PlanningPane = z.infer<typeof PlanningPaneSchema>;
 export const EditingSessionSchema = z.strictObject({
   version: z.literal(1),
   id: identifier,
@@ -449,17 +592,8 @@ export const EditingSessionSchema = z.strictObject({
    * The spec this planning writes, by its slug, so reopening the session opens
    * the same one (D-103). Null until the first save creates the folder;
    * defaulted so a session saved before specs existed still parses.
-   *
-   * Held to the shape `specSlug` mints rather than to a length, because it is
-   * a path segment: this record lives in a file on the machine, and a session
-   * that came back carrying `../` would name a folder outside the repository.
    */
-  specSlug: z
-    .string()
-    .max(120)
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "a spec slug is lowercase words joined by hyphens")
-    .nullable()
-    .default(null),
+  specSlug: specSlugText.nullable().default(null),
   /**
    * The asking being put to the person and how much of it they have answered
    * (D-117), as {@link AskingSchema} holds it.
@@ -482,6 +616,47 @@ export const EditingSessionSchema = z.strictObject({
    * session from before it existed, which reads as "no graph" and is right.
    */
   nodes: z.number().int().nonnegative().default(0),
+  /**
+   * Where the plan and the spec have parted, as the last reading of the two
+   * left it (D-128): the problems still
+   * open, oldest first, and whether a reading has since found none. Null
+   * where no reading has found a problem, which is what a planning without
+   * the Problems pane means.
+   *
+   * Kept on the session rather than read off the verdict beside the ticket,
+   * because the rail, the picker and the ticket's landing are drawn where no
+   * verdict can be read, and what they need is whether problems are open.
+   */
+  drift: z
+    .strictObject({
+      open: z.array(DriftFindingSchema).max(MAX_DRIFT_FINDINGS),
+      resolved: z.boolean(),
+    })
+    .nullable(),
+  /**
+   * The last change to this planning's spec and plan, or null where none has
+   * been recorded, as {@link EditingChangeSchema} holds it. Replaced whole by
+   * the next change and kept nowhere else, which is what "the marks stand
+   * until the next change" means.
+   */
+  change: EditingChangeSchema.nullable(),
+  /**
+   * The pane the person was last on in this planning, or null before they
+   * have been on one: every way back into the planning opens it there
+   * (D-130). Recorded as the pane
+   * changes, so going Home and closing Perbo each find it already written.
+   */
+  lastPane: PlanningPaneSchema.nullable(),
+  /**
+   * Whether the person was last on this planning's contract rather than on
+   * one of its panes: "contract" from reaching the contract page until planning
+   * mode records a pane, else null. The ticket's own page opens on the contract
+   * while it says so and the plan waits for approval, where it would
+   * otherwise send the person into the planning
+   * (D-130). `lastPane` is kept, so the
+   * contract's way back goes to the pane it was left from.
+   */
+  lastView: z.literal("contract").nullable(),
   form: EditingFormSchema,
   phase: z.enum(["editing", "working", "ready", "conflict", "outcome-unknown", "discarded"]),
   error: z.string().nullable(),
@@ -506,6 +681,8 @@ export const EditingSessionSchema = z.strictObject({
    * of its own rather than continuing one the new provider has never heard of.
    */
   interviewProvider: z.enum(["claude", "codex"]).nullable().default(null),
+  /** The model that session was started on, which the chat's header names. */
+  interviewModel: z.string().min(1).max(100).nullable(),
 });
 export type EditingSession = z.infer<typeof EditingSessionSchema>;
 export type EditingOperation = z.infer<typeof EditingOperationSchema>;
@@ -514,10 +691,23 @@ export interface OpenDraft {
   id: string;
   repoId: string;
   key: string | null;
+  /** Whether the planning drafted the ticket it holds, which is the only ticket its delete takes. */
+  admitted: boolean;
   outcome: string;
   phase: EditingSession["phase"];
   /** How many nodes its plan has: zero for a flat plan, or for no plan yet. */
   nodes: number;
+  /**
+   * How many problems between its plan and its spec stand open, and whether
+   * a reading has since resolved them; null where no reading found any. The
+   * rail offers the Problems pane on it, and the ticket lands there while it
+   * is open (D-128).
+   */
+  drift: { open: number; resolved: boolean } | null;
+  /** The pane the person was last on, which the planning reopens on where it still offers it. */
+  lastPane: PlanningPane | null;
+  /** "contract" where the person was last on the contract rather than a pane, which the ticket's page then opens on. */
+  lastView: "contract" | null;
   /**
    * The scope this session holds, which is not yet the contract's.
    *
@@ -528,6 +718,30 @@ export interface OpenDraft {
    * moved on from.
    */
   scope: { paths: string[]; prohibited: string[] };
+  /**
+   * The spec this planning writes, by slug, or null before its first save.
+   *
+   * Here so the picker can subtract: a spec folder on disk that no planning
+   * and no ticket names is one nothing in the app points at, and that is the
+   * row {@link Snapshot.specs} exists to offer.
+   */
+  specSlug: string | null;
+}
+/**
+ * A spec folder this repository holds, by the slug that names it and the title
+ * it states.
+ *
+ * Read from disk rather than from the records, because the point of it is the
+ * spec no record names: a planning discarded takes its session and the ticket
+ * it drafted, and the folder it wrote stays. Nothing else in the app enumerates
+ * the spec folder, so without this a spec whose planning is gone is unreachable
+ * while still holding its own title against a new one (D-129).
+ */
+export interface SpecRow {
+  repoId: string;
+  slug: string;
+  /** The spec's own first heading, which is what a person named the work. */
+  title: string;
 }
 export const EditingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("new"), repoId: identifier }),
@@ -542,6 +756,14 @@ export const EditingTargetSchema = z.discriminatedUnion("kind", [
    */
   z.strictObject({ kind: z.literal("planning"), repoId: identifier, key }),
   z.strictObject({ kind: z.literal("session"), id: identifier }),
+  /**
+   * Planning over a spec already in the repository, named by its slug.
+   *
+   * The way back into a spec whose planning was discarded. It carries no key:
+   * the ticket that spec drafted is gone, and what is reopened is the writing,
+   * which Generate plan drafts from again (D-129).
+   */
+  z.strictObject({ kind: z.literal("spec"), repoId: identifier, slug: specSlugText }),
 ]);
 export type EditingTarget = z.infer<typeof EditingTargetSchema>;
 export const LegacyEditingSchema = z.strictObject({
@@ -606,6 +828,12 @@ export interface ImpactView extends ImpactReport {
   /** When these warnings were derived; each ask derives them again. */
   readAt: string;
 }
+/**
+ * What `perbo drift KEY --json` prints, as the drift job leaves it on
+ * `job.result`: the verdict kept beside the ticket, and whether a model ran
+ * for it or the two hashes it is keyed by still held.
+ */
+export type { DriftVerdict } from "@perbo/planning/browser";
 /** One acceptance criterion as the Graph pane shows and edits it. */
 export interface GraphCriterionView {
   id: string;
@@ -782,6 +1010,20 @@ export const RequestSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("editingSave"), id: identifier, revision: z.number().int().nonnegative(), repoId: identifier, form: EditingFormSchema }),
   z.strictObject({ kind: z.literal("editingSubmit"), id: identifier, revision: z.number().int().nonnegative(), operationId: identifier, intent: EditingOperationSchema.shape.intent }),
   z.strictObject({ kind: z.literal("editingStop"), id: identifier }),
+  /**
+   * The person is now on this pane of this planning. Recorded on the session
+   * as its `lastPane`, which is where the planning reopens
+   * (D-130); not an edit, so it moves no
+   * revision.
+   */
+  z.strictObject({ kind: z.literal("editingVisited"), id: identifier, pane: PlanningPaneSchema }),
+  /**
+   * The person is now on this planning's contract. Recorded on the session
+   * as its `lastView`, which is where its ticket reopens
+   * (D-130); not an edit, so it moves no
+   * revision.
+   */
+  z.strictObject({ kind: z.literal("editingContractVisited"), id: identifier }),
   /** The spec this planning session holds, read from the repository (D-103). */
   z.strictObject({ kind: z.literal("specRead"), id: identifier }),
   /**
@@ -804,6 +1046,37 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    * planning session. A ticket the CLI admitted never had one at all.
    */
   z.strictObject({ kind: z.literal("impactContract"), repoId: identifier, key }),
+  /**
+   * The plan read against the spec it was drafted from, on the way from the
+   * plan to the contract (D-128): where
+   * the two no longer promise the same thing, and the ways to close each
+   * difference. Advice, never a gate. `driftDismiss` records that the person
+   * went on with the findings open, so the same reading is not put to them
+   * again at the same state.
+   *
+   * The session names itself, as `impactRead` does: the repository, the ticket
+   * and the spec are the host's to derive from its records, and the model is
+   * the ticket's own or the settings', so nothing here becomes an argument
+   * (ADR-0023 §4). What a finding offers goes to the interview as a turn in
+   * the person's own words, through `interviewTurn`, and reaches no edit.
+   */
+  z.strictObject({ kind: z.literal("driftCheck"), id: identifier }),
+  z.strictObject({ kind: z.literal("driftDismiss"), id: identifier }),
+  /**
+   * Delete a spec folder, by the slug that names it.
+   *
+   * The slug and not a path, as every other request naming a file in a
+   * repository does (ADR-0023 §4): the host builds the path from the
+   * repository it registered and the folder it configured, and nothing a
+   * renderer sent reaches the filesystem.
+   *
+   * Refused for a spec any ticket was drafted from. A plan's provenance is the
+   * spec it names, and staleness is judged by reading those bytes back
+   * (D-103): deleting them leaves a ticket that can never be read as current
+   * again. What the picker offers has no ticket by definition, so this refuses
+   * only a request the picker would not have made.
+   */
+  z.strictObject({ kind: z.literal("specDelete"), repoId: identifier, slug: specSlugText }),
   /**
    * Write the spec to `specs/<slug>/spec.md`, creating the folders the first
    * time. The session names itself and its repository; the path is the host's
@@ -852,6 +1125,20 @@ export const RequestSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("chooseRepository") }),
   z.strictObject({ kind: z.literal("forgetRepository"), repoId: identifier }),
   z.strictObject({ kind: z.literal("saveSettings"), settings: SettingsSchema }),
+  /**
+   * The models one ticket runs on, chosen for that ticket alone.
+   *
+   * The defaults are the person's settings; this is the override the contract
+   * page writes, so a person deciding whether to approve can change what will
+   * run without leaving the page that says what approving freezes. Refused on
+   * an approved contract: what runs is settled when the loop is started.
+   */
+  z.strictObject({
+    kind: z.literal("taskModels"),
+    repoId: z.string().min(1),
+    key: z.string().min(1),
+    models: TaskModelsSchema,
+  }),
   z.strictObject({ kind: z.literal("providers") }),
   /** Opens the machine's terminal on the provider's own sign-in command; the desktop never takes a credential. */
   z.strictObject({ kind: z.literal("login"), provider: z.enum(["claude", "codex"]) }),
@@ -879,8 +1166,21 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     ...reference,
     title: z.string().trim().min(1).max(200),
   }),
-  /** Permanently deletes a contract that has never run: no attempt, no bundle, no pull request. */
+  /**
+   * Permanently deletes a piece of work whole, from the contract page and from
+   * the page a stopped run lands on: the ticket's own files, the reading of its
+   * plan against its spec, the attempts it recorded, the bundles those attempts
+   * sealed and the spec folder it was drafted from
+   * (D-129). Refused at one stage only — a ticket
+   * at `pr_open`, whose pull request is a record this machine does not own.
+   */
   z.strictObject({ kind: z.literal("discard"), ...reference }),
+  /**
+   * What is typed on a repository's question page and not yet sent
+   * (D-131); a desktop preference, and an
+   * empty text removes it.
+   */
+  z.strictObject({ kind: z.literal("askSave"), repoId: identifier, text: z.string().max(12_000) }),
   /** Files completed tickets away from Home (S4); a desktop preference, never a Ticket state. */
   z.strictObject({
     kind: z.literal("archive"),
@@ -892,12 +1192,6 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     kind: z.literal("doctor"),
     repoId: identifier,
     writeConfig: z.boolean(),
-  }),
-  z.strictObject({
-    kind: z.literal("draft"),
-    repoId: identifier,
-    outcome: text,
-    models: TaskModelsSchema.optional(),
   }),
   z.strictObject({
     kind: z.literal("admit"),
@@ -919,6 +1213,15 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     id: identifier,
     models: TaskModelsSchema.optional(),
   }),
+  /**
+   * Plan a stopped ticket's work again from the spec it was drafted from.
+   *
+   * Delete the stopped ticket with everything recorded after its contract
+   * (the spec stays) and draft a fresh `plan_review` ticket from that spec
+   * with `admit --from-spec`; the planning opened over it is what the answer
+   * names.
+   */
+  z.strictObject({ kind: z.literal("replan"), ...reference }),
   /** Re-draft this session's ticket from its spec, keeping the ticket (D-103). */
   z.strictObject({
     kind: z.literal("startOver"),
@@ -1006,6 +1309,8 @@ export interface Job {
   resultKey: string | null;
   result: unknown;
   editing?: { sessionId: string; operationId: string } | undefined;
+  /** A run's publication choice: whether it pushes and opens a pull request once the review gate passes. */
+  publish?: boolean | undefined;
 }
 export interface TaskRow {
   repoId: string;
@@ -1029,6 +1334,8 @@ export interface Snapshot {
   taskModels?: Record<string, TaskModels>;
   /** `repoId:key` of every completed ticket filed away by hand. */
   archived?: string[];
+  /** Each repository's unsent answer to "What do you want to build?", by repository id. */
+  asks?: Record<string, string>;
   power?: PowerState;
   sequence?: number;
   repositoryErrors?: Record<string, string[]>;
@@ -1036,6 +1343,11 @@ export interface Snapshot {
   refreshingRepos?: string[];
   /** Open planning, newest first, for the Create picker. */
   drafts?: OpenDraft[];
+  /**
+   * Every spec each connected repository holds (D-103). The picker offers the
+   * ones no planning and no ticket names.
+   */
+  specs?: SpecRow[];
   /**
    * The editing sessions with a live interview beside them (D-102). An
    * interview outlives the pane it was started from, as drafting outlives the
@@ -1074,6 +1386,7 @@ export const ChangeSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("preferences"), sequence: z.number().int().nonnegative(), settings: SettingsSchema, titles: z.record(z.string(), z.string()),
     taskModels: z.record(z.string(), TaskModelsSchema), archived: z.array(z.string()).default([]),
+    asks: z.record(z.string(), z.string()),
   }),
   z.object({ kind: z.literal("repositories"), sequence: z.number().int().nonnegative() }),
   z.object({ kind: z.literal("editing"), sequence: z.number().int().nonnegative(), sessionId: identifier }),
@@ -1109,6 +1422,11 @@ export const ChangeSchema = z.discriminatedUnion("kind", [
      * (D-119).
      */
     working: z.boolean().default(false),
+    /**
+     * What the turn in flight is doing that its conversation does not show
+     * yet, or null where it is nothing of the kind or no turn is.
+     */
+    doing: z.enum(INTERVIEW_DOING).nullable().default(null),
   }),
   z.object({ kind: z.literal("power"), sequence: z.number().int().nonnegative(), power: PowerStateSchema }),
 ]);
@@ -1147,6 +1465,38 @@ export interface AttemptView {
 export interface Detail {
   ticket: Ticket;
   contract: PlanContract;
+  /**
+   * Where the plan and the spec it was drafted from disagree, read before the
+   * contract is approved.
+   *
+   * Approving freezes the contract and starts the loop, so this is the last
+   * moment either can still move. Advice and never a gate: a warning that held
+   * the button is one people learn to click past, as the impact count beside it
+   * is not (D-128).
+   *
+   * Empty for a plan drafted from no spec, and for one whose spec cannot be
+   * read — what cannot be judged is not asserted.
+   */
+  specFindings: {
+    /** `uncited`: the spec asks for this and nothing answers it. `dangling`: a criterion cites what the spec no longer states. */
+    kind: "uncited" | "dangling";
+    requirementId: string;
+    /** The criteria involved, for a dangling citation. Empty for an uncited requirement. */
+    criteria: string[];
+    /** What the requirement says, where the spec still states it. */
+    text: string | null;
+  }[];
+  /**
+   * The criteria whose `expected_verification` differs from the one the draft
+   * proposed, by criterion id.
+   *
+   * Read on the page that approves, because approving freezes the criteria and
+   * their verification and starts the loop (D-100): a criterion proven
+   * differently from how it was drafted reads exactly as it did, since the
+   * claim is untouched, so nothing otherwise shows that what will be taken for
+   * proof has moved. Empty where the plan has no recorded edits.
+   */
+  changedAssertions: string[];
   digest: string;
   attempts: AttemptView[];
   cost: { micros: number; partial: boolean; unavailable: number };
@@ -1190,6 +1540,8 @@ export interface UsageProvider {
   id: "claude" | "codex" | "anthropic";
   name: string;
   role: string | null;
+  /** Signed in on this machine, whether or not the provider reports a window. */
+  connected: boolean;
   plan: string | null;
   windows: UsageWindow[] | null;
   detail: string;
@@ -1227,6 +1579,8 @@ export interface ReplyMap {
   editingSave: EditingSession;
   editingSubmit: EditingSession;
   editingStop: EditingSession;
+  editingVisited: EditingSession;
+  editingContractVisited: EditingSession;
   editingDiscard: EditingSession;
   interviewStart: InterviewStatus;
   interviewTurn: InterviewStatus;
@@ -1236,10 +1590,14 @@ export interface ReplyMap {
   symbolIndex: SymbolIndexView;
   impactRead: ImpactView;
   impactContract: ImpactView;
+  driftCheck: Job;
+  driftDismiss: null;
+  specDelete: null;
   openHelp: null;
   chooseRepository: Repository | null;
   forgetRepository: null;
   saveSettings: Settings;
+  taskModels: null;
   providers: Provider[];
   login: null;
   models: ModelCatalog;
@@ -1252,12 +1610,14 @@ export interface ReplyMap {
   saveManifest: null;
   rename: null;
   archive: null;
+  askSave: null;
   discard: null;
   doctor: Job;
-  draft: Job;
   admit: Job;
   edit: Job;
   generatePlan: Job;
+  /** The planning opened over the new plan, and which of its panes holds it. */
+  replan: { sessionId: string; pane: "graph" | "criteria" };
   startOver: Job;
   run: Job;
   sync: Job;

@@ -103,6 +103,7 @@ function scripted(draft: unknown): Model {
 }
 
 const DRAFT = {
+  name: "Activation email",
   outcome: "New users receive an activation email within 60 seconds of signing up.",
   acceptance_criteria: [
     {
@@ -169,6 +170,7 @@ const EMPTY_REPORT: InspectReport = {
   kind: "ticket",
   ticket: "PRB-1",
   ticket_id: "ticket_01abcdef",
+  title: "New users receive an activation email.",
   outcome: "New users receive an activation email.",
   contract_source: null,
   refusal: null,

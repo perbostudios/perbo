@@ -61,6 +61,16 @@ import { StoreError, repositoryRootOf, storeDir, storedRepositoryRoot } from "./
  *   is not counter-sealed, and `perbo edit` rewrites it after approval as well
  *   as before — it is the half of the plan the contract deliberately does not
  *   freeze. Review never reads it.
+ * - `PRB-118.drift.json` is the plan read against its spec: where the two no
+ *   longer promise the same thing, kept against the spec's bytes and the
+ *   plan's promise texts so it holds while neither moves. Read and written
+ *   only through `@perbo/planning`'s `drift-record.ts`: written by `admit`, by
+ *   the interview and by `perbo drift`; read by `perbo drift` and by the
+ *   interview's `carryDrift` as a chat turn brings a clean verdict forward; and
+ *   read and written by the desktop host as a rename carries it to the
+ *   retitled spec. It is
+ *   advice on the way to the contract and nothing gates on it
+ *   ([D-128](../../../../docs/11-open-decisions.md)).
  */
 
 /** Lives beside the tickets and is not one; `listTickets` skips it by name. */
@@ -111,6 +121,7 @@ const isTicketFile = (name: string) =>
   !name.endsWith(".contract.json") &&
   !name.endsWith(".draft.json") &&
   !name.endsWith(".approach.json") &&
+  !name.endsWith(".drift.json") &&
   name !== SEQUENCE_FILE;
 
 /**

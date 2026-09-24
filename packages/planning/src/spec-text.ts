@@ -124,6 +124,40 @@ const OPENING =
   /^(?:i(?:'d| would)? (?:want|like|need)(?: to)?|can you|could you|please|let'?s|we need(?: to)?|help me)\b[\s,:-]*/i;
 
 /**
+ * The making of the thing, which every piece of work here is.
+ *
+ * "Create an app that lets me play tic tac toe" names one piece of work twice:
+ * once as the making, once as the thing. The board, the spec's folder and the
+ * planning pane all carry this name, and a name that opens the same way as
+ * every other name is a name that has to be read to the end before two of them
+ * can be told apart. Dropping the making leaves the thing.
+ *
+ * Only "a" and "an". "The" names something already there, and the verb in
+ * front of it is then the work rather than the making of it: "Make the login
+ * form responsive", "Add the missing tests" and "Build the parser" all say what
+ * is being done to a thing that exists, and dropping the verb would leave a
+ * title that is not a sentence about anything. "Create parsers for both
+ * formats" is not an opening at all.
+ */
+const MAKING = /^(?:creat|build|mak|writ|develop|implement|design|add)(?:e|ing)?\s+an?\s+/i;
+
+/**
+ * A container word standing in front of what the work actually does.
+ *
+ * What {@link MAKING} leaves is often "app that lets me play tic tac toe": the
+ * app is the shape of nearly everything, so it distinguishes nothing, and the
+ * sentence after it is the work.
+ *
+ * Only ever applied to what MAKING left, which is what makes it safe. The
+ * container is hollow because the making already said the thing was being
+ * made; on its own at the head of a sentence it is usually the subject of one —
+ * "The page that lets you edit the title is broken" is a report about that
+ * page, and cutting its subject out inverts it.
+ */
+const HOLLOW =
+  /^(?:an?|the)?\s*(?:app|application|program|tool|script|website|site|web\s?page|page|system|feature|service)\s+(?:that|which)\s+(?:allows?|lets?|enables?)\s+(?:me|us|you|the user)\s+(?:to\s+)?(?=\S)/i;
+
+/**
  * The first sentence of a message, where a full stop after a short token is an
  * abbreviation rather than an ending.
  *
@@ -145,7 +179,10 @@ function firstSentence(text: string): string {
 }
 
 /**
- * A spec title taken from the first thing a person said about the work.
+ * A spec title taken from the first thing a person said about the work: what
+ * names the folder of a planning that has to be named before any model has
+ * written a word, and the title the spec carries until the interview writes
+ * its own (D-118).
  *
  * The person's own words, cut down deterministically: the first sentence, its
  * opening dropped, clipped to a whole word. Nothing a model returned reaches
@@ -157,10 +194,14 @@ function firstSentence(text: string): string {
  * from what it was called.
  */
 export function specTitleFromMessage(message: string): string {
-  const sentence = firstSentence(message.replace(/\s+/g, " ").trim())
-    .replace(OPENING, "")
-    .replace(/[.!?,;:\s]+$/, "")
-    .trim();
+  const said = firstSentence(message.replace(/\s+/g, " ").trim()).replace(OPENING, "");
+  const made = said.replace(MAKING, "");
+  // HOLLOW only on what MAKING left: see its own note.
+  const cut = (made === said ? made : made.replace(HOLLOW, "")).replace(/[.!?,;:\s]+$/, "").trim();
+  // Cutting can leave nothing — "Create a ." is an opening and a full stop. The
+  // person still said something, so the name comes from what they said rather
+  // than from a cut that took all of it.
+  const sentence = cut.length > 0 ? cut : said.replace(/[.!?,;:\s]+$/, "").trim();
   const whole = sentence.slice(0, MAX_SPEC_SLUG_LENGTH + 1).replace(/\s+\S*$/, "");
   const clipped =
     sentence.length <= MAX_SPEC_SLUG_LENGTH
@@ -175,6 +216,26 @@ export function specTitleFromMessage(message: string): string {
   // one rule rather than two that drift.
   specSlug(title);
   return title;
+}
+
+/**
+ * The spec with its title line set to `title` and every other byte as it was:
+ * how a spec takes its ticket's name, so the two are one name
+ * (D-127).
+ *
+ * The title line is the one {@link readSpecSections} reads as the title, the
+ * first `#` heading; a spec with none is given one at its head. The name is a
+ * label, so it is flattened to one line: a line break in it would open a
+ * heading of its own on the next read.
+ */
+export function retitleSpec(markdown: string, title: string): string {
+  const flat = title.replace(/\s+/g, " ").trim();
+  if (flat.length === 0) throw new PlanningError("a spec's first heading is the title of the work it states");
+  const lines = markdown.split("\n");
+  const at = lines.findIndex((line) => /^#\s+\S/.test(line.trim()));
+  if (at === -1) return `# ${flat}\n\n${markdown.replace(/^\uFEFF/, "")}`;
+  lines[at] = `# ${flat}${lines[at]!.endsWith("\r") ? "\r" : ""}`;
+  return lines.join("\n");
 }
 
 /**

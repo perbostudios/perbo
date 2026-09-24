@@ -4,7 +4,6 @@ import { createScratch } from "@perbo/test-support";
 import { SettingsSchema } from "../../shared/protocol.js";
 import {
   admitDraftArgs,
-  admitFromFileArgs,
   admitFromSpecArgs,
   approveArgs,
   assertEditable,
@@ -122,7 +121,6 @@ describe("the admission commands", () => {
       "opus",
       "--json",
     ]);
-    expect(admitFromFileArgs("/profile/source-1.md", "codex-cli", "gpt")).toContain("--from-file");
     expect(admitDraftArgs(draft).slice(0, 3)).toEqual(["admit", "--prefix", "PRB"]);
   });
 
@@ -178,6 +176,13 @@ describe("the run and doctor configurations", () => {
     expect(
       runConfig({ ...settings, executorSkills: ["diagnosing-bugs"] }, limits, false),
     ).toMatchObject({ executor_skills: ["diagnosing-bugs"], limits });
+  });
+
+  it("carries how hard each role's model thinks", () => {
+    expect(
+      runConfig({ ...settings, executorEffort: "high", reviewerEffort: "low" }, limits, false),
+    ).toMatchObject({ effort: "high", reviewer_effort: "low" });
+    expect(runConfig(settings, limits, false)).toMatchObject({ effort: null, reviewer_effort: null });
   });
 
   it("asks the doctor to write the configuration only where the person did", () => {

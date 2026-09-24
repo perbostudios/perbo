@@ -18,6 +18,7 @@ import { ManifestDialog } from "./ManifestDialog.js";
 import { SkillPicker } from "./SkillPicker.js";
 import type { PageProps } from "../shell/route.js";
 import { ModelCatalogSchema } from "../../shared/protocol.js";
+import { EFFORT_LABELS, type EffortLevel } from "@perbo/contracts/browser";
 import type {
   ModelProvider,
   Provider,
@@ -30,12 +31,29 @@ export const providerName = (id: string): string =>
     : id === "anthropic"
       ? "Anthropic API"
       : "Claude Code";
+/** The connection a model provider runs on, as `providers` lists it. */
+const connectionOf = (id: ModelProvider): string =>
+  id === "claude-cli" ? "claude" : id === "codex-cli" ? "codex" : "anthropic";
+const signedIn = (connections: Provider[] | undefined, id: ModelProvider): boolean =>
+  connections?.some((connection) => connection.id === connectionOf(id) && connection.authenticated) ?? false;
+const effortLabel = (level: EffortLevel | null): string => (level === null ? "Default" : EFFORT_LABELS[level]);
 export function useProviders() {
   return useQuery({
     queryKey: ["providers"],
     queryFn: () => bridge.request({ kind: "providers" }),
     staleTime: 30_000,
   });
+}
+/**
+ * The name a closed picker reads for a model id: Claude's ids spelled as their
+ * family and version ("claude-fable-5-1" is "Fable 5.1"), anything else as the
+ * provider wrote it. The open list reads the catalog's own labels.
+ */
+export function modelName(id: string): string {
+  const claude = /^claude-([a-z]+)-(\d+(?:-\d{1,2})*)(?:-\d{8})?(\[1m\])?$/.exec(id);
+  if (!claude) return id;
+  const [, family = "", version = "", wide] = claude;
+  return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${version.replaceAll("-", ".")}${wide ? " · 1M" : ""}`;
 }
 export function ModelPicker({
   role,
@@ -51,13 +69,17 @@ export function ModelPicker({
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
   const provider =
     role === "executor" ? models.executorProvider : models.reviewerProvider;
   const model =
     role === "executor" ? models.executorModel : models.reviewerModel;
+  const effort =
+    role === "executor" ? models.executorEffort : models.reviewerEffort;
   const [selection, setSelection] = useState<{
     provider: ModelProvider;
     model: string;
+    effort: EffortLevel | null;
   } | null>(null);
   const selectedProvider = selection?.provider ?? provider;
   const catalog = useQuery({
@@ -78,29 +100,58 @@ export function ModelPicker({
     choices[0]?.id ||
     "";
   const selectedChoice = choices.find((choice) => choice.id === selectedModel);
-  const update = (id: string, modelId: string): void =>
+  // The levels this model offers; a level it does not offer sends nothing on
+  // Claude Code; Codex starts at medium and the API at high.
+  const levels = selectedChoice?.efforts ?? [];
+  const selectedEffort = selection !== null ? selection.effort : effort;
+  const chosenEffort =
+    selectedEffort !== null && levels.includes(selectedEffort) ? selectedEffort : null;
+  const done = !selectedChoice || catalog.isFetching || catalog.isError;
+  const finish = (): void => {
     onChange(
       role === "executor"
         ? {
             ...models,
-            executorProvider: id as TaskModels["executorProvider"],
-            executorModel: modelId,
-            draftingProvider: id as TaskModels["draftingProvider"],
+            executorProvider: selectedProvider as TaskModels["executorProvider"],
+            executorModel: selectedModel,
+            executorEffort: chosenEffort,
+            draftingProvider: selectedProvider as TaskModels["draftingProvider"],
           }
         : {
             ...models,
-            reviewerProvider: id as TaskModels["reviewerProvider"],
-            reviewerModel: modelId,
+            reviewerProvider: selectedProvider,
+            reviewerModel: selectedModel,
+            reviewerEffort: chosenEffort,
           },
     );
+    setOpen(false);
+  };
+  // A click anywhere else puts the popup away as Done would, or leaves the
+  // saved choice as it was where Done cannot be pressed. Only a popup with no
+  // model chosen at all stays, because closing it would leave a role with no
+  // model to run on.
+  const away = useRef<() => void>(() => undefined);
+  away.current = () => {
+    if (selectedModel === "") return;
+    if (done) setOpen(false);
+    else finish();
+  };
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: MouseEvent): void => {
+      if (!root.current?.contains(event.target as Node)) away.current();
+    };
+    document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [open]);
   return (
-    <div className="model-picker">
+    <div className="model-picker" ref={root}>
       <button
         type="button"
         aria-label={"Change " + role + " model"}
         aria-expanded={open}
         onClick={() => {
-          if (!open) setSelection({ provider, model });
+          if (!open) setSelection({ provider, model, effort });
           setOpen(!open);
         }}
       >
@@ -111,9 +162,9 @@ export function ModelPicker({
               <br />
             </span>
           )}
-          <strong>
-            {providerName(provider)} · {model}
-          </strong>
+          <strong>{modelName(model)}</strong>
+          <span className="model-effort">{effortLabel(effort)}</span>
+          <span className={cx("connection-dot", !signedIn(connections, provider) && "disconnected")} />
         </span>
         {compact ? (
           <img src="./brand/dropdown.svg" alt="" />
@@ -138,31 +189,18 @@ export function ModelPicker({
               setSelection({
                 provider: event.target.value as ModelProvider,
                 model: "",
+                effort: null,
               })
             }
           >
-            {(
-              [
-                "claude-cli",
-                "codex-cli",
-                ...(role === "reviewer" ? ["anthropic"] : []),
-              ] as const
+            {(role === "reviewer"
+              ? (["claude-cli", "codex-cli", "anthropic"] as const)
+              : (["claude-cli", "codex-cli"] as const)
             ).map((id) => (
               <option
                 key={id}
                 value={id}
-                disabled={
-                  connections !== undefined &&
-                  !connections.some(
-                    (connection) =>
-                      connection.id ===
-                        (id === "claude-cli"
-                          ? "claude"
-                          : id === "codex-cli"
-                            ? "codex"
-                            : "anthropic") && connection.authenticated,
-                  )
-                }
+                disabled={connections !== undefined && !signedIn(connections, id)}
               >
                 {providerName(id)}
                 {id === "anthropic" ? " · optional API" : " · subscription"}
@@ -179,6 +217,7 @@ export function ModelPicker({
                 setSelection({
                   provider: selectedProvider,
                   model: event.target.value,
+                  effort: selectedEffort,
                 })
               }
             >
@@ -221,6 +260,32 @@ export function ModelPicker({
               </div>
             )}
           </div>
+          {levels.length > 0 && (
+            <div className="effort-control">
+              <label htmlFor={role + "-effort"} className="small">
+                Effort · <b>{effortLabel(chosenEffort)}</b>
+              </label>
+              {/* One stop per level this model offers, above the provider's
+                  own default at the left; the label names the one chosen. */}
+              <input
+                id={role + "-effort"}
+                type="range"
+                aria-label={role + " effort"}
+                aria-valuetext={effortLabel(chosenEffort)}
+                min={0}
+                max={levels.length}
+                step={1}
+                value={chosenEffort === null ? 0 : levels.indexOf(chosenEffort) + 1}
+                onChange={(event) =>
+                  setSelection({
+                    provider: selectedProvider,
+                    model: selectedModel,
+                    effort: levels[Number(event.target.value) - 1] ?? null,
+                  })
+                }
+              />
+            </div>
+          )}
           <button
             type="button"
             className="text-button small"
@@ -239,14 +304,7 @@ export function ModelPicker({
               }
             />
           )}
-          <Button
-            className="small"
-            onClick={() => {
-              update(selectedProvider, selectedModel);
-              setOpen(false);
-            }}
-            disabled={!selectedChoice || catalog.isFetching || catalog.isError}
-          >
+          <Button className="small" onClick={finish} disabled={done}>
             Done
           </Button>
         </div>
@@ -395,7 +453,6 @@ export function ProviderScreen({
                   : "Reviewer — never sees the executor’s story"}
               </p>
               <div className="provider-default-model">
-                <span className="connection-dot" />
                 <ModelPicker
                   role={role}
                   compact

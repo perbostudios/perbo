@@ -44,7 +44,7 @@ export class WorkspaceRefresh {
     const power = this.power && this.power.sequence > (snapshot.sequence ?? -1) ? this.power.power : undefined;
     return {
       ...snapshot, jobs: [...jobs.values()].slice(-40), refreshingRepos: [...this.pending],
-      ...(preferences ? { settings: preferences.settings, titles: preferences.titles, taskModels: preferences.taskModels, archived: preferences.archived } : {}),
+      ...(preferences ? { settings: preferences.settings, titles: preferences.titles, taskModels: preferences.taskModels, archived: preferences.archived, asks: preferences.asks } : {}),
       ...(power ? { power } : {}),
     };
   }
@@ -129,7 +129,15 @@ export class WorkspaceRefresh {
         const live = new Set(snapshot.interviews ?? []);
         if (change.running) live.add(change.sessionId);
         else live.delete(change.sessionId);
-        return { ...snapshot, interviews: [...live] };
+        // And whether it is mid-turn, for the same reason: the panes that wait
+        // on a turn — the Spec pane before it drafts, the way onward before it
+        // freezes — read it off the snapshot, and a snapshot only corrected by
+        // the next full read has them waiting on a turn that ended, or not
+        // waiting on one that is still running.
+        const busy = new Set(snapshot.working ?? []);
+        if (change.running && change.working) busy.add(change.sessionId);
+        else busy.delete(change.sessionId);
+        return { ...snapshot, interviews: [...live], working: [...busy] };
       });
       return;
     }

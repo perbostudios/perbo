@@ -55,20 +55,8 @@ const PATHS = {
     </>
   ),
   chevron: <path d="M9.4 5.8l6.2 6.2-6.2 6.2" />,
-  // The two answers every question carries, whoever asked it: handing the
-  // choice back, and answering in words of one's own.
-  handOver: (
-    <>
-      <path d="M4.8 8.2h8.9a4.2 4.2 0 0 1 0 8.4H7.4" />
-      <path d="M10.4 13.5 7.2 16.6l3.2 3.2" />
-    </>
-  ),
-  ownWords: (
-    <>
-      <path d="M4.6 19.4l.8-3.6L15.6 5.4a1.9 1.9 0 0 1 2.7 0l.4.4a1.9 1.9 0 0 1 0 2.7L8.4 19.1z" />
-      <path d="M14.3 6.8l3.2 3.2" />
-    </>
-  ),
+  // The composer's send: up, out of the box and into the conversation.
+  send: <path d="M12 18.4V5.8M6.8 11l5.2-5.2 5.2 5.2" />,
   trash: (
     <>
       <path d="M4.5 6.9h15" />

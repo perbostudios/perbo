@@ -20,6 +20,7 @@ export function forgetRepository(state: ProfileState, repoId: string): void {
   for (const entry of Object.keys(state.taskModels))
     if (entry.startsWith(prefix)) delete state.taskModels[entry];
   state.archived = state.archived.filter((entry) => !entry.startsWith(prefix));
+  delete state.asks[repoId];
 }
 
 /** What a deleted contract leaves behind on this machine. */
@@ -28,6 +29,15 @@ export function forgetTicket(state: ProfileState, repoId: string, key: string): 
   delete state.titles[entry];
   delete state.taskModels[entry];
   state.archived = state.archived.filter((item) => item !== entry);
+}
+
+/**
+ * This repository's unsent answer to "What do you want to build?", kept as the
+ * person types it; an empty one removes it.
+ */
+export function saveAsk(state: ProfileState, repoId: string, text: string): void {
+  if (text.length === 0) delete state.asks[repoId];
+  else state.asks[repoId] = text;
 }
 
 /** Filing tickets away from Home by hand, or putting them back (S4). */
@@ -44,17 +54,20 @@ export function setArchived(
 }
 
 /**
- * The planning sessions that were drafting this ticket, marked discarded in
- * place: the contract they were editing has gone, so there is nothing for a
- * resume to open.
+ * The planning sessions drafting this ticket, marked discarded in place: the
+ * contract they edit has gone, so there is nothing for a resume to open.
+ * Answers with the ids it marked, whose chats go with them.
  */
-export function discardEditingFor(state: ProfileState, repoId: string, key: string): void {
+export function discardEditingFor(state: ProfileState, repoId: string, key: string): string[] {
+  const marked: string[] = [];
   for (const session of state.editingSessions)
     if (session.repoId === repoId && session.key === key && session.phase !== "discarded") {
       session.phase = "discarded";
       session.resumeNew = false;
       session.revision++;
+      marked.push(session.id);
     }
+  return marked;
 }
 
 /**

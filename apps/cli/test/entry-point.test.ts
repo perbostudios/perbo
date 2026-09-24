@@ -6,18 +6,19 @@ import { buildCli, removeStagedBundles, spawnBuilt } from "../src/test-support/b
 /**
  * The CLI's command table, run as a program and asked rather than read off the
  * source: the six that work against a repository with nothing admitted, the
- * twelve that build history across machines, and `index`, which reads the
+ * thirteen that build history across machines, and `index`, which reads the
  * repository's code.
  */
 
 /** The six commands that work against a repository with nothing admitted, named here rather than imported from the code under test. */
 const WITHOUT_ADMISSION = ["doctor", "baseline", "review", "inspect", "verdict", "run"] as const;
 
-/** The twelve that build history across machines, and `index`, likewise. */
+/** The thirteen that build history across machines, and `index`, likewise. */
 const WITH_HISTORY = [
   "admit",
   "approve",
   "edit",
+  "drift",
   "list",
   "sync",
   "serve",
@@ -75,10 +76,10 @@ describe.sequential("the entry point", () => {
 
   // One cold spawn of the built binary per command, each individually bounded
   // by `spawnBuilt`'s own deadline, so a genuine hang fails there and this
-  // budget only ever bounds how slowly nineteen of them run together. Nineteen
-  // take about a minute on the loaded machine SCP-191 measures against, so the
-  // budget is that with room, and it grows as the table does.
-  it("carries all nineteen commands", () => {
+  // budget only ever bounds how slowly twenty of them run together: what the
+  // table takes on the loaded machine SCP-191 measures against, with room, and
+  // it grows as the table does.
+  it("carries all twenty commands", () => {
     for (const command of [...WITHOUT_ADMISSION, ...WITH_HISTORY]) {
       const help = invoke("main.js", [command, "--help"]);
       expect(help.code, `${command} --help`).toBe(0);
@@ -86,7 +87,7 @@ describe.sequential("the entry point", () => {
     }
   }, 150_000);
 
-  it("offers the thirteen in its help", () => {
+  it("offers the fourteen in its help", () => {
     const help = invoke("main.js", ["--help"]);
     expect(help.code).toBe(0);
     expect(offered(help.stderr)).toEqual(expect.arrayContaining([...WITH_HISTORY]));

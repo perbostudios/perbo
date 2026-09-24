@@ -78,7 +78,7 @@ describe("admit", () => {
   it("does not let an outcome approve the ticket it admits", () => {
     const args = admitCommandLine.read(["--outcome", "--x=--approve"]).input;
     expect(args.approve).toBe(false);
-    expect(args.title).toBe("--x=--approve");
+    expect(args.outcome).toBe("--x=--approve");
   });
 });
 

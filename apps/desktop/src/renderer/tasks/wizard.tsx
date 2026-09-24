@@ -1,4 +1,4 @@
-/** The three-step Create a task wizard: its header, and the screen a step waits on. */
+/** The head of a task's own pages, and the screen a task waits on. */
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -6,44 +6,43 @@ import {
   InkIcon,
   PageFooter,
   PageHeader,
-  ProgressDots,
   ThinkingStatus,
   cx,
 } from "../ui/index.js";
-export function WizardHeader({
-  step,
-  children,
-}: {
-  step: number;
-  children?: ReactNode;
-}) {
+/**
+ * The head of a task's own pages, which counts no steps: the work is described
+ * to the interview, the plan is read on its own pane, and the contract is where
+ * approving freezes it — three different places, not three steps of one form,
+ * and a number counting to three over any of them says a person is partway
+ * through something they are not.
+ */
+export function WizardHeader({ children }: { children?: ReactNode }) {
   return (
-    <PageHeader
-      title="Create a task"
-      subtitle={
-        <>
-          · <span>step {step} of 3</span>
-        </>
-      }
-      wizard
-    >
-      <ProgressDots step={step} />
+    <PageHeader title="Create a task" wizard>
       {children}
     </PageHeader>
   );
 }
 export function WaitScreen({
-  step,
   title,
   description,
   status,
   onCancel,
+  bare = false,
 }: {
-  step: number;
   title: string;
   description: string;
   status: string;
-  onCancel: () => void;
+  onCancel?: () => void;
+  /**
+   * Whether this is a pane working rather than the window.
+   *
+   * A pane keeps the head of the page it is part of: retitling the window
+   * "Create a task" because a pane inside a planning is busy says a person is
+   * somewhere they are not. A page that is the whole of what is happening
+   * takes the head, because there is nothing else on screen to own it.
+   */
+  bare?: boolean;
 }) {
   const [shown, setShown] = useState(false);
   useEffect(() => {
@@ -51,11 +50,8 @@ export function WaitScreen({
     return () => cancelAnimationFrame(frame);
   }, []);
   return (
-    <section
-      className="screen wait-screen"
-      data-screen={step === 1 ? "s8" : "s10"}
-    >
-      <WizardHeader step={step} />
+    <section className="screen wait-screen" data-screen="s10">
+      {!bare && <WizardHeader />}
       <div className="wait-body">
         <InkIcon name="dots" size={52} className="waiting-dots" />
         <div className={cx("t-stagger", shown && "is-shown")}>
@@ -71,13 +67,15 @@ export function WaitScreen({
           </div>
         </div>
       </div>
-      <PageFooter>
-        <span className="small muted">
-          You can leave this page. Your work stays on this machine.
-        </span>
-        <span className="spacer" />
-        <Button onClick={onCancel}>Cancel</Button>
-      </PageFooter>
+      {onCancel !== undefined && (
+        <PageFooter>
+          <span className="small muted">
+            You can leave this page. Your work stays on this machine.
+          </span>
+          <span className="spacer" />
+          <Button onClick={onCancel}>Cancel</Button>
+        </PageFooter>
+      )}
     </section>
   );
 }

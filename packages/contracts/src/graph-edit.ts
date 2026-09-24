@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CriterionIdSchema, NodeIdSchema } from "./ids.js";
+import { CriterionIdSchema, NodeIdSchema, RequirementIdSchema } from "./ids.js";
 import { ExpectedVerificationSchema } from "./plan.js";
 
 /**
@@ -30,6 +30,20 @@ const PathsSchema = z.array(z.string().min(1)).min(1);
 export const NewCriterionSchema = z.strictObject({
   text: z.string().min(1),
   expected_verification: ExpectedVerificationSchema,
+  /**
+   * The spec requirement this criterion answers, where it answers one.
+   *
+   * Without it a criterion written by an edit reaches the executor as work
+   * drafted from nothing: a node's page derives its Requirements section from
+   * these citations and prints "No requirement of this spec is derived to this
+   * node yet" when there are none, and that page is committed as the branch's
+   * first commit and is what the executor reads (D-103).
+   *
+   * Optional, because a plan drafted from an issue has no spec and cites
+   * nothing. Which ids a spec actually carries is not knowable here — the
+   * caller supplies the set, as it does for a drafted criterion.
+   */
+  requirement_id: RequirementIdSchema.optional(),
 });
 export type NewCriterion = z.infer<typeof NewCriterionSchema>;
 

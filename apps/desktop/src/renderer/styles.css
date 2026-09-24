@@ -447,16 +447,6 @@ code {
   align-items: center;
   justify-content: center;
 }
-.picker-foot {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-  padding: 9px 6px 0;
-  border-top: 1.5px solid var(--line);
-  color: var(--muted);
-  font-size: calc(11.5px * var(--text-scale));
-}
 .ink-icon {
   display: inline-block;
   object-fit: contain;
@@ -730,18 +720,6 @@ textarea {
   color: var(--amber-text);
   font-weight: 500;
 }
-.runner-label {
-  font: calc(11.5px * var(--text-scale)) var(--mono);
-  color: var(--muted);
-}
-.live-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--green);
-  display: inline-block;
-  flex: none;
-}
 .home-heading {
   padding: 26px 30px 18px;
   display: flex;
@@ -780,7 +758,7 @@ textarea {
   box-shadow: 0 6px 18px rgba(var(--shadow-rgb), 0.12);
   border-color: rgba(var(--ink-rgb), 0.5);
 }
-.task-card--attention {
+.task-card--yellow {
   background: var(--amber-paper);
   border-color: rgba(var(--amber-rgb), 0.55);
 }
@@ -806,7 +784,7 @@ textarea {
   border-radius: 50%;
   background: var(--paper);
 }
-.stage-ring--attention > span {
+.stage-ring--yellow > span {
   background: var(--amber-paper);
 }
 .stage-pill {
@@ -819,7 +797,7 @@ textarea {
   color: var(--ink);
   white-space: nowrap;
 }
-.task-card--attention .stage-pill {
+.task-card--yellow .stage-pill {
   background: var(--amber);
   color: var(--paper);
   font-weight: 500;
@@ -839,7 +817,8 @@ textarea {
   font-weight: 500;
   flex: 1;
 }
-.task-card--attention .rename {
+.task-card--yellow .rename,
+.task-card--red .rename {
   font-weight: 600;
 }
 .rename {
@@ -960,11 +939,13 @@ textarea {
   justify-content: space-between;
   font-size: calc(13px * var(--text-scale));
 }
+/* Below the Archive's table, which fills the page, so it sits at the bottom. */
 .archive-footer {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 26px;
+  padding: 14px 26px 22px;
 }
 .archive-total {
   text-align: right;
@@ -1280,6 +1261,54 @@ textarea {
 .model-popup .field .dropdown {
   width: 100%;
 }
+/* The closed picker reads as the model and its effort, apart: "Fable 5.1  High". */
+.model-picker .model-effort {
+  margin-left: 12px;
+  color: var(--muted);
+}
+/* Whether the role's provider is signed in: "Fable 5.1  High ●". */
+.model-picker .connection-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.effort-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.effort-control input[type="range"] {
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  accent-color: var(--ink);
+}
+/* The contract page's pickers sit in a side column that scrolls, clips what
+   leaves it, and whose right edge is the window's: here the popup opens
+   downward and spans the row it opens from, so it stays in the column and the
+   column scrolls to all of it. */
+.contract-side .run-facts > div {
+  position: relative;
+}
+.contract-side .run-facts .model-picker {
+  position: static;
+}
+.contract-side .model-popup {
+  top: calc(100% + 7px);
+  bottom: auto;
+  right: 0;
+  width: auto;
+  min-width: 0;
+  text-align: left;
+  box-shadow: 0 10px 26px rgba(var(--shadow-rgb), 0.18);
+  /* Tighter than elsewhere, so the whole of it fits under the executor's row
+     in a 940×650 window. */
+  padding: 12px;
+  gap: 6px;
+}
 .repo-setup-list,
 .repo-search,
 .off-limits {
@@ -1443,76 +1472,6 @@ textarea {
   flex-direction: column;
   gap: 24px;
 }
-.repo-field {
-  width: 290px;
-}
-.repo-field .dropdown {
-  width: 100%;
-  font: calc(12.5px * var(--text-scale)) var(--mono);
-}
-.outcome-label {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 7px;
-  color: var(--muted);
-  font-size: calc(11.5px * var(--text-scale));
-}
-.outcome-input {
-  padding: 15px 17px;
-  border-color: rgba(var(--ink-rgb), 0.3);
-  background: var(--soft);
-  font-size: calc(16.5px * var(--text-scale));
-  min-height: 109px;
-  resize: vertical;
-}
-.outcome-foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 9px;
-}
-.handwritten {
-  font:
-    500 17px Caveat,
-    cursive;
-  color: var(--handwriting);
-}
-.outcome-foot .mono {
-  font-size: calc(11px * var(--text-scale));
-  color: var(--faint);
-  margin-left: auto;
-}
-.confirm-models {
-  border-top: 1.5px solid var(--line);
-  padding-top: 20px;
-}
-.confirm-models .column-heading {
-  margin-bottom: 12px;
-}
-.role-card {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 13px 15px;
-  border: 1.5px solid rgba(var(--ink-rgb), 0.22);
-  border-radius: var(--radius);
-}
-.role-card .connection-dot {
-  width: 13px;
-  height: 13px;
-}
-.role-card .model-picker {
-  flex: 1;
-}
-.role-card .role-name {
-  font-size: calc(11px * var(--text-scale));
-  color: var(--muted);
-}
-.role-card strong {
-  font-weight: 500;
-}
 .criteria-body {
   padding: 26px 32px;
   gap: 22px;
@@ -1552,6 +1511,12 @@ textarea {
 .criterion-text {
   font-size: calc(14.5px * var(--text-scale));
   line-height: 1.45;
+}
+/* An assertion the draft did not propose. Said in the note's own line rather
+   than as a badge: it is a pointer for the eye, not a state of the criterion. */
+.criterion-moved {
+  color: var(--amber-text);
+  font-weight: 600;
 }
 .criterion-note {
   line-height: normal;
@@ -2564,30 +2529,35 @@ textarea {
 .skill-picker summary {
   cursor: pointer;
 }
+/* Three rows high, so the whole popup, effort and Done included, stays inside
+   a 940×650 window wherever it opens, the contract page's narrow column too;
+   the list scrolls inside it, a skill's name a row, its description on hover. */
 .skill-options {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: 240px;
+  gap: 6px;
+  max-height: 64px;
   overflow: auto;
   margin-top: 10px;
 }
 .skill-options label {
   display: flex;
   gap: 9px;
-  align-items: flex-start;
+  align-items: center;
   cursor: pointer;
 }
 .skill-options input {
   width: 14px;
   height: 14px;
-  margin: 2px 0 0;
+  margin: 0;
   flex: none;
 }
-.skill-options label > span {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+.skill-picker summary,
+.skill-options label > strong {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .manifest-entries {
@@ -2651,8 +2621,23 @@ textarea {
 .archive-row--closed > span:last-child {
   color: var(--amber-text);
 }
+/* A wait that takes the whole window takes the rail with it: there is one
+   thing happening and nowhere else to be. A wait inside planning mode is a
+   pane working while the rest of the planning stays put — the chat beside it
+   is still readable, and the rail is how a person leaves. */
 .app-shell:has(.wait-screen) .rail {
   display: none;
+}
+.app-shell:has(.plan .wait-screen) .rail {
+  display: flex;
+}
+/* The Spec pane while its plan is being drafted: the wait fills the pane it
+   replaced, rather than sitting in an auto-height block at the top of it. */
+.spec-working {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .wait-body {
   flex: 1;
@@ -2977,9 +2962,6 @@ textarea {
   }
 }
 @media (max-width: 1050px) {
-  .runner-label {
-    display: none;
-  }
   .task-created {
     display: none;
   }
@@ -3144,7 +3126,8 @@ textarea {
   align-items: center;
   gap: 10px;
 }
-.completed-count {
+.completed-count,
+.stopped-count {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -3155,11 +3138,25 @@ textarea {
   color: var(--green);
   background: var(--green-paper);
 }
+.stopped-count {
+  border-color: var(--red-line);
+  color: var(--red);
+  background: var(--red-paper);
+}
 .home-controls {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 0 30px 16px;
+}
+/* Home's empty state: the page footer's row and place, with nothing drawn around it. */
+.home-empty {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 17px 32px;
+  margin-top: auto;
+  flex: none;
 }
 .home-search {
   display: flex;
@@ -3206,17 +3203,17 @@ textarea {
 .diff-label .removed {
   font-weight: 500;
 }
-.task-card--complete {
+.task-card--green {
   background: var(--green-paper);
   border-color: rgba(var(--green-rgb), 0.55);
 }
-.task-card--complete .stage-pill {
+.task-card--green .stage-pill {
   background: var(--green);
   border-color: var(--green);
   color: var(--paper);
   font-weight: 500;
 }
-.stage-ring--complete > span {
+.stage-ring--green > span {
   background: var(--green-paper);
 }
 .task-card--complete .button {
@@ -4064,6 +4061,16 @@ kbd {
   white-space: nowrap;
   transform: translateY(-1px);
 }
+/* Where the requirement's criteria landed, beside the id that cites them. The
+   id's own bubble in the plan's colours rather than the spec's: the id is the
+   spec's word and the node is the plan's answer to it, and they are read
+   together (D-103). */
+.spec-req-node {
+  margin-left: 5px;
+  padding-left: 5px;
+  border-left: 1px solid rgba(var(--amber-rgb), 0.35);
+  opacity: 0.75;
+}
 .spec-code {
   font: calc(11.5px * var(--text-scale)) var(--mono);
   background: var(--soft);
@@ -4191,21 +4198,6 @@ kbd {
   flex-wrap: wrap;
   margin-top: 8px;
 }
-.spec-requirements {
-  list-style: none;
-  margin: 2px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.spec-requirements li {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  font-size: 12px;
-  color: var(--muted);
-}
 
 /* The action sits at the end of its block, where a hand goes looking for it,
    and what it does is read on the way there. */
@@ -4273,7 +4265,7 @@ kbd {
   gap: 6px;
   flex-wrap: wrap;
 }
-.size-holder {
+.graph-pop-holder {
   position: relative;
 }
 .size {
@@ -4319,7 +4311,7 @@ kbd {
   text-underline-offset: 3px;
   text-decoration-thickness: 1.5px;
 }
-.size-pop {
+.graph-pop {
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
@@ -4333,24 +4325,28 @@ kbd {
   font-size: calc(12px * var(--text-scale));
   line-height: 1.5;
 }
-.size-pop table {
+.graph-pop table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 2px;
   font: calc(11px * var(--text-scale)) var(--mono);
   margin: 8px 0;
 }
-.size-pop td,
-.size-pop th {
+.graph-pop td,
+.graph-pop th {
   padding: 2px 4px;
   text-align: center;
   font-weight: 400;
   color: var(--muted);
 }
-.size-pop th:first-child,
-.size-pop td:first-child {
+.graph-pop th:first-child,
+.graph-pop td:first-child {
   text-align: left;
   color: var(--text);
+}
+.graph-pop-foot {
+  display: flex;
+  justify-content: flex-end;
 }
 /* The canvas clips; one translated layer inside it holds the nodes and edges. */
 .canvas {
@@ -4455,14 +4451,6 @@ kbd {
 .kind--query {
   color: var(--red);
   border-color: var(--red-line);
-}
-.node-paths {
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1.5px dashed var(--line);
-  font: calc(10.5px * var(--text-scale)) / 1.55 var(--mono);
-  color: var(--muted);
-  overflow-wrap: anywhere;
 }
 /* SCP-317: what the run's records say about a node, on the node. */
 .state {
@@ -4639,7 +4627,8 @@ kbd {
 .ghost i:nth-child(3) {
   height: 50px;
 }
-/* One node, open under the canvas: what it has to prove, where, and its page. */
+/* One node, open under the canvas: what it has to prove and where, as controls,
+   and the Notes a person wrote on its page. */
 .inspector {
   flex: none;
   height: 44%;
@@ -4659,30 +4648,66 @@ kbd {
   padding: 8px 14px 8px 18px;
   border-bottom: 1.5px solid var(--line);
 }
+/* Two halves: the criteria, which scroll on their own, and one block that
+   stays put beside them — the order, the paths, then the node page's Notes,
+   read-only — a size smaller, since the criteria are what the node is. */
 .insp-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(200px, 1fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
-  padding: 12px 18px 16px;
+  padding: 0 18px;
 }
 .insp-main,
-.insp-side,
-.insp-page {
+.insp-block,
+.insp-notes {
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  min-height: 0;
 }
-.insp-page .section-label {
+.insp-main,
+.insp-block {
+  overflow-y: auto;
+  padding: 12px 0 16px;
+}
+.insp-block {
+  gap: 12px;
+  font-size: calc(12px * var(--text-scale));
+}
+.insp-order {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+.insp-order > div,
+.insp-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.insp-block .path-chips {
+  gap: 6px;
+}
+.insp-block .path-chip {
+  font-size: calc(11px * var(--text-scale));
+}
+.insp-notes {
+  flex: 1;
+  min-height: 72px;
+}
+.insp-notes .section-label {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.insp-notes code {
   overflow-wrap: anywhere;
 }
-.node-page {
+.node-notes {
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -4709,9 +4734,7 @@ kbd {
   border: 0;
   background: transparent;
   resize: vertical;
-  width: 100%;
   line-height: 1.45;
-  padding: 0;
   outline: none;
   font: inherit;
   color: var(--ink);
@@ -4758,30 +4781,36 @@ kbd {
 .inspector .path-chip button:hover:enabled {
   color: var(--ink);
 }
-.mini-input {
-  font: calc(11.5px * var(--text-scale)) var(--mono);
-  padding: 5px 8px;
-  border: 1.5px dashed rgba(var(--ink-rgb), 0.28);
-  border-radius: var(--radius);
-  background: transparent;
-  width: 100%;
-  outline: none;
-  color: var(--ink);
-  margin-top: 7px;
+/* "+ path", "+ after" and "+ before": a dotted chip after the bubbles it adds
+   to. The path one opens into a text entry in its place; the order ones are
+   the dropdown of nodes, drawn as the chip. */
+.add-chip {
+  appearance: none;
+  flex: none;
+  width: auto;
+  font: calc(11px * var(--text-scale)) / 1.5 var(--mono);
+  padding: 2px 8px;
+  border: 1.5px dashed rgba(var(--ink-rgb), 0.32);
+  border-radius: 9px 7px 10px 7px;
+  color: var(--muted);
+  cursor: pointer;
 }
-.mini-input:focus {
+select.add-chip {
+  field-sizing: content;
+}
+.add-chip:hover:enabled {
+  color: var(--ink);
+  border-color: rgba(var(--ink-rgb), 0.55);
+}
+.add-chip--open {
+  width: 27ch;
+  max-width: 100%;
+  cursor: text;
+  color: var(--ink);
+  outline: none;
   border-style: solid;
   border-color: var(--ink);
   background: var(--paper);
-}
-.select-mini {
-  font: calc(11.5px * var(--text-scale)) var(--mono);
-  padding: 4px 6px;
-  border: 1.5px solid var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--paper);
-  color: var(--ink);
-  max-width: 100%;
 }
 .split-names {
   display: flex;
@@ -4821,13 +4850,18 @@ kbd {
 .split-row.mono > span:first-child {
   font: calc(11.5px * var(--text-scale)) var(--mono);
 }
-/* What approving freezes, the edits since the draft, and the approval. */
+/* One bar at the foot of the Graph, holding the plan's edits and the way
+   onward together, centred in it: the list reads in columns. It is at least as
+   tall as the chat's box and the composer's 12px beneath it (the box is its
+   textarea's 76px, 8px and 7px of padding and two 1.5px rims), so at the
+   dock's default width its top edge is level with the box's top edge. */
 .approve-bar {
   flex: none;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  min-height: 106px;
   gap: 16px;
-  padding: 11px 20px;
+  padding: 8px 16px 10px;
   border-top: 1.5px solid var(--line);
   background: var(--canvas);
 }
@@ -4865,25 +4899,163 @@ kbd {
 .pane-confirm .small {
   margin-right: auto;
 }
-.graph-history {
+/* The Problems pane, on the way to the contract: one problem at a time as a
+   card in the interview's own shape, with its answers, a count in the head's
+   corner, and the footer every pane that shows the plan has. The card takes
+   its height from what is in it rather than from the dock's drag, and the
+   body scrolls. There is no chat beside it, so the pane takes the width. */
+.drift {
+  display: flex;
+  flex-direction: column;
+}
+.drift .pane-head {
+  align-items: baseline;
+}
+.drift-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.drift-resolved {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 64ch;
+}
+.drift-resolved h3 {
+  margin: 0;
+}
+/* The way on a note offers sits on its own line, at the note's right, with
+   room above it so the offer reads apart from the sentence it follows. */
+.msg-offer {
+  display: block;
+  margin: 12px 0 2px auto;
+}
+/* The last change to the spec and the plan, marked where it stands
+   (D-128): what it added highlighted
+   green, what it took away red and struck through. Both on the theme's own
+   green and red, light and dark. Only an addition carries a highlight, quiet
+   enough that the words stay words, and words added together are one mark,
+   so it runs unbroken across them: a bold, italic, code or `@name` run inside
+   it takes the mark's green and none of its own; a removal is its colour and
+   its line alone. */
+.change--added {
+  background: rgba(var(--green-rgb), 0.16);
+  color: var(--green);
+  text-decoration: none;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+.change--added > [data-run] {
+  color: inherit;
+  background: none;
+  text-decoration: none;
+}
+.change--removed {
+  color: var(--red);
+  text-decoration: line-through;
+  text-decoration-color: var(--red-line);
+}
+/* The words as the last change left them, under the box in the inspector that edits them. */
+.crit-change {
+  margin: 2px 0 0;
+  font-size: calc(12.5px * var(--text-scale));
+  line-height: 1.45;
+  color: var(--ink);
+}
+/* A criterion the last change took away, struck through where the list ends. */
+.crit-removed {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  font-size: calc(12px * var(--text-scale));
+  line-height: 1.4;
+  margin-top: 5px;
+  color: var(--muted);
+}
+.criterion-editor.crit-removed {
+  font-size: inherit;
+  margin-top: 0;
+}
+.drift-asking-head {
+  margin: 0 0 6px;
+}
+.asked-about {
+  margin-left: 8px;
+}
+.drift-body {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.drift-intro {
+  font-size: calc(13px * var(--text-scale));
+  color: var(--muted);
+  line-height: 1.55;
+  max-width: 64ch;
+}
+.drift-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 720px;
+}
+.drift-cards .asked-card {
+  height: auto;
+  overflow: visible;
+}
+.drift-cards .asked-card .asked-body {
+  flex: none;
+  overflow: visible;
+}
+.graph-history {
+  /* Wide enough for two columns of edits and no wider: at full width the two
+     columns split the whole footer and sit a hand's width apart. */
+  flex: 0 1 auto;
   min-width: 0;
-  max-height: 120px;
-  overflow: auto;
+  max-width: 420px;
+}
+/* A span by default, whose margin would not apply and would leave the list
+   against it. */
+.graph-history .section-label {
+  display: block;
 }
 .graph-history ol {
   list-style: none;
-  margin: 4px 0 0;
+  /* Off the label above it: the two read as a heading and its list rather than
+     as one block of small text. */
+  margin: 8px 0 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  /* Two columns, never more, filled down then across so the newest edits stay
+     together at the top of the first rather than alternating across the bar.
+     Asked for as a count rather than a width: a width lets the bar add a third
+     column when it is wide, and two is what this is. The section it sits in
+     holds it to a width so the two sit beside each other rather than at
+     opposite ends of the footer. */
+  columns: 2;
+  column-gap: 14px;
+  line-height: 1.5;
 }
 .graph-history li {
   display: flex;
   align-items: baseline;
   gap: 8px;
   font-size: calc(12px * var(--text-scale));
+  /* An edit reads as one line or not at all: a long summary is cut rather
+     than wrapped or pushing the next column off the bar, and a line broken
+     down the middle of a column is not a shorter list. */
+  white-space: nowrap;
+  overflow: hidden;
+}
+.graph-history .hist-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .graph-history li.is-undone .hist-line {
   text-decoration: line-through;
@@ -4966,7 +5138,7 @@ kbd {
   background: transparent;
   transition: background var(--duration-fast, 120ms) ease;
 }
-.dock-handle:hover .dock-handle-grip,
+.dock-handle--hover .dock-handle-grip,
 .dock-handle:focus-visible .dock-handle-grip,
 .dock-handle--dragging .dock-handle-grip {
   background: var(--accent, var(--line));
@@ -5062,6 +5234,16 @@ kbd {
   color: var(--muted);
   padding: 0 2px;
 }
+/* A note about a page the person is not on: read at the size of the chat, on
+   the text colour, behind the rule that marks it as the app speaking. Not a
+   warning — nothing has gone wrong — so it borrows no danger colour and no
+   icon; it is only made legible enough to be read once. */
+.msg--notable {
+  font-size: calc(12px * var(--text-scale));
+  color: var(--text);
+  border-left: 2px solid var(--accent);
+  padding: 2px 0 2px 8px;
+}
 /* The transcript says an asking happened and keeps the questions behind its
    dot, so a group moved past is still there to read without the whole of it
    sitting in the chat. */
@@ -5089,38 +5271,21 @@ kbd {
   border: 1.5px solid var(--line);
   border-radius: 12px 10px 13px 10px;
   background: var(--paper);
+  /* The pair under each part sizes its words to the card's width. */
+  container-type: inline-size;
 }
 .asked-head {
   display: flex;
   align-items: baseline;
   gap: 8px;
 }
-/* With the box for a person's own words open under it, the two are one panel:
-   the card's bottom edge is straightened and its border dropped, and the box
-   below gives up its own, so what divides them is the one line the composer
-   already draws across the dock rather than two curved edges facing each
-   other. */
-.asked-card--joined {
-  border-bottom: 0;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  padding-bottom: 10px;
-}
-.composer--joined .composer-box {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding-left: 0;
-  padding-right: 0;
-}
-/* The mark on the two answers every question carries. */
-.choice-icon {
-  flex: none;
-  color: var(--muted);
-  margin-right: 1px;
-}
-.choice.selected .choice-icon {
-  color: var(--accent);
+/* The box a part is answered in when its answer is none of the offered ones.
+   Shorter than the one on a decision, because it sits inside a card that has
+   the rest of the group under it and a dock's width to do it in. */
+.asked-part .choice--custom textarea {
+  min-height: 62px;
+  height: 62px;
+  margin-top: 2px;
 }
 .asked-head b {
   font-size: calc(12.5px * var(--text-scale));
@@ -5129,14 +5294,19 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* A fieldset is otherwise as wide as its widest line unbroken, which puts
+     its answers past the card's edge in a narrow dock. */
+  min-width: 0;
   margin: 0;
   padding: 0;
   border: 0;
 }
+/* The question itself, at the size its answers are read at. */
 .asked-part legend {
   display: block;
-  padding: 0 0 4px;
-  font-size: calc(12px * var(--text-scale));
+  padding: 0 0 6px;
+  font-size: calc(14.5px * var(--text-scale));
+  line-height: 1.4;
 }
 .asked-letter {
   margin-right: 6px;
@@ -5153,17 +5323,7 @@ kbd {
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-}
-/* Below the scroll rather than inside it, so it sits on the bottom edge
-   whatever the group's length and never has to be scrolled to. */
-.asked-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: none;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
+  gap: 24px;
 }
 /* The bar on the card's top edge: the dock's own edge turned on its side. */
 .asked-handle {
@@ -5229,6 +5389,135 @@ kbd {
   }
 }
 
+/* The interview folded away above the chat once there is a plan: one line at
+   the top of the log that opens it, and closes it again. */
+.chat-earlier {
+  align-self: center;
+  flex: none;
+  color: var(--muted);
+}
+
+/* The two answers every part carries, side by side under the offered ones:
+   its own words on the left, the interview's judgement on the right. Opened,
+   its own words take the whole row and grow down into the box.
+   They are actions rather than answers to read, so they are drawn as buttons:
+   no radio to see, the label centred, each half the row, and as tall as an
+   answer above them. Their words stay on one line and shrink together with the
+   card's width rather than wrap, down to what the narrowest dock gives them. */
+.choice-pair {
+  display: flex;
+  gap: 6px;
+}
+.choice-pair > .choice {
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* The pair's radio is out of the flow and placed against its own answer, so
+   focusing it (the click on its answer does) scrolls nothing to find it. */
+.choice--paired {
+  position: relative;
+  padding: 15px 11px;
+}
+/* An answer's heading is its 18px radio with 7px under it, 19px and 8px once
+   picked; the pair's is the same height with its label in the middle. */
+.choice--paired .choice-heading,
+.choice--paired.selected .choice-heading {
+  justify-content: center;
+  min-height: 25px;
+  margin-bottom: 0;
+}
+.choice--paired.selected .choice-heading {
+  min-height: 27px;
+}
+.choice--paired strong {
+  flex: none;
+  white-space: nowrap;
+  font-size: clamp(calc(10.5px * var(--text-scale)), 4.9cqw, calc(12.5px * var(--text-scale)));
+}
+.choice input.unseen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.choice--paired:has(input.unseen:focus-visible) {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+.choice-pair--open > .choice--custom .choice-heading {
+  margin-bottom: 8px;
+}
+
+/* The session's words on their way: its bubble, with one dot, two, three, until
+   they arrive. Still dots for a person who asked for less motion. */
+.speaking-dots {
+  display: inline-flex;
+  letter-spacing: 1px;
+}
+.speaking-dots span:nth-child(2) {
+  animation: speaking-dot-2 1200ms steps(1, end) infinite;
+}
+.speaking-dots span:nth-child(3) {
+  animation: speaking-dot-3 1200ms steps(1, end) infinite;
+}
+@keyframes speaking-dot-2 {
+  0% {
+    opacity: 0;
+  }
+  33%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes speaking-dot-3 {
+  0% {
+    opacity: 0;
+  }
+  66%,
+  100% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .speaking-dots span {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* A box waiting on words only the person can type: the composer's rim, or the
+   own-words box on a card, pulses in the accent until they begin. Steady for a
+   person who asked for less motion. */
+.awaiting-words {
+  animation: awaiting-words 1600ms ease-in-out infinite;
+}
+.composer-box.awaiting-words,
+.choice--custom textarea.awaiting-words {
+  border-style: solid;
+  border-color: var(--accent);
+}
+@keyframes awaiting-words {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--amber-rgb), 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(var(--amber-rgb), 0.35);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .awaiting-words {
+    animation: none;
+    box-shadow: 0 0 0 2px rgba(var(--amber-rgb), 0.35);
+  }
+}
+
+/* A way of reading the session does not have. Quiet on purpose: nothing went
+   wrong, and the red belongs to the refusals a person should act on. */
+.allow-list {
+  opacity: 0.7;
+}
 /* A refusal is reported and never asked: a card with nothing on it to answer. */
 .refusal {
   border: 1.5px solid var(--red-line);
@@ -5257,6 +5546,13 @@ kbd {
   margin: 0;
   font-size: calc(12px * var(--text-scale));
   line-height: 1.5;
+}
+/* The reason, in the card's own colour. It is the sentence that says what was
+   refused and why, and the one thing on the card to act on — the head above it
+   says only that something was, and the rule below it is provenance. Read at
+   the colour of the border around it, so the eye lands there first. */
+.refusal-why {
+  color: var(--red);
 }
 .tool-card {
   border: 1.5px solid var(--line);
@@ -5354,13 +5650,16 @@ kbd {
     transition: none;
   }
 }
-/* Why a tool was refused, which the card shows rather than holds back. */
+/* Why a tool was refused, which the card shows rather than holds back: one
+   muted line under its name. */
 .tool-why {
+  align-self: stretch;
   margin: 0;
-  max-height: 160px;
-  overflow: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: calc(11.5px * var(--text-scale));
-  white-space: pre-wrap;
+  color: var(--muted);
 }
 .tool-detail {
   margin: 0;
@@ -5370,24 +5669,6 @@ kbd {
   font: calc(11px * var(--text-scale)) var(--mono);
   color: var(--muted);
   white-space: pre-wrap;
-}
-.edit-title {
-  font-size: calc(12.5px * var(--text-scale));
-  line-height: 1.4;
-}
-.ba {
-  display: flex;
-  gap: 8px;
-  font-size: calc(11.5px * var(--text-scale));
-  width: 100%;
-}
-.ba-label {
-  font: 400 calc(10px * var(--text-scale)) var(--mono);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--faint);
-  flex: none;
-  width: 46px;
 }
 .composer {
   flex: none;
@@ -5401,28 +5682,102 @@ kbd {
   background: var(--surface);
   padding: 8px 10px 7px;
   display: flex;
-  flex-direction: column;
+  align-items: flex-end;
   gap: 6px;
+}
+/* The send in the box's bottom-right corner: muted while there is nothing to
+   send, inked once there is. */
+.composer-send {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(var(--ink-rgb), 0.1);
+  color: var(--muted);
+}
+.composer-send:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+}
+.composer-send:disabled {
+  cursor: default;
 }
 .composer-box:focus-within {
   border-color: var(--ink);
 }
-.composer textarea {
+.composer-box textarea {
   border: 0;
   outline: none;
   resize: none;
-  background: transparent;
-  height: 44px;
-  width: 100%;
-  line-height: 1.45;
-  padding: 0;
-  color: var(--ink);
   font: inherit;
 }
-.composer-row {
+/* A textarea clips what it draws at its padding edge, and this face sets the
+   ink of a T or a W a little left of where the letter starts: at no inline
+   padding the first letter loses its left edge. The padding is room for that
+   ink, and the margin and width give the room back, so the words sit where the
+   box's edge would put them. */
+.crit-edit textarea,
+.composer-box textarea {
+  padding-block: 0;
+  padding-inline: 4px;
+  margin-inline: -4px;
+  width: calc(100% + 8px);
+}
+/* A repository's question page, where a planning starts: the whole page beside
+   the rail, with its heading and one box at the centre. The box is a line tall
+   and grows with what is typed in it, to a third of the window, then scrolls;
+   the repository and the send sit in its bottom-right corner. */
+.ask {
+  flex: 1;
+  min-height: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 22px;
+  padding: 24px 32px;
+  overflow: auto;
+}
+.ask h2 {
+  text-align: center;
+}
+.ask-box {
+  width: min(760px, 100%);
+  border-radius: 24px;
+  padding: 10px 10px 10px 20px;
+  gap: 12px;
+}
+.ask-box textarea {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.45;
+  padding-block: 5px;
+  field-sizing: content;
+  min-height: calc(1.45em + 10px);
+  max-height: 33vh;
+}
+/* The one send for a group of questions: a bar across the card's foot, the
+   round arrow at its right. */
+.asked-bar {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 -13px -12px;
+  padding: 8px 13px 10px;
+  border-top: 1.5px solid var(--line);
+}
+.ask-repo {
+  flex: none;
+  max-width: 30%;
+  line-height: 24px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* The plan's history: a drawer over the current pane, so the chat stays visible. */
 .hist-scrim {
@@ -5470,4 +5825,97 @@ kbd {
 .hist-rows li.is-undone .hist-line {
   text-decoration: line-through;
   color: var(--muted);
+}
+/* The page a stopped run lands on: the ticket's name, that the run was
+   stopped, and the three ways out in the footer with the ways to its contract
+   and its recorded output — nothing that scrolls. */
+.stopped-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 24px 30px;
+  gap: 18px;
+}
+.stopped-heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.stopped-heading h1 {
+  letter-spacing: -0.025em;
+  font-size: calc(21px * var(--text-scale));
+  line-height: 1.3;
+}
+/* The footer every pane has, with the three ways out at the start of the row
+   and the ways to the contract and the output at its end. */
+.stopped-actions {
+  justify-content: flex-start;
+}
+
+/* ── Home row colours (S4): red where the loop stopped short of the end ──── */
+.task-card--red {
+  background: var(--red-paper);
+  border-color: var(--red-line);
+}
+.task-card--red .stage-pill {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--paper);
+  font-weight: 500;
+}
+.stage-ring--red > span {
+  background: var(--red-paper);
+}
+
+/* ── Home's counts (S4): the card's buttons, and the rail's Home badge in
+   yellow, red and green ──────────────────────────────────────────────────── */
+/* A card's buttons sit together at its right edge, Archive the last of them. */
+.task-card-description > .task-card-actions {
+  flex: none;
+}
+.task-card-description .task-card-archive {
+  padding: 8px 10px;
+}
+.rail-badge .rail-badge--red {
+  background: var(--red);
+}
+.rail-badge .rail-badge--green {
+  background: var(--green);
+}
+/* Between two colours the badge shrinks away, then the next grows in. */
+.rail-badge .rail-badge--leaving {
+  transform: scale(0);
+  opacity: 0;
+  transition:
+    transform var(--badge-pop-close-dur) var(--badge-close-ease),
+    opacity var(--badge-fade-close-dur) var(--badge-close-ease);
+}
+.rail-badge .rail-badge--swapped:not(.rail-badge--leaving) {
+  animation: rail-badge-reappear var(--badge-pop-dur) var(--badge-pop-ease) both;
+}
+@keyframes rail-badge-reappear {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+/* Without motion the colour simply changes: nothing shrinks or grows. */
+@media (prefers-reduced-motion: reduce) {
+  .rail-badge .rail-badge--leaving {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+:root[data-motion="reduced"] .rail-badge .rail-badge--leaving {
+  transform: scale(1);
+  opacity: 1;
+}
+/* Opened with no row selected, the picker holds the focus without a ring. */
+.picker:focus-visible {
+  outline: none;
 }

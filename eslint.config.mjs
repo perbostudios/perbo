@@ -160,10 +160,13 @@ const BROWSER_BUNDLED = [
   "apps/desktop/src/renderer/**",
   "apps/desktop/src/shared/**",
   "apps/desktop/src/sample-host/**",
+  "packages/planning/src/assertion-drift.ts",
   "packages/planning/src/browser.ts",
+  "packages/planning/src/drift-report.ts",
   "packages/planning/src/errors.ts",
   "packages/planning/src/graph-edit.ts",
   "packages/planning/src/impact.ts",
+  "packages/planning/src/model-record.ts",
   "packages/planning/src/node-page-text.ts",
   "packages/planning/src/spec-text.ts",
 ];

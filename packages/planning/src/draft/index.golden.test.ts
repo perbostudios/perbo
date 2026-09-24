@@ -12,7 +12,7 @@ import {
   draftContract,
   type DraftReadOutcome,
 } from "./index.js";
-import { validDraft } from "./test-support/drafter.js";
+import { validDraft } from "../test-support/drafter.js";
 import { expectGolden } from "./test-support/golden.js";
 
 /**

@@ -4,6 +4,7 @@ import { Checkbox, LineIcon, Notice, Segmented, cx } from "../ui/index.js";
 import { planNodes, standingGlob } from "@perbo/contracts/browser";
 import { bridge, errorMessage } from "../workspace/index.js";
 import type { DraftMark } from "../../shared/contract-editing.js";
+import { INTERVIEWER_NAME } from "../../shared/protocol.js";
 import type { PageProps } from "../shell/route.js";
 import type { useContractEditing } from "../contract-editor.js";
 import { ConfirmPlan } from "./ConfirmPlan.js";
@@ -199,7 +200,7 @@ export function ExplorerPane({ workspace, navigate, editor }: PageProps & { edit
                       <small>undone</small>
                     ) : (
                       <>
-                        <small>{edit.author === "you" ? "you" : "the interview"}</small>
+                        <small>{edit.author === "you" ? "you" : INTERVIEWER_NAME}</small>
                         <button
                           type="button"
                           className="text-btn"

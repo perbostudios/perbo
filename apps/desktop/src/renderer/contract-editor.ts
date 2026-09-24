@@ -21,7 +21,8 @@ type EditorView = {
   record: Detail | undefined;
   loading: boolean;
   saving: boolean;
-  submitting: boolean;
+  /** What a submission the host has not answered yet asks for, so a screen says it from the press. */
+  submitting: EditingOperation["intent"] | null;
   error: string | null;
 };
 
@@ -34,7 +35,7 @@ function legacyEditing(models: TaskModels): LegacyEditing | undefined {
     return LegacyEditingSchema.parse({
       repoId: record.repoId ?? sessionStorage.getItem("perbo:composer-repo"),
       key: record.key ?? null, digest: record.digest ?? null,
-      form: { ...editingForm(models), draft, step: sessionStorage.getItem("perbo:composer-step") === "2" ? 2 : 1 },
+      form: { ...editingForm(models), draft },
       pending: sessionStorage.getItem("perbo:composer-job") !== null,
     });
   } catch { return undefined; }
@@ -63,7 +64,7 @@ export class ContractEditor {
     this.connection = connection;
     this.target = target;
     this.identified = identified;
-    this.value = { session: null, form: editingForm(models, detail), repoId: "repoId" in target ? target.repoId : "", record: detail, loading: true, saving: false, submitting: false, error: null };
+    this.value = { session: null, form: editingForm(models, detail), repoId: "repoId" in target ? target.repoId : "", record: detail, loading: true, saving: false, submitting: null, error: null };
   }
   getSnapshot = (): EditorView => this.value;
   subscribe = (listener: () => void): (() => void) => {
@@ -95,12 +96,12 @@ export class ContractEditor {
       if ((change.kind === "editing" && change.sessionId === this.saved?.id) ||
         (change.kind === "records" && (change.repoId === null || change.repoId === this.saved?.repoId))) void this.refresh();
     });
-    if (this.failedSave || this.value.saving || this.value.submitting) return;
+    if (this.failedSave || this.value.saving || this.value.submitting !== null) return;
     const legacy = this.target.kind === "new" ? legacyEditing(this.value.form.models) : undefined;
     const changes = this.changes;
     void this.connection.request({ kind: "editingOpen", target: this.saved ? { kind: "session", id: this.saved.id } : this.target, ...(legacy ? { legacy } : {}) })
       .then(async (result) => {
-        if (generation !== this.generation || changes !== this.changes || this.value.saving || this.value.submitting) return;
+        if (generation !== this.generation || changes !== this.changes || this.value.saving || this.value.submitting !== null) return;
         this.accept(result);
         if (legacy) for (const key of ["composer", "composer-record", "composer-repo", "composer-step", "composer-job"])
           sessionStorage.removeItem("perbo:" + key);
@@ -119,7 +120,7 @@ export class ContractEditor {
    * latched and the next Start over refused with nothing said.
    */
   private reopen = async (): Promise<void> => {
-    if (!this.saved || this.value.saving || this.value.submitting || this.failedSave) return;
+    if (!this.saved || this.value.saving || this.value.submitting !== null || this.failedSave) return;
     const generation = this.generation;
     const id = this.saved.id;
     try {
@@ -161,7 +162,7 @@ export class ContractEditor {
   private refresh(): Promise<void> {
     this.refreshRevision++;
     if (this.reading) return this.reading;
-    if (!this.saved || this.value.saving || this.value.submitting || this.failedSave) return Promise.resolve();
+    if (!this.saved || this.value.saving || this.value.submitting !== null || this.failedSave) return Promise.resolve();
     const id = this.saved.id, changes = this.changes, generation = this.generation;
     this.reading = (async () => {
       // The read is taken again while a change lands under it, and a session
@@ -175,7 +176,7 @@ export class ContractEditor {
           if (revision !== this.refreshRevision) continue;
           throw error;
         }
-        if (changes !== this.changes || generation !== this.generation || this.value.saving || this.value.submitting) return;
+        if (changes !== this.changes || generation !== this.generation || this.value.saving || this.value.submitting !== null) return;
         if (revision !== this.refreshRevision) continue;
         if (session.revision < (this.saved?.revision ?? 0)) return;
         const oldDigest = this.saved?.digest;
@@ -192,7 +193,7 @@ export class ContractEditor {
     return this.reading;
   }
   update = (patch: Partial<EditingForm>, repoId = this.value.repoId): void => {
-    if (!this.saved || this.value.submitting || this.saved.phase === "working" || this.saved.phase === "discarded") return;
+    if (!this.saved || this.value.submitting !== null || this.saved.phase === "working" || this.saved.phase === "discarded") return;
     const form = { ...this.value.form, ...patch }, change = ++this.changes;
     this.publish({ form, repoId, saving: true });
     const work = this.tail.then(async () => {
@@ -216,8 +217,8 @@ export class ContractEditor {
     void work.finally(() => saving.delete(work));
   };
   submit = (intent: EditingOperation["intent"]): void => {
-    if (this.value.submitting) return;
-    this.publish({ submitting: true, error: null });
+    if (this.value.submitting !== null) return;
+    this.publish({ submitting: intent, error: null });
     const operationId = crypto.randomUUID();
     const submission = { cancelled: false };
     this.submission = submission;
@@ -228,7 +229,7 @@ export class ContractEditor {
       this.accept(session);
       if (submission.cancelled) this.accept(await this.connection.request({ kind: "editingStop", id: session.id }));
     }).catch((error) => { this.publish({ error: message(error) }); }).finally(() => {
-      this.publish({ submitting: false });
+      this.publish({ submitting: null });
       this.submission = null;
       void this.refresh();
     });

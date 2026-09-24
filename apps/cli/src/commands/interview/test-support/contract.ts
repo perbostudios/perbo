@@ -1,16 +1,18 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it as vitestIt } from "vitest";
-import { InterviewEventSchema, type InterviewEvent } from "@perbo/contracts";
+import { EXIT_CODES, InterviewEventSchema, type InterviewEvent } from "@perbo/contracts";
 import {
   SUBMIT_REVIEW_TOOL,
   type Model,
   type ModelRequest,
   type ModelTurn,
 } from "@perbo/model";
+import { admitCommandLine } from "../../admit.js";
 import { INTERVIEW_SESSION_FILE, INTERVIEW_TOOL_NAMES } from "../index.js";
-import { listTickets, readDraftSnapshot, readTicket, storeDir } from "../../../store/tickets.js";
-import type { RecordedStreams } from "../../../test-support/streams.js";
+import { runCommandLine } from "../../../command-line/terminal.js";
+import { readDraftSnapshot, readTicket, storeDir } from "../../../store/tickets.js";
+import { recordStreams, type RecordedStreams } from "../../../test-support/streams.js";
 import { initRepository, SPAWN_TEST_TIMEOUT_MS } from "@perbo/test-support";
 
 // Every case spawns git and a fake app server, so each runs on the spawn
@@ -140,6 +142,7 @@ export function drafter(): Model {
 }
 
 export const drafted = {
+  name: "Activation email",
   outcome: "New users receive an activation email within 60 seconds of signing up.",
   acceptance_criteria: [
     {
@@ -178,7 +181,31 @@ const writeSpec = (content = SPEC): ContractStep => ({
   path: `${SPEC_FOLDER}/spec.md`,
   content,
 });
-const generate: ContractStep = { kind: "call", tool: "generate_plan", input: {} };
+/**
+ * The person's Generate plan press, made out of band (D-102): `admit
+ * --from-spec` from the spec in `folder` as it stands on disk.
+ *
+ * The interview holds no tool that drafts: it writes the spec and stops, and
+ * admitting the ticket from it is the person's own act, on the Spec pane or
+ * at the terminal. So a case that needs a plan to change admits one this way.
+ */
+export async function admitSpec(repo: string, folder = SPEC_FOLDER): Promise<void> {
+  const streams = recordStreams();
+  const code = await runCommandLine(admitCommandLine, {
+    argv: ["--repo", repo, "--from-spec", join(repo, folder, "spec.md")],
+    streams,
+    cwd: repo,
+    deps: { model: drafter() },
+  });
+  if (code !== EXIT_CODES.approve) throw new Error(`admit --from-spec: ${streams.out()}${streams.err()}`);
+}
+
+/** The sample spec written and a plan admitted from it, before the session is run. */
+export async function draftFromSpec(repo: string): Promise<void> {
+  mkdirSync(join(repo, SPEC_FOLDER), { recursive: true });
+  writeFileSync(join(repo, SPEC_FOLDER, "spec.md"), SPEC);
+  await admitSpec(repo);
+}
 
 /**
  * The suite, run against one transport.
@@ -241,12 +268,12 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
 
       it("refuses a direct write to the ticket store", async () => {
         const repo = repository(scratch());
+        await draftFromSpec(repo);
         const result = await run(repo, [
           writeSpec(),
-          generate,
           { kind: "write", path: ".perbo/tickets/PRB-1.contract.json", content: "{}" },
         ]);
-        expect(result.decisions[2]?.behavior).toBe("deny");
+        expect(result.decisions[1]?.behavior).toBe("deny");
         expect(refusals(result.streams).at(-1)?.rule).toBe("write_prohibited_path");
         expect(
           readFileSync(join(storeDir(repo, null), "tickets", "PRB-1.contract.json"), "utf8"),
@@ -868,51 +895,11 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
       });
     });
 
-    describe("generate_plan (D-102)", () => {
-      it("refuses to draft until the session has brought spec.md up to date", async () => {
-        const repo = repository(scratch());
-        mkdirSync(join(repo, SPEC_FOLDER), { recursive: true });
-        writeFileSync(join(repo, SPEC_FOLDER, "spec.md"), SPEC);
-        const result = await run(repo, [generate]);
-        expect(result.decisions[0]?.isError).toBe(true);
-        expect(result.decisions[0]?.result).toContain("spec.md");
-        expect(existsSync(join(storeDir(repo, null), "tickets"))).toBe(false);
-      });
-
-      it("runs the drafter once the spec is written, and reports the key", async () => {
-        const repo = repository(scratch());
-        const result = await run(repo, [writeSpec(), generate]);
-        const call = result.decisions[1];
-        expect(call?.isError).toBe(false);
-        expect(call?.result).toContain("PRB-1");
-        const ticket = readTicket(storeDir(repo, null), "PRB-1");
-        expect(ticket.state).toBe("plan_review");
-        expect(ticket.approved_at).toBeNull();
-        expect(ticket.admission.spec?.path).toBe(`${SPEC_FOLDER}/spec.md`);
-        expect(
-          events(result.streams).some((event) => event.type === "tool" && event.tool === "generate_plan"),
-        ).toBe(true);
-      });
-
-      it("re-drafts the same ticket rather than admitting a second one", async () => {
-        const repo = repository(scratch());
-        const result = await run(repo, [
-          writeSpec(),
-          generate,
-          writeSpec(SPEC.replace("60 seconds", "30 seconds")),
-          generate,
-        ]);
-        expect(result.decisions[3]?.result).toContain("re-drafted PRB-1");
-        expect(listTickets(storeDir(repo, null)).map((ticket) => ticket.key)).toEqual(["PRB-1"]);
-      });
-    });
-
     describe("the plan's edits (D-100)", () => {
       it("changes the plan through the validated edit path, as the interview, and undoes it", async () => {
         const repo = repository(scratch());
+        await draftFromSpec(repo);
         const result = await run(repo, [
-          writeSpec(),
-          generate,
           {
             kind: "call",
             tool: "edit_plan",
@@ -930,7 +917,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
         // An edit the person's own session made on their behalf is recorded and
         // not counted as friction (D-100).
         expect(readTicket(dir, "PRB-1").admission.edit_count).toBe(0);
-        expect(result.decisions[2]?.result).toContain("edit 1");
+        expect(result.decisions[0]?.result).toContain("edit 1");
         expect(
           events(result.streams).some((event) => event.type === "tool" && event.tool === "edit_plan"),
         ).toBe(true);
@@ -938,9 +925,8 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
 
       it("holds no way to name a plan, so it can only change the one its spec was drafted into", async () => {
         const repo = repository(scratch());
+        await draftFromSpec(repo);
         const result = await run(repo, [
-          writeSpec(),
-          generate,
           {
             kind: "call",
             tool: "edit_plan",
@@ -949,7 +935,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           { kind: "call", tool: "undo_edit", input: { key: "PRB-9", edit: 1 } },
           { kind: "call", tool: "read_plan", input: { key: "PRB-9" } },
         ]);
-        for (const at of [2, 3, 4]) {
+        for (const at of [0, 1, 2]) {
           expect(result.decisions[at]?.isError, `call ${at}`).toBe(true);
           expect(result.decisions[at]?.result, `call ${at}`).toContain("key");
         }
@@ -958,15 +944,23 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
 
       it("reads the plan back: the contract, the graph, the size and the history", async () => {
         const repo = repository(scratch());
-        const result = await run(repo, [
-          writeSpec(),
-          generate,
-          { kind: "call", tool: "read_plan", input: {} },
-        ]);
-        const read = result.decisions[2]?.result ?? "";
+        await draftFromSpec(repo);
+        const result = await run(repo, [{ kind: "call", tool: "read_plan", input: {} }]);
+        const read = result.decisions[0]?.result ?? "";
         expect(read).toContain("node_1");
         expect(read).toContain('"size"');
         expect(read).toContain('"edits"');
+      });
+    });
+
+    describe("reading the plan before there is one", () => {
+      it("answers that there is none yet rather than refusing, so the chat reports nothing", async () => {
+        const repo = repository(scratch());
+        const result = await run(repo, [{ kind: "call", tool: "read_plan", input: {} }]);
+        expect(result.decisions[0]?.isError ?? false).toBe(false);
+        expect(result.decisions[0]?.result).toContain("No plan has been drafted");
+        const told = events(result.streams).find((event) => event.type === "tool" && event.tool === "read_plan");
+        expect(told?.type === "tool" ? told.ok : null).toBe(true);
       });
     });
 
@@ -1002,14 +996,19 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
         expect(result.streams.err()).not.toContain("?");
       });
 
-      it("cannot reach admit --approve through generate_plan", async () => {
+      // The interview cannot admit a ticket, and that is not a flag it is
+      // refused but a tool it does not have: `admit --approve` is out of its
+      // reach because `admit` is. Reached for by name, so the guarantee is
+      // checked rather than assumed from the list above.
+      it("cannot draft a plan: there is no such tool to call", async () => {
         const repo = repository(scratch());
         const result = await run(repo, [
           writeSpec(),
-          { kind: "call", tool: "generate_plan", input: { approve: true } },
+          { kind: "call", tool: "generate_plan", input: {} },
+          { kind: "call", tool: "admit", input: { approve: true } },
         ]);
-        expect(result.decisions[1]?.isError).toBe(true);
-        expect(result.decisions[1]?.result).toMatch(/approve/i);
+        expect(result.decisions.map((each) => each.behavior)).toEqual(["allow", "deny", "deny"]);
+        for (const refusal of refusals(result.streams)) expect(refusal.reason).toContain("holds no");
         expect(existsSync(join(storeDir(repo, null), "tickets"))).toBe(false);
       });
     });

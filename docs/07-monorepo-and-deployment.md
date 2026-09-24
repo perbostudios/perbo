@@ -42,6 +42,7 @@ packages/<name>/
     browser.ts          the part of it that loads in a browser
     <module>.ts         a module with no interior
     <module>.test.ts    its tests
+    test-support/       fakes two or more modules share; never built, never imported by src
     <module>/           a module with an interior
       index.ts          its surface
       internal/         what only this module imports
@@ -69,7 +70,7 @@ Never rebuild the tree while a corpus or regression-suite run is in flight: the 
 
 ## Packaging and release
 
-The **desktop package** (`pnpm desktop:package`, electron-builder) bundles the full CLI and its write-guard hook into an unsigned, per-platform directory build under `apps/desktop/release`. The app runs that CLI on the Node inside Electron (`ELECTRON_RUN_AS_NODE`), so no second interpreter is shipped. Git, the provider CLIs and the repository's own package manager stay host prerequisites; signing and notarization are not part of this build.
+The **desktop package** (`pnpm desktop:package`, electron-builder) bundles the full CLI and its write-guard hook into an unsigned, per-platform directory build under `apps/desktop/release`, named Perbo with its icon (`productName`, `appId` `dev.perbo.desktop`); `pnpm desktop:run` builds it and opens it, and is how `scripts/setup-local.mjs` opens the desktop on macOS, while `pnpm desktop:start` runs Electron's own bundle, which the Dock and Finder call Electron. The app runs that CLI on the Node inside Electron (`ELECTRON_RUN_AS_NODE`), so no second interpreter is shipped. Git, the provider CLIs and the repository's own package manager stay host prerequisites; signing and notarization are not part of this build.
 
 The **CLI tarball** is what a design partner installs. `tooling/package/pack.mjs` builds the workspace, bundles the CLI to one file, stages the write-guard hook, a version manifest and a licence notice beside it, and archives the result with a published SHA-256. `.github/workflows/release.yml` is the release written for GitHub Actions: on a version tag or a manual dispatch naming one, it re-gates the exact commit (build, typecheck, test, lint), checks the tag against the CLI's own package manifest, packs the tarball, verifies the write-guard hook is inside it, attests build provenance once the repository is public, and drafts a GitHub release carrying the tarball and its digest. The tarball does not update itself: a new version is a new tarball and a message; the desktop's self-update is decided, not built ([D-046](11-open-decisions.md)).
 

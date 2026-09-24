@@ -21,7 +21,7 @@ import {
 import { UsageError } from "../usage-error.js";
 import { editCommandLine } from "./edit/index.js";
 import { buildInspectReport, inspectCommandLine, renderInspect } from "./inspect.js";
-import { LIST_JSON_SCHEMA_VERSION, ListJsonSchema, admitCommandLine, applyObservedPath, approveCommandLine, listCommandLine, loadAdmitted, statesObserved } from "./admit.js";
+import { LIST_JSON_SCHEMA_VERSION, ListJsonSchema, admitCommandLine, applyObservedPath, approveCommandLine, judgingOverlap, listCommandLine, loadAdmitted, statesObserved } from "./admit.js";
 import { PACKAGE_ROOT, REPO_ROOT } from "../test-support/paths.js";
 import { recordDelivery, syncCommandLine } from "./sync.js";
 import {
@@ -97,6 +97,7 @@ const issue = {
 const fetchIssue = () => Promise.resolve(issue);
 
 const draft = {
+  name: "Activation email",
   outcome: "New users receive an activation email within 60 seconds of signing up.",
   acceptance_criteria: [
     {
@@ -179,7 +180,7 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
 
     // The snapshot is what the person was shown, with the model that drafted it.
     const snapshot = readDraftSnapshot(dir, "PRB-1");
-    expect(snapshot?.draft?.model.prompt_version).toBe("draft_v4");
+    expect(snapshot?.draft?.model.prompt_version).toBe("draft_v5");
     expect(snapshot?.draft?.model.provider).toBe("double");
     // As returned, plus the fields the schema fills when a draft names no
     // dependency and proposes no graph.
@@ -234,6 +235,55 @@ describe("perbo admit --from: the model drafts, the person approves", () => {
     expect(criteriaOf(contract)).toHaveLength(2);
     expect(contract.level).toBe("P1");
     expect(readTicket(dir, "PRB-1").admission.criteria_source).toBe("drafted");
+  });
+
+  it("calls the ticket what the drafter named it (D-127)", async () => {
+    const repo = repository("admit-from-named");
+    const code = await runCommandLine(admitCommandLine, {
+      argv: ["--repo", repo, "--from", "o/r#412"],
+      streams: recordStreams(),
+      cwd: repo,
+      deps: { model: drafter({ ...draft, name: "Activation email" }), fetchIssue },
+    });
+    expect(code).toBe(0);
+    const dir = storeDir(repo, null);
+    expect(readTicket(dir, "PRB-1").title).toBe("Activation email");
+    expect(readContract(dir, "PRB-1").outcome).toBe(draft.outcome);
+  });
+
+  it("keeps the drafted name when --outcome overrides the drafted outcome", async () => {
+    const repo = repository("admit-from-named-override");
+    await runCommandLine(admitCommandLine, {
+      argv: ["--repo", repo, "--from", "o/r#412", "--outcome", "Typed outcome."],
+      streams: recordStreams(),
+      cwd: repo,
+      deps: { model: drafter({ ...draft, name: "Activation email" }), fetchIssue },
+    });
+    const dir = storeDir(repo, null);
+    expect(readContract(dir, "PRB-1").outcome).toBe("Typed outcome.");
+    expect(readTicket(dir, "PRB-1").title).toBe("Activation email");
+  });
+
+  it("shows the drafter each ticket in flight by its contract's outcome, not by its name", async () => {
+    const repo = repository("admit-from-board");
+    await runCommandLine(admitCommandLine, {
+      argv: ["--repo", repo, "--from", "o/r#412"],
+      streams: recordStreams(),
+      cwd: repo,
+      deps: { model: drafter({ ...draft, name: "Activation email" }), fetchIssue },
+    });
+    const model = recordingDrafter();
+    await runCommandLine(admitCommandLine, {
+      argv: ["--repo", repo, "--from", "o/r#412"],
+      streams: recordStreams(),
+      cwd: repo,
+      deps: { model, fetchIssue },
+    });
+    const user = String(model.requests[0]!.messages[0]!.content);
+    const board = /<perbo:board trust="repo"[^>]*>\n([\s\S]*?)\n<\/perbo:board>/.exec(user)?.[1];
+    expect(board).toBe(
+      `PRB-1 [plan_review, normal, draft] ${draft.outcome} — scope: ${draft.proposed_scope.paths_allowed.join(", ")}`,
+    );
   });
 
   it("turns a failure to read the issue into one sentence", async () => {
@@ -350,14 +400,18 @@ describe("perbo admit --from-file: the same draft, from a pasted issue", () => {
     expect(fromFileRequest.forceSubmit).toBe(fromRequest.forceSubmit);
     expect(fromFileRequest.forceSubmit).toBe(true);
     // And the issue block differs only in the provenance a file genuinely has:
-    // its reference, and no URL. The board is set aside: the first admission
-    // put a ticket on it, which the second call is rightly shown.
-    const withoutBoard = (content: unknown) => String(content).replace(/<perbo:board[^>]*>[\s\S]*?<\/perbo:board>\n?/, "");
-    const swapped = withoutBoard(fromFileRequest.messages[0]!.content).replace(
+    // its reference, and no URL. The board and the names are set aside: the
+    // first admission put a ticket on both, which the second call is rightly
+    // shown.
+    const withoutTheStore = (content: unknown) =>
+      String(content)
+        .replace(/<perbo:board[^>]*>[\s\S]*?<\/perbo:board>\n?/, "")
+        .replace(/<perbo:names[^>]*>[\s\S]*?<\/perbo:names>\n?/, "");
+    const swapped = withoutTheStore(fromFileRequest.messages[0]!.content).replace(
       'reference="file:SCP-150.md"',
       `reference="o/r#412" url="${issue.url}"`,
     );
-    expect(swapped).toBe(withoutBoard(fromRequest.messages[0]!.content));
+    expect(swapped).toBe(withoutTheStore(fromRequest.messages[0]!.content));
   });
 
   it("produces a candidate only: nothing is executed or admitted from it (D-072)", async () => {
@@ -805,6 +859,52 @@ describe("level is derived, not chosen", () => {
       }),
     ).toThrow(/\*\* overlaps protected \.perbo\/\*\*/);
     expect(existsSync(join(storeDir(everything, null), "tickets"))).toBe(false);
+  });
+
+  it("reads a scope glob as the seal does: a single `*` stays within one segment", () => {
+    const overlaps = (scope: string, judging: string) =>
+      judgingOverlap([scope], [{ path: judging, source: "store" }]).length > 0;
+    // A root-level `*.md` can never name a path under `.perbo/`.
+    expect(overlaps("*.md", ".perbo/**")).toBe(false);
+    // It does name a protected root-level Markdown file.
+    expect(overlaps("*.md", "SECURITY.md")).toBe(true);
+    // `**` crosses segments, so it reaches the store.
+    expect(overlaps("**/*.md", ".perbo/**")).toBe(true);
+    // A `*` segment that matches the judging segment reaches inside it...
+    expect(overlaps(".perbo*/**", ".perbo/**")).toBe(true);
+    expect(overlaps("docs/*.md", "docs/**")).toBe(true);
+    // ...and one that does not match it names somewhere else.
+    expect(overlaps("docs/*.md", "docs/adr/**")).toBe(false);
+    expect(overlaps("src/*/index.ts", "src/review/**")).toBe(true);
+    expect(overlaps("src/rev*/index.ts", "src/other/**")).toBe(false);
+    // A `**` after literal text reaches only what that text matches.
+    expect(overlaps("pack**", "packages/review/**")).toBe(true);
+    expect(overlaps("apps**", "packages/review/**")).toBe(false);
+    expect(overlaps("**", "packages/review/**")).toBe(true);
+    expect(overlaps("packages/**", "packages/review/**")).toBe(true);
+    expect(overlaps("packages/cli/**", "packages/review/**")).toBe(false);
+    // A scope that ends where the place does or before it, with no `**`,
+    // matches only paths as deep as itself: never one inside the place.
+    expect(overlaps("*", ".perbo/**")).toBe(false);
+    expect(overlaps("docs/*", "docs/adr/**")).toBe(false);
+    expect(overlaps("packages", "packages/review/**")).toBe(false);
+    expect(overlaps("packages/review", "packages/review/**")).toBe(false);
+    // One that goes deeper than the place, inside it, reaches it.
+    expect(overlaps("packages/review/prompt.ts", "packages/review/**")).toBe(true);
+    // A judging glob with no wildcard is one path, and the scope reaches it
+    // only by matching that path.
+    expect(overlaps("SECURITY.md", "SECURITY.md")).toBe(true);
+    expect(overlaps("**.ts", "SECURITY.md")).toBe(false);
+    expect(overlaps("SECURITY.md/notes", "SECURITY.md")).toBe(false);
+
+    // End to end: the founder's `*.md` scope is approved beside the store.
+    const markdown = repository("judging-root-markdown");
+    runCommandLine(admitCommandLine, {
+      argv: argvFor(markdown, "--path", "*.md", "--approve"),
+      streams: recordStreams(),
+      cwd: markdown,
+    });
+    expect(readTicket(storeDir(markdown, null), "PRB-1").approved_at).not.toBeNull();
   });
 
   it("refuses at approval a scope that reaches what judges the attempt (D-045)", () => {
@@ -1315,7 +1415,7 @@ describe("perbo list --json", () => {
     const heading = table.split("\n")[0]!;
     expect(heading).toContain("TICKET");
     expect(json.out).not.toContain(heading);
-    for (const column of ["TICKET", "STATE", "OUTCOME"]) {
+    for (const column of ["TICKET", "STATE", "NAME"]) {
       expect(table).toContain(column);
       expect(json.out).not.toContain(column);
     }

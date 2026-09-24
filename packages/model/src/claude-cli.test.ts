@@ -511,3 +511,14 @@ describe("the text a transport failure records", () => {
     expect(failure?.message).not.toContain("verdicts.ts");
   });
 }, SPAWN_TEST_TIMEOUT_MS);
+
+describe("the claude-cli transport's effort", () => {
+  it("passes the configured effort as --effort, and none where none is configured", async () => {
+    const chosen = await echoed(
+      claudeCliModel({ submitSchema: { type: "object" }, binary: echoingClaude("argv"), effort: "xhigh" }),
+    );
+    expect(chosen[chosen.indexOf("--effort") + 1]).toBe("xhigh");
+    const unset = await echoed(claudeCliModel({ submitSchema: { type: "object" }, binary: echoingClaude("argv") }));
+    expect(unset).not.toContain("--effort");
+  });
+});

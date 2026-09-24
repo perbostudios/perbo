@@ -14,12 +14,14 @@ import type { EditingSession } from "../../shared/protocol.js";
  * `safePath` refuses a symlink on the way and anything outside the checkout,
  * and it is the same string the command is then given, so what was checked is
  * what it acts on. `--session` appears only once an interview has reported
- * one, `--model` is the model this planning drafts with, and `--provider` is
- * the session it runs on, which is this planning's drafting choice.
+ * one, `--model` is the chat's model (`interviewModelFor`, D-102), and
+ * `--provider` is the session it runs on, which is this planning's drafting
+ * choice.
  */
 export function interviewArgv(
   repo: RegisteredRepository,
   session: EditingSession,
+  model: string,
 ): string[] {
   const models = TaskModelsSchema.strip().parse(session.form.models);
   if (session.specSlug === null) throw new Error(INTERVIEW_NEEDS_A_TITLE);
@@ -32,7 +34,7 @@ export function interviewArgv(
     spec,
     ...interviewSessionArgs(session, provider),
     "--model",
-    models.executorModel,
+    model,
     "--provider",
     provider,
   ];

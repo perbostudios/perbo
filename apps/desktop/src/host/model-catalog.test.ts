@@ -288,3 +288,47 @@ describe("model catalogs without inference", () => {
     ).toBe(false);
   });
 });
+
+describe("each model's name and effort levels, as its provider reports them", () => {
+  it("names a Claude model by the version its description leads with, and keeps the levels Claude Code takes", async () => {
+    const test =
+      fixture(`reply({ type: 'control_response', response: { request_id: message.request_id, subtype: 'success', response: { models: [
+      { value: 'default', resolvedModel: 'claude-opus-5[1m]', displayName: 'Default (recommended)', description: 'Opus 5 with 1M context · Best for everyday, complex tasks', supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+      { value: 'claude-fable-5-1[1m]', resolvedModel: 'claude-fable-5-1', displayName: 'Fable', description: 'Fable 5.1 · Most capable', supportedEffortLevels: ['max', 'low', 'turbo'] },
+      { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', displayName: 'Haiku', description: 'Haiku 4.5 · Fastest for quick answers' }
+    ] } } });`);
+    const result = await discoverModels("claude-cli", test.options);
+    expect(result.models).toEqual([
+      { id: "claude-opus-5[1m]", label: "Opus 5 with 1M context", description: "Best for everyday, complex tasks", isDefault: true, efforts: ["low", "medium", "high", "xhigh", "max"] },
+      // In the table's order, and a level no table names is left out.
+      { id: "claude-fable-5-1", label: "Fable 5.1", description: "Most capable", isDefault: false, efforts: ["low", "max"] },
+      { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", description: "Fastest for quick answers", isDefault: false, efforts: [] },
+    ]);
+  });
+
+  it("keeps a Claude model's display name when its description does not lead with a version", async () => {
+    const test =
+      fixture(`reply({ type: 'control_response', response: { request_id: message.request_id, subtype: 'success', response: { models: [
+      { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet', description: 'Recommended · Balanced for everyday tasks' },
+      { value: 'opus', resolvedModel: 'claude-opus-5', displayName: 'Opus', description: 'opus 5 · Deepest reasoning' }
+    ] } } });`);
+    const result = await discoverModels("claude-cli", test.options);
+    expect(result.models.map((model) => [model.label, model.description])).toEqual([
+      ["Sonnet", "Recommended · Balanced for everyday tasks"],
+      ["Opus", "opus 5 · Deepest reasoning"],
+    ]);
+  });
+
+  it("keeps the reasoning efforts Codex reports for each model", async () => {
+    const test = fixture(`if (message.id === 1) reply({ id: 1, result: {} });
+      else if (message.method === 'model/list') reply({ id: message.id, result: { data: [
+        { model: 'codex-a', displayName: 'A', supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'ultra' }, { reasoningEffort: 'minimal' }] },
+        { model: 'codex-b', displayName: 'B' }
+      ], nextCursor: null } });`);
+    const result = await discoverModels("codex-cli", test.options);
+    expect(result.models.map((model) => [model.id, model.efforts])).toEqual([
+      ["codex-a", ["low", "ultra"]],
+      ["codex-b", []],
+    ]);
+  });
+});

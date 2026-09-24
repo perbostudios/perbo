@@ -36,6 +36,11 @@ function session(paths: string[], specSlug: string | null = null): EditingSessio
     phase: "editing",
     error: null,
     operation: null,
+    drift: null,
+    change: null,
+    lastPane: null,
+    lastView: null,
+    interviewModel: null,
   });
 }
 const index = {

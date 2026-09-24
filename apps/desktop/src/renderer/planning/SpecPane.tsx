@@ -1,13 +1,16 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, InfoHint, InkIcon, Notice } from "../ui/index.js";
 import type { SpecField } from "@perbo/planning/browser";
 import { specSymbolNames } from "@perbo/planning/browser";
 import { bridge } from "../workspace/index.js";
 import { useContractEditing } from "../contract-editor.js";
+import { changeKey, textMarks } from "./change-marks.js";
 import { SpecSection } from "./SpecSection.js";
-import type { ExportedName, SpecSections, SpecView } from "../../shared/protocol.js";
+import { INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
+import type { Change, ExportedName, SpecSections, SpecView } from "../../shared/protocol.js";
 import type { PageProps } from "../shell/route.js";
+import { confirmRoute, planApproved } from "./panes.js";
 
 const Composer = lazy(() =>
   import("../tasks/Composer.js").then((module) => ({ default: module.Composer })),
@@ -92,6 +95,34 @@ export function SpecPane({
   });
   const view: SpecView | undefined = spec.data;
 
+  // Read again when the interview has been at the file.
+  //
+  // The interview writes this same spec, in its own process, so the file moves
+  // without this pane asking for anything, and a pane that read it only when
+  // it mounted would show a person watching the chat write their spec an
+  // empty pane until they left for another and came back (D-102, D-103).
+  //
+  // On this planning's own turns, and on this repository's records moving:
+  // between them they cover everything that writes this file that is not this
+  // pane. A refused save holds its own two texts and is not disturbed — the
+  // query is left alone while a conflict is open, which `conflict` guards
+  // below.
+  useEffect(
+    () =>
+      bridge.subscribe((change: Change) => {
+        const mine =
+          // Mid-turn as well as at its end: the spec is written partway
+          // through a turn, and the rest of the turn can be minutes.
+          (change.kind === "interview" && change.sessionId === sessionId) ||
+          // And a write from anywhere else — the command line, a second
+          // window, a planning discarded beside this one.
+          (change.kind === "records" && (change.repoId === null || change.repoId === editor.repoId));
+        if (!mine) return;
+        void client.invalidateQueries({ queryKey: ["spec", sessionId] });
+      }),
+    [client, sessionId, editor.repoId],
+  );
+
   // The names `@Symbol` completes from, built by the host running `perbo index`
   // over the registered repository (D-015). Nothing the renderer holds names a
   // file or a symbol; this asks for a repository and gets back a list.
@@ -132,18 +163,19 @@ export function SpecPane({
   // save is out waits for it and goes with the file that comes back.
   const inFlight = useRef(false);
   const queued = useRef(false);
+  const send = (input: { title: string; sections: SpecSections; base: SpecView }) =>
+    bridge.request({
+      kind: "specSave",
+      id: sessionId,
+      repoId: editor.repoId,
+      title: input.title,
+      sections: input.sections,
+      // What this save is against: the file as the pane last read it, so the
+      // host can tell a section this writer changed from one somebody else did.
+      base: { title: input.base.title, sections: input.base.sections },
+    });
   const save = useMutation({
-    mutationFn: (input: { title: string; sections: SpecSections; base: SpecView }) =>
-      bridge.request({
-        kind: "specSave",
-        id: sessionId,
-        repoId: editor.repoId,
-        title: input.title,
-        sections: input.sections,
-        // What this save is against: the file as the pane last read it, so the
-        // host can tell a section this writer changed from one somebody else did.
-        base: { title: input.base.title, sections: input.base.sections },
-      }),
+    mutationFn: send,
     onSuccess: (reply, sent) => {
       setFailure(null);
       // The file is what the pane shows, refused or not: after a refusal it is
@@ -203,7 +235,23 @@ export function SpecPane({
     // the queued save reading that state — and clear what was just chosen.
     const stamp = JSON.stringify([view.title, view.sections]);
     if (seen.current === stamp) return;
+    const first = seen.current === null;
     seen.current = stamp;
+    // The fields are there before the first read lands. What was typed into
+    // one the file leaves empty stands, since there is nothing of the file's
+    // under it; what was typed over one the file fills goes, because the pane
+    // never showed that text and saving against it would replace it unseen.
+    if (first) {
+      if (view.title !== "") setTitle(null);
+      setEdited((current) =>
+        Object.fromEntries(
+          Object.entries(current).filter(
+            ([field]) => view.sections[field as keyof SpecSections] === "",
+          ),
+        ),
+      );
+      return;
+    }
     setTitle(null);
     setEdited({});
     setConflict(null);
@@ -211,6 +259,25 @@ export function SpecPane({
 
   const sections: SpecSections = { ...(view?.sections ?? EMPTY), ...edited };
   const shownTitle = title ?? view?.title ?? "";
+  // The last change to the spec, as marks placed in each section's after-text
+  // (D-128). Diffed once per change
+  // rather than per render or per session read: a keystroke in one section
+  // re-renders the others, a re-read hands over a fresh object for the same
+  // change, and a diff of a long section is not free. Shown on a section only
+  // while its text is the change's after-text — typed into since, the marks
+  // would fall on the wrong characters, and the save that follows is a change
+  // of its own.
+  const change = editor.session?.change?.spec ?? null;
+  const changed = changeKey(editor.session?.change ?? null);
+  const marks = useMemo(
+    () =>
+      change === null
+        ? null
+        : Object.fromEntries(
+            SECTIONS.map(([field]) => [field, textMarks(change.before[field], change.after[field])]),
+          ),
+    [changed],
+  );
   /**
    * The save the shown text calls for, or null where the file already says it.
    *
@@ -239,6 +306,8 @@ export function SpecPane({
   const latest = useRef(pending);
   latest.current = pending;
   const starting = useRef(false);
+  /** Whether the draft in flight is a re-draft this pane asked for. */
+  const redrafting = useRef(false);
   const commit = (over?: Partial<SpecSections>): void => {
     // Both texts are on screen and neither has been chosen: writing now would
     // pick one of them without being asked, which is the whole thing this is
@@ -263,6 +332,21 @@ export function SpecPane({
     queued.current = false;
     commit();
   });
+  // What is typed and not yet saved goes to the file as the pane goes away:
+  // leaving planning from inside a field, by a shortcut, never blurs it, and a
+  // title typed there is a planning somebody put something into
+  // (D-129). Sent straight over the bridge rather
+  // than through the mutation, which reaches its request only after a
+  // microtask: this way it is ahead of the leave's own read of the planning,
+  // which App sends in the same commit. Nothing is sent over an open conflict,
+  // or beside a save already out, which is ahead of that read in its turn.
+  const leftUnsaved = useRef<() => void>(() => undefined);
+  leftUnsaved.current = () => {
+    if (conflict !== null || inFlight.current || starting.current) return;
+    const wanted = pending();
+    if (wanted !== null) void send(wanted).catch(() => undefined);
+  };
+  useEffect(() => () => leftUnsaved.current(), []);
 
   /** One refused section settled, with the text the person chose for it. */
   const settle = (field: SpecField, text: string): void => {
@@ -288,25 +372,50 @@ export function SpecPane({
 
   const key = editor.session?.key ?? null;
   const written = Boolean(view?.slug);
+  // Whether the interview drafted what is on this pane, which changes what the
+  // button beside it has to say: a spec the person wrote themselves needs no
+  // invitation to read it. Taken from the chat's own note rather than guessed
+  // at, so the two surfaces say the same thing about the same moment (D-102).
+  const drafted = (editor.session?.conversation ?? []).some(
+    (entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC,
+  );
   const busy =
-    editor.submitting || editor.session?.phase === "working" || save.isPending;
-  // A group of questions still in front of the person, or a turn the interview
-  // is still taking. Drafting over either turns the spec into a plan while the
-  // thing that would have changed it is still being asked — the answers land
-  // in a spec the contract was already drafted from.
+    editor.submitting !== null || editor.session?.phase === "working" || save.isPending;
+  // A group of questions still in front of the person. Drafting over one turns
+  // the spec into a plan while the thing that would have changed it is still
+  // being asked — the answers land in a spec the contract was already drafted
+  // from.
   const asked = editor.session?.asking ?? null;
+  // A turn the interview is still taking, which is not a reason to withhold
+  // the press: the press ends the turn and drafts from what it wrote, so one
+  // press does both and nobody has to stop the interview by hand first. It is
+  // what the sentence under the button says instead.
   const midTurn = (workspace.working ?? []).includes(sessionId);
-  // The drafter reads the file, so a draft waits for a title and an outcome to
-  // be in it: `parseSpec` refuses a spec without either.
-  const ready =
-    Boolean(view?.slug) &&
-    (view?.sections.outcome.trim().length ?? 0) > 0 &&
-    asked === null &&
-    !midTurn;
+  // The drafter reads the file, so the press is offered once a title and an
+  // outcome are in it: `parseSpec` refuses a spec without either.
+  const stated = Boolean(view?.slug) && (view?.sections.outcome.trim().length ?? 0) > 0;
+  const ready = stated && asked === null;
+  // Why a plan cannot be drafted from this stated spec yet, or null where it
+  // can. One sentence, read under this pane's own button, which is held while
+  // it says anything: this is the one press that turns a spec into a plan
+  // (D-102), so a person who cannot make it reads why before they reach for it
+  // rather than after.
+  const notReady = ready
+    ? null
+    : "Answer the chat's questions first — its answers change the spec this drafts from.";
+  // What the drafter refused the last press with, said where the press was
+  // made: the job runs on the working screen, and the pane it hands back to is
+  // the only place a person looks for why no plan came of it.
+  const operation = editor.session?.operation ?? null;
+  const refusedDraft =
+    operation?.state === "failed" && (operation.intent === "generate" || operation.intent === "startOver")
+      ? (editor.session?.error ?? null)
+      : null;
   // What is shown reaches the file before the drafter reads it: every save
   // the text calls for is awaited, including one a section left meanwhile
   // asks for, and a save that fails or is refused leaves the draft unsent.
   const start = async (intent: "generate" | "startOver"): Promise<void> => {
+    setFailure(null);
     starting.current = true;
     inFlight.current = true;
     try {
@@ -332,14 +441,26 @@ export function SpecPane({
       starting.current = false;
       inFlight.current = false;
     }
+    // Drafting again lands on the plan, as drafting the first one does.
+    // Planning's own landing fires when the plan changes pane, and a re-draft
+    // that keeps its shape changes none, so this says where it went.
+    if (intent === "startOver") redrafting.current = true;
     editor.submit(intent);
   };
+
+  useEffect(() => {
+    if (!redrafting.current) return;
+    const settled = editor.session;
+    if (settled?.phase !== "ready" || settled.key === null) return;
+    redrafting.current = false;
+    navigate({ page: "planning", sessionId, pane: settled.nodes > 0 ? "graph" : "criteria" });
+  }, [editor.session, navigate, sessionId]);
 
   // While a command runs the Composer takes the pane, as it does for the
   // contract steps: one thing is happening and it says what. It is the same
   // element either way and is never unmounted, because it is what lands on the
   // drafted contract when the job settles.
-  const working = editor.submitting || editor.session?.phase === "working";
+  const working = editor.submitting !== null || editor.session?.phase === "working";
 
   // Every name the spec refers to that the index does not hold, counted over
   // the whole document because the head speaks for the whole document.
@@ -402,12 +523,13 @@ export function SpecPane({
             )}
           </div>
           {failure !== null && <Notice tone="danger">{failure}</Notice>}
+          {refusedDraft !== null && <Notice tone="danger">{refusedDraft}</Notice>}
           {conflict !== null && (
             <Notice tone="warning">
               <p>
                 <strong>Nothing was saved.</strong> {listOf(conflict.map((field) => LABELS[field]))}{" "}
                 {conflict.length === 1 ? "was" : "were"} written in the file since this pane read it
-                — by the interview, or in another window. Both texts are here: settle each one and
+                — by the chat, or in another window. Both texts are here: settle each one and
                 the save goes again. Nothing else in the spec is written until you do.
               </p>
               <ul className="spec-conflicts">
@@ -468,69 +590,84 @@ export function SpecPane({
                 hint={hint}
                 value={sections[field]}
                 symbols={symbols}
+                nodes={
+                  field === "requirements"
+                    ? new Map(
+                        (view?.requirements ?? []).flatMap((requirement) =>
+                          requirement.id === null ? [] : [[requirement.id, requirement.nodes]],
+                        ),
+                      )
+                    : undefined
+                }
+                marks={
+                  change !== null && marks !== null && sections[field] === change.after[field]
+                    ? (marks[field] ?? null)
+                    : null
+                }
                 onChange={(value) => setEdited((current) => ({ ...current, [field]: value }))}
                 onCommit={(text) => commit(text === undefined ? undefined : { [field]: text })}
               >
-                {field === "requirements" &&
-                  (view?.requirements ?? []).some(
-                    (requirement) => requirement.nodes.length > 0,
-                  ) && (
-                    // Only once there is a plan for them to have landed in. The
-                    // requirements themselves are read in the box above, so what
-                    // this adds is where each one went — and before a draft that
-                    // is "none yet" on every line, which is a column of nothing
-                    // under the thing it is about.
-                    <ul className="spec-requirements" aria-label="Requirements">
-                      {(view?.requirements ?? []).map((requirement, index) => (
-                        <li key={requirement.id ?? index}>
-                          <span className="mono">{requirement.id ?? "—"}</span>
-                          <span className="small muted">
-                            {requirement.nodes.length > 0
-                              ? requirement.nodes.join(", ")
-                              : "none yet"}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
               </SpecSection>
             ))}
           </div>
-          <div className="spec-generate">
-            {key === null ? (
-              <>
-                <Button variant="primary" disabled={!ready || busy} onClick={() => void start("generate")}>
-                  Generate plan
-                </Button>
-                <span className="small muted">
-                  {ready
-                    ? "Press once. The drafter turns the spec into a contract and an execution graph."
-                    : asked !== null
-                      ? "Answer the interview's questions first — its answers change the spec this drafts from."
-                      : midTurn
-                        ? "The interview is still talking."
-                        : "Available once the spec has a title and an outcome."}
-                </span>
-              </>
-            ) : (
-              <>
-                <Button onClick={() => navigate({ page: "task", repoId: editor.repoId, key, view: "contract" })}>
-                  Open the plan
-                </Button>
-                <button
-                  className="text-button small"
-                  disabled={busy}
-                  onClick={() => setDialog(true)}
-                >
-                  Start over from the spec…
-                </button>
-                <span className="small muted">
-                  After the first draft the plan changes by editing it. Starting over drafts it again.
-                </span>
-              </>
-            )}
-          </div>
+          {(key !== null || stated) && (
+            <div className="spec-generate">
+              {key === null ? (
+                <>
+                  <Button variant="primary" disabled={!ready || busy} onClick={() => void start("generate")}>
+                    Generate plan
+                  </Button>
+                  <span className="small muted">
+                    {notReady ??
+                      (midTurn
+                        ? "The chat is still talking. Pressing stops it and drafts the plan from the spec as it stands."
+                        : drafted
+                          ? "The chat has drafted the spec: read it and change what you want first. Press once, and the drafter turns it into a contract and an execution graph."
+                          : "Press once. The drafter turns the spec into a contract and an execution graph.")}
+                  </span>
+                </>
+              ) : (
+                <>
+                  {/* One button, whatever the spec has done. What the chat
+                      changes it is held to writing here in the same turn
+                      (D-128), so nothing
+                      it did needs reporting. A person's own edit is not held to
+                      it, so the way to the contract reads the plan against this
+                      spec first, as every way there does. And it waits for a
+                      turn in flight, as the Graph's way onward does: a reading
+                      made mid-turn is of half a plan, and the turn's own end
+                      is what carries the verdict forward. */}
+                  <Button
+                    disabled={midTurn}
+                    onClick={() =>
+                      navigate(
+                        confirmRoute({
+                          repoId: editor.repoId,
+                          key,
+                          sessionId,
+                          approved: planApproved(workspace, editor.repoId, key),
+                        }),
+                      )
+                    }
+                  >
+                    Open the plan
+                  </Button>
+                  <button
+                    className="text-button small"
+                    disabled={busy}
+                    onClick={() => setDialog(true)}
+                  >
+                    Start over from the spec…
+                  </button>
+                  <span className="small muted">
+                    {midTurn
+                      ? "Waiting for the chat to finish this turn…"
+                      : "After the first draft the plan changes by editing it. Starting over drafts it again."}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
         </>
       )}
       {/* The composer stays mounted whatever is on screen — it is what lands
@@ -544,6 +681,11 @@ export function SpecPane({
             workspace={workspace}
             navigate={navigate}
             target={{ kind: "session", id: sessionId }}
+            // This one is here for the working screen, not for its own sake.
+            // Planning mode decides where a drafted plan lands — it has a pane
+            // for one — so this must not walk off to the ticket the moment the
+            // job settles.
+            plan
           />
         </Suspense>
       </div>

@@ -310,7 +310,7 @@ const admitTicket = tool({
     const defaults = defaultAdmission(targetOf(context));
     const admission: DraftAdmission = {
       ...defaults,
-      title: input.outcome ?? null,
+      outcome: input.outcome ?? null,
       criteria: [...(input.criteria ?? [])],
       paths: [...(input.paths ?? [])],
       // Appended to the command's own defaults, as a typed `--prohibit` or

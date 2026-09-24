@@ -1,5 +1,4 @@
-import type { PlanningPane } from "../planning/panes.js";
-import type { Snapshot } from "../../shared/protocol.js";
+import type { PlanningPane, Snapshot } from "../../shared/protocol.js";
 
 /** Where the app can be, and what every page is handed. The shell owns both; a feature reads them from here. */
 export type TaskView =
@@ -10,6 +9,7 @@ export type TaskView =
   | "review"
   | "merge"
   | "decisions"
+  | "stopped"
   | "called-off"
   | "complete"
   | "explorer";
@@ -25,7 +25,16 @@ export type Route =
   | {
       page: "home" | "archive" | "setup" | "settings" | SettingsSection;
     }
-  | { page: "planning"; sessionId: string; pane: PlanningPane }
+  /**
+   * A repository's question page, "What do you want to build?", where a
+   * planning starts (D-131).
+   */
+  | { page: "ask"; repoId: string }
+  /**
+   * A pane of a planning, or null for the planning itself, which opens where
+   * it was left (D-130).
+   */
+  | { page: "planning"; sessionId: string; pane: PlanningPane | null }
   | {
       page: "task";
       repoId: string;
@@ -35,5 +44,10 @@ export type Route =
     };
 export interface PageProps {
   workspace: Snapshot;
-  navigate: (route: Route) => void;
+  /**
+   * Go to a route. `replace` puts it in place of the route being left rather
+   * than after it, for a route that only ever sends the person on: Back then
+   * skips it rather than returning to it and being sent on again.
+   */
+  navigate: (route: Route, options?: { replace?: boolean }) => void;
 }

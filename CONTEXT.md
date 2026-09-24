@@ -79,12 +79,12 @@ _Avoid_: Prohibited path (that names code), non-goal.
 The desktop surface Create opens for one piece of work in one repository, where its spec, scope and execution graph are prepared for approval.
 _Avoid_: Planning workspace (workspace already names other things here), IDE.
 
-**Interview**:
-The conversation in which a person's own agent session questions them about a piece of work and writes its spec. The desktop shows it as a chat in planning mode.
-_Avoid_: Grilling (the method it follows), terminal session.
+**Chat**:
+The conversation in planning mode in which a person's own agent session, speaking as the Architect, questions them about a piece of work and writes its spec. `perbo interview` runs it.
+_Avoid_: Interview (the command's name, not the session's), grilling (the method it follows), terminal session.
 
 **Spec**:
-A document in the repository stating the intent of one Ticket, from which that Ticket's contract is drafted. Its folder also holds a page per node, generated from the spec and the graph, so that a node reads on its own.
+A document in the repository stating the intent of one piece of work, from which a Ticket's contract is drafted. It is written before there is a Ticket, and a spec that no Ticket and no planning names is work whose plan is still to come. Its folder also holds a page per node, generated from the spec and the graph, so that a node reads on its own.
 _Avoid_: Epic, epic spec, PRD, issue (an issue lives in an external tracker).
 
 **Execution graph**:
@@ -102,6 +102,10 @@ _Avoid_: Finding (findings come from review), probe.
 **Stale spec**:
 A spec edited after its Ticket was approved, or one that names code which no longer exists.
 _Avoid_: Broken spec.
+
+**Drift**:
+Where a plan's promise and its spec's words have parted after a hand edit, or a chat turn that wrote the spec and left the plan; read by a model on the way to the contract, and each difference put to the person as a problem; advice, never a gate ([D-128](docs/11-open-decisions.md)).
+_Avoid_: Finding (findings come from review), Stale spec (bytes after approval), Impact warning (scope, not promise), Divergence.
 
 **Size estimate**:
 A description of how big a Ticket's execution graph is, from S to XL, derived from its nodes, criteria and scope. It predicts neither cost nor time.
