@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -120,6 +120,36 @@ describe("a park an earlier process was killed in the middle of", () => {
       expect.objectContaining({ reason: "provider_reset", until: "2026-08-27T05:00:00.000Z" }),
       null,
     ]);
+  });
+
+  it("is not waited out for a record whose cost basis this version does not know", async () => {
+    const { dir, config } = run();
+    const plan = contract();
+    parked(dir, plan.ticket_id);
+    // The same record, its attempt priced on a basis no version here names.
+    const path = join(dir, "state", `${plan.ticket_id}.attempts.json`);
+    const record = JSON.parse(readFileSync(path, "utf8")) as { attempts: object[] };
+    record.attempts = record.attempts.map((attempt) => ({
+      ...attempt,
+      usage: { cost_micros: 700_000, cost_basis: "a_basis_from_elsewhere" },
+    }));
+    writeFileSync(path, JSON.stringify(record));
+    const waits: number[] = [];
+
+    await expect(
+      start({
+        config,
+        contract: plan,
+        lock: fakeLock(),
+        limits: limits(4 * 60 * 60 * 1000),
+        clock: () => NOW,
+        wait: async (ms) => {
+          waits.push(ms);
+        },
+        progress: () => undefined,
+      }),
+    ).rejects.toThrow(/att_0000000000000001.*a_basis_from_elsewhere/);
+    expect(waits).toEqual([]);
   });
 
   it("is not waited out past a bound this configuration no longer allows", async () => {

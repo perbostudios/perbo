@@ -253,12 +253,17 @@ describe("a writer that is not the first word of the line", () => {
     for (const command of [
       `pnpm exec sh -c 'pnpm test | tee ${ROOT}/report.txt'`,
       `env -i tee ${ROOT}/x`,
-      `xargs -I{} install {} ${ROOT}/bin/`,
+      `xargs -I{} install -- {} ${ROOT}/bin/`,
       "nice -n 5 rsync -a src/ bin/backup/",
       `cd src && tee out.log`,
     ]) {
       expect(hits(command), command).toEqual([]);
     }
+  });
+
+  it("refuses the words xargs supplies where install still reads options", () => {
+    const command = `xargs -I{} install {} ${ROOT}/bin/`;
+    expect(writes(command).length, command).toBeGreaterThan(0);
   });
 });
 

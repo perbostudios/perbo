@@ -560,7 +560,8 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
           'cat "$(command git log --output=CONTEXT.md)"',
           'cat "$(nice git log --output=CONTEXT.md)"',
           'cat "$(exec git log --output=CONTEXT.md)"',
-          'cat "$(xargs git log --output=CONTEXT.md)"',
+          // `--` keeps the words xargs appends paths; without it one could be an option.
+          'cat "$(xargs git log --output=CONTEXT.md --)"',
           'cat "$( (git log --output=CONTEXT.md) )"',
           'cat "$({ git log --output=CONTEXT.md; })"',
           'cat "$(VAR=1 git log --output=CONTEXT.md)"',

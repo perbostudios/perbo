@@ -48,29 +48,74 @@ const FROM_STANDARD_INPUT = [
  * The same wrapper where the line does spell the destination: `-I`, `-i` and
  * `-J` substitute the words into operands already written down, and `-t` names
  * a directory the operands are written into, so what arrives on standard input
- * is a source.
+ * is a source — once a `--` or a prefix keeps it from being read as an option.
  */
 const DESTINATION_ON_THE_LINE = [
-  "xargs -I{} cp {} out",
-  "xargs -i cp {} out",
-  "xargs -J % cp % out",
-  "xargs -0 -n1 cp -t out",
-  "xargs --replace=% mv % out",
+  "xargs -I{} cp -- {} out",
+  "xargs -I{} cp ./{} out",
+  "xargs -i cp -- {} out",
+  "xargs -J % cp -- % out",
+  "xargs -0 -n1 cp -t out --",
+  "xargs --replace=% mv -- % out",
   // A substituting wrapper whose operands carry no placeholder runs the line as
   // it stands, once per word it reads.
   "xargs -I{} rm sub/generated",
   "xargs grep TODO",
   "xargs ls",
-  "xargs curl -o out/payload https://example.com/x",
+  "xargs curl -o out/payload https://example.com/x --",
   // `{}` is what xargs is most often told to substitute, and a quoted tilde is
   // handed over as written.
+  "find . -print0 | xargs -0 -J {} cp -- {} out",
+  "xargs -J {} cp -- {} out",
+  "xargs -J '~' cp -- a '~' b",
+  // The placeholder among a writer's sources, with the destination on the line.
+  "xargs -J % cp -- a % out",
+  "xargs -J % cp -t out -- %",
+];
+
+/**
+ * The same lines where the words the wrapper supplies stand where the writer
+ * still reads options: a placeholder that begins a word before `--`, or words
+ * appended to a line with no `--`. What the wrapper reads is whatever its input
+ * holds, and a word in it that begins with `-` is an option: after
+ * `touch -- 'sub/-t..'`, `ls sub | xargs -I{} cp {} out` runs GNU `cp -t.. out`.
+ */
+const SUPPLIED_WHERE_OPTIONS_ARE_READ = [
+  "touch -- 'sub/-t..'; ls sub | xargs -I{} cp {} out",
+  "xargs -I{} cp {} out",
+  "xargs -i cp {} out",
+  "xargs -J % cp % out",
+  "xargs -0 -n1 cp -t out",
+  "xargs --replace=% mv % out",
+  "xargs curl -o out/payload https://example.com/x",
   "find . -print0 | xargs -0 -J {} cp {} out",
   "xargs -J {} cp {} out",
   "xargs -J '~' cp a '~' b",
-  // The placeholder among a writer's sources, with the destination on the line.
   "xargs -J % cp a % out",
   "xargs -J % cp -t out %",
+  "xargs -I{} ln {} links/",
+  "xargs ln -t links",
+  // A word that begins with the placeholder begins with what the input holds.
+  "xargs -I{} cp {}.bak out",
+  // The option a word supplies can make the command a writer at all: `-i`
+  // makes `sed` one, and `-C` gives an extraction its directory.
+  "xargs -I{} sed -n p {} src/a.ts",
+  "xargs -I{} tar -xf a.tar {}",
 ];
+
+/**
+ * `dd` reads no options, and an `of=` among its operands is where it writes,
+ * `--` or not: a word the wrapper supplies may be one.
+ */
+const SUPPLIED_AMONG_DD_OPERANDS = [
+  "echo of=/etc/x | xargs dd if=/dev/zero count=1",
+  "echo of=/etc/x | xargs dd if=/dev/zero count=1 --",
+  "xargs -I{} dd if=/dev/zero {} count=1",
+  "xargs -I{} dd if=/dev/zero -- {} count=1",
+];
+
+/** A supplied word `dd` reads as a file it reads from. */
+const SUPPLIED_AS_DD_INPUT = ["xargs -I{} dd if={} of=out/copy"];
 
 /**
  * The placeholder standing where the destination goes. Every operand of an
@@ -182,6 +227,26 @@ describe("a writer whose destination is on the line", () => {
       expect(decision(command), command).toBe("allowed");
     });
   }
+
+  for (const command of SUPPLIED_WHERE_OPTIONS_ARE_READ) {
+    it(`refuses ${command}, where the words xargs supplies may be options`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("still reads options");
+    });
+  }
+
+  for (const command of SUPPLIED_AMONG_DD_OPERANDS) {
+    it(`refuses ${command}, where a word xargs supplies may be an of=`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("reads an of= among its operands");
+    });
+  }
+
+  for (const command of SUPPLIED_AS_DD_INPUT) {
+    it(`allows ${command}`, () => {
+      expect(decision(command), command).toBe("allowed");
+    });
+  }
 });
 
 describe("a writer whose destination is the placeholder", () => {
@@ -191,6 +256,198 @@ describe("a writer whose destination is the placeholder", () => {
       // The refusal names the wrapper that supplies the word, because the line
       // the agent typed spells no path for it to recognise.
       expect(sentence(command), command).toContain("xargs");
+    });
+  }
+});
+
+/**
+ * A placeholder inside a command line a nested shell runs, or inside a `find`
+ * body: the wrapper puts its input into a line this guard reads as written, so
+ * what that line runs cannot be read, and the refusal names the wrapper.
+ */
+const SUBSTITUTED_INTO_A_NESTED_COMMAND = [
+  "echo /etc/passwd | xargs -I{} sh -c 'rm {}'",
+  "echo 'rm /etc/x' | xargs -J % sh -c %",
+  "echo 'rm /etc/x' | xargs -J % pnpm exec -c %",
+  "xargs -I{} bash -c 'cp a {}'",
+  "xargs -I{} npx -c 'rm {}'",
+  "xargs -I{} pnpm exec --call='rm {}'",
+  "echo /etc/passwd | xargs -I{} find . -exec rm {} \\;",
+  "echo /etc/passwd | xargs -I{} find . -exec sh -c 'rm {}' \\;",
+];
+
+/** The same shapes where the input stays out of the nested line. */
+const OUTSIDE_THE_NESTED_COMMAND = [
+  "xargs -I{} sh -c 'rm sub/x'",
+  // BSD `-J` replaces only a whole operand, so `rm %` runs as written.
+  "xargs -J % sh -c 'rm %'",
+  // The input is `-name`'s pattern, and reaches no body. A `find` the input
+  // is appended to is in find.test.ts: appended words can add a body.
+  "xargs -I{} find . -name {} -exec rm sub/x \\;",
+];
+
+describe("a placeholder substituted into a nested command", () => {
+  for (const command of SUBSTITUTED_INTO_A_NESTED_COMMAND) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("xargs");
+    });
+  }
+
+  for (const command of OUTSIDE_THE_NESTED_COMMAND) {
+    it(`allows ${command}`, () => {
+      expect(decision(command), command).toBe("allowed");
+    });
+  }
+});
+
+/**
+ * The destinations a line reaches outside the writer table: a link, a `git`
+ * directory, the file `time -o` writes and the directory `sudo -D` runs in.
+ * Each is judged where the line spells it and refused where a wrapper in front
+ * fills it from its standard input, as a writer's operand is.
+ */
+const BEYOND_THE_WRITER_TABLE = [
+  "echo /etc/x | xargs ln -s a",
+  "echo /etc/x | xargs ln a",
+  "xargs ln -s -t links",
+  "xargs -I{} ln -s {} links/x",
+  "xargs -I{} ln -s a {}",
+  "echo /etc | xargs -J % git -C % clean -fdx",
+  "xargs -I{} git -C {} commit -m x",
+  "echo /etc/repo | xargs git init",
+  "echo https://example.com/x.git | xargs git clone",
+  "echo /etc/tree | xargs git worktree add",
+  "time -o /etc/x ls",
+  "time --output=/etc/x ls",
+  "xargs -I{} time -o {} ls",
+  "echo /etc/x | xargs -J % time -o % ls",
+  "sudo -D /etc rm x",
+  "sudo --chdir=/etc rm x",
+  "xargs -I{} sudo -D {} rm x",
+];
+
+/** The same shapes where what the line writes is inside, or is only read. */
+const WITHIN_OR_READ = [
+  // A hard link's target is read, not written through.
+  "xargs -I{} ln -- {} links/",
+  "xargs ln -t links --",
+  "xargs -J % git -C % log",
+  "xargs git clean -fdx",
+  "time -o out/timing.txt ls",
+  "sudo -D src rm x",
+];
+
+describe("a destination the writer table does not name", () => {
+  for (const command of BEYOND_THE_WRITER_TABLE) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+    });
+  }
+
+  for (const command of WITHIN_OR_READ) {
+    it(`allows ${command}`, () => {
+      expect(decision(command), command).toBe("allowed");
+    });
+  }
+
+  it("names the wrapper that fills one from its standard input", () => {
+    for (const command of BEYOND_THE_WRITER_TABLE.filter((line) => line.includes("xargs"))) {
+      expect(sentence(command), command).toContain("xargs");
+    }
+  });
+});
+
+/**
+ * `sudo -R` runs the command under another root directory, where every path
+ * the command names resolves somewhere this guard does not read — inside the
+ * worktree or not.
+ */
+const UNDER_ANOTHER_ROOT = [
+  "sudo -R /etc rm x",
+  "sudo --chroot=/etc rm x",
+  "sudo -nR /etc rm x",
+  "sudo -R src rm x",
+];
+
+describe("a command run under another root directory", () => {
+  for (const command of UNDER_ANOTHER_ROOT) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("under another root directory");
+    });
+  }
+});
+
+/**
+ * One `xargs` behind another whose input reaches it: the command the inner one
+ * runs is built from two inputs, and the refusal names the outer wrapper.
+ */
+const BEHIND_ANOTHER_WRAPPER = [
+  "xargs -I{} xargs -a list -I@ cp a @ {}",
+  "xargs -J % xargs -I@ cp @ %",
+  "echo /etc | xargs xargs -I@ cp @ out",
+];
+
+describe("an xargs behind another", () => {
+  for (const command of BEHIND_ANOTHER_WRAPPER) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("stands behind xargs");
+    });
+  }
+
+  it("reads the inner one where the outer one's input reaches nothing", () => {
+    expect(decision("xargs -I{} xargs cp -t out --")).toBe("allowed");
+    // Without the `--`, the inner one appends its input where `cp` reads options.
+    expect(sentence("xargs -I{} xargs cp -t out")).toContain("still reads options");
+    expect(sentence("xargs -I{} xargs cp -t out")).not.toContain("stands behind xargs");
+  });
+});
+
+/**
+ * A verb that writes through one of its options — `git diff --output`,
+ * `git format-patch -o`, `rg --pre`, which runs a program — behind a wrapper
+ * that supplies it words. Those words land where the verb still reads its
+ * options, so one can be that option: each is refused unless `--` keeps them
+ * paths. A relative `--output` under a `-C` the placeholder fills lands where
+ * the supplied words say, and a `--pre` program the placeholder stands in is
+ * not one the line names.
+ */
+const OPTION_A_WRAPPER_SUPPLIES = [
+  "git ls-files | xargs git diff",
+  "xargs git log --oneline",
+  "xargs -I{} git show {}",
+  "xargs git format-patch",
+  "git ls-files | xargs rg foo",
+  "xargs -I{} rg foo {}",
+  "xargs -J % git -C % diff --output=x.diff",
+  "xargs -J % git -C % format-patch -o patches HEAD~1",
+  "xargs -I{} rg --pre ./{} foo -- src",
+];
+
+/** The same, with `--` keeping the supplied words paths, or with no wrapper in front. */
+const OPTION_THE_LINE_SPELLS = [
+  "git ls-files | xargs git diff --",
+  "xargs -I{} git show -- {}",
+  "git ls-files | xargs rg foo --",
+  "xargs -I{} rg foo -- {}",
+  "xargs -J % git -C % log",
+  "git -C src diff --output=x.diff",
+  "rg --pre cat foo src",
+];
+
+describe("a word a wrapper supplies where a verb writes through an option", () => {
+  for (const command of OPTION_A_WRAPPER_SUPPLIES) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("xargs");
+    });
+  }
+
+  for (const command of OPTION_THE_LINE_SPELLS) {
+    it(`allows ${command}`, () => {
+      expect(decision(command), command).toBe("allowed");
     });
   }
 });

@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { GH_NOT_LOGGED_IN } from "@perbo/contracts";
 import type { ModelProvider } from "@perbo/model";
+import { createGh, createGit } from "@perbo/workspace";
 import {
   readGithubCredential,
   type GithubCredentialReading,
@@ -14,7 +15,9 @@ import {
  * trace with the ticket left in `provisioning`.
  *
  * Every check is a fixed argv against a fixed binary. Nothing here takes a
- * value from a model or from repository content.
+ * value from a model or from repository content. `git` and `gh` are asked
+ * through `@perbo/workspace`'s repository module, which starts every one of
+ * their processes; the other binaries are asked here.
  */
 
 export interface PreflightFinding {
@@ -105,6 +108,13 @@ function version(
     return { present: false, version: null };
   }
 }
+
+/** The repository module's answer, as a tool this check reports. */
+const asTool = (line: string | null): PreflightTool =>
+  line === null ? { present: false, version: null } : { present: true, version: line };
+
+/** How long a `--version` may take before the binary counts as missing. */
+const VERSION_TIMEOUT_MS = 30_000;
 
 /** D-106: the earliest Codex build the runner's subagent role files and per-thread guard are held to. */
 const CODEX_MIN_VERSION = "0.145.0";
@@ -246,7 +256,7 @@ export function preflight(request: PreflightRequest): PreflightResult {
   }
 
   if (request.needsGit ?? true) {
-    tools.git = version("git", env);
+    tools.git = asTool(createGit({ environment: () => env }).versionSync({ timeoutMs: VERSION_TIMEOUT_MS }));
     if (!tools.git.present) {
       findings.push({
         severity: "blocking",
@@ -352,7 +362,7 @@ export function preflight(request: PreflightRequest): PreflightResult {
   // `gh` is checked whether or not this run publishes: `sync`, `stops` and
   // the next `--publish` all need it, and a partner's first hour should hear
   // about it once, as a warning, rather than at the first pull request.
-  tools.gh = version("gh", env);
+  tools.gh = asTool(createGh({ environment: () => env }).versionSync({ timeoutMs: VERSION_TIMEOUT_MS }));
   const ghSeverity = request.needsGh ? "blocking" : "warning";
   let github: GithubCredentialReading | null = null;
   if (!tools.gh.present) {

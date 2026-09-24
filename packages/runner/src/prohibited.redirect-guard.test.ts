@@ -302,7 +302,11 @@ describe("a wrapper's own options", () => {
     allowed(`env -i cp a ${AYO6_ROOT}/b`);
     allowed(`stdbuf -oL cp a ${AYO6_ROOT}/b`);
     allowed(`timeout 30 pnpm exec vitest run > ${AYO6_ROOT}/log.txt`);
-    allowed(`xargs -I{} cp {} ${AYO6_ROOT}/out`);
+    allowed(`xargs -I{} cp -- {} ${AYO6_ROOT}/out`);
+  });
+
+  it("refuses the words xargs supplies where cp still reads options", () => {
+    expect(hits(`xargs -I{} cp {} ${AYO6_ROOT}/out`)).not.toEqual([]);
   });
 });
 

@@ -50,6 +50,7 @@ packages/<name>/
   test/                 only what cannot sit beside a module
 ```
 
+- `packages/evaluation` is a program, not a library: nothing imports it, so it has no `exports` and no `src/index.ts`, and its `package.json` names the `perbo-corpus` binary in `bin` instead.
 - Another package is imported by its name or one of its subpaths, never by a file under its `src/` or `dist/`.
 - An entry point that something outside its package names by path stays at `src/<name>.ts`, because its `dist` path is part of a contract: `apps/cli/src/main.ts`, `packages/evaluation/src/main.ts` and `packages/workspace/src/main.ts` (`bin` entries and the harness's spawn), and `packages/runner/src/guard-hook.ts` (`tooling/package/bundle.mjs`).
 - A generated module sits where its module wants it and moves with the one line that writes it: `tooling/skills/build.mjs` writes `packages/runner/src/skills/internal/content.ts`.

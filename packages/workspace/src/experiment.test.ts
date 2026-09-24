@@ -73,4 +73,36 @@ describe("the materialization measurement", () => {
     expect(results[0]!.cold?.verified).toBe(true);
     expect(results[0]!.cold?.failure).toBeNull();
   }, 120_000);
+
+  it("refuses a count of workspace packages read from a listing git cut short", async () => {
+    // More package manifests than the half-megabyte a listing may say can name.
+    const stem = "p".repeat(230);
+    const files: Record<string, string> = {
+      "package.json": `${JSON.stringify({ name: "fixture", private: true })}\n`,
+      "pnpm-workspace.yaml": "packages:\n  - 'packages/*'\n",
+      "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+    };
+    for (let index = 0; index < 2200; index += 1) {
+      files[`packages/${stem}-${index}/package.json`] = "{}\n";
+    }
+    const { dir } = checkout("monorepo", files);
+
+    await expect(
+      runExperiment(
+        ExperimentConfigSchema.parse({
+          scratch: mkdtempSync(join(scratchRoot, "run-")),
+          repositories: [
+            {
+              name: "monorepo",
+              repository_id: "repo_monorepo",
+              source: dir,
+              clone: "none",
+              install_command: ["node", "-e", "0"],
+              verify_command: ["node", "-e", "0"],
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/workspace packages/);
+  }, 120_000);
 });

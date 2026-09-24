@@ -22,7 +22,7 @@ Three modules own the desktop's lifecycles, each behind a focused interface.
   - Validated progress events patch the job display without native reads.
   - Record events refresh the changed repository and the active detail, output, summary and graph queries.
   - Polling and visibility wakeups still read external CLI changes.
-  - A dirty generation forces a fresh pass when a mutation overlaps a read. One module states that rule, `src/shared/read-generations.ts`, and both the host's reads and every one of the renderer's query hooks go through it.
+  - A dirty generation forces a fresh pass when a mutation overlaps a read. One module states that rule, `src/shared/read-generations.ts`, and both the host's reads and the renderer's record queries — the snapshot, detail, output, summary and graph hooks in `src/renderer/workspace/` — go through it. The usage read and the queries a screen, pane or dialog makes of the host directly do not.
   - The host shares in-flight reads; the selected output attempt still passes ticket, bundle, size, regular-file and hash checks.
 
 The sample host, which the tests and the development preview run the renderer against, answers the same Request table as the host and is held to it by a conformance suite ([D-120](../11-open-decisions.md)). Neither it nor the native host changes the CLI's authority over tickets and contracts, or the runner's review, publication and merge controls.

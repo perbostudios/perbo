@@ -45,11 +45,96 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
   "xargs -i rm {}",
 ];
 
-/** The same wrapper where the line spells the destination, on both paths. */
-const DESTINATION_ON_THE_LINE = ["xargs -I{} cp {} sub", "xargs -0 -n1 cp -t sub"];
+/**
+ * The same wrapper where the line spells the destination and a `--` keeps the
+ * words it supplies from being options, and a `#` read as a character, on both
+ * paths.
+ */
+const DESTINATION_ON_THE_LINE = [
+  "xargs -I{} cp -- {} sub",
+  "xargs -0 -n1 cp -t sub --",
+  "cp a b#c '#' sub",
+];
+
+/** The same wrapper where the words it supplies stand where `cp` reads options, on both paths. */
+const SUPPLIED_WHERE_OPTIONS_ARE_READ = ["xargs -I{} cp {} sub", "xargs -0 -n1 cp -t sub"];
+
+/** Writes outside the worktree that a misreading of the line would hide, on both paths. */
+const MISREAD = [
+  // A comment's words read as operands: `-t sub` would make `/etc/x` a source.
+  "cp a /etc/x # -t sub",
+  // A `#` both shells read as a character, read as a comment hiding the `cp`.
+  "echo ${x:-a #}; cp a /etc/x",
+  "cat <(true)#x; cp a /etc/x",
+  "(( 1 #)); cp a /etc/x",
+  // A `#` bash and zsh disagree on.
+  "cp a /etc/x ${x:+{a} #} -t sub",
+  // A `"` inside an expansion inside double quotes, read as closing them.
+  'echo "$(echo " #")"; cp a /etc/x',
+  `cp a "$(echo '"')/../../etc" #' b'`,
+  'echo "$(echo " <<EOF")"\ncp a /etc/x',
+  // An ANSI-C quote's escaped `'`, read as the quote's end.
+  "echo $'\\''; cp a /etc/x",
+  // A heredoc whose body waits behind an expansion or a `((…))` whose end is uncertain.
+  "cat <<EOF; cat ${x:-a\nEOF\n}\n$(cp a /etc/x)\nEOF",
+  "cat <<EOF; cat $[1+\nEOF\n2]\n$(cp a /etc/x)\nEOF",
+  "cat <<EOF; ((1+\nEOF\n2))\n$(cp a /etc/x)\nEOF",
+  "cat <<'EOF'; cat ${x:-a\nEOF\n{b}\n$(cp a /etc/x)\n}\nEOF",
+  "cat <<'EOF'; cat ${x:-{a}\n$(cp a /etc/x)\n}\nEOF",
+  // A `find -exec` terminator read as the end of a writer's operands.
+  "cp a sub + /etc",
+  "cp a sub ';' /etc",
+];
+
+/**
+ * A placeholder `xargs` substitutes, or a path `find` finds, in a line a nested
+ * shell runs, on both paths.
+ */
+const SUBSTITUTED_INTO_A_NESTED_COMMAND = [
+  "echo /etc/passwd | xargs -I{} sh -c 'rm {}'",
+  "echo 'rm /etc/x' | xargs -J % sh -c %",
+  "find . -exec sh -c 'rm {}' \\;",
+];
+
+/** Writes under a `find` starting point outside the worktree, on both paths. */
+const UNDER_A_FIND_START = [
+  "find /etc -name x -delete",
+  "find /etc -name x -exec rm {} +",
+  // `-execdir` runs the body on the starting point itself from the directory above it.
+  "find sub -execdir cp a ../x \\;",
+  "find sub -okdir cp a ../x \\;",
+  // A starting point after `--`, or in a file.
+  "find -- /etc -name x -delete",
+  "find -files0-from list -delete",
+  // A starting point and an action arriving on standard input.
+  "echo /etc/x -delete | xargs find",
+];
+
+/** An `xargs` behind another whose placeholder the inner one's command carries, on both paths. */
+const BEHIND_ANOTHER_WRAPPER = ["xargs -I{} xargs -a list -I@ cp a @ {}"];
+
+/**
+ * Destinations outside the writer table, on both paths. `sudo -D` is left to
+ * the shell module's own tests: the deny list refuses `sudo` before the write
+ * guard reads it.
+ */
+const BEYOND_THE_WRITER_TABLE = [
+  "echo /etc/x | xargs ln -s a",
+  "echo /etc | xargs -J % git -C % clean -fdx",
+  "time -o /etc/x ls",
+];
 
 describe("a write neither executor can see the destination of", () => {
-  for (const command of [...FROM_STANDARD_INPUT, ...SUBSTITUTED_FOR_THE_DESTINATION]) {
+  for (const command of [
+    ...FROM_STANDARD_INPUT,
+    ...SUBSTITUTED_FOR_THE_DESTINATION,
+    ...MISREAD,
+    ...SUBSTITUTED_INTO_A_NESTED_COMMAND,
+    ...BEYOND_THE_WRITER_TABLE,
+    ...BEHIND_ANOTHER_WRAPPER,
+    ...UNDER_A_FIND_START,
+    ...SUPPLIED_WHERE_OPTIONS_ARE_READ,
+  ]) {
     it(`is refused by the hook and by Codex — ${command}`, () => {
       const hook = judgePreToolCall(
         { tool_name: "Bash", tool_input: { command }, tool_use_id: "hook" },

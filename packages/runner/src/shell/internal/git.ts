@@ -1,4 +1,4 @@
-import type { Context } from "./command.js";
+import { carries, suppliedAsOption, suppliedDestination, type Context } from "./command.js";
 import { judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
 import type { Word } from "./lexer.js";
 import { anchorOf, normalise } from "./path.js";
@@ -45,7 +45,16 @@ const GIT_GLOBAL_VALUES = new Set([
   "-c", "--exec-path", "--namespace", "--super-prefix", "--config-env", "--attr-source",
 ]);
 
-/** Judge the directories a `git` command writes into. */
+/**
+ * Judge the directories a `git` command writes into.
+ *
+ * Behind a wrapper that supplies words from its standard input, a directory
+ * those words fill — a `-C` its placeholder stands in, or the destination of a
+ * `clone`, an `init` or a `worktree add` the line leaves for appended words —
+ * is a path the line does not spell, and is refused as one. So is a word they
+ * fill where a verb that writes through an option (`--output`, `-o`) still
+ * reads its options, since the word can be that option.
+ */
 export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
   const directories: Word[] = [];
   // The directories `-C` moves git to, in order: a relative path an option
@@ -78,18 +87,27 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
   }
 
   const verb = rest[i]?.value ?? "";
+  const supplied = context.supplied;
   const judge = (word: Word, label: string): WriteFinding[] =>
-    pathFinding(
-      label,
-      word,
-      judgeTarget(word.value, context.scope, context.cwd, true),
-      context.segment,
-    );
+    supplied !== undefined && carries(supplied, word.value)
+      ? [suppliedDestination(label, supplied, context.segment)]
+      : pathFinding(
+          label,
+          word,
+          judgeTarget(word.value, context.scope, context.cwd, true),
+          context.segment,
+        );
+  /** Where the line leaves the destination to words a wrapper appends. */
+  const appended = (label: string): WriteFinding[] =>
+    supplied !== undefined && supplied.placeholder === null
+      ? [suppliedDestination(label, supplied, context.segment)]
+      : [];
 
   // A path a verb writes through one of its options, wherever the verb's own
   // options stand, read from the directory `-C` moved git to. A long option
   // takes its value after `=` or as the next word, a short one attached
-  // (`-odir`) or as the next word.
+  // (`-odir`) or as the next word. Behind a wrapper, a relative path under a
+  // `-C` its placeholder fills lands where the supplied words say.
   const written = (names: ReadonlySet<string>, label: string): WriteFinding[] => {
     const found: WriteFinding[] = [];
     for (let j = i + 1; j < rest.length; j += 1) {
@@ -107,11 +125,25 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
         const value = word.value.slice(name.length + (name.startsWith("--") ? 1 : 0));
         operand = { ...word, raw: value, value };
       }
-      if (operand !== undefined) found.push(...judge(fromMoves(operand, moves, context), label));
+      if (operand === undefined) continue;
+      const moved = fromMoves(operand, moves, context);
+      found.push(
+        ...(supplied !== undefined &&
+        moved !== operand &&
+        moves.some((move) => carries(supplied, move.value))
+          ? [suppliedDestination(label, supplied, context.segment)]
+          : judge(moved, label)),
+      );
     }
     return found;
   };
 
+  // Words a wrapper hands a verb that writes through an option are read as its
+  // options too, so one of them can be that option.
+  if (GIT_DIFF_OUTPUT.has(verb) || verb === "format-patch") {
+    const option = suppliedAsOption(`git ${verb}`, rest.slice(i + 1), context);
+    if (option !== null) return [option];
+  }
   if (GIT_DIFF_OUTPUT.has(verb)) {
     const output = written(GIT_DIFF_OUTPUT_OPTION, `the file git ${verb} --output writes`);
     if (output.length > 0) return output;
@@ -127,17 +159,29 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
   // The verbs that name where a repository or a worktree lands. A `clone` with
   // one operand puts it under the directory the command runs in, which the
   // walk below has already judged.
-  if (verb === "clone" && operands.length >= 2) {
-    findings.push(...judge(operands[operands.length - 1]!, "the git clone destination"));
+  if (verb === "clone") {
+    findings.push(
+      ...(operands.length >= 2
+        ? judge(operands[operands.length - 1]!, "the git clone destination")
+        : appended("the git clone destination")),
+    );
   }
   if (verb === "format-patch") {
     findings.push(...written(GIT_FORMAT_PATCH_DIRECTORY, "the directory git format-patch writes its patches to"));
   }
-  if (verb === "init" && operands.length >= 1) {
-    findings.push(...judge(operands[0]!, "the git init destination"));
+  if (verb === "init") {
+    findings.push(
+      ...(operands.length >= 1
+        ? judge(operands[0]!, "the git init destination")
+        : appended("the git init destination")),
+    );
   }
-  if (verb === "worktree" && operands[0]?.value === "add" && operands[1] !== undefined) {
-    findings.push(...judge(operands[1]!, "the git worktree destination"));
+  if (verb === "worktree" && operands[0]?.value === "add") {
+    findings.push(
+      ...(operands[1] !== undefined
+        ? judge(operands[1], "the git worktree destination")
+        : appended("the git worktree destination")),
+    );
   }
   return findings;
 }
