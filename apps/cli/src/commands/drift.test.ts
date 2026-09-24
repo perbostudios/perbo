@@ -320,6 +320,33 @@ describe("perbo drift", () => {
     expect(read.verdict.dismissed).toBe(false);
   });
 
+  it("leaves a record written while it read, and prints that one", async () => {
+    const { repo, specPath, dir } = await drafted1();
+    await reword(repo, "A signup POST queues exactly two activation emails.");
+    // Another reading of the same state lands and is dismissed while this
+    // one's model is still reading.
+    const landed = {
+      ...expectedKey(repo, specPath),
+      origin: "read" as const,
+      findings: [finding],
+      dismissed: true,
+      checked_at: "2026-09-21T10:00:05.000Z",
+      model: null,
+    };
+    const slow = scripted([submits({ findings: [] })]);
+    const turn = slow.turn.bind(slow);
+    slow.turn = async (request) => {
+      writeFileSync(driftRecordPath(dir, "PRB-1"), `${JSON.stringify(landed, null, 2)}\n`);
+      return turn(request);
+    };
+    const read = await drift(repo, slow);
+    expect(slow.requests).toHaveLength(1);
+    expect(read.code).toBe(0);
+    expect(readDriftRecord(dir, "PRB-1")).toEqual(landed);
+    expect(read.verdict).toEqual({ ...landed, key: "PRB-1", cached: true });
+    expect(read.streams.err()).toContain("changed while this reading ran");
+  });
+
   it("is seeded again by a re-draft from the spec", async () => {
     const { repo, specPath, dir } = await drafted1();
     await reword(repo, "A signup POST queues exactly two activation emails.");

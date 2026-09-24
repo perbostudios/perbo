@@ -457,11 +457,13 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     }),
     rename: scoped<"rename">(async (repo, request) => {
       m.tickets.contract(repo, request.key);
-      // The name first, so a spec that cannot be retitled refuses only that.
+      // The spec first, because it is the step that can refuse: a spec that
+      // cannot be retitled refuses the rename whole, and the ticket keeps the
+      // name it had rather than one its spec does not carry.
+      const retitled = await nameSpecAfterRename(m.tickets, repo, request.key, request.title);
       m.profile.state.titles[repo.id + ":" + request.key] = request.title;
       m.changes.preferences(m.profile.state);
-      if (await nameSpecAfterRename(m.tickets, repo, request.key, request.title))
-        m.changes.changed(true, { kind: "records", repoId: repo.id, key: request.key });
+      if (retitled) m.changes.changed(true, { kind: "records", repoId: repo.id, key: request.key });
       return null;
     }),
     openRepository: scoped<"openRepository">(async (repo) => {

@@ -635,6 +635,7 @@ export function detail(key: string): Detail {
         before: edit.before,
         undone: edit.undone,
         replaced: edit.replaced,
+        undoes: edit.undoes,
       })),
       "acceptance_criteria" in contract ? contract.acceptance_criteria : [],
     ),

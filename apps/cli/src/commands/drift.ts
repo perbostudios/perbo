@@ -183,9 +183,24 @@ export async function drift(
     checked_at: context.now.toISOString(),
     model: read.model,
   };
+  // Another reading, a dismissal or a re-draft's seed may have written the
+  // record while the model read. That record is newer than the state this
+  // reading began from, so it stands, and what is printed is it: the verdict
+  // on the page is the one on disk, and `cached` says no model ran for it.
+  const now = readDriftRecord(dir, key);
+  if (now !== null && !sameRecord(now, existing)) {
+    context.diagnostics.stderr(
+      `${key}'s drift record changed while this reading ran, so it is kept and this reading is not recorded\n`,
+    );
+    return print(now, true);
+  }
   writeDriftRecord(dir, key, record);
   return print(record, false);
 }
+
+/** Whether the record on disk is still the one a reading began from. */
+const sameRecord = (a: DriftRecord, b: DriftRecord | null): boolean =>
+  b !== null && JSON.stringify(a) === JSON.stringify(b);
 
 const DRIFT_FLAGS = {
   "--repo": valueFlag(),

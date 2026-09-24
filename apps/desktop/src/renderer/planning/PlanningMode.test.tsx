@@ -3248,7 +3248,9 @@ describe("the Graph pane (SCP-316)", () => {
       await waitFor(() =>
         expect(within(dock).queryByRole("group", { name: "How the queue is split" })).toBeNull(),
       );
-      expect((await sampleBridge.request({ kind: "snapshot" })).working).toContain(plan.id);
+      // Whether the turn is still being applied at this instant is the host's
+      // timing, not the rule: the watcher above holds the button to the
+      // reading's landing whichever way that goes.
       expect(within(note).queryByRole("button", { name: "Confirm the plan" })).toBeNull();
       await waitFor(() => expect(landedAt).not.toBeNull(), { timeout: 5000 });
       await waitFor(

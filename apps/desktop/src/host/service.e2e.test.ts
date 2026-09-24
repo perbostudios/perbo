@@ -5861,6 +5861,25 @@ describe("a ticket renamed while it is planned renames its spec (D-127)", () => 
     expect((await service.snapshot()).titles?.[repoId + ":PRB-1"]).toBe("Snake game");
   });
 
+  it("refuses the rename whole where the spec cannot be retitled, and the ticket keeps its name", async () => {
+    const changes: Change[] = [];
+    const { service, repo, repoId, specPath } = await planned(undefined, { changed: (change) => void changes.push(change) });
+    // A link at spec.md is a path the host refuses to write through.
+    const elsewhere = join(repo, "elsewhere.md");
+    writeFileSync(elsewhere, SPEC_MD);
+    rmSync(specPath);
+    symlinkSync(elsewhere, specPath);
+    const before = (await service.snapshot()).titles?.[repoId + ":PRB-1"];
+    changes.length = 0;
+    await expect(
+      service.request({ kind: "rename", repoId, key: "PRB-1", title: "Snake game" }),
+    ).rejects.toThrow(/symlink/);
+
+    expect((await service.snapshot()).titles?.[repoId + ":PRB-1"]).toBe(before);
+    expect(changes).not.toContainEqual(expect.objectContaining({ kind: "preferences" }));
+    expect(readFileSync(elsewhere, "utf8")).toBe(SPEC_MD);
+  });
+
   it("carries the verdict the plan was read against its spec with to the renamed spec", async () => {
     const { service, repo, repoId, specPath } = await planned();
     const at = join(repo, ".perbo", "tickets", "PRB-1.drift.json");

@@ -29,6 +29,8 @@ export interface AssertionEdit {
   before: Record<string, unknown>;
   undone: boolean;
   replaced: boolean;
+  /** The edit this one undid, by its number, or null for an edit of its own. */
+  undoes: number | null;
 }
 
 /** A criterion as the contract holds it, narrowed to what this reads. */
@@ -57,11 +59,12 @@ function assertionOf(entity: unknown): string | null {
  *
  * The drafted assertion is the `before` of the **earliest edit still in force**
  * that touched the criterion: an edit's `before` is the state just ahead of it,
- * so the first one is what the drafter wrote. Undone and replaced edits are
- * passed over — an undone edit's `before` is a state that was put back, and a
- * replaced one belonged to a contract that no longer exists (D-103) — so a
- * criterion only ever edited and then un-edited is not marked, which is right:
- * its assertion is the drafted one.
+ * so the first one is what the drafter wrote. Undone, replaced and undo edits
+ * are passed over — an undone edit's `before` is a state that was put back, a
+ * replaced one belonged to a contract that no longer exists (D-103), and an
+ * undo's `before` is the edited state it reversed, never the drafted one — so
+ * a criterion only ever edited and then un-edited is not marked, which is
+ * right: its assertion is the drafted one.
  *
  * A criterion no edit touched is never marked, and neither is one added by an
  * edit: nothing drafted it, so there is no proposal to have moved away from.
@@ -77,7 +80,7 @@ export function assertionsChangedSinceDraft(
   // that never existed.
   const drafted = new Map<string, string | null>();
   for (const edit of edits) {
-    if (edit.undone || edit.replaced) continue;
+    if (edit.undone || edit.replaced || edit.undoes !== null) continue;
     for (const [key, entity] of Object.entries(edit.before)) {
       if (key.startsWith("criterion:") && !drafted.has(key)) drafted.set(key, assertionOf(entity));
     }

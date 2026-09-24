@@ -10,11 +10,12 @@ const criterion = (id: string, assertion: string) => ({
 /** One recorded edit, in the draft snapshot's own shape. */
 const edit = (
   keys: Record<string, { before: unknown; after: unknown }>,
-  flags: { undone?: boolean; replaced?: boolean } = {},
+  flags: { undone?: boolean; replaced?: boolean; undoes?: number } = {},
 ) => ({
   before: Object.fromEntries(Object.entries(keys).map(([k, v]) => [k, v.before])),
   undone: flags.undone ?? false,
   replaced: flags.replaced ?? false,
+  undoes: flags.undoes ?? null,
 });
 
 /** A recorded criterion entity, as `difference` writes it into before/after. */
@@ -62,6 +63,32 @@ describe("which criteria are proven differently from how the draft proposed", ()
       edit({ "criterion:ac_1": { before: held("ac_1", "status === 200"), after: held("ac_1", "status === 201") } }),
     ];
     expect(assertionsChangedSinceDraft(edits, [criterion("ac_1", "status === 201")])).toEqual(["ac_1"]);
+  });
+
+  it("does not mark an assertion an undo put back where the draft had it", () => {
+    // Undoing edit 1 marks it undone and records the undo as edit 2, whose
+    // `before` is the edited assertion it reversed. Read as the baseline, that
+    // would mark the drafted assertion as moved from the edit.
+    const edits = [
+      edit(
+        { "criterion:ac_1": { before: held("ac_1", "drafted"), after: held("ac_1", "edited") } },
+        { undone: true },
+      ),
+      edit({ "criterion:ac_1": { before: held("ac_1", "edited"), after: held("ac_1", "drafted") } }, { undoes: 1 }),
+    ];
+    expect(assertionsChangedSinceDraft(edits, [criterion("ac_1", "drafted")])).toEqual([]);
+  });
+
+  it("marks an assertion edited again after an undo, against what the draft proposed", () => {
+    const edits = [
+      edit(
+        { "criterion:ac_1": { before: held("ac_1", "drafted"), after: held("ac_1", "edited") } },
+        { undone: true },
+      ),
+      edit({ "criterion:ac_1": { before: held("ac_1", "edited"), after: held("ac_1", "drafted") } }, { undoes: 1 }),
+      edit({ "criterion:ac_1": { before: held("ac_1", "drafted"), after: held("ac_1", "third") } }),
+    ];
+    expect(assertionsChangedSinceDraft(edits, [criterion("ac_1", "third")])).toEqual(["ac_1"]);
   });
 
   it("passes over an edit a re-draft replaced, whose contract no longer exists", () => {
