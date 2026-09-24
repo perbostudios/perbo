@@ -855,9 +855,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
   **Continue the task** carries; `removeSpecFolder` and
   `deleteDraftedFromSpec`, which take the ticket and the folder with the planning and hold the
   slug to one folder name in the configured spec folder (D-103), because an admission record is a file in the repository and this ends
-  in a recursive delete; the planning's delete, `editingDiscard`, which is refused before anything
-  is discarded while a command runs in the repository, leaving the planning, the ticket and the
-  spec as they were, says a refusal found once the chat has exited — a pull request open — with the
+  in a recursive delete; the planning's delete, `editingDiscard`, which, for a planning holding the ticket it
+  drafted, is refused before anything is discarded while a command runs in the repository,
+  leaving the planning, the ticket and the spec as they were, says a refusal found once the chat has exited — a pull request open — with the
   planning already thrown away and the ticket kept, and takes the spec folder with the planning
   where the ticket is already gone; the same reading in the sample host, and the same refusals of a delete in
   the sentences `shared/discard.ts` holds for both, so it behaves as the host does; `untouchedPlanning` in `contract-editing.ts`, which is what holds nothing means;
