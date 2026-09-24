@@ -309,9 +309,11 @@ export async function resetToPullRequest(args: {
         args.sealedBy(commit.sha) !== null || commit.attempts.some((attempt) => args.onRecord.has(attempt));
       const foreign = carried.filter((commit) => !own(commit));
       // A listing held from its end has lost its oldest commits, which are
-      // the ones a reset would drop: what cannot be read whole is refused
-      // rather than reset over.
-      const unread = listed?.truncated === true;
+      // the ones a reset would drop, and one git failed or did not finish
+      // names none of them: what cannot be read whole is refused rather than
+      // reset over.
+      const unread =
+        listed !== null && (listed.code !== 0 || listed.timed_out || listed.truncated);
       if (ahead && !unread && foreign.length === 0) {
         await git.run(workspace.path, ["reset", "--hard", tip], call);
         progress(
@@ -322,8 +324,13 @@ export async function resetToPullRequest(args: {
         await sweepWorktree({ worktree: workspace.path, onProgress: progress });
         await cleanup({ workspace, root: config.worktree_root, outcome: "failure" }).catch(() => undefined);
         const what = unread
-          ? `${workspace.branch} carries more past what the pull request has (${tip.slice(0, 12)}) than ` +
-            `${MAX_BRANCH_LOG_BYTES} bytes of log can name`
+          ? listed.truncated
+            ? `${workspace.branch} carries more past what the pull request has (${tip.slice(0, 12)}) than ` +
+              `${MAX_BRANCH_LOG_BYTES} bytes of log can name`
+            : `what ${workspace.branch} carries past what the pull request has (${tip.slice(0, 12)}) ` +
+              `could not be listed: git log ${
+                listed.timed_out ? "did not finish" : `exited ${listed.code ?? listed.signal}`
+              }`
           : ahead
             ? `${workspace.branch} carries ${foreign.length} commit${foreign.length === 1 ? "" : "s"} the loop did not ` +
               `make past what the pull request has (${tip.slice(0, 12)}): ` +

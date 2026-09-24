@@ -89,6 +89,31 @@ describe("what a git child is given", () => {
   });
 });
 
+describe("the version a binary reports", () => {
+  it.skipIf(!posix)("is the first line it prints, in the environment the module builds", () => {
+    const dir = scratch();
+    for (const name of ["git", "gh"]) {
+      writeFileSync(join(dir, name), `#!/bin/sh\necho "${name} version 9.9.9"\necho detail\n`, {
+        mode: 0o755,
+      });
+    }
+    const environment = () => ({ PATH: dir });
+
+    expect(createGit({ environment }).versionSync()).toBe("git version 9.9.9");
+    expect(createGh({ environment }).versionSync()).toBe("gh version 9.9.9");
+  });
+
+  it("is null where the binary cannot be run, or does not answer", () => {
+    const missing = join(scratch(), "missing");
+    expect(createGit({ binary: missing }).versionSync()).toBeNull();
+    expect(createGh({ binary: missing }).versionSync()).toBeNull();
+
+    const failing = join(scratch(), "failing");
+    writeFileSync(failing, "#!/bin/sh\nexit 3\n", { mode: 0o755 });
+    if (posix) expect(createGit({ binary: failing }).versionSync()).toBeNull();
+  });
+});
+
 describe("an operand that would be read as an option", () => {
   it("is refused before anything is spawned", async () => {
     const process_ = fakeGitProcess();

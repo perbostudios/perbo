@@ -1,7 +1,9 @@
 import {
   basename,
+  carries as carriesInto,
   isAssignment,
   optionSet,
+  suppliedDestination,
   type Context,
   type SuppliedOperands,
 } from "./command.js";
@@ -12,6 +14,7 @@ import {
   type Destination,
   type WriteFinding,
 } from "./destination.js";
+import { findExpression } from "./find.js";
 import { gitFindings } from "./git.js";
 import { INTERPRETERS, interpreterFindings } from "./interpreter.js";
 import {
@@ -38,6 +41,22 @@ import {
   type WrapperSpec,
 } from "./wrappers.js";
 import { WRITERS, writerFindings } from "./writers.js";
+
+/** The directory a command runs in, as a word: `find`'s default starting point. */
+const HERE: Word = { raw: ".", value: ".", substitutions: [], variable: false };
+
+/** A word of a `find` body with the path the walk found standing where `{}` does. */
+function placed(word: Word, found: Word): Word {
+  if (!word.value.includes("{}")) return word;
+  return {
+    ...word,
+    raw: word.raw.split("{}").join(found.raw),
+    value: word.value.split("{}").join(found.value),
+    substitutions: [...word.substitutions, ...found.substitutions],
+    variable: word.variable || found.variable,
+    found: true,
+  };
+}
 
 /** One command of a line, as the reading of that line found it. */
 export interface CommandSegment {
@@ -172,8 +191,11 @@ function analyzeWords(words: Word[], context: Context): Analysis {
   let cwd = context.cwd;
   /** True when the nested command runs in this shell rather than a new one. */
   let nestedRunsHere = false;
-  /** The wrapper standing in front that supplies the command its operands. */
-  let supplied: SuppliedOperands | undefined;
+  /**
+   * The wrapper standing in front that supplies the command its operands — the
+   * one on these words, or the one in front of the `find` whose body they are.
+   */
+  let supplied: SuppliedOperands | undefined = context.supplied;
   /**
    * The placeholder that wrapper substitutes the words it reads for, where one
    * of its options names one. It is read as that option's value is read, so a
@@ -309,6 +331,45 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     return stopHere();
   };
 
+  const rootedOption = (option: string, wrapper: string): Analysis => {
+    findings.push({
+      detail:
+        `${wrapper} ${option} runs the command under another root directory, so every path it ` +
+        `names resolves somewhere this guard does not read: ${context.segment.slice(0, 200)}`,
+      target: null,
+      resolved: null,
+    });
+    return stopHere();
+  };
+
+  /** Whether the wrapper in front substitutes its input into this word. */
+  const carries = (word: Word): boolean => carriesInto(supplied, word.value);
+
+  /**
+   * A command line a nested shell runs, with words the line does not spell put
+   * into it: the input of the wrapper in front, or the paths a `find` finds.
+   * They land inside a line this guard reads as written, and a file's name is
+   * read there as shell code, so what runs cannot be read.
+   */
+  const substitutedInto = (operand: Word, by: string): Analysis | null => {
+    const how =
+      operand.found === true
+        ? "find puts each path it finds where {} stands in it"
+        : supplied !== undefined && carries(operand)
+          ? `${supplied.wrapper} substitutes the words it reads from standard input for ` +
+            `${supplied.placeholder} in it`
+          : null;
+    if (how === null) return null;
+    findings.push({
+      detail:
+        `the command ${operand.raw} passed to ${by} cannot be read — ${how}: ` +
+        `${context.segment.slice(0, 200)}`,
+      target: null,
+      resolved: null,
+    });
+    return stopHere();
+  };
+
   /**
    * Where a move leaves the shell.
    *
@@ -335,13 +396,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     if (operand === undefined) return unknownOption(option, wrapper);
     // A directory the wrapper in front supplies from its standard input is a
     // destination the line never spelled, as an operand carrying it would be.
-    if (
-      supplied !== undefined &&
-      supplied.placeholder !== null &&
-      (supplied.wholeWord
-        ? operand.value === supplied.placeholder
-        : operand.value.includes(supplied.placeholder))
-    ) {
+    if (supplied !== undefined && carries(operand)) {
       findings.push({
         detail:
           `the directory ${wrapper} ${option} runs in cannot be resolved — ${supplied.wrapper} ` +
@@ -357,6 +412,54 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     return null;
   };
 
+  /** The directory a `find` starting point names, as a body run in it stands. */
+  const directoryOf = (start: Word): Cwd => {
+    const at = judgeTarget(start.value, context.scope, cwd, true);
+    return at.kind === "unresolvable"
+      ? { path: cwd.path, unknown: true }
+      : { path: at.resolved ?? cwd.path, unknown: false };
+  };
+
+  /**
+   * Where an `-execdir` body runs on what a walk from `start` finds, and what
+   * `{}` is there. A path under the start runs it in the directory holding
+   * that path, the shallowest being the start itself, with `{}` a name inside
+   * it. The start itself runs it a level up, as `./<name>`: GNU in the
+   * directory the path names it from — `sub` for `sub/deep` and for `sub/..`,
+   * the directory above home for `~` — and BSD in the command's own
+   * directory. A relative destination in the body is judged from each.
+   */
+  const execdirReadings = (start: Word): Array<{ found: Word; at: Cwd }> => {
+    const as = (value: string): Word => ({ ...start, raw: value, value });
+    const value = start.value.replace(/(?<=[^/])\/+$/, "");
+    const slash = value.lastIndexOf("/");
+    const name = value.slice(slash + 1);
+    const parent =
+      name === "." || name === ".."
+        ? directoryOf(as(slash === -1 ? "." : slash === 0 ? "/" : value.slice(0, slash)))
+        : directoryOf(as(`${value}/..`));
+    const self = as(name.length === 0 ? "." : `./${name}`);
+    const readings = [
+      { found: HERE, at: directoryOf(start) },
+      { found: self, at: parent },
+    ];
+    if (parent.path !== cwd.path || parent.unknown !== cwd.unknown) {
+      readings.push({ found: self, at: cwd });
+    }
+    return readings;
+  };
+
+  /** A file the wrapper itself writes — `time -o` — judged as any destination is. */
+  const wrote = (operand: Word, option: string, wrapper: string): void => {
+    const label = `the file ${wrapper} ${option} writes`;
+    if (supplied !== undefined && carries(operand)) {
+      findings.push(suppliedDestination(label, supplied, context.segment));
+      return;
+    }
+    const destination = judgeTarget(operand.value, context.scope, cwd, true);
+    findings.push(...pathFinding(label, operand, destination, context.segment));
+  };
+
   /**
    * Consume a wrapper's leading options. Returns an Analysis when the wrapper
    * cannot be seen through, and null when the next word names the program.
@@ -366,7 +469,9 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     const values = optionSet(spec.values);
     const commands = optionSet(spec.commands);
     const dirs = optionSet(spec.dirs);
+    const destinations = optionSet(spec.destinations);
     const refused = optionSet(spec.refuse);
+    const roots = optionSet(spec.roots);
     const substitutes = optionSet(spec.substitutes);
     const wholeWord = optionSet(spec.substitutesWholeWord);
     const attachedValues = optionSet(spec.attachedValues);
@@ -389,10 +494,18 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         const name = eq === -1 ? raw : raw.slice(0, eq);
         const attached = eq === -1 ? null : raw.slice(eq + 1);
         if (refused.has(name)) return refusedOption(raw, wrapper);
+        if (roots.has(name)) return rootedOption(raw, wrapper);
         if (dirs.has(name)) {
           const operand = attached === null ? words[i + 1] : { ...word, raw: attached, value: attached };
           const stop = moveInto(operand, name, wrapper);
           if (stop !== null) return stop;
+          i += attached === null ? 2 : 1;
+          continue;
+        }
+        if (destinations.has(name)) {
+          const operand = attached === null ? words[i + 1] : { ...word, raw: attached, value: attached };
+          if (operand === undefined) return unknownOption(raw, wrapper);
+          wrote(operand, name, wrapper);
           i += attached === null ? 2 : 1;
           continue;
         }
@@ -402,6 +515,8 @@ function analyzeWords(words: Word[], context: Context): Analysis {
           if (operand.variable || operand.substitutions.length > 0) {
             return unreadable(operand, `${wrapper} ${name}`);
           }
+          const into = substitutedInto(operand, `${wrapper} ${name}`);
+          if (into !== null) return into;
           nested.push(operand.value);
           i += attached === null ? 2 : 1;
           continue;
@@ -435,6 +550,8 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         if (operand.variable || operand.substitutions.length > 0) {
           return unreadable(operand, `${wrapper} ${raw}`);
         }
+        const into = substitutedInto(operand, `${wrapper} ${raw}`);
+        if (into !== null) return into;
         nested.push(operand.value);
         i += 2;
         continue;
@@ -456,10 +573,18 @@ function analyzeWords(words: Word[], context: Context): Analysis {
           continue;
         }
         if (refused.has(option)) return refusedOption(option, wrapper);
+        if (roots.has(option)) return rootedOption(option, wrapper);
         if (dirs.has(option)) {
           const operand = inline.length > 0 ? { ...word, raw: inline, value: inline } : words[i + 1];
           const stop = moveInto(operand, option, wrapper);
           if (stop !== null) return stop;
+          separate = inline.length === 0;
+          break;
+        }
+        if (destinations.has(option)) {
+          const operand = inline.length > 0 ? { ...word, raw: inline, value: inline } : words[i + 1];
+          if (operand === undefined) return unknownOption(option, wrapper);
+          wrote(operand, option, wrapper);
           separate = inline.length === 0;
           break;
         }
@@ -577,6 +702,24 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         return stopHere();
       }
       if (wrapper.appendsOperands === true) {
+        // A second wrapper that puts its input into the command, behind one
+        // whose input reaches it — appended to its words, or substituted into
+        // one of them — builds that command out of two inputs, and this guard
+        // reads one.
+        if (
+          supplied !== undefined &&
+          (supplied.placeholder === null || words.slice(from + 1).some((word) => carries(word)))
+        ) {
+          findings.push({
+            detail:
+              `${program} stands behind ${supplied.wrapper}, which puts the words it reads from ` +
+              `standard input into the command ${program} runs, so what runs cannot be read: ` +
+              `${context.segment.slice(0, 200)}`,
+            target: null,
+            resolved: null,
+          });
+          return stopHere();
+        }
         const rest = words.slice(i + (wrapper.operands ?? 0));
         const expanded =
           named !== null && placeholderWholeWord
@@ -631,6 +774,8 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       if (operand.variable || operand.substitutions.length > 0) {
         return unreadable(operand, `${value} -c`);
       }
+      const into = substitutedInto(operand, `${value} -c`);
+      if (into !== null) return into;
       nested.push(operand.value);
       break;
     }
@@ -687,10 +832,10 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     } else if (verb === "ln") {
       programs.push(verb);
       mutating = true;
-      findings.push(...linkFindings(rest, { ...context, cwd }));
+      findings.push(...linkFindings(rest, { ...context, cwd, supplied }));
     } else if (verb === "git") {
       programs.push(verb);
-      findings.push(...gitFindings(rest, { ...context, cwd }));
+      findings.push(...gitFindings(rest, { ...context, cwd, supplied }));
     } else if (INTERPRETERS.has(verb)) {
       programs.push(verb);
       const inner = { ...context, cwd };
@@ -727,24 +872,96 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       cd = { path: cwd.path, unknown: true };
     } else if (verb === "find") {
       programs.push(verb);
-      const at = rest.findIndex((word) => word.value === "-exec" || word.value === "-execdir");
-      if (at !== -1) {
-        const body: Word[] = [];
-        for (const word of rest.slice(at + 1)) {
-          if (word.value === ";" || word.value === "+") break;
-          body.push(word);
+      const expression = findExpression(rest);
+      // Words a wrapper in front puts where `find` reads a starting point or
+      // an action can be an action themselves: `-delete`, or `-fprint` taking
+      // the word after it as its file. An appending wrapper puts them after
+      // the whole expression, BSD's `-J` puts every word it reads wherever its
+      // placeholder stands, and a placeholder standing as a head is one.
+      const fed =
+        supplied === undefined
+          ? null
+          : supplied.placeholder === null
+            ? `${supplied.wrapper} appends the words it reads from standard input to its expression`
+            : supplied.wholeWord && rest.some((word) => carries(word))
+              ? `${supplied.wrapper} substitutes every word it reads from standard input for ` +
+                `${supplied.placeholder} in it`
+              : expression.heads.some((word) => carries(word))
+                ? `${supplied.wrapper} substitutes the words it reads from standard input for ` +
+                  `${supplied.placeholder} where it reads a starting point or an action`
+                : null;
+      if (fed !== null) {
+        findings.push({
+          detail:
+            `what find walks and what it does there cannot be read — ${fed}: ` +
+            `${context.segment.slice(0, 200)}`,
+          target: null,
+          resolved: null,
+        });
+        return stopHere();
+      }
+      if (expression.startsFrom !== null && (expression.deletes || expression.bodies.length > 0)) {
+        findings.push({
+          detail:
+            `the starting points find -files0-from reads from ${expression.startsFrom.raw} are ` +
+            `not on the line, so where its -delete or -exec body writes cannot be resolved: ` +
+            `${context.segment.slice(0, 200)}`,
+          target: null,
+          resolved: null,
+        });
+      }
+      const starts = expression.starts.length > 0 ? expression.starts : [HERE];
+      /** A path under which the walk writes, or a file an action writes. */
+      const judgeWritten = (word: Word, label: string): WriteFinding[] =>
+        supplied !== undefined && carries(word)
+          ? [suppliedDestination(label, supplied, context.segment)]
+          : pathFinding(label, word, judgeTarget(word.value, context.scope, cwd, true), context.segment);
+      if (expression.deletes) {
+        for (const start of starts) {
+          findings.push(...judgeWritten(start, "the find -delete starting point"));
         }
-        // The body is a command of its own: it inherits the directory, not the
-        // standard input the line gave the `find`.
-        const inner = analyzeWords(body, { ...context, cwd, stdin: undefined });
-        findings.push(...inner.findings);
-        if (!inner.accounted) accounted = false;
-        // `find … -exec rm {} ;` runs `rm`: what the line writes is the body's,
-        // and the admission decision is about the same act.
-        if (inner.mutating) mutating = true;
-        programs.push(...inner.programs);
-        invocations.push(...inner.invocations);
-        unreadablePrograms.push(...inner.unreadablePrograms);
+      }
+      for (const { action, word } of expression.files) {
+        findings.push(...judgeWritten(word, `the find ${action} destination`));
+      }
+      for (const body of expression.bodies) {
+        // A body runs on each path the walk finds, which `find` puts where `{}`
+        // stands, and every one is under a starting point: so the body is read
+        // once per starting point with that point in its place. `-execdir`
+        // runs it in the directory holding each found path, which for the
+        // starting point itself is the one above it (`execdirReadings`).
+        // A body the wrapper in front substitutes its own input into is read
+        // as written, because that input is what stands there.
+        const readings =
+          supplied !== undefined && body.words.some((word) => carries(word))
+            ? [{ words: body.words, at: cwd }]
+            : starts.flatMap((start) =>
+                body.inFoundDirectory
+                  ? execdirReadings(start).map(({ found, at }) => ({
+                      words: body.words.map((word) => placed(word, found)),
+                      at,
+                    }))
+                  : [{ words: body.words.map((word) => placed(word, start)), at: cwd }],
+              );
+        readings.forEach((reading, index) => {
+          // The body is a command of its own: it inherits the directory, not
+          // the standard input the line gave the `find`.
+          const inner = analyzeWords(reading.words, {
+            ...context,
+            cwd: reading.at,
+            stdin: undefined,
+            supplied,
+          });
+          findings.push(...inner.findings);
+          if (!inner.accounted) accounted = false;
+          // `find … -exec rm {} ;` runs `rm`: what the line writes is the
+          // body's, and the admission decision is about the same act.
+          if (inner.mutating) mutating = true;
+          if (index > 0) return;
+          programs.push(...inner.programs);
+          invocations.push(...inner.invocations);
+          unreadablePrograms.push(...inner.unreadablePrograms);
+        });
       }
     } else {
       programs.push(verb);
@@ -886,7 +1103,8 @@ function analyzeSegment(
       run(item.text);
       continue;
     }
-    if (item.kind === "word" && (item.word.value === "(" || item.word.value === ")")) {
+    // Only an unquoted parenthesis opens or closes a subshell; `'('` is a word.
+    if (item.kind === "word" && (item.word.raw === "(" || item.word.raw === ")")) {
       run("");
       if (item.word.value === "(") {
         enclosing.push(cwd);
@@ -960,9 +1178,16 @@ export function inspectSegments(
       segments: [],
     };
   }
-  const { texts, separators, balanced, bodies } = scanSegments(command);
+  const { texts, separators, balanced, bodies, unreadable } = scanSegments(command);
   const heredocs = heredocQueue(bodies);
   const findings: WriteFinding[] = [];
+  if (unreadable !== null) {
+    findings.push({
+      detail: `this line cannot be read — ${unreadable}: ${command.slice(0, 200)}`,
+      target: null,
+      resolved: null,
+    });
+  }
   const segments: CommandSegment[] = [];
   let cwd = start;
   /** The stage a pipe put before this one, which is where its input comes from. */

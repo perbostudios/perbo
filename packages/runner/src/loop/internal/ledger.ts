@@ -31,14 +31,43 @@ export interface LedgerRecord {
 }
 
 const USAGE = z.looseObject({
+  attempt_id: z.string().optional(),
   agent: z.looseObject({ credential_class: z.string() }).optional(),
   usage: z.looseObject({
     cost_micros: z.number().int().min(0),
     cost_basis: z.string(),
   }),
 });
-/** A record can name a basis this version cannot price, and an unpriced one is counted. */
-const BASIS = CostBasisSchema.catch("unavailable");
+
+/**
+ * The refusal for a record naming a cost basis this version does not know, or
+ * null. Such a record may carry dollars this cannot tell from none, and
+ * counted as unpriced a real figure would drop out of the sum the budget is
+ * held to. A subscription attempt is none of the budget's business (D-096),
+ * whatever its basis.
+ */
+function unknownBasis(record: unknown, path: string): Error | null {
+  const parsed = USAGE.safeParse(record);
+  if (!parsed.success || parsed.data.agent?.credential_class === "subscription") return null;
+  if (CostBasisSchema.safeParse(parsed.data.usage.cost_basis).success) return null;
+  return new Error(
+    `${parsed.data.attempt_id ?? "an attempt"} in ${path} names a cost basis this version ` +
+      `does not know (${JSON.stringify(parsed.data.usage.cost_basis)}), so what the ticket has ` +
+      "spent cannot be added up",
+  );
+}
+
+/**
+ * Refuse a ticket's record that names a cost basis this version does not know
+ * (`unknownBasis`). A run asks as it starts, before it waits out a park or
+ * reads the checkout, so a record it cannot add up costs nothing.
+ */
+export function refuseUnknownCostBasis(prior: AttemptsRecord | null, path: string): void {
+  for (const attempt of prior?.attempts ?? []) {
+    const refused = unknownBasis(attempt, path);
+    if (refused !== null) throw refused;
+  }
+}
 
 export class Ledger {
   /** The ticket's attempts record on disk. */
@@ -59,11 +88,16 @@ export class Ledger {
    */
   private recordedThrough = 0;
 
+  /**
+   * Refuses a record naming a cost basis this version does not know, as
+   * `start` has already done, rather than when the budget is first checked.
+   */
   constructor(record: LedgerRecord) {
     this.path = record.path;
     this.prior = record.prior;
     this.ticketId = record.ticketId;
     this.sealed = sealedByAttempt(record.prior);
+    refuseUnknownCostBasis(record.prior, record.path);
   }
 
   get attempts(): readonly ExecutionAttempt[] {
@@ -120,6 +154,9 @@ export class Ledger {
    *
    * An attempt on a subscription is left out (D-096): the dollar figure it
    * reports is a measure of work and not a bill, and the budget is a bill.
+   *
+   * A record naming a cost basis this version does not know is refused
+   * (`unknownBasis`).
    */
   spend(): TicketSpend {
     const components: Cost[] = [];
@@ -131,10 +168,12 @@ export class Ledger {
         continue;
       }
       if (parsed.data.agent?.credential_class === "subscription") continue;
+      const refused = unknownBasis(record, this.path);
+      if (refused !== null) throw refused;
       components.push(
         costOf({
           micros: parsed.data.usage.cost_micros,
-          basis: BASIS.parse(parsed.data.usage.cost_basis),
+          basis: CostBasisSchema.parse(parsed.data.usage.cost_basis),
         }),
       );
     }

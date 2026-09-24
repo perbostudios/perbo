@@ -52,3 +52,40 @@ describe("every writer in the table, pinned by removing it", () => {
     });
   }
 });
+
+/**
+ * `;` and `+` end a `find -exec` body and nothing else. Anywhere else a quoted
+ * `;`, a `+` or a quoted parenthesis is one more operand, and the destination is
+ * read past it.
+ */
+const PAST_A_TERMINATOR = [
+  "cp a b + /etc",
+  "cp a b ';' /etc",
+  "cp a b \\; /etc",
+  "cp a b '(' /etc",
+  "rm a + /etc/x",
+  "ln a + /etc/x",
+  "ln -s a ';' /etc/x",
+  // Inside a body, `+` ends it only straight after `{}`.
+  "find . -exec cp a + /etc/x \\;",
+];
+
+/** The same words where they do end a body. */
+const AT_A_TERMINATOR = [
+  "find . -name x -exec rm {} +",
+  "find . -name x -exec cp {} sub \\;",
+];
+
+describe("a word that ends a find -exec body", () => {
+  for (const command of PAST_A_TERMINATOR) {
+    it(`ends nothing in ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+    });
+  }
+
+  for (const command of AT_A_TERMINATOR) {
+    it(`ends the body in ${command}`, () => {
+      expect(decision(command), command).toBe("allowed");
+    });
+  }
+});

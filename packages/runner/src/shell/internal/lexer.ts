@@ -15,6 +15,11 @@ export interface Word {
    * option-only with `> log.txt` or `2>&1` after it (SCP-186).
    */
   redirect?: boolean;
+  /**
+   * True for a word of a `find` body that holds the path the walk finds, where
+   * the body spells `{}`: a name the files on disk give, not the line.
+   */
+  found?: boolean;
 }
 
 interface Redirect {
@@ -217,8 +222,221 @@ function skipHeredocBodies(
   return at;
 }
 
+/** Skip the quoted text that starts at `from`, returning where it ends, or null. */
+function skipQuoted(text: string, from: number): number | null {
+  const quote = text[from]!;
+  for (let i = from + 1; i < text.length; i += 1) {
+    if (quote === '"' && text[i] === "\\") i += 1;
+    else if (text[i] === quote) return i + 1;
+  }
+  return null;
+}
+
 /**
- * The same line with every heredoc body removed.
+ * Where a `${…}` starting at `from` ends, as bash reads it and as zsh does.
+ *
+ * Both skip quoted text and substitutions inside one, and both read a `#` in
+ * one as a character. They disagree on a bare `{` inside: bash ends the
+ * expansion at the first `}` that no nested `${` claims, and zsh counts the
+ * `{`, so `${x:-{a} #}` ends after `{a}` under bash — the ` #}` then opening a
+ * comment — and at the last `}` under zsh. Null where bash finds no end; where
+ * zsh finds none, its end is the end of the text.
+ */
+function readParameterExpansion(text: string, from: number): { bash: number; zsh: number } | null {
+  let bashDepth = 1;
+  let zshDepth = 1;
+  let bash: number | null = null;
+  let i = from + 2;
+  while (i < text.length) {
+    const ch = text[i]!;
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      const end = skipQuoted(text, i);
+      if (end === null) break;
+      i = end;
+      continue;
+    }
+    if (ch === "`" || (ch === "$" && text[i + 1] === "(")) {
+      const read = readSubstitution(text, i);
+      if (read === null) break;
+      i = read.end;
+      continue;
+    }
+    if (ch === "$" && text[i + 1] === "{") {
+      if (bash === null) bashDepth += 1;
+      zshDepth += 1;
+      i += 2;
+      continue;
+    }
+    if (ch === "{") zshDepth += 1;
+    if (ch === "}") {
+      if (bash === null) {
+        bashDepth -= 1;
+        if (bashDepth === 0) bash = i + 1;
+      }
+      zshDepth -= 1;
+      if (zshDepth === 0) return { bash: bash ?? i + 1, zsh: i + 1 };
+    }
+    i += 1;
+  }
+  return bash === null ? null : { bash, zsh: text.length };
+}
+
+/**
+ * Where the balanced text that a `(` or `[` at `from` opens ends, just past the
+ * character that closes it, or null. Quoted text and substitutions inside are
+ * skipped.
+ */
+function readBalanced(text: string, from: number, open: string, close: string): number | null {
+  let depth = 1;
+  let i = from + 1;
+  while (i < text.length) {
+    const ch = text[i]!;
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      const end = skipQuoted(text, i);
+      if (end === null) return null;
+      i = end;
+      continue;
+    }
+    if (ch === "`" || (ch === "$" && text[i + 1] === "(")) {
+      const read = readSubstitution(text, i);
+      if (read === null) return null;
+      i = read.end;
+      continue;
+    }
+    if (ch === open) depth += 1;
+    else if (ch === close) {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+    i += 1;
+  }
+  return null;
+}
+
+/**
+ * Where an arithmetic command `(( … ))` starting at `from` ends, or null where
+ * the `((` opens two subshells. Both shells take it as arithmetic only where
+ * the `)` balancing the second `(` is followed at once by another.
+ */
+function readArithmeticCommand(text: string, from: number): number | null {
+  const inner = readBalanced(text, from + 1, "(", ")");
+  return inner !== null && text[inner] === ")" ? inner + 1 : null;
+}
+
+/** The reason a line with a `#` this guard cannot read as a character is refused. */
+const COMMENT = "a comment cannot be told from an argument here";
+
+/**
+ * A character that, straight before a `#`, joins the `#` to the word it
+ * stands in, whatever surrounds them: a letter, a quote, a backslash, a `$`, a
+ * brace. A `#` after one is a character to bash and to zsh — part of a word,
+ * the parameter `$#`, a quoted or an escaped `#` — because a comment starts
+ * only where a `#` begins a word. After a blank, an operator, a parenthesis or
+ * a backtick, or at the start of the text, a `#` may begin one.
+ */
+const JOINS_A_WORD = /[^\s;&|()<>`]/;
+
+/** The first `#` from `from` to `end` that no character joins to a word, or -1. */
+function looseHash(text: string, from: number, end = text.length): number {
+  for (let i = text.indexOf("#", from); i !== -1 && i < end; i = text.indexOf("#", i + 1)) {
+    if (i === 0 || !JOINS_A_WORD.test(text[i - 1]!)) return i;
+  }
+  return -1;
+}
+
+/**
+ * What can make bash or zsh end an expansion somewhere other than where the
+ * readers above end it: a double quote, which the shells read as nested and
+ * this may not, an escape or a newline inside it, a nested expansion, a
+ * heredoc, a `case` pattern's lone `)`. A single quote is read the same way by
+ * all three.
+ */
+const UNSURE_INSIDE = /["`\\\n]|\$[({['"]|<<|\bcase\b/;
+
+/**
+ * Whether the inside of an expansion, `from` to `end`, is one whose end the
+ * readers above find where bash and zsh do: nothing in it is `UNSURE_INSIDE`,
+ * no bracket in it that `nested` names, and no `#` in it may start a comment.
+ */
+function certain(text: string, from: number, end: number, nested: RegExp | null): boolean {
+  const inside = text.slice(from, end);
+  return (
+    !UNSURE_INSIDE.test(inside) &&
+    (nested === null || !nested.test(inside)) &&
+    looseHash(text, from, end) === -1
+  );
+}
+
+/**
+ * Read the `$(…)`, `$((…))`, backtick pair, `${…}` or `$[…]` at `from`: where
+ * bash ends it, where zsh does, and whether that end is `certain`. Null where
+ * it has no end.
+ */
+function readExpansion(
+  text: string,
+  from: number,
+): { end: number; zsh: number; certain: boolean } | null {
+  if (text[from] === "`" || text.startsWith("$(", from)) {
+    const read = readSubstitution(text, from);
+    if (read === null) return null;
+    // The reader counts parentheses, and the only lone `)` a command holds is
+    // a `case` pattern's.
+    const backtick = text[from] === "`";
+    const sure = certain(text, from + (backtick ? 1 : 2), read.end - 1, null);
+    return { end: read.end, zsh: read.end, certain: sure };
+  }
+  if (text.startsWith("${", from)) {
+    const read = readParameterExpansion(text, from);
+    if (read === null) return null;
+    const sure = read.zsh === read.bash && certain(text, from + 2, read.bash - 1, /[{}()]/);
+    return { end: read.bash, zsh: read.zsh, certain: sure };
+  }
+  const end = readBalanced(text, from + 1, "[", "]");
+  if (end === null) return null;
+  return { end, zsh: end, certain: certain(text, from + 2, end - 1, /[[\]]/) };
+}
+
+/** Whether an expansion `readExpansion` reads starts at `at`. */
+const opensExpansion = (text: string, at: number): boolean =>
+  text[at] === "`" || (text[at] === "$" && "([{".includes(text[at + 1] ?? "\0"));
+
+/**
+ * Whether the `$'…'` at `from` ends where a plain single quote does. In one, a
+ * backslash escapes the next character, a `'` among them; read as a single
+ * quote it ends at an escaped `'`, and what follows is quoted differently.
+ */
+function ansiQuoteReadsPlain(text: string, from: number): boolean {
+  const close = text.indexOf("'", from + 2);
+  if (close === -1) return true;
+  let escapes = 0;
+  while (text[close - 1 - escapes] === "\\") escapes += 1;
+  return escapes % 2 === 0;
+}
+
+/**
+ * The first `$'…'` anywhere in the text — inside a substitution or a quote too
+ * — that does not end where a plain single quote does, or -1. Every reader
+ * here takes a `'` as a plain single quote, so after one the whole line is
+ * read quoted the other way round.
+ */
+function misreadAnsiQuote(text: string): number {
+  for (let at = text.indexOf("$'"); at !== -1; at = text.indexOf("$'", at + 2)) {
+    if (!ansiQuoteReadsPlain(text, at)) return at;
+  }
+  return -1;
+}
+
+/**
+ * The same line with every heredoc body removed, and why the line cannot be
+ * read, where it cannot.
  *
  * `cat >> file <<'EOF'` feeds the lines that follow to the command's standard
  * input. They are its data: a `>` or a `cd` written inside one redirects and
@@ -229,20 +447,88 @@ function skipHeredocBodies(
  * two operators on one line take their bodies in that order — and ends at the
  * first line equal to the tag. An unterminated body runs to the end of the
  * text. `<<<` is a here-string, whose word is on the line itself, and is left
- * alone.
+ * alone, as is a `<<` inside `${…}`, `$[…]`, `$((…))` or `((…))`, where it is
+ * text or a shift.
  *
  * What the command does with the data is the command's own — with one
  * exception, and it is the reason the bodies are returned rather than dropped:
  * where the command is an interpreter or a shell, that data **is** its program,
  * and the guard reads it as such (SCP-177).
+ *
+ * A comment is not taken out. Its words, read as a command's, can hide a write
+ * (`cp a /etc/x # -t out`), and where one starts is not something this can
+ * read with certainty: bash and zsh disagree on some, and an expansion misread
+ * before a `#` moves it. So a `#` that may start a comment makes the line
+ * `unreadable`, and a `#` is read as a character only where this proves it one:
+ * inside a quote, or continuing a word, as this reads them. That reading holds
+ * up to the first expansion or `$'…'` this cannot prove ends where the shells
+ * end it (`certain`); after one, a `#` is a character only where the character
+ * before it joins it to a word (`JOINS_A_WORD`).
+ *
+ * A `$'…'` holding an escaped `'` makes the line `unreadable` wherever it
+ * stands (`misreadAnsiQuote`).
+ *
+ * Where bash and zsh disagree whether a `<<` opens a heredoc — after the `}`
+ * bash ends a `${…}` at and zsh does not — the line is `unreadable` too, and so
+ * it is where a `<<` this reads as opening one stands after an expansion or a
+ * `$'…'` whose end is uncertain: it may be text inside a quote the shells read
+ * as still open, and taken as a heredoc it would hide the lines after it.
+ *
+ * A heredoc's body starts after the newline that ends the line its `<<` stands
+ * on, and a newline inside an expansion or a `((…))` ends no line. So where a
+ * `<<` waits for its body behind an expansion, a `$'…'` or a `((…))` whose end
+ * is uncertain — one holding a newline included — which newline starts the
+ * body is uncertain too, and the line is `unreadable`.
  */
-export function withoutHeredocBodies(command: string): { text: string; bodies: HeredocBody[] } {
+export function withoutHeredocBodies(command: string): {
+  text: string;
+  bodies: HeredocBody[];
+  unreadable: string | null;
+} {
   const bodies: HeredocBody[] = [];
-  if (!command.includes("<<")) return { text: command, bodies };
+  const ansi = misreadAnsiQuote(command);
+  if (!command.includes("<<") && !command.includes("#") && ansi === -1) {
+    return { text: command, bodies, unreadable: null };
+  }
   let kept = "";
   let start = 0;
   let opened: Heredoc[] = [];
   let quote: string | null = null;
+  /** Whether the next character starts a word or continues one. */
+  let at: "start" | "inside" = "start";
+  /** Where what is quoted stopped being certain, or -1. */
+  let unsure = -1;
+  /** Where zsh ends the last `${…}` that bash ended sooner. */
+  let zshUntil = -1;
+  /** The first `<<` whose body has not started, as written, or null. */
+  let waiting: string | null = null;
+  let unreadable: string | null = null;
+  /** The expansion or `$'` after which what is quoted is uncertain, as written. */
+  const opener = () =>
+    JSON.stringify(command.slice(unsure, command[unsure] === "`" ? unsure + 1 : unsure + 2));
+  const comment = (hash: number): string => {
+    const excerpt = JSON.stringify(command.slice(hash, hash + 24).split("\n")[0]);
+    if (unsure === -1) {
+      return `the # in ${excerpt} starts a word, so it may open a comment, and ${COMMENT}`;
+    }
+    return (
+      `the # in ${excerpt} may open a comment — what is quoted after the ${opener()} before ` +
+      `it cannot be read with certainty — and ${COMMENT}`
+    );
+  };
+  /** From `from` on, only the character before a `#` proves it a character. */
+  const lose = (from: number) => {
+    if (unsure !== -1) return;
+    unsure = from;
+    if (waiting !== null) {
+      unreadable ??=
+        `the << in ${waiting} takes its body from the lines after the one it stands on, and ` +
+        `after the ${opener()} that follows it where that line ends cannot be read with ` +
+        "certainty, so which lines are data and which the shell runs cannot be told";
+    }
+    const hash = looseHash(command, from);
+    if (hash !== -1) unreadable ??= comment(hash);
+  };
   let i = 0;
   while (i < command.length) {
     const ch = command[i]!;
@@ -253,41 +539,81 @@ export function withoutHeredocBodies(command: string): { text: string; bodies: H
     }
     if (ch === "\\") {
       // An escaped newline continues the line, so the body it opens still
-      // begins after the next newline that ends one.
+      // begins after the next newline that ends one, and the word it stood in
+      // goes on after it.
+      if (command[i + 1] !== "\n") at = "inside";
       i += 2;
       continue;
     }
     if (quote === null && (ch === '"' || ch === "'")) {
+      if (ch === "'" && command[i - 1] === "$" && !ansiQuoteReadsPlain(command, i - 1)) {
+        lose(i - 1);
+      }
       quote = ch;
+      at = "inside";
       i += 1;
       continue;
     }
     if (quote === '"') {
       if (ch === '"') quote = null;
+      else if (unsure === -1 && opensExpansion(command, i)) {
+        // The shells read an expansion inside double quotes whole, a `"` in it
+        // included, and this reads on to the next `"`: the same place only
+        // where the expansion's end is certain.
+        const read = readExpansion(command, i);
+        if (read === null || !read.certain) lose(i);
+      }
       i += 1;
       continue;
     }
-    if (ch === "`" || (ch === "$" && command[i + 1] === "(")) {
+    if (opensExpansion(command, i)) {
       // A heredoc inside a substitution belongs to the command the substitution
       // runs, which is read on its own.
-      const read = readSubstitution(command, i);
-      if (read === null) break;
+      const read = readExpansion(command, i);
+      if (read === null) {
+        lose(i);
+        break;
+      }
+      if (read.zsh > read.end) zshUntil = Math.max(zshUntil, read.zsh);
+      if (!read.certain) lose(i);
+      at = "inside";
       i = read.end;
+      continue;
+    }
+    if (ch === "#" && at === "start") {
+      if (unsure === -1) unreadable ??= comment(i);
+      at = "inside";
+      i += 1;
       continue;
     }
     if (ch === "<" && command[i + 1] === "<") {
       if (command[i + 2] === "<") {
         // A here-string. Its word is on this line, and the two characters it
         // ends with are not an operator of their own.
+        at = "start";
         i += 3;
         continue;
       }
       const read = readHeredocTag(command, i + 2);
       if (read === null) {
+        at = "start";
         i += 2;
         continue;
       }
+      if (i < zshUntil) {
+        unreadable ??=
+          "a << after the } that bash ends a ${…} at and zsh does not opens a heredoc " +
+          "to one shell and is text to another";
+      }
+      if (unsure !== -1) {
+        unreadable ??=
+          `the << in ${JSON.stringify(command.slice(i, read.end))} may stand inside a quote — ` +
+          `what is quoted after the ${opener()} before it cannot be read with certainty — and ` +
+          "a heredoc it opened would take the lines the shell runs after it as data";
+      }
       opened.push(read.heredoc);
+      waiting ??= JSON.stringify(command.slice(i, read.end));
+      at = "inside";
       i = read.end;
       continue;
     }
@@ -296,11 +622,28 @@ export function withoutHeredocBodies(command: string): { text: string; bodies: H
       i = skipHeredocBodies(command, i + 1, opened, bodies);
       start = i;
       opened = [];
+      waiting = null;
+      at = "start";
       continue;
     }
+    if (ch === "(" && at !== "inside" && command[i + 1] === "(") {
+      const end = readArithmeticCommand(command, i);
+      if (end !== null) {
+        if (!certain(command, i + 2, end - 2, null)) lose(i);
+        at = "start";
+        i = end;
+        continue;
+      }
+    }
+    at = /\s/.test(ch) || WORD_BREAK.has(ch) ? "start" : "inside";
     i += 1;
   }
-  return { text: kept + command.slice(start), bodies };
+  if (ansi !== -1) {
+    unreadable ??=
+      `the $'…' in ${JSON.stringify(command.slice(ansi, ansi + 16).split("\n")[0])} holds an ` +
+      "escaped quote, which ends it for this guard and not for the shell";
+  }
+  return { text: kept + command.slice(start), bodies, unreadable };
 }
 
 /**
@@ -335,6 +678,8 @@ export function scanSegments(command: string): {
   separators: string[];
   balanced: boolean;
   bodies: HeredocBody[];
+  /** Why the line cannot be read, where it cannot (`withoutHeredocBodies`). */
+  unreadable: string | null;
 } {
   const read = withoutHeredocBodies(command);
   const bodies = read.bodies;
@@ -417,7 +762,7 @@ export function scanSegments(command: string): {
   if (quote !== null || depth !== 0) balanced = false;
   texts.push(text.slice(start));
   separators.push("");
-  return { texts, separators, balanced, bodies };
+  return { texts, separators, balanced, bodies, unreadable: read.unreadable };
 }
 
 /** The list `inspectCommand` evaluates its pattern rules against. */

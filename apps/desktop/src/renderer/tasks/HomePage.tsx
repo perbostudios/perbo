@@ -37,14 +37,23 @@ const HEADER_COUNT: Record<HomeTone, [className: string, icon: InkIconName, size
 export function DiffLabel({
   summary,
   pending,
+  refusal = null,
   compact = false,
 }: {
   summary: TaskSummary | undefined;
   pending: boolean;
+  /** Why the summary could not be read, where it could not; the label says so rather than "no diff yet". */
+  refusal?: string | null;
   /** The archive column has room for the two numbers; the file count goes in the title. */
   compact?: boolean;
 }) {
   if (pending) return <span className="diff-label muted">reading…</span>;
+  if (refusal !== null)
+    return (
+      <span className="diff-label muted" title={refusal}>
+        diff unavailable
+      </span>
+    );
   if (!summary || summary.attempts === 0 || !summary.diff)
     return <span className="diff-label muted">{summary?.note ? "diff unavailable" : "no diff yet"}</span>;
   const files = `${summary.diff.files} ${summary.diff.files === 1 ? "file" : "files"}`;
@@ -163,7 +172,11 @@ function TaskCard({
         <span className="muted" aria-hidden="true">·</span>
         <span className="mono">{row.repository}</span>
         <span className="muted" aria-hidden="true">·</span>
-        <DiffLabel summary={summary.data} pending={summary.isPending && !summary.isError} />
+        <DiffLabel
+          summary={summary.data}
+          pending={summary.isPending && !summary.isError}
+          refusal={summary.isError ? errorMessage(summary.error) : null}
+        />
       </div>
       <div className="task-card-description">
         <span>{finished ?? description}</span>
@@ -224,7 +237,12 @@ function ArchiveRow({
       </span>
       <span role="cell">{row.repository}</span>
       <span role="cell">
-        <DiffLabel summary={summary.data} pending={summary.isPending && !summary.isError} compact />
+        <DiffLabel
+          summary={summary.data}
+          pending={summary.isPending && !summary.isError}
+          refusal={summary.isError ? errorMessage(summary.error) : null}
+          compact
+        />
       </span>
       <span role="cell">{row.ticket.admission.criteria_count}</span>
       <span role="cell">

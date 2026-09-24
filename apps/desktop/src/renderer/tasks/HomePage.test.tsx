@@ -72,3 +72,36 @@ describe("the archive's cost column", () => {
     expect(costCell()).toBe("—");
   });
 });
+
+/**
+ * One ticket the sample host has no record of, so reading its summary is
+ * refused, filed in the archive or left on the board.
+ */
+function unreadable(filed: boolean): Snapshot {
+  const row = structuredClone(
+    sample.tasks.find((task) => (task.ticket.state === "merged") === filed) ?? sample.tasks[0]!,
+  );
+  if (filed) row.ticket.state = "merged";
+  // A key the protocol accepts and the sample host has no ticket for.
+  row.ticket.key = "ZZZ-9999999";
+  return {
+    ...structuredClone(sample),
+    tasks: [row],
+    archived: filed ? [row.repoId + ":" + row.ticket.key] : [],
+  };
+}
+
+describe("a diff whose summary could not be read", () => {
+  for (const archive of [false, true]) {
+    it(`says it is unavailable and why, not that there is none yet${archive ? ", in the archive" : ""}`, async () => {
+      render(
+        <QueryClientProvider client={client}>
+          <HomePage workspace={unreadable(archive)} navigate={() => undefined} archive={archive} />
+        </QueryClientProvider>,
+      );
+      const label = await screen.findByText("diff unavailable");
+      expect(label.getAttribute("title")).toBe("Sample task not found in this repository.");
+      expect(screen.queryByText("no diff yet")).toBeNull();
+    });
+  }
+});

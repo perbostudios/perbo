@@ -200,9 +200,10 @@ describe("the allow-list the runner already had", () => {
     "sh -c 'sudo rm -r sub'",
     "/usr/bin/sudo rm -r sub",
     "env -i sudo touch a",
-    // `sub` is the destination and `{}` is the source, so the refusal is about
-    // the verb rather than about words `xargs` would read from its input.
-    "xargs -I{} sudo cp {} sub",
+    // `sub` is the destination and `{}` is the source, past a `--`, so the
+    // refusal is about the verb rather than about words `xargs` would read from
+    // its input.
+    "xargs -I{} sudo cp -- {} sub",
   ];
 
   for (const command of WRAPPED_DENIALS) {

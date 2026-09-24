@@ -42,7 +42,7 @@ const NO_TRANSPORT_PROCESS_EXECUTION = {
  */
 const NO_GIT_OR_GH_PROCESS = {
   selector:
-    "CallExpression[callee.name=/^(execFile|execFileSync|spawn|spawnSync|run|runOrThrow|runSync)$/]" +
+    "CallExpression[callee.name=/^(execFile|execFileSync|spawn|spawnSync|run|runOrThrow|runSync|version)$/]" +
     ":matches([arguments.0.value=/^(git|gh)$/], [arguments.0.elements.0.value=/^(git|gh)$/])",
   message:
     "git and gh go through @perbo/workspace's repository module: argv only, in the runner's " +

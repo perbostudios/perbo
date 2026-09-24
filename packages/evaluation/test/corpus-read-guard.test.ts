@@ -480,37 +480,88 @@ interface Offence {
   message: string;
 }
 
+/** The trees vitest collects a suite from, and what it leaves out of them. */
+interface Collected {
+  roots: string[];
+  /** Whether `test.exclude` takes a file under those trees out of the run. */
+  excluded: (path: string) => boolean;
+}
+
 /**
- * The directories vitest collects a suite from, read out of this package's
+ * A vitest glob as a pattern over a path relative to the package: `**` crosses
+ * directories, `*` and `?` do not.
+ */
+function globPattern(glob: string): RegExp {
+  let pattern = "";
+  for (let at = 0; at < glob.length; at += 1) {
+    const char = glob[at]!;
+    if (glob.startsWith("**/", at)) {
+      pattern += "(?:.*/)?";
+      at += 2;
+    } else if (glob.startsWith("**", at)) {
+      pattern += ".*";
+      at += 1;
+    } else if (char === "*") pattern += "[^/]*";
+    else if (char === "?") pattern += "[^/]";
+    else pattern += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${pattern}$`);
+}
+
+/**
+ * The trees vitest collects a suite from, read out of a package's
  * `vitest.config.ts`.
  *
  * The guard's subject is what vitest runs, and the config is what decides that,
  * so the trees are taken from it rather than written here: a widened `include`
- * widens the scan instead of leaving a tree nobody guards. A glob's leading
- * literal segments are its tree: one that starts `src/` collects from `src`.
+ * widens the scan instead of leaving a tree nobody guards, and an `exclude`
+ * takes out of the scan what vitest takes out of the run. Only the `test`
+ * options' own `include` and `exclude` decide it; `test.coverage.include` names
+ * what a coverage report counts, not a suite. A glob's leading literal segments
+ * are its tree: one that starts `src/` collects from `src`.
  */
-function collectedRoots(): string[] {
-  const config = parseFile(join(PACKAGE_DIR, "vitest.config.ts"));
-  const globs: string[] = [];
-
-  forEachNode(config, (node) => {
-    if (!ts.isPropertyAssignment(node)) return;
-    const name = node.name;
-    if (!ts.isIdentifier(name) || name.text !== "include") return;
-    if (!ts.isArrayLiteralExpression(node.initializer)) return;
-    for (const element of node.initializer.elements) {
-      if (ts.isStringLiteralLike(element)) globs.push(element.text);
+function collectedTrees(configPath: string, packageDir: string): Collected {
+  const globs: Record<"include" | "exclude", string[]> = { include: [], exclude: [] };
+  for (const statement of parseFile(configPath).statements) {
+    if (!ts.isExportAssignment(statement)) continue;
+    let options = unwrap(statement.expression);
+    if (ts.isCallExpression(options) && options.arguments[0] !== undefined) {
+      options = unwrap(options.arguments[0]);
     }
-  });
+    if (!ts.isObjectLiteralExpression(options)) continue;
+    for (const test of options.properties) {
+      if (!ts.isPropertyAssignment(test) || !ts.isIdentifier(test.name)) continue;
+      if (test.name.text !== "test" || !ts.isObjectLiteralExpression(test.initializer)) continue;
+      for (const option of test.initializer.properties) {
+        if (!ts.isPropertyAssignment(option) || !ts.isIdentifier(option.name)) continue;
+        const key = option.name.text;
+        if (key !== "include" && key !== "exclude") continue;
+        if (!ts.isArrayLiteralExpression(option.initializer)) continue;
+        for (const element of option.initializer.elements) {
+          if (ts.isStringLiteralLike(element)) globs[key].push(element.text);
+        }
+      }
+    }
+  }
 
-  const roots = globs.map((glob) => {
+  const roots = globs.include.map((glob) => {
     const parts = glob.split("/");
     const literal = parts.slice(0, parts.findIndex((part) => part.includes("*")));
-    return resolve(PACKAGE_DIR, ...literal);
+    return resolve(packageDir, ...literal);
   });
+  const excludes = globs.exclude.map(globPattern);
 
-  return [...new Set(roots)].filter((dir) => existsSync(dir)).sort();
+  return {
+    roots: [...new Set(roots)].filter((dir) => existsSync(dir)).sort(),
+    excluded: (path) => {
+      const within = relative(packageDir, path).replaceAll("\\", "/");
+      return !within.startsWith("../") && excludes.some((pattern) => pattern.test(within));
+    },
+  };
 }
+
+/** This package's own trees. */
+const COLLECTED = collectedTrees(join(PACKAGE_DIR, "vitest.config.ts"), PACKAGE_DIR);
 
 /**
  * Every `.ts` file under `dir`, named by its path relative to `dir`.
@@ -521,8 +572,9 @@ function collectedRoots(): string[] {
  * never opened. Relative paths rather than bare names, so a failure names the
  * file the way a reader would have to go and find it.
  */
-function tsFiles(dir: string): string[] {
+function tsFiles(dir: string, excluded: Collected["excluded"] = COLLECTED.excluded): string[] {
   return tsFilesUnder(dir)
+    .filter((path) => !excluded(path))
     .map((path) => relative(dir, path).replaceAll("\\", "/"))
     .sort();
 }
@@ -612,7 +664,7 @@ function unguardedCorpusReads(
 
 describe("no suite reads the corpus outside the gate", () => {
   const modules = loaderModules(SRC_DIR);
-  const collected = collectedRoots();
+  const collected = COLLECTED.roots;
 
   /** A directory of planted files, removed after each test that asks for one. */
   const scratchDirectory = createScratch("perbo-corpus-guard-");
@@ -692,6 +744,36 @@ describe("no suite reads the corpus outside the gate", () => {
     expect(files.filter((file) => file.endsWith(".test.ts")).length).toBeGreaterThan(30);
     expect(files).toContain(`test/${GATE}`);
     expect(files).toContain("src/corpus.ts");
+  });
+
+  /**
+   * The trees come from the `test` options' own `include`, less their
+   * `exclude`: a coverage `include` is not a tree vitest collects a suite from,
+   * and a tree vitest excludes is not one it runs.
+   */
+  it("reads the trees from test.include, less test.exclude, and no other include", () => {
+    const dir = scratchDir();
+    for (const tree of ["suites/fixtures", "lib"]) mkdirSync(join(dir, tree), { recursive: true });
+    plant(dir, "suites/kept.test.ts", "");
+    plant(dir, "suites/fixtures/skipped.test.ts", "");
+    plant(dir, "lib/covered.ts", "");
+    plant(
+      dir,
+      "vitest.config.ts",
+      'import { defineConfig } from "vitest/config";\n' +
+        "export default defineConfig({\n" +
+        "  test: {\n" +
+        '    include: ["suites/**/*.test.ts"],\n' +
+        '    exclude: ["suites/fixtures/**"],\n' +
+        '    coverage: { include: ["lib/**"] },\n' +
+        "  },\n" +
+        "});\n",
+    );
+
+    const trees = collectedTrees(join(dir, "vitest.config.ts"), dir);
+
+    expect(trees.roots).toEqual([join(dir, "suites")]);
+    expect(tsFiles(join(dir, "suites"), trees.excluded)).toEqual(["kept.test.ts"]);
   });
 
   it("finds no unguarded read in the trees as they stand", () => {

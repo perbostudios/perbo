@@ -1,4 +1,10 @@
-import { anyPresent, optionSet, optionsPresent, type Context } from "./command.js";
+import {
+  anyPresent,
+  optionSet,
+  optionsPresent,
+  suppliedAsOption,
+  type Context,
+} from "./command.js";
 import { judgeTarget, pathFinding, type Destination, type WriteFinding } from "./destination.js";
 import type { Word } from "./lexer.js";
 
@@ -128,6 +134,20 @@ export function writerFindings(
   rest: Word[],
   context: Context,
 ): WriteFinding[] {
+  // Read before the options are: a supplied word can be the option that makes
+  // the command a writer at all, as `-i` makes `sed` one.
+  const option = suppliedAsOption(verb, rest, context, spec.assignments !== undefined);
+  const named = destinationFindings(verb, spec, rest, context);
+  return option === null ? named : [option, ...named];
+}
+
+/** The destinations the words after `verb` name, read through its `spec`. */
+function destinationFindings(
+  verb: string,
+  spec: WriterSpec,
+  rest: Word[],
+  context: Context,
+): WriteFinding[] {
   const present = optionsPresent(rest);
   if (spec.onlyWith !== undefined && !anyPresent(spec.onlyWith, present)) return [];
   const takesDestination =
@@ -148,8 +168,6 @@ export function writerFindings(
   for (let i = 0; i < rest.length; i += 1) {
     const word = rest[i]!;
     const value = word.value;
-    // A `find … -exec` body ends here, and so does a `{ … }` group.
-    if (value === ";" || value === "+" || value === "(" || value === ")") break;
     if (!optionsEnded) {
       if (value === "--") {
         optionsEnded = true;

@@ -74,6 +74,8 @@ export interface Git {
   run(cwd: string, args: readonly string[], options?: CallOptions): Promise<RunResult>;
   runOrThrow(cwd: string, args: readonly string[], options?: CallOptions): Promise<RunResult>;
   runSync(cwd: string, args: readonly string[], options?: CallOptions): RunResult;
+  /** The first line `git --version` prints, or null where git cannot be run here. */
+  versionSync(options?: CallOptions): string | null;
 
   head(cwd: string, options?: CallOptions): Promise<string | null>;
   headSync(cwd: string, options?: CallOptions): string | null;
@@ -118,6 +120,8 @@ export interface GhCallOptions extends CallOptions {
 export interface Gh {
   run(cwd: string, args: readonly string[], options?: GhCallOptions): Promise<RunResult>;
   runSync(cwd: string, args: readonly string[], options?: GhCallOptions): RunResult;
+  /** The first line `gh --version` prints, or null where gh cannot be run here. */
+  versionSync(options?: GhCallOptions): string | null;
   viewPullRequest(
     cwd: string,
     selector: string,
@@ -146,6 +150,23 @@ function value(result: RunResult): string | null {
 
 function lines(result: RunResult): string[] {
   return result.stdout.split("\n").filter((line) => line.length > 0);
+}
+
+/**
+ * The first line a `--version` prints, or null where the binary did not run
+ * and answer: missing, not executable, a non-zero exit, or an answer it did
+ * not finish.
+ */
+function versionLine(ask: () => RunResult): string | null {
+  let result: RunResult;
+  try {
+    result = ask();
+  } catch {
+    // A binary that cannot be started at all is what this question is for.
+    return null;
+  }
+  if (result.code !== 0 || result.timed_out || result.truncated) return null;
+  return result.stdout.trim().split("\n")[0] ?? "";
 }
 
 function succeeded(result: RunResult): RunResult {
@@ -202,6 +223,10 @@ export function createGit(options: RepositoryOptions = {}): Git {
     run,
     runOrThrow: async (cwd, args, call) => succeeded(await run(cwd, args, call)),
     runSync,
+    versionSync: (call) =>
+      versionLine(() =>
+        child.runSync(argv(["--version"]), spawnOptions(process.cwd(), ["--version"], call, QUERY_MAX_OUTPUT_BYTES)),
+      ),
 
     head: async (cwd, call) => value(await ask(cwd, ["rev-parse", "HEAD"], call)),
     headSync: (cwd, call) => value(askSync(cwd, ["rev-parse", "HEAD"], call)),
@@ -319,6 +344,10 @@ export function createGh(options: RepositoryOptions = {}): Gh {
   return {
     run: (cwd, args, call) => child.run(argv(args), spawnOptions(cwd, call, GENERIC_MAX_OUTPUT_BYTES)),
     runSync: (cwd, args, call) => child.runSync(argv(args), spawnOptions(cwd, call, GENERIC_MAX_OUTPUT_BYTES)),
+    versionSync: (call) =>
+      versionLine(() =>
+        child.runSync(argv(["--version"]), spawnOptions(process.cwd(), call, QUERY_MAX_OUTPUT_BYTES)),
+      ),
     viewPullRequest: (cwd, selector, fields, call) =>
       child.run(argv(viewArgs(selector, fields, call?.repo)), spawnOptions(cwd, call, QUERY_MAX_OUTPUT_BYTES)),
     viewPullRequestSync: (cwd, selector, fields, call) =>
