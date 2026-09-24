@@ -8,7 +8,7 @@ import { WaitScreen } from "./wizard.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey, stageName } from "./ticket-workspace.js";
 import { costLabel, runEnding, taskRecords } from "./task-context.js";
-import type { TaskContext } from "./task-context.js";
+import type { RunEnding, TaskContext } from "./task-context.js";
 import type { DecisionQuestion } from "../../shared/protocol.js";
 
 export function TaskHeader(context: TaskContext) {
@@ -86,10 +86,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
         text: entry.note || entry.to.replaceAll("_", " "),
         reason: null,
         time: index === ticket.history.length - 1 && active ? "now" : "",
-        state:
-          index === ticket.history.length - 1 && active
-            ? ("current" as const)
-            : ("complete" as const),
+        state: index === ticket.history.length - 1 && active ? ("current" as const) : ("complete" as const),
       }))
       .reverse(),
   ];
@@ -310,11 +307,8 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
       </div>
       {ending !== null && !acknowledged ? (
         <EndedCard
-          title={ending.title}
+          ending={ending}
           why={whyLabel}
-          sentence={ending.sentence}
-          reason={ending.reason}
-          log={ending.log}
           onConfirm={() => {
             confirmEnding(ending.job.id);
             setConfirmed(new Set([...confirmed, ending.job.id]));
@@ -349,22 +343,13 @@ function confirmEnding(jobId: string): void {
 }
 /** What ended the command, in the decision card's frame, read and confirmed. */
 function EndedCard({
-  title,
+  ending: { title, sentence, reason, log },
   why,
-  sentence,
-  reason,
-  log,
   onConfirm,
 }: {
-  /** "The run ended", or the name of the command that failed. */
-  title: string;
+  ending: RunEnding;
   /** What the `i` is called. */
   why: string;
-  sentence: string;
-  /** The fuller account behind the sentence, read from the same records, behind an `i`. */
-  reason: string;
-  /** A failure that is not the loop's own verdict, in the command's words. */
-  log: string | null;
   onConfirm: () => void;
 }) {
   const card = useRef<HTMLDivElement>(null);

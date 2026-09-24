@@ -124,11 +124,7 @@ export interface CommandSegment {
  * to be judged as itself.
  */
 export function everySegment(segments: readonly CommandSegment[]): CommandSegment[] {
-  return segments.flatMap((segment) => [
-    segment,
-    ...everySegment(segment.nested),
-    ...everySegment(segment.substitutions),
-  ]);
+  return segments.flatMap((segment) => [segment, ...everySegment(segment.nested), ...everySegment(segment.substitutions)]);
 }
 
 /** What reading a command line yields: what it writes, where it stands, what it runs. */
@@ -161,6 +157,18 @@ function looksUp(words: readonly Word[]): boolean {
     if (/^-[pvV]+$/.test(value) && /[vV]/.test(value)) return true;
   }
   return false;
+}
+
+/** The command a `find -exec` or `-execdir` runs, as words, or null where there is none. */
+function findExec(rest: readonly Word[]): Word[] | null {
+  const at = rest.findIndex((word) => word.value === "-exec" || word.value === "-execdir");
+  if (at === -1) return null;
+  const body: Word[] = [];
+  for (const word of rest.slice(at + 1)) {
+    if (word.value === ";" || word.value === "+") break;
+    body.push(word);
+  }
+  return body;
 }
 
 /** `rg`'s options that take a value, as a separate word or attached. */
@@ -213,18 +221,14 @@ function rgPreprocessor(rest: readonly Word[]): Word[] | null {
       attached = letter + 1 < value.length ? value.slice(letter + 1) : null;
     }
     if (!RG_VALUES.has(name)) continue;
-    const operand =
-      attached !== null ? { ...word, raw: attached, value: attached } : rest[at + 1];
+    const operand = attached !== null ? { ...word, raw: attached, value: attached } : rest[at + 1];
     if (attached === null) at += 1;
-    if (name === "-e" || name === "--regexp" || name === "-f" || name === "--file") {
-      patternGiven = true;
-    }
+    if (name === "-e" || name === "--regexp" || name === "-f" || name === "--file") patternGiven = true;
     if (name === "--pre" && operand !== undefined) program = operand;
   }
   if (program === null) return null;
   const paths = patternGiven ? positionals : positionals.slice(1);
-  const dot: Word = { raw: ".", value: ".", substitutions: [], variable: false };
-  return [program, ...(paths.length > 0 ? paths : [dot])];
+  return [program, ...(paths.length > 0 ? paths : [{ raw: ".", value: ".", substitutions: [], variable: false }])];
 }
 
 interface Analysis {
@@ -839,38 +843,19 @@ function analyzeWords(words: Word[], context: Context): Analysis {
         resolved: null,
       });
       cd = { path: cwd.path, unknown: true };
-    } else if (verb === "find") {
+    } else if (verb === "find" || verb === "rg") {
       programs.push(verb);
-      const at = rest.findIndex((word) => word.value === "-exec" || word.value === "-execdir");
-      if (at !== -1) {
-        const body: Word[] = [];
-        for (const word of rest.slice(at + 1)) {
-          if (word.value === ";" || word.value === "+") break;
-          body.push(word);
-        }
-        // The body is a command of its own: it inherits the directory, not the
-        // standard input the line gave the `find`.
+      // A `find -exec` body, and the command `<program> <paths…>` an `rg --pre
+      // <program>` runs on each file the search reads, is a command of its own:
+      // it inherits the directory, not the standard input the line gave the
+      // search.
+      const body = verb === "find" ? findExec(rest) : rgPreprocessor(rest);
+      if (body !== null) {
         const inner = analyzeWords(body, { ...context, cwd, stdin: undefined });
         findings.push(...inner.findings);
         if (!inner.accounted) accounted = false;
         // `find … -exec rm {} ;` runs `rm`: what the line writes is the body's,
         // and the admission decision is about the same act.
-        if (inner.mutating) mutating = true;
-        programs.push(...inner.programs);
-        invocations.push(...inner.invocations);
-        unreadablePrograms.push(...inner.unreadablePrograms);
-      }
-    } else if (verb === "rg") {
-      programs.push(verb);
-      // `--pre <program>` runs that program with each file the search reads
-      // as its operand, so it is read as the command `<program> <paths…>`,
-      // the way a `find -exec` body is: what it writes and what it runs are
-      // the line's.
-      const pre = rgPreprocessor(rest);
-      if (pre !== null) {
-        const inner = analyzeWords(pre, { ...context, cwd, stdin: undefined });
-        findings.push(...inner.findings);
-        if (!inner.accounted) accounted = false;
         if (inner.mutating) mutating = true;
         programs.push(...inner.programs);
         invocations.push(...inner.invocations);

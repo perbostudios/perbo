@@ -1,12 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type KeyboardEvent,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { Button, InfoHint, LineIcon, Notice, ThinkingStatus, cx } from "../ui/index.js";
 import { useQueryClient } from "@tanstack/react-query";
 import { bridge, errorMessage, useGraph } from "../workspace/index.js";
@@ -83,15 +75,13 @@ function markSending(id: string, by: 1 | -1): void {
   else turnsSending.delete(id);
   for (const listener of sendingListeners) listener();
 }
+function onSending(listener: () => void): () => void {
+  sendingListeners.add(listener);
+  return () => sendingListeners.delete(listener);
+}
 /** Whether a turn this window sent to this planning's chat is still on its way to the host. */
 export function useTurnSending(id: string): boolean {
-  return useSyncExternalStore(
-    (listener) => {
-      sendingListeners.add(listener);
-      return () => sendingListeners.delete(listener);
-    },
-    () => turnsSending.has(id),
-  );
+  return useSyncExternalStore(onSending, () => turnsSending.has(id));
 }
 
 export function InterviewDock({
@@ -276,29 +266,26 @@ export function InterviewDock({
   // Until something is pushed, what the snapshot says: a dock opened part way
   // through a turn missed the change that said so.
   const inFlight = busyTurn === null ? (workspace.working ?? []).includes(id ?? "") : busyTurn;
-  // Said for the whole of the turn, the part after the spec-written note
-  // included: Generate plan is held until the turn is over (D-102), so the
-  // chat says the turn is still going for as long as the press waits on it.
-  const told = inFlight;
   const handed = handedOver(conversation);
   // The session has words for the person that are not shown yet: its bubble
   // stands at the foot of the log with the dots, in place of the status line,
   // until they are. Not once the spec-written note stands, since nothing the
   // session says after it is shown.
-  const speaking = told && doingTurn === "speaking" && !handed;
+  const speaking = inFlight && doingTurn === "speaking" && !handed;
   // The one status line at the foot of the log, saying what the turn is doing
   // as it moves from reading the person's answer to thinking, writing the spec
   // and changing the plan, or null where there is none to show. Writing the
   // spec is the host's to say, because it leaves no line to read it from; the
   // rest is read from the last line the turn put in the conversation.
   const working = useMemo(() => {
-    if (!told || speaking) return null;
+    if (!inFlight || speaking) return null;
     // Whatever the session does after the note is not shown, so neither is
-    // what it is doing: only that the turn is still going.
+    // what it is doing: only that the turn, which Generate plan waits on
+    // (D-102), is still going.
     if (handed) return FINISHING;
     if (doingTurn === "writing_the_spec") return "Writing the spec…";
     return sayWorking(conversation.at(-1)?.line, conversation.at(-2)?.line);
-  }, [told, speaking, handed, doingTurn, conversation]);
+  }, [inFlight, speaking, handed, doingTurn, conversation]);
 
   const dropped = (conversation[0]?.n ?? 1) - 1;
   // What the log draws: every line but a tool call that only repeated itself.
@@ -586,16 +573,14 @@ const FINISHING = "Finishing this turn…";
  *
  * It is a reading of what happened, not a report from the session, so it is
  * written as what is in hand rather than as a claim about the next moment.
- *
  */
 export function sayWorking(
   line: InterviewEntry["line"] | undefined,
   previous?: InterviewEntry["line"],
 ): string {
   if (line === undefined) return "Reading the repository…";
-  // The spec is written and the note says so, and the session is winding the
-  // turn up: Generate plan waits on that (D-102), so the status says it is
-  // going on rather than falling quiet under the note.
+  // The spec is written and the session is winding the turn up, which
+  // Generate plan waits on (D-102).
   if (line.kind === "note" && line.text === INTERVIEW_WROTE_THE_SPEC) return FINISHING;
   // An answer to a problem between the plan and the spec: the session is
   // applying it, and the plan is read again once it has.
@@ -889,9 +874,6 @@ export function QuestionCard({
         key={at}
       >
         <span className="choice-heading">
-          {/* The circle every answer carries, the pair's included: filled
-              while it is the pick, and while the box it opened is being
-              typed in. */}
           <input
             type="radio"
             name={`asked-${number}-${index}`}
@@ -899,11 +881,7 @@ export function QuestionCard({
             disabled={busy}
             // A click on the pick already made takes it back: a radio fires
             // no change for that click, so it is read here. Space on it is
-            // the keyboard's way of making it, and is not a take-back. A click
-            // anywhere on the answer reaches here through its label but one
-            // in the box Something else opened, which is the box's own: so
-            // that answer is taken back by its opened card around the box,
-            // and never by typing in it.
+            // the keyboard's way of making it, and is not a take-back.
             onClick={() => {
               if (chosen) answer();
             }}
@@ -1053,9 +1031,7 @@ function Line({
   // A note the host marked is about a page the person is not on, so it is
   // drawn to be read rather than to be scrolled past. It is told, not warned:
   // nothing has gone wrong, so it takes no danger colour. A note is words and
-  // never a press: the one saying the spec is written leaves drafting to the
-  // foot of the Spec pane, and the one saying every problem is resolved
-  // leaves confirming to the Confirm the plan every other pane carries.
+  // never a press: drafting and confirming are the panes' own.
   if (line.kind === "note")
     return (
       <p
@@ -1198,7 +1174,7 @@ export function ToolCard({
       {!line.ok && (
         <p className="tool-why">
           {`Refused: ${firstSentence(line.detail)}`}
-          {firstSentence(line.detail) !== flat(line.detail) && (
+          {/[.!?]\s/.test(line.detail.trim()) && (
             <InfoHint text={line.detail} label={`Why it was refused: ${toolName(line.tool, false)}`} />
           )}
         </p>
@@ -1207,12 +1183,9 @@ export function ToolCard({
   );
 }
 
-/** What a tool said, on one line: its whitespace run together. */
-const flat = (text: string): string => text.trim().replace(/\s+/g, " ");
-
 /** The first sentence of what a tool said, or all of it where it has no end to a sentence. */
 export function firstSentence(text: string): string {
-  const said = flat(text);
-  const end = said.search(/[.!?](\s|$)/);
-  return end < 0 ? said : said.slice(0, end + 1);
+  const flat = text.trim().replace(/\s+/g, " ");
+  const end = flat.search(/[.!?](\s|$)/);
+  return end < 0 ? flat : flat.slice(0, end + 1);
 }

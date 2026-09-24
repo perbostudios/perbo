@@ -149,6 +149,9 @@ describe("a Home card", () => {
         `The outcome of ticket ${index}, long enough that a narrow card has to cut it short at its edge`,
       );
     }
+    const stopped = card("Ticket 3 failed").querySelector(".task-card-description > span")!;
+    expect(stopped.className).toBe("");
+    expect(stopped.textContent).toBe("The loop stopped. Its work and evidence have been retained. Open the task to inspect the cause.");
     // No outcome to say, or none read yet: the line keeps its height with a space, so the card does not move.
     cleanup();
     const workspace = board([["merged", pr], ["executing", null]]);
@@ -161,11 +164,6 @@ describe("a Home card", () => {
     home(workspace);
     for (const name of ["Ticket 0 merged", "Ticket 1 executing"])
       expect(card(name).querySelector(".task-card-outcome")!.textContent).toBe("\u00a0");
-    cleanup();
-    home(board([["pr_open", pr], ["merged", pr], ["changes_requested", null], ["failed", null]]));
-    const stopped = card("Ticket 3 failed").querySelector(".task-card-description > span")!;
-    expect(stopped.className).toBe("");
-    expect(stopped.textContent).toBe("The loop stopped. Its work and evidence have been retained. Open the task to inspect the cause.");
     // One line, cut short with an ellipsis at the card's other end.
     const rule = /\.task-card-description > \.task-card-outcome \{([^}]*)\}/.exec(
       readFileSync(`${import.meta.dirname}/../styles.css`, "utf8"),

@@ -41,6 +41,7 @@ import {
   ContractEditing,
   interviewModelFor,
   interviewProviderFor,
+  keepsPersonsTitle,
   REREAD_COULD_NOT_START,
   sectionsOf,
   specFindings,
@@ -1537,11 +1538,13 @@ function specTicketName(repo: string, key: string, markdown: string, keepTitle: 
 /**
  * Draft a plan from a spec, as `admit --from-spec` does: one criterion per
  * requirement, each citing it, grouped into two nodes so a requirement's node
- * is something to look at. `keepTitle` is `--keep-title`: the ticket takes the
- * spec's title and the spec is left as it is (D-127).
+ * is something to look at. Where `planning` records the person titling the
+ * spec and it still states that title, it is `--keep-title`: the ticket takes
+ * the spec's title and the spec is left as it is (D-127).
  */
-export function draftFromSpec(key: string, markdown: string, slug: string, keepTitle: boolean): void {
+export function draftFromSpec(key: string, markdown: string, slug: string, planning: EditingSession | undefined): void {
   const read = readSpecSections(markdown);
+  const keepTitle = planning !== undefined && keepsPersonsTitle(planning, read.text.title);
   const plan = plans.get(key)!;
   // The spec this plan was drafted from, as the CLI records it on admission.
   // Written here because the picker reads it: a ticket is what says a spec has
@@ -1788,6 +1791,12 @@ export function startSampleInterview(id: string): InterviewStatus {
   });
   return interviewStatus(id);
 }
+/** The chat of a planning that has been discarded, ended with it (D-102). */
+export function endPlanningChat(id: string): void {
+  sampleInterviews.delete(id);
+  sampleWorking.delete(id);
+  emit({ kind: "interview", sessionId: id, running: false, entry: null, asking: askingOf(id), working: false, doing: null });
+}
 /**
  * The end of the sample's interview, as the host's stop ends a real one:
  * stopping ends the turn, and what the turn had already written is written, so
@@ -1798,12 +1807,6 @@ export function startSampleInterview(id: string): InterviewStatus {
  * Its own function because Generate plan makes the same ending: the chat is
  * stopped before the plan is drafted from what it left behind.
  */
-/** The chat of a planning that has been discarded, ended with it (D-102). */
-export function endPlanningChat(id: string): void {
-  sampleInterviews.delete(id);
-  sampleWorking.delete(id);
-  emit({ kind: "interview", sessionId: id, running: false, entry: null, asking: askingOf(id), working: false, doing: null });
-}
 export function stopSampleInterview(id: string): void {
   sampleInterviews.delete(id);
   sampleWorking.delete(id);
@@ -2386,9 +2389,7 @@ export function discardTicket(repoId: string, key: string): string | null {
   snapshot.titles = titles;
   snapshot.taskModels = taskModels;
   snapshot.archived = (snapshot.archived ?? []).filter((item) => item !== entry);
-  const { [entry]: opened, ...lastOpened } = snapshot.lastOpened ?? {};
-  void opened;
-  snapshot.lastOpened = lastOpened;
+  snapshot.lastOpened = Object.fromEntries(Object.entries(snapshot.lastOpened ?? {}).filter(([item]) => item !== entry));
   // And every planning over it, as the host discards them, with their chats
   // (D-102): a planning over a ticket that is gone has nothing left to open.
   const over = (session: EditingSession): boolean =>

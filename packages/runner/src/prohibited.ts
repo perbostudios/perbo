@@ -262,24 +262,21 @@ const COPIERS = new Set(["cat", "dd", "tee"]);
 function runsProgram(segment: CommandSegment, rule: ProgramRule): boolean {
   const names = rule.programs.join("|");
   const anywhere = new RegExp(String.raw`\b(?:${names})\b`, "i");
-  // A word whose last component is the name: `sendmail`, `/usr/sbin/sendmail`,
-  // `./mail`. Not `mailbox`, `mail.txt` or `src/mail/x`.
-  const word = new RegExp(
-    String.raw`(?:^|[\s"'=(\`])(?:[^\s"'\`;&|<>()]*/)?(?:${names})(?=$|[\s"'\`;&|<>()])`,
-    "i",
-  );
-  // The same, spelled from the root or from home: `/usr/sbin/sendmail`,
-  // `if=/usr/bin/mail`, `~/bin/mail`. Not `mail` or `templates/mail`.
-  const path = new RegExp(
-    String.raw`(?:^|[\s"'=(\`])[/~](?:[^\s"'\`;&|<>()]*/)?(?:${names})(?=$|[\s"'\`;&|<>()])`,
-    "i",
-  );
+  // A word whose last component is the name — `sendmail`, `/usr/sbin/sendmail`,
+  // `./mail`, not `mailbox`, `mail.txt` or `src/mail/x` — and, as `path`, one
+  // spelled from the root or from home: `if=/usr/bin/mail`, `~/bin/mail`, not
+  // `templates/mail`.
+  const spelled = (from: string) =>
+    new RegExp(String.raw`(?:^|[\s"'=(\`])${from}(?:[^\s"'\`;&|<>()]*/)?(?:${names})(?=$|[\s"'\`;&|<>()])`, "i");
+  const word = spelled("");
+  const path = spelled("[/~]");
   return everySegment([segment]).some((inner) => {
     const runs = inner.programs.map((program) => program.toLowerCase());
+    const running = (programs: ReadonlySet<string>) => runs.some((program) => programs.has(program));
     if (!inner.accounted) return anywhere.test(inner.text);
-    if (runs.some((program) => LAUNCHERS.has(program)) && anywhere.test(inner.text)) return true;
-    if (runs.some((program) => STAGERS.has(program)) && word.test(inner.text)) return true;
-    if (runs.some((program) => COPIERS.has(program)) && path.test(inner.text)) return true;
+    if (running(LAUNCHERS) && anywhere.test(inner.text)) return true;
+    if (running(STAGERS) && word.test(inner.text)) return true;
+    if (running(COPIERS) && path.test(inner.text)) return true;
     return runs.some((program) => rule.programs.includes(program));
   });
 }

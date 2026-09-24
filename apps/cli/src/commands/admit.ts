@@ -1507,15 +1507,17 @@ function assertNotAlreadyDrafted(input: Admitting): void {
  * request, never from this (ADR-0023 §4). An edit never renames a ticket.
  */
 function ticketTitle(resolved: Resolved, outcome: string, keepTitle: boolean): string {
-  const specTitle = resolved.spec === null ? "" : (resolved.issue?.title.replace(/\s+/g, " ").trim() ?? "");
+  const specTitle = resolved.spec === null ? "" : oneLine(resolved.issue?.title ?? "");
   if (keepTitle) return specTitle.length > 0 ? specTitle : outcome;
   // Flattened because it is a model's words shown as a title (ADR-0023 §4).
-  const drafted = (resolved.drafted?.draft.name ?? "").replace(/\s+/g, " ").trim();
+  const drafted = oneLine(resolved.drafted?.draft.name ?? "");
   const named = [drafted, specTitle].find(
     (name) => name.length > 0 && !resolved.names.some((taken) => sameName(name, taken)),
   );
   return named ?? outcome;
 }
+
+const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 /** The longest name a ticket takes, the drafter's own bound (D-127). */
 const TICKET_NAME_CAP = ContractDraftSchema.shape.name.maxLength!;
@@ -1526,7 +1528,7 @@ const TICKET_NAME_CAP = ContractDraftSchema.shape.name.maxLength!;
  * name is the person's and only they can say which words go (D-127).
  */
 function assertKeepableTitle(title: string): void {
-  const kept = title.replace(/\s+/g, " ").trim();
+  const kept = oneLine(title);
   if (kept.length > TICKET_NAME_CAP)
     throw new UsageError(
       `the spec's title is ${kept.length} characters, and a ticket's name is at most ` +

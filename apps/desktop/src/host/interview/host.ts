@@ -848,9 +848,8 @@ export class InterviewHost {
   /** The title this planning's spec states, or null where there is no spec to read. */
   private specTitle(id: string): string | null {
     try {
-      const session = this.deps.editing.read(id);
-      if (session.specSlug === null) return null;
-      return specTitles(this.deps.repository)(session.repoId, session.specSlug);
+      const { repoId, specSlug } = this.deps.editing.read(id);
+      return specSlug === null ? null : specTitles(this.deps.repository)(repoId, specSlug);
     } catch {
       return null;
     }

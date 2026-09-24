@@ -296,13 +296,9 @@ export function openDrafts(
     .reverse();
 }
 
-function titleOfSpec(
-  record: EditingSession,
-  specTitle: (repoId: string, slug: string) => string | null,
-): string | null {
-  if (record.specSlug === null) return null;
-  const title = specTitle(record.repoId, record.specSlug)?.trim() ?? "";
-  return title.length === 0 || title === record.specCut ? null : title;
+function titleOfSpec(record: EditingSession, specTitle: Parameters<typeof openDrafts>[1]): string | null {
+  const title = record.specSlug === null ? null : specTitle(record.repoId, record.specSlug)?.trim();
+  return !title || title === record.specCut ? null : title;
 }
 
 /** A title on one line, as the spec's title line and a ticket's name hold it. */
@@ -321,11 +317,7 @@ export const titleChanged = (save: { title: string; base: { title: string } }): 
  * spec, and the spec still states that title.
  */
 export function keepsPersonsTitle(session: EditingSession, specTitle: string | null): boolean {
-  return (
-    session.named?.by === "person" &&
-    specTitle !== null &&
-    oneLineTitle(specTitle) === session.named.title
-  );
+  return session.named?.by === "person" && specTitle !== null && oneLineTitle(specTitle) === session.named.title;
 }
 
 /** Local editable work and its operation receipts, never canonical Ticket state. */
@@ -549,8 +541,7 @@ export class ContractEditing {
   architectTitled(id: string, title: string): void {
     const written = oneLineTitle(title);
     this.update(id, (session) => {
-      if (written.length === 0 || written === session.specCut) return;
-      if (session.named !== null && written === session.named.title) return;
+      if (!written || written === session.specCut || written === session.named?.title) return;
       session.named = { by: "architect", title: written };
     });
   }
@@ -796,9 +787,10 @@ export class ContractEditing {
    * of the interview's own shape, so the Problems pane and the chat show the
    * same card and either answers it with a turn. None found, after some were,
    * is the reading that resolved them: recorded so, and said as a note —
-   * once, since a reading that finds none after that is nothing new. A reading the person went on past clears them, and problems
-   * found again after a resolved round re-open them: a hand rewording after
-   * the round is what that is.
+   * once, since a reading that finds none after that is nothing new. A
+   * reading the person went on past clears them, and problems found again
+   * after a resolved round re-open them: a hand rewording after the round is
+   * what that is.
    *
    * One problem at a time, and never the same one twice while its card is
    * up: a re-read that finds the same list — the interview's turn did not
@@ -854,11 +846,7 @@ export class ContractEditing {
         askingChanged();
       }
       this.recordDrift(id, []);
-      say({
-        kind: "note",
-        text: EVERY_PROBLEM_RESOLVED,
-        notable: true,
-      });
+      say({ kind: "note", text: EVERY_PROBLEM_RESOLVED, notable: true });
       return;
     }
     const same = session.drift !== null && !session.drift.resolved && sameProblems(session.drift.open, verdict.findings);

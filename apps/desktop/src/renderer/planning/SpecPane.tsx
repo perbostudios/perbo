@@ -164,9 +164,9 @@ export function SpecPane({
   // the work or for the Architect's title to fill once it replaces the cut in
   // the file; once a plan is drafted the title line is the ticket's name
   // (D-127), whatever its words.
-  const cut = (editor.session?.key ?? null) === null ? (editor.session?.specCut ?? null) : null;
+  const cut = editor.session?.key == null ? editor.session?.specCut : null;
   const titleIn = (source: SpecView | null | undefined): string =>
-    source === null || source === undefined || source.title === cut ? "" : source.title;
+    !source || source.title === cut ? "" : source.title;
 
   // One save at a time. Two in flight would each read the file without the
   // other's ids and number the same requirements twice; a section left while a
@@ -305,8 +305,7 @@ export function SpecPane({
     // A title the person has not typed, or has typed blank, is the file's,
     // the cut included: a save of a section leaves the title line as it is
     // rather than being held back for want of one.
-    const typed = title !== null && title.trim().length > 0 ? title : null;
-    const wanted = { title: typed ?? view.title, sections: { ...sections, ...over }, base: refused.current ?? view };
+    const wanted = { title: title?.trim() ? title : view.title, sections: { ...sections, ...over }, base: refused.current ?? view };
     if (wanted.title.trim().length === 0) return null;
     if (
       wanted.title === view.title &&
@@ -405,8 +404,7 @@ export function SpecPane({
   // moment the host says it is over. The press waits for it: whatever the
   // person last asked the chat for reaches the spec before the drafter reads
   // it (D-102).
-  const sending = useTurnSending(sessionId);
-  const midTurn = sending || (workspace.working ?? []).includes(sessionId);
+  const midTurn = useTurnSending(sessionId) || (workspace.working ?? []).includes(sessionId);
   // The drafter reads the file, so the press is offered once a title and an
   // outcome are in it: `parseSpec` refuses a spec without either.
   const stated = Boolean(view?.slug) && (view?.sections.outcome.trim().length ?? 0) > 0;

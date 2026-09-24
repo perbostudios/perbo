@@ -328,14 +328,10 @@ type Bin = { label: string; confirm: string; remove: () => Promise<void> };
  * or preferences change, besides the workspace's own polling.
  */
 export function titleOfDraft(workspace: Pick<Snapshot, "tasks" | "titles">, draft: OpenDraft): string {
-  return ticketName(workspace, draft.repoId, draft.key) ?? (draft.title?.trim() || "Untitled");
-}
-
-/** A ticket's name: the one a person gave it on this machine, else the one on the ticket; null where no ticket is listed. */
-function ticketName(workspace: Pick<Snapshot, "tasks" | "titles">, repoId: string, key: string | null): string | null {
-  const ticket = workspace.tasks.find((row) => row.repoId === repoId && row.ticket.key === key);
-  if (!ticket) return null;
-  return (workspace.titles?.[repoId + ":" + ticket.ticket.key] ?? ticket.ticket.title).trim() || null;
+  // The ticket's name: the one a person gave it on this machine, else the one on the ticket.
+  const ticket = workspace.tasks.find((row) => row.repoId === draft.repoId && row.ticket.key === draft.key);
+  const named = ticket && (workspace.titles?.[draft.repoId + ":" + ticket.ticket.key] ?? ticket.ticket.title).trim();
+  return named || draft.title?.trim() || "Untitled";
 }
 
 /**

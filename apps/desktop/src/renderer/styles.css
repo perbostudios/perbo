@@ -174,7 +174,6 @@ code {
 }
 /* The name of the planning the page is a pane of, right of the toggle: as much of it as the bar leaves room for. */
 .titlebar-name {
-  flex: 0 1 auto;
   min-width: 0;
   max-width: 40%;
   margin-left: 10px;

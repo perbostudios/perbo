@@ -10,7 +10,7 @@ import {
 import { isNeverReadPath } from "@perbo/contracts/browser";
 import type { DriftVerdict } from "@perbo/planning/browser";
 import type { GraphEdit } from "@perbo/contracts/browser";
-import { keepsPersonsTitle, openDrafts, titleChanged, turnMark } from "../shared/contract-editing.js";
+import { openDrafts, titleChanged, turnMark } from "../shared/contract-editing.js";
 import type { EditingOwner } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows, isArchivable, notArchivable } from "../shared/archive.js";
 import { heldRepository, isLive, isRun } from "../shared/jobs.js";
@@ -481,10 +481,6 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       (each) =>
         each.repoId === request.repoId && each.key === request.key && each.phase !== "discarded",
     );
-    const keepTitle =
-      planning !== undefined &&
-      keepsPersonsTitle(planning, readSpecSections(specFiles()[named]!).text.title);
-    const namedBy = planning?.named ?? null;
     // The stopped ticket goes, and its attempts and evidence with it, which
     // this sample holds beside the ticket; the spec stays, because the new
     // plan is drafted from it. Deleted first, as the host deletes it, so the
@@ -496,12 +492,12 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     const markdown = specFiles()[named] ?? "";
     const drafted = newSampleTicket("", "plan_review");
     snapshot.tasks.push({ repoId: request.repoId, repository: "webstore", ticket: drafted });
-    draftFromSpec(drafted.key, markdown, named, keepTitle);
+    draftFromSpec(drafted.key, markdown, named, planning);
     if (models)
       snapshot.taskModels = { ...snapshot.taskModels, [request.repoId + ":" + drafted.key]: models };
     const opened = await editing.open({ kind: "planning", repoId: request.repoId, key: drafted.key }, undefined);
     // Who named the spec goes with it to the new planning, as the host carries it (D-127).
-    editing.carryNamed(opened.id, namedBy);
+    editing.carryNamed(opened.id, planning?.named ?? null);
     emit({ kind: "records", repoId: request.repoId, key: drafted.key });
     return { sessionId: opened.id, pane: opened.nodes > 0 ? "graph" : "criteria" };
   },
@@ -533,12 +529,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         // On the board before it is drafted, so the drafting finds the row to
         // record the spec on: a ticket is what says a spec has a plan.
         snapshot.tasks.push({ repoId: request.repoId, repository: "webstore", ticket });
-        draftFromSpec(
-          ticket.key,
-          markdown,
-          session.specSlug,
-          keepsPersonsTitle(editing.read(request.id), readSpecSections(markdown).text.title),
-        );
+        draftFromSpec(ticket.key, markdown, session.specSlug, editing.read(request.id));
         job.resultKey = ticket.key;
       },
       1400,
@@ -559,12 +550,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         // What the plan promised before it is drafted again, for the marks on
         // the re-draft.
         const before = marks.promiseAt({ id: request.repoId }, request.key);
-        draftFromSpec(
-          request.key,
-          markdown,
-          session.specSlug,
-          keepsPersonsTitle(session, readSpecSections(markdown).text.title),
-        );
+        draftFromSpec(request.key, markdown, session.specSlug, session);
         // A name the person gave the ticket outlives the re-draft, as the host
         // keeps it on the spec.
         const given = snapshot.titles?.[request.repoId + ":" + request.key];

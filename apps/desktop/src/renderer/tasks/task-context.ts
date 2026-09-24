@@ -95,9 +95,8 @@ const words = (name: string): string => name.replaceAll("_", " ");
 /** A duration as it is said: "10 minutes", or seconds under one. */
 const lasting = (ms: number): string => {
   const minutes = Math.round(ms / 60_000);
-  if (minutes >= 1) return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-  const seconds = Math.round(ms / 1000);
-  return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+  const [n, unit] = minutes >= 1 ? [minutes, "minute"] : [Math.round(ms / 1000), "second"];
+  return `${n} ${unit}${n === 1 ? "" : "s"}`;
 };
 /** A duration as a limit is named: "10-minute". */
 const limitOf = (ms: number): string =>
@@ -142,50 +141,35 @@ function refusals(detail: string): { kind: string; reading: string; command: str
     });
 }
 
+/** A ceiling measured in a count: "The attempt used 1,200 tokens against its 1,000-token limit." */
+const counted =
+  (verb: string, unit: string) =>
+  (used: number | null, limit: number | null): string =>
+    `The attempt ${verb} ${used === null ? `more ${unit}s than it may` : `${count(used)} ${unit}s`}` +
+    (limit === null ? "." : ` against its ${count(limit)}-${unit} limit.`);
+
 /**
  * The ceilings that end an attempt (D-096), each with the resource the record
- * measures it in and how its sentence reads that measure. A stall is not among
- * them: it is a hang, and is said as one.
+ * measures it in, which is also the setting that raises it, and how its
+ * sentence reads that measure. A stall is not among them: it is a hang, and is
+ * said as one.
  */
-const CEILINGS: Record<
-  string,
-  { resource: string; setting: string; say: (used: number | null, limit: number | null) => string }
-> = {
+const CEILINGS: Record<string, { resource: string; say: (used: number | null, limit: number | null) => string }> = {
   wall_clock_exceeded: {
     resource: "attempt_wall_clock_ms",
-    setting: "attempt_wall_clock_ms",
     say: (used, limit) =>
       `The attempt ran${used === null ? "" : ` for ${lasting(used)}`}` +
       (limit === null ? " past its time limit." : `, past its ${limitOf(limit)} limit.`),
   },
   cost_ceiling_exceeded: {
     resource: "attempt_cost_micros",
-    setting: "attempt_cost_micros",
     say: (used, limit) =>
       `The attempt cost ${used === null ? "more than it may" : formatUsd(used, 2)}` +
       (limit === null ? "." : ` against its ${formatUsd(limit, 2)} limit.`),
   },
-  token_ceiling_exceeded: {
-    resource: "attempt_tokens",
-    setting: "attempt_tokens",
-    say: (used, limit) =>
-      `The attempt used ${used === null ? "more tokens than it may" : `${count(used)} tokens`}` +
-      (limit === null ? "." : ` against its ${count(limit)}-token limit.`),
-  },
-  iteration_ceiling_exceeded: {
-    resource: "attempt_iterations",
-    setting: "attempt_iterations",
-    say: (used, limit) =>
-      `The attempt took ${used === null ? "more turns than it may" : `${count(used)} turns`}` +
-      (limit === null ? "." : ` against its ${count(limit)}-turn limit.`),
-  },
-  command_ceiling_exceeded: {
-    resource: "attempt_commands",
-    setting: "attempt_commands",
-    say: (used, limit) =>
-      `The attempt ran ${used === null ? "more commands than it may" : `${count(used)} commands`}` +
-      (limit === null ? "." : ` against its ${count(limit)}-command limit.`),
-  },
+  token_ceiling_exceeded: { resource: "attempt_tokens", say: counted("used", "token") },
+  iteration_ceiling_exceeded: { resource: "attempt_iterations", say: counted("took", "turn") },
+  command_ceiling_exceeded: { resource: "attempt_commands", say: counted("ran", "command") },
 };
 
 /** What ended a command, as the loop page says it. */
@@ -231,13 +215,7 @@ export function runEnding(
   const title = run ? "The run ended" : `${job.label} failed`;
   const output = job.error ?? job.log;
   // Where there is no verdict of the loop's: the command's own words.
-  const own = (sentence: string): RunEnding => ({
-    job,
-    title,
-    sentence,
-    reason: cliSentence(output),
-    log: output,
-  });
+  const own = (sentence: string): RunEnding => ({ job, title, sentence, reason: cliSentence(output), log: output });
   if (job.state === "interrupted")
     return {
       ...own("Perbo closed before the command reported an outcome."),
@@ -245,8 +223,7 @@ export function runEnding(
       reason: output,
     };
   // The attempt is this command's own only where it started after the command did.
-  const recorded =
-    run && latest !== undefined && Date.parse(latest.startedAt) >= Date.parse(job.startedAt);
+  const recorded = run && latest !== undefined && Date.parse(latest.startedAt) >= Date.parse(job.startedAt);
   if (!recorded)
     return own(
       run
@@ -256,19 +233,23 @@ export function runEnding(
   const [head = "", ...rest] = latest.termination.split(":");
   const reason = head.trim();
   const detail = rest.join(":").trim();
-  const measured = (resource: string) => latest.ceilings.find((entry) => entry.resource === resource);
+  const noted = detail ? ` It recorded: ${detail}` : "";
+  /** The measure the record holds of a resource, and its ceiling. */
+  const measured = (resource: string): [number | null, number | null] => {
+    const entry = latest.ceilings.find((each) => each.resource === resource);
+    return [entry?.used ?? null, entry?.ceiling ?? null];
+  };
   const ended = (sentence: string, why: string): RunEnding => ({ job, title, sentence, reason: why, log: null });
   if (reason === "no_changes")
     return ended(
       "The agent made no change to the branch.",
-      "The attempt ended with nothing changed on the branch, so there was nothing to check or review." +
-        (detail ? ` It recorded: ${detail}` : ""),
+      "The attempt ended with nothing changed on the branch, so there was nothing to check or review." + noted,
     );
   if (reason === "no_changes_after_denials")
     return ended(
       "The agent made no change to the branch after the guard refused its commands.",
       "The guard refused the commands the agent tried, and the attempt ended with nothing changed on the branch." +
-        (detail ? ` It recorded: ${detail}` : ""),
+        noted,
     );
   if (reason === "prohibited_action") {
     const refused = refusals(detail);
@@ -285,9 +266,7 @@ export function runEnding(
     );
   }
   if (reason === "stalled") {
-    const stall = measured("attempt_stall_ms");
-    const quiet = stall?.used ?? null;
-    const limit = stall?.ceiling ?? null;
+    const [quiet, limit] = measured("attempt_stall_ms");
     return ended(
       quiet !== null && limit !== null
         ? `The attempt stalled for ${lasting(quiet)}, past its ${limitOf(limit)} limit.`
@@ -301,21 +280,18 @@ export function runEnding(
     return ended(
       "A refinement round took more turns than a round may.",
       "The runner ends a refinement round that reaches its turn limit, which the repository's configuration " +
-        "sets as `round_iterations`; raise it there to give a round more turns." +
-        (detail ? ` It recorded: ${detail}` : ""),
+        "sets as `round_iterations`; raise it there to give a round more turns." + noted,
     );
   const ceiling = CEILINGS[reason];
   if (ceiling !== undefined) {
-    const entry = measured(ceiling.resource);
-    const sentence = ceiling.say(entry?.used ?? null, entry?.ceiling ?? null);
+    const sentence = ceiling.say(...measured(ceiling.resource));
     return ended(
       sentence,
       `${sentence} The runner stops an attempt at this limit, which the repository's configuration sets as ` +
-        `\`${ceiling.setting}\`; raise it there to let a run go further.`,
+        `\`${ceiling.resource}\`; raise it there to let a run go further.`,
     );
   }
-  if (reason === "cancelled")
-    return ended("The run was stopped.", "The attempt was stopped before it finished.");
+  if (reason === "cancelled") return ended("The run was stopped.", "The attempt was stopped before it finished.");
   if (reason !== "completed")
     return ended(
       `The attempt was terminated: ${words(reason)}.`,
@@ -364,9 +340,7 @@ export function runEnding(
 function cliSentence(error: string): string {
   const lines = error.split("\n").map((line) => line.trim()).filter(Boolean);
   const marked = (line: string): boolean => /^(error|blocking)\b/.test(line);
-  const said = lines
-    .filter(marked)
-    .map((line) => line.replace(/^error:\s*/, "").replace(/^blocking\s+/, ""));
+  const said = lines.filter(marked).map((line) => line.replace(/^error:\s*/, "").replace(/^blocking\s+/, ""));
   const last = lines.at(-1);
   return [...said, ...(last === undefined || marked(last) ? [] : [last])].join("\n");
 }

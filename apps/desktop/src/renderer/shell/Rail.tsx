@@ -72,7 +72,7 @@ export function RailToggle() {
   );
 }
 
-/** How long the Home badge holds each colour before it gives way to the next, every colour alike. */
+/** How long the Home badge holds each colour before it gives way to the next. */
 const BADGE_HOLD = 10_000;
 /** How long the badge takes to shrink away before it reappears in the next colour. */
 const BADGE_SWAP = 180;
@@ -142,7 +142,7 @@ function contractPlanning(
       row.ticket.state === "plan_review" &&
       row.ticket.approved_at === null,
   );
-  const curating = (workspace.drafts ?? []).find(
+  const curating = workspace.drafts?.find(
     (draft) => draft.repoId === route.repoId && draft.key === route.key && curates(draft),
   );
   return waiting && curating ? { sessionId: curating.id, pane: null } : null;
@@ -206,17 +206,12 @@ export function Rail({
   // Counted over what Home lists, work being deleted left out as Home leaves it.
   const visible = withoutDeleting(workspace, create.deleting);
   const tally = homeTally(visible, homeRows(visible));
-  // The planning whose panes sit under Create: the one open, or the one
-  // curating the plan whose contract is open while it waits for approval, whose
-  // panes each go back to planning as the contract's Back to planning does,
-  // landing on that pane (D-130). Approved, the contract is frozen and the
-  // rail is the rail.
+  // The planning whose panes sit under Create: the one open, or the one whose
+  // plan's contract is open awaiting approval, its panes each going back to
+  // planning as the contract's Back to planning does, landing on that pane
+  // (D-130). Approved, the contract is frozen and has none.
   const planning =
-    route.page === "planning"
-      ? { sessionId: route.sessionId, pane: route.pane }
-      : route.page === "task"
-        ? contractPlanning(workspace, route)
-        : null;
+    route.page === "planning" ? route : route.page === "task" ? contractPlanning(workspace, route) : null;
   // A repository's question page is Create's own page: Create is lit there,
   // and there is no planning, so no panes under it, until it is answered
   // (D-131).
@@ -239,7 +234,7 @@ export function Rail({
           className={cx(
             "rail-item",
             (create.isOpen || asking) && "selected",
-            planning !== null && !create.isOpen && "parent",
+            planning && !create.isOpen && "parent",
           )}
           aria-label="Create"
           title="Create — plan a piece of work"
@@ -253,7 +248,7 @@ export function Rail({
             <InkIcon name="add-circle" size={22} />
           </span>
         </button>
-        {planning !== null && (
+        {planning && (
           <div className="rail-children" role="group" aria-label="Planning panes">
             {panesFor(workspace.drafts, planning.sessionId).map((pane) => (
               <button

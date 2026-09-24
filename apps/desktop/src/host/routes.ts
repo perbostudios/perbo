@@ -786,7 +786,6 @@ async function replan(
   );
   const keepTitle =
     planning !== undefined && keepsPersonsTitle(planning, specTitles(() => repo)(repo.id, slug));
-  const named = planning === undefined ? null : structuredClone(planning.named);
   // The stopped ticket goes, and everything recorded after its contract with
   // it — the attempts and the bundles they sealed — while the spec it was
   // drafted from stays, because the new plan is drafted from it
@@ -833,7 +832,7 @@ async function replan(
     });
   // The new planning holds the same spec, and who named it with it, so the
   // next draft from it keeps the person's name as this one did (D-127).
-  m.editing.carryNamed(opened.id, named);
+  m.editing.carryNamed(opened.id, planning?.named ?? null);
   return { sessionId: opened.id, pane: opened.nodes > 0 ? "graph" : "criteria" };
 }
 

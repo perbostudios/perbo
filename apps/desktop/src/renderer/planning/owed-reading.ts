@@ -1,5 +1,4 @@
-import { EVERY_PROBLEM_RESOLVED } from "../../shared/protocol.js";
-import type { InterviewEntry, Job } from "../../shared/protocol.js";
+import { EVERY_PROBLEM_RESOLVED, type InterviewEntry, type Job } from "../../shared/protocol.js";
 
 /** What {@link owedReading} finds of the person's last turn. */
 export interface OwedReading {
@@ -53,8 +52,5 @@ export function owedReading(
  * editing).
  */
 function putByReading(line: InterviewEntry["line"]): boolean {
-  return (
-    (line.kind === "asked" && line.drift !== undefined) ||
-    (line.kind === "note" && line.text === EVERY_PROBLEM_RESOLVED)
-  );
+  return (line.kind === "asked" && line.drift !== undefined) || (line.kind === "note" && line.text === EVERY_PROBLEM_RESOLVED);
 }

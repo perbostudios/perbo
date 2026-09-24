@@ -123,7 +123,6 @@ export function GraphInspector({
                       </span>
                     );
                   })}
-                  {/* Nothing left to join on either side: no chip to offer nothing. */}
                   {offered.length > 0 && (
                     <select
                       className="add-chip"
@@ -205,8 +204,6 @@ export function GraphInspector({
               )}
             </div>
             <datalist id={`graph-paths-${node.id}`}>
-              {/* The paths the node does not already name: one it names is
-                  already a chip in this row. */}
               {view.pathsAllowed
                 .filter((glob) => !node.paths.includes(glob))
                 .map((glob) => (

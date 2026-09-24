@@ -7,6 +7,14 @@ import { QuestionCard, ToolCard, foldAllowList, handedOver, sayWorking, waitsOnW
 
 afterEach(cleanup);
 
+const css = readFileSync(`${import.meta.dirname}/../styles.css`, "utf8");
+/** The first rule in the renderer's stylesheet with exactly this selector, up to its closing brace. */
+const cssRule = (selector: string): string => {
+  const at = css.indexOf(`\n${selector} {`);
+  expect(at, selector).toBeGreaterThanOrEqual(0);
+  return css.slice(at, css.indexOf("}", at));
+};
+
 describe("what the dock says the session is doing", () => {
   it("names the work in hand rather than calling every pause thinking", () => {
     // "Thinking…" is true of every pause and says nothing about any of them.
@@ -168,13 +176,6 @@ describe("the two answers every part carries", () => {
   };
   const radio = (named: RegExp): HTMLInputElement => screen.getByRole("radio", { name: named });
   const answer = (named: RegExp): HTMLElement => radio(named).closest("label")!;
-  /** The first rule in the renderer's stylesheet with exactly this selector, up to its closing brace. */
-  const cssRule = (selector: string): string => {
-    const css = readFileSync(`${import.meta.dirname}/../styles.css`, "utf8");
-    const at = css.indexOf(`\n${selector} {`);
-    expect(at, selector).toBeGreaterThanOrEqual(0);
-    return css.slice(at, css.indexOf("}", at));
-  };
 
   it("draws each with the circle every answer carries, filled while it is the pick", () => {
     card();
@@ -251,7 +252,6 @@ describe("the two answers every part carries", () => {
     expect(focused).toContain("outline: none;");
     expect(focused).toContain("border-width: 2.5px;");
     expect(focused).not.toContain("box-shadow");
-    const css = readFileSync(`${import.meta.dirname}/../styles.css`, "utf8");
     expect(css).not.toContain("textarea.awaiting-words");
   });
 });
@@ -289,10 +289,7 @@ describe("a refused call's card", () => {
   });
 
   it("wraps the reason over the lines it needs rather than cutting it to one", () => {
-    const css = readFileSync(`${import.meta.dirname}/../styles.css`, "utf8");
-    const at = css.indexOf("\n.tool-why {");
-    const rule = css.slice(at, css.indexOf("}", at));
-    expect(at).toBeGreaterThanOrEqual(0);
+    const rule = cssRule(".tool-why");
     for (const cut of ["nowrap", "ellipsis", "overflow: hidden"]) expect(rule).not.toContain(cut);
   });
 });

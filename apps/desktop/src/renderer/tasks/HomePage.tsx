@@ -117,9 +117,8 @@ function TaskCard({
         : row.ticket.state === "cancelled"
           ? "cancelled"
           : row.ticket.state.replaceAll("_", " ");
-  // The contract's outcome sentence, the line under the title on its contract
-  // page; a space holds the line's height while it is read, or where there is none.
-  const outcome = summary.data?.outcome ?? null;
+  // A space holds the line's height while the outcome is read, or where there is none.
+  const outcome = summary.data?.outcome;
   return (
     <article
       role="button"
@@ -164,8 +163,6 @@ function TaskCard({
         <span className="muted" aria-hidden="true">·</span>
         <DiffLabel summary={summary.data} pending={summary.isPending && !summary.isError} />
       </div>
-      {/* The card is what opens the ticket, so the one button it carries is
-          Archive, and only once the loop has let go of it. */}
       <div className="task-card-description">
         {stopped ? (
           <span>{finished ?? description}</span>
@@ -339,8 +336,6 @@ export function HomePage({
       .join(" ")
       .toLowerCase()
       .includes(search.toLowerCase());
-  // Home's own sort: by colour and then by when each was opened, or by its
-  // age, unless title or furthest along is chosen.
   const shown = all
     .filter(matches)
     .filter((row) => repoFilter === "all" || row.repoId === repoFilter)

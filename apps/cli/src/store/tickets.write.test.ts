@@ -56,17 +56,15 @@ function store(): string {
   return dir;
 }
 
+type Tally = { reads: number; torn: number; titles: number };
+
 /**
  * Reads `path` in a loop in a process of its own until `stop` exists: how many
  * reads it made, how many did not parse, and how many different titles it saw.
  * It says how many reads it has made so far in `progress`, so the writer can
  * go on until enough of them have landed rather than for a length of time.
  */
-function reader(
-  path: string,
-  stop: string,
-  progress: string,
-): { ready: Promise<void>; done: Promise<{ reads: number; torn: number; titles: number }> } {
+function reader(path: string, stop: string, progress: string): { ready: Promise<void>; done: Promise<Tally> } {
   const child = spawn(
     process.execPath,
     [
@@ -87,13 +85,13 @@ function reader(
   let output = "";
   let signalReady: () => void = () => undefined;
   const ready = new Promise<void>((resolve) => (signalReady = resolve));
-  const done = new Promise<{ reads: number; torn: number; titles: number }>((resolve, reject) => {
+  const done = new Promise<Tally>((resolve, reject) => {
     child.stdout.on("data", (chunk: Buffer) => {
       output += chunk.toString();
       if (output.startsWith("ready\n")) signalReady();
     });
     child.on("error", reject);
-    child.on("close", () => resolve(JSON.parse(output.split("\n")[1]!) as { reads: number; torn: number; titles: number }));
+    child.on("close", () => resolve(JSON.parse(output.split("\n")[1]!) as Tally));
   });
   return { ready, done };
 }

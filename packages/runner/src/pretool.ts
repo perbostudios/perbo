@@ -643,17 +643,7 @@ function callerOf(call: PreToolCall): string | null {
  * redirect. A program that acts on its own does not — `curl -o` writes without
  * one, and is on the deny-list.
  */
-export const EFFECT_FREE_VERBS = new Set([
-  "cd",
-  "pushd",
-  "popd",
-  "pwd",
-  "echo",
-  "printf",
-  "true",
-  "false",
-  ":",
-]);
+export const EFFECT_FREE_VERBS = new Set(["cd", "pushd", "popd", "pwd", "echo", "printf", "true", "false", ":"]);
 
 /**
  * Whether the runner has positive grounds to admit this line, or nothing to say.

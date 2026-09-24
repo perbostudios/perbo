@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import type { ReactNode } from "react";
 import { Button, Notice } from "../ui/index.js";
 import { bridge, errorMessage, useDetail } from "../workspace/index.js";
 import type { PageProps, TaskView } from "../shell/route.js";
@@ -134,8 +133,7 @@ export function TaskPage({
   // which keeps the page it was on until the delete settles.
   const gone =
     !deleting &&
-    query.error instanceof Error &&
-    query.error.message === DELETE_TICKET_GONE &&
+    query.error?.message === DELETE_TICKET_GONE &&
     !workspace.tasks.some((row) => row.repoId === repoId && row.ticket.key === taskKey);
   // Otherwise only a ticket never read is a page that could not load. Once one
   // is held, a read that fails is a refresh that failed: the page keeps what it
@@ -182,7 +180,7 @@ export function TaskPage({
     </>
   );
 }
-function taskScreen(screen: Exclude<TaskView, "auto">, context: TaskContext): ReactNode {
+function taskScreen(screen: Exclude<TaskView, "auto">, context: TaskContext) {
   if (screen === "output") return <OutputScreen {...context} />;
   if (screen === "merge") return <MergeScreen {...context} />;
   if (screen === "called-off")

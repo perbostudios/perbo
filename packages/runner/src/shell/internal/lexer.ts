@@ -122,14 +122,10 @@ function readBackticks(text: string, from: number): { body: string; end: number 
   let body = "";
   for (let i = from + 1; i < text.length; i += 1) {
     const ch = text[i]!;
-    if (ch === "\\") {
-      const next = text[i + 1];
-      if (next === "`" || next === "$" || next === "\\") {
-        body += next;
-        i += 1;
-      } else {
-        body += ch;
-      }
+    const next = text[i + 1];
+    if (ch === "\\" && (next === "`" || next === "$" || next === "\\")) {
+      body += next;
+      i += 1;
       continue;
     }
     if (ch === "`") return { body, end: i + 1 };
@@ -139,48 +135,26 @@ function readBackticks(text: string, from: number): { body: string; end: number 
 }
 
 /**
- * True where the `(` that opens `body` closes at its last character, quotes
- * and escapes read: `(1 + 2)` is one group, and `(a) ; (b)` is two.
+ * A process substitution whose `<` or `>` is at `from`: its body and where it
+ * ends, or, where it never closes, the rest of the text as its body.
  */
-function oneGroup(body: string): boolean {
-  if (!body.startsWith("(")) return false;
-  let depth = 0;
-  let quote: string | null = null;
-  for (let i = 0; i < body.length; i += 1) {
-    const ch = body[i]!;
-    if (quote !== null) {
-      if (ch === "\\" && quote === '"') i += 1;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === "\\") {
-      i += 1;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (ch === "(") depth += 1;
-    else if (ch === ")") {
-      depth -= 1;
-      if (depth === 0) return i === body.length - 1;
-    }
-  }
-  return false;
+function readProcess(text: string, from: number): { body: string; end: number; closed: boolean } {
+  const read = readSubstitution(text, from);
+  return read === null ? { body: text.slice(from + 2), end: text.length, closed: false } : { ...read, closed: true };
 }
 
 /**
- * The command bodies a substitution starting at `from` runs.
+ * The command bodies a substitution starting at `from` runs, given what
+ * `readSubstitution` read there.
  *
  * `$((…))` is arithmetic, not a command: its text runs nothing, and only a
  * substitution written inside it does. It is arithmetic only where the inner
  * `(` closes at the end, as bash and zsh read it: `$((a) ; (b))` is a command
  * substitution running two subshells, and runs `a` and `b`.
  */
-function substitutionBodies(text: string, from: number, body: string): string[] {
-  const arithmetic = text.startsWith("$((", from) && oneGroup(body);
-  return arithmetic ? substitutionsIn(body.slice(1, -1)) : [body];
+function substitutionBodies(text: string, from: number, read: { body: string; end: number }): string[] {
+  const arithmetic = text.startsWith("$((", from) && readSubstitution(text, from + 1)?.end === read.end - 1;
+  return arithmetic ? substitutionsIn(read.body.slice(1, -1)) : [read.body];
 }
 
 /**
@@ -204,7 +178,7 @@ export function substitutionsIn(text: string): string[] {
         bodies.push(text.slice(i + (ch === "`" ? 1 : 2)));
         break;
       }
-      bodies.push(...substitutionBodies(text, i, read.body));
+      bodies.push(...substitutionBodies(text, i, read));
       i = read.end;
       continue;
     }
@@ -259,7 +233,7 @@ function readWord(text: string, from: number): { word: Word; end: number; balanc
         i = text.length;
         continue;
       }
-      substitutions.push(...substitutionBodies(text, i, read.body));
+      substitutions.push(...substitutionBodies(text, i, read));
       value += text.slice(i, read.end);
       i = read.end;
       continue;
@@ -600,19 +574,10 @@ export function tokenize(
         // `<(…)` is a process substitution: the shell runs its body and hands
         // the command a path to read the output from, so it is an operand of
         // the command whose body is a command in its own right, as a `$(…)` is.
-        const read = readSubstitution(segment, i - 1);
-        const end = read?.end ?? segment.length;
-        if (read === null) balanced = false;
+        const { body, end, closed } = readProcess(segment, i - 1);
+        if (!closed) balanced = false;
         const raw = segment.slice(i - 1, end);
-        items.push({
-          kind: "word",
-          word: {
-            raw,
-            value: raw,
-            substitutions: read === null ? [segment.slice(i + 1)] : [read.body],
-            variable: false,
-          },
-        });
+        items.push({ kind: "word", word: { raw, value: raw, substitutions: [body], variable: false } });
         i = end;
         continue;
       } else {
@@ -628,14 +593,9 @@ export function tokenize(
         if (opened === 1 && !descriptor && segment.startsWith("<(", i)) {
           // `< <(…)`: the input is a process substitution's output, which the
           // line does not spell, and its body is a command the shell runs.
-          const read = readSubstitution(segment, i);
-          const end = read?.end ?? segment.length;
-          if (read === null) balanced = false;
-          items.push({
-            kind: "stdin",
-            source: { kind: "opaque", raw: `<${segment.slice(start, end)}` },
-            substitutions: read === null ? [segment.slice(i + 2)] : [read.body],
-          });
+          const { body, end, closed } = readProcess(segment, i);
+          if (!closed) balanced = false;
+          items.push({ kind: "stdin", source: { kind: "opaque", raw: `<${segment.slice(start, end)}` }, substitutions: [body] });
           i = end;
           continue;
         }
@@ -647,11 +607,7 @@ export function tokenize(
           kind: "stdin",
           source,
           substitutions:
-            source.kind === "heredoc"
-              ? source.expanded
-                ? substitutionsIn(source.body)
-                : []
-              : read.word.substitutions,
+            source.kind !== "heredoc" ? read.word.substitutions : source.expanded ? substitutionsIn(source.body) : [],
         });
         i = read.end === i ? i + 1 : read.end;
         continue;
@@ -701,19 +657,12 @@ export function tokenize(
       // `>(…)`: the command writes into a process whose body is a command of
       // its own. Where the output goes cannot be placed, and the body is read
       // as a `$(…)`'s is.
-      const paren = i + substitution[0].length - 1;
-      const read = readSubstitution(segment, paren - 1);
-      const end = read?.end ?? segment.length;
-      if (read === null) balanced = false;
+      const { body, end, closed } = readProcess(segment, i + substitution[0].length - 2);
+      if (!closed) balanced = false;
       items.push({
         kind: "redirect",
         redirect: {
-          target: {
-            raw: segment.slice(i, end),
-            value: "",
-            substitutions: read === null ? [segment.slice(paren + 1)] : [read.body],
-            variable: false,
-          },
+          target: { raw: segment.slice(i, end), value: "", substitutions: [body], variable: false },
           reason: "a process substitution",
         },
       });

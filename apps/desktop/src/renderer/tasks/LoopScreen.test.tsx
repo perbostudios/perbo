@@ -102,9 +102,7 @@ describe("the decision card", () => {
 describe("what ended the run", () => {
   it("says the review requested changes in a card, with its findings behind the i, and keeps it at the top of the steps once confirmed", () => {
     const run = failedRun();
-    mount(
-      context([run], requestedChanges),
-    );
+    mount(context([run], requestedChanges));
     // The log is not the page: the verdict is.
     expect(screen.queryByText(/THE WHOLE RUN LOG/)).toBeNull();
     const card = screen.getByRole("dialog", { name: "The run ended" });

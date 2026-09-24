@@ -231,6 +231,14 @@ const INLINE_EXPRESSION_CHARACTERS = /^[A-Za-z0-9_$§.,()[\]{}+\-*/%:!=?\s]*$/;
 const INLINE_CALL = /([A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\(/g;
 const INLINE_NAME = /[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*/g;
 
+/** Each call in `code`: where its name starts, its width as written, the name without spaces, and the code before it. */
+function* callsIn(code: string) {
+  for (const match of code.matchAll(INLINE_CALL)) {
+    const at = match.index;
+    yield { at, width: match[1]!.length, name: match[1]!.replace(/\s+/g, ""), before: code.slice(0, at).trimEnd() };
+  }
+}
+
 /** The top-level arguments of the call whose name starts at `from`. */
 function callArguments(masked: string, from: number): string[] {
   const start = masked.indexOf("(", from);
@@ -261,9 +269,9 @@ function callArguments(masked: string, from: number): string[] {
   return args.map((argument) => argument.trim());
 }
 
-/** The literal an argument is, where it is one. */
-function literalArgument(argument: string, literals: string[]): string | null {
-  const match = /^§(\d+)§$/.exec(argument);
+/** The literal an argument is, where there is one and it is one. */
+function literalArgument(argument: string | undefined, literals: string[]): string | null {
+  const match = /^§(\d+)§$/.exec(argument ?? "");
   if (match === null) return null;
   return literals[Number(match[1])] ?? null;
 }
@@ -292,9 +300,7 @@ function guardedCall(
     const keyword = args
       .map((argument) => /^mode\s*=(?!=)\s*([\s\S]*)$/.exec(argument)?.[1])
       .find((value) => value !== undefined);
-    const positional = args.filter(
-      (argument) => argument !== "" && !/^[A-Za-z_]\w*\s*=(?!=)/.test(argument),
-    );
+    const positional = args.filter((argument) => argument !== "" && !/^[A-Za-z_]\w*\s*=(?!=)/.test(argument));
     const mode = keyword ?? positional[method ? 0 : 1];
     if (mode === undefined) return null;
     const literal = literalArgument(mode, literals);
@@ -393,30 +399,18 @@ function unreadableExpression(
   // The calls first, then the same text with each call's name blanked, so a
   // callee is never read a second time as a bare value.
   let remaining = text;
-  const blank = (from: number, width: number) => {
-    remaining = remaining.slice(0, from) + " ".repeat(width) + remaining.slice(from + width);
-  };
-  INLINE_CALL.lastIndex = 0;
-  let match = INLINE_CALL.exec(text);
-  while (match !== null) {
-    const name = match[1]!.replace(/\s+/g, "");
+  for (const { at, width, name, before } of callsIn(text)) {
+    remaining = remaining.slice(0, at) + " ".repeat(width) + remaining.slice(at + width);
+    if (INLINE_OPERATOR_KEYWORDS.has(name)) continue;
     const segments = name.split(".");
-    const before = text.slice(0, match.index).trimEnd();
-    if (INLINE_OPERATOR_KEYWORDS.has(name)) {
-      blank(match.index, match[1]!.length);
-      match = INLINE_CALL.exec(text);
-      continue;
-    }
     // A plain write to a literal path is a shape this guard reads, whatever the
     // table makes of the name: the destination is what decides it, and the pass
     // that resolves paths answers that.
     const method = segments.length > 1 || before.endsWith(".");
-    const plain = plainWrite(name, text, match.index, method, literals);
+    const plain = plainWrite(name, text, at, method, literals);
     if (plain !== null) {
       if ("reason" in plain) return plain.reason;
       destinations.push(plain.target);
-      blank(match.index, match[1]!.length);
-      match = INLINE_CALL.exec(text);
       continue;
     }
     // A method on a receiver this scan cannot name — a literal, a subscript,
@@ -427,10 +421,8 @@ function unreadableExpression(
       ? true
       : (onUnnamedReceiver || onBoundName) && vocabulary.methods.has(segments[segments.length - 1]!);
     if (!known) return `\`${name}\` is not a call the read-only table names`;
-    const guard = guardedCall(name, text, match.index, method, literals, vocabulary);
+    const guard = guardedCall(name, text, at, method, literals, vocabulary);
     if (guard !== null) return guard;
-    blank(match.index, match[1]!.length);
-    match = INLINE_CALL.exec(text);
   }
   INLINE_NAME.lastIndex = 0;
   let name = INLINE_NAME.exec(remaining);
@@ -688,9 +680,7 @@ type WriteOperands = readonly number[] | "each" | "mode";
 type SpawnForm = "shell" | "argv";
 
 const byModule = <T>(entries: Record<string, Record<string, T>>) =>
-  new Map(
-    Object.entries(entries).map(([module, calls]) => [module, new Map(Object.entries(calls))]),
-  );
+  new Map(Object.entries(entries).map(([module, calls]) => [module, new Map(Object.entries(calls))]));
 
 /**
  * The calls that write a file, by the module that owns them, and which of
@@ -806,14 +796,14 @@ const UNMISTAKABLE = new Set([
   "Popen", "getoutput",
 ]);
 
-/** The first module a table files a method under, for a name placed without one. */
-function unmistakable<T>(table: Map<string, Map<string, T>>, method: string): T | undefined {
-  if (!UNMISTAKABLE.has(method)) return undefined;
-  for (const calls of table.values()) {
-    const found = calls.get(method);
-    if (found !== undefined) return found;
-  }
-  return undefined;
+/**
+ * What a table files a call under: by its module, or, for an unmistakable
+ * method, under the first module that has it.
+ */
+function placed<T>(table: Map<string, Map<string, T>>, call: Callee): T | undefined {
+  const found = call.module === null ? undefined : table.get(call.module)?.get(call.method);
+  if (found !== undefined || !UNMISTAKABLE.has(call.method)) return found;
+  return [...table.values()].map((calls) => calls.get(call.method)).find((value) => value !== undefined);
 }
 
 /** The module a load names, with the spellings that load the same one folded. */
@@ -873,26 +863,19 @@ function bindingsOf(code: string, statements: readonly string[], literals: strin
   const modules = new Map<string, Binding>();
   const paths = new Map<string, string>();
   const loaded = (index: string) => moduleOf(literals[Number(index)] ?? "");
-  const eachPart = (list: string, separator: RegExp, bind: (name: string, local: string) => void) => {
+  /** Bind each `name` or `name <separator> local` of a list to that member of `module`. */
+  const bindEach = (list: string, separator: RegExp, module: string) => {
     for (const part of list.split(",")) {
       const [name, local] = part.split(separator).map((word) => word.trim().replace(/\s*=[\s\S]*$/, ""));
-      if (name !== undefined && /^[A-Za-z_$][\w$]*$/.test(name)) bind(name, local || name);
+      if (name !== undefined && /^[A-Za-z_$][\w$]*$/.test(name)) modules.set(local || name, { module, member: name });
     }
   };
   for (const match of code.matchAll(BOUND_LOAD)) {
     modules.set(match[1]!, { module: loaded(match[2]!), member: lastMember(match[3]) });
   }
-  for (const match of code.matchAll(DESTRUCTURED_LOAD)) {
-    const module = loaded(match[2]!);
-    eachPart(match[1]!, /\s*:\s*/, (name, local) => modules.set(local, { module, member: name }));
-  }
-  for (const match of code.matchAll(ES_DEFAULT)) {
-    modules.set(match[1]!, { module: loaded(match[2]!), member: null });
-  }
-  for (const match of code.matchAll(ES_NAMED)) {
-    const module = loaded(match[2]!);
-    eachPart(match[1]!, /\s+as\s+/, (name, local) => modules.set(local, { module, member: name }));
-  }
+  for (const match of code.matchAll(DESTRUCTURED_LOAD)) bindEach(match[1]!, /\s*:\s*/, loaded(match[2]!));
+  for (const match of code.matchAll(ES_DEFAULT)) modules.set(match[1]!, { module: loaded(match[2]!), member: null });
+  for (const match of code.matchAll(ES_NAMED)) bindEach(match[1]!, /\s+as\s+/, loaded(match[2]!));
   for (const statement of statements) {
     const python = /^import\s+([\w.\s,]+)$/.exec(statement);
     if (python !== null) {
@@ -904,10 +887,7 @@ function bindingsOf(code: string, statements: readonly string[], literals: strin
       }
     }
     const from = /^from\s+([\w.]+)\s+import\s+\(?([^()]*)\)?$/.exec(statement);
-    if (from !== null) {
-      const module = moduleOf(from[1]!);
-      eachPart(from[2]!, /\s+as\s+/, (name, local) => modules.set(local, { module, member: name }));
-    }
+    if (from !== null) bindEach(from[2]!, /\s+as\s+/, moduleOf(from[1]!));
   }
   for (const match of code.matchAll(PATH_BINDING)) {
     const path = literals[Number(match[2])];
@@ -947,16 +927,13 @@ function calleeOf(name: string, before: string, literals: string[], bound: Bindi
     return {
       module: loaded === undefined ? null : moduleOf(literalArgument(loaded, literals) ?? ""),
       method,
-      path: path === undefined ? null : literalArgument(path, literals),
+      path: literalArgument(path, literals),
     };
   }
   const head = segments[0];
   if (head === undefined) {
     const member = bound.modules.get(method);
-    if (member !== undefined) {
-      return { module: member.module, method: member.member ?? method, path: null };
-    }
-    return { module: "builtins", method, path: null };
+    return { module: member?.module ?? "builtins", method: member?.member ?? method, path: null };
   }
   if (segments.length === 1 && bound.paths.has(head)) {
     return { module: null, method, path: bound.paths.get(head)! };
@@ -966,8 +943,8 @@ function calleeOf(name: string, before: string, literals: string[], bound: Bindi
 
 /** The literals an array literal holds, where it is one made only of literals. */
 function literalArray(argument: string | undefined, literals: string[]): string[] | null {
-  const array = argument === undefined ? null : /^\[([\s\S]*)\]$/.exec(argument.trim());
-  if (array === null || array === undefined) return null;
+  const array = /^\[([\s\S]*)\]$/.exec(argument?.trim() ?? "");
+  if (array === null) return null;
   const items = array[1]!.split(",").map((item) => item.trim()).filter((item) => item !== "");
   const values = items.map((item) => literalArgument(item, literals));
   return values.every((value): value is string => value !== null) ? values : null;
@@ -978,7 +955,7 @@ function namedLiteral(args: readonly string[], names: string, literals: string[]
   const text = args.join(",");
   if (!new RegExp(String.raw`\b(?:${names})\b`).test(text)) return undefined;
   const spelled = new RegExp(String.raw`\b(?:${names})\s*[:=]\s*(§\d+§)`).exec(text);
-  return spelled === null ? null : literalArgument(spelled[1]!, literals);
+  return literalArgument(spelled?.[1], literals);
 }
 
 /** A mode that writes, in any of the languages' spellings: `w`, `a+`, `r+`, `x`, Perl's `>`. */
@@ -988,24 +965,19 @@ const PERL_MODE = /^\s*(\+?>>?|\+<)\s*([\s\S]*)$/;
 
 /** The files an `open` writes: its path, where its mode is a literal that writes. */
 function openedForWriting(args: readonly string[], literals: string[]): string[] {
-  const literal = (at: number) => (args[at] === undefined ? null : literalArgument(args[at], literals));
+  const literal = (at: number) => literalArgument(args[at], literals);
   // A mode this scan cannot read is not a write it can place, and the
   // read-only table refuses the call for it; no mode at all is a read.
   const mode = namedLiteral(args, "mode|flags?", literals) ?? literal(1);
   if (mode === null || !WRITE_MODE.test(mode)) return [];
   const perl = PERL_MODE.exec(mode);
-  if (perl !== null) {
-    const carried = perl[2]!.trim();
-    const path = carried !== "" ? carried : literal(2);
-    return path === null ? [] : [path];
-  }
-  const path = literal(0) ?? namedLiteral(args, "file", literals) ?? null;
+  const path = perl !== null ? perl[2]!.trim() || literal(2) : (literal(0) ?? namedLiteral(args, "file", literals) ?? null);
   return path === null ? [] : [path];
 }
 
 /** The literal files one call writes, where it is a write this table places. */
 function writtenBy(call: Callee, args: readonly string[], literals: string[]): string[] {
-  const literal = (at: number) => (args[at] === undefined ? null : literalArgument(args[at], literals));
+  const literal = (at: number) => literalArgument(args[at], literals);
   const pick = (positions: readonly number[]) =>
     positions.map(literal).filter((value): value is string => value !== null);
   if (call.path !== null) {
@@ -1017,9 +989,7 @@ function writtenBy(call: Callee, args: readonly string[], literals: string[]): s
     }
     return [call.path, ...pick(others)];
   }
-  const operands =
-    (call.module === null ? undefined : WRITE_CALLS.get(call.module)?.get(call.method)) ??
-    unmistakable(WRITE_CALLS, call.method);
+  const operands = placed(WRITE_CALLS, call);
   if (operands === undefined) return [];
   if (operands === "mode") return openedForWriting(args, literals);
   if (operands === "each") return pick(args.map((_, at) => at));
@@ -1030,20 +1000,11 @@ function writtenBy(call: Callee, args: readonly string[], literals: string[]): s
 const shellWord = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`;
 
 /** The shell command one call runs, where it is a spawn this table places and its command is literal. */
-function spawnedBy(
-  call: Callee,
-  args: readonly string[],
-  literals: string[],
-  language: InlineLanguage,
-): string | null {
-  const literal = (at: number) => (args[at] === undefined ? null : literalArgument(args[at], literals));
-  const form =
-    (call.module === null ? undefined : SPAWN_CALLS.get(call.module)?.get(call.method)) ??
-    unmistakable(SPAWN_CALLS, call.method) ??
-    // Perl's, Ruby's and PHP's `exec` runs a command; Python's runs Python.
-    (language === "shellish" && call.module === "builtins" && call.method === "exec"
-      ? "argv"
-      : undefined);
+function spawnedBy(call: Callee, args: readonly string[], literals: string[], language: InlineLanguage): string | null {
+  const literal = (at: number) => literalArgument(args[at], literals);
+  // Perl's, Ruby's and PHP's `exec` runs a command; Python's runs Python.
+  const shellExec = language === "shellish" && call.module === "builtins" && call.method === "exec";
+  const form = placed(SPAWN_CALLS, call) ?? (shellExec ? "argv" : undefined);
   if (form === undefined) return null;
   if (form === "shell") return literal(0);
   const listed = literalArray(args[0], literals);
@@ -1064,7 +1025,7 @@ function spawnedBy(
 interface SpawnedCommand {
   text: string;
   /** The `cwd` option: absent, a literal, or null where it is not a literal. */
-  cwd: string | null | undefined;
+  cwd?: string | null | undefined;
 }
 
 /**
@@ -1078,7 +1039,7 @@ interface SpawnedCommand {
 interface WriteSites {
   targets: string[];
   commands: SpawnedCommand[];
-  chdir: string | null | undefined;
+  chdir?: string | null | undefined;
 }
 
 /**
@@ -1099,48 +1060,33 @@ interface WriteSites {
 function writeSites(source: string, language: InlineLanguage): WriteSites {
   const { masked, literals, commands } = maskLiterals(source, language);
   const code = withoutComments(masked, language);
-  const statements = splitStatements(code);
-  const bound = bindingsOf(code, statements, literals);
-  const sites: WriteSites = {
-    targets: [],
-    commands: commands.map((text) => ({ text, cwd: undefined })),
-    chdir: undefined,
-  };
-  // A copy of the pattern: `matchAll` starts where the shared one's last
-  // `exec` left off, and the read-only scan stops mid-walk.
-  for (const match of code.matchAll(new RegExp(INLINE_CALL.source, "g"))) {
-    const name = match[1]!.replace(/\s+/g, "");
-    const before = code.slice(0, match.index).trimEnd();
+  const bound = bindingsOf(code, splitStatements(code), literals);
+  const sites: WriteSites = { targets: [], commands: commands.map((text) => ({ text })) };
+  for (const { at, name, before } of callsIn(code)) {
     const call = calleeOf(name, before, literals, bound);
-    const args = callArguments(code, match.index);
+    const args = callArguments(code, at);
     if (call.method === "chdir") {
-      sites.chdir = args[0] === undefined ? null : literalArgument(args[0], literals);
+      sites.chdir = literalArgument(args[0], literals);
       continue;
     }
     sites.targets.push(...writtenBy(call, args, literals));
     const command = spawnedBy(call, args, literals, language);
-    if (command !== null) {
-      sites.commands.push({ text: command, cwd: namedLiteral(args.slice(1), "cwd", literals) });
-    }
+    if (command !== null) sites.commands.push({ text: command, cwd: namedLiteral(args.slice(1), "cwd", literals) });
   }
+  /** The literals the matches of `pattern` capture, in their first capturing group that took part. */
+  const captured = (pattern: RegExp) =>
+    [...code.matchAll(pattern)]
+      .map((match) => literalArgument(match[1] ?? match[2], literals))
+      .filter((literal) => literal !== null);
   if (language === "awk") {
     // `awk` writes with a redirect in its own program text, and runs a command
     // by piping into or out of one.
-    for (const match of code.matchAll(/>>?\s*(§\d+§)/g)) {
-      const target = literalArgument(match[1]!, literals);
-      if (target !== null) sites.targets.push(target);
-    }
-    for (const match of code.matchAll(/\|\s*&?\s*(§\d+§)|(§\d+§)\s*\|\s*getline/g)) {
-      const command = literalArgument(match[1] ?? match[2]!, literals);
-      if (command !== null) sites.commands.push({ text: command, cwd: undefined });
-    }
+    sites.targets.push(...captured(/>>?\s*(§\d+§)/g));
+    sites.commands.push(...captured(/\|\s*&?\s*(§\d+§)|(§\d+§)\s*\|\s*getline/g).map((text) => ({ text })));
   }
   if (language === "other") {
     // AppleScript's `do shell script`.
-    for (const match of code.matchAll(/\bdo\s+shell\s+script\s+(§\d+§)/g)) {
-      const command = literalArgument(match[1]!, literals);
-      if (command !== null) sites.commands.push({ text: command, cwd: undefined });
-    }
+    sites.commands.push(...captured(/\bdo\s+shell\s+script\s+(§\d+§)/g).map((text) => ({ text })));
   }
   return sites;
 }
@@ -1148,9 +1094,8 @@ function writeSites(source: string, language: InlineLanguage): WriteSites {
 /** The directory a `cwd` option or a `chdir` names, judged from where the code starts. */
 function directoryAt(option: string | null | undefined, context: Context, cwd: Cwd): Cwd {
   if (option === undefined) return cwd;
-  if (option === null || SCHEME_URL.test(option)) return { path: cwd.path, unknown: true };
-  const destination = judgeTarget(option, context.scope, cwd, false);
-  if (destination.kind === "unresolvable" || destination.resolved === null) {
+  const destination = option === null || SCHEME_URL.test(option) ? null : judgeTarget(option, context.scope, cwd, false);
+  if (destination === null || destination.kind === "unresolvable" || destination.resolved === null) {
     return { path: cwd.path, unknown: true };
   }
   return { path: destination.resolved, unknown: false };
@@ -1165,15 +1110,9 @@ function directoryAt(option: string | null | undefined, context: Context, cwd: C
  * read-only table, so that code is refused as `unreadable_program` whatever the
  * command is.
  */
-function spawnedFindings(
-  command: SpawnedCommand,
-  how: string,
-  context: Context,
-  cwd: Cwd,
-): WriteFinding[] {
+function spawnedFindings(command: SpawnedCommand, how: string, context: Context, cwd: Cwd): WriteFinding[] {
   const start = directoryAt(command.cwd, context, cwd);
-  const reading = inspectSegments(command.text, context.scope, start, context.depth + 1);
-  return reading.findings
+  return inspectSegments(command.text, context.scope, start, context.depth + 1).findings
     .filter((finding) => finding.target !== null && (finding.cause ?? "outside_target") === "outside_target")
     .map((finding) => ({
       ...finding,

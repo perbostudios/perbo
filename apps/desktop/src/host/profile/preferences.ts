@@ -3,8 +3,8 @@ import type { ProfileState } from "./store.js";
 /**
  * The preferences a person set beside a ticket, keyed `repoId:key`: its title,
  * the models it drafts and runs with, whether it has been filed and when its
- * page was last opened. They are
- * this host's own, so they are dropped here rather than written to a repository.
+ * page was last opened. They are this host's own, so they are dropped here
+ * rather than written to a repository.
  */
 const entryKey = (repoId: string, key: string): string => repoId + ":" + key;
 

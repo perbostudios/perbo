@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EVERY_PROBLEM_RESOLVED } from "../../shared/protocol.js";
-import type { InterviewEntry } from "../../shared/protocol.js";
+import { EVERY_PROBLEM_RESOLVED, type InterviewEntry } from "../../shared/protocol.js";
 import { owedReading } from "./owed-reading.js";
 
 /** A minute past ten on one morning, so each line's time reads as its minute. */

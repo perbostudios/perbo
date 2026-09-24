@@ -121,9 +121,7 @@ export function codexCommandDecision(
    * is judged as `rm -rf src/x` is.
    */
   const eligible = (segment: (typeof inspection.segments)[number]): boolean => {
-    if (segment.unreadablePrograms.length > 0) return false;
-    if (!segment.accounted) return false;
-    if (!segment.substitutions.every(eligible)) return false;
+    if (segment.unreadablePrograms.length > 0 || !segment.accounted || !segment.substitutions.every(eligible)) return false;
     if (segment.nested.length > 0) return segment.nested.every(eligible);
     return (
       segment.mutating ||

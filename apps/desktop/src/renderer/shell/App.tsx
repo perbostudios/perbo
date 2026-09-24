@@ -200,8 +200,8 @@ export function App() {
     );
   const data = workspace.data,
     props = { workspace: data, navigate };
-  // The planning this page is a pane of, named beside the sidebar toggle.
   const name = nameOfRoute(data, route);
+  const nav = <Rail route={route} navigate={navigate} workspace={data} />;
   const setup = !data.settings.onboardingComplete || route.page === "setup";
   const settings = (SETTINGS_PAGES as readonly string[]).includes(route.page);
   const section: SettingsSection =
@@ -251,19 +251,10 @@ export function App() {
               {/* The bar is the drag region; the toggle and the header's controls punch no-drag holes in it. */}
               <TitleBar>
                 {!setup && <RailToggle />}
-                {!setup && name !== null && (
-                  <span className="titlebar-name">{name}</span>
-                )}
+                {!setup && name !== null && <span className="titlebar-name">{name}</span>}
               </TitleBar>
               <div className="app-body">
-                {!setup && !rail.collapsed && (
-                  <Rail route={route} navigate={navigate} workspace={data} />
-                )}
-                {!setup && rail.collapsed && (
-                  <RailReveal>
-                    <Rail route={route} navigate={navigate} workspace={data} />
-                  </RailReveal>
-                )}
+                {!setup && (rail.collapsed ? <RailReveal>{nav}</RailReveal> : nav)}
                 <main id="content" className="workspace-shell">
                   {data.errors.length > 0 && (
                     <div className="workspace-errors">

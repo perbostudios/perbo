@@ -60,7 +60,7 @@ export const homeRows = (workspace: Pick<Snapshot, "tasks" | "archived" | "jobs"
   workspace.tasks.filter((row) => !isFiled(workspace, row) && !isPreLoop(row));
 
 /** Home's order, top to bottom: completed, a decision waiting on the person, stopped, then running. */
-export const HOME_ORDER: readonly (HomeTone | null)[] = ["green", "yellow", "red", null];
+const HOME_ORDER: readonly (HomeTone | null)[] = ["green", "yellow", "red", null];
 
 /**
  * Home's tickets by where each stands, in `HOME_ORDER`, and within a colour by
@@ -74,24 +74,18 @@ export function homeOrder<Row extends Pick<TaskRow, "repoId" | "ticket">>(
   by: "opened" | "newest" | "oldest",
 ): Row[] {
   const rank = (row: Row): number => HOME_ORDER.indexOf(homeTone(workspace, row));
-  const opened = (row: Row): string | undefined => workspace.lastOpened?.[row.repoId + ":" + row.ticket.key];
-  return [...rows].sort((a, b) => {
-    const [first, second] = [opened(a), opened(b)];
-    return (
+  // Never opened reads as "", which sorts after every opening.
+  const opened = (row: Row): string => workspace.lastOpened?.[row.repoId + ":" + row.ticket.key] ?? "";
+  return [...rows].sort(
+    (a, b) =>
       rank(a) - rank(b) ||
       (by === "newest"
         ? b.ticket.updated_at.localeCompare(a.ticket.updated_at)
         : by === "oldest"
           ? a.ticket.updated_at.localeCompare(b.ticket.updated_at)
-          : first !== undefined && second !== undefined
-            ? second.localeCompare(first)
-            : first !== undefined
-              ? -1
-              : second !== undefined
-                ? 1
-                : b.ticket.admitted_at.localeCompare(a.ticket.admitted_at))
-    );
-  });
+          : opened(b).localeCompare(opened(a)) ||
+            (opened(a) === "" ? b.ticket.admitted_at.localeCompare(a.ticket.admitted_at) : 0)),
+  );
 }
 
 /** How many Home tickets stand at each tone. */
