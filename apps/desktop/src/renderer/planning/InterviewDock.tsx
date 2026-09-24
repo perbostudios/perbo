@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { bridge, errorMessage, useGraph } from "../workspace/index.js";
 import { isLive, newestReading } from "../../shared/jobs.js";
 import { graphHistory, latestUndoable } from "./history.js";
+import { owedReading } from "./owed-reading.js";
 import { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS } from "../../shared/contract-editing.js";
 import { AskedHandle } from "./AskedHandle.js";
 import { askedHeightLimit, useAskedHeight } from "../shell/asked-size.js";
@@ -277,20 +278,11 @@ export function InterviewDock({
   // that reading has landed. The note reads without its button meanwhile.
   const newest = key === null ? null : newestReading(workspace.jobs, repoId, key);
   const reading = newest !== null && isLive(newest);
-  // A turn that ends with a verdict on the record is owed a reading, which
-  // the host starts once it has read the ticket: for that round trip the job
-  // is not yet in the list, and the button would be back before the reading
-  // had begun. So the person's last turn is held against the newest reading
-  // — the button is theirs again only once a reading started after that turn
-  // has landed. Derived from the record and the jobs as they stand, never
-  // from an effect, because a single render with the button drawn is the
-  // flash this is here to prevent.
-  const lastTurnAt = conversation.findLast((entry) => entry.line.kind === "turn")?.at ?? null;
-  const owed =
-    session?.drift != null &&
-    lastTurnAt !== null &&
-    running &&
-    !(newest !== null && newest.startedAt >= lastTurnAt);
+  // The button is held until the person's last turn has had the reading it
+  // is owed, one started at or after the turn was applied. Derived from the
+  // record and the jobs as they stand, never from an effect, because a single
+  // render with the button drawn is the flash this is here to prevent.
+  const { owed } = owedReading(conversation, { drift: session?.drift, running }, newest);
   const withheld =
     key === null || asking !== null || working !== null || speaking || reading || owed;
 

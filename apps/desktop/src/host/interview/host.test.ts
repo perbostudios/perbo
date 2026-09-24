@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { createScratch } from "@perbo/test-support";
 import { InterviewHost, type InterviewDeps } from "./host.js";
 import { ContractEditing } from "../../shared/contract-editing.js";
@@ -51,6 +52,10 @@ class FakeInterview {
   stderr(text: string): void {
     this.options.onStderr?.(text);
   }
+  /** The child itself gone, with its output still held by something it started. */
+  exit(): void {
+    this.options.onExit?.();
+  }
   close(code: number, stopped = false): void {
     this.options.onClose?.({ code, stopped } as Parameters<
       NonNullable<LineProcessOptions["onClose"]>
@@ -59,7 +64,11 @@ class FakeInterview {
 }
 
 /** A whole interview host over an in-memory editing record and an in-memory child. */
-function host(repo: RegisteredRepository) {
+function host(
+  repo: RegisteredRepository,
+  /** The catalog the chat's model is read from; none by default, so it starts on the planning's own. */
+  known: InterviewDeps["catalogs"]["known"] = () => Promise.resolve(undefined),
+) {
   let records: EditingSession[] = [];
   const told: Change[] = [];
   const spawned: { args: string[]; child: FakeInterview }[] = [];
@@ -92,8 +101,7 @@ function host(repo: RegisteredRepository) {
     },
     detail: () => Promise.reject(new Error("no detail in this test")),
     marks: { pairOf: () => null, recordChangeSince: () => undefined },
-    // No catalog to read: the chat starts on the planning's own model.
-    catalogs: { known: () => Promise.resolve(undefined) },
+    catalogs: { known },
     sessions: () => records,
     draftedFrom: () => Promise.resolve(null),
     reread: () => undefined,
@@ -277,6 +285,67 @@ describe("stopping", () => {
     w.spawned[0]!.child.close(0, true);
     expect(w.conversation(session.id).length).toBe(before);
     expect(w.interviews.running()).toEqual([]);
+  });
+
+  it("settles a stopped chat's exit once the child has gone, though its output never closes", async () => {
+    // Something the chat started can hold its stdout past its own exit, and
+    // then `close` never comes: a draft or a delete waiting on the exit would
+    // wait for ever.
+    const w = host(repository());
+    const session = await w.open();
+    w.editing.recordSpec(session.id, "retry-a-failed-run");
+    await w.interviews.start(session.id);
+    w.interviews.stop(session.id);
+    const exited = w.interviews.exited(session.id).then(() => "exited");
+    w.spawned[0]!.child.exit();
+    await expect(Promise.race([exited, delay(200).then(() => "still waiting")])).resolves.toBe(
+      "exited",
+    );
+  });
+
+  /** A host whose catalog answers only when the test says, so a start can be caught before it spawns. */
+  function held() {
+    let answer: () => void = () => undefined;
+    const catalog = new Promise<undefined>((resolve) => {
+      answer = () => resolve(undefined);
+    });
+    return { w: host(repository(), () => catalog), answer };
+  }
+
+  it("spawns nothing for a planning thrown away while its chat was starting, and settles its exit", async () => {
+    // The chat's model is read from the catalog before it spawns, and a delete
+    // in that gap is over a chat that is not there yet.
+    const { w, answer } = held();
+    const session = await w.open();
+    w.editing.recordSpec(session.id, "retry-a-failed-run");
+    const starting = w.interviews.start(session.id);
+    expect(w.interviews.running(), "a chat on its way is one to stop").toEqual([session.id]);
+    w.editing.discard(session.id);
+    const exited = w.interviews.exited(session.id).then(() => "exited");
+    answer();
+    expect((await starting).running).toBe(false);
+    await expect(Promise.race([exited, delay(200).then(() => "still waiting")])).resolves.toBe(
+      "exited",
+    );
+    expect(w.spawned).toHaveLength(0);
+    expect(w.interviews.running()).toEqual([]);
+  });
+
+  it("spawns nothing for a chat stopped while it was starting, so what waits on its exit is not left waiting", async () => {
+    // Generate plan stops the chat and waits for it to exit: a chat spawned
+    // after that stop is one nothing stops, and the draft would wait for ever.
+    const { w, answer } = held();
+    const session = await w.open();
+    w.editing.recordSpec(session.id, "retry-a-failed-run");
+    const starting = w.interviews.start(session.id);
+    w.interviews.stop(session.id);
+    const exited = w.interviews.exited(session.id).then(() => "exited");
+    answer();
+    expect((await starting).running).toBe(false);
+    await expect(Promise.race([exited, delay(200).then(() => "still waiting")])).resolves.toBe(
+      "exited",
+    );
+    expect(w.spawned).toHaveLength(0);
   });
 
   it("ends every interview when the app closes", async () => {

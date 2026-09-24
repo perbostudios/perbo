@@ -100,19 +100,6 @@ export function repositorySpecs(repo: RegisteredRepository): SpecRow[] {
 }
 
 /**
- * The slug of the spec a ticket was drafted from, in the folder this
- * repository keeps specs in now, or null where its record names none there:
- * `specSlugOf`'s answer, with the folder read. Throws where the repository's
- * configured spec folder cannot be read.
- */
-export function ticketSpecSlug(
-  repo: RegisteredRepository,
-  ticket: { admission: { spec?: { path?: string } | null } },
-): string | null {
-  return specSlugOf(ticket.admission.spec?.path, specFolder(repo));
-}
-
-/**
  * The spec a ticket still being planned was drafted from, titled with the name
  * the person just gave the ticket, so the Spec pane, the picker and the
  * contract's head show one name (D-127).

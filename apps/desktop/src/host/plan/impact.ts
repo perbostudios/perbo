@@ -1,6 +1,7 @@
 import { isNeverReadPath } from "@perbo/contracts";
 import { impactReport, readSpecText } from "@perbo/planning";
-import { specPath, ticketSpecSlug } from "./spec.js";
+import { safePath } from "../repository/paths.js";
+import { specPath } from "./spec.js";
 import { trackedFiles, type Execute } from "../repository/git.js";
 import { readSymbolIndex } from "../symbols.js";
 import type { Cli } from "../cli.js";
@@ -90,12 +91,14 @@ export async function contractImpact(
   const tracked = (await trackedFiles(deps.execute, repo.path)).filter(
     (path) => !isNeverReadPath(path),
   );
-  let spec: string | null;
-  try {
-    const slug = ticket === undefined ? null : ticketSpecSlug(repo, ticket);
-    spec = slug === null ? null : readSpecText(specPath(repo, slug)).markdown;
-  } catch {
-    spec = null;
+  const at = ticket?.admission?.spec?.path ?? null;
+  let spec: string | null = null;
+  if (at !== null) {
+    try {
+      spec = readSpecText(safePath(repo, ...at.split("/"))).markdown;
+    } catch {
+      spec = null;
+    }
   }
   const report = impactReport({
     scope: contract.scope.paths_allowed,

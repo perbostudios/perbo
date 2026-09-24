@@ -75,9 +75,10 @@ export class DriftReadings {
    * session's own records: the session names itself and nothing else
    * (ADR-0023 §4).
    *
-   * Refused where there is nothing to read — no spec yet, or no plan drafted
-   * from it — and on an approved ticket, whose plan is frozen (ADR-0016): a
-   * finding there would offer a change the interview may not make. The
+   * Refused where there is nothing to read — a planning thrown away, whose
+   * work is being deleted, no spec yet, or no plan drafted from it — and on an
+   * approved ticket, whose plan is frozen (ADR-0016): a finding there would
+   * offer a change the interview may not make. The
    * approved case is the desktop's refusal and not the CLI's, because it is the
    * desktop that puts this reading on the way to the contract, and an approved
    * plan goes there without it.
@@ -85,6 +86,8 @@ export class DriftReadings {
   private async target(id: string): Promise<{ repo: RegisteredRepository; key: string }> {
     const session = this.deps.editing.read(id);
     const repo = this.deps.repository(session.repoId);
+    if (session.phase === "discarded")
+      throw new Error("This planning has been thrown away, and its plan with it.");
     if (session.specSlug === null)
       throw new Error("Write the spec before reading it against the plan.");
     if (session.key === null)
@@ -242,6 +245,13 @@ export class DriftReadings {
    * reading between them, since it reads the plan as it then stands. A reading
    * that cannot be started is said in the chat, because the page is waiting on
    * it.
+   *
+   * Never for a planning thrown away. Its chat is stopped as its work is
+   * deleted, and that stop and the chat's exit both end a turn: a reading
+   * started there runs `perbo drift` over files being removed, writes its
+   * verdict back beside a ticket that has gone, and, still running as the
+   * delete checks, holds the repository so the ticket is refused its delete.
+   * Both deletes mark the planning thrown away before they stop its chat.
    */
   async reread(id: string): Promise<void> {
     let session;
@@ -250,7 +260,7 @@ export class DriftReadings {
     } catch {
       return;
     }
-    if (session.drift === null || session.key === null) return;
+    if (session.drift === null || session.key === null || session.phase === "discarded") return;
     const key = session.key;
     const live = this.deps.jobs
       .live()

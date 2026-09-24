@@ -20,6 +20,8 @@ import { conflictFor, DEFAULT_SHORTCUTS, effectiveShortcuts, setPlatformForTests
 import { withDraft } from "../shell/create.js";
 import { untouchedPlanning } from "../../shared/contract-editing.js";
 import { isLive } from "../../shared/jobs.js";
+import { DELETE_WAITS_FOR_COMMANDS } from "../../shared/discard.js";
+import { job } from "../../sample-host/records.js";
 import { SpecSection } from "./SpecSection.js";
 import { firstSentence } from "./InterviewDock.js";
 import { GraphInspector } from "./GraphInspector.js";
@@ -3179,33 +3181,38 @@ describe("the Graph pane (SCP-316)", () => {
       expect(within(note).getByRole("button", { name: "Confirm the plan" })).toBeTruthy();
       // The interview asks a question of its own: it stands between the
       // person and confirming, so the note reads without its button.
+      const drift = async () =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter(
+          (job) => job.kind === "drift" && job.key === plan.key,
+        );
+      const readBeforeAsking = new Set((await drift()).map((job) => job.id));
       await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "ask me" });
       await within(dock).findByRole("group", { name: "How the queue is split" }, { timeout: 5000 });
       expect(within(note).queryByRole("button", { name: "Confirm the plan" })).toBeNull();
-      // Answered in the person's own words, which takes the question away —
-      // but not the button back: the interview is applying the answer, and
-      // then the plan is read against the spec again, and until that reading
-      // has landed what the answer did to the record is not known. The page
-      // waits through the same two, and the note reads without its button.
-      await sampleBridge.request({
-        kind: "interviewTurn",
-        id: plan.id,
-        text: "Change R1 in the spec to say: The person can choose Light, Dark or System without a restart.",
-      });
-      await waitFor(() =>
-        expect(within(dock).queryByRole("group", { name: "How the queue is split" })).toBeNull(),
+      // The question's own turn is owed a reading too, and it lands before the
+      // person answers, so the reading the answer owes is the only one ahead.
+      // An answer sent in the round trip before that reading's job starts is
+      // sent before the reading and applied after it, and which reading then
+      // brings the button back turns on that race, not on the rule under test.
+      await waitFor(
+        async () => {
+          const jobs = await drift();
+          expect(jobs.some((job) => !readBeforeAsking.has(job.id) && !isLive(job))).toBe(true);
+          expect(jobs.some((job) => isLive(job))).toBe(false);
+        },
+        { timeout: 5000 },
       );
-      expect((await sampleBridge.request({ kind: "snapshot" })).working).toContain(plan.id);
       expect(within(note).queryByRole("button", { name: "Confirm the plan" })).toBeNull();
-      // From here until the reading the turn owes has landed, the button is
-      // never there — not while the interview applies the answer, not in the
+      // From the answer until the reading the turn owes has landed, the button
+      // is never there — not while the interview applies the answer, not in the
       // round trip between the turn ending and the reading's job appearing,
       // and not while it runs. Watched rather than sampled: a flash between
       // two polls is exactly what would let the person confirm a plan the
       // reading was about to find wanting. The landing is taken from the
-      // change that carries the job, which reaches the dock before it draws.
-      const before = (await sampleBridge.request({ kind: "snapshot" })).jobs
-        .filter((job) => job.kind === "drift" && job.key === plan.key)
+      // change that carries the job, which reaches the dock before it draws,
+      // and both watch from before the answer is sent, so neither can be
+      // missed however quickly the turn and the reading go by.
+      const before = (await drift())
         .map((job) => job.startedAt)
         .sort()
         .at(-1) ?? "";
@@ -3228,6 +3235,21 @@ describe("the Graph pane (SCP-316)", () => {
         )
           landedAt = performance.now();
       });
+      // Answered in the person's own words, which takes the question away —
+      // but not the button back: the interview is applying the answer, and
+      // then the plan is read against the spec again, and until that reading
+      // has landed what the answer did to the record is not known. The page
+      // waits through the same two, and the note reads without its button.
+      await sampleBridge.request({
+        kind: "interviewTurn",
+        id: plan.id,
+        text: "Change R1 in the spec to say: The person can choose Light, Dark or System without a restart.",
+      });
+      await waitFor(() =>
+        expect(within(dock).queryByRole("group", { name: "How the queue is split" })).toBeNull(),
+      );
+      expect((await sampleBridge.request({ kind: "snapshot" })).working).toContain(plan.id);
+      expect(within(note).queryByRole("button", { name: "Confirm the plan" })).toBeNull();
       await waitFor(() => expect(landedAt).not.toBeNull(), { timeout: 5000 });
       await waitFor(
         () => expect(within(note).getByRole("button", { name: "Confirm the plan" })).toBeTruthy(),
@@ -3237,6 +3259,96 @@ describe("the Graph pane (SCP-316)", () => {
       unsubscribe();
       expect(shownAt, "the button was there before the reading landed").not.toBeNull();
       expect(shownAt! >= landedAt!, "the button came back before the reading landed").toBe(true);
+    });
+
+    it("withholds the chat's way on through a reading the question's turn owed that never saw the answer", async () => {
+      const plan = await problems();
+      answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
+      answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
+      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
+      location.hash = `planning/${plan.id}/graph`;
+      await screen.findByRole("heading", { name: "Execution graph" });
+      const dock = screen.getByRole("complementary", { name: "Chat" });
+      const note = await within(dock).findByText(/^Every problem is resolved/);
+      expect(within(note).getByRole("button", { name: "Confirm the plan" })).toBeTruthy();
+      await waitFor(
+        async () =>
+          expect(
+            (await sampleBridge.request({ kind: "snapshot" })).jobs.some(
+              (job) => job.kind === "drift" && job.key === plan.key && isLive(job),
+            ),
+          ).toBe(false),
+        { timeout: 5000 },
+      );
+      const answer = "Change R1 in the spec to say: The person can choose Light, Dark or System without a restart.";
+      // The answer goes the instant the question's turn ends, as a person
+      // already typing does: after the turn is over and before the reading it
+      // owes has started, so that reading starts under the answer and reads
+      // the plan before the answer is applied. Sent from a microtask, which
+      // runs after the host has asked for that reading and before its job
+      // starts.
+      let asked = false;
+      let answeredAt: string | null = null;
+      // The `at` of the last line the answer led to, as the lines arrive.
+      let appliedAt: string | null = null;
+      let shownAt: number | null = null;
+      let staleLandedAt: number | null = null;
+      let landedAt: number | null = null;
+      const look = (): void => {
+        if (shownAt === null && within(note).queryByRole("button", { name: "Confirm the plan" }))
+          shownAt = performance.now();
+      };
+      // Watched from the moment the answer is sent, rather than sampled: a
+      // flash between two polls is exactly what would let the person confirm.
+      const watcher = new MutationObserver(look);
+      const unsubscribe = sampleBridge.subscribe((change) => {
+        if (change.kind === "interview" && change.sessionId === plan.id) {
+          if (answeredAt !== null && change.entry !== null) appliedAt = change.entry.at;
+          if (asked && answeredAt === null && !change.working) {
+            answeredAt = "";
+            queueMicrotask(() => {
+              void sampleBridge
+                .request({ kind: "interviewTurn", id: plan.id, text: answer })
+                .then(() => {
+                  look();
+                  watcher.observe(note, { childList: true, subtree: true, attributes: true });
+                });
+            });
+          }
+          if (answeredAt === "" && change.entry?.line.kind === "turn") answeredAt = change.entry.at;
+        }
+        const job = "job" in change ? change.job : undefined;
+        if (
+          answeredAt === null ||
+          answeredAt === "" ||
+          appliedAt === null ||
+          job === undefined ||
+          job.kind !== "drift" ||
+          job.key !== plan.key ||
+          isLive(job) ||
+          job.startedAt < answeredAt
+        )
+          return;
+        // A reading that started after the answer was sent: before its last
+        // line, the one that never saw it; from that line on, the one it owes.
+        if (job.startedAt < appliedAt) staleLandedAt ??= performance.now();
+        else landedAt ??= performance.now();
+      });
+      asked = true;
+      await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "ask me" });
+      await waitFor(() => expect(landedAt).not.toBeNull(), { timeout: 8000 });
+      await waitFor(
+        () => expect(within(note).getByRole("button", { name: "Confirm the plan" })).toBeTruthy(),
+        { timeout: 5000 },
+      );
+      watcher.disconnect();
+      unsubscribe();
+      // The race was forced: a reading started under the answer and landed
+      // ahead of the one the answer owes.
+      expect(staleLandedAt, "no reading started under the answer").not.toBeNull();
+      expect(staleLandedAt! < landedAt!).toBe(true);
+      expect(shownAt, "the button was never drawn again").not.toBeNull();
+      expect(shownAt! >= landedAt!, "the button came back on a reading that never saw the answer").toBe(true);
     });
 
     it("lands on the problems from the picker and from the ticket's own link while they are open", async () => {
@@ -3761,6 +3873,108 @@ describe("the Graph pane (SCP-316)", () => {
       expect(screen.queryByRole("group", { name: "How the queue is split" })).toBeNull();
     });
 
+    it("holds the wait on an answer to the interview's question through a reading that started under it, before it was applied", async () => {
+      const plan = await problems();
+      answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
+      answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
+      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
+      const landed = async (): Promise<number> =>
+        (await sampleBridge.request({ kind: "snapshot" })).jobs.filter(
+          (job) => job.kind === "drift" && job.key === plan.key && !isLive(job),
+        ).length;
+      /** Every reading owed so far has landed and no turn is in flight. */
+      const settled = async (readings: number): Promise<void> =>
+        waitFor(
+          async () => {
+            const workspace = await sampleBridge.request({ kind: "snapshot" });
+            expect(workspace.working).not.toContain(plan.id);
+            expect(workspace.jobs.some((job) => job.kind === "drift" && isLive(job))).toBe(false);
+            expect(await landed()).toBeGreaterThan(readings);
+          },
+          { timeout: 5000 },
+        );
+      // The interview asks two groups of its own over the resolved state, and
+      // the first is answered from the chat with words that move nothing, so
+      // the record stays resolved and the second is the one to answer here.
+      let readings = await landed();
+      await sampleBridge.request({ kind: "interviewTurn", id: plan.id, text: "ask me" });
+      await settled(readings);
+      readings = await landed();
+      await sampleBridge.request({
+        kind: "interviewTurn",
+        id: plan.id,
+        text: "a) Split at the read, and refuse it\nb) A unit test per node",
+      });
+      await settled(readings);
+      const second = await screen.findByRole("group", { name: "Question 2" }, { timeout: 5000 });
+      expect((await editingRead(plan.id)).drift).toEqual({ open: [], resolved: true });
+      // A reading is started the moment the answer is on the record, before
+      // the interview has applied it: it reads the plan the answer has not
+      // moved yet, and lands ahead of the reading the answer is owed.
+      let armed = false;
+      let answeredAt: string | null = null;
+      // The `at` of the last line the answer led to, as the lines arrive.
+      let appliedAt: string | null = null;
+      let shownAt: number | null = null;
+      let staleLandedAt: number | null = null;
+      let landedAt: number | null = null;
+      const look = (): void => {
+        if (
+          shownAt === null &&
+          [...document.querySelectorAll("button")].some((button) => button.textContent === "Confirm the plan")
+        )
+          shownAt = performance.now();
+      };
+      // Watched from the moment the answer is sent, rather than sampled: a
+      // flash between two polls is exactly what would let the person confirm.
+      const watcher = new MutationObserver(look);
+      watcher.observe(document.body, { childList: true, subtree: true, attributes: true });
+      const unsubscribe = sampleBridge.subscribe((change) => {
+        if (armed && change.kind === "interview" && change.sessionId === plan.id && change.entry !== null) {
+          const { line, at } = change.entry;
+          if (answeredAt === null && line.kind === "turn") {
+            answeredAt = at;
+            queueMicrotask(() => void sampleBridge.request({ kind: "driftCheck", id: plan.id }));
+          } else if (
+            answeredAt !== null &&
+            !(line.kind === "asked" && line.drift !== undefined) &&
+            !(line.kind === "note" && line.offers === "contract")
+          )
+            appliedAt = at;
+        }
+        const job = "job" in change ? change.job : undefined;
+        if (
+          answeredAt === null ||
+          appliedAt === null ||
+          job === undefined ||
+          job.kind !== "drift" ||
+          job.key !== plan.key ||
+          isLive(job) ||
+          job.startedAt < answeredAt
+        )
+          return;
+        if (job.startedAt < appliedAt) staleLandedAt ??= performance.now();
+        else landedAt ??= performance.now();
+      });
+      try {
+        armed = true;
+        fireEvent.click(within(second).getByRole("radio", { name: /Delete it/ }));
+        sendGroup(second);
+        // The interview moved the plan as it applied the answer, and the
+        // reading the answer owes finds the problem that made.
+        await waitFor(() => expect(landedAt).not.toBeNull(), { timeout: 8000 });
+        await screen.findByRole("group", { name: "Criterion 1 and R1" }, { timeout: 5000 });
+      } finally {
+        watcher.disconnect();
+        unsubscribe();
+      }
+      // The race was forced: a reading started under the answer and landed
+      // ahead of the one the answer owes.
+      expect(staleLandedAt, "no reading started under the answer").not.toBeNull();
+      expect(staleLandedAt! < landedAt!).toBe(true);
+      expect(shownAt, "the way on was drawn on a reading that never saw the answer").toBeNull();
+    });
+
     describe("confirming once the problems are resolved", () => {
       /** Nothing under way for the planning: no turn in flight and no reading live. */
       const quiet = async (plan: { id: string }): Promise<void> => {
@@ -4230,6 +4444,36 @@ describe("the Graph pane (SCP-316)", () => {
     await screen.findByText("No graph yet");
     expect(screen.queryByRole("button", { name: "Node" })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
+  });
+
+  it("keeps a planning deleted from the picker while a command runs, and says why in the host's words", async () => {
+    // A planning that drafted its ticket takes the ticket with it, and a
+    // command running in the repository may be writing what that removes: the
+    // host refuses before anything goes, and the picker says so rather than
+    // letting the row come back with no reason.
+    const plan = await planned();
+    expect((await editingRead(plan.id)).admitted).toBe(true);
+    mount();
+    await screen.findByRole("heading", { name: /Hi, / });
+    const running = job("run", plan.repoId, "PRB-404", () => undefined, 60_000);
+    try {
+      const workspace = await sampleBridge.request({ kind: "snapshot" });
+      const row = workspace.tasks.find((each) => each.repoId === plan.repoId && each.ticket.key === plan.key)!;
+      const title = workspace.titles?.[plan.repoId + ":" + plan.key] ?? row.ticket.title;
+      const bin = (): HTMLElement | null =>
+        within(screen.getByRole("dialog", { name: "Plan a piece of work" })).queryByRole("button", {
+          name: "Delete planning: " + title,
+        });
+      const picker = await openPicker();
+      fireEvent.click(await within(picker).findByRole("button", { name: "Delete planning: " + title }));
+      const asking = await screen.findByRole("dialog", { name: "Delete planning" });
+      fireEvent.click(within(asking).getAllByRole("button", { name: "Delete planning" })[0]!);
+      await screen.findByText(DELETE_WAITS_FOR_COMMANDS);
+      expect((await editingRead(plan.id)).phase).not.toBe("discarded");
+      await waitFor(() => expect(bin()).not.toBeNull());
+    } finally {
+      running.state = "cancelled";
+    }
   });
 });
 

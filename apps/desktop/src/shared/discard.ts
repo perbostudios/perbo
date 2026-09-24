@@ -12,6 +12,13 @@ export const DELETE_WAITS_FOR_COMMANDS =
 export const DELETE_TICKET_GONE = "This task is no longer in the repository's ticket store.";
 
 /**
+ * Why a planning thrown away leaves the plan drafted from its spec: another
+ * planning curates it, by the spec it writes or the ticket it holds, and it is
+ * that planning's to throw away.
+ */
+export const ANOTHER_PLANNING_HOLDS = "Another planning holds this plan.";
+
+/**
  * The one stage a delete does not reach: the pull request is on GitHub, a
  * record this machine does not own.
  */

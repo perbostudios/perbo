@@ -3,6 +3,7 @@ import type { Ticket } from "@perbo/contracts";
 import { specFolder } from "../repository/config.js";
 import { safePath } from "../repository/paths.js";
 import { specSlugOf } from "../../shared/spec-slug.js";
+import { ANOTHER_PLANNING_HOLDS } from "../../shared/discard.js";
 import { SPEC_SLUG } from "../../shared/protocol.js";
 import type { Changes } from "../changes.js";
 import type { RegisteredRepository } from "../profile/store.js";
@@ -81,7 +82,7 @@ export async function deleteDraftedFromSpec(
           (entry.specSlug === slug || entry.key === key) &&
           entry.phase !== "discarded",
       );
-    if (held) return "Another planning holds this plan.";
+    if (held) return ANOTHER_PLANNING_HOLDS;
     return await deps.discard(repo, key);
   } catch {
     // Nothing readable is nothing to delete, and the planning has gone either

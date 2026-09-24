@@ -56,10 +56,15 @@ it("keeps work whose pull request is open, in the host's words", async () => {
   expect(onBoard("PRB-377")).toBe(true);
 });
 
-it("keeps the ticket a discarded planning drafted once its pull request is open", async () => {
+it("keeps the ticket a discarded planning drafted once its pull request is open, and says why", async () => {
   const planning = await drafted("pr_open");
-  const discarded = await sampleBridge.request({ kind: "editingDiscard", id: planning.id });
-  expect(discarded.phase).toBe("discarded");
+  // The planning goes; the ticket stays where it is listed, and the refusal
+  // is said in the host's words rather than swallowed.
+  await expect(sampleBridge.request({ kind: "editingDiscard", id: planning.id })).rejects.toThrow(
+    "PRB-421 has a pull request open, and that is a record this machine does not own. Close " +
+      "or merge it on GitHub first, then delete the work.",
+  );
+  expect(stored().find((each) => each.id === planning.id)?.phase).toBe("discarded");
   expect(onBoard("PRB-421")).toBe(true);
 });
 
@@ -69,9 +74,17 @@ it("waits for a command running in the repository, in the host's words", async (
     "Wait for the commands running in this repository to finish before deleting a contract.",
   );
   expect(onBoard("PRB-412")).toBe(true);
-  // Nor does the planning that drafted a ticket take it past the command.
+});
+
+it("refuses to discard the planning that drafted its ticket while a command runs, before anything goes", async () => {
   const planning = await drafted("executing");
-  await sampleBridge.request({ kind: "editingDiscard", id: planning.id });
+  held.push(job("run", repoId, "PRB-404", () => undefined, 60_000));
+  await expect(sampleBridge.request({ kind: "editingDiscard", id: planning.id })).rejects.toThrow(
+    "Wait for the commands running in this repository to finish before deleting a contract.",
+  );
+  // Refused before the planning went, as the host refuses it: the person
+  // finds the work as it was, planning and ticket both.
+  expect(stored().find((each) => each.id === planning.id)?.phase).not.toBe("discarded");
   expect(onBoard("PRB-421")).toBe(true);
 });
 

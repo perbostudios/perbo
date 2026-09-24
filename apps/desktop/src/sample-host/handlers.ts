@@ -13,7 +13,8 @@ import type { GraphEdit } from "@perbo/contracts/browser";
 import { openDrafts, turnMark } from "../shared/contract-editing.js";
 import type { EditingOwner } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows, isArchivable, notArchivable } from "../shared/archive.js";
-import { isLive, isRun } from "../shared/jobs.js";
+import { heldRepository, isLive, isRun } from "../shared/jobs.js";
+import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
 import { HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
 import type { Job, ReplyMap, Request, RequestHandlers } from "../shared/protocol.js";
 import {
@@ -181,13 +182,17 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // The ticket this planning drafted goes with it, as it does on the real
     // host: a plan thrown away must not leave its ticket on the board with no
     // way back to the plan, whatever stage it had reached (D-129). One this
-    // planning was merely opened over was never its to throw away. Where the
-    // ticket stays — a pull request open, a command running in the repository
-    // — the planning goes and the ticket, and the spec it names, stay.
+    // planning was merely opened over was never its to throw away.
     const held = editing.read(request.id);
+    // A command running in the repository holds the delete of the ticket this
+    // planning drafted, so the discard is refused before anything goes, as the
+    // host refuses it.
+    if (held.key !== null && held.admitted && heldRepository(snapshot.jobs, held.repoId))
+      throw new Error(DELETE_WAITS_FOR_COMMANDS);
     const session = editing.discard(request.id, request.revision);
     endPlanningChat(request.id);
-    if (held.key !== null && held.admitted) discardTicket(held.repoId, held.key);
+    let refused: string | null = null;
+    if (held.key !== null && held.admitted) refused = discardTicket(held.repoId, held.key);
     // A planning that never took the ticket drafted from its own spec still
     // deletes it: the row being thrown away stood for that work. Not where
     // another planning curates it, by the spec it writes or the ticket it
@@ -207,13 +212,21 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
             (each.specSlug === held.specSlug || each.key === key) &&
             each.phase !== "discarded",
         );
-      if (mine.length === 1 && !curated(mine[0]!.ticket.key))
-        discardTicket(held.repoId, mine[0]!.ticket.key);
+      if (mine.length === 1)
+        refused = curated(mine[0]!.ticket.key)
+          ? ANOTHER_PLANNING_HOLDS
+          : discardTicket(held.repoId, mine[0]!.ticket.key);
     }
-    // And the spec they came from, once nothing is left holding it: a ticket
-    // that stayed still names it, and a plan is read against the spec it names
-    // (D-103).
-    if (held.specSlug !== null) {
+    // Work left standing is said, as the host says it: the planning has gone,
+    // and the ticket stays where it is listed, to delete once what holds it has
+    // settled. A ticket already gone left nothing to delete, and one another
+    // planning holds is that planning's.
+    if (refused !== null && refused !== DELETE_TICKET_GONE && refused !== ANOTHER_PLANNING_HOLDS)
+      throw new Error(refused);
+    // And the spec they came from, once nothing is left holding it. Not where
+    // the ticket refused to go: a plan still standing is read against the spec
+    // it names (D-103).
+    if (held.specSlug !== null && refused === null) {
       removeSpecFile(held.specSlug, { sessionId: request.id });
       emit({ kind: "records", repoId: held.repoId, key: null });
     }

@@ -88,8 +88,6 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
     action.mutate({ kind: "cancel", jobId: active.id });
     if (isRun(active)) show("stopped");
   };
-  useShortcut("output", () => show("output"));
-  useShortcut("stop", active && active.state !== "stopping" ? stop : null);
   // Between pressing Approve and the loop having anything to show.
   //
   // Approving runs a command: the request returns as soon as the job is
@@ -97,7 +95,14 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
   // contract and settling its checks. Underneath, it says "Ready to start the
   // loop" over an empty progress bar — which reads as nothing having happened
   // to a person who just pressed the one button that freezes their work.
-  if (active && !recoverable && ["plan_review", "ready"].includes(ticket.state))
+  const approving =
+    active !== undefined && !recoverable && ["plan_review", "ready"].includes(ticket.state);
+  useShortcut("output", () => show("output"));
+  // The wait offers no stop, so the shortcut offers none either: there is no
+  // run yet to call off, and the stopped page is not about a ticket still
+  // being approved.
+  useShortcut("stop", active && active.state !== "stopping" && !approving ? stop : null);
+  if (approving)
     return (
       <WaitScreen
         title="Approving the contract"

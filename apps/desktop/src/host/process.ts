@@ -201,6 +201,12 @@ export function redact(
 export const LINE_CHAR_CAP = 1024 * 1024;
 /** How long a stopped child has to leave on its own before its group is signalled. */
 export const STOP_GRACE_MS = 3000;
+/**
+ * How long after a child exits its output has to close before the child is
+ * reported gone without that ({@link LineProcessOptions.onExit}): long enough
+ * for what it wrote before exiting to be read off the pipe.
+ */
+export const OUTPUT_CLOSES_IN_MS = 1000;
 
 export interface LineProcessOptions {
   cwd: string;
@@ -211,6 +217,13 @@ export interface LineProcessOptions {
   onStderr?: (text: string) => void;
   /** The child is gone: its exit code, and whether a stop asked for it. */
   onClose: (result: { code: number; stopped: boolean }) => void;
+  /**
+   * The child has exited and its output is still open
+   * {@link OUTPUT_CLOSES_IN_MS} later, because something it started holds it.
+   * `onClose` waits for that to let go, which may be never; this is the child
+   * itself having gone. Not called where `onClose` came first.
+   */
+  onExit?: () => void;
   /** The child could not be started at all. */
   onError?: (error: Error) => void;
 }
@@ -312,6 +325,11 @@ export function startLineProcess(
   child.once("error", (error) => {
     for (const timer of timers) clearTimeout(timer);
     options.onError?.(new Error(`Could not start ${binary}: ${error.message}`));
+  });
+  child.once("exit", () => {
+    const closing = setTimeout(() => options.onExit?.(), OUTPUT_CLOSES_IN_MS);
+    closing.unref();
+    timers.push(closing);
   });
   child.once("close", (code) => {
     for (const timer of timers) clearTimeout(timer);

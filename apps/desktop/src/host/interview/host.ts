@@ -92,6 +92,16 @@ export class InterviewHost {
     { repoId: string; child: LineProcess; model: string; exited: Promise<void> }
   >();
   /**
+   * The chats asked to start and not spawned yet, while the model they run on
+   * is read from the catalog. A stop or a discard in that gap is owed to a chat
+   * that is not in {@link live} yet, and reaches it here: `stopped` is set by a
+   * stop, and the start then spawns nothing.
+   */
+  private readonly starting = new Map<
+    string,
+    { stopped: boolean; settled: Promise<InterviewStatus> }
+  >();
+  /**
    * The plannings whose interview is working on what it will say next (D-119).
    *
    * Held here rather than on the record: it is about a process running now, and
@@ -194,9 +204,9 @@ export class InterviewHost {
     this.deps = deps;
   }
 
-  /** The planning sessions whose interview is still there. */
+  /** The planning sessions whose interview is still there, or on its way. */
   running(): string[] {
-    return [...this.live.keys()];
+    return [...new Set([...this.live.keys(), ...this.starting.keys()])];
   }
 
   /** The planning sessions whose interview owes the person a turn (D-119). */
@@ -228,10 +238,32 @@ export class InterviewHost {
     if (repoId !== undefined && asked.repoId !== repoId)
       throw new Error("This planning belongs to another repository.");
     if (this.live.has(id)) return this.status(id);
-    const model = await this.chatModel(TaskModelsSchema.strip().parse(asked.form.models));
     // Asked twice while the catalog was read, it starts once.
-    if (this.live.has(id)) return this.status(id);
+    const already = this.starting.get(id);
+    if (already) return already.settled;
+    const stop = { stopped: false };
+    const pending = Object.assign(stop, { settled: this.launch(id, asked, stop) });
+    this.starting.set(id, pending);
+    try {
+      return await pending.settled;
+    } finally {
+      if (this.starting.get(id) === pending) this.starting.delete(id);
+    }
+  }
+
+  /**
+   * Spawn the chat {@link start} was asked for, once its model is read, unless
+   * it was stopped or its planning thrown away meanwhile: a chat spawned then
+   * is one nothing will stop, over a spec a delete is removing.
+   */
+  private async launch(
+    id: string,
+    asked: EditingSession,
+    pending: { stopped: boolean },
+  ): Promise<InterviewStatus> {
+    const model = await this.chatModel(TaskModelsSchema.strip().parse(asked.form.models));
     const session = this.deps.editing.read(id);
+    if (pending.stopped || session.phase === "discarded") return this.status(id);
     const repo = this.deps.repository(session.repoId);
     const args = interviewArgv(repo, session, model);
     let stderr = "";
@@ -247,6 +279,10 @@ export class InterviewHost {
       onStderr: (text) => {
         stderr = (stderr + text).slice(-4000);
       },
+      // The child itself has gone while something it started still holds its
+      // output, so `onClose` may never come: whatever waits for the child to
+      // exit before it reads or deletes the spec stops waiting here.
+      onExit: () => gone(),
       onClose: ({ code, stopped }) => {
         this.live.delete(id);
         gone();
@@ -355,6 +391,8 @@ export class InterviewHost {
    */
   stop(id: string): InterviewStatus {
     this.live.get(id)?.child.stop();
+    const pending = this.starting.get(id);
+    if (pending) pending.stopped = true;
     // Said now rather than at `onClose`, which is up to eight seconds later:
     // the person has stopped waiting, so the dock stops saying they should.
     this.owed.delete(id);
@@ -374,11 +412,14 @@ export class InterviewHost {
    * reads or deletes the spec after a stop waits for this first.
    */
   exited(id: string): Promise<void> {
+    // A chat still starting has nothing to wait for once it is stopped: the
+    // stop is what keeps it from spawning ({@link starting}).
     return this.live.get(id)?.exited ?? Promise.resolve();
   }
 
   /** Every interview goes when the app closes; each ends through its own stdin. */
   shutdown(): void {
+    for (const pending of this.starting.values()) pending.stopped = true;
     for (const live of this.live.values()) live.child.stop();
     this.live.clear();
     this.owed.clear();

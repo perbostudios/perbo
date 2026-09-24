@@ -94,6 +94,32 @@ async function openTheContract(): Promise<void> {
     await screen.findByRole("button", { name: /Confirm the plan|Open the contract/ }, { timeout: 5000 }),
   );
 }
+/**
+ * What a ticket's page says while it reads, recorded as each is put up, and a
+ * way to wait for one plain read of the ticket to come and go.
+ */
+function watchTheWait(): { said: string[]; read: () => Promise<void> } {
+  const said: string[] = [];
+  let up: string | null = null;
+  const watch = new MutationObserver(() => {
+    const now =
+      ["Compiling the contract", "Reading the task and its evidence…"].find(
+        (text) => screen.queryByText(text) !== null,
+      ) ?? null;
+    if (now !== null && now !== up) said.push(now);
+    up = now;
+  });
+  watch.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => watch.disconnect());
+  const read = async (): Promise<void> => {
+    const before = said.length;
+    await waitFor(() => expect(said.slice(before)).toContain("Reading the task and its evidence…"));
+    await waitFor(() => expect(screen.queryByText("Reading the task and its evidence…")).toBeNull(), {
+      timeout: 5000,
+    });
+  };
+  return { said, read };
+}
 async function resetPreviewSettings(): Promise<void> {
   const snapshot = await sampleBridge.request({ kind: "snapshot" });
   await sampleBridge.request({
@@ -380,26 +406,7 @@ describe("UI v2", () => {
     // confirmed plan and on no other way onto a ticket's page.
     mount();
     await screen.findByRole("heading", { name: /Hi, / });
-    // Whatever the page says while it reads, recorded as it is put up.
-    const said: string[] = [];
-    let up: string | null = null;
-    const watch = new MutationObserver(() => {
-      const now =
-        ["Compiling the contract", "Reading the task and its evidence…"].find(
-          (text) => screen.queryByText(text) !== null,
-        ) ?? null;
-      if (now !== null && now !== up) said.push(now);
-      up = now;
-    });
-    watch.observe(document.body, { childList: true, subtree: true });
-    onTestFinished(() => watch.disconnect());
-    const read = async (): Promise<void> => {
-      const before = said.length;
-      await waitFor(() => expect(said.slice(before)).toContain("Reading the task and its evidence…"));
-      await waitFor(() => expect(screen.queryByText("Reading the task and its evidence…")).toBeNull(), {
-        timeout: 5000,
-      });
-    };
+    const { said, read } = watchTheWait();
     for (const title of ["Activation email never sent on signup", "Rate-limit the invite endpoint"]) {
       location.hash = "home";
       fireEvent.click(await screen.findByRole("button", { name: title }, { timeout: 5000 }));
@@ -419,6 +426,37 @@ describe("UI v2", () => {
     location.hash = "home";
     await screen.findByRole("heading", { name: /Hi, / });
     location.hash = `task/${waiting.repoId}/${waiting.key}`;
+    await read();
+    expect(said).not.toContain("Compiling the contract");
+  });
+
+  it("only reads the ticket, and compiles nothing, coming back to a contract the planning was left at", async () => {
+    // The contract was compiled on the way from the confirm; a person who
+    // left the planning there and comes back to it is reading the ticket
+    // again (D-130), whether the picker takes them or the contract's own
+    // address does, as Back does.
+    await openTheContract();
+    await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 });
+    const contract = location.hash;
+    const [, repoId, key] = contract.slice(1).split("/");
+    const planning = (await sampleBridge.request({ kind: "snapshot" })).drafts!.find(
+      (draft) => draft.repoId === repoId && draft.key === key,
+    )!;
+    await waitFor(async () =>
+      expect((await sampleBridge.request({ kind: "editingRead", id: planning.id })).lastView).toBe("contract"),
+    );
+    const { said, read } = watchTheWait();
+
+    location.hash = "home";
+    await screen.findByRole("heading", { name: /Hi, / });
+    fireEvent.click(await screen.findByRole("button", { name: "Create" }));
+    const picker = await screen.findByRole("dialog", { name: "Plan a piece of work" });
+    fireEvent.click(within(picker).getByRole("button", { name: /^Split the settings page into tabs/ }));
+    await read();
+
+    location.hash = "home";
+    await screen.findByRole("heading", { name: /Hi, / });
+    location.hash = contract;
     await read();
     expect(said).not.toContain("Compiling the contract");
   });

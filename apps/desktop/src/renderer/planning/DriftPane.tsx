@@ -10,6 +10,7 @@ import { isLive, newestReading } from "../../shared/jobs.js";
 import { REREAD_COULD_NOT_START } from "../../shared/contract-editing.js";
 import { WaitScreen } from "../tasks/wizard.js";
 import { planPaneFor } from "./panes.js";
+import { owedReading } from "./owed-reading.js";
 import { QuestionCard, problemHead } from "./InterviewDock.js";
 import type { InterviewEntry, Job } from "../../shared/protocol.js";
 import type { PageProps } from "../shell/route.js";
@@ -71,13 +72,11 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // frame before the wait that precedes it.
   const [checking, setChecking] = useState(false);
   const [askedFor, setAskedFor] = useState<Job | null>(null);
-  // The answer this pane sent and is waiting on: which problem it answered,
-  // which reading was newest when it went, and where the conversation stood,
-  // so that the record moving on from that problem, or putting it again, or
-  // a note saying the plan could not be read again, is read as this answer's.
-  const [sent, setSent] = useState<{ problem: string; after: number; reading: string | null } | null>(
-    null,
-  );
+  // The answer this pane sent and is waiting on: which problem it answered
+  // and where the conversation stood, so that the turn after that point, the
+  // record moving on from that problem or putting it again, and a note saying
+  // the plan could not be read again are read as this answer's.
+  const [sent, setSent] = useState<{ problem: string; after: number } | null>(null);
   const asked = useRef<string | null>(null);
   const check = useCallback(async (): Promise<void> => {
     if (id === null) return;
@@ -197,8 +196,8 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
     if (group === undefined) return null;
     return { key: `${held.entry}:${held.answered}`, group, number: held.answered + 1, of: line.groups.length };
   }, [session?.asking, conversation]);
-  // Whether the pane is still waiting on an answer it sent: until a reading
-  // that started since has landed and the record shows what it decided, or
+  // Whether the pane is still waiting on an answer it sent: until the reading
+  // the answer is owed has landed and the record shows what it decided, or
   // the interview stops, or the host says the plan could not be read again.
   const since = (entry: InterviewEntry): boolean => sent !== null && entry.n > sent.after;
   const putAgain = conversation.some(
@@ -210,15 +209,25 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
         ? [entry.line.text]
         : [],
     )[0] ?? null;
-  // A reading that landed since the answer was sent has decided the record,
-  // whatever it found. But the reading's job settles here a round trip ahead
-  // of the record it wrote, which this pane reads over the bridge: the wait
-  // holds until the record no longer shows the problem that was answered,
-  // or shows it put again, so the answered card is never up to be answered a
-  // second time. Where no problem was answered — the interview's own
-  // question over the resolved state — the reading landing is the whole of
-  // it, since a reading that recorded nothing leaves the record as it was.
-  const reread = sent !== null && newest !== null && newest.id !== sent.reading && !isLive(newest);
+  // The reading the answer is owed has landed once the answer is on the
+  // record as a turn, that turn is owed no reading — the rule the chat's way
+  // on to the contract holds to, so a reading that started before the answer
+  // was applied never counts as its reading — and none is running. That
+  // reading has decided the record, whatever it found. But the reading's job
+  // settles here a round trip ahead of the record it wrote, which this pane
+  // reads over the bridge: the wait holds until the record no longer shows
+  // the problem that was answered, or shows it put again, so the answered
+  // card is never up to be answered a second time. Where no problem was
+  // answered — the interview's own question over the resolved state — the
+  // reading landing is the whole of it, since a reading that recorded nothing
+  // leaves the record as it was.
+  const owing = owedReading(conversation, { drift, running }, newest);
+  const reread =
+    sent !== null &&
+    owing.turn !== null &&
+    owing.turn > sent.after &&
+    !owing.owed &&
+    (newest === null || !isLive(newest));
   const decided =
     reread && (sent.problem === "" || problemKey(open) !== sent.problem || putAgain);
   const awaiting = sent !== null && !decided && couldNotReread === null && running;
@@ -233,7 +242,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
     if (id === null || busy || thinking) return;
     setBusy(true);
     setFailure(null);
-    setSent({ problem: problemKey(open), after: conversation.at(-1)?.n ?? 0, reading: newest?.id ?? null });
+    setSent({ problem: problemKey(open), after: conversation.at(-1)?.n ?? 0 });
     try {
       await bridge.request({ kind: "interviewTurn", id, text });
     } catch (error) {

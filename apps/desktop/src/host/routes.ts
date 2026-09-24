@@ -12,6 +12,7 @@ import { nameSpecAfterRename, saveSpec, specPath, specView, type SpecDeps } from
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
+import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
 import {
   deleteDraftedFromSpec,
   deleteSpec,
@@ -243,6 +244,11 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       // made, holds that key from birth. Discarding on the key alone would
       // throw away work this planning did not do and cannot give back.
       const session = m.editing.read(request.id);
+      // A command running in the repository holds the delete of the ticket
+      // this planning drafted (D-129), so the discard is refused before
+      // anything goes, and the person finds the work as it was and why.
+      if (session.key !== null && session.admitted && heldRepository(m.jobs.live(), session.repoId))
+        throw new Error(DELETE_WAITS_FOR_COMMANDS);
       const discarded = m.editing.discard(request.id, request.revision);
       // Waited out before anything is deleted: a session whose stdin has closed
       // finishes the turn it is in, and a turn that writes the spec after the
@@ -264,6 +270,13 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       // session's to throw away.
       if (session.key === null && session.specSlug !== null)
         refused = await deleteDraftedFromSpec(work, session.repoId, session.specSlug, request.id);
+      // Work left standing is said, as deleting it outright says it: a command
+      // that started while the chat wound down, or a pull request open. The
+      // planning has gone, and the work stays where it is listed, to delete
+      // once that has settled. A ticket already gone left nothing to delete,
+      // and one another planning holds is that planning's.
+      if (refused !== null && refused !== DELETE_TICKET_GONE && refused !== ANOTHER_PLANNING_HOLDS)
+        throw new Error(refused);
       // And the spec they came from, once nothing is left holding it. Not where
       // the ticket refused to go: a plan still standing is read against the
       // spec it names (D-103).
@@ -401,8 +414,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
           return null;
         }
       })();
-      // Deleting work outright says the reason it stays, where throwing away
-      // the planning that drafted it carries on past one.
+      // Deleting work outright says the reason it stays.
       const refusal = await discardDrafted(m, repo, request.key);
       if (refusal !== null) throw new Error(refusal);
       // The spec goes with the plan it drafted, as it does when a planning is
@@ -612,6 +624,10 @@ function graphEdit(
   );
 }
 
+/** Why a plan is not drafted while a group of the interview's questions stands (D-117). */
+const ANSWER_THE_QUESTIONS_FIRST =
+  "Answer the chat's questions first — its answers change the spec this drafts from.";
+
 /** A plan drafted from the spec this planning wrote (D-103). */
 function fromSpec(
   m: HostModules,
@@ -644,9 +660,7 @@ function fromSpec(
       // on a re-draft: `startOver` is the way back from a plan that is already
       // wrong, and holding it behind a question would strand the person on it.
       if (request.kind === "generatePlan" && session.asking !== null)
-        throw new Error(
-          "Answer the chat's questions first — its answers change the spec this drafts from.",
-        );
+        throw new Error(ANSWER_THE_QUESTIONS_FIRST);
       // One press does both. The interview is still talking for as long as it
       // is writing, and a person who wants the plan from what it has written
       // should not have to end the conversation by hand first and then press
@@ -659,9 +673,14 @@ function fromSpec(
       // answers are what would change the spec (D-102). Not on a re-draft,
       // where the conversation is a chat about a plan that exists and ending it
       // is no part of drafting it again.
+      //
+      // And asked again once it has exited: the turn winding down can put a
+      // group of its own after the stop, and that group holds the draft as
+      // one standing before the press does.
       if (request.kind === "generatePlan") {
         m.interviews.stop(request.id);
         await m.interviews.exited(request.id);
+        if (m.editing.read(request.id).asking !== null) throw new Error(ANSWER_THE_QUESTIONS_FIRST);
       }
       // What the plan promised before it is drafted again, for the marks on the
       // re-draft. A first draft has no before, and records nothing.

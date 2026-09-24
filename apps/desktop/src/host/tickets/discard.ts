@@ -40,10 +40,10 @@ export interface DiscardDeps {
  * standing with nothing here to read it against, so the pull request is closed
  * or merged first and the delete is offered again after that.
  *
- * The reason is answered rather than thrown, because there are two callers
- * with two different needs: deleting work outright says the reason to the
- * person, and throwing away the planning that drafted it takes the ticket
- * along only where it can, and keeps going where it cannot.
+ * The reason is answered rather than thrown, because the callers differ in
+ * which reasons are theirs to say: deleting work outright says every one, and
+ * throwing away the planning that drafted it says each that leaves the work
+ * standing, but not a ticket already gone, which leaves nothing to delete.
  */
 export async function discardTicket(
   deps: DiscardDeps,

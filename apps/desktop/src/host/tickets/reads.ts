@@ -19,7 +19,7 @@ import { listBundles, readAttempts, readDraftEditRecordsOrNone, summariseTicket 
 import type { BundleManifest } from "../records.js";
 import { effectiveLimits } from "../repository/config.js";
 import { attemptsPath, bundlesPath, objectsPath, principlesPath, ticketPath } from "../repository/layout.js";
-import { specPath, ticketSpecSlug } from "../plan/spec.js";
+import { safePath } from "../repository/paths.js";
 import type { Cli } from "../cli.js";
 import type { RepositoryRegistry } from "../repository/registry.js";
 import type { WorkspaceReads } from "../workspace-reads.js";
@@ -303,12 +303,11 @@ function readSpecFindings(
   ticket: Ticket,
   contract: Detail["contract"],
 ): Detail["specFindings"] {
-  if (!hasAcceptanceCriteria(contract)) return [];
+  const at = ticket.admission.spec?.path;
+  if (at === undefined || at === null || !hasAcceptanceCriteria(contract)) return [];
   let requirements;
   try {
-    const slug = ticketSpecSlug(repo, ticket);
-    if (slug === null) return [];
-    requirements = readSpecText(specPath(repo, slug)).requirements;
+    requirements = readSpecText(safePath(repo, ...at.split("/"))).requirements;
   } catch {
     return [];
   }

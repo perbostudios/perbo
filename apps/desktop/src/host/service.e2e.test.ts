@@ -19,6 +19,7 @@ import { DesktopService, type ServiceOptions } from "./service.js";
 import { runProcess, startLineProcess } from "./process.js";
 import { GRAPH_NODE_STATES, INTERVIEW_WROTE_THE_SPEC, SettingsSchema } from "../shared/protocol.js";
 import { isLive, lane } from "../shared/jobs.js";
+import { DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
 import type {
   Change,
   Draft,
@@ -2135,6 +2136,9 @@ const send = (event) => process.stdout.write(JSON.stringify(event) + '\n');
 // where one is, and whether that write waits for the folder to be deleted: a
 // session whose stdin has closed finishes the turn it is in.
 let windsDown = null;
+// Whether the turn in flight puts a group of questions as it winds down, after
+// its stdin has closed and before it exits.
+let asksAsItWindsDown = false;
 send({ type: 'started', session_id: 'sdk-session-1', spec: 'specs/activation-email/spec.md',
   adr: 'docs/adr', model: null, tools: ['edit_plan', 'undo_edit', 'read_plan', 'ask_options'] });
 readline.createInterface({ input: process.stdin })
@@ -2207,6 +2211,15 @@ readline.createInterface({ input: process.stdin })
         waitsForTheDelete: turn.text.includes('write back after a delete') };
       fs.appendFileSync(windsDown.folder + '/spec.md', '\nAnd the spec says so.\n');
       send({ type: 'wrote_spec' });
+      return;
+    }
+    // A turn that writes the spec and never ends until stdin closes, and then
+    // puts a group of questions before it exits.
+    if (turn.text.includes('ask as it winds down')) {
+      const argv = process.argv.slice(2);
+      fs.appendFileSync(argv[argv.indexOf('--spec') + 1] + '/spec.md', '\nAnd the spec says so.\n');
+      send({ type: 'wrote_spec' });
+      asksAsItWindsDown = true;
       return;
     }
     // A turn that writes the spec and then, a while after it is handed over,
@@ -2298,6 +2311,12 @@ readline.createInterface({ input: process.stdin })
   })
   .on('close', () => {
     const ended = () => send({ type: 'ended', session_id: 'sdk-session-1', reason: 'the session ended' });
+    if (asksAsItWindsDown) {
+      send({ type: 'asked', groups: [{ title: 'Which way', parts: [{ question: 'Which way?',
+        options: [{ label: 'This way', detail: null, recommended: true },
+                  { label: 'That way', detail: null, recommended: false }] }] }] });
+      return ended();
+    }
     if (windsDown === null) return ended();
     const { folder, waitsForTheDelete } = windsDown;
     const write = () => {
@@ -3132,6 +3151,37 @@ readline.createInterface({ input: process.stdin })
     );
     expect((await service.request({ kind: "editingRead", id })).key).toBeNull();
     await service.request({ kind: "interviewStop", id });
+  });
+
+  it("refuses to draft over a group of questions the turn puts as it winds down after the press", async () => {
+    // The press stops the chat and waits for it to exit, and the turn it was
+    // in can put a group of its own in that time. That group holds the draft
+    // as one standing before the press does (D-117).
+    let drafts = 0;
+    const runs: typeof runProcess = async (binary, args, options) => {
+      if (!args.includes("--from-spec")) return runProcess(binary, args, options);
+      drafts += 1;
+      return { code: 1, stdout: "", stderr: "no drafter in this fixture", cancelled: false };
+    };
+    const { service, repoId, id, changes } = await writing(runs);
+    await service.request({ kind: "interviewStart", repoId, id });
+    await running(service, id);
+    await service.request({ kind: "interviewTurn", id, text: "ask as it winds down" });
+    await writingSaid(changes, id);
+    expect((await service.request({ kind: "editingRead", id })).asking, "nothing stands at the press").toBeNull();
+
+    const held = await finished(
+      service,
+      (await service.request({ kind: "generatePlan", repoId, id })).id,
+    );
+    expect(held.state).toBe("failed");
+    expect(held.error).toBe(
+      "Answer the chat's questions first — its answers change the spec this drafts from.",
+    );
+    expect(drafts, "nothing was drafted").toBe(0);
+    const after = await service.request({ kind: "editingRead", id });
+    expect(after.asking, "the group the turn put as it wound down").not.toBeNull();
+    expect(after.key).toBeNull();
   });
 
   it("leaves a planning whose first draft the drafter refused editable, so the next press drafts again", async () => {
@@ -4460,6 +4510,58 @@ describe("planning beside a run (SCP-335)", () => {
   });
 });
 
+/**
+ * `admit --from-spec` without a model.
+ *
+ * Drafting a plan from a spec is the one part of planning the desktop does not
+ * own, so the fake admits the same work from criteria and records the spec on
+ * the ticket, which is what the real command leaves behind.
+ */
+function drafting(
+  repo: () => string,
+  asked: string[][] = [],
+  standing: boolean[] = [],
+): typeof runProcess {
+  return async (binary, args, options) => {
+    const at = args.indexOf("--from-spec");
+    if (args[1] !== "admit" || at < 0) return runProcess(binary, args, options);
+    asked.push(args.slice(1, args.indexOf("--repo")));
+    // Whether the stopped ticket was still there when the admission ran.
+    standing.push(existsSync(join(repo(), ".perbo", "tickets", "PRB-1.json")));
+    const result = await runProcess(
+      binary,
+      [
+        args[0]!,
+        "admit",
+        "--prefix",
+        "PRB",
+        "--outcome",
+        "Every import goes through the current parser",
+        "--criterion",
+        "An upload of either dialect is read :: importer.test.ts :: test",
+        "--path",
+        "packages/import/**",
+        "--json",
+        ...args.slice(args.indexOf("--repo")),
+      ],
+      options,
+    );
+    if (result.code !== 0) return result;
+    const printed = JSON.parse(result.stdout) as { ticket: { key: string } };
+    const path = join(repo(), ".perbo", "tickets", `${printed.ticket.key}.json`);
+    const ticket = JSON.parse(readFileSync(path, "utf8")) as { admission: { spec?: unknown } };
+    ticket.admission.spec = {
+      path: args[at + 1]!,
+      content_sha256: "sha256:" + "0".repeat(64),
+      files: [],
+      names_that_resolved: null,
+      symbols_judged_at_approval: false,
+    };
+    writeFileSync(path, JSON.stringify(ticket));
+    return { ...result, stdout: JSON.stringify({ ticket }) };
+  };
+}
+
 describe("the plan read against the spec (D-128)", () => {
   /** What `perbo drift KEY --json` prints, as the canned CLI answers it. */
   const verdict = (findings: unknown[], dismissed = false) => ({
@@ -4489,6 +4591,8 @@ describe("the plan read against the spec (D-128)", () => {
   function canned(
     reply: unknown | ((args: string[]) => unknown) = verdict([finding]),
     startProcess?: typeof startLineProcess,
+    /** Every other command; the bundled CLI where none is given. */
+    otherwise: typeof runProcess = runProcess,
   ) {
     const drifts: string[][] = [];
     const runner: typeof runProcess = async (binary, args, options) => {
@@ -4503,7 +4607,7 @@ describe("the plan read against the spec (D-128)", () => {
       }
       // The loop itself, where a test approves: nothing here runs an executor.
       if (args[1] === "run") return { code: 0, stdout: "{}", stderr: "", cancelled: false };
-      return runProcess(binary, args, options);
+      return otherwise(binary, args, options);
     };
     return { ...fixture(runner, startProcess), drifts };
   }
@@ -5179,6 +5283,199 @@ readline.createInterface({ input: process.stdin })
     expect(existsSync(record)).toBe(false);
     expect(existsSync(join(repo, ".perbo", "tickets", "PRB-1.json"))).toBe(false);
   });
+
+  /** The chat started beside a planning, once its own `started` event has reached the record. */
+  async function chatting(service: DesktopService, repoId: string, id: string): Promise<void> {
+    await service.request({ kind: "interviewStart", repoId, id });
+    for (let count = 0; count < 400; count++) {
+      if ((await service.request({ kind: "editingRead", id })).interviewSession !== null) return;
+      await delay(10);
+    }
+    throw new Error("The interview never reported a session");
+  }
+  /**
+   * Once the chat has gone and no command is running, and a moment after: a
+   * reading its stop or its exit started has started by then.
+   */
+  async function quiet(service: DesktopService, id: string): Promise<void> {
+    const until = Date.now() + 20_000;
+    for (;;) {
+      const snapshot = await service.snapshot();
+      if (!(snapshot.interviews ?? []).includes(id) && !snapshot.jobs.some(isLive)) break;
+      if (Date.now() > until)
+        throw new Error(
+          `The chat never went, or a command never settled: ${snapshot.jobs
+            .filter(isLive)
+            .map((job) => job.kind)
+            .join(", ")}`,
+        );
+      await delay(20);
+    }
+    await delay(300);
+  }
+  /** The chat's notes that a reading could not be started. */
+  const unstarted = (session: { conversation: InterviewEntry[] }): InterviewEntry[] =>
+    session.conversation.filter(
+      (entry) => entry.line.kind === "note" && entry.line.text.startsWith(REREAD_COULD_NOT_START),
+    );
+  const retrying = {
+    outcome: "The user can retry.",
+    requirements: "- The user can retry.",
+    no_gos: "",
+    rabbit_holes: "",
+    notes: "",
+  };
+
+  /**
+   * A planning that drafted PRB-1 from its spec, with a reading that found a
+   * problem and its chat running: work its own discard deletes whole. Every
+   * reading after the first is held until `later` is released.
+   */
+  async function draftedWithProblems() {
+    const root = scratchDirectory("perbo-drift-");
+    let repo = "";
+    const later = held<unknown>();
+    let reads = 0;
+    const made = canned(
+      () => (reads++ === 0 ? verdict([finding]) : later.promise),
+      fakeAnswering(root),
+      drafting(() => repo),
+    );
+    repo = made.repo;
+    const { service, drifts } = made;
+    const repoId = (await service.registerRepository(repo)).id;
+    const { id } = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
+    await saveSpec(service, { kind: "specSave", id, repoId, title: "Retry on failure", sections: retrying });
+    const before = await service.request({ kind: "editingRead", id });
+    const submitted = await service.request({
+      kind: "editingSubmit",
+      id,
+      revision: before.revision,
+      operationId: randomUUID(),
+      intent: "generate",
+    });
+    await finished(service, submitted.operation!.jobId!);
+    let session = await service.request({ kind: "editingRead", id });
+    for (let tries = 0; tries < 400 && session.key === null; tries += 1) {
+      await delay(10);
+      session = await service.request({ kind: "editingRead", id });
+    }
+    expect(session, "the ticket this planning drafted").toMatchObject({ key: "PRB-1", admitted: true });
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    expect((await service.request({ kind: "editingRead", id })).drift, "a reading that found a problem").not.toBeNull();
+    await chatting(service, repoId, id);
+    return {
+      service,
+      repo,
+      repoId,
+      id,
+      drifts,
+      later,
+      ticket: join(repo, ".perbo", "tickets", "PRB-1.json"),
+      spec: join(repo, "specs", "retry-on-failure"),
+    };
+  }
+
+  it("reads nothing again as a planning with problems open is thrown away, and deletes its work whole", async () => {
+    // Throwing the planning away stops its chat, and the stop and the chat's
+    // exit each end a turn. A reading started there holds the repository as
+    // the delete of its ticket checks, which left the ticket and the spec
+    // behind (D-129), and reads files the delete is removing.
+    const made = await draftedWithProblems();
+    try {
+      await made.service.request({ kind: "editingDiscard", id: made.id });
+      await quiet(made.service, made.id);
+      expect(existsSync(made.ticket), "the ticket").toBe(false);
+      expect(existsSync(made.spec), "the spec").toBe(false);
+      expect(made.drifts, "the one reading the pane asked for").toHaveLength(1);
+      expect((await made.service.snapshot()).jobs.filter((job) => job.kind === "drift")).toHaveLength(1);
+      expect(unstarted(await made.service.request({ kind: "editingRead", id: made.id })), "nor tried to").toEqual([]);
+      // And none is started for it on request: its plan went with it.
+      await expect(made.service.request({ kind: "driftCheck", id: made.id })).rejects.toThrow(
+        "This planning has been thrown away",
+      );
+    } finally {
+      made.later.release(verdict([finding]));
+    }
+  });
+
+  it("refuses to throw a planning away while a reading of its plan is running, and says why", async () => {
+    // The reading holds the repository, so the ticket this planning drafted
+    // cannot be deleted with it. Refused before anything goes, so the person
+    // finds the work as it was, and the reason (D-129).
+    const made = await draftedWithProblems();
+    try {
+      await made.service.request({ kind: "driftCheck", id: made.id });
+      await expect(made.service.request({ kind: "editingDiscard", id: made.id })).rejects.toThrow(
+        DELETE_WAITS_FOR_COMMANDS,
+      );
+      expect((await made.service.request({ kind: "editingRead", id: made.id })).phase).not.toBe("discarded");
+      expect(existsSync(made.ticket), "the ticket").toBe(true);
+      expect(existsSync(made.spec), "the spec").toBe(true);
+      expect((await made.service.snapshot()).interviews ?? [], "the chat").toContain(made.id);
+    } finally {
+      made.later.release(verdict([finding]));
+    }
+    await made.service.request({ kind: "interviewStop", id: made.id });
+  });
+
+  it("says why a planning's ticket stays where it is thrown away over an open pull request", async () => {
+    // The one stage a delete does not reach (D-129): the planning goes, and
+    // the person is told why the work did not go with it.
+    const made = await draftedWithProblems();
+    try {
+      const record = JSON.parse(readFileSync(made.ticket, "utf8")) as Record<string, unknown>;
+      writeFileSync(made.ticket, JSON.stringify({ ...record, state: "pr_open" }));
+      await expect(made.service.request({ kind: "editingDiscard", id: made.id })).rejects.toThrow(
+        "PRB-1 has a pull request open",
+      );
+      expect(existsSync(made.ticket), "the ticket").toBe(true);
+      expect(existsSync(made.spec), "the spec its plan is read against").toBe(true);
+    } finally {
+      made.later.release(verdict([finding]));
+    }
+  });
+
+  it("reads nothing again as work with problems open is deleted from its contract, and leaves no verdict behind", async () => {
+    // The delete stops the chat of the planning over the ticket, and a reading
+    // started by that stop or by the chat's exit runs `perbo drift` while the
+    // files are removed, writing its verdict back beside a ticket that has gone.
+    const root = scratchDirectory("perbo-drift-");
+    let repo = "";
+    // What `perbo drift` leaves as it reads: its verdict beside the ticket.
+    const made = canned(() => {
+      writeFileSync(join(repo, ".perbo", "tickets", "PRB-1.drift.json"), JSON.stringify(verdict([finding])));
+      return verdict([finding]);
+    }, fakeAnswering(root));
+    repo = made.repo;
+    const { service, drifts } = made;
+    const repoId = (await service.registerRepository(repo)).id;
+    const id = await planned(service, repoId);
+    // Drafted from the spec the planning writes, as `admit --from-spec`
+    // records it, so the spec goes with the ticket.
+    const at = join(repo, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(at, "utf8")) as { admission: { spec?: unknown } };
+    ticket.admission.spec = {
+      path: "specs/retry-on-failure/spec.md",
+      content_sha256: "sha256:" + "0".repeat(64),
+      files: [],
+      names_that_resolved: null,
+      symbols_judged_at_approval: false,
+    };
+    writeFileSync(at, JSON.stringify(ticket));
+    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    expect((await service.request({ kind: "editingRead", id })).drift, "a reading that found a problem").not.toBeNull();
+    await chatting(service, repoId, id);
+
+    await service.request({ kind: "discard", repoId, key: "PRB-1" });
+    await quiet(service, id);
+    expect(existsSync(at), "the ticket").toBe(false);
+    expect(existsSync(join(repo, ".perbo", "tickets", "PRB-1.drift.json")), "the verdict").toBe(false);
+    expect(existsSync(join(repo, "specs", "retry-on-failure")), "the spec").toBe(false);
+    expect(drifts, "the one reading the pane asked for").toHaveLength(1);
+    expect((await service.snapshot()).jobs.filter((job) => job.kind === "drift")).toHaveLength(1);
+    expect(unstarted(await service.request({ kind: "editingRead", id })), "nor tried to").toEqual([]);
+  });
 });
 
 /**
@@ -5192,57 +5489,6 @@ readline.createInterface({ input: process.stdin })
 describe("a stopped run's ticket", () => {
   const slug = "retire-the-legacy-csv-importer";
   const spec = `specs/${slug}/spec.md`;
-  /**
-   * `admit --from-spec` without a model.
-   *
-   * Drafting a plan from a spec is the one part of this the desktop does not
-   * own, so the fake admits the same work from criteria and records the spec
-   * on the ticket, which is what the real command leaves behind.
-   */
-  function drafting(
-    repo: () => string,
-    asked: string[][] = [],
-    standing: boolean[] = [],
-  ): typeof runProcess {
-    return async (binary, args, options) => {
-      const at = args.indexOf("--from-spec");
-      if (args[1] !== "admit" || at < 0) return runProcess(binary, args, options);
-      asked.push(args.slice(1, args.indexOf("--repo")));
-      // Whether the stopped ticket was still there when the admission ran.
-      standing.push(existsSync(join(repo(), ".perbo", "tickets", "PRB-1.json")));
-      const result = await runProcess(
-        binary,
-        [
-          args[0]!,
-          "admit",
-          "--prefix",
-          "PRB",
-          "--outcome",
-          "Every import goes through the current parser",
-          "--criterion",
-          "An upload of either dialect is read :: importer.test.ts :: test",
-          "--path",
-          "packages/import/**",
-          "--json",
-          ...args.slice(args.indexOf("--repo")),
-        ],
-        options,
-      );
-      if (result.code !== 0) return result;
-      const printed = JSON.parse(result.stdout) as { ticket: { key: string } };
-      const path = join(repo(), ".perbo", "tickets", `${printed.ticket.key}.json`);
-      const ticket = JSON.parse(readFileSync(path, "utf8")) as { admission: { spec?: unknown } };
-      ticket.admission.spec = {
-        path: args[at + 1]!,
-        content_sha256: "sha256:" + "0".repeat(64),
-        files: [],
-        names_that_resolved: null,
-        symbols_judged_at_approval: false,
-      };
-      writeFileSync(path, JSON.stringify(ticket));
-      return { ...result, stdout: JSON.stringify({ ticket }) };
-    };
-  }
   /** The records a stop leaves: a spent ticket, its attempt, and the bundle that attempt sealed. */
   const chosen = {
     executorProvider: "codex-cli" as const,

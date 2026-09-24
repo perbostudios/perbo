@@ -12,6 +12,8 @@ import type { ReactNode } from "react";
 import { App } from "../shell/App.js";
 import { ContractScreen } from "./ContractScreen.js";
 import { LoopScreen } from "./LoopScreen.js";
+import { ShortcutProvider } from "../shell/shortcuts.js";
+import { bridge } from "../workspace/index.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import { setPlatformForTests } from "../../shared/shortcuts.js";
 import type { TaskContext } from "./task-context.js";
@@ -167,6 +169,45 @@ describe("the wait while a contract is being approved", () => {
     expect(screen.getByText(/Freezing the outcome/)).toBeTruthy();
     // The page underneath says this, over a bar at nothing per cent.
     expect(screen.queryByText("Ready to start the loop")).toBeNull();
+  });
+
+  it("takes no stop from the keyboard while the contract is being approved", async () => {
+    const context = await contractContext();
+    const { ticket } = context.detail;
+    context.detail.ticket = { ...ticket, state: "plan_review", approved_at: null };
+    context.workspace.jobs = [running(context.repoId, ticket.key)];
+    const request = vi.spyOn(bridge, "request");
+    mount(
+      <ShortcutProvider overrides={{}}>
+        <LoopScreen {...context} />
+      </ShortcutProvider>,
+    );
+    expect(screen.getByText("Approving the contract")).toBeTruthy();
+    fireEvent.keyDown(document.body, { key: ".", metaKey: true });
+    // A mutation reaches the bridge a tick after it is asked for.
+    await new Promise((settle) => setTimeout(settle, 0));
+    expect(request.mock.calls.filter(([sent]) => sent.kind === "cancel")).toEqual([]);
+    expect(context.show).not.toHaveBeenCalledWith("stopped");
+  });
+
+  it("stops the run from the keyboard once the loop is under way", async () => {
+    const context = await contractContext();
+    const { ticket } = context.detail;
+    context.detail.ticket = { ...ticket, state: "executing" };
+    context.workspace.jobs = [running(context.repoId, ticket.key)];
+    const request = vi.spyOn(bridge, "request");
+    mount(
+      <ShortcutProvider overrides={{}}>
+        <LoopScreen {...context} />
+      </ShortcutProvider>,
+    );
+    fireEvent.keyDown(document.body, { key: ".", metaKey: true });
+    // A mutation reaches the bridge a tick after it is asked for.
+    await new Promise((settle) => setTimeout(settle, 0));
+    expect(request.mock.calls.filter(([sent]) => sent.kind === "cancel")).toEqual([
+      [{ kind: "cancel", jobId: "job-" + ticket.key }],
+    ]);
+    expect(context.show).toHaveBeenCalledWith("stopped");
   });
 
   it("gives way to the loop once the run is under way", async () => {
