@@ -678,7 +678,12 @@ describe("the control: a writer whose whole effect is the paths it names", () =>
 });
 
 /** A command through the hook, under the contract's two lists. */
-const judged = (command: string, paths_allowed: string[], paths_prohibited: string[] = []) =>
+const judged = (
+  command: string,
+  paths_allowed: string[],
+  paths_prohibited: string[] = [],
+  spec_folder_writable = false,
+) =>
   judgePreToolCall(
     { tool_name: "Bash", tool_use_id: "toolu_scoped", tool_input: { command } },
     {
@@ -687,6 +692,7 @@ const judged = (command: string, paths_allowed: string[], paths_prohibited: stri
       cwd: ROOT,
       paths_allowed,
       paths_prohibited,
+      spec_folder_writable,
       allow_list: [...profile.command_allow_list, "Bash(find:*)"],
       deny_list: [...profile.command_deny_list],
     },
@@ -726,16 +732,32 @@ describe("a write to a whole directory, through the hook", () => {
 
   it("refuses the worktree root under a scope that does not admit all of it", () => {
     for (const command of ROOT_WRITES) {
-      expect(judged(command, ["src/**"]), command).toMatchObject({
+      expect(judged(command, ["src/**"], [], true), command).toMatchObject({
         answer: "deny",
         rule: "write_outside_scope",
       });
     }
   });
 
-  it("admits the worktree root under `**`", () => {
+  it("refuses the worktree root as prohibited wherever anything under it is, under `**` too", () => {
     for (const command of ROOT_WRITES) {
-      expect(judged(command, ["**"]).decision, command).toBe("allowed");
+      // The spec folder is prohibited whatever the contract names (D-103).
+      for (const [allowed, prohibited] of [
+        [["**"], []],
+        [["**"], [".perbo/**"]],
+        [["src/**"], []],
+      ] as const) {
+        expect(judged(command, [...allowed], [...prohibited]), `${command} ${allowed}`).toMatchObject({
+          answer: "deny",
+          rule: "write_prohibited_path",
+        });
+      }
+    }
+  });
+
+  it("admits the worktree root under `**` where nothing is prohibited", () => {
+    for (const command of ROOT_WRITES) {
+      expect(judged(command, ["**"], [], true).decision, command).toBe("allowed");
     }
   });
 
@@ -765,5 +787,57 @@ describe("a write to a whole directory, through the hook", () => {
   it("admits a directory the scope covers whole, and refuses one it covers in part", () => {
     expect(judged("rm -rf src", ["src/**"]).decision).toBe("allowed");
     expect(judged("rm -rf src", ["src/lib/**"])).toMatchObject({ answer: "deny", rule: "write_outside_scope" });
+  });
+});
+
+describe("a write to a directory with a prohibited path inside it (D-105)", () => {
+  const ALLOWED = ["src/**"];
+  const PROHIBITED = ["src/generated/**"];
+  const DIRECTORY_WRITES = ["rm -rf src", "rm -rf ./src", "rm -rf src/", `cp -r ${OUTSIDE} src`, "find src -delete"];
+  const scoped = { root: ROOT, cwd: ROOT, home: HOME, paths_allowed: ALLOWED, paths_prohibited: PROHIBITED };
+  const refusals = (hits: Array<{ action: string }>) =>
+    hits.filter((hit) => hit.action === "write_prohibited_path" || hit.action === "write_outside_scope");
+
+  it("is refused by the reading", () => {
+    for (const command of DIRECTORY_WRITES) {
+      expect(refusals(inspectCommand(command, scoped)).length, command).toBeGreaterThan(0);
+      expect(refusals(inspectCommandWithCwd(command, scoped).hits).length, command).toBeGreaterThan(0);
+    }
+  });
+
+  it("is refused by the hook", () => {
+    for (const command of DIRECTORY_WRITES) {
+      expect(judged(command, ALLOWED, PROHIBITED), command).toMatchObject({
+        answer: "deny",
+        rule: "write_prohibited_path",
+      });
+    }
+  });
+
+  it("leaves a directory with nothing prohibited inside it admitted", () => {
+    for (const [command, prohibited] of [
+      ["rm -rf src", []],
+      ["rm -rf src", ["docs/generated/**"]],
+      ["rm -rf src/other", PROHIBITED],
+    ] as const) {
+      const lists = { ...scoped, paths_prohibited: [...prohibited] };
+      expect(refusals(inspectCommand(command, lists)), command).toEqual([]);
+      expect(refusals(inspectCommandWithCwd(command, lists).hits), command).toEqual([]);
+      expect(judged(command, ALLOWED, [...prohibited]).decision, command).toBe("allowed");
+    }
+  });
+
+  it("refuses the worktree root under a `**` scope with `.perbo/**` prohibited", () => {
+    const lists = { ...scoped, paths_allowed: ["**"], paths_prohibited: [".perbo/**"], spec_folder_writable: true };
+    for (const command of ["rm -rf .", "find . -delete"]) {
+      expect(inspectCommand(command, lists).map((hit) => hit.action), command).toContain("write_prohibited_path");
+      expect(inspectCommandWithCwd(command, lists).hits.map((hit) => hit.action), command).toContain(
+        "write_prohibited_path",
+      );
+      expect(judged(command, ["**"], [".perbo/**"], true), command).toMatchObject({
+        answer: "deny",
+        rule: "write_prohibited_path",
+      });
+    }
   });
 });

@@ -13,9 +13,9 @@ const scratch = scratchDirectories("perbo-runner-");
  * of a write: an operand of a write call, or a redirect or a writer inside a
  * command the code spawns. The interpreter a spawn uses, the directory it runs
  * in, a file the code reads and a URL it fetches are not writes, and a finding
- * that says they are ends an attempt that wrote nothing. PRB-1's attempt was
- * ended twice that way: for `{shell:'/bin/zsh'}` in a `command -v` probe, and
- * for the registry URL an `https.get` fetched.
+ * that says they are ends an attempt that wrote nothing: `{shell:'/bin/zsh'}`
+ * in a `command -v` probe is a shell to run, and the registry URL an
+ * `https.get` fetches is a resource to read.
  */
 
 const ROOT = realpathSync(scratch("perbo-inline-code-root-"));
@@ -30,7 +30,7 @@ const findings = (command: string) => inspectCommandWithCwd(command, SCOPE).writ
 const shown = (command: string) =>
   findings(command).filter((finding) => (finding.cause ?? "outside_target") === "outside_target");
 
-/** PRB-1's two commands, exactly as the executor typed them. */
+/** A `command -v` probe under a named shell, and a registry fetch. */
 const COMMAND_V_PROBE = `node -e "const{execSync}=require('child_process');for(const c of ['playwright','python3','deno','bun','open']){try{console.log(c, execSync('command -v '+c,{shell:'/bin/zsh'}).toString().trim())}catch(e){}}"`;
 const REGISTRY_FETCH = `node -e "const https=require('https');const r=https.get('https://registry.npmjs.org/jsdom',{timeout:8000},res=>{let d='';res.on('data',c=>d+=c);res.on('end',()=>{console.log(JSON.parse(d)['dist-tags'])})});r.on('error',e=>console.log(e.message))"`;
 
@@ -45,8 +45,8 @@ describe("a string that is not the target of a write", () => {
 
   it("still refuses both, as programs it cannot show write nothing", () => {
     // Neither `child_process` nor `https` is on the read-only table, so the
-    // command is refused before it runs; what changed is that the refusal no
-    // longer claims a write it never saw.
+    // command is refused before it runs, as a program it cannot read rather
+    // than as a write it never saw.
     for (const command of [COMMAND_V_PROBE, REGISTRY_FETCH]) {
       const found = findings(command);
       expect(found.length, command).toBe(1);
@@ -68,8 +68,6 @@ describe("a string that is not the target of a write", () => {
     ["a path it only prints", `node -e "console.log('/etc/hosts')"`],
     ["a shebang it only prints", `python3 -c "print('#!/usr/bin/env python3')"`],
     ["a path in a position this reading does not know", `node -e "const x = require('some-lib'); x.frob('/etc/hosts')"`],
-    ["a URL given to a write call", `node -e "require('fs').writeFileSync('https://example.com/x', 'y')"`],
-    ["a URL given to `open` for writing", `python3 -c "open('file:///etc/hosts', 'w')"`],
     ["a URL as a spawn's `cwd`", `node -e "require('child_process').execSync('ls', {cwd: 'https://example.com'})"`],
     ["`remove` on a list", `python3 -c "xs = ['/etc/hosts']; xs.remove('/etc/hosts')"`],
   ];
@@ -123,5 +121,53 @@ describe("a string that is the target of a write", () => {
 
   it("admits a write the contract admits", () => {
     expect(findings(`node -e "fs.writeFileSync('src/a.ts', 'x')"`)).toEqual([]);
+  });
+});
+
+/**
+ * A write call takes its target as a path, never a URL: `https://x/y` is a
+ * directory called `https:` below where the code runs, and on Windows
+ * `C://Users/a` is the drive's own `Users`. Each is judged where it lands.
+ */
+describe("a URL-shaped string given to a write call", () => {
+  mkdirSync(join(ROOT, ".perbo"), { recursive: true });
+  mkdirSync(join(ROOT, "specs"), { recursive: true });
+  const PROHIBITED = { root: ROOT, home: "/Users/nobody", paths_prohibited: [".perbo/**"] };
+  const placed = (command: string, scope: Parameters<typeof inspectCommandWithCwd>[1]) =>
+    inspectCommandWithCwd(command, scope).writes.filter(
+      (finding) => (finding.cause ?? "outside_target") === "outside_target",
+    );
+
+  it("is judged as a path inside the worktree, and refused outside the contract", () => {
+    for (const command of [
+      `node -e "require('fs').writeFileSync('https://example.com/x', 'y')"`,
+      `node -e "fs.writeFileSync('https://x/y','z')"`,
+      `python3 -c "open('file:///etc/hosts', 'w')"`,
+    ]) {
+      expect(placed(command, SCOPE).map((finding) => finding.rule), command).toEqual(["write_outside_scope"]);
+    }
+  });
+
+  it("is refused where it lands in a prohibited path", () => {
+    for (const command of [
+      `cd .perbo && node -e "fs.writeFileSync('https://x/y','z')"`,
+      `cd specs && python3 -c "open('file:///y','w')"`,
+    ]) {
+      expect(placed(command, PROHIBITED).map((finding) => finding.rule), command).toEqual([
+        "write_prohibited_path",
+      ]);
+    }
+  });
+
+  it("is a drive path under Windows semantics, refused outside the worktree", () => {
+    const windows = { root: String.raw`C:\Users\a\wt`, home: String.raw`C:\Users\a`, semantics: "windows" as const };
+    for (const [command, path] of [
+      [`node -e "fs.writeFileSync('C://Users/a/.ssh/authorized_keys','y')"`, "C:/Users/a/.ssh/authorized_keys"],
+      [`python3 -c "open('C://Users/a/x.txt','w')"`, "C:/Users/a/x.txt"],
+    ] as const) {
+      const found = placed(command, windows);
+      expect(found.map((finding) => finding.rule), command).toEqual(["write_outside_worktree"]);
+      expect(found[0]?.resolved, command).toBe(path);
+    }
   });
 });

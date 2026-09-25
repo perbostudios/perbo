@@ -86,13 +86,13 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
 
   const verb = rest[i]?.value ?? "";
   const supplied = context.supplied;
-  const judge = (word: Word, label: string): WriteFinding[] =>
+  const judge = (word: Word, label: string, reading: "whole" | "place" = "whole"): WriteFinding[] =>
     supplied !== undefined && carries(supplied, word.value)
       ? [suppliedDestination(label, supplied, context.segment)]
       : pathFinding(
           label,
           word,
-          judgeTarget(word.value, context.scope, context.cwd, true),
+          judgeTarget(word.value, context.scope, context.cwd, true, reading),
           context.segment,
         );
   /** Where the line leaves the destination to words a wrapper appends. */
@@ -152,7 +152,7 @@ export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
     .filter((word) => word.value.length > 0 && !word.value.startsWith("-"));
 
   const findings = directories.flatMap((directory) =>
-    judge(directory, `the directory git ${verb} works in`),
+    judge(directory, `the directory git ${verb} works in`, "place"),
   );
   // The verbs that name where a repository or a worktree lands. A `clone` with
   // one operand puts it under the directory the command runs in, which the

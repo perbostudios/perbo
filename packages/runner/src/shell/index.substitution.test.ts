@@ -142,7 +142,11 @@ describe("the command `rg --pre` runs", () => {
     const [segment] = readCommandLine("rg --pre rm x", scope).segments;
     expect(segment!.mutating).toBe(true);
     expect(segment!.programs).toEqual(["rg", "rm"]);
-    expect(resolved("rg --pre rm x")).toEqual([]);
+    // The search is the whole worktree, and `rm` over it reaches the spec
+    // folder, prohibited whatever the contract names (D-103).
+    expect(resolved("rg --pre rm x")).toEqual(["/work/tree"]);
+    const open = resolveScope({ root: "/work/tree", home: "/Users/nobody", spec_folder_writable: true });
+    expect(readCommandLine("rg --pre rm x", open).findings).toEqual([]);
   });
 
   it("refuses a program built at run time", () => {

@@ -1220,8 +1220,8 @@ export const CHAT_MODEL = "claude-opus-5-5";
 /**
  * The model `perbo interview` is started on: {@link CHAT_MODEL} where this
  * planning drafts on Claude Code and that provider's catalog lists it, under
- * its own id or its 1M-context one, and otherwise the model this planning
- * drafts with, which is the person's own default executor. `offered` is the
+ * its own id or its 1M-context one, and otherwise the planning's executor
+ * model, which is the model its spec is drafted with. `offered` is the
  * catalog's ids, or null where none could be read, which offers nothing.
  */
 export function interviewModelFor(

@@ -98,7 +98,22 @@ const SCRATCH_PREFIX =
  */
 const DEVICE_TARGET = /^\/dev\/(?:null|stdin|stdout|stderr|tty|fd\/\d+)$/;
 
-export function judgeTarget(target: string, scope: ResolvedScope, cwd: Cwd, shell: boolean): Destination {
+/**
+ * Where a write to `target` lands, and which refusal it earns.
+ *
+ * `whole` reads the target as something the write may replace entirely — a
+ * file, or a directory with everything under it. `place` reads it as a
+ * directory a command works in, writing some of what is there and not the
+ * rest (`git -C <dir>`): a prohibited path below it is judged when a write
+ * names it, not held against the directory.
+ */
+export function judgeTarget(
+  target: string,
+  scope: ResolvedScope,
+  cwd: Cwd,
+  shell: boolean,
+  reading: "whole" | "place" = "whole",
+): Destination {
   let path = target;
   if (shell) {
     if (path.includes("`") || path.includes("$(")) {
@@ -160,7 +175,10 @@ export function judgeTarget(target: string, scope: ResolvedScope, cwd: Cwd, shel
   // refused as prohibited (D-105). The other order would tell the reader to
   // widen the contract to reach a path the contract forbids.
   const prohibitedFold = (value: string) => prohibitedComparable(value, scope.semantics);
-  if (covers(prohibitedFold(at), scope.paths_prohibited.map(prohibitedFold))) {
+  const prohibited = scope.paths_prohibited.map(prohibitedFold);
+  const judged = prohibitedFold(at);
+  const below = (glob: string, how: "named" | "any") => reading === "whole" && reachesBelow(judged, glob, how);
+  if (covers(judged, prohibited) || prohibited.some((glob) => below(glob, "named"))) {
     return {
       kind: "prohibited_path",
       resolved: walked.path,
@@ -168,7 +186,14 @@ export function judgeTarget(target: string, scope: ResolvedScope, cwd: Cwd, shel
       prohibited: scope.paths_prohibited,
     };
   }
-  if (scope.paths_allowed.length === 0 || covers(fold(at), scope.paths_allowed.map(fold))) {
+  const allowed = scope.paths_allowed.map(fold);
+  if (scope.paths_allowed.length === 0 || (at !== "" && matchesAny(fold(at), allowed))) {
+    return { kind: "inside", resolved: walked.path };
+  }
+  // Admitted as a directory whose whole contents the globs admit only where no
+  // prohibited glob can match anything inside it, so a write that empties the
+  // directory cannot reach a prohibited path through it (D-105).
+  if (covers(fold(at), allowed) && !prohibited.some((glob) => below(glob, "any"))) {
     return { kind: "inside", resolved: walked.path };
   }
   return { kind: "outside_scope", resolved: walked.path, at: at || ".", allowed: scope.paths_allowed };
@@ -178,13 +203,36 @@ export function judgeTarget(target: string, scope: ResolvedScope, cwd: Cwd, shel
  * Whether globs cover a write to `at`, a repository-relative path with the
  * root as `""`. A write to a directory reaches everything under it, so a glob
  * covers a directory whose whole contents it matches: `<dir>/**` covers
- * `<dir>`, and only `**` covers the root. Both lists are read this way, so a
- * directory a prohibited glob empties is refused and one the allowed globs
- * admit whole is admitted.
+ * `<dir>`, and only `**` covers the root.
  */
 function covers(at: string, globs: readonly string[]): boolean {
   const contents = globs.filter((glob) => glob === "**" || glob.endsWith("/**"));
   return (at !== "" && matchesAny(at, globs)) || matchesAny(at, contents.map((glob) => glob.slice(0, -3)));
+}
+
+/**
+ * Whether a glob can match a path strictly below `at`, the root being `""`:
+ * what a write to `at` reaches if `at` is a directory.
+ *
+ * `named` asks whether the glob names a place inside `at`: every glob does
+ * for the root, and `src/generated/**` does for `src` because its leading
+ * segments spell `src` literally. A write there is refused as prohibited,
+ * since a file cannot sit where the glob puts a directory. `any` also counts a
+ * glob that reaches below `at` through a wildcard, as one opening with `**`
+ * reaches below every path. The guard cannot hold that against a target it
+ * cannot tell from a file, so it only stops a directory being admitted whole.
+ */
+function reachesBelow(at: string, glob: string, reading: "named" | "any"): boolean {
+  if (at === "") return glob.length > 0;
+  const parts = at.split("/");
+  const segments = glob.split("/");
+  for (const [index, part] of parts.entries()) {
+    const segment = segments[index];
+    if (segment === undefined) return false;
+    if (segment.includes("**")) return reading === "any";
+    if (reading === "named" ? segment !== part : !matchesAny(part, [segment])) return false;
+  }
+  return segments.length > parts.length;
 }
 
 /**
