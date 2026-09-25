@@ -1,5 +1,6 @@
 import {
   failedChecks,
+  type CostBasis,
   type ExecutionAttempt,
   type GithubCredential,
   type PlanContractWithCriteria,
@@ -17,6 +18,7 @@ import { githubCredential } from "../../github-credential.js";
 import type { LoopMergeOutcome } from "../../merge.js";
 import type { TicketRunConfig } from "./config.js";
 import type { LoopPorts } from "./context.js";
+import type { Decline } from "../../declines.js";
 import type { Ledger } from "./ledger.js";
 import type { RoundState } from "./state.js";
 
@@ -26,6 +28,12 @@ import type { RoundState } from "./state.js";
 
 /** The pull request a run publishes to, as `createPullRequest` reports it. */
 export type PullRequestRef = Awaited<ReturnType<typeof createPullRequest>>;
+
+/** What one closure verification cost, as the pull request body adds it up. */
+export interface VerificationCost {
+  cost_micros: number;
+  cost_basis: CostBasis;
+}
 
 /** What reached GitHub, and what the run records of it. */
 export interface Delivery {
@@ -46,8 +54,14 @@ export interface Delivery {
 interface PublishArgs {
   config: TicketRunConfig;
   contract: PlanContractWithCriteria;
-  state: RoundState;
-  ledger: Ledger;
+  /**
+   * Where the branch is and the base its change set is measured against: a
+   * run's round state, or the checkout a retained branch is published from
+   * (D-NEW-publish-a-retained-branch-later).
+   */
+  state: Pick<RoundState, "baseCommit"> & {
+    workspace: Pick<RoundState["workspace"], "path" | "branch" | "base_commit">;
+  };
   rootAttemptId: string;
   push: LoopPorts["push"];
   merge: LoopPorts["merge"];
@@ -72,6 +86,10 @@ export async function publish(
      * the review judged (D-NEW-a-person-s-answer-closes-a-routed-finding).
      */
     attempts: readonly ExecutionAttempt[];
+    /** What each closure verification of those attempts cost, which the body adds up. */
+    verificationCosts: readonly VerificationCost[];
+    /** D-065: the findings those attempts declined, which the body leaves for the person. */
+    declines: readonly Decline[];
     open: LoopPorts["open"];
     /** The review that judged the change; the pull request body states it. */
     finalReview: ReviewArtifact;
@@ -80,7 +98,7 @@ export async function publish(
     onPullRequest: ((pull_request: PullRequestRef) => void) | undefined;
   },
 ): Promise<Delivery> {
-  const { config, contract, state, ledger, clock, progress } = args;
+  const { config, contract, state, clock, progress } = args;
   let delivery_checks: DeliveredChecksReading | null = null;
   let detail = args.detail;
   const merged_base = state.baseCommit === state.workspace.base_commit ? null : state.baseCommit;
@@ -97,17 +115,8 @@ export async function publish(
     // Where the work came from, so the person merging reads it here
     // rather than going back to the ticket for it.
     source: config.ticket_source,
-    verification_costs: ledger.rounds.flatMap((entry) =>
-      entry.verification
-        ? [
-            {
-              cost_micros: entry.verification.cost_micros,
-              cost_basis: entry.verification.cost_basis,
-            },
-          ]
-        : [],
-    ),
-    declines: ledger.declines,
+    verification_costs: args.verificationCosts,
+    declines: args.declines,
     // SCP-202: the closing line says which of the two merges this pull
     // request is waiting for, from the switch that decides it.
     merge: config.merge,
@@ -208,6 +217,7 @@ export async function publish(
  */
 export async function publishRelevel(
   args: PublishArgs & {
+    ledger: Ledger;
     existing: LoopPorts["existing"];
     /** The attempt the ticket's record ends on, which the merge step is taken under. */
     continuesPreviousRun: string | null;

@@ -61,6 +61,7 @@ import {
   preflight,
   readDeliveredChecks,
   renderPreflight,
+  publishRetained,
   resolveResumeSource,
   resumeNote,
   runTicket,
@@ -69,12 +70,14 @@ import {
   type DeliveredChecksReading,
   type PreflightRequest,
   type PreflightResult,
+  type RetainedPublishResult,
   type TicketRunResult,
   type MergedTicketContext,
 } from "@perbo/runner";
 import {
   DECIDED_DELIVERY_NOTE,
   TICKET_TRANSITIONS,
+  retainedBranch,
   TicketSchema,
   admittedSpecFiles,
   transition,
@@ -225,6 +228,17 @@ export interface TicketRuns {
   starting(work: AdmittedWork, relevel: boolean): number | null;
   /** Record what the run did to the ticket, and answer the state it left it in. */
   finished(work: AdmittedWork, result: TicketRunResult, at: Date, relevel: boolean): string;
+  /**
+   * D-NEW-publish-a-retained-branch-later: the branch the ticket's last run
+   * retained without publishing, and the outcome the ticket records for it.
+   * Throws a {@link UsageError} where there is none to publish. Moves nothing.
+   */
+  retained(work: AdmittedWork): { branch: string; outcome: "approved" | "escalated" };
+  /**
+   * Record the pull request a retained branch was published to. The ticket
+   * stays in the state it is in; only its delivery record changes.
+   */
+  published(work: AdmittedWork, result: RetainedPublishResult, at: Date): string;
 }
 
 /**
@@ -266,8 +280,8 @@ export interface ExecuteArgs {
   json: boolean;
   quiet: boolean;
   /**
-   * The execution bundle of an attempt a ceiling cut, whose retained
-   * `change.diff` this run starts from (SCP-154).
+   * The execution bundle of an attempt a ceiling or a person's stop cut
+   * short, whose retained `change.diff` this run starts from (SCP-154).
    */
   resumeFrom: string | null;
   /**
@@ -285,6 +299,12 @@ export interface ExecuteArgs {
    * than run the ticket. Takes `--ticket`.
    */
   relevel: boolean;
+  /**
+   * D-NEW-publish-a-retained-branch-later: push the branch an approved or
+   * escalated run retained without publishing, and open its pull request,
+   * rather than run the ticket. Takes `--ticket`.
+   */
+  publishRetained: boolean;
 }
 
 const DOCTOR_FLAGS = {
@@ -326,6 +346,7 @@ const RUN_FLAGS = {
   "--path": listFlag(),
   "--pr": valueFlag(),
   "--relevel": switchFlag(),
+  "--publish-retained": switchFlag(),
 } satisfies FlagTable;
 
 const RUN_GRAMMAR: Grammar<typeof RUN_FLAGS> = {
@@ -385,9 +406,9 @@ export function exitCodeForRun(outcome: TicketRunResult["outcome"]): number {
  * one independent review and each round's closure verification.
  *
  * Reported on completion whatever the outcome, and that is the point: an
- * attempt a ceiling cut spent money on the way to being cut, and a run whose
- * total is only readable by opening the store afterwards is a run whose cost
- * nobody sees.
+ * attempt a ceiling or a person's stop cut short spent money on the way, and a
+ * run whose total is only readable by opening the store afterwards is a run
+ * whose cost nobody sees.
  */
 export function runCost(result: TicketRunResult): CostRoll {
   return result.rounds
@@ -812,6 +833,31 @@ export const TICKET_RUNS: TicketRuns = {
     writeTicket(work.dir, moved);
     return moved.state;
   },
+
+  retained(work: AdmittedWork) {
+    const found = retainedBranch(readTicket(work.dir, work.key));
+    if (found.refusal !== null) throw new UsageError(found.refusal);
+    return { branch: found.branch, outcome: found.outcome };
+  },
+
+  published(work: AdmittedWork, result: RetainedPublishResult, at: Date) {
+    // The same delivery record a publishing run writes, over the ticket as it
+    // stands: nothing about the run is new, so the state and the history stay.
+    const ticket = readTicket(work.dir, work.key);
+    const recorded = recordDelivery(
+      ticket,
+      {
+        workspace: { branch: result.branch },
+        pull_request: result.pull_request,
+        github_credential: result.github_credential,
+        incomplete_review: ticket.delivery.incomplete_review,
+        delivery_checks: result.delivery_checks,
+      },
+      at,
+    );
+    writeTicket(work.dir, recorded);
+    return recorded.state;
+  },
 };
 
 /**
@@ -865,6 +911,18 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
         "only a ticket names one",
     );
   }
+  if (args.publishRetained && args.ticket === null) {
+    throw new UsageError(
+      "--publish-retained takes --ticket: it publishes the branch an admitted ticket's run " +
+        "retained, and only a ticket names one",
+    );
+  }
+  if (args.publishRetained && (args.relevel || args.resumeFrom !== null)) {
+    throw new UsageError(
+      `--publish-retained and ${args.relevel ? "--relevel" : "--resume-from"} are alternatives: ` +
+        "publishing a retained branch runs nothing",
+    );
+  }
 
   // An admitted ticket supplies the contract, the repository and the run
   // configuration this repository has already agreed once, so the only thing
@@ -878,6 +936,12 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
           store: args.store,
           key: args.ticket,
         });
+  // D-NEW-publish-a-retained-branch-later: which branch, or why there is none,
+  // read from the ticket before the machine is asked anything, so a ticket
+  // with nothing to publish is told so rather than what the machine lacks.
+  // Refused before anything is pushed, and moving nothing: the ticket is not
+  // starting a run.
+  const retained = admitted !== null && args.publishRetained ? TICKET_RUNS.retained(admitted) : null;
 
   let contract: PlanContract;
   if (admitted) {
@@ -912,7 +976,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
     : null;
   const configInput =
     admitted !== null
-      ? TICKET_RUNS.runConfig(admitted, override, args.publish)
+      ? TICKET_RUNS.runConfig(admitted, override, args.publish || args.publishRetained)
       : local !== null
         ? mergeRunConfig(
             {
@@ -946,7 +1010,9 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
   }
   const config = {
     ...parsedConfig.data,
-    publish: args.publish || parsedConfig.data.publish,
+    // Publishing a retained branch is publishing, whatever the configuration
+    // says a run does (D-NEW-publish-a-retained-branch-later).
+    publish: args.publish || args.publishRetained || parsedConfig.data.publish,
     resume_from: args.resumeFrom ?? parsedConfig.data.resume_from,
   };
 
@@ -984,14 +1050,20 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
   // What this machine lacks is found here, before a worktree exists and before
   // the ticket is moved. A missing binary used to surface as an ENOENT stack
   // trace with the ticket left in `provisioning`.
-  const machine = (options.preflight ?? preflight)({
-    agentBinary: config.agent_binary,
-    agentProvider: config.agent_provider,
-    reviewerProvider: config.reviewer_provider,
-    needsGh: config.publish,
-    // An install of kind `none` is never spawned, so it names no binary to ask for.
-    installBinary: install.kind === "none" ? null : (install.command[0] ?? null),
-  });
+  // Publishing a retained branch executes, reviews and installs nothing, so it
+  // asks the machine for `git` and `gh` alone.
+  const machine = (options.preflight ?? preflight)(
+    retained !== null
+      ? { agentBinary: null, agentProvider: null, reviewerProvider: null, needsGh: true, installBinary: null }
+      : {
+          agentBinary: config.agent_binary,
+          agentProvider: config.agent_provider,
+          reviewerProvider: config.reviewer_provider,
+          needsGh: config.publish,
+          // An install of kind `none` is never spawned, so it names no binary to ask for.
+          installBinary: install.kind === "none" ? null : (install.command[0] ?? null),
+        },
+  );
   if (!machine.ok) {
     streams.stderr(`${renderPreflight(machine)}\n\n`);
     streams.stderr(
@@ -1076,7 +1148,8 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
   };
 
   /** Null on the `--contract` path: no ticket, so no history to count runs in. */
-  const runsStarted = admitted === null ? null : TICKET_RUNS.starting(admitted, args.relevel);
+  const runsStarted =
+    admitted === null || retained !== null ? null : TICKET_RUNS.starting(admitted, args.relevel);
 
   // Written before the loop starts, for the reason the ticket path moves a
   // ticket to `provisioning` before the attempt: a run that never returns has
@@ -1142,6 +1215,18 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
   }
 
   const decisionsStore = admitted?.dir ?? local?.store ?? null;
+  if (admitted !== null && retained !== null) {
+    return await publishRetainedTicket({
+      options,
+      admitted,
+      retained,
+      contract,
+      config: { ...runConfig, delivery_checks_bound_ms: deliveryBoundMs },
+      configuredBoundMs: runConfig.delivery_checks_bound_ms,
+      repositoryChecks,
+      progress,
+    });
+  }
   let result: TicketRunResult;
   try {
     result = await runTicket({
@@ -1313,6 +1398,116 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
     );
   }
   return exitCodeForRun(result.outcome);
+}
+
+/**
+ * `perbo run --ticket <KEY> --publish-retained`
+ * (D-NEW-publish-a-retained-branch-later): the branch the ticket's last run
+ * retained, pushed and its pull request opened by the runner's own delivery,
+ * without executing or reviewing again, and the pull request recorded on the
+ * ticket, which stays where it is. A refusal is the runner's, said before
+ * anything is pushed, and leaves the ticket as it was.
+ */
+async function publishRetainedTicket(input: {
+  options: ExecuteOptions;
+  admitted: AdmittedWork;
+  retained: { branch: string; outcome: "approved" | "escalated" };
+  contract: PlanContract;
+  config: Parameters<typeof publishRetained>[0]["config"];
+  /** The bound the configuration named, before the repository's reading zeroed it. */
+  configuredBoundMs: number;
+  repositoryChecks: PullRequestChecks | null;
+  progress: ((message: string) => void) | undefined;
+}): Promise<number> {
+  const { options, admitted, retained, contract, config, repositoryChecks, progress } = input;
+  const { args, streams } = options;
+  let result: RetainedPublishResult;
+  /** What the delivery record holds, written under the run lock. */
+  let recorded: { state: string; delivery_checks: DeliveredChecksReading | null } | undefined;
+  try {
+    result = await publishRetained({
+      config,
+      contract,
+      branch: retained.branch,
+      outcome: retained.outcome,
+      // The answers a person gave, which the pull request lists as a
+      // publishing run's does.
+      decided: decidedFindings(readLocalVerdictsOrWarn(admitted.dir, streams).verdicts, contract.ticket_id),
+      // Written while the runner still holds the ticket's run lock, so no run
+      // of the ticket starts between the pull request opening and the record
+      // saying so.
+      recordDelivery: async (published) => {
+        // As a run does: a check the repository was not seen to run is
+        // waited for under the bound it was configured with before anything
+        // records it.
+        let delivery_checks = published.delivery_checks;
+        if (
+          config.delivery_checks_bound_ms === 0 &&
+          delivery_checks !== null &&
+          delivery_checks.checks.some((check) => check.conclusion === UNCHECKED)
+        ) {
+          delivery_checks = await waitForUnexpectedChecks({
+            worktree: config.repository_root,
+            branch: published.branch,
+            boundMs: input.configuredBoundMs,
+            already: delivery_checks,
+            ...(progress ? { onProgress: progress } : {}),
+          });
+        }
+        const state = TICKET_RUNS.published(admitted, { ...published, delivery_checks }, new Date());
+        recorded = { state, delivery_checks };
+      },
+      ...(options.hooks ? { hooks: options.hooks } : {}),
+      ...(progress ? { onProgress: progress } : {}),
+    });
+  } catch (error) {
+    if (!(error instanceof RunRefusedError)) throw error;
+    streams.stderr(`error: ${admitted.key}'s retained branch was not published: ${error.message}\n`);
+    return EXIT_CODES.did_not_complete;
+  }
+  const { state, delivery_checks } = recorded!;
+  streams.stderr(`\n${admitted.key} is still ${state}; its pull request is ${result.pull_request.url}\n`);
+
+  const reading =
+    delivery_checks === null
+      ? null
+      : { ...delivery_checks, reason: deliveryChecksReason(delivery_checks, repositoryChecks) };
+  if (args.json || !streams.isTTY) {
+    streams.stdout(
+      `${JSON.stringify(
+        {
+          ticket_id: result.ticket_id,
+          outcome: retained.outcome,
+          detail: result.detail,
+          branch: result.branch,
+          pull_request: result.pull_request,
+          delivery_checks: reading,
+          repository_checks: repositoryChecks,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  } else {
+    const lines = [
+      `TICKET    ${result.ticket_id}`,
+      `BRANCH    ${result.branch}`,
+      "",
+      `OUTCOME   ${retained.outcome} — ${result.detail}`,
+      `PR        ${result.pull_request.url}`,
+    ];
+    if (delivery_checks !== null) {
+      lines.push(
+        `CHECKS    ${delivery_checks.state} — ` +
+          (delivery_checks.checks.length === 0
+            ? deliveryChecksReason(delivery_checks, repositoryChecks)
+            : delivery_checks.checks.map((check) => `${check.name} ${check.conclusion}`).join(", ")),
+      );
+      lines.push(`          ${deliveryChecksMessage(delivery_checks, repositoryChecks)}`);
+    }
+    streams.stdout(`${lines.join("\n")}\n`);
+  }
+  return EXIT_CODES.approve;
 }
 
 /**
@@ -3184,6 +3379,7 @@ export const executeCommandLine: NarratedCommand<ExecuteArgs, Record<string, nev
         paths: [...(line.flags["--path"] ?? [])],
         pr: line.flags["--pr"] ?? null,
         relevel: line.flags["--relevel"] === true,
+        publishRetained: line.flags["--publish-retained"] === true,
       },
       output: {},
     };

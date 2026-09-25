@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Dialog, FactList, InkIcon, Notice, SectionLabel } from "../ui/index.js";
@@ -9,16 +9,44 @@ import { useShortcut } from "../shell/shortcuts.js";
 import { useDiscardTicket } from "../shell/create.js";
 import { displayKey } from "./ticket-workspace.js";
 import { EFFORT_LABELS, planNodes, type EffortLevel } from "@perbo/contracts/browser";
-import { curates, leftAt } from "../planning/panes.js";
+import { confirmRoute, curates, leftAt, planPaneFor } from "../planning/panes.js";
+import { CriteriaEditor } from "./CriteriaEditor.js";
+import type { useContractEditing } from "../contract-editor.js";
 import { ModelPicker, useProviders } from "../settings/ConnectionScreens.js";
-import { TaskModelsSchema, type PlanningPane, type TaskModels } from "../../shared/protocol.js";
+import { TaskModelsSchema, type Detail, type PlanningPane, type TaskModels } from "../../shared/protocol.js";
 import { costLabel, pendingScope, taskRecords } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
+const ContractGraph = lazy(() =>
+  import("../planning/GraphPane.js").then((module) => ({ default: module.ContractGraph })),
+);
 /** An approved contract's effort, where one was chosen; the provider's own default says nothing. */
 const effortText = (effort: EffortLevel | null): string =>
   effort === null ? "" : " · " + EFFORT_LABELS[effort] + " effort";
-export function ContractScreen(context: TaskContext) {
-  const { detail, repoId, navigate, show, workspace } = context;
+
+/**
+ * What a contract shows of its plan, on the planning's contract tab and on
+ * the ticket's contract after approval alike, so the two cannot differ
+ * (D-NEW-basic-and-epic-flows): an epic's
+ * graph, read, panned and zoomed, and changed only on the Graph pane; a basic
+ * ticket's criteria, open to edit on the contract tab while the plan waits for
+ * approval and read-only everywhere else.
+ */
+export function contractShows(contract: Detail["contract"], editable: boolean): "graph" | "criteria-editor" | "criteria" {
+  if (planNodes(contract).length > 0) return "graph";
+  return editable ? "criteria-editor" : "criteria";
+}
+
+type Editor = ReturnType<typeof useContractEditing>;
+
+/**
+ * The contract, and the one approval there is. Inside planning (`planning`)
+ * it is the planning's last tab (D-NEW-basic-and-epic-flows):
+ * the tabs are the way back, and a basic ticket's criteria are edited here,
+ * each change written into the contract and the plan read against the spec
+ * again on the way back to it (D-128).
+ */
+export function ContractScreen(context: TaskContext & { planning?: { editor: Editor } }) {
+  const { detail, repoId, navigate, show, workspace, planning } = context;
   const { contract, ticket, criteria, models, repo, busy, held, title, latest } =
     taskRecords(context);
   const [publish, setPublish] = useState(false),
@@ -62,8 +90,37 @@ export function ContractScreen(context: TaskContext) {
   // rule the rail uses. Problems still open do not hold this way back: it goes
   // where the person was, and the rail offers the Problems pane from there.
   const curatingPane: PlanningPane =
-    (curating && leftAt(workspace.drafts, curating.id)) ??
-    ((curating?.nodes ?? 0) > 0 ? "graph" : "criteria");
+    (curating && leftAt(workspace, curating.id)) ??
+    (curating ? planPaneFor(workspace.drafts, curating.id) : null) ??
+    "spec";
+  // A change to a basic ticket's criteria, written into the contract as it is
+  // made — the operation it waits on is the first after the one it saw — and
+  // then the plan read against the spec again, which comes back here on its
+  // own where the two still agree (D-128).
+  const editor = planning?.editor ?? null;
+  const [writing, setWriting] = useState<{ after: string | null } | null>(null);
+  const writeThrough = (): void => {
+    if (editor === null) return;
+    setWriting({ after: editor.session?.operation?.id ?? null });
+    editor.submit("compile");
+  };
+  const operation = editor?.session?.operation ?? null;
+  const written =
+    writing !== null &&
+    editor !== null &&
+    editor.submitting === null &&
+    operation !== null &&
+    operation.id !== writing.after &&
+    operation.intent === "compile" &&
+    operation.reconciled &&
+    editor.session?.phase !== "working";
+  useEffect(() => {
+    if (!written || editor?.session == null) return;
+    setWriting(null);
+    if (operation?.state === "completed")
+      navigate(confirmRoute({ repoId, key: ticket.key, sessionId: editor.session.id, approved: false }));
+  }, [written]);
+  const shows = contractShows(contract, editor !== null && ticket.approved_at === null);
   // Which criteria are proven differently from how the draft proposed. A
   // criterion whose assertion moved reads exactly as it did, because the claim
   // is untouched, so nothing else on this page would show it.
@@ -141,6 +198,44 @@ export function ContractScreen(context: TaskContext) {
             </div>
             <div className="outcome-summary">{contract.outcome}</div>
           </div>
+          {shows === "graph" ? (
+            // What a graph freezes, on the page that freezes it: the division
+            // itself, read and never curated here — that is the Graph pane's
+            // (D-NEW-basic-and-epic-flows).
+            <div>
+              <SectionLabel>Execution graph · {criteria.length} criteria</SectionLabel>
+              <Suspense fallback={<p className="small muted">Reading the graph…</p>}>
+                <ContractGraph repoId={repoId} ticketKey={ticket.key} />
+              </Suspense>
+              {/* Approving freezes how each criterion is proven, and a graph
+                  shows what is proven rather than how, so what moved since the
+                  draft is named under it (D-128). */}
+              {criteria.some((criterion) => moved.has(criterion.id)) && (
+                <p className="criterion-note">
+                  Proven differently from the draft:{" "}
+                  <span className="mono">
+                    {criteria.filter((criterion) => moved.has(criterion.id)).map((criterion) => criterion.id).join(", ")}
+                  </span>
+                </p>
+              )}
+            </div>
+          ) : shows === "criteria-editor" && editor !== null ? (
+            // A basic ticket's plan is its criteria, and this is where they
+            // are changed: each change written into the contract as it is
+            // made. Direct edits carry no change marks — those are the chat's
+            // (D-128).
+            <div>
+              <SectionLabel>Acceptance criteria · {criteria.length}</SectionLabel>
+              <CriteriaEditor editor={editor} onCommit={writeThrough} />
+              {(writing !== null || editor.error) && (
+                <p className="small muted" role="status">
+                  {writing !== null
+                    ? "Writing the change into the contract…"
+                    : editor.error}
+                </p>
+              )}
+            </div>
+          ) : (
           <div>
             <SectionLabel>Acceptance criteria · {criteria.length}</SectionLabel>
             <div className="contract-criteria">
@@ -179,25 +274,6 @@ export function ContractScreen(context: TaskContext) {
               ))}
             </div>
           </div>
-          {/* What a graph freezes, on the page that freezes it. A divided plan
-              is approved here and curated on the Graph pane, so the division
-              has to be readable here too — approving what you cannot see is
-              the one thing this screen exists to prevent. */}
-          {planNodes(contract).length > 0 && (
-            <section className="contract-nodes" aria-label="How the work divides">
-              <SectionLabel>How the work divides</SectionLabel>
-              <ol>
-                {planNodes(contract).map((node) => (
-                  <li key={node.id}>
-                    <b>{node.title}</b>
-                    <span className="small muted">
-                      {node.criteria.length} {node.criteria.length === 1 ? "criterion" : "criteria"}
-                      {node.paths.length > 0 ? ` · ${node.paths.join(" · ")}` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-            </section>
           )}
           <FactList
             className="boundary-facts"
@@ -381,13 +457,18 @@ export function ContractScreen(context: TaskContext) {
                 {pending.allowed.length} allowed{" "}
                 {pending.allowed.length === 1 ? "path" : "paths"} and{" "}
                 {pending.prohibited.length} prohibited. Approving freezes the
-                contract&rsquo;s scope, not this one, so compile it in first:
-                open the contract again with Back and save it.
+                contract&rsquo;s scope, not this one, so write it in first
+                {shows === "criteria-editor" ? "." : ": open the contract again with Back and save it."}
+                {shows === "criteria-editor" && (
+                  <Button disabled={writing !== null || busy} onClick={writeThrough}>
+                    Write the scope in
+                  </Button>
+                )}
               </Notice>
             )}
             <Button
               variant="primary"
-              disabled={busy || action.isPending || pending !== null}
+              disabled={busy || action.isPending || pending !== null || writing !== null}
               onClick={start}
             >
               {ticket.approved_at
@@ -395,7 +476,8 @@ export function ContractScreen(context: TaskContext) {
                 : "Approve · start the loop"}
             </Button>
             <div className="row">
-              <Button
+              {/* Inside planning the planning's tabs are the way back. */}
+              {planning === undefined && <Button
                 // Shut only where it leads to the ticket's own editor: a
                 // contract with named manual reviewers is edited with the CLI
                 // so the assignments survive, and an approved one is frozen
@@ -417,7 +499,7 @@ export function ContractScreen(context: TaskContext) {
                 }
               >
                 Back to planning
-              </Button>
+              </Button>}
               <Button onClick={() => navigate({ page: "home" })}>
                 Save draft
               </Button>

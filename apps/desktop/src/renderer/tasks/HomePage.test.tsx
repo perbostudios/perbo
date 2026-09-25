@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { TicketState } from "@perbo/contracts";
 import { HomePage } from "./HomePage.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import type { Route } from "../shell/route.js";
-import type { Snapshot, TaskRow, TaskSummary } from "../../shared/protocol.js";
+import type { Request, Snapshot, TaskRow, TaskSummary } from "../../shared/protocol.js";
+import { bridge } from "../workspace/index.js";
 
 let client: QueryClient;
 let sample: Snapshot;
@@ -21,6 +22,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   client.clear();
+  vi.restoreAllMocks();
 });
 
 /** One filed ticket, with the summary its row reads already answered. */
@@ -171,6 +173,126 @@ describe("a Home card", () => {
     expect(rule).toMatch(/white-space: nowrap;/);
     expect(rule).toMatch(/overflow: hidden;/);
     expect(rule).toMatch(/text-overflow: ellipsis;/);
+  });
+
+  /** The bridge, answering every request with nothing and keeping each one it was asked. */
+  function asked(): Request[] {
+    const requests: Request[] = [];
+    vi.spyOn(bridge, "request").mockImplementation((async (request: Request) => {
+      requests.push(request);
+      return null;
+    }) as typeof bridge.request);
+    return requests;
+  }
+  /** A run under way for this board's ticket at `index`. */
+  const running = (workspace: Snapshot, index: number): Snapshot["jobs"][number] => ({
+    id: crypto.randomUUID(), repoId: workspace.tasks[index]!.repoId, key: workspace.tasks[index]!.ticket.key, resultKey: null,
+    kind: "run", label: "Run", state: "running", startedAt: "2026-09-09T09:00:00.000Z", endedAt: null, log: "", error: null, result: null,
+  });
+  const cards = (): string[] =>
+    [...document.querySelectorAll(".task-list .task-card")].map((entry) => entry.getAttribute("aria-label") ?? "");
+
+  it("keeps a merged or closed ticket on Home, under every colour, with a check in its wheel and Archive to press", async () => {
+    const requests = asked();
+    const workspace = board([
+      ["merged", pr], ["executing", null], ["closed", pr], ["changes_requested", null], ["failed", null], ["pr_open", pr],
+    ]);
+    workspace.jobs = [running(workspace, 1)];
+    // Opened after every other ticket: still under them all.
+    workspace.lastOpened = {
+      [workspace.tasks[0]!.repoId + ":PRB-900"]: "2026-09-20T09:00:00.000Z",
+      [workspace.tasks[2]!.repoId + ":PRB-902"]: "2026-09-21T09:00:00.000Z",
+    };
+    home(workspace);
+    expect(cards()).toEqual([
+      "Ticket 5 pr_open", "Ticket 3 changes_requested", "Ticket 4 failed", "Ticket 1 executing",
+      "Ticket 2 closed", "Ticket 0 merged",
+    ]);
+    // Every other sort keeps the decided merges below the rest.
+    const sorted = (option: string): string[] => {
+      fireEvent.click(screen.getByLabelText("Sort tickets"));
+      fireEvent.click(screen.getByRole("option", { name: option }));
+      return cards();
+    };
+    for (const option of ["Newest first", "Oldest first"])
+      expect(sorted(option).slice(4).sort()).toEqual(["Ticket 0 merged", "Ticket 2 closed"]);
+    // By title, the merged ticket's comes first of all and still sits below.
+    expect(sorted("Task title")).toEqual([
+      "Ticket 1 executing", "Ticket 3 changes_requested", "Ticket 4 failed", "Ticket 5 pr_open",
+      "Ticket 0 merged", "Ticket 2 closed",
+    ]);
+    // Furthest along, the merged ticket is at no further a stage than the stopped one above it.
+    expect(sorted("Furthest along")).toEqual([
+      "Ticket 5 pr_open", "Ticket 3 changes_requested", "Ticket 1 executing", "Ticket 4 failed",
+      "Ticket 0 merged", "Ticket 2 closed",
+    ]);
+    // The wheel holds the check mark where its progress was; a card still in the loop holds its progress.
+    for (const name of ["Ticket 0 merged", "Ticket 2 closed"]) {
+      const ring = card(name).querySelector<HTMLElement>(".stage-ring")!;
+      expect(ring.getAttribute("aria-label")).toBe("Completed");
+      expect(ring.classList).toContain("stage-ring--decided");
+      expect(ring.querySelector("img")!.getAttribute("src")).toBe("./brand/approve.png");
+      expect(ring.style.background).toBe("");
+    }
+    for (const name of ["Ticket 5 pr_open", "Ticket 3 changes_requested", "Ticket 4 failed", "Ticket 1 executing"]) {
+      const ring = card(name).querySelector<HTMLElement>(".stage-ring")!;
+      expect(ring.querySelector("img")).toBeNull();
+      expect(ring.style.background).toContain("conic-gradient");
+    }
+    // Rendered and left alone, nothing is filed.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(requests.filter((request) => request.kind === "archive")).toEqual([]);
+    // Archive on a decided card, and on a stopped one, is the same request.
+    for (const name of ["Ticket 0 merged", "Ticket 2 closed", "Ticket 4 failed"])
+      fireEvent.click(within(card(name)).getByRole("button", { name: "Archive" }));
+    const repoId = workspace.tasks[0]!.repoId;
+    await waitFor(() =>
+      expect(requests.filter((request) => request.kind === "archive")).toEqual([
+        { kind: "archive", repoId, keys: ["PRB-900"], archived: true },
+        { kind: "archive", repoId, keys: ["PRB-902"], archived: true },
+        { kind: "archive", repoId, keys: ["PRB-904"], archived: true },
+      ]),
+    );
+  });
+
+  it("marks a ticket that needs you with a blue circle until it is opened, and never a decided merge", () => {
+    const workspace = board([
+      ["changes_requested", null], ["failed", null], ["pr_open", pr], ["merged", pr], ["closed", pr], ["executing", null],
+    ]);
+    workspace.jobs = [running(workspace, 5)];
+    const moved = "2026-09-10T09:00:00.000Z";
+    for (const row of workspace.tasks) {
+      row.ticket.history = [{ at: moved, from: "ready", to: row.ticket.state, note: "moved" }];
+      row.ticket.updated_at = moved;
+    }
+    const circled = (): string[] =>
+      cards().filter((name) => card(name).querySelector(".task-card-unseen") !== null);
+    const { rerender } = home(workspace);
+    expect(circled()).toEqual(["Ticket 2 pr_open", "Ticket 0 changes_requested", "Ticket 1 failed"]);
+    const circle = card("Ticket 1 failed").querySelector(".task-card-unseen")!;
+    expect(circle.getAttribute("role")).toBe("img");
+    expect(circle.getAttribute("aria-label")).toBe("Not opened since it needed you");
+    // A button's children are presentational, so the card itself carries the circle's words.
+    const described = (): string[] =>
+      screen.queryAllByRole("button", { description: "Not opened since it needed you" }).map((each) => each.getAttribute("aria-label") ?? "");
+    expect(described()).toEqual(["Ticket 2 pr_open", "Ticket 0 changes_requested", "Ticket 1 failed"]);
+    const blue = /\.task-card-unseen \{([^}]*)\}/.exec(readFileSync(`${import.meta.dirname}/../styles.css`, "utf8"))?.[1];
+    expect(blue).toMatch(/background: var\(--blue\);/);
+    expect(blue).toMatch(/position: absolute;/);
+    // Opened after it came to stand there: the circle goes. Opened before: it stays.
+    const opened = (index: number, at: string) => ({ [workspace.tasks[index]!.repoId + ":" + workspace.tasks[index]!.ticket.key]: at });
+    const later = {
+      ...workspace,
+      lastOpened: { ...opened(1, "2026-09-10T09:05:00.000Z"), ...opened(0, "2026-09-09T09:00:00.000Z"), ...opened(3, "2026-09-09T09:00:00.000Z") },
+    };
+    rerender(
+      <QueryClientProvider client={client}>
+        <HomePage workspace={later} navigate={() => undefined} archive={false} />
+      </QueryClientProvider>,
+    );
+    expect(circled()).toEqual(["Ticket 2 pr_open", "Ticket 0 changes_requested"]);
+    expect(described()).toEqual(["Ticket 2 pr_open", "Ticket 0 changes_requested"]);
+    expect(screen.getByRole("button", { name: "Ticket 1 failed", description: "" })).toBeTruthy();
   });
 
   it("names a stopped loop's stage 'loop stopped', and every other card by its stage", () => {

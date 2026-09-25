@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { keepsPersonsTitle, openDrafts, promiseOf, titleChanged } from "../shared/contract-editing.js";
+import { keepsPersonsTitle, openDrafts, promiseOf } from "../shared/contract-editing.js";
 import { DraftSchema, HELP_LINKS, RequestSchema, TaskModelsSchema } from "../shared/protocol.js";
 import { heldRepository, isRun } from "../shared/jobs.js";
 import { isArchivable, notArchivable } from "../shared/archive.js";
@@ -8,7 +8,7 @@ import { listExplorer, readExplorerFile } from "./explorer.js";
 import { exportedNames } from "./symbols.js";
 import { graphView } from "./plan/graph.js";
 import { contractImpact, impactView } from "./plan/impact.js";
-import { nameSpecAfterRename, saveSpec, specPath, specTitles, specView, type SpecDeps } from "./plan/spec.js";
+import { nameSpecAfterRename, saveSpec, specPath, specTexts, specTitles, specView, type SpecDeps } from "./plan/spec.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
@@ -39,6 +39,7 @@ import {
   editArgs,
   graphEditArgs,
   principleArgs,
+  publishArgs,
   runArgs,
   runConfig,
   syncArgs,
@@ -190,7 +191,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       return opened;
     },
     editingRead: (request) => m.editing.read(request.id),
-    drafts: () => openDrafts(m.profile.state.editingSessions, specTitles(repository)),
+    drafts: () => openDrafts(m.profile.state.editingSessions, specTexts(repository)),
     editingSave: (request) =>
       m.editing.save(request.id, request.revision, request.repoId, request.form),
     editingSubmit: (request) =>
@@ -232,7 +233,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     explorerUndo: (request) => m.editing.undo(request.id, request.revision, request.edit),
     editingStop: (request) => m.editing.stop(request.id),
     editingVisited: (request) => m.editing.visit(request.id, request.pane),
-    editingContractVisited: (request) => m.editing.visitContract(request.id),
+    editingContractVisited: (request) => m.editing.visitContract(request.id, request.state),
     editingDiscard: async (request) => {
       // The chat goes with the planning it belongs to: a discarded planning has
       // no spec for the interview to write and no plan for it to change.
@@ -504,9 +505,10 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     specSave: scoped<"specSave">((repo, request) => {
       const saved = saveSpec(m.planDeps, repo, request);
       // The picker and the title bar name the planning by its spec's title,
-      // which they read off the drafts list: a save that landed a new title
-      // has that list read again.
-      if (saved.conflicting.length === 0 && titleChanged(request))
+      // and its contract stays a tab while its spec's sections do
+      // (D-NEW-basic-and-epic-flows), all read
+      // off the drafts list: a save that landed has that list read again.
+      if (saved.conflicting.length === 0)
         m.changes.changed(false, { kind: "editing", sessionId: request.id });
       return saved;
     }),
@@ -559,6 +561,35 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
         { repo, key: request.key, kind: request.kind, label: "Refresh delivery from GitHub" },
         async (_job, run) => {
           await run.invoke(syncArgs(request.key));
+        },
+      ),
+    ),
+    publish: scoped<"publish">((repo, request) =>
+      m.jobs.start(
+        { repo, key: request.key, kind: request.kind, label: "Open the pull request" },
+        async (job, run) => {
+          // The merge press on a ticket whose run retained its branch
+          // (D-NEW-publish-a-retained-branch-later): the CLI pushes it and
+          // opens its pull request, holding the person's credential as a run
+          // does, under the configuration a run of this ticket is given with
+          // publishing on — a person merges, whatever the repository says.
+          // Then the pull request opens in the browser, as the press opens one
+          // already there.
+          const settings = m.profile.state.settings;
+          const path = writePrivate(
+            m.dataDirectory,
+            `publish-${job.id}.json`,
+            JSON.stringify(
+              runConfig(
+                m.profile.state.taskModels[repo.id + ":" + request.key] ?? settings,
+                effectiveLimits(repo, settings),
+                true,
+              ),
+            ),
+          );
+          await run.invoke(publishArgs(request.key, path));
+          if (run.signal.aborted) return;
+          await m.io.openExternal(pullRequestUrl(await m.tickets.detail(repo.id, request.key)));
         },
       ),
     ),
@@ -837,7 +868,7 @@ async function replan(
   // The new planning holds the same spec, and who named it with it, so the
   // next draft from it keeps the person's name as this one did (D-127).
   m.editing.carryNamed(opened.id, planning?.named ?? null);
-  return { sessionId: opened.id, pane: opened.nodes > 0 ? "graph" : "criteria" };
+  return { sessionId: opened.id, key: job.resultKey, nodes: opened.nodes };
 }
 
 /** A contract saved from the form. */

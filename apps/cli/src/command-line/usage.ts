@@ -35,6 +35,7 @@ export const USAGE = `perbo — contract to pull request, locally
 
   perbo run --ticket PRB-1 [--publish] [--resume-from <bundle_id>]
   perbo run --ticket PRB-1 --relevel [--publish]
+  perbo run --ticket PRB-1 --publish-retained
   perbo run --contract c.json --config run.json [--publish]
   perbo run --outcome "..." [--criterion "..."] [--path "src/**"]
   perbo run --pr owner/repo#412
@@ -55,6 +56,17 @@ export const USAGE = `perbo — contract to pull request, locally
       approved contracts of what merged — where the merge stops. With
       --publish it pushes and reads the merge step; it opens nothing new, and
       the ticket stays at pr_open. Exit 0 when the branch is level.
+
+      With --publish-retained, a run that ended approved or escalated without
+      publishing has its retained branch published now: pushed, and its pull
+      request opened against the base with the review on record, the answers
+      a person gave under it, exactly as a publishing run opens it — nothing
+      is executed or reviewed again. It refuses, pushing nothing, where the
+      ticket already has a pull request, where the branch has moved past the
+      commit the review judged, where it carries a commit the loop did not
+      make, or where the base has moved past what the run judged; a run with
+      --publish judges what is there instead. The ticket stays where it is
+      and its delivery record gets the pull request. Exit 0 once it is open.
 
       With --ticket, the contract comes from the admitted ticket and the run
       configuration from <repo>/.perbo/config.json — the checks and the
@@ -83,14 +95,19 @@ export const USAGE = `perbo — contract to pull request, locally
       and ceilings a ticket run is, and \`perbo inspect <run id>\` reads it back.
       The run prints what it cost when it ends, whatever ended it.
 
-      With --resume-from, the run starts from the retained change.diff of the
-      execution bundle it names — the work an attempt a ceiling cut had already
-      done. The diff is applied into the new attempt's worktree at the same base
-      commit before the executor is invoked, which is told the diff is a prior
-      attempt's unfinished work to check rather than trust; the new attempt
-      records the cut one as what it continues. A base commit that has moved, or
-      a diff that no longer applies, refuses the run rather than merging
-      something nobody asked for. The bundle it reads is never rewritten.
+      With --resume-from, the run starts from the work of the attempt whose
+      execution bundle it names — one a ceiling cut or a person stopped. Where
+      the ticket's branch still holds the commit that attempt sealed, the work
+      is already there and nothing is applied; otherwise the bundle's retained
+      change.diff is applied into the new attempt's worktree at the same base
+      commit before the executor is invoked. The executor is told where the
+      prior attempt's unfinished work is, committed or applied, and to check it
+      rather than trust it; the new attempt records the stopped one as what it
+      continues. A base commit that has moved refuses the run rather than
+      merging something nobody asked for. A diff that no longer applies to the
+      branch is dropped whole: the executor starts from the branch's commit,
+      and the run's log and the attempt's record say so. The bundle it reads is
+      never rewritten.
       \`perbo inspect <ticket>\` names the bundle of every attempt on record.
 
   perbo review --contract c.json --diff change.diff --checks checks.json --repo .

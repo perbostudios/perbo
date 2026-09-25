@@ -2,6 +2,7 @@ import {
   findingKey,
   hasAcceptanceCriteria,
   redactCredentials,
+  spokenLine,
   type CheckResult,
   type Finding,
   type NodeReview,
@@ -563,6 +564,15 @@ export async function reviewRound(args: {
     target: { ...graphOutcome.combined.target, prior_commits: args.priorCommits },
     findings: [...graphOutcome.combined.findings, ...flakyCheckFindings(args.gating)],
   };
+  // The review's own words, for whoever watches the run: each finding it left
+  // open, redacted as its artifact is and on a line of its own marked as the
+  // reviewer's — the findings the review on record lists. Words to show,
+  // never read back.
+  for (const finding of review.findings) {
+    if (finding.status !== "open") continue;
+    const said = spokenLine("reviewer", redactCredentials(args.secrets.redact(finding.statement).text).text);
+    if (said !== null) progress(said);
+  }
   const nodeReviewsThisRound: NodeReview[] = graphOutcome.nodes.map((entry) => ({
     node_id: entry.node_id,
     review: entry.outcome?.artifact ?? null,

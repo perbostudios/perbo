@@ -48,6 +48,7 @@ function run(agent: LoopPorts["agent"], worktreePath: string, quarantineRoot: st
       prior_commits: [],
       toClose: [],
       resumedHere: null,
+      resumeOutcome: null,
       pathsAllowed: ["src/**"],
       pathsProhibited: [],
       prompt: "do the ticket",

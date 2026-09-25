@@ -2,6 +2,8 @@ import { z } from "zod";
 
 const EntrySchema = z.object({
   type: z.string().optional(),
+  parent_tool_use_id: z.string().nullable().optional(),
+  subagent: z.boolean().optional(),
   item: z
     .object({
       type: z.string(),
@@ -16,12 +18,10 @@ const EntrySchema = z.object({
         z.object({
           type: z.string(),
           text: z.string().optional(),
-          name: z.string().optional(),
         }),
       ),
     })
     .optional(),
-  result: z.string().optional(),
 });
 export interface TranscriptEntry {
   author: string;
@@ -29,7 +29,13 @@ export interface TranscriptEntry {
   text: string;
 }
 
-/** Interpret only documented display fields; provider records never become actions. */
+/**
+ * Interpret only documented display fields; provider records never become actions.
+ * The transcript is each turn the executor's own session spoke, as the run
+ * printed it while it went — never a subagent's words (a Claude turn with a
+ * `parent_tool_use_id`, a Codex item marked `subagent`) and never a row per
+ * tool call: the commands it ran, a subagent's among them, are the terminal's.
+ */
 export function retainedOutput(raw: string | null | undefined): {
   entries: TranscriptEntry[];
   terminal: string;
@@ -53,33 +59,17 @@ export function retainedOutput(raw: string | null | undefined): {
           "\n" +
           (entry.item.aggregatedOutput ?? "No output retained."),
       );
-    if (entry.item?.type === "agentMessage" && entry.item.text)
-      entries.push({
-        author: "Executor",
-        label: "recorded message",
-        text: entry.item.text,
-      });
-    if (entry.type === "assistant")
-      for (const block of entry.message?.content ?? []) {
-        if (block.type === "text" && block.text)
-          entries.push({
-            author: "Executor",
-            label: "recorded message",
-            text: block.text,
-          });
-        if (block.type === "tool_use" && block.name)
-          entries.push({
-            author: "Executor",
-            label: "tool call",
-            text: block.name,
-          });
-      }
-    if (entry.type === "result" && entry.result)
-      entries.push({
-        author: "Executor",
-        label: "recorded result",
-        text: entry.result,
-      });
+    if (entry.item?.type === "agentMessage" && entry.item.text && entry.subagent !== true)
+      entries.push({ author: "Executor", label: "message", text: entry.item.text });
+    // One entry per turn, its text blocks together, as the run printed it.
+    const said =
+      entry.type === "assistant" && !entry.parent_tool_use_id
+        ? (entry.message?.content ?? [])
+            .flatMap((block) => (block.type === "text" && block.text ? [block.text] : []))
+            .join("\n")
+            .trim()
+        : "";
+    if (said) entries.push({ author: "Executor", label: "message", text: said });
   }
   return { entries, terminal: commands.join("\n\n") };
 }

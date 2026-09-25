@@ -1,3 +1,4 @@
+import { readSpoken, type Speaker } from "@perbo/contracts/browser";
 import type { TicketState } from "@perbo/contracts";
 
 /** Observed CLI milestones, used for display while ticket persistence lags and for the stage-change notification. */
@@ -41,4 +42,16 @@ export function runnerProgress(
       };
   }
   return current;
+}
+
+/**
+ * The executor's and the reviewer's own words out of a command's log, in the
+ * order it printed them, as words shown and never read as anything else.
+ * Nothing else the log holds is taken, so no tool call is.
+ */
+export function spokenWords(log: string): { speaker: Speaker; words: string }[] {
+  return log.split("\n").flatMap((line) => {
+    const spoken = readSpoken(line.trim());
+    return spoken === null ? [] : [spoken];
+  });
 }

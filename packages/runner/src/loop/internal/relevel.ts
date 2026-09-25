@@ -246,6 +246,50 @@ export async function judgeRelevel(
  */
 const MAX_BRANCH_LOG_BYTES = 64 * 1024 * 1024;
 
+/** One commit on a branch's own line, and the attempts its `Attempt:` trailer names. */
+export interface CarriedCommit {
+  sha: string;
+  subject: string;
+  attempts: string[];
+}
+
+/**
+ * A branch's own line over `range`, oldest first: what a merge brought in from
+ * the base is the base's, and is behind the merge's second parent. `whole` is
+ * false where the listing was held from its end, which loses its oldest
+ * commits, or where git failed or did not finish: a listing that is not whole
+ * names nothing a caller may decide on.
+ */
+export async function branchLine(
+  worktree: string,
+  range: string,
+  call: { timeoutMs: number },
+): Promise<{ listed: Awaited<ReturnType<typeof git.run>>; commits: CarriedCommit[]; whole: boolean }> {
+  const listed = await git.run(
+    worktree,
+    [
+      "log",
+      "--first-parent",
+      "--reverse",
+      "--format=%H%x1f%s%x1f%(trailers:key=Attempt,valueonly,separator=%x2c)",
+      range,
+    ],
+    { ...call, maxOutputBytes: MAX_BRANCH_LOG_BYTES },
+  );
+  const commits = listed.stdout
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const [sha = "", subject = "", trailers = ""] = line.split("\x1f");
+      const attempts = trailers
+        .split(",")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0);
+      return { sha, subject, attempts };
+    });
+  return { listed, commits, whole: listed.code === 0 && !listed.timed_out && !listed.truncated };
+}
+
 /**
  * SCP-227: a re-level judges what the pull request has.
  *
@@ -279,41 +323,16 @@ export async function resetToPullRequest(args: {
     const local = (await git.head(workspace.path, call)) ?? "";
     if (local !== tip) {
       const ahead = await git.isAncestor(workspace.path, tip, "HEAD", call);
-      // The branch's own line past the tip: what a merge brought in from the
-      // base is the base's, and is behind the merge's second parent.
-      const listed = ahead
-        ? await git.run(
-            workspace.path,
-            [
-              "log",
-              "--first-parent",
-              "--reverse",
-              "--format=%H%x1f%s%x1f%(trailers:key=Attempt,valueonly,separator=%x2c)",
-              `${tip}..HEAD`,
-            ],
-            { ...call, maxOutputBytes: MAX_BRANCH_LOG_BYTES },
-          )
-        : null;
-      const carried = (listed?.stdout ?? "")
-        .split("\n")
-        .filter((line) => line.length > 0)
-        .map((line) => {
-          const [sha = "", subject = "", trailers = ""] = line.split("\x1f");
-          const attempts = trailers
-            .split(",")
-            .map((value) => value.trim())
-            .filter((value) => value.length > 0);
-          return { sha, subject, attempts };
-        });
-      const own = (commit: (typeof carried)[number]): boolean =>
+      // The branch's own line past the tip.
+      const line = ahead ? await branchLine(workspace.path, `${tip}..HEAD`, call) : null;
+      const own = (commit: CarriedCommit): boolean =>
         args.sealedBy(commit.sha) !== null || commit.attempts.some((attempt) => args.onRecord.has(attempt));
-      const foreign = carried.filter((commit) => !own(commit));
+      const foreign = (line?.commits ?? []).filter((commit) => !own(commit));
       // A listing held from its end has lost its oldest commits, which are
       // the ones a reset would drop, and one git failed or did not finish
       // names none of them: what cannot be read whole is refused rather than
       // reset over.
-      const unread =
-        listed !== null && (listed.code !== 0 || listed.timed_out || listed.truncated);
+      const unread = line !== null && !line.whole;
       if (ahead && !unread && foreign.length === 0) {
         await git.run(workspace.path, ["reset", "--hard", tip], call);
         progress(
@@ -324,12 +343,12 @@ export async function resetToPullRequest(args: {
         await sweepWorktree({ worktree: workspace.path, onProgress: progress });
         await cleanup({ workspace, root: config.worktree_root, outcome: "failure" }).catch(() => undefined);
         const what = unread
-          ? listed.truncated
+          ? line.listed.truncated
             ? `${workspace.branch} carries more past what the pull request has (${tip.slice(0, 12)}) than ` +
               `${MAX_BRANCH_LOG_BYTES} bytes of log can name`
             : `what ${workspace.branch} carries past what the pull request has (${tip.slice(0, 12)}) ` +
               `could not be listed: git log ${
-                listed.timed_out ? "did not finish" : `exited ${listed.code ?? listed.signal}`
+                line.listed.timed_out ? "did not finish" : `exited ${line.listed.code ?? line.listed.signal}`
               }`
           : ahead
             ? `${workspace.branch} carries ${foreign.length} commit${foreign.length === 1 ? "" : "s"} the loop did not ` +

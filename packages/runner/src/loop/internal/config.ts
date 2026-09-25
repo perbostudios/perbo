@@ -212,11 +212,14 @@ export const TicketRunConfigSchema = z.strictObject({
    */
   runs_started: z.number().int().min(1).nullable().default(null),
   /**
-   * SCP-154: the execution bundle of an attempt a ceiling cut, whose retained
-   * `change.diff` this run's first attempt starts from. The diff is applied
-   * into the worktree before the executor is invoked and the attempt is
-   * recorded as a continuation of the cut one. Null — the default — is a run
-   * that starts from the base commit and nothing else.
+   * SCP-154: the execution bundle of an attempt a ceiling cut or a person
+   * stopped, whose retained `change.diff` this run's first attempt starts from.
+   * The diff is applied into the worktree before the executor is invoked and
+   * the attempt is recorded as a continuation of the stopped one; a branch that
+   * already holds the commit that attempt sealed is given nothing, since it
+   * carries the work; a diff that does not apply is dropped, the worktree stays
+   * at the commit it was provisioned on, and the record says so. Null — the
+   * default — is a run that starts from the base commit and nothing else.
    */
   resume_from: z.string().min(1).nullable().default(null),
   /**

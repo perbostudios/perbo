@@ -16,6 +16,7 @@ import {
   costOf,
   costPhrase,
   derivePlannedRisk,
+  gateClosedNote,
   isActive,
   isConfigPath,
   isDependencyPath,
@@ -2701,7 +2702,7 @@ export function statesObserved(result: {
     case "escalated":
     case "remediation_exhausted":
     case "remediation_stalled":
-      path.push({ to: "changes_requested", note: `the gate closed: ${result.outcome}` });
+      path.push({ to: "changes_requested", note: gateClosedNote(result.outcome) });
       break;
     default:
       path.push({

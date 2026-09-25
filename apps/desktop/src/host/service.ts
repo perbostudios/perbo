@@ -22,7 +22,7 @@ import { discoverModels } from "./model-catalog.js";
 import { ModelCatalogs } from "./providers/catalogs.js";
 import { ChangeMarks } from "./plan/marks.js";
 import { DriftReadings } from "./plan/drift.js";
-import { repositorySpecs, specTitles } from "./plan/spec.js";
+import { repositorySpecs, specTexts } from "./plan/spec.js";
 import { draftedFrom } from "./tickets/work.js";
 import { probeProviders } from "./providers/status.js";
 import { readStanding, specFolder, writeStanding } from "./repository/config.js";
@@ -334,7 +334,7 @@ export class DesktopService {
         repositoryErrors: Object.fromEntries(
           records.map((entry) => [entry.repository.id, entry.errors]),
         ),
-        drafts: openDrafts(this.state.editingSessions, specTitles((id) => this.repository(id))),
+        drafts: openDrafts(this.state.editingSessions, specTexts((id) => this.repository(id))),
         specs: this.state.repositories.flatMap((repo) => {
           try {
             return repositorySpecs(this.repository(repo.id));

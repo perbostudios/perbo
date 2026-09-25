@@ -9,7 +9,9 @@ import { InterviewDock } from "./InterviewDock.js";
 import { DockHandle } from "./DockHandle.js";
 import { dockWidthLimit, useDockWidth } from "../shell/dock-size.js";
 import { bridge } from "../workspace/index.js";
-import { PLANNING_PANES, panesFor, planPaneFor, remembered, reopenPane } from "./panes.js";
+import { PLANNING_PANES, contractState, flowFor, remembered, reopenPane } from "./panes.js";
+import { SimpleTaskNotice, useDraftLanding } from "./SimpleTask.js";
+import { WaitScreen } from "../tasks/wizard.js";
 import type { PageProps } from "../shell/route.js";
 import type { PlanningPane } from "../../shared/protocol.js";
 const SpecPane = lazy(() =>
@@ -18,8 +20,8 @@ const SpecPane = lazy(() =>
 const GraphPane = lazy(() =>
   import("./GraphPane.js").then((module) => ({ default: module.GraphPane })),
 );
-const Composer = lazy(() =>
-  import("../tasks/Composer.js").then((module) => ({ default: module.Composer })),
+const ContractPane = lazy(() =>
+  import("./ContractPane.js").then((module) => ({ default: module.ContractPane })),
 );
 const DriftPane = lazy(() =>
   import("./DriftPane.js").then((module) => ({ default: module.DriftPane })),
@@ -36,15 +38,17 @@ const DriftPane = lazy(() =>
  * checked once when the plan first arrives and by its button after that; the
  * Problems pane, on the way from the plan to the contract, reads the plan
  * against the spec and puts each place the two have parted, one at a time
- * (D-128).
+ * (D-128); and the contract, the last tab, where the one approval is. Which
+ * of them a planning offers is `flowFor`'s (D-NEW-basic-and-epic-flows).
  *
  * One pane at a time, with the interview docked beside it (D-102) and the
  * plan's history opening as a drawer over the pane, so the chat is there from
- * the first question to the approval. The one pane without it is Problems: a
- * problem is a card of the chat's own shape, and the pane takes the width for
- * it, while the chat shows the same card beside every other pane. The dock is
- * outside the panes, so a pane knows nothing about it and adding one adds an
- * entry to {@link PLANNING_PANES} and a branch here.
+ * the first question to the contract. Two panes are without it: Problems,
+ * where a problem is a card of the chat's own shape and the pane takes the
+ * width for it, while the chat shows the same card beside every other pane;
+ * and the contract, whose criteria are edited by hand. The dock is outside
+ * the panes, so a pane knows nothing about it and adding one adds an entry to
+ * {@link PLANNING_PANES} and a branch here.
  */
 export function PlanningMode({
   workspace,
@@ -75,44 +79,6 @@ export function PlanningMode({
     observer.observe(held);
     return () => observer.disconnect();
   }, []);
-  // Landing on the plan the moment there is one.
-  //
-  // Drafting it is the one thing in planning that takes minutes and finishes
-  // somewhere the person is not looking: they press Generate plan on the Spec
-  // pane, or ask for it in the chat, and the pane they are on has nothing more
-  // to say when it lands. The rail grows a pane at that moment, and a new
-  // entry in the rail is not an answer — it is something to notice. So the
-  // page goes where the work went: the Graph for work the drafter divided, the
-  // criteria for work it did not.
-  //
-  // Only on the change, and only a change seen from this page: a planning
-  // opened on the Spec pane over a plan that already exists is a person who
-  // came to read the spec, and this leaves them there.
-  // Which pane holds this planning's plan, or null where it has none — and
-  // undefined where the drafts have not been read yet, which is not the same
-  // thing. A list that has not arrived says nothing about whether there is a
-  // plan, and treating it as "none" makes every planning look like one whose
-  // plan has just landed the moment the list does.
-  const listed = (workspace.drafts ?? []).some((entry) => entry.id === sessionId);
-  const planPane = listed ? planPaneFor(workspace.drafts, sessionId) : undefined;
-  // Remembered against the planning it was read for: this component is not
-  // remounted when the session changes under it, so a bare flag would carry
-  // one planning's answer into the next and send a person opening a plan that
-  // already has one straight to it.
-  const wasPlanned = useRef<{ sessionId: string; pane: typeof planPane } | null>(null);
-  useEffect(() => {
-    const before = wasPlanned.current;
-    wasPlanned.current = { sessionId, pane: planPane };
-    if (before?.sessionId !== sessionId || before.pane === undefined || planPane === undefined)
-      return;
-    // A first plan, and a re-draft that changed its shape — dividing work that
-    // was one piece, or putting a divided plan back together. Both move the
-    // plan to a pane the person is not on. Not off the Problems pane, though:
-    // the ticket lands there while problems are open, and a plan reshaped
-    // under it is still the plan the problems are about.
-    if (before.pane !== planPane && planPane !== null && pane !== "drift")
-      navigate({ page: "planning", sessionId, pane: planPane });
-  }, [planPane, navigate, sessionId, pane]);
   // Where the person is, written down as they get there, so every way back
   // into this planning opens it on the same pane
   // (D-130). Once per pane, and nothing
@@ -120,17 +86,38 @@ export function PlanningMode({
   // recorded by the move that reached it. Only a pane that is a place to be
   // left at, and only one this planning offers: an address typed by hand
   // naming a pane it has not got is not where the person is.
-  const visited =
-    panesFor(workspace.drafts, sessionId).find((entry) => entry.id === pane && remembered(entry.id))?.id ?? null;
+  //
+  // The contract is written down with the state it was reached at, which
+  // keeps it a tab until that state moves (D-NEW-basic-and-epic-flows):
+  // once, as the person arrives, so a change made on the contract itself is
+  // not taken as checked before the reading it goes through.
+  const listed = (workspace.drafts ?? []).some((entry) => entry.id === sessionId);
+  const flow = flowFor(workspace, sessionId, pane);
+  const visited = flow.panes.find((entry) => entry.id === pane && remembered(entry.id))?.id ?? null;
+  const draft = (workspace.drafts ?? []).find((entry) => entry.id === sessionId);
+  const arrived = useRef<string | null>(null);
   useEffect(() => {
+    const at = visited === null ? null : `${sessionId}:${visited}`;
+    if (at === arrived.current) return;
+    if (visited === "contract") {
+      // Not before the drafts list holds the planning, whose state it is, and
+      // its spec as the host read it.
+      if (draft === undefined || (draft.specSlug !== null && draft.spec === null)) return;
+      arrived.current = at;
+      void bridge
+        .request({ kind: "editingContractVisited", id: sessionId, state: contractState(workspace, draft) })
+        .catch(() => undefined);
+      return;
+    }
+    arrived.current = at;
     if (visited !== null)
       void bridge.request({ kind: "editingVisited", id: sessionId, pane: visited }).catch(() => undefined);
-  }, [sessionId, visited]);
+  }, [sessionId, visited, draft, workspace]);
   // A link to the planning itself names no pane, and it opens where it was
   // left — which the drafts list says, so not before the list has this
   // planning in it. In place of that link, so Back does not return to it and
   // be sent on again.
-  const reopen = pane === null && listed ? reopenPane(workspace.drafts, sessionId) : null;
+  const reopen = pane === null && listed ? reopenPane(workspace, sessionId) : null;
   useEffect(() => {
     if (reopen !== null) navigate({ page: "planning", sessionId, pane: reopen }, { replace: true });
   }, [reopen, navigate, sessionId]);
@@ -139,6 +126,12 @@ export function PlanningMode({
   // The same editor the Composer binds to: the host is asked for the session, and its answer decides whether there is planning to show.
   const editor = useContractEditing({ kind: "session", id: sessionId }, workspace.settings);
   const [history, setHistory] = useState(false);
+  const landing = useDraftLanding({ sessionId, editor, navigate });
+  // The pane the person came from, which says whether the contract is being
+  // reached through the reading on the way to it, and so compiled, or come
+  // back to.
+  const trail = useRef<{ pane: PlanningPane | null; from: PlanningPane | null }>({ pane: null, from: null });
+  if (trail.current.pane !== pane) trail.current = { pane, from: trail.current.pane };
   const discarded = editor.session?.phase === "discarded";
   if (discarded || (!editor.loading && !editor.session && editor.error))
     return (
@@ -164,16 +157,22 @@ export function PlanningMode({
   const open =
     pane === null ? (
       <Opening what="planning" />
-    ) : pane === "criteria" ? (
-      // The plan, for work the drafter did not divide: the criteria it will be
-      // judged against, which is the whole of what there is to check.
-      <Suspense fallback={<div className="launch"><InkIcon name="dots" /><p>Opening…</p></div>}>
-        <Composer
-          key={sessionId}
+    ) : landing.checking ? (
+      // A basic ticket's fresh plan, checked before it lands anywhere: what
+      // it disturbs, and whether it still promises what the spec does.
+      <WaitScreen
+        bare
+        title="Checking the plan"
+        description="Reading what the plan is likely to touch outside its scope, and reading it against the spec. Neither changes anything."
+        status="Checking the plan…"
+      />
+    ) : pane === "contract" ? (
+      <Suspense fallback={<Opening what="the contract" />}>
+        <ContractPane
           workspace={workspace}
           navigate={navigate}
-          target={{ kind: "session", id: sessionId }}
-          plan
+          editor={editor}
+          confirming={trail.current.from === "drift"}
         />
       </Suspense>
     ) : pane === "explorer" ? (
@@ -204,15 +203,18 @@ export function PlanningMode({
       >
         {open}
         {history && <HistoryDrawer editor={editor} onClose={() => setHistory(false)} />}
+        {landing.notice && !landing.checking && <SimpleTaskNotice onNext={landing.acknowledge} />}
       </section>
-      {/* The chat stays on every pane but Problems: its work after a draft is
-          changing the plan through the validated edit path, each change a card
-          with an undo (D-102, D-100). It opens narrow so the pane beside it —
-          the graph most of all — has the room, and the bar between them still
-          moves. On Problems the card in the pane is the chat's own card, and a
-          second beside it would be two ways to do one thing. Not before the
-          planning has a pane to stand beside, either. */}
-      {pane !== "drift" && pane !== null && (
+      {/* The chat stays on every pane but Problems and the contract: its work
+          after a draft is changing the plan through the validated edit path,
+          each change a card with an undo (D-102, D-100). It opens narrow so
+          the pane beside it — the graph most of all — has the room, and the
+          bar between them still moves. On Problems the card in the pane is the
+          chat's own card, and a second beside it would be two ways to do one
+          thing; on the contract the criteria are the person's to edit by hand
+          (D-NEW-basic-and-epic-flows). Not before the planning has a pane to
+          stand beside, either. */}
+      {pane !== "drift" && pane !== "contract" && pane !== null && (
         <>
           <DockHandle width={dock} limit={limit} />
           <InterviewDock

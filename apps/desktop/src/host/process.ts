@@ -194,6 +194,24 @@ export function redact(
   );
 }
 
+/** The most of a command's output a job's log keeps: its end. */
+export const LOG_TAIL_CHARS = 80_000;
+
+/**
+ * The end of a command's output a job's log keeps: at most
+ * {@link LOG_TAIL_CHARS}, and where that cuts a line, nothing up to its first
+ * newline, so the log starts on a whole line. A half line is not read as
+ * what it would say whole: an agent's words cut after its mark would
+ * otherwise read as one of the run's stages.
+ */
+export function logTail(text: string): string {
+  if (text.length <= LOG_TAIL_CHARS) return text;
+  const cut = text.slice(-LOG_TAIL_CHARS);
+  if (text[text.length - LOG_TAIL_CHARS - 1] === "\n") return cut;
+  const whole = cut.indexOf("\n");
+  return whole < 0 ? "" : cut.slice(whole + 1);
+}
+
 /**
  * The longest one line of a long-lived child's stdout may be before it is
  * dropped, in characters of the decoded text rather than bytes of it.
@@ -430,7 +448,7 @@ export function runProcess(
         stderr += value;
         // Keep an unfinished line private: a credential may cross subprocess chunks.
         const complete = stderr.slice(0, stderr.lastIndexOf("\n") + 1);
-        options.onOutput?.(redact(complete, options.env).slice(-80_000));
+        options.onOutput?.(logTail(redact(complete, options.env)));
       }
     };
     child.stdout.on("data", (chunk: Buffer) => receive(chunk, "out"));

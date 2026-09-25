@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import {
   LINE_CHAR_CAP,
+  LOG_TAIL_CHARS,
   childEnvironment,
   forgetRegistryPath,
   installLocations,
+  logTail,
   registryPath,
   redact,
   requireSuccess,
@@ -15,6 +17,7 @@ import {
   startLineProcess,
 } from "./process.js";
 import type { LineProcess } from "./process.js";
+import { runnerProgress } from "../shared/runner-progress.js";
 
 const windows = process.platform === "win32";
 /** Two spellings of one Windows directory compare equal. */
@@ -312,6 +315,47 @@ describe("startLineProcess", () => {
     expect(out).toEqual(["tail"]);
     expect(stderr.join("")).toContain("longer than");
     expect(close.code).toBe(0);
+  });
+});
+
+/**
+ * An executor's line whose words end in a stage's, placed so that the log's
+ * tail cuts it right after its mark: what is left of it reads, alone, as
+ * "review round 2". Then one whole line that fills the rest of the tail.
+ */
+const CUT_INSIDE_A_LINE =
+  "  executing\n  executor says: then review round 2\n" + ".".repeat(LOG_TAIL_CHARS - "review round 2\n".length - 1) + "\n";
+
+describe("the end of a command's output a job's log keeps", () => {
+  it("keeps output within the bound as it is", () => {
+    expect(logTail("  executing\n")).toBe("  executing\n");
+  });
+
+  it("keeps a tail that starts on a whole line as it is", () => {
+    const whole = "x".repeat(LOG_TAIL_CHARS - 1) + "\n";
+    expect(logTail("  executing\n" + whole)).toBe(whole);
+  });
+
+  it("drops what a cut leaves of a line, so a half line cannot advance the stage", () => {
+    const kept = logTail(CUT_INSIDE_A_LINE);
+    expect(CUT_INSIDE_A_LINE.slice(-LOG_TAIL_CHARS).startsWith("review round 2\n")).toBe(true);
+    expect(kept.length).toBeLessThan(LOG_TAIL_CHARS);
+    expect(kept).not.toContain("review round");
+    expect(runnerProgress(kept)).toBeNull();
+  });
+
+  it("keeps nothing of a tail that is one unfinished line", () => {
+    expect(logTail("y".repeat(LOG_TAIL_CHARS * 2))).toBe("");
+  });
+
+  it("streams a command's stderr cut the same way", async () => {
+    const observed: string[] = [];
+    await runProcess(process.execPath, ["-e", `process.stderr.write(${JSON.stringify(CUT_INSIDE_A_LINE)})`], {
+      cwd: tmpdir(),
+      onOutput: (output) => observed.push(output),
+    });
+    expect(observed.length).toBeGreaterThan(0);
+    for (const output of observed) expect(runnerProgress(output)?.state).not.toBe("independent_review");
   });
 });
 

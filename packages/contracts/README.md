@@ -59,6 +59,20 @@ for a person takes any, `answersReview`, which says which review an answer answe
 is. `perbo verdict --decide`, the loop and the desktop's decision screen read the same rules, so an
 answer one of them takes is one the others act on; it is browser-safe for the last.
 
+`spoken.ts` is the single home for an agent's words as a run prints them while it works: one
+progress line per turn, folded to one line, bounded, and marked with whose words they are, which
+the runner's adapters and review stage write and the desktop's Watch page reads back to show them
+as they arrive. A line is words to show and nothing else ([ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)).
+It imports nothing, so the renderer takes it from `@perbo/contracts/browser`.
+
+`retained.ts` is the single home for whether a ticket's last run retained a branch to publish
+([D-NEW-publish-a-retained-branch-later](../../docs/11-open-decisions.md)): `retainedBranch`
+reads it from the ticket alone, as the branch and the outcome the ticket records for that run or the
+refusal that says why there is none, and `gateClosedNote` is the row an escalated run writes that
+it reads back. `perbo run --publish-retained` refuses with that refusal, and the desktop's merge
+screen says it; it imports only the ticket's types, so the renderer takes it from
+`@perbo/contracts/browser`.
+
 `review.ts` carries one deliberate asymmetry worth knowing about. A finding's `routing` is derived
 from `blocking` when it is absent, rather than defaulted, so an artifact written before D-051 stays
 scoreable — a plain default would silently relabel every blocking finding in an older artifact as

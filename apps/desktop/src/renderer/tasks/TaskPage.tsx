@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Button, Notice } from "../ui/index.js";
 import { bridge, errorMessage, useDetail } from "../workspace/index.js";
 import type { PageProps, TaskView } from "../shell/route.js";
@@ -9,7 +9,7 @@ import { ContractScreen } from "./ContractScreen.js";
 import { LoopScreen } from "./LoopScreen.js";
 import { StoppedScreen } from "./StoppedScreen.js";
 import { planNodes } from "@perbo/contracts/browser";
-import { projectTicket } from "./ticket-workspace.js";
+import { projectTicket, unseenAttention } from "./ticket-workspace.js";
 import { curates, leftAt, planApproved, problemsOpen } from "../planning/panes.js";
 import type { PlanningPane } from "../../shared/protocol.js";
 import {
@@ -43,10 +43,20 @@ export function TaskPage({
   const show = (view: TaskView): void =>
     navigate({ page: "task", repoId, key: taskKey, view });
   const resultReady = projection?.resultReady;
-  // Opening a ticket is what orders Home within each colour, most recent first.
+  // Opening a ticket is what orders Home within each group, most recent first,
+  // and what clears its claim on the person. One that comes to need them while
+  // its page is open is seen as it does, so the opening is recorded again
+  // whenever Home would count it unseen: that opening is newer than the moment
+  // it came to stand there, so it records once each time.
+  const listed = workspace.tasks.find((row) => row.repoId === repoId && row.ticket.key === taskKey);
+  const unseen = listed !== undefined && unseenAttention(workspace, listed);
+  const recorded = useRef<string | null>(null);
   useEffect(() => {
+    const page = repoId + ":" + taskKey;
+    if (recorded.current === page && !unseen) return;
+    recorded.current = page;
     void bridge.request({ kind: "ticketOpened", repoId, key: taskKey }).catch(() => undefined);
-  }, [repoId, taskKey]);
+  }, [repoId, taskKey, unseen]);
   useEffect(() => {
     if (view === "loop" && resultReady) show("review");
   }, [resultReady, view]);
@@ -54,8 +64,9 @@ export function TaskPage({
   // landing on a freshly drafted plan and clicking the same ticket on Home
   // agree — a rule about where a ticket belongs, written once.
   //
-  // Only for `auto`: asking for the contract is how a person gets to it from
-  // the graph, and that has to keep working.
+  // For `auto`, and for the contract asked for by name: a plan waiting for
+  // approval in the planning curating it has its contract inside that
+  // planning, as its last tab (D-NEW-basic-and-epic-flows).
   const planning = (workspace.drafts ?? []).find(
     (draft) => draft.repoId === repoId && draft.key === taskKey && draft.phase !== "discarded",
   );
@@ -68,50 +79,43 @@ export function TaskPage({
   // `edit` is as explicit an ask as a named view: the contract editor is
   // reached by it and nothing else, so answering over it would leave an epic
   // with no way into its own editor.
-  const plannable = view === "auto" && !edit && awaiting;
-  // The contract first where the person was last on it: coming back to the
-  // ticket is coming back there (D-130).
-  // Then the problems, whatever the plan's shape: they are what the planning
+  const plannable = (view === "auto" || view === "contract") && !edit && awaiting;
+  // The contract asked for by name, in the planning curating it. Otherwise
+  // the problems first, whatever the plan's shape: they are what the planning
   // is about until each is resolved or the person goes on past them
   // (D-128). Then where the planning was
-  // left, where it is the planning curating this plan: coming back to it is
-  // coming back to that pane (D-130), and
-  // a session the ticket's own editor made is no such planning, so its ticket
-  // stays on this page.
+  // left, the contract included, where it is the planning curating this plan:
+  // coming back to it is coming back to that pane
+  // (D-130), and a session the ticket's own
+  // editor made is no such planning, so its ticket stays on this page.
   // Then the division on its graph, not on the page that cannot show it, asked
   // of the contract, which is where it actually is — the session carries a
-  // copy for the rail, and a copy can be behind.
-  const landing: PlanningPane | null = !plannable || planning.lastView === "contract"
+  // copy for the rail, and a copy can be behind — and a plan left flat on its
+  // contract, which is its plan.
+  const curating = planning !== undefined && curates(planning);
+  const landing: PlanningPane | null = !plannable
     ? null
-    : problemsOpen(workspace.drafts, planning.id)
-      ? "drift"
-      : ((curates(planning) ? leftAt(workspace.drafts, planning.id) : null) ??
-        (planNodes(detail.contract).length > 0 ? "graph" : null));
+    : view === "contract"
+      ? curating
+        ? "contract"
+        : null
+      : problemsOpen(workspace.drafts, planning.id)
+        ? "drift"
+        : ((curating ? leftAt(workspace, planning.id) : null) ??
+          (planNodes(detail.contract).length > 0 ? "graph" : curating ? "contract" : null));
   // In place of this page, which then only ever sends the person on.
   useEffect(() => {
     if (landing !== null && planning)
       navigate({ page: "planning", sessionId: planning.id, pane: landing }, { replace: true });
   }, [landing, planning?.id, navigate]);
-  // The contract of a plan waiting for approval, written down as the person
-  // reaches it, as planning mode writes the pane: the one page of a ticket
-  // the ladder would send them away from on their way back. Not while this
-  // page is only sending them on.
-  const atContract = awaiting && !edit && landing === null && projection?.screen === "contract";
-  useEffect(() => {
-    if (atContract && planning.lastView !== "contract")
-      void bridge.request({ kind: "editingContractVisited", id: planning.id }).catch(() => undefined);
-  }, [atContract, planning?.id, planning?.lastView]);
-  // Confirming a plan lands on its contract while `perbo inspect` reads the
-  // ticket, which is the step between the plan and the page that freezes it:
-  // the contract of a plan still in planning and not yet approved, asked for
-  // by name, by a person arriving from planning rather than coming back to a
-  // contract they were last on. Every other way onto a ticket's page is only
-  // reading the ticket.
+  // The contract of a plan still in planning, asked for by name while
+  // `perbo inspect` reads the ticket: the step between the plan and the page
+  // that freezes it. Every other way onto a ticket's page is only reading the
+  // ticket.
   const confirming =
     view === "contract" &&
     !edit &&
     planning !== undefined &&
-    planning.lastView !== "contract" &&
     !planApproved(workspace, repoId, taskKey);
   if (query.isPending)
     return confirming ? (

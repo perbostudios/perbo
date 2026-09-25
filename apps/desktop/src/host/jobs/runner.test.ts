@@ -6,6 +6,7 @@ import { Profile } from "../profile/store.js";
 import { WorkspaceReads } from "../workspace-reads.js";
 import type { Cli } from "../cli.js";
 import type { Change, Job } from "../../shared/protocol.js";
+import { runnerProgress, spokenWords } from "../../shared/runner-progress.js";
 import type { ProcessResult } from "../process.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
@@ -20,11 +21,20 @@ const repo: RegisteredRepository = {
 };
 const other: RegisteredRepository = { ...repo, id: "80000000-0000-4000-8000-000000000002" };
 const settle = (): Promise<void> => Promise.resolve();
-/** A runner over a real profile and change stream, with everything it tells recorded. */
-function runner(result: ProcessResult = { code: 0, stdout: "", stderr: "", cancelled: false }) {
+/**
+ * A runner over a real profile and change stream, with everything it tells
+ * recorded. Its CLI prints `outputs` one after another, each the whole output
+ * so far, as the process runner hands it on.
+ */
+function runner(
+  result: ProcessResult = { code: 0, stdout: "", stderr: "", cancelled: false },
+  outputs: readonly string[] = ["stage one"],
+) {
   const directory = scratchDirectory();
   const profile = Profile.open(directory);
   const told: Change[] = [];
+  /** Each progress change's log as it was when told: the job is one object, and it moves on. */
+  const logs: string[] = [];
   const order: string[] = [];
   const runs: string[][] = [];
   const changes = new Changes({
@@ -32,13 +42,14 @@ function runner(result: ProcessResult = { code: 0, stdout: "", stderr: "", cance
     save: () => profile.save(),
     emit: (change) => {
       told.push(change);
+      if (change.kind === "progress") logs.push(change.job.log);
       order.push(change.kind === "records" ? "records" : change.kind);
     },
   });
   const cli: Cli = {
     run: (args, _repo, options) => {
       runs.push(args);
-      options?.onOutput?.("stage one");
+      for (const output of outputs) options?.onOutput?.(output);
       return Promise.resolve(result);
     },
     spawn: () => {
@@ -68,7 +79,7 @@ function runner(result: ProcessResult = { code: 0, stdout: "", stderr: "", cance
       return settle();
     },
   });
-  return { jobs, profile, told, order, runs, started, changes };
+  return { jobs, profile, told, logs, order, runs, started, changes };
 }
 /** Waits until every job has settled, which is what the runner's own promises do. */
 async function quiet(jobs: JobRunner): Promise<void> {
@@ -143,6 +154,33 @@ describe("the lanes", () => {
     first.finish();
     await new Promise((done) => setTimeout(done, 10));
     expect(order).toEqual(["first", "elsewhere", "second"]);
+  });
+});
+
+describe("relaying a run's progress", () => {
+  it("tells each line the CLI prints while the run is live, in the order printed, the executor's words among them", async () => {
+    // As the CLI prints them on stderr, each output the whole of it so far.
+    const printed = [
+      "  worktree /w on prb/x at abc1234",
+      "  executing",
+      "  executor says: Reading the mailer first.",
+      "  executor says: Adding the retry now.",
+      "  sealing the change set",
+    ];
+    const w = runner(undefined, printed.map((_, at) => printed.slice(0, at + 1).join("\n") + "\n"));
+    const job = w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, async (_job, context) => {
+      await context.invoke(["run", "PRB-1"]);
+    });
+    await quiet(w.jobs);
+    // One progress change for the job starting, then one for each line, each told while it ran.
+    const relayed = w.logs.slice(1, printed.length + 1);
+    expect(relayed.map((log) => log.trimEnd().split("\n").at(-1))).toEqual(printed);
+    expect(spokenWords(relayed.at(-1)!)).toEqual([
+      { speaker: "executor", words: "Reading the mailer first." },
+      { speaker: "executor", words: "Adding the retry now." },
+    ]);
+    expect(runnerProgress(relayed.at(-1)!)?.title).toBe("Working on the approved outcome");
+    expect(job.state).toBe("completed");
   });
 });
 

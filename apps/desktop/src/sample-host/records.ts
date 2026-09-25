@@ -33,6 +33,7 @@ import {
   planSizeCounts,
   sameName,
   sizeEstimate,
+  TICKET_TRANSITIONS,
   type ApproachRecord,
   type EffortLevel,
   type StandingProhibitedEntry,
@@ -250,6 +251,10 @@ function sample(number: number, title: string, state: Ticket["state"]): Ticket {
         : null,
       observed_at: at,
       branch: "retry-activation-email",
+      // The loop's own delivery, as the host's schema reads a record that
+      // names no other: what a merge press asks before it publishes.
+      opened_by: ["pr_open", "merged", "closed"].includes(state) ? "loop" : null,
+      arm: "loop",
     },
     history: [],
   } as unknown as Ticket;
@@ -452,6 +457,48 @@ export function ticketRow(key: string): TaskRow {
   const row = snapshot.tasks.find((row) => row.ticket.key === key);
   if (!row) throw new Error("Sample task not found.");
   return row;
+}
+/** Whether the lifecycle has a row taking `ticket` from `from` to `to` with this note, its guard read against the ticket. */
+const rowAllows = (ticket: Ticket, from: Ticket["state"], to: Ticket["state"], note: string): boolean =>
+  TICKET_TRANSITIONS.some((row) => row.from === from && row.to === to && (row.when?.(ticket, note) ?? true));
+
+/**
+ * Move a sample ticket as the CLI moves one: through `steps`, the states a
+ * run's result proves, each a row the lifecycle allows (`TICKET_TRANSITIONS`)
+ * and each its own history row with its note, then when it last moved. A step
+ * with no row refuses the whole move and leaves the ticket where it was.
+ */
+export function moveTicket(ticket: Ticket, steps: readonly { to: Ticket["state"]; note: string }[]): void {
+  const walk = steps.map((step, index) => ({ from: index === 0 ? ticket.state : steps[index - 1]!.to, ...step }));
+  const refused = walk.find((step) => !rowAllows(ticket, step.from, step.to, step.note));
+  if (refused) throw new Error(`${ticket.key} cannot move from ${refused.from} to ${refused.to}: the lifecycle has no row for it.`);
+  const now = new Date().toISOString();
+  ticket.history = [...ticket.history, ...walk.map((step) => ({ at: now, ...step }))];
+  ticket.state = walk.at(-1)?.to ?? ticket.state;
+  ticket.updated_at = now;
+}
+
+/**
+ * Bring a sample ticket back to `ready` for a new attempt as `perbo run`
+ * reopens one: by the shortest route the lifecycle's rows allow, each state
+ * on the way noted as reopened through, and `ready` with `note`. A ticket the
+ * rows give no route back is refused, and left where it was.
+ */
+export function reopenTicket(ticket: Ticket, note: string): void {
+  const noteFor = (to: Ticket["state"]): string => (to === "ready" ? note : `reopened through ${to} to start a new attempt`);
+  const queue: Ticket["state"][][] = [[]];
+  const seen = new Set<Ticket["state"]>([ticket.state]);
+  while (queue.length > 0) {
+    const route = queue.shift()!;
+    const from = route.at(-1) ?? ticket.state;
+    for (const row of TICKET_TRANSITIONS) {
+      if (row.from !== from || seen.has(row.to) || !rowAllows(ticket, from, row.to, noteFor(row.to))) continue;
+      if (row.to === "ready") return moveTicket(ticket, [...route, row.to].map((to) => ({ to, note: noteFor(to) })));
+      seen.add(row.to);
+      queue.push([...route, row.to]);
+    }
+  }
+  throw new Error(`${ticket.key} is ${ticket.state}, which the lifecycle has no route out of back to ready.`);
 }
 export function applyDraft(ticket: Ticket, draft: Draft): void {
   const plan = plans.get(ticket.key)!;
@@ -741,6 +788,7 @@ const LABELS: Record<string, string> = {
   decide: "Run engineering loop",
   doctor: "Check repository readiness",
   sync: "Refresh delivery from GitHub",
+  publish: "Open the pull request",
   principle: "Record a product decision",
   verdict: "Record finding feedback",
 };
@@ -1225,8 +1273,8 @@ export function sampleDriftFindings(key: string): DriftFinding[] {
   plan.acceptance_criteria.forEach((criterion, index) => {
     const cited = stated.find((each) => each.id === criterion.requirement_id);
     if (cited === undefined) {
-      // A criterion that cites nothing — a compile on the Plan pane numbers
-      // them afresh — answers a requirement in the same words, or promises
+      // A criterion that cites nothing — a compile of a basic ticket's
+      // criteria on its contract numbers them afresh — answers a requirement in the same words, or promises
       // something the spec does not ask for.
       const worded = stated.find((each) => each.text.trim() === criterion.text.trim());
       if (worded !== undefined) {

@@ -53,6 +53,7 @@ export async function sealRound(args: {
     protected_tests: config.protected_tests,
     protected_paths: config.protected_paths,
   };
+  args.progress("sealing the change set");
   const raw = await sealChangeSet({
     worktree: state.workspace.path,
     base_commit: state.baseCommit,

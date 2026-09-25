@@ -71,4 +71,11 @@ describe("keyboard bindings", () => {
     expect(actionForBinding({ create: "Meta+J" }, "Meta+J")).toBe("create");
     expect(actionForBinding({ create: "Meta+J" }, "Meta+N")).toBeNull();
   });
+
+  it("names what the pull request shortcut does where the run kept its branch as well as where it opened one", () => {
+    // D-NEW-publish-a-retained-branch-later: on a retained ticket the press pushes first.
+    expect(DEFAULT_SHORTCUTS.find((one) => one.action === "openPullRequest")?.label).toBe(
+      "Open the pull request, pushing a retained branch first",
+    );
+  });
 });

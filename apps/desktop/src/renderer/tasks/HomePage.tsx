@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { formatUsd } from "@perbo/contracts/browser";
 import {
   Button,
@@ -19,19 +19,27 @@ import { useShortcut } from "../shell/shortcuts.js";
 import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/route.js";
 import type { Snapshot, TaskRow, TaskSummary } from "../../shared/protocol.js";
-import { archiveRows, isArchivable, isArchived, isFiled } from "../../shared/archive.js";
-import { HOME_TONES, HOME_TONE_LABELS, displayKey, homeOrder, homeRows, homeTally, homeTone, projectTicket, stageName, type HomeTone } from "./ticket-workspace.js";
+import { archiveRows, isArchivable, isArchived, isFiled, isMergeDecided } from "../../shared/archive.js";
+import { HOME_TONES, HOME_TONE_LABELS, completedLabel, displayKey, homeGroup, homeOrder, homeRows, homeTally, projectTicket, stageName, unseenAttention, type HomeTone } from "./ticket-workspace.js";
 const countWord = (number: number): string =>
   ["No", "One", "Two", "Three", "Four", "Five"][number] ?? String(number);
 const lower = (word: string): string => word.toLowerCase();
-/** The tone each Show filter but "all" keeps; "running" is every ticket with none. */
-const SHOW_TONE = { needs: "yellow", running: null, stopped: "red", completed: "green" } as const;
-/** Each tone's count in Home's header: its class and its icon. */
-const HEADER_COUNT: Record<HomeTone, [className: string, icon: InkIconName, size: number]> = {
+/**
+ * The group each Show filter but "all" keeps: "running" is every ticket with
+ * no colour, "merge" the pull requests waiting on the merge decision, and
+ * "completed" only the tickets whose merge is decided.
+ */
+const SHOW_GROUP = { needs: "yellow", running: null, stopped: "red", merge: "green", completed: "decided" } as const;
+/** Each tone's count in Home's header, and the completed count after them: its class and its icon. */
+const HEADER_COUNT: Record<HomeTone | "completed", [className: string, icon: InkIconName, size: number]> = {
   yellow: ["attention-count", "alert", 13],
   red: ["stopped-count", "locked", 12],
-  green: ["completed-count", "approve", 12],
+  green: ["merge-count", "inbox", 12],
+  completed: ["completed-count", "approve", 12],
 };
+
+/** What a card's blue circle says: the ticket needs the person and was not opened since. */
+const UNSEEN = "Not opened since it needed you";
 
 /** `+added −removed · files`, or the honest reason there is none (S4, S5). */
 export function DiffLabel({
@@ -70,12 +78,23 @@ function StageRing({
   stage,
   tone = null,
   complete = false,
+  decided = false,
 }: {
   stage: number;
   /** The row's colour, which the ring's centre takes and a completed ring is drawn in. */
   tone?: "green" | "yellow" | "red" | null;
   complete?: boolean;
+  /** The merge is decided: the ring is whole and holds a check mark where its progress was. */
+  decided?: boolean;
 }) {
+  if (decided)
+    return (
+      <span className="stage-ring stage-ring--green stage-ring--decided" aria-label="Completed">
+        <span>
+          <InkIcon name="approve" size={11} />
+        </span>
+      </span>
+    );
   const share = complete ? 100 : (stage / 6) * 100;
   const fill = complete ? (tone === "red" ? "var(--red)" : "var(--green)") : "var(--ink)";
   return (
@@ -111,7 +130,8 @@ function TaskCard({
   onRenameChange: (open: boolean) => void;
 }) {
   const { stage, tone, description } = projectTicket(workspace, row);
-  const completed = isArchived(row.ticket.state);
+  const decided = isMergeDecided(row);
+  const completed = decided || isArchived(row.ticket.state);
   const stopped = tone === "red";
   const summary = useTaskSummary(row.repoId, row.ticket.key);
   const branch = summary.data ? summary.data.branch : (row.ticket.delivery.branch ?? null);
@@ -128,11 +148,16 @@ function TaskCard({
           : row.ticket.state.replaceAll("_", " ");
   // A space holds the line's height while the outcome is read, or where there is none.
   const outcome = summary.data?.outcome;
+  // The circle's words reach a screen reader through the card, whose children
+  // a `button` role makes presentational, and show on hover as its title.
+  const unseen = unseenAttention(workspace, row);
+  const unseenId = useId();
   return (
     <article
       role="button"
       tabIndex={0}
       aria-label={title}
+      aria-describedby={unseen ? unseenId : undefined}
       className={cx(
         "task-card",
         tone && "task-card--" + tone,
@@ -149,8 +174,11 @@ function TaskCard({
         }
       }}
     >
+      {unseen && (
+        <span id={unseenId} className="task-card-unseen" role="img" aria-label={UNSEEN} title={UNSEEN} />
+      )}
       <div className="task-card-header">
-        <StageRing stage={stage} tone={tone} complete={completed} />
+        <StageRing stage={stage} tone={tone} complete={completed} decided={decided} />
         <span className="stage-pill">{stopped ? "loop stopped" : completed ? "completed" : stageName(stage)}</span>
         <span className="task-key" title={row.ticket.key}>
           {displayKey(row.ticket.key)}
@@ -287,7 +315,7 @@ export function HomePage({
   const workspace = withoutDeleting(read, create.deleting);
   const [search, setSearch] = useState(""),
     [repoFilter, setRepoFilter] = useState("all"),
-    [homeFilter, setHomeFilter] = useState<"all" | keyof typeof SHOW_TONE>("all"),
+    [homeFilter, setHomeFilter] = useState<"all" | keyof typeof SHOW_GROUP>("all"),
     [outcome, setOutcome] = useState<"all" | "merged" | "closed" | "cancelled">(
       "all",
     ),
@@ -297,11 +325,15 @@ export function HomePage({
   const searchInput = useRef<HTMLInputElement>(null);
   useShortcut(archive ? "archiveSearch" : "search", () => searchInput.current?.focus());
   const all = homeRows(workspace);
-  // The greeting, the filters and the sort read the three colours the header's
-  // counts and the rail's Home badge read (S4), so no two of them disagree.
+  // The greeting, the filters and the sort read the groups the header's counts
+  // and the rail's Home badge read (S4), so no two of them disagree on where a
+  // ticket stands; the badge counts only those owed a look.
   const tally = homeTally(workspace, all);
-  const toneOf = (row: TaskRow) => homeTone(workspace, row);
-  const running = all.length - tally.green - tally.red;
+  const groupOf = (row: TaskRow) => homeGroup(workspace, row);
+  const running = all.length - tally.green - tally.red - tally.completed;
+  // A ticket whose merge is decided stays below every other under each sort.
+  const decidedLast = (a: TaskRow, b: TaskRow): number =>
+    Number(groupOf(a) === "decided") - Number(groupOf(b) === "decided");
   const archivable = all.filter((row) => isArchivable(workspace, row));
   const open = (row: TaskRow): void => {
     const { primary, screen } = projectTicket(workspace, row);
@@ -357,13 +389,13 @@ export function HomePage({
   const shown = all
     .filter(matches)
     .filter((row) => repoFilter === "all" || row.repoId === repoFilter)
-    .filter((row) => homeFilter === "all" || toneOf(row) === SHOW_TONE[homeFilter]);
+    .filter((row) => homeFilter === "all" || groupOf(row) === SHOW_GROUP[homeFilter]);
   const tasks = archive
     ? archiveRows(workspace, filters)
     : sort === "title"
-      ? shown.sort((a, b) => titleOf(a).localeCompare(titleOf(b)))
+      ? shown.sort((a, b) => decidedLast(a, b) || titleOf(a).localeCompare(titleOf(b)))
       : sort === "stage"
-        ? shown.sort((a, b) => projectTicket(workspace, b).stage - projectTicket(workspace, a).stage)
+        ? shown.sort((a, b) => decidedLast(a, b) || projectTicket(workspace, b).stage - projectTicket(workspace, a).stage)
         : homeOrder(workspace, shown, sort === "recent" ? "opened" : sort);
   const repository = workspace.repositories[0],
     pageCount = Math.max(1, Math.ceil(tasks.length / 10)),
@@ -375,14 +407,14 @@ export function HomePage({
         title={archive ? "Archive" : <span className="header-wordmark">perbo</span>}
         subtitle={archive ? filed.length + " archived" : undefined}
       >
-        {/* The rail's Home badge's three counts, in its order (S4). */}
+        {/* Each colour's count, in the order the rail's Home badge shows them (S4), then the completed. */}
         {!archive &&
-          HOME_TONES.map((tone) => {
-            const [className, icon, size] = HEADER_COUNT[tone];
-            return tally[tone] > 0 && (
-              <span key={tone} className={className}>
+          [...HOME_TONES, "completed" as const].map((count) => {
+            const [className, icon, size] = HEADER_COUNT[count];
+            return tally[count] > 0 && (
+              <span key={count} className={className}>
                 <InkIcon name={icon} size={size} />
-                {HOME_TONE_LABELS[tone](tally[tone])}
+                {count === "completed" ? completedLabel(tally[count]) : HOME_TONE_LABELS[count](tally[count])}
               </span>
             );
           })}
@@ -407,7 +439,10 @@ export function HomePage({
                   ? lower(countWord(tally.yellow)) + " waiting on you"
                   : "nothing waiting on you"}
                 {tally.green
-                  ? ` · ${lower(countWord(tally.green))} completed`
+                  ? ` · ${lower(countWord(tally.green))} waiting on your merge decision`
+                  : ""}
+                {tally.completed
+                  ? ` · ${lower(countWord(tally.completed))} completed`
                   : ""}
               </p>
             </div>
@@ -432,6 +467,7 @@ export function HomePage({
               <option value="needs">Show · needs you</option>
               <option value="running">Show · running</option>
               <option value="stopped">Show · stopped</option>
+              <option value="merge">Show · waiting on your merge decision</option>
               <option value="completed">Show · completed</option>
             </Dropdown>
             {workspace.repositories.length > 1 && (

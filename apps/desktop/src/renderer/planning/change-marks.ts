@@ -6,7 +6,7 @@ import type { EditingChange, PlanPromise } from "../../shared/protocol.js";
  * green, what it took away is shown red and struck through, where each stood.
  *
  * Pure functions over text, so the same diff serves a criterion on a node
- * card, a criterion in the inspector, a row on the Plan pane and a section of
+ * card, a criterion in the inspector and a section of
  * the spec as it reads. Nothing here reads a record or a file; the panes hand
  * these the before and the after the session holds.
  */

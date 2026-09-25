@@ -101,6 +101,11 @@ export { resolvePorts, type LoopPorts, type RunLimits } from "./internal/context
 export { incompleteReviewCauses } from "./internal/review.js";
 export { type DecidedFinding } from "../decisions.js";
 export { type RoundKind, type RoundRecord, type RunOutcome } from "./internal/state.js";
+export {
+  publishRetained,
+  type RetainedPublishRequest,
+  type RetainedPublishResult,
+} from "./internal/retained.js";
 
 export {
   BaseSourceSchema,
@@ -335,7 +340,7 @@ async function runLockedTicket(
    * Read before the loop so the first round's brief is the right one — the
    * ticket's own outcome, or the findings its last review left open. An
    * explicit `--resume-from` says what the run is for and is not overridden:
-   * that run is continuing a cut attempt's diff, not a review's findings.
+   * that run is continuing a stopped attempt's work, not a review's findings.
    *
    * Whether the branch is still at the commit that review judged is checked in
    * the loop, against the branch itself.
@@ -470,6 +475,7 @@ async function runLockedTicket(
         detail = briefed.end.detail;
         break;
       }
+      state = { ...state, resumeOutcome: briefed.brief.resumeOutcome };
       const { prior_commits, toClose, pathsAllowed } = briefed.brief;
 
       const executed = await execute({
@@ -815,8 +821,9 @@ async function runLockedTicket(
         config,
         contract,
         state,
-        ledger,
         attempts: delivered,
+        verificationCosts: ledger.verificationCosts,
+        declines: ledger.declines,
         rootAttemptId: deliveredUnder,
         finalReview: state.finalReview,
         detail,

@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
+import { retainedBranch } from "@perbo/contracts/browser";
+import { isLive } from "../../shared/jobs.js";
+import type { Job } from "../../shared/protocol.js";
 import {
   Button,
   Dialog,
   FactList,
   Field,
+  InfoHint,
   InkIcon,
   Notice,
   PageFooter,
@@ -14,13 +18,39 @@ import {
   Switch,
   cx,
 } from "../ui/index.js";
-import { errorMessage, useAction, useOutput } from "../workspace/index.js";
+import type { InkIconName } from "../ui/index.js";
+import type { CoverageStatus, VerificationStrength } from "@perbo/contracts";
+import { errorMessage, useAction, useOutputs } from "../workspace/index.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { TaskHeader } from "./LoopScreen.js";
-import { costLabel, taskRecords } from "./task-context.js";
+import { cliSentence, costLabel, taskRecords, watchTranscript } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
 import { retainedOutput } from "./retained-output.js";
 import { displayKey } from "./ticket-workspace.js";
+
+/** A criterion card's icon, by the outcome the review recorded for it. */
+const OUTCOME_ICON: Record<CoverageStatus, InkIconName> = {
+  met: "approve",
+  not_met: "reject",
+  cannot_determine: "help",
+};
+/**
+ * A criterion card's badge colour, by how the outcome was established: green
+ * where an assertion proves it, amber where it is inferred through a proxy,
+ * red where nothing retained establishes it — asserted only, or not reviewed.
+ */
+const STRENGTH_TONE: Record<VerificationStrength, "green" | "amber" | "red"> = {
+  directly_verified: "green",
+  proxy: "amber",
+  asserted_only: "red",
+};
+function criterionMarks(
+  coverage: { status: CoverageStatus; verification_strength: VerificationStrength } | undefined,
+): { icon: InkIconName; tone: "green" | "amber" | "red" } {
+  return coverage
+    ? { icon: OUTCOME_ICON[coverage.status], tone: STRENGTH_TONE[coverage.verification_strength] }
+    : { icon: "help", tone: "red" };
+}
 
 export function ReviewScreen(context: TaskContext) {
   const { detail, repoId, show, navigate } = context;
@@ -34,7 +64,9 @@ export function ReviewScreen(context: TaskContext) {
   const selectedFinding = review?.findings.find(
     (finding) => finding.key === feedback,
   );
-  useShortcut("openPullRequest", ticket.delivery.pull_request_url ? () => show("merge") : null);
+  // The merge screen is always the next one: it merges the pull request, or
+  // opens it first where the run retained its branch, or says why neither.
+  useShortcut("openPullRequest", () => show("merge"));
   useShortcut("output", () => show("output"));
   return (
     <section className="screen" data-screen="s15">
@@ -62,13 +94,6 @@ export function ReviewScreen(context: TaskContext) {
                 review ? `${review.findings.filter((finding) => finding.status === "open").length} unresolved findings` : "review findings unavailable"}
             </p>
           </div>
-          <Button
-            variant="primary"
-            disabled={!ticket.delivery.pull_request_url}
-            onClick={() => show("merge")}
-          >
-            Open pull request
-          </Button>
         </div>
         <div className="review-columns">
           <div>
@@ -113,43 +138,51 @@ export function ReviewScreen(context: TaskContext) {
                 const coverage = review?.coverage.find(
                   (row) => row.criterion_id === criterion.id,
                 );
+                const number = String(index + 1).padStart(2, "0");
+                const marks = criterionMarks(coverage);
+                // The card carries the criterion and its badge; the evidence
+                // is behind the `i` beside the criterion.
+                const evidence =
+                  (coverage?.evidence?.location
+                    ? coverage.evidence.location.file +
+                      (coverage.evidence.location.line
+                        ? ":" + coverage.evidence.location.line
+                        : "") +
+                      " · "
+                    : "") +
+                  (coverage?.evidence?.assertion ??
+                    coverage?.evidence?.ref ??
+                    coverage?.note ??
+                    criterion.expected_verification.assertion);
                 return (
-                  <details className="review-criterion" key={criterion.id} open>
-                    <summary>
-                      <InkIcon
-                        name={
-                          coverage?.verification_strength ===
-                          "directly_verified"
-                            ? "approve"
-                            : "alert"
-                        }
-                        size={17}
-                      />
-                      <span className="criterion-number">
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-                      <span className="review-criterion-text">
-                        {criterion.text}
-                      </span>
-                      <span className="evidence-strength">
-                        {coverage?.verification_strength.replaceAll("_", " ") ??
-                          "not reviewed"}
-                      </span>
-                    </summary>
-                    <div className="review-evidence">
-                      {coverage?.evidence?.location
-                        ? coverage.evidence.location.file +
-                          (coverage.evidence.location.line
-                            ? ":" + coverage.evidence.location.line
-                            : "") +
-                          " · "
-                        : ""}
-                      {coverage?.evidence?.assertion ??
-                        coverage?.evidence?.ref ??
-                        coverage?.note ??
-                        criterion.expected_verification.assertion}
-                    </div>
-                  </details>
+                  <div className="review-criterion" key={criterion.id}>
+                    <span
+                      className="review-outcome"
+                      role="img"
+                      aria-label={
+                        coverage?.status.replaceAll("_", " ") ?? "not reviewed"
+                      }
+                    >
+                      <InkIcon name={marks.icon} size={15} />
+                    </span>
+                    <span className="criterion-number">{number}</span>
+                    <span className="review-criterion-text">
+                      {criterion.text}
+                    </span>
+                    <InfoHint
+                      text={evidence}
+                      label={`The evidence for criterion ${number}`}
+                    />
+                    <span
+                      className={cx(
+                        "evidence-strength",
+                        `evidence-strength--${marks.tone}`,
+                      )}
+                    >
+                      {coverage?.verification_strength.replaceAll("_", " ") ??
+                        "not reviewed"}
+                    </span>
+                  </div>
                 );
               })
             )}
@@ -294,6 +327,13 @@ export function ReviewScreen(context: TaskContext) {
           <Notice tone="danger">{errorMessage(action.error)}</Notice>
         )}
       </div>
+      {/* The highlighted action at the bottom right. */}
+      <PageFooter>
+        <span className="spacer" />
+        <Button variant="primary" onClick={() => show("merge")}>
+          Next
+        </Button>
+      </PageFooter>
       {feedback && (
         <Dialog title="Send a finding back" onClose={() => setFeedback(null)}>
           <p>{selectedFinding?.statement}</p>
@@ -356,17 +396,32 @@ export function ReviewScreen(context: TaskContext) {
 }
 export function OutputScreen(context: TaskContext) {
   const { detail, repoId, show } = context,
-    { ticket, jobs, latest } = taskRecords(context);
+    { ticket, jobs, active, latest } = taskRecords(context);
   const [tab, setTab] = useState("Transcript"),
     [copied, setCopied] = useState(false),
     [follow, setFollow] = useState(true);
-  const action = useAction(),
-    output = useOutput(repoId, ticket.key, latest?.id);
+  const action = useAction();
+  // Every attempt of the latest run, in order: its rounds are what the live
+  // list showed as they went.
+  const attempts = latest === undefined ? [] : detail.attempts.filter((attempt) => attempt.run === latest.run),
+    outputs = useOutputs(
+      repoId,
+      ticket.key,
+      attempts.map((attempt) => attempt.id),
+    );
   const log =
     jobs.at(-1)?.log ??
     "No desktop command output has been recorded for this task.";
-  const recorded = retainedOutput(output.data?.transcript);
-  const transcript = recorded.entries;
+  // The latest attempt's own read: its terminal, its changes, its records.
+  const output = outputs.at(-1);
+  const recorded = retainedOutput(output?.data?.transcript);
+  // The agents' own words, the latest at the bottom: live from the run's log
+  // while it goes, from the records once it has ended.
+  const transcript = watchTranscript(
+    jobs,
+    active,
+    attempts.map((attempt, at) => ({ attempt, transcript: outputs[at]?.data?.transcript })),
+  );
   const terminal =
     [
       recorded.terminal,
@@ -436,8 +491,8 @@ export function OutputScreen(context: TaskContext) {
           ))}
           {transcript.length === 0 && (
             <p className="muted">
-              The executor’s recorded messages appear after the attempt is
-              sealed. Runner progress is available below while it works.
+              The executor’s and the reviewer’s own words appear here as they
+              say them, the latest at the bottom.
             </p>
           )}
         </div>
@@ -484,7 +539,7 @@ export function OutputScreen(context: TaskContext) {
                 Changed files are available after the runner seals this attempt.
               </p>
             )}
-            {output.data?.diff && (
+            {output?.data?.diff && (
               <details className="evidence-details" open={tab === "Changes"}>
                 <summary>Retained diff · latest attempt</summary>
                 <pre>{output.data.diff}</pre>
@@ -495,7 +550,7 @@ export function OutputScreen(context: TaskContext) {
       </div>
       {tab !== "Transcript" && (
         <div className="output-records">
-          {output.data?.transcript && (
+          {output?.data?.transcript && (
             <details className="evidence-details">
               <summary>Raw provider record · latest attempt</summary>
               <pre>{output.data.transcript}</pre>
@@ -523,16 +578,23 @@ export function OutputScreen(context: TaskContext) {
           </details>
         </div>
       )}
-      {output.error && (
+      {output?.error && (
         <Notice tone="danger">{errorMessage(output.error)}</Notice>
       )}
-      {output.data?.notes.map((note) => (
+      {output?.data?.notes.map((note) => (
         <Notice key={note}>{note}</Notice>
       ))}
+      {/* The highlighted action at the bottom right. */}
       <PageFooter>
-        <Button variant="primary" onClick={() => show("loop")}>
-          Back to the loop
-        </Button>
+        <button
+          className="text-button mono small"
+          onClick={() =>
+            action.mutate({ kind: "export", repoId, key: ticket.key })
+          }
+        >
+          Export kept evidence
+        </button>
+        <span className="spacer" />
         <Button
           onClick={() => {
             void navigator.clipboard
@@ -550,15 +612,9 @@ export function OutputScreen(context: TaskContext) {
         >
           {copied ? "Copied" : "Copy transcript"}
         </Button>
-        <span className="spacer" />
-        <button
-          className="text-button mono small"
-          onClick={() =>
-            action.mutate({ kind: "export", repoId, key: ticket.key })
-          }
-        >
-          Export kept evidence
-        </button>
+        <Button variant="primary" onClick={() => show("loop")}>
+          Back to the loop
+        </Button>
       </PageFooter>
       {action.error && (
         <Notice tone="danger">{errorMessage(action.error)}</Notice>
@@ -577,9 +633,35 @@ export function MergeScreen(context: TaskContext) {
       repo,
       busy,
       elapsed,
+      jobs,
     } = taskRecords(context);
   const action = useAction(),
-    [opened, setOpened] = useState(false);
+    [opened, setOpened] = useState(false),
+    [pressed, setPressed] = useState<string | null>(null);
+  const url = ticket.delivery.pull_request_url;
+  // No pull request yet: the branch the run retained, which the press
+  // publishes first, or why there is none (D-NEW-publish-a-retained-branch-later).
+  const retained = url ? null : retainedBranch(ticket);
+  const publishing = jobs.filter((job) => job.kind === "publish").at(-1);
+  const publishingNow = publishing !== undefined && isLive(publishing);
+  const pressedState = publishing?.id === pressed ? publishing.state : null;
+  const mergeable = Boolean(url) || (retained?.refusal === null && !busy);
+  const merge = () => {
+    if (url)
+      void action
+        .mutateAsync({ kind: "openPullRequest", repoId, key: ticket.key })
+        .then(() => setOpened(true))
+        .catch(() => undefined);
+    else
+      void action
+        .mutateAsync({ kind: "publish", repoId, key: ticket.key })
+        .then((job) => setPressed((job as Job).id))
+        .catch(() => undefined);
+  };
+  // The host opens the pull request in the browser once it is published.
+  useEffect(() => {
+    if (pressedState === "completed") setOpened(true);
+  }, [pressedState]);
   const verified =
     review?.coverage.filter(
       (row) =>
@@ -589,28 +671,24 @@ export function MergeScreen(context: TaskContext) {
   useEffect(() => {
     if (opened && ticket.delivery.state === "merged") show("complete");
   }, [opened, ticket.delivery.state, show]);
-  useShortcut(
-    "openPullRequest",
-    ticket.delivery.pull_request_url
-      ? () => {
-          void action
-            .mutateAsync({ kind: "openPullRequest", repoId, key: ticket.key })
-            .then(() => setOpened(true))
-            .catch(() => undefined);
-        }
-      : null,
-  );
+  useShortcut("openPullRequest", mergeable ? merge : null);
   return (
     <section className="screen" data-screen="s16">
       <TaskHeader {...context} />
       <div className="merge-body">
         <div className="merge-question">
           <div>
-            <h1>Merge?</h1>
+            <h1>{retained?.refusal ? "Nothing to merge" : "Merge?"}</h1>
             <p className="muted">
-              The pull request is open on your branch. perbo will not merge it
-              — the thing that wrote this code and the thing that reviewed it
-              are the same system, so the last call is yours.
+              {retained?.refusal
+                ? `${retained.refusal}.`
+                : (url
+                    ? "The pull request is open on your branch."
+                    : `The run kept ${retained?.branch} on this machine and has not pushed it. ` +
+                      "Merge on GitHub pushes it and opens its pull request with the run's review, " +
+                      "running and reviewing nothing again, then takes you there.") +
+                  " perbo will not merge it — the thing that wrote this code and the thing that " +
+                  "reviewed it are the same system, so the last call is yours."}
             </p>
           </div>
           <div className="merge-score">
@@ -685,26 +763,24 @@ export function MergeScreen(context: TaskContext) {
             Deployment and outcome are opt-in, and not on this screen.
           </span>
         </div>
+        {/* The highlighted action at the far right. */}
         <div className="merge-actions">
-          <Button
-            variant="primary"
-            disabled={!ticket.delivery.pull_request_url}
-            onClick={() => {
-              void action
-                .mutateAsync({
-                  kind: "openPullRequest",
-                  repoId,
-                  key: ticket.key,
-                })
-                .then(() => setOpened(true))
-                .catch(() => undefined);
-            }}
-          >
+          <Button onClick={() => show("review")}>Back to review</Button>
+          {url && <Button onClick={() => show("called-off")}>Don’t merge</Button>}
+          <Button variant="primary" disabled={!mergeable} onClick={merge}>
             Merge on GitHub
           </Button>
-          <Button onClick={() => show("called-off")}>Don’t merge</Button>
-          <Button onClick={() => show("review")}>Back to review</Button>
         </div>
+        {!url && publishingNow && (
+          <div className="scope-message" role="status">
+            <span className="spacer">
+              Pushing {ticket.delivery.branch} and opening its pull request.
+            </span>
+          </div>
+        )}
+        {!url && publishing?.state === "failed" && (
+          <Notice tone="danger">{cliSentence(publishing.error ?? publishing.log)}</Notice>
+        )}
         {opened && (
           <div className="scope-message">
             <span className="spacer">

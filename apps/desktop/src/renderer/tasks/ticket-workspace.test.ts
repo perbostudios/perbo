@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { TicketStateSchema } from "@perbo/contracts";
-import { homeOrder, homeRows, homeTally, homeTone, projectTicket } from "./ticket-workspace.js";
+import { homeOrder, homeRows, homeTally, homeTone, projectTicket, unseenAttention } from "./ticket-workspace.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import type { Job } from "../../shared/protocol.js";
 
@@ -223,7 +223,7 @@ describe("where a Home ticket stands", () => {
 });
 
 describe("Home's order", () => {
-  it("puts completed first, then decisions, then stops, then running, each most recently opened first", async () => {
+  it("puts a merge still to decide first, then decisions, stops and running, and every decided merge last, each most recently opened first", async () => {
     const { workspace, row: template, job } = await fixture();
     /** A ticket in this state, admitted then, and opened then where it was. */
     const ticket = (name: string, state: string, admitted: string, opened: string | null) => {
@@ -249,10 +249,10 @@ describe("Home's order", () => {
       ticket("stopped, never opened, admitted last", "cancelled", "6", null),
       ticket("decision, opened", "changes_requested", "3", "0"),
       ticket("merged, opened later", "merged", "4", "3"),
+      ticket("closed without merge, opened last", "closed", "5", "8"),
     ];
     workspace.jobs = [{ ...job, key: rows[0]!.ticket.key, state: "running", endedAt: null, error: null }];
     expect(homeOrder(workspace, rows, "opened").map((row) => row.ticket.title)).toEqual([
-      "merged, opened later",
       "waiting on the merge, opened earlier",
       "decision, opened",
       "decision, never opened",
@@ -260,16 +260,19 @@ describe("Home's order", () => {
       "stopped, never opened, admitted last",
       "stopped, never opened, admitted first",
       "running",
+      // However recently opened, a decided merge stays under every other group.
+      "closed without merge, opened last",
+      "merged, opened later",
     ]);
     // Opening one moves it to the top of its colour, and nowhere else.
     workspace.lastOpened = { ...workspace.lastOpened, [rows[1]!.repoId + ":" + rows[1]!.ticket.key]: "2026-09-29T09:00:00.000Z" };
-    expect(homeOrder(workspace, rows, "opened").map((row) => row.ticket.title).slice(4, 7)).toEqual([
+    expect(homeOrder(workspace, rows, "opened").map((row) => row.ticket.title).slice(3, 6)).toEqual([
       "stopped, never opened, admitted first",
       "stopped, opened",
       "stopped, never opened, admitted last",
     ]);
   });
-  it("orders by colour first and then by age, newest or oldest", async () => {
+  it("orders by group first and then by age, newest or oldest", async () => {
     const { workspace, row: template } = await fixture();
     workspace.tasks = [];
     workspace.jobs = [];
@@ -287,12 +290,59 @@ describe("Home's order", () => {
       ticket("merged, older", "merged", "2"),
       ticket("decision", "changes_requested", "9"),
       ticket("stopped, newer", "failed", "5"),
-      ticket("merged, newer", "merged", "6"),
+      ticket("closed, newer", "closed", "6"),
+      ticket("waiting on the merge", "pr_open", "3"),
     ];
     // Recently opened orders on openings, which these have none of, so the age decides here alone.
     workspace.lastOpened = { [rows[1]!.repoId + ":" + rows[1]!.ticket.key]: "2026-09-20T09:00:00.000Z" };
     const titles = (by: "newest" | "oldest") => homeOrder(workspace, rows, by).map((row) => row.ticket.title);
-    expect(titles("newest")).toEqual(["merged, newer", "merged, older", "decision", "stopped, newer", "stopped, older"]);
-    expect(titles("oldest")).toEqual(["merged, older", "merged, newer", "decision", "stopped, older", "stopped, newer"]);
+    expect(titles("newest")).toEqual(["waiting on the merge", "decision", "stopped, newer", "stopped, older", "closed, newer", "merged, older"]);
+    expect(titles("oldest")).toEqual(["waiting on the merge", "decision", "stopped, older", "stopped, newer", "merged, older", "closed, newer"]);
+  });
+});
+
+describe("a Home ticket's claim on the person", () => {
+  /** A ticket moved into `state` at `moved`, opened at `opened` where it was. */
+  async function claim(state: string, moved: string, opened: string | null) {
+    const { workspace, row, job } = await fixture();
+    workspace.tasks = [row];
+    row.ticket.state = state as typeof row.ticket.state;
+    row.ticket.delivery.pull_request_url = "https://github.com/example/repo/pull/1";
+    row.ticket.history = [
+      { at: "2026-09-01T09:00:00.000Z", from: null, to: "ready", note: "approved" },
+      { at: moved, from: "ready", to: row.ticket.state, note: "moved" },
+    ];
+    row.ticket.updated_at = moved;
+    workspace.lastOpened = opened === null ? {} : { [row.repoId + ":" + row.ticket.key]: opened };
+    return { workspace, row, job };
+  }
+  it.each(["changes_requested", "failed", "pr_open"])("is owed by %s until the ticket is opened after it came to stand there", async (state) => {
+    const fresh = await claim(state, "2026-09-10T09:00:00.000Z", null);
+    expect(unseenAttention(fresh.workspace, fresh.row)).toBe(true);
+    const before = await claim(state, "2026-09-10T09:00:00.000Z", "2026-09-09T09:00:00.000Z");
+    expect(unseenAttention(before.workspace, before.row)).toBe(true);
+    const after = await claim(state, "2026-09-10T09:00:00.000Z", "2026-09-10T09:05:00.000Z");
+    expect(unseenAttention(after.workspace, after.row)).toBe(false);
+    // Coming to stand there again after that opening owes it again.
+    after.row.ticket.history.push({ at: "2026-09-11T09:00:00.000Z", from: after.row.ticket.state, to: after.row.ticket.state, note: "again" });
+    expect(unseenAttention(after.workspace, after.row)).toBe(true);
+  });
+  it.each(["merged", "closed", "done"])("is never owed by a ticket whose merge is decided (%s), opened or not", async (state) => {
+    const { workspace, row } = await claim(state, "2026-09-10T09:00:00.000Z", null);
+    expect(homeTone(workspace, row)).toBe("green");
+    expect(unseenAttention(workspace, row)).toBe(false);
+  });
+  it("is never owed by a ticket the loop is running", async () => {
+    const { workspace, row, job } = await claim("executing", "2026-09-10T09:00:00.000Z", null);
+    workspace.jobs = [{ ...job, state: "running", endedAt: null, error: null }];
+    expect(unseenAttention(workspace, row)).toBe(false);
+  });
+  it("dates a run that stopped short from when it ended, not from when its ticket last moved", async () => {
+    const { workspace, row, job } = await claim("executing", "2026-09-10T09:00:00.000Z", "2026-09-10T09:30:00.000Z");
+    workspace.jobs = [{ ...job, startedAt: "2026-09-10T09:00:00.000Z", endedAt: "2026-09-10T10:00:00.000Z" }];
+    expect(homeTone(workspace, row)).toBe("red");
+    expect(unseenAttention(workspace, row)).toBe(true);
+    workspace.lastOpened = { [row.repoId + ":" + row.ticket.key]: "2026-09-10T10:01:00.000Z" };
+    expect(unseenAttention(workspace, row)).toBe(false);
   });
 });

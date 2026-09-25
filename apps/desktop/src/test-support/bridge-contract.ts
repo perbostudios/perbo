@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busyMessage, lane } from "../shared/jobs.js";
 import { ChangeSchema, INTERVIEW_NEEDS_A_TITLE } from "../shared/protocol.js";
+import { runnerProgress, spokenWords } from "../shared/runner-progress.js";
 import type { Change, DesktopBridge, Job } from "../shared/protocol.js";
 
 /**
@@ -198,9 +199,38 @@ export function describeBridgeContract(name: string, setup: () => Promise<Contra
       expect((await row()).ticket.state).toBe(before.ticket.state);
     });
 
-    it("refuses to stop a command that has already stopped", async () => {
-      const { bridge } = subject;
+    it("tells a live run's progress as it is printed: the stages it reaches and the executor's words, in order", async () => {
       const held = running!;
+      /** The held run as the last progress change told it. */
+      const told = (): Job | undefined =>
+        subject.changes
+          .filter((change) => change.kind === "progress" && change.job.id === held.id)
+          .map((change) => (change as Extract<Change, { kind: "progress" }>).job)
+          .at(-1);
+      let log = "";
+      for (let count = 0; count < 250; count++) {
+        const job = told();
+        log = job?.log ?? "";
+        if (job?.state === "running" && spokenWords(log).length > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      // A stage the run reached, and after it the executor's own words.
+      expect(runnerProgress(log), log).not.toBeNull();
+      expect(spokenWords(log)[0], log).toMatchObject({ speaker: "executor" });
+      const lines = log.split("\n").map((line) => line.trim());
+      expect(lines.findIndex((line) => line.startsWith("executor says: "))).toBeGreaterThan(
+        lines.findIndex((line) => line === "executing"),
+      );
+    }, 30_000);
+
+    it("stops a run leaving its ticket where the run left it, with no row for the stop, and refuses to stop it again", async () => {
+      const { bridge, repoId, runnableKey } = subject;
+      const held = running!;
+      const ticket = async () =>
+        (await bridge.request({ kind: "snapshot" })).tasks.find(
+          (entry) => entry.repoId === repoId && entry.ticket.key === runnableKey,
+        )!.ticket;
+      const before = await ticket();
       await bridge.request({ kind: "cancel", jobId: held.id });
       for (let count = 0; count < 400; count++) {
         const job = (await bridge.request({ kind: "snapshot" })).jobs.find(
@@ -209,6 +239,8 @@ export function describeBridgeContract(name: string, setup: () => Promise<Contra
         if (!job || !["running", "stopping"].includes(job.state)) break;
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
+      const after = await ticket();
+      expect({ state: after.state, history: after.history }).toEqual({ state: before.state, history: before.history });
       await expect(bridge.request({ kind: "cancel", jobId: held.id })).rejects.toThrow(
         new Error("That command is no longer active."),
       );

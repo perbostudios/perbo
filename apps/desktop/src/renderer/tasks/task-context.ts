@@ -1,6 +1,8 @@
 import { formatUsd } from "@perbo/contracts/browser";
 import type { ProhibitedAction } from "@perbo/contracts";
 import { isRun } from "../../shared/jobs.js";
+import { spokenWords } from "../../shared/runner-progress.js";
+import { retainedOutput, type TranscriptEntry } from "./retained-output.js";
 import type { AttemptView, Detail, Job, OpenDraft } from "../../shared/protocol.js";
 import type { PageProps, TaskView } from "../shell/route.js";
 import { projectTicket } from "./ticket-workspace.js";
@@ -88,6 +90,52 @@ export function pendingScope(
   if (same(draft.scope.paths, scope.paths_allowed) && same(draft.scope.prohibited, scope.paths_prohibited))
     return null;
   return { allowed: draft.scope.paths, prohibited: draft.scope.prohibited };
+}
+
+/** One attempt of a run and its retained transcript: `undefined` until it is read, `null` where none was retained. */
+export interface AttemptTranscript {
+  attempt: AttemptView;
+  transcript: string | null | undefined;
+}
+
+/**
+ * What the Watch page's transcript lists: the executor's and the reviewer's
+ * own words, oldest first so the latest is at the bottom, and never a row for
+ * a tool call.
+ *
+ * While a run is live they are read from its log as the CLI prints them, each
+ * turn as it arrives. Once none is, they are rebuilt from the records of each
+ * attempt of the latest run, in order: each turn its retained transcript holds
+ * of the executor's own session, then each finding the reviewer filed that the
+ * review of that attempt left open, in its own words — the lines the run
+ * printed for them as it went. A finding the runner states itself, such as a
+ * flaky check, is the runner's line and not the reviewer's words, so it is not
+ * listed. The last run's log stands in until every attempt's transcript is
+ * read, and where no attempt retained the executor's words while the log holds
+ * some; the records stand where the log holds nothing.
+ */
+export function watchTranscript(
+  jobs: readonly Job[],
+  active: Job | undefined,
+  attempts: readonly AttemptTranscript[],
+): TranscriptEntry[] {
+  const fromLog = (job: Job | undefined): TranscriptEntry[] =>
+    spokenWords(job?.log ?? "").map(({ speaker, words }) =>
+      speaker === "executor"
+        ? { author: "Executor", label: "message", text: words }
+        : { author: "Reviewer", label: "finding", text: words },
+    );
+  if (active !== undefined && isRun(active)) return fromLog(active);
+  const logged = fromLog(jobs.filter(isRun).at(-1));
+  if (attempts.some(({ transcript }) => transcript === undefined)) return logged;
+  const spoken = attempts.map(({ transcript }) => retainedOutput(transcript).entries);
+  const recorded = attempts.flatMap(({ attempt }, at) => [
+    ...spoken[at]!,
+    ...(attempt.review?.findings ?? [])
+      .filter((finding) => finding.status === "open" && finding.source !== "deterministic")
+      .map((finding) => ({ author: "Reviewer", label: "finding", text: finding.statement })),
+  ]);
+  return spoken.some((entries) => entries.length > 0) || logged.length === 0 ? recorded : logged;
 }
 
 /** A rule's or a reason's name in words: `wall_clock_exceeded` reads "wall clock exceeded". Only ever a name, never a path or a command. */
@@ -337,7 +385,7 @@ export function runEnding(
  * error or a blocking check, and its last line, which is where it says what it
  * did about them.
  */
-function cliSentence(error: string): string {
+export function cliSentence(error: string): string {
   const lines = error.split("\n").map((line) => line.trim()).filter(Boolean);
   const marked = (line: string): boolean => /^(error|blocking)\b/.test(line);
   const said = lines.filter(marked).map((line) => line.replace(/^error:\s*/, "").replace(/^blocking\s+/, ""));

@@ -92,6 +92,8 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       injected.push(session!.injectItems(threadId!, REBRIEF));
     },
     onSubagentStarted: () => undefined,
+    spoke: () => undefined,
+    rootThread: () => null,
   });
   session = new CodexExecutorSession({
     binary,

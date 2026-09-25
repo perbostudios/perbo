@@ -110,7 +110,7 @@ describe("the conversation an editing session keeps", () => {
     revision: 0,
     resumeNew: false,
     lastPane: null,
-    lastView: null,
+    confirmed: null, impact: null,
     specCut: null,
     named: null,
     drift: null,

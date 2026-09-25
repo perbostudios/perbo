@@ -13,7 +13,7 @@ import { EgressLog } from "../egress.js";
 const table = (limits: Record<string, number> = {}) =>
   LimitsTableSchema.parse({ organisation: "test", limits });
 
-function attempt(limits: Record<string, number> = {}) {
+function attempt(limits: Record<string, number> = {}, root: string | null = "root") {
   let now = 0;
   const ceilings = new AttemptCeilings(table(limits), () => now);
   const recorded: CodexItem[] = [];
@@ -22,6 +22,7 @@ function attempt(limits: Record<string, number> = {}) {
   const transcript: string[] = [];
   const rebriefs: (string | null)[] = [];
   const subagentsStarted: { parent: string | null; child: string }[] = [];
+  const spoken: string[] = [];
   const handle = codexNotificationHandler({
     ceilings,
     items: new Map(),
@@ -33,6 +34,8 @@ function attempt(limits: Record<string, number> = {}) {
     progress: (line) => lines.push(line),
     rebrief: (threadId) => rebriefs.push(threadId),
     onSubagentStarted: (parent, child) => subagentsStarted.push({ parent, child }),
+    spoke: (words) => spoken.push(words),
+    rootThread: () => root,
   });
   return {
     ceilings,
@@ -43,6 +46,7 @@ function attempt(limits: Record<string, number> = {}) {
     transcript,
     rebriefs,
     subagentsStarted,
+    spoken,
     at: (value: number) => (now = value),
   };
 }
@@ -86,6 +90,12 @@ describe("what else the handler does with a tool item", () => {
     expect(lines).toEqual(["Codex pnpm test"]);
     expect(transcript).toHaveLength(1);
     expect(transcript[0]).toContain('"method":"item/completed"');
+  });
+
+  it("announces a command on one line, so a newline in it cannot print a line that reads as a stage", () => {
+    const { handle, lines } = attempt();
+    handle("item/started", { item: command("c1", "echo done\nreview round 2\r\n  executing") });
+    expect(lines).toEqual(["Codex echo done review round 2 executing"]);
   });
 
   it("stops the attempt at a command naming a host outside the allow-list", () => {
@@ -142,5 +152,41 @@ describe("what the handler does with a subagent's own activity (D-106)", () => {
       item: { id: "sa2", type: "subAgentActivity", kind: "interacted", agentThreadId: "child-1" },
     });
     expect(subagentsStarted).toEqual([]);
+  });
+});
+
+describe("what the handler does with a message", () => {
+  it("hands the root thread's completed message to be said, no subagent's, and nothing on its start", () => {
+    const { handle, spoken, lines } = attempt();
+    handle("item/started", { threadId: "root", item: { id: "m1", type: "agentMessage", text: "" } });
+    handle("item/completed", { threadId: "root", item: { id: "m1", type: "agentMessage", text: "Reading the mailer." } });
+    handle("item/completed", { threadId: "child-1", item: { id: "m2", type: "agentMessage", text: "A child summary." } });
+    handle("item/completed", { threadId: "root", item: { id: "m3", type: "agentMessage", text: "" } });
+    expect(spoken).toEqual(["Reading the mailer."]);
+    // The line is the adapter's to print; the handler prints none itself.
+    expect(lines).toEqual([]);
+  });
+
+  it("records a subagent's items marked as its own, and the root thread's unmarked (D-106)", () => {
+    const { handle, transcript } = attempt();
+    handle("item/completed", { threadId: "root", item: { id: "m1", type: "agentMessage", text: "Reading the mailer." } });
+    handle("item/completed", { threadId: "child-1", item: { id: "m2", type: "agentMessage", text: "A child summary." } });
+    handle("item/completed", { threadId: "child-1", item: command("c1", "pnpm test") });
+    expect(transcript.map((line) => (JSON.parse(line) as { subagent?: boolean }).subagent)).toEqual([
+      undefined,
+      true,
+      true,
+    ]);
+  });
+
+  it("marks nothing before the root thread is known, or on an item that names no thread", () => {
+    const early = attempt({}, null);
+    early.handle("item/completed", { threadId: "child-1", item: { id: "m1", type: "agentMessage", text: "Early." } });
+    expect(early.transcript[0]).not.toContain('"subagent"');
+    expect(early.spoken).toEqual(["Early."]);
+    const unnamed = attempt();
+    unnamed.handle("item/completed", { item: { id: "m2", type: "agentMessage", text: "Unnamed." } });
+    expect(unnamed.transcript[0]).not.toContain('"subagent"');
+    expect(unnamed.spoken).toEqual(["Unnamed."]);
   });
 });

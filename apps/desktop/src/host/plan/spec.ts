@@ -20,7 +20,7 @@ import type { Ticket } from "@perbo/contracts";
 import { specFolder } from "../repository/config.js";
 import { perboPath } from "../repository/layout.js";
 import { safePath } from "../repository/paths.js";
-import { sectionsOf, titleChanged } from "../../shared/contract-editing.js";
+import { sectionsOf, titleChanged, type SpecReader } from "../../shared/contract-editing.js";
 import { SPEC_SLUG } from "../../shared/protocol.js";
 import { specSlugOf } from "../../shared/spec-slug.js";
 import type { ContractEditing } from "../../shared/contract-editing.js";
@@ -57,20 +57,29 @@ export function specPath(repo: RegisteredRepository, slug: string): string {
 }
 
 /**
- * The title each spec states, by repository id and slug, for the drafts list
- * to name a planning by: null where the repository or the file has gone or
- * the file cannot be read.
+ * Each spec as its file states it, by repository id and slug — its title and
+ * its five sections — for the drafts list to name a planning by and to say
+ * whether its spec has moved since the contract was reached
+ * (D-NEW-basic-and-epic-flows): null where the
+ * repository or the file has gone or the file cannot be read.
  */
-export function specTitles(
-  repository: (id: string) => RegisteredRepository,
-): (repoId: string, slug: string) => string | null {
+export function specTexts(repository: (id: string) => RegisteredRepository): SpecReader {
   return (repoId, slug) => {
     try {
-      return readSpecText(specPath(repository(repoId), slug)).text.title;
+      const { text } = readSpecText(specPath(repository(repoId), slug));
+      return { title: text.title, sections: sectionsOf(text) };
     } catch {
       return null;
     }
   };
+}
+
+/** The title each spec states, as {@link specTexts} reads it. */
+export function specTitles(
+  repository: (id: string) => RegisteredRepository,
+): (repoId: string, slug: string) => string | null {
+  const read = specTexts(repository);
+  return (repoId, slug) => read(repoId, slug)?.title ?? null;
 }
 
 /**

@@ -3,7 +3,7 @@ import type { Detail, Snapshot, TaskRow } from "../../shared/protocol.js";
 import type { TaskView } from "../shell/route.js";
 import { runnerProgress } from "../../shared/runner-progress.js";
 import { exclusiveJob, heldRepository, isRun, ticketRun } from "../../shared/jobs.js";
-import { GIVEN_UP_STATES, JOURNEY_END_STATES, isFiled, isPreLoop } from "../../shared/archive.js";
+import { GIVEN_UP_STATES, JOURNEY_END_STATES, isFiled, isMergeDecided, isPreLoop } from "../../shared/archive.js";
 
 export const displayKey = (key: string): string => "#" + key.replace(/^PRB-/, "");
 export const stageName = (stage: number): string =>
@@ -19,12 +19,18 @@ const closureSchema = z.object({
 /** Where a Home ticket stands, in the order the rail's Home badge shows them. */
 export const HOME_TONES = ["yellow", "red", "green"] as const;
 export type HomeTone = (typeof HOME_TONES)[number];
-/** What a count of Home tickets at each tone says, on the rail's Home badge and in Home's header. */
+/**
+ * What a count of Home tickets at each tone says, on the rail's Home badge and
+ * in Home's header. Green there is a pull request waiting on the merge
+ * decision; "completed" is only ever a ticket whose merge is decided.
+ */
 export const HOME_TONE_LABELS: Record<HomeTone, (count: number) => string> = {
   yellow: (count) => `${count} ${count === 1 ? "ticket needs" : "tickets need"} action`,
   red: (count) => `${count} stopped`,
-  green: (count) => `${count} completed`,
+  green: (count) => `${count} waiting on your merge decision`,
 };
+/** What a count of Home tickets whose merge is decided says in Home's header. */
+export const completedLabel = (count: number): string => `${count} completed`;
 
 /**
  * Where a Home ticket stands (S4), the one answer its card's colour, the
@@ -59,13 +65,28 @@ export function homeTone(
 export const homeRows = (workspace: Pick<Snapshot, "tasks" | "archived" | "jobs">): TaskRow[] =>
   workspace.tasks.filter((row) => !isFiled(workspace, row) && !isPreLoop(row));
 
-/** Home's order, top to bottom: completed, a decision waiting on the person, stopped, then running. */
-const HOME_ORDER: readonly (HomeTone | null)[] = ["green", "yellow", "red", null];
+/**
+ * The group a Home ticket stands in: `decided` once its merge is decided,
+ * merged or closed without merge, under every colour; otherwise its colour,
+ * or none while the loop carries it.
+ */
+export type HomeGroup = HomeTone | "decided" | null;
+export const homeGroup = (
+  workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
+  row: Pick<TaskRow, "repoId" | "ticket">,
+): HomeGroup => (isMergeDecided(row) ? "decided" : homeTone(workspace, row));
 
 /**
- * Home's tickets by where each stands, in `HOME_ORDER`, and within a colour by
+ * Home's order, top to bottom: a pull request waiting on the merge decision,
+ * a decision waiting on the person, stopped, running, and last every ticket
+ * whose merge is decided.
+ */
+const HOME_ORDER: readonly HomeGroup[] = ["green", "yellow", "red", null, "decided"];
+
+/**
+ * Home's tickets by where each stands, in `HOME_ORDER`, and within a group by
  * `by`: `opened`, the one whose page was opened most recently first, a ticket
- * never opened coming after every opened one of its colour, the most recently
+ * never opened coming after every opened one of its group, the most recently
  * admitted first; `newest` or `oldest`, by when the ticket last moved.
  */
 export function homeOrder<Row extends Pick<TaskRow, "repoId" | "ticket">>(
@@ -73,7 +94,7 @@ export function homeOrder<Row extends Pick<TaskRow, "repoId" | "ticket">>(
   rows: readonly Row[],
   by: "opened" | "newest" | "oldest",
 ): Row[] {
-  const rank = (row: Row): number => HOME_ORDER.indexOf(homeTone(workspace, row));
+  const rank = (row: Row): number => HOME_ORDER.indexOf(homeGroup(workspace, row));
   // Never opened reads as "", which sorts after every opening.
   const opened = (row: Row): string => workspace.lastOpened?.[row.repoId + ":" + row.ticket.key] ?? "";
   return [...rows].sort(
@@ -88,17 +109,53 @@ export function homeOrder<Row extends Pick<TaskRow, "repoId" | "ticket">>(
   );
 }
 
-/** How many Home tickets stand at each tone. */
+/**
+ * How many Home tickets stand at each tone, and how many are completed: a
+ * ticket whose merge is decided counts as completed and at no tone.
+ */
 export function homeTally(
   workspace: Pick<Snapshot, "jobs" | "refreshingRepos">,
   rows: readonly Pick<TaskRow, "repoId" | "ticket">[],
-): Record<HomeTone, number> {
-  const tally = { yellow: 0, red: 0, green: 0 };
+): Record<HomeTone | "completed", number> {
+  const tally = { yellow: 0, red: 0, green: 0, completed: 0 };
   for (const row of rows) {
-    const tone = homeTone(workspace, row);
-    if (tone) tally[tone]++;
+    const group = homeGroup(workspace, row);
+    if (group) tally[group === "decided" ? "completed" : group]++;
   }
   return tally;
+}
+
+/**
+ * When the ticket came to stand where its colour says: the newest row of its
+ * history moving it into the state it holds, and for a stop the moment its
+ * last run ended, whichever is later.
+ */
+function attentionSince(
+  workspace: Pick<Snapshot, "jobs">,
+  row: Pick<TaskRow, "repoId" | "ticket">,
+  tone: HomeTone,
+): string {
+  const moved = row.ticket.history.findLast((entry) => entry.to === row.ticket.state)?.at ?? row.ticket.updated_at;
+  const ended = tone === "red" ? ticketRun(workspace, row).jobs.filter(isRun).at(-1)?.endedAt : null;
+  return ended && ended > moved ? ended : moved;
+}
+
+/**
+ * Whether this ticket needs the person and they have not opened it since it
+ * came to: yellow, red, or green with its merge decision still to make, whose
+ * page was last opened before it came to stand there, or never. A ticket whose
+ * merge is decided needs nobody. The rail's Home badge counts these, and each
+ * card carries a blue circle while it is one; opening the ticket clears it,
+ * and a ticket that comes to need the person again counts again (S4).
+ */
+export function unseenAttention(
+  workspace: Pick<Snapshot, "jobs" | "refreshingRepos" | "lastOpened">,
+  row: Pick<TaskRow, "repoId" | "ticket">,
+): boolean {
+  const tone = homeTone(workspace, row);
+  if (tone === null || isMergeDecided(row)) return false;
+  const opened = workspace.lastOpened?.[row.repoId + ":" + row.ticket.key];
+  return opened === undefined || opened < attentionSince(workspace, row, tone);
 }
 
 /** A read-only projection of one repository-qualified Ticket. It performs no reads or writes. */
@@ -143,7 +200,12 @@ export function projectTicket(
   const tone = homeTone(workspace, row);
   let screen: Exclude<TaskView, "auto">;
   if (requested === "output") screen = "output";
-  else if (["merge", "called-off"].includes(requested)) screen = ticket.delivery.pull_request_url ? requested as "merge" | "called-off" : "review";
+  // The merge screen follows the review whatever the ticket holds: it merges
+  // the pull request, opens it first where the run retained its branch, or
+  // says why neither (D-NEW-publish-a-retained-branch-later). Calling a merge
+  // off needs a pull request to leave open.
+  else if (requested === "merge") screen = "merge";
+  else if (requested === "called-off") screen = ticket.delivery.pull_request_url ? "called-off" : "review";
   else if (requested === "complete" && ticket.delivery.state === "merged") screen = "complete";
   else if (requested === "contract") screen = "contract";
   // The repository's files beside this contract, read-only: asked for from the
@@ -174,7 +236,7 @@ export function projectTicket(
     plan_review: "Criteria drafted and the contract is compiled, waiting for your approval before the loop starts.",
     ready: "The approved contract is ready. Start the loop when you are ready.",
     changes_requested: "A finding needs your judgement. Read the question and confirm your answer before the loop resumes.",
-    pr_open: ticket.delivery.pull_request_url ? "The pull request is open. Review the evidence and make the merge decision on GitHub." : "The local run is complete. Review its retained changes and evidence. No pull request was created.",
+    pr_open: ticket.delivery.pull_request_url ? "The pull request is open. Review the evidence and make the merge decision on GitHub." : "The local run is complete and its branch is kept on this machine, not pushed. Review its changes and evidence; merging opens its pull request.",
     executing: "The agent is working in its own worktree. Watch its progress and inspect the output.",
     provisioning: "Materialising a clean worktree from the approved base.",
     verifying: "Running the pinned checks on the sealed change set. Their results will stay with the attempt.",

@@ -7,6 +7,7 @@ import { taskRecords } from "./task-context.js";
 import type { TaskContext } from "./task-context.js";
 import { TaskHeader } from "./LoopScreen.js";
 import { deletes, useCreate, useDiscardTicket, useSettle } from "../shell/create.js";
+import { draftedLanding } from "../planning/panes.js";
 
 /**
  * The page a stopped run lands on.
@@ -25,7 +26,8 @@ import { deletes, useCreate, useDiscardTicket, useSettle } from "../shell/create
  * attempt against it. Nothing here changes the lifecycle — the ticket stays
  * where the stop left it until one of the three is taken. At the other end of
  * the same row are the ways to the contract and to the agents' recorded
- * output, because this is the ticket's page for as long as it is stopped.
+ * output, because this is the ticket's page for as long as it is stopped, and
+ * the highlighted Continue the task at the far right.
  */
 export function StoppedScreen(context: TaskContext) {
   const { detail, repoId, navigate, show } = context;
@@ -96,7 +98,10 @@ export function StoppedScreen(context: TaskContext) {
     void bridge
       .request({ kind: "replan", repoId, key: ticket.key })
       .then((opened) => {
-        navigate({ page: "planning", sessionId: opened.sessionId, pane: opened.pane });
+        // Into the planning over the new plan, on the page that holds it: an
+        // epic's Graph, a basic ticket's contract
+        // (D-NEW-basic-and-epic-flows).
+        navigate(draftedLanding(opened));
         settle(release);
       })
       .catch((failure: unknown) => {
@@ -130,12 +135,13 @@ export function StoppedScreen(context: TaskContext) {
             {drafting ? "Drafting the plan…" : "Plan it again"}
           </Button>
         )}
-        <Button variant="primary" disabled={busy || action.isPending} onClick={carryOn}>
-          Continue the task
-        </Button>
         <span className="spacer" />
         <Button onClick={() => show("contract")}>Open the contract</Button>
         <Button onClick={() => show("output")}>Watch what the agents did</Button>
+        {/* The highlighted action at the far right. */}
+        <Button variant="primary" disabled={busy || action.isPending} onClick={carryOn}>
+          Continue the task
+        </Button>
       </div>
       {deleting && (
         <Dialog title={"Delete " + displayKey(ticket.key) + "?"} onClose={() => setDeleting(false)}>

@@ -3,6 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sampleBridge } from "./bridge.js";
 import { editing, job, sampleInterviews, saveSpec, snapshot, specFiles } from "./records.js";
 import type { EditingSession, Job } from "../shared/protocol.js";
+import { TICKET_TRANSITIONS } from "@perbo/contracts/browser";
+import { unseenAttention } from "../renderer/tasks/ticket-workspace.js";
 
 /**
  * Deleting a piece of work from the sample host refuses where the host's
@@ -178,7 +180,7 @@ it("moves a ticket on a principle with no finding answered, as the principle alo
   const digest = async () => (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
   // The run that stops for it was going to publish.
   await sampleBridge.request({ kind: "run", repoId, key, digest: await digest(), publish: true, approve: false, resumeFrom: null });
-  await vi.waitFor(() => expect(state()).not.toBe("executing"), { timeout: 5000 });
+  await vi.waitFor(() => expect(state()).not.toBe("provisioning"), { timeout: 5000 });
   const decided = await sampleBridge.request({
     kind: "decide",
     repoId,
@@ -188,6 +190,74 @@ it("moves a ticket on a principle with no finding answered, as the principle alo
     decisions: [],
   });
   expect(decided.publish).toBe(false);
-  await vi.waitFor(() => expect(state()).not.toBe("executing"), { timeout: 5000 });
+  await vi.waitFor(() => expect(state()).not.toBe("provisioning"), { timeout: 5000 });
   expect(state()).toBe("pr_open");
+});
+
+it("moves a ticket as the CLI does, along the lifecycle's own rows with a row of history each step, so one opened before it came to need the person owes it again", async () => {
+  const key = "PRB-412";
+  const ticket = () => snapshot.tasks.find((row) => row.ticket.key === key)!.ticket;
+  const from = ticket().state;
+  const before = ticket().history.length;
+  await sampleBridge.request({ kind: "ticketOpened", repoId, key });
+  const digest = (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
+  await sampleBridge.request({ kind: "run", repoId, key, digest, publish: false, approve: false, resumeFrom: null });
+  // Back through `ready`, then `provisioning` before the attempt.
+  expect(ticket().history.slice(before).map((row) => [row.from, row.to])).toEqual([[from, "ready"], ["ready", "provisioning"]]);
+  await vi.waitFor(() => expect(ticket().state).not.toBe("provisioning"), { timeout: 5000 });
+  const walked = ticket().history.slice(before);
+  expect(walked.map((row) => row.to)).toEqual(["ready", "provisioning", "executing", "verifying", "independent_review", ticket().state]);
+  for (const step of walked)
+    expect(TICKET_TRANSITIONS.some((row) => row.from === step.from && row.to === step.to), `${step.from} to ${step.to}`).toBe(true);
+  expect(walked.at(-1)).toMatchObject({ from: "independent_review", to: ticket().state, at: ticket().updated_at });
+  const board = await sampleBridge.request({ kind: "snapshot" });
+  expect(unseenAttention(board, board.tasks.find((row) => row.ticket.key === key)!)).toBe(true);
+  await sampleBridge.request({ kind: "ticketOpened", repoId, key });
+  const opened = await sampleBridge.request({ kind: "snapshot" });
+  expect(unseenAttention(opened, opened.tasks.find((row) => row.ticket.key === key)!)).toBe(false);
+});
+
+it("stops a run as the host does: the ticket stays where the run left it, with no row for the stop", async () => {
+  const key = "PRB-412";
+  const ticket = () => snapshot.tasks.find((row) => row.ticket.key === key)!.ticket;
+  const digest = (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
+  const run = await sampleBridge.request({ kind: "run", repoId, key, digest, publish: false, approve: false, resumeFrom: null });
+  const started = structuredClone(ticket());
+  expect(started.state).toBe("provisioning");
+  await sampleBridge.request({ kind: "cancel", jobId: run.id });
+  await vi.waitFor(() => expect(snapshot.jobs.find((each) => each.id === run.id)!.state).toBe("cancelled"), { timeout: 5000 });
+  expect(ticket()).toEqual(started);
+});
+
+it("refuses a run on a ticket the lifecycle gives no route back to ready, before any job opens", async () => {
+  const key = "PRB-412";
+  const row = snapshot.tasks.find((each) => each.ticket.key === key)!;
+  const refused = async (state: "cancelled" | "pr_open", delivery: "open" | "closed") => {
+    row.ticket = { ...row.ticket, state, delivery: { ...row.ticket.delivery, state: delivery } };
+    const before = structuredClone(row.ticket);
+    const jobs = snapshot.jobs.length;
+    const digest = (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
+    await expect(
+      sampleBridge.request({ kind: "run", repoId, key, digest, publish: false, approve: false, resumeFrom: null }),
+    ).rejects.toThrow(`PRB-412 is ${state}, which the lifecycle has no route out of back to ready.`);
+    expect(snapshot.jobs).toHaveLength(jobs);
+    expect(row.ticket).toEqual(before);
+  };
+  await refused("cancelled", "open");
+  // The rows out of pr_open but the merge are for a pull request GitHub closed.
+  await refused("pr_open", "open");
+});
+
+it("refuses a move the lifecycle has no row for, and leaves the ticket where it was", async () => {
+  const key = "PRB-412";
+  const row = snapshot.tasks.find((each) => each.ticket.key === key)!;
+  // An open pull request on a ticket still waiting on the person: no row takes it to merged.
+  row.ticket = { ...row.ticket, delivery: { ...row.ticket.delivery, state: "open" } };
+  const before = structuredClone(row.ticket);
+  const sync = await sampleBridge.request({ kind: "sync", repoId, key });
+  await vi.waitFor(() => expect(snapshot.jobs.find((each) => each.id === sync.id)!.state).toBe("failed"), { timeout: 5000 });
+  expect(snapshot.jobs.find((each) => each.id === sync.id)!.error).toBe(
+    "PRB-412 cannot move from changes_requested to merged: the lifecycle has no row for it.",
+  );
+  expect(row.ticket).toEqual(before);
 });

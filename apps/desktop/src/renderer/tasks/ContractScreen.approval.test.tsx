@@ -47,6 +47,8 @@ async function contextFor(criteria: AcceptanceCriterion[]): Promise<TaskContext>
   if (!("acceptance_criteria" in detail.contract))
     throw new Error("A criterion contract is required");
   detail.contract.acceptance_criteria = criteria;
+  // A flat plan, whose contract lists its criteria; an epic's shows its graph.
+  delete detail.contract.nodes;
   detail.attempts = [];
   workspace.jobs = [];
   return {
@@ -66,7 +68,7 @@ function captureEdits(context: TaskContext) {
   const original = bridge.request.bind(bridge);
   let session = EditingSessionSchema.parse({
     version: 1, id: crypto.randomUUID(), repoId: context.repoId, key: context.detail.ticket.key,
-    digest: context.detail.digest, revision: 0, resumeNew: false, lastPane: null, lastView: null, specCut: null, named: null, drift: null, change: null, phase: "editing", error: null,
+    digest: context.detail.digest, revision: 0, resumeNew: false, lastPane: null, confirmed: null, impact: null, specCut: null, named: null, drift: null, change: null, phase: "editing", error: null,
     operation: null, interviewModel: null, form: editingForm(context.workspace.settings, context.detail),
   });
   return vi.spyOn(bridge, "request").mockImplementation(

@@ -52,6 +52,31 @@ const REASON_LABELS: Record<ImpactReasonKind, string> = {
  */
 const IMPACT_ASKED = new Set<string>();
 
+/**
+ * The one reading of a planning's impact, asked here or by the checks a basic
+ * ticket's fresh plan is given (D-NEW-basic-and-epic-flows):
+ * the same query either way, so an answer those checks fetched is the one this
+ * pane opens on.
+ */
+export const impactQuery = (id: string) => ({
+  queryKey: ["impact", id],
+  queryFn: () => bridge.request({ kind: "impactRead", id }),
+  networkMode: "always" as const,
+  // `staleTime` alone holds a *loaded* answer still on window focus. It does
+  // not hold a failed one: `isStaleByTime` treats undefined data as stale
+  // regardless of `staleTime`, and a rejected ask never has data, so
+  // `refetchOnWindowFocus` must be off too or a failed ask would run `git
+  // ls-files` and a full `perbo index` again on every focus.
+  staleTime: Infinity,
+  refetchOnWindowFocus: false,
+  retry: false,
+});
+
+/** The plan's impact has been asked for, by the checks its draft was given, so the pane does not ask again. */
+export function impactAsked(id: string, key: string): void {
+  IMPACT_ASKED.add(`${id}:${key}`);
+}
+
 export function ImpactPane({ workspace, navigate, editor }: PageProps & { editor: Editor }) {
   const client = useQueryClient();
   const [failure, setFailure] = useState<string | null>(null);
@@ -60,19 +85,9 @@ export function ImpactPane({ workspace, navigate, editor }: PageProps & { editor
   const repository = workspace.repositories.find((entry) => entry.id === editor.repoId);
 
   const impact = useQuery({
-    queryKey: ["impact", session?.id ?? ""],
-    queryFn: () => bridge.request({ kind: "impactRead", id: session!.id }),
-    networkMode: "always",
+    ...impactQuery(session?.id ?? ""),
     // Asked for, never standing: the pane opens on what the last ask returned.
     enabled: asked && session !== null,
-    // `staleTime` alone holds a *loaded* answer still on window focus. It does
-    // not hold a failed one: `isStaleByTime` treats undefined data as stale
-    // regardless of `staleTime`, and a rejected ask never has data, so
-    // `refetchOnWindowFocus` must be off too or a failed ask would run `git
-    // ls-files` and a full `perbo index` again on every focus.
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-    retry: false,
   });
   const view: ImpactView | undefined = impact.data;
 

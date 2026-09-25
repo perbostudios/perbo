@@ -107,9 +107,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-101 — Create opens planning mode
 
 - Owner: Founder
-- Decision: Create moves into the desktop's rail, first (⌘1; Home ⌘2, Archive ⌘3, Settings ⌘4; ⌘N still creates). It opens planning mode for one piece of work: Spec, Explorer and Impact panes, with a Graph pane second, under Spec, once a plan has been drafted and divided into nodes; the chat is docked beside them. Planning mode also opens for any ticket in `plan_review`. Drafting, impact checks, file reads and the chat run alongside a run; runs, decisions and publishing still take one at a time.
+- Decision: Create moves into the desktop's rail, first (⌘1; Home ⌘2, Archive ⌘3, Settings ⌘4; ⌘N still creates). It opens planning mode for one piece of work: a Spec and an Explorer pane while the spec is written, and the panes a plan needs once one is drafted — for a plan divided into nodes a Graph second, under Spec, then Impact — with the contract as the last tab (D-NEW-basic-and-epic-flows); the chat is docked beside them. Planning mode also opens for any ticket in `plan_review`. Drafting, impact checks, file reads and the chat run alongside a run; runs, decisions and publishing still take one at a time.
 - Why: planning the next piece of work while the last one runs is what the queue is for.
-- Built: Create first in the rail with ⌘1 to ⌘4, the picker, planning mode over a contract editing session whose Spec pane holds the spec ([D-103](#d-103--a-spec-is-a-folder-in-the-repository-committed-first)) and offers no second way to start a plan beside it, with the Explorer and Graph panes beside it and the chat docked beside whichever is open, and planning alongside a run; the explorer's reads and the chat's three requests are answered outside the job list, so a run never holds one up, the picker opens planning mode over a ticket in `plan_review`; and the Impact pane, which checks once when the planning first has a plan and by its button after that, because its answer is a fresh index of the whole tracked tree, with the count of what falls outside also on the contract page, which is the last screen where a scope can still be widened, answered outside the job list with the explorer's reads.
+- Built: Create first in the rail with ⌘1 to ⌘4, the picker, planning mode over a contract editing session whose Spec pane holds the spec ([D-103](#d-103--a-spec-is-a-folder-in-the-repository-committed-first)) and offers no second way to start a plan beside it, with the Explorer and Graph panes beside it and the chat docked beside whichever is open but the contract and the Problems pane, and planning alongside a run; the explorer's reads and the chat's three requests are answered outside the job list, so a run never holds one up, the picker opens planning mode over a ticket in `plan_review`; and the Impact pane, which checks once when the planning first has a plan and by its button after that, because its answer is a fresh index of the whole tracked tree, with the count of what falls outside also on the contract page, which is the last screen where a scope can still be widened, answered outside the job list with the explorer's reads.
 
 ### D-102 — The chat is the person's own session
 
@@ -297,6 +297,12 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Decision: `perbo sync` moves a `pr_open` ticket to `closed` when GitHub reports its pull request closed and unmerged, and to `changes_requested`, with delivery `closed`, where the pull request carries a changes-requested review verdict. `closed` is terminal for the record, and the ticket can be run again.
 - Why: the record says what happened in a state, not in a printed line.
 
+### D-NEW-publish-a-retained-branch-later — A person publishes a retained branch later
+
+- Owner: Founder
+- Decision: a run that ended `approved` or `escalated` without publishing keeps its branch on the machine and opens nothing. A person's press publishes that branch later: `perbo run --ticket <KEY> --publish-retained`, or Merge on GitHub on the desktop's merge screen, which the review screen's Next always leads to. It goes through the same delivery a publishing run ends in: the runner pushes the branch and opens the pull request against the base with the review on record and the person's answers under it, holding the person's credential, then takes the merge step and reads the head's checks. The body is the one the run would have opened itself: its attempts, what each closure verification of them cost, read from the verification's bundle, and what the executor declined (D-065), which each attempt records at its seal. Nothing is executed or reviewed again, so the machine is asked for `git` and `gh` and nothing else. It refuses, and pushes nothing, where the ticket's last run did not end so, which is said before the machine is asked anything, where the ticket already has its pull request or its delivery is not the loop's own, where a run of the ticket holds its run lock, where no review or no attempt that sealed the judged commit is on record, where the run ended `escalated` and an attempt's record does not say what its executor declined, where the branch has moved past the commit the review judged, where the branch carries a commit the loop did not make, or where the base names no commit or has moved past what the run judged; each refusal names what it found, and `perbo run --ticket <KEY> --publish` judges what is there instead. The ticket stays in the state the run left it, and only its delivery record changes, written before the run lock is let go. On the desktop the press then opens the pull request in the browser, as it does where one is already open.
+- Why: a retained branch is a change the review has already judged, so publishing it takes a person's press and not another run; and what is published has to be exactly that change, with the pull request that run would have opened.
+
 ### D-041 — The person merges; a repository may let the loop merge
 
 - Owner: Founder
@@ -422,7 +428,7 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-097 — Perbo UI v2; the phone's surfaces follow pairing
 
 - Owner: Founder
-- Decision: the desktop follows the v2 boards (`design/perbo-v2`). The rail's settings pill holds General, Usage and Connections. General holds the name, the four moments the loop may interrupt a person, appearance and an away-from-keyboard hold. Usage reports a provider's plan windows only from the provider's own reply, and a spend ledger summed from retained attempts. Shortcuts are rebindable, except the two money bindings. Completed tickets, and tickets whose run stopped, stay on Home until archived by hand; a ticket the loop still carries, and a completed one whose pull request still waits on the merge decision, cannot be archived, and archiving is a desktop preference, never a ticket state. There is a dark theme, and motion is vendored from transitions.dev at a pinned commit. The desktop shows no forecast, and no phone surface until pairing lands; the phone boards are the target for that work.
+- Decision: the desktop follows the v2 boards (`design/perbo-v2`). The rail's settings pill holds General, Usage and Connections. General holds the name, the four moments the loop may interrupt a person, appearance and an away-from-keyboard hold. Usage reports a provider's plan windows only from the provider's own reply, and a spend ledger summed from retained attempts. Shortcuts are rebindable, except the two money bindings. Completed tickets, and tickets whose run stopped, stay on Home until archived by hand, and nothing archives one on its own; a ticket the loop still carries, and a completed one whose pull request still waits on the merge decision, cannot be archived, and archiving is a desktop preference, never a ticket state. A ticket whose merge is decided, merged or closed without merge, sits at the foot of Home under every colour, with a check mark in its progress wheel and Archive on its card as a stopped one has. The rail's Home badge counts only the tickets that need the person — a finding waiting on an answer, a stopped run, a pull request waiting on the merge decision — and have not been opened since they came to stand there, read from the ticket's own history and when its page was last opened; each such card carries a blue circle until it is opened, and a ticket that comes to need the person again counts again. There is a dark theme, and motion is vendored from transitions.dev at a pinned commit. The desktop shows no forecast, and no phone surface until pairing lands; the phone boards are the target for that work.
 - Why: nothing shown is invented; every number comes from a provider or the records.
 - Changes if: the desktop shows a number no provider reported, or a desktop preference changes a ticket's state.
 
@@ -755,11 +761,11 @@ This is the one home for the decisions that govern Perbo. Every other document c
   the same manner as drafting, and `driftDismiss`, which the host refuses for a session with no
   spec, no plan or an approved ticket, and clears the differences the host keeps; and the
   Problems pane between the plan and the contract, reached by every way from the plan to the
-  contract, which asks for the reading as it opens and goes on to the contract on its own when
+  contract, which asks for the reading as it opens and goes on to the contract tab on its own when
   nothing differs — problems resolved from another pane included — or the person went on before; where the reading finds differences the host
   keeps them on the planning until the person goes on with them open or the contract is approved;
-  the pane hides the chat, and while any of them is open it sits in the rail after Impact, labelled
-  "Problems" — resolved, it is only the step every Confirm passes through — and opening the ticket
+  the pane hides the chat, and while any of them is open it sits in the rail after Explorer and
+  Impact, labelled "Problems" (D-NEW-basic-and-epic-flows) — resolved, it is only the step every Confirm passes through — and opening the ticket
   from Home or the picker lands there (D-130); it puts one problem at a time — the first still open, as a card
   in the chat's own shape, recommended answer first and the person's own words last, with a
   counter in its corner reading "Problem 1 of N" and "N more after this" — whose bar at its foot posts the
@@ -771,9 +777,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
   either, because it read a plan the turn's answer had not reached yet; the same problem is put in the chat as an asked line in D-117's shape headed
   "Problem 1 of N", so it is answered from any other pane the same way and the same re-read
   follows; once none is open the pane says "Every problem is resolved" and offers "Confirm the
-  plan" at its foot, to the right of "Back to the plan" — the work is still being planned, and the button is the way on to the contract — and the
+  plan" — "Confirm contract" for a basic ticket — at its foot, to the right of "Back to the plan" — the work is still being planned, and the button is the way on to the contract — and the
   chat's note saying the same is words alone, because every pane the chat sits beside but the Spec
-  pane carries Confirm the plan already; a question the Architect raises of its own stands
+  pane and the contract carries that way on already; a question the Architect raises of its own stands
   ahead of that resolved state, on the page as the thing to answer, headed "A question from the
   Architect" with the counter hidden, and the way on is withheld on the page until
   it is answered and the plan read again; "Go on to the contract anyway"
@@ -786,10 +792,11 @@ This is the one home for the decisions that govern Perbo. Every other document c
   count and in its manner, advice and never a gate;
   `requirement_id` on every criterion an edit writes, including one an undo puts back, so a
   node's page names the requirement rather than telling the executor it was drafted from nothing;
-  the criteria whose verification the draft did not propose marked on the page that freezes them,
+  the criteria whose verification the draft did not propose marked on the page that freezes them —
+  on an epic's contract, which shows the graph, named under it —
   because approving is the last place a changed assertion can be read; and the last change to the
-  pair marked where the two are read — the Spec pane's reading, the Graph's node cards and
-  inspector, the Plan pane — additions green and removals red and struck through, kept on the
+  pair marked where the two are read — the Spec pane's reading and the Graph's node cards and
+  inspector — additions green and removals red and struck through, kept on the
   planning as what the spec's sections and the plan's outcome and criteria said before and after,
   recorded once a chat turn ends and once an edit by hand, a compile or a spec save lands, only
   where words differ and never for the first words put into an empty spec section or a plan just
@@ -881,33 +888,27 @@ This is the one home for the decisions that govern Perbo. Every other document c
 ### D-130 — Coming back to a planning is coming back to the pane
 
 - Owner: Founder
-- Decision: a planning reopens on the pane the person was last on in it, whether they left it for
-  Home, Archive or Settings or closed Perbo with it open. Every way back into a planning asks this
-  — the picker's rows, the ticket's own page, a link to the planning that names no pane, and the
-  contract's **Back to planning** — and it outranks where each of them would otherwise land: the
-  Graph for a divided plan, the Spec for a planning with no plan. Open problems outrank it in their
-  turn for the picker, the ticket's own page and a link with no pane: while a reading has problems
-  open, those land on the Problems pane (D-128). The
-  contract's way back is not held by them: it goes where the planning was left, else to the plan.
-  The ticket's own page and the contract's way back ask this only of the planning curating the
-  ticket, which is one with a graph it was divided into or a spec it was drafted from; a session
-  the ticket's own editor opened is not one, so that ticket stays on its own page. The reading
-  between the plan and the contract is not a pane a planning is left at, so it is never
-  remembered: every **Confirm the plan** passes through it, and
-  the pane remembered is the one the person confirmed from. Nor is a pane the planning does not
-  offer, reached by an address typed by hand. Where the pane left is one the planning no longer
-  offers — a Graph for a plan that is no longer divided — the way in lands where it otherwise
-  would. Moving between panes is not putting anything into a planning: it moves no revision, so a
-  planning opened fresh and only looked around in is still thrown away as the person leaves it
-  (D-129). A planning's contract is a place it is left at too: a
-  person who reached the contract of a plan still waiting for approval and left it, for anywhere or
-  by closing Perbo, comes back to the contract from the picker's row, the ticket's own page, a link
-  to the ticket that names no view and a restart, ahead of open problems and the pane, until
-  planning mode records a pane, which is then the last place. Until approval the rail keeps the
-  planning's panes on that contract, each a way back into the planning that lands on its own pane
-  and records it as any pane reached does. Once the plan is approved the
-  ticket's page lands by its state, and a stopped run on its stopped page; no other view of a
-  ticket is remembered, since each is where its state already sends the person.
+- Decision: a planning reopens on the pane the person was last on in it, the contract tab
+  included, whether they left it for Home, Archive or Settings or closed Perbo with it open. Every
+  way back into a planning asks this — the picker's rows, the ticket's own page and a link to the
+  planning that names no pane — and it outranks where each of them would otherwise land: the Graph
+  for an epic, the contract for a basic ticket, the Spec for a planning with no plan
+  (D-NEW-basic-and-epic-flows). Open problems outrank it in their turn: while a reading has
+  problems open, those land on the Problems pane (D-128). The ticket's own page asks this only of
+  the planning curating the ticket, which is one with a graph it was divided into or a spec it was
+  drafted from; a session the ticket's own editor opened is not one, so that ticket stays on its
+  own page. The reading between the plan and the contract is not a pane a planning is left at, so
+  it is never remembered: every **Confirm the plan** passes through it, and the pane remembered is
+  the one the person confirmed from. Nor is a pane the planning does not offer, reached by an
+  address typed by hand. Where the pane left is one the planning no longer offers — a Graph for a
+  plan that is no longer divided, or a contract that something has changed since — the way in lands
+  where it otherwise would. The contract of a plan waiting for approval is a tab of the planning
+  curating it, so a link to that contract, and the ticket's own page, open it there, with the
+  planning's tabs beside it, each a way back into the planning on its own pane. Moving between
+  panes is not putting anything into a planning: it moves no revision, so a planning opened fresh
+  and only looked around in is still thrown away as the person leaves it (D-129). Once the plan is
+  approved the ticket's page lands by its state, and a stopped run on its stopped page; no other
+  view of a ticket is remembered, since each is where its state already sends the person.
 - Why: a person who steps away mid-thought — to check a ticket on Home, or for the night — comes
   back to finish that thought, and a planning that reopens somewhere else makes them find their
   place again every time. The rule each way in lands by is a good guess at where a person is going
@@ -916,35 +917,80 @@ This is the one home for the decisions that govern Perbo. Every other document c
   because closing Perbo is not a leave the renderer sees, and a record written on the way out
   would be lost on exactly the exit it is for.
 - Built: `lastPane` on the contract editing session, null until a pane has been visited, and on
-  each open draft; `lastView` beside it, "contract" or null and null at birth, and on each open
-  draft, the one record of the contract being the last place, on the session because a ticket's
-  page is only ever sent away from its contract while a planning holds its plan; the
-  `editingContractVisited` request, which carries the session id alone and is recorded by
-  `visitContract` in `contract-editing.ts`, and `visit` clearing `lastView` as it records a pane,
-  neither moving the revision, the same on the native host and the sample host; `TaskPage` sending it
-  as the contract of a plan waiting for approval is shown and not being redirected, and landing on
-  that contract, ahead of its problems and `leftAt`, while `lastView` says so; the picker's row
-  for such a planning opening its ticket's page; `contractPlanning` in `renderer/shell/Rail.tsx`,
-  which keeps the curating planning's panes under Create on that contract until the plan is
-  approved, each navigating to the planning on its own pane; `PlanningPaneSchema` in the protocol, the one list of pane ids the record, the
-  routes and the rail share; the `editingVisited` request, which carries the session id and a pane
-  id and is recorded by `visit` in `contract-editing.ts`, leaving the revision alone and writing
-  nothing for the pane already recorded or for a discarded planning, the same on the native host and
-  the sample host; planning mode sending it once per pane it reaches, for a pane that `remembered` in
-  `renderer/planning/panes.ts` allows — every pane but the reading — and that `panesFor` offers;
-  `leftAt` there, which answers the recorded pane only where `panesFor` still offers it, and
-  `reopenPane`, which answers the Problems pane while problems are open, else `leftAt`, else the
-  Spec; the picker's rows, `TaskPage`'s redirect and planning mode's own route with no pane landing
-  by that order, the route replacing itself in the history with the pane it picks once the drafts
-  list names the planning; `curates` there, the one test of whether a planning curates its
-  ticket, which the contract screen finds its planning by and `TaskPage` asks before `leftAt`;
-  the contract's way back asking `leftAt` before the plan's own pane, whatever problems are open;
-  and the Spec pane's first read of the file keeping what was typed before it only in a field the
-  file leaves empty, so nothing typed replaces text of the file's the pane never showed.
-  A `workspace.json` holding a record that does not match the schema stops Perbo from starting,
-  with a message naming the file and each failing field, a failure shared by several records named
-  once with every index it holds at, and ending on what to do: correct the field or move the file
-  aside.
+  each open draft; `PlanningPaneSchema` in the protocol, the one list of pane ids the record, the
+  routes and the rail share, the contract among them; the `editingVisited` request, which carries
+  the session id and a pane id other than the contract and is recorded by `visit` in
+  `contract-editing.ts`, and `editingContractVisited`, which carries the session id and the state
+  the contract was reached at and is recorded by `visitContract`, each leaving the revision alone
+  and writing nothing for where the person already is or for a discarded planning, the same on the
+  native host and the sample host; planning mode sending one of them once per pane it reaches, for
+  a pane that `remembered` in `renderer/planning/panes.ts` allows — every pane but the reading —
+  and that `flowFor` offers; `leftAt` there, which answers the recorded pane only where `flowFor`
+  still offers it, and `reopenPane`, which answers the Problems pane while problems are open, else
+  `leftAt`, else the Spec; the picker's rows, `TaskPage`'s redirect and planning mode's own route
+  with no pane landing by that order, the route replacing itself in the history with the pane it
+  picks once the drafts list names the planning; `TaskPage` sending a contract asked for by name,
+  of a plan waiting for approval in the planning curating it, to that planning's contract tab;
+  `curates` there, the one test of whether a planning curates its ticket, which `TaskPage` asks
+  before `leftAt`; and the Spec pane's first read of the file keeping what was typed before it only
+  in a field the file leaves empty, so nothing typed replaces text of the file's the pane never
+  showed. A `workspace.json` holding a record that does not match the schema stops Perbo from
+  starting, with a message naming the file and each failing field, a failure shared by several
+  records named once with every index it holds at, and ending on what to do: correct the field or
+  move the file aside.
+
+### D-NEW-basic-and-epic-flows — Planning offers the tabs its plan needs
+
+- Owner: Founder
+- Decision: which tabs planning offers follows what is being planned. While the spec is being
+  written and there is no plan, the Spec and the Explorer are all there is: Impact, the Graph and
+  Problems wait for a plan, because a plan is what each of them is about. A plan the drafter
+  divides into a graph is an epic: Spec, Graph, Explorer, Impact, then Problems while a reading of
+  the plan against its spec has problems open (D-128); it lands on its Graph once drafted, and every
+  **Confirm the plan** goes through that reading to the contract. A plan it leaves flat is a basic
+  ticket: its criteria are drafted from the spec's requirements, each citing the one it answers
+  with a verification the drafter adds, and it has no graph to curate, so it has no Graph pane and
+  no pane of its own for the criteria, which are read and changed on its contract. When Generate
+  plan, or Start over, brings back a flat plan, the impact check and the reading of the plan
+  against the spec run side by side, and once both are back the person lands on Problems where
+  the reading found any, else on Impact where the check found paths outside the scope, else on the
+  contract, with a pop-up over that page saying the task is simple, so there is no graph, whose one
+  button, **Next**, puts it away. A basic ticket offers Spec and Explorer, then Impact only while
+  its last check found paths outside the scope and Problems while any are open, and its way on,
+  **Confirm contract**, goes through the same reading. The contract is the planning's last tab,
+  **Confirm contract**, shown while the person is on it and afterwards while nothing has changed
+  since they were — the spec's sections, a mark in the Explorer, an edit of the plan; once
+  something has, the tab goes until the change is checked again and the person reaches the
+  contract again, through the reading for either shape. The chat is not beside it. On it a basic
+  ticket's criteria are edited directly, each change written into the contract as it is made and
+  the plan read against the spec again, the person landing back on the contract where the two
+  still agree and on Problems where they do not; a direct edit carries no change marks, which are
+  the chat's (D-128). An epic's contract shows its graph in place of the criteria, read-only:
+  panned and zoomed, and changed only on the Graph pane. The ticket's contract after approval draws
+  the plan by the same rule, an epic's graph and a basic ticket's criteria, both read-only. Every
+  node on a graph, on the Graph pane and on a contract, says under its title how many criteria it
+  covers and the paths expected to satisfy them. Plan it again lands in the planning over the plan
+  it drafts: on its Graph for an epic, on its contract for a basic ticket (D-129).
+- Why: a pane with nothing to show is a stage a person goes looking into. Before a plan there is
+  nothing to measure impact against, and a flat plan has no division to curate: its criteria are
+  the one thing on it to change, and the contract, the page that freezes them, already shows them.
+  The pop-up says why the graph is missing at the moment it would be looked for. A contract kept as
+  a tab only while nothing has moved means that going back to it is always going back to a
+  contract that was checked.
+- Built: `flowFor` in `apps/desktop/src/renderer/planning/panes.ts`, the one rule for which tabs a
+  planning shows, which the rail draws and planning mode records against; `contractState` there,
+  the state a contract is reached at — the spec's sections, which each host fingerprints onto the
+  planning's open draft as `spec`, the ticket's `updated_at`, and the scope the planning holds —
+  recorded on the session as `confirmed` by `editingContractVisited` as the person arrives on the
+  contract tab, and compared on every draw; the session's `impact`, how many paths the last impact
+  check of its draft found outside the scope, written by both hosts as the check answers and
+  cleared by a fresh draft; `useDraftLanding` and `SimpleTaskNotice` in
+  `renderer/planning/SimpleTask.tsx`, which watch a draft settle, run a basic ticket's two checks
+  and land it by `checkedLanding`; `ContractPane`, the contract tab; `contractShows` in
+  `renderer/tasks/ContractScreen.tsx`, the one rule both contract pages draw the plan by;
+  `CriteriaEditor`, the criteria editing the ticket's own editor and a basic ticket's contract
+  share; `ContractGraph` and `nodeSummary` beside the Graph pane; and `draftedLanding`, where Plan
+  it again lands.
 
 ### D-131 — A planning starts from its repository's question
 

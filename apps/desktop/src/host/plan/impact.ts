@@ -12,7 +12,7 @@ import type { ImpactView } from "../../shared/protocol.js";
 
 /** What deriving the impact warnings needs of the rest of the host. */
 export interface ImpactDeps {
-  editing: Pick<ContractEditing, "read">;
+  editing: Pick<ContractEditing, "read" | "recordImpact">;
   repository(id: string): RegisteredRepository;
   cli: Pick<Cli, "run">;
   execute: Execute;
@@ -46,6 +46,10 @@ export interface ContractImpactDeps {
  * alone: `perbo index` reads the whole tree and has no never-read filter of
  * its own, so what keeps them off the screen is `impactReport` naming nothing
  * outside that list — inside a warning's sentence as much as in its path.
+ *
+ * How many paths it found outside the scope is written on the session, since
+ * a flat plan offers the Impact pane only where there are some, and the rail
+ * that offers it reads no report (D-NEW-basic-and-epic-flows).
  */
 export async function impactView(deps: ImpactDeps, id: string): Promise<ImpactView> {
   const session = deps.editing.read(id);
@@ -61,6 +65,7 @@ export async function impactView(deps: ImpactDeps, id: string): Promise<ImpactVi
     spec,
     index: await readSymbolIndex(deps.cli, repo),
   });
+  deps.editing.recordImpact(id, report.warnings.length + report.truncated);
   return { ...report, readAt: new Date().toISOString() };
 }
 

@@ -9,7 +9,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { App } from "./App.js";
 import type { Route, TaskView } from "./route.js";
@@ -18,6 +18,8 @@ import { runnerProgress } from "../../shared/runner-progress.js";
 import { HomePage } from "../tasks/HomePage.js";
 import { TaskPage } from "../tasks/TaskPage.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
+import { handlers } from "../../sample-host/handlers.js";
+import { editing as sampleEditing } from "../../sample-host/records.js";
 import { bridge } from "../workspace/index.js";
 import { isLive } from "../../shared/jobs.js";
 import { setPlatformForTests } from "../../shared/shortcuts.js";
@@ -216,55 +218,147 @@ describe("interactive desktop flows", () => {
     return opened.id;
   }
 
-  it("plans work that was not divided on its own pane, and carries an edit to the contract", async () => {
-    // The path for one piece of work after its spec is written: the plan
-    // drafted from it, the criteria it will be judged against, and the
-    // contract that freezes them. Work the drafter did not divide has no graph
-    // to curate, so its plan is those criteria — and Next is the way to the
-    // page where approving freezes them (D-100, D-103).
-    await planningWithSpec(
-      "Signup confirmation mail",
-      "New users receive a confirmation email within sixty seconds.",
-    );
+  /** The planning panes the rail draws, by name. */
+  const tabs = (): string[] =>
+    within(screen.getByRole("group", { name: "Planning panes" }))
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label") ?? "");
+  /** The sample host's impact check finding these paths outside the scope, as the host records them. */
+  function impactFinds(paths: string[]): void {
+    const original = handlers.impactRead;
+    vi.spyOn(handlers, "impactRead").mockImplementation(async (request, owner) => {
+      const view = await original(request, owner);
+      sampleEditing.recordImpact(request.id, paths.length);
+      return {
+        ...view,
+        warnings: paths.map((path) => ({ path, package: "packages/app", reasons: [{ kind: "config" as const, detail: "Configuration." }] })),
+        truncated: 0,
+      };
+    });
+  }
+
+  it("lands a flat plan on its contract once it is checked, says the task is simple there, and offers no graph (D-NEW-basic-and-epic-flows)", async () => {
+    // Work the drafter did not divide has no graph to curate: its plan is its
+    // criteria, and the contract is where they are read. The impact check and
+    // the reading against the spec run first; with nothing from either, the
+    // person lands on the contract, with a pop-up saying why there is no graph.
+    impactFinds([]);
+    const id = await planningWithSpec("Signup confirmation mail", "New users receive a confirmation email within sixty seconds.");
     mount();
+    // Before the plan: the Spec and the Explorer and nothing else.
+    await waitFor(() => expect(tabs()).toEqual(["Spec", "Explorer"]));
     await generatePlan();
     await screen.findByText("Drafting the plan from your spec");
+    await screen.findByText("Checking the plan", {}, { timeout: 5000 });
+    const notice = await screen.findByRole("dialog", { name: "A simple task" }, { timeout: 5000 });
+    expect(notice.textContent).toContain("The task is simple, so there is no graph.");
+    expect(location.hash).toMatch(/^#planning\/[^/]+\/contract$/);
+    // Both checks ran: the impact check, and the plan read against the spec.
+    const { key } = await sampleBridge.request({ kind: "editingRead", id });
+    expect((await sampleBridge.request({ kind: "snapshot" })).jobs.some((job) => job.kind === "drift" && job.key === key)).toBe(true);
+    expect(handlers.impactRead).toHaveBeenCalled();
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
+    expect(tabs()).toEqual(["Spec", "Explorer", "Confirm contract"]);
+    // No chat beside the contract: its criteria are the person's to edit.
+    expect(screen.queryByRole("complementary", { name: "Chat" })).toBeNull();
+    // Next only puts it away.
+    fireEvent.click(within(notice).getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "A simple task" })).toBeNull());
+    expect(location.hash).toMatch(/\/contract$/);
+    // Left for the Spec, the contract is still a tab while nothing has changed.
+    fireEvent.click(within(screen.getByRole("group", { name: "Planning panes" })).getByRole("button", { name: "Spec" }));
+    await waitFor(() => expect(location.hash).toMatch(/\/spec$/));
+    await waitFor(() => expect(tabs()).toEqual(["Spec", "Explorer", "Confirm contract"]));
+    expect(await screen.findByRole("complementary", { name: "Chat" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "A simple task" })).toBeNull();
+  });
 
-    // It lands on the plan, which for work that was not divided is the
-    // criteria — and the rail offers that rather than a graph with nothing in
-    // it.
-    await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-    await waitFor(() => expect(location.hash).toMatch(/\/criteria$/));
-    const panes = screen.getByRole("group", { name: "Planning panes" });
-    expect(within(panes).getByRole("button", { name: "Plan" })).toBeTruthy();
-    expect(within(panes).queryByRole("button", { name: "Graph" })).toBeNull();
+  it("takes the contract off the tabs once the spec changes, even while the person is on it", async () => {
+    // What keeps the contract a tab is the state it was reached at; a change
+    // made while the person reads it is still a change nobody has checked.
+    impactFinds([]);
+    const id = await planningWithSpec("Signup reminder mail", "New users receive a reminder email within a day.");
+    mount();
+    await generatePlan();
+    const notice = await screen.findByRole("dialog", { name: "A simple task" }, { timeout: 8000 });
+    fireEvent.click(within(notice).getByRole("button", { name: "Next" }));
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
+    await waitFor(async () =>
+      expect((await sampleBridge.request({ kind: "editingRead", id })).confirmed).not.toBeNull(),
+    );
+    const spec = await sampleBridge.request({ kind: "specRead", id });
+    const listed = () => client.getQueryData<Snapshot>(["workspace"])?.drafts?.find((draft) => draft.id === id)?.spec;
+    const before = listed();
+    expect(before).toBeTruthy();
+    await sampleBridge.request({
+      kind: "specSave",
+      id,
+      repoId: (await sampleBridge.request({ kind: "editingRead", id })).repoId,
+      title: spec.title,
+      sections: { ...spec.sections, notes: "Reminders go out in the morning." },
+      base: { title: spec.title, sections: spec.sections },
+    });
+    // The drafts list reads the spec again, with the person still on the contract.
+    await waitFor(() => expect(listed()).not.toBe(before), { timeout: 5000 });
+    expect(location.hash).toBe(`#planning/${id}/contract`);
+    expect(tabs()).toContain("Confirm contract");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    fireEvent.click(within(screen.getByRole("group", { name: "Planning panes" })).getByRole("button", { name: "Explorer" }));
+    await waitFor(() => expect(location.hash).toBe(`#planning/${id}/explorer`));
+    await waitFor(() => expect(tabs()).toEqual(["Spec", "Explorer"]));
+  });
 
-    // A criterion is read and changed here, before anything freezes.
+  it("lands a flat plan on Impact where the check found paths outside its scope, with the pop-up there", async () => {
+    impactFinds(["config/app.json"]);
+    await planningWithSpec("Signup receipt mail", "New users receive a confirmation email within sixty seconds.");
+    mount();
+    await generatePlan();
+    const notice = await screen.findByRole("dialog", { name: "A simple task" }, { timeout: 8000 });
+    expect(location.hash).toMatch(/^#planning\/[^/]+\/impact$/);
+    await waitFor(() => expect(tabs()).toEqual(["Spec", "Explorer", "Impact"]));
+    fireEvent.click(within(notice).getByRole("button", { name: "Next" }));
+    // The pane shows what the check found, and its way on is the contract.
+    expect(await screen.findByText("config/app.json")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm contract" }));
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 8000 });
+    expect(location.hash).toMatch(/\/contract$/);
+  });
+
+  it("edits a flat plan's criteria on its contract, reads the plan against the spec again, and keeps the contract off the tabs until that is done", async () => {
+    // The contract is where a basic ticket's criteria are changed. A change
+    // is written into the contract at once, and the plan is read against the
+    // spec on the way back to it: a reworded criterion is the way the two
+    // part, so the reading puts what it finds, and the contract is not a tab
+    // again until the person goes on (D-128).
+    impactFinds([]);
+    const id = await planningWithSpec("Signup welcome mail", "New users receive a confirmation email within sixty seconds.");
+    mount();
+    await generatePlan();
+    const notice = await screen.findByRole("dialog", { name: "A simple task" }, { timeout: 8000 });
+    fireEvent.click(within(notice).getByRole("button", { name: "Next" }));
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
+    await waitFor(async () =>
+      expect((await sampleBridge.request({ kind: "editingRead", id })).confirmed).not.toBeNull(),
+    );
+    const checks = async () =>
+      (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift").length;
+    const before = await checks();
     fireEvent.click(screen.getByRole("button", { name: "Edit criterion 1" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Criterion 1" }), {
       target: { value: "Every new signup queues exactly one email." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    const next = await screen.findByRole("button", { name: "Next" });
-    await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(next);
-
-    // A criterion reworded by hand is the one way the plan and the spec can
-    // part, so the way to the contract reads the two against each other and
-    // puts what it finds one problem at a time
-    // (D-128): the first, with the
-    // count, and not the second beside it. Never a gate: the person goes on
-    // with the problems open.
-    await screen.findByRole("group", { name: "Criterion 1" }, { timeout: 5000 });
-    expect(screen.queryByRole("group", { name: "R1" })).toBeNull();
-    expect(screen.getByText("Problem 1 of 2")).toBeTruthy();
+    // The reading, and the problem it found, with the contract off the tabs.
+    await waitFor(() => expect(location.hash).toBe(`#planning/${id}/drift`), { timeout: 8000 });
+    await screen.findByText(/^Problem 1 of \d$/, {}, { timeout: 8000 });
+    expect(await checks()).toBeGreaterThan(before);
+    expect(tabs()).not.toContain("Confirm contract");
+    expect(tabs()).toContain("Problems");
     fireEvent.click(screen.getByRole("button", { name: "Go on to the contract anyway" }));
-
-    // And the contract, with the change carried to it.
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
     expect(screen.getByText("Every new signup queues exactly one email.")).toBeTruthy();
-    expect(location.hash).toMatch(/^#task\//);
+    await waitFor(() => expect(tabs()).toContain("Confirm contract"));
+    expect(location.hash).toBe(`#planning/${id}/contract`);
   });
 
   it("keeps a decision pending when leaving, lets it be rewritten, and resumes after confirmation", async () => {
@@ -379,7 +473,7 @@ describe("interactive desktop flows", () => {
         navigate={() => undefined}
         repoId={row.repoId}
         taskKey={row.ticket.key}
-        view="merge"
+        view="review"
         edit={false}
       />,
       { wrapper },
@@ -397,6 +491,61 @@ describe("interactive desktop flows", () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
+  });
+
+  /**
+   * D-NEW-publish-a-retained-branch-later: a run that ended approved with
+   * publishing off kept its branch and opened nothing. Next always leads on
+   * to the merge screen, and its one press publishes the branch — the host
+   * pushes it, opens the pull request and opens it in the browser — and the
+   * screen then holds the pull request like any other.
+   */
+  async function retainedSample(key: string, retained: boolean) {
+    const app = await freshApp();
+    const records = await import("../../sample-host/records.js");
+    const { ticket, repoId } = records.ticketRow(key);
+    if (retained)
+      ticket.delivery = { ...ticket.delivery, state: "none", pull_request_url: null, pull_request_number: null, opened_by: null };
+    location.hash = ["task", repoId, key, "review"].join("/");
+    const sent = vi.spyOn(app.host, "request");
+    app.mount();
+    const next = (await screen.findByRole("button", { name: "Next" })) as HTMLButtonElement;
+    return { sent, next };
+  }
+
+  it("leads on from Next to a merge whose press opens the retained branch's pull request, then holds it", async () => {
+    const { sent, next } = await retainedSample("PRB-377", true);
+    expect(next.disabled).toBe(false);
+    fireEvent.click(next);
+    expect(await screen.findByRole("heading", { name: "Merge?" })).toBeTruthy();
+    expect(document.querySelector('section[data-screen="s16"]')).toBeTruthy();
+    expect(screen.getByText(/The run kept retry-activation-email on this machine and has not pushed it\./)).toBeTruthy();
+    // Nothing is open to leave open.
+    expect(screen.queryByRole("button", { name: "Don’t merge" })).toBeNull();
+    const press = screen.getByRole("button", { name: "Merge on GitHub" }) as HTMLButtonElement;
+    expect(press.disabled).toBe(false);
+    fireEvent.click(press);
+    expect(await screen.findByText(/The pull request is open in your browser/)).toBeTruthy();
+    expect(await screen.findByText(/The pull request is open on your branch\./)).toBeTruthy();
+    expect(screen.getByText(/#418$/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Don’t merge" })).toBeTruthy();
+    const kinds = sent.mock.calls.map(([request]) => request.kind);
+    expect(kinds.filter((kind) => kind === "publish")).toHaveLength(1);
+    // The host opens what it published; the page asks for nothing more.
+    expect(kinds).not.toContain("openPullRequest");
+  });
+
+  it("says why there is nothing to merge where no branch was retained to publish", async () => {
+    const { sent, next } = await retainedSample("PRB-415", false);
+    fireEvent.click(next);
+    expect(await screen.findByRole("heading", { name: "Nothing to merge" })).toBeTruthy();
+    expect(
+      screen.getByText("PRB-415 is failed: only a run that ended approved or escalated retains a branch to publish."),
+    ).toBeTruthy();
+    const press = screen.getByRole("button", { name: "Merge on GitHub" }) as HTMLButtonElement;
+    expect(press.disabled).toBe(true);
+    fireEvent.click(press);
+    expect(sent.mock.calls.some(([request]) => request.kind === "publish")).toBe(false);
   });
 
   it("reports observed review and refinement instead of an earlier provisioning state", () => {
@@ -727,41 +876,35 @@ describe("interactive desktop flows", () => {
     },
   );
 
-  it("spends no edit moving past a plan nobody changed", async () => {
-    // Reading the plan and agreeing with it is not an edit. Next compiles only
-    // what moved; a compile on the way past would record an edit against
-    // admission (D-072) for a person who touched nothing.
-    await planningWithSpec("Weekly digest", "Subscribers receive a weekly digest.");
+  it("spends no edit reaching the contract of a plan nobody changed", async () => {
+    // Reading the plan and agreeing with it is not an edit: a flat plan lands
+    // on its contract without one (D-072).
+    impactFinds([]);
+    const id = await planningWithSpec("Weekly digest", "Subscribers receive a weekly digest.");
     mount();
     await generatePlan();
-    await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-    await waitFor(() => expect(location.hash).toMatch(/\/criteria$/));
-
-    const edits = async () =>
-      (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "edit");
-    const before = (await edits()).length;
-    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+    await screen.findByRole("dialog", { name: "A simple task" }, { timeout: 8000 });
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    // No edit ran, so nothing was recorded as one. The reading of the plan
-    // against the spec on the way is a job of its own and changes nothing.
-    expect(await edits()).toHaveLength(before);
+    const { key } = await sampleBridge.request({ kind: "editingRead", id });
+    const edits = (await sampleBridge.request({ kind: "snapshot" })).jobs.filter(
+      (job) => job.kind === "edit" && job.key === key,
+    );
+    expect(edits).toHaveLength(0);
   });
 
   describe("a ticket reopens where it was left (D-130)", () => {
     const on = (screenId: string): boolean => document.querySelector(`section[data-screen="${screenId}"]`) !== null;
-    const lastView = async (id: string) => (await sampleBridge.request({ kind: "editingRead", id })).lastView;
-    /** A flat plan drafted by a planning, its contract compiled and on screen: the planning's id and its ticket. */
+    const lastPane = async (id: string) => (await sampleBridge.request({ kind: "editingRead", id })).lastPane;
+    /** A flat plan drafted by a planning, landed on its contract: the planning's id and its ticket. */
     async function compiled(title: string): Promise<{ id: string; repoId: string; key: string }> {
+      impactFinds([]);
       const id = await planningWithSpec(title, "Subscribers receive a weekly digest.");
       mount();
       await generatePlan();
-      await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-      await waitFor(() => expect(location.hash).toMatch(/\/criteria$/));
-      const next = await screen.findByRole("button", { name: "Next" });
-      await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false));
-      fireEvent.click(next);
+      const notice = await screen.findByRole("dialog", { name: "A simple task" }, { timeout: 8000 });
+      fireEvent.click(within(notice).getByRole("button", { name: "Next" }));
       await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-      await waitFor(async () => expect(await lastView(id)).toBe("contract"));
+      await waitFor(async () => expect(await lastPane(id)).toBe("contract"));
       const { repoId, key } = await sampleBridge.request({ kind: "editingRead", id });
       return { id, repoId, key: key! };
     }
@@ -789,12 +932,12 @@ describe("interactive desktop flows", () => {
       await screen.findByRole("button", { name: "Approve · start the loop" });
       await new Promise((resolve) => setTimeout(resolve, 300));
       expect(on("s11")).toBe(true);
-      expect(location.hash).toMatch(/^#task\//);
+      expect(location.hash).toBe(`#planning/${plan.id}/contract`);
 
       await home();
       await openByLink(plan);
       expect(on("s11")).toBe(true);
-      expect(location.hash).toMatch(/^#task\//);
+      expect(location.hash).toBe(`#planning/${plan.id}/contract`);
 
       // A restart: a fresh renderer over the same records, opened on the link.
       cleanup();
@@ -804,18 +947,18 @@ describe("interactive desktop flows", () => {
       await screen.findByRole("button", { name: "Approve · start the loop" });
       await new Promise((resolve) => setTimeout(resolve, 300));
       expect(on("s11")).toBe(true);
-      expect(location.hash).toMatch(/^#task\//);
+      expect(location.hash).toBe(`#planning/${plan.id}/contract`);
     });
 
-    it("opens the planning's pane again once the person went Back to planning from the contract", async () => {
+    it("opens the planning's pane again once the person went from the contract to another tab", async () => {
       const plan = await compiled("Reopen on the plan");
-      fireEvent.click(await screen.findByRole("button", { name: "Back to planning" }));
-      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/criteria`));
-      await waitFor(async () => expect(await lastView(plan.id)).toBeNull());
+      fireEvent.click(within(screen.getByRole("group", { name: "Planning panes" })).getByRole("button", { name: "Explorer" }));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/explorer`));
+      await waitFor(async () => expect(await lastPane(plan.id)).toBe("explorer"));
       await home();
       const sent = vi.spyOn(bridge, "request");
       await openByLink(plan);
-      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/criteria`));
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/explorer`));
       expect(on("s11")).toBe(false);
       // The page that only sent the person on is not a contract they reached.
       expect(sent.mock.calls.some(([request]) => request.kind === "editingContractVisited")).toBe(false);
@@ -877,6 +1020,12 @@ describe("interactive desktop flows", () => {
         expect(on("s12") || on("s10")).toBe(true);
         expect(screen.getByText(/This task is no longer in the repository's ticket store\./)).toBeTruthy();
         failing = false;
+        // The read that follows, whatever asks for it: here, the window taking
+        // focus again once the read is stale.
+        await new Promise((resolve) => setTimeout(resolve, 2100));
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+        onTestFinished(() => focusManager.setFocused(undefined));
         await waitFor(() => expect(screen.queryByText(/no longer in the repository's ticket store/)).toBeNull(), { timeout: 8000 });
         expect(on("s12") || on("stopped") || on("s13")).toBe(true);
       } finally {
@@ -904,17 +1053,6 @@ describe("interactive desktop flows", () => {
       ]);
       return children.slice(spacer + 1);
     };
-
-    it("puts Next in the right corner of the bar, last", async () => {
-      await planningWithSpec("Footer order", "Every footer puts its way on last.");
-      mount();
-      await generatePlan();
-      await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-      const next = await screen.findByRole("button", { name: "Next" });
-      const right = corner(next);
-      expect(right.at(-1)).toBe(next);
-      expect(right.every((child) => child.tagName === "BUTTON")).toBe(true);
-    });
 
     it("puts Compile the contract there too, after the ways out", async () => {
       const workspace = await sampleBridge.request({ kind: "snapshot" });
@@ -945,7 +1083,7 @@ describe("interactive desktop flows", () => {
     );
     expect(live.map((entry) => entry.kind).sort()).toEqual(["draft", "run"]);
     expect(live.some((entry) => entry.id === running.job.id)).toBe(true);
-    await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
+    await screen.findByRole("dialog", { name: "A simple task" }, { timeout: 8000 });
     await running.stop();
   });
 
@@ -1279,9 +1417,9 @@ describe("the contract page's delete", () => {
 /**
  * The page a stopped run lands on: from Stop the loop at once, and from Home
  * and the Archive while the ticket is stopped. It holds the ticket's name, that
- * the run was stopped, and three buttons named and nothing else, in the footer
- * at the bottom left: Delete this work, Plan it again, and Continue the task
- * darkened.
+ * the run was stopped, and three buttons named and nothing else, in the footer:
+ * Delete this work and Plan it again at the bottom left, and Continue the task
+ * darkened at the far right.
  */
 describe("the stopped page", () => {
   const stoppedPage = () => document.querySelector('section[data-screen="stopped"]');
@@ -1370,7 +1508,7 @@ describe("the stopped page", () => {
     expect(await screen.findByRole("heading", { name: "The run was stopped" })).toBeTruthy();
   });
 
-  it("holds the name, the state and the three ways out at the foot, Continue darkened, with the contract and the output at its end", async () => {
+  it("holds the name, the state and the three ways out at the foot, Continue darkened at the far right after the contract and the output", async () => {
     const workspace = await sampleBridge.request({ kind: "snapshot" });
     location.hash = ["task", workspace.repositories[0]!.id, "PRB-415"].join("/");
     mount();
@@ -1384,19 +1522,21 @@ describe("the stopped page", () => {
     expect(buttons.map((button) => button.textContent)).toEqual([
       "Delete this work",
       "Plan it again",
-      "Continue the task",
       "Open the contract",
       "Watch what the agents did",
+      "Continue the task",
     ]);
     expect(buttons.map((button) => button.className)).toEqual([
       "button button--secondary",
       "button button--secondary",
+      "button button--secondary",
+      "button button--secondary",
       "button button--primary",
-      "button button--secondary",
-      "button button--secondary",
     ]);
-    // The three ways out at the start of the row, and the other two at its end.
-    expect(buttons[2]!.nextElementSibling!.className).toBe("spacer");
+    // Delete and Plan again at the start of the row, and the rest at its end,
+    // the highlighted one rightmost.
+    expect(buttons[1]!.nextElementSibling!.className).toBe("spacer");
+    expect(footer.lastElementChild).toBe(buttons[4]);
     // No description anywhere: the body says the run was stopped, and the
     // header names the ticket.
     expect(page.querySelector(".stopped-body")!.textContent).toBe("The run was stopped");
@@ -1474,6 +1614,52 @@ describe("continuing a filed stopped run", () => {
 });
 
 describe("Plan it again on a stopped run (D-129)", () => {
+  /**
+   * From the Archive: a stopped ticket filed there opens on its stopped page,
+   * and Plan it again goes into the planning over the plan it drafts, with its
+   * tabs — the Graph for an epic, the contract for a basic ticket — and never
+   * to the loop's pages (D-NEW-basic-and-epic-flows).
+   */
+  it.each([
+    ["an epic on its Graph", false, "graph"],
+    ["a basic ticket on its contract", true, "contract"],
+  ] as const)("lands %s, planned again from an archived stopped ticket", async (_, flat, pane) => {
+    const { host, mount: mountFresh } = await freshApp();
+    const held = localStorage.getItem("perbo:preview-specs");
+    onTestFinished(() => {
+      if (held !== null) localStorage.setItem("perbo:preview-specs", held);
+    });
+    if (flat) {
+      // One requirement, so the drafter has nothing to divide.
+      const specs = JSON.parse(held ?? "{}") as Record<string, string>;
+      specs["retire-the-legacy-csv-importer"] = specs["retire-the-legacy-csv-importer"]!.replace(
+        /## Requirements[\s\S]*?(?=\n## )/,
+        "## Requirements\n\n- R1: The legacy importer and its routes are removed.\n",
+      );
+      localStorage.setItem("perbo:preview-specs", JSON.stringify(specs));
+    }
+    const repoId = (await host.request({ kind: "snapshot" })).repositories[0]!.id;
+    await host.request({ kind: "archive", repoId, keys: ["PRB-415"], archived: true });
+    mountFresh();
+    await screen.findByRole("heading", { name: /Hi, / });
+    fireEvent.click(within(document.querySelector(".rail") as HTMLElement).getByRole("button", { name: "Archive" }));
+    const rows = await screen.findAllByRole("row");
+    fireEvent.click(rows.find((row) => row.textContent?.includes("#415"))!);
+    await screen.findByRole("heading", { name: "The run was stopped" }, { timeout: 5000 });
+    fireEvent.click(screen.getByRole("button", { name: "Plan it again" }));
+    await waitFor(() => expect(location.hash).toMatch(new RegExp(`^#planning/[^/]+/${pane}$`)), { timeout: 8000 });
+    await screen.findByRole(pane === "graph" ? "heading" : "button", {
+      name: pane === "graph" ? "Execution graph" : "Approve · start the loop",
+    }, { timeout: 8000 });
+    // Inside the planning, with its tabs, and no page of the loop.
+    const tabs = within(screen.getByRole("group", { name: "Planning panes" }))
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"));
+    expect(tabs).toContain(pane === "graph" ? "Graph" : "Confirm contract");
+    for (const loop of ["s12", "s13", "s15", "s16", "stopped"])
+      expect(document.querySelector(`section[data-screen="${loop}"]`), loop).toBeNull();
+  });
+
   it("takes the stopped ticket off Home at the click and for good, and lists the plan drafted from its spec in the picker", async () => {
     const { host, mount: mountFresh } = await freshApp();
     const title = "Retire the legacy CSV importer";

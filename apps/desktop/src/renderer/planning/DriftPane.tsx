@@ -9,7 +9,7 @@ import { bridge, errorMessage } from "../workspace/index.js";
 import { isLive, newestReading } from "../../shared/jobs.js";
 import { REREAD_COULD_NOT_START } from "../../shared/contract-editing.js";
 import { WaitScreen } from "../tasks/wizard.js";
-import { planPaneFor } from "./panes.js";
+import { confirmLabel, flowFor, planPaneFor } from "./panes.js";
 import { owedReading } from "./owed-reading.js";
 import { QuestionCard, problemHead } from "./InterviewDock.js";
 import type { InterviewEntry, Job } from "../../shared/protocol.js";
@@ -127,7 +127,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
     if (id === null || key === null || asked.current === id) return;
     asked.current = id;
     if (specless) {
-      navigate({ page: "task", repoId, key, view: "contract" });
+      navigate({ page: "planning", sessionId: id, pane: "contract" });
       return;
     }
     if (newest !== null && isLive(newest)) return;
@@ -177,9 +177,9 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
     (drift === null || (!arrived && sent === null && !thinking && session?.asking == null));
   useEffect(() => {
     if (landed === null || key === null || reading) return;
-    if (passing) navigate({ page: "task", repoId, key, view: "contract" });
+    if (passing && id !== null) navigate({ page: "planning", sessionId: id, pane: "contract" });
     setArrived(true);
-  }, [landed, passing, reading, key, repoId, navigate]);
+  }, [landed, passing, reading, key, id, navigate]);
 
   const running = (workspace.interviews ?? []).includes(id ?? "");
   const open = drift?.open ?? [];
@@ -264,9 +264,11 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
     }
     navigate({ page: "planning", sessionId: id, pane: planPaneFor(workspace.drafts, id) ?? "spec" });
   };
+  // On to the contract, which is the planning's last tab
+  // (D-NEW-basic-and-epic-flows).
   const contract = (): void => {
-    if (key === null) return;
-    navigate({ page: "task", repoId, key, view: "contract" });
+    if (id === null || key === null) return;
+    navigate({ page: "planning", sessionId: id, pane: "contract" });
   };
   // Going on with the problems open is recorded before the page moves, so the
   // same reading is not put to the person again at the same state. Where the
@@ -312,7 +314,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
       <Button onClick={back}>Back to the plan</Button>
       {resolved && (
         <Button variant="primary" onClick={contract}>
-          Confirm the plan
+          {confirmLabel(flowFor(workspace, id ?? "").shape)}
         </Button>
       )}
       {problem !== undefined && (

@@ -1,26 +1,16 @@
 import type { InkIconName } from "../ui/index.js";
 import type { OpenDraft, PlanningPane, Snapshot } from "../../shared/protocol.js";
+import { fingerprint } from "../../shared/contract-editing.js";
 import type { Route } from "../shell/route.js";
 
 /**
  * The panes planning mode has, in rail order, each by an id the protocol's
  * `PlanningPaneSchema` names. Each pane's ticket adds its entry here and
  * its id there; an id there with no entry here fails to compile, naming it.
- *
- * Second, under the spec it came from, is the plan — and which pane that is
- * depends on what the drafter made. Work it divided has a Graph: the nodes,
- * the order between them and the paths each reaches. Work it did not is one
- * piece, and there is no division to curate; its plan is the criteria it will
- * be judged against, which is the whole of what a person checks before
- * confirming. Neither is offered before there is a plan at all.
- *
- * Files and Impact are there from the first turn: both are about the draft's
- * scope, which is what the spec is being written against.
  */
 const PANES = {
   spec: { id: "spec", label: "Spec", icon: "document" },
   graph: { id: "graph", label: "Graph", icon: "share" },
-  criteria: { id: "criteria", label: "Plan", icon: "clipboard" },
   // Drawn as a folder, since what it lists is the repository's files.
   explorer: { id: "explorer", label: "Explorer", icon: "folder" },
   impact: { id: "impact", label: "Impact", icon: "growth-chart" },
@@ -34,13 +24,103 @@ const PANES = {
    * Its id is "drift", which every route to it names.
    */
   drift: { id: "drift", label: "Problems", icon: "alert" },
+  /**
+   * The contract, the planning's last tab: the page approving happens on,
+   * reached inside planning rather than as a place of its own
+   * (D-NEW-basic-and-epic-flows). Drawn as a
+   * tick, the nearest drawing there is to "approve this".
+   */
+  contract: { id: "contract", label: "Confirm contract", icon: "approve" },
 } as const satisfies { [Id in PlanningPane]: { id: Id; label: string; icon: InkIconName } };
-const REST = [PANES.explorer, PANES.impact] as const;
 export const PLANNING_PANES = Object.values(PANES);
+type Pane = (typeof PLANNING_PANES)[number];
 
 /** This planning's entry in the drafts list, where the list holds it. */
 const draftOf = (drafts: Snapshot["drafts"], sessionId: string): OpenDraft | undefined =>
   (drafts ?? []).find((entry) => entry.id === sessionId);
+
+/**
+ * What a planning is planning (D-NEW-basic-and-epic-flows):
+ * "spec" while the spec is being written and there is no plan, "basic" for a
+ * plan the drafter left flat, and "epic" for one it divided into a graph.
+ */
+export type PlanShape = "spec" | "basic" | "epic";
+export function shapeOf(draft: Pick<OpenDraft, "key" | "nodes"> | undefined): PlanShape {
+  if (draft === undefined || draft.key === null) return "spec";
+  return draft.nodes > 0 ? "epic" : "basic";
+}
+
+/**
+ * The state a person reaches a planning's contract at: the spec's sections,
+ * as the host fingerprints them, the plan as its ticket last moved, and the
+ * scope the planning holds. While it is the state recorded as they last
+ * reached the contract, nothing has changed since and the contract is still
+ * a tab to go back to (D-NEW-basic-and-epic-flows).
+ */
+export function contractState(
+  workspace: Pick<Snapshot, "drafts" | "tasks">,
+  draft: OpenDraft,
+): string {
+  const ticket = workspace.tasks.find(
+    (row) => row.repoId === draft.repoId && row.ticket.key === draft.key,
+  )?.ticket;
+  return fingerprint(
+    JSON.stringify([
+      draft.spec,
+      ticket?.updated_at ?? null,
+      [...draft.scope.paths].sort(),
+      [...draft.scope.prohibited].sort(),
+    ]),
+  );
+}
+
+/** What planning mode offers a planning. */
+export interface PlanningFlow {
+  shape: PlanShape;
+  /** The panes the rail draws, in rail order. */
+  panes: readonly Pane[];
+}
+
+/**
+ * The one rule for which tabs a planning shows (D-NEW-basic-and-epic-flows).
+ *
+ * While the spec is being written there is no plan to measure anything
+ * against, so the Spec and the Explorer are all there is. A plan divided into
+ * a graph — an epic — offers its Graph second, then the Explorer and Impact,
+ * and the Problems pane after them while a reading of the plan against its
+ * spec has problems open (D-128). A plan left flat — a basic ticket — has no
+ * graph to curate: the Explorer, then Impact only where its check found paths
+ * outside the scope, then Problems while any are open.
+ *
+ * The contract is the last tab, and is one while the person is on it
+ * (`current`), and after that while nothing has changed since they were —
+ * the spec's words, a mark in the Explorer, an edit of the plan. Once
+ * something has, it goes until the change has been checked again and the
+ * person reaches it again.
+ */
+export function flowFor(
+  workspace: Pick<Snapshot, "drafts" | "tasks">,
+  sessionId: string,
+  current: PlanningPane | null = null,
+): PlanningFlow {
+  const draft = draftOf(workspace.drafts, sessionId);
+  const shape = shapeOf(draft);
+  const problems = problemsOpen(workspace.drafts, sessionId) ? [PANES.drift] : [];
+  const panes: Pane[] =
+    shape === "spec"
+      ? [PANES.spec, PANES.explorer]
+      : shape === "epic"
+        ? [PANES.spec, PANES.graph, PANES.explorer, PANES.impact, ...problems]
+        : [PANES.spec, PANES.explorer, ...((draft?.impact ?? 0) > 0 ? [PANES.impact] : []), ...problems];
+  const reachable =
+    draft !== undefined &&
+    draft.confirmed !== null &&
+    draft.confirmed === contractState(workspace, draft);
+  return {
+    shape,
+    panes: shape !== "spec" && (current === "contract" || reachable) ? [...panes, PANES.contract] : panes,
+  };
+}
 
 /**
  * Whether this planning is the one curating its ticket's plan, which a session
@@ -48,43 +128,19 @@ const draftOf = (drafts: Snapshot["drafts"], sessionId: string): OpenDraft | und
  * sending that ticket into planning mode would put an interview dock over a
  * ticket with no spec and leave the editor unreachable. What marks a planning
  * is a plan to show there — a graph it was divided into, or the spec it was
- * drafted from, which is the pane its criteria are read on.
+ * drafted from.
  */
 export function curates(draft: OpenDraft): boolean {
   return draft.nodes > 0 || draft.specSlug !== null;
 }
 
 /**
- * Which pane holds this planning's plan, or null before there is one, which
- * is before it holds a ticket.
- *
- * The Graph for work the drafter divided, the criteria for work it did not.
- * One or the other, never both: they are two drawings of the same plan, and
- * offering the empty one as a stage is a stage a person goes looking into.
+ * The pane that holds this planning's plan: the Graph for an epic, and none
+ * for a basic ticket, whose plan is its contract, or for a planning with no
+ * plan yet.
  */
-export function planPaneFor(
-  drafts: Snapshot["drafts"],
-  sessionId: string,
-): "graph" | "criteria" | null {
-  const draft = draftOf(drafts, sessionId);
-  if (draft === undefined || draft.key === null) return null;
-  return draft.nodes > 0 ? "graph" : "criteria";
-}
-
-/**
- * The panes to offer this planning in the rail, which is all of them once it
- * has a plan, less the step to the contract — which is a place to go, after
- * Impact, only while the last reading of the plan against its spec has
- * problems open, and otherwise only the step every Confirm passes through
- * (D-128).
- */
-export function panesFor(
-  drafts: Snapshot["drafts"],
-  sessionId: string,
-): readonly (typeof PLANNING_PANES)[number][] {
-  const plan = planPaneFor(drafts, sessionId);
-  const problems = problemsOpen(drafts, sessionId) ? [PANES.drift] : [];
-  return [PANES.spec, ...(plan === null ? [] : [PANES[plan]]), ...REST, ...problems];
+export function planPaneFor(drafts: Snapshot["drafts"], sessionId: string): "graph" | null {
+  return shapeOf(draftOf(drafts, sessionId)) === "epic" ? "graph" : null;
 }
 
 /**
@@ -111,9 +167,9 @@ export function remembered(pane: PlanningPane): boolean {
  * Asked by every way into a planning: the picker's rows, the ticket's own
  * page, a link that names no pane and the contract's way back.
  */
-export function leftAt(drafts: Snapshot["drafts"], sessionId: string): PlanningPane | null {
-  const pane = draftOf(drafts, sessionId)?.lastPane ?? null;
-  return pane !== null && panesFor(drafts, sessionId).some((offered) => offered.id === pane)
+export function leftAt(workspace: Pick<Snapshot, "drafts" | "tasks">, sessionId: string): PlanningPane | null {
+  const pane = draftOf(workspace.drafts, sessionId)?.lastPane ?? null;
+  return pane !== null && flowFor(workspace, sessionId).panes.some((offered) => offered.id === pane)
     ? pane
     : null;
 }
@@ -129,9 +185,35 @@ export function problemsOpen(drafts: Snapshot["drafts"], sessionId: string): boo
  * then what the planning is about (D-128);
  * else where it was left; else its Spec, which is where a planning starts.
  */
-export function reopenPane(drafts: Snapshot["drafts"], sessionId: string): PlanningPane {
-  if (problemsOpen(drafts, sessionId)) return "drift";
-  return leftAt(drafts, sessionId) ?? "spec";
+export function reopenPane(workspace: Pick<Snapshot, "drafts" | "tasks">, sessionId: string): PlanningPane {
+  if (problemsOpen(workspace.drafts, sessionId)) return "drift";
+  return leftAt(workspace, sessionId) ?? "spec";
+}
+
+/**
+ * Where a plan drafted again from a stopped run's spec lands
+ * (D-NEW-basic-and-epic-flows, D-129): an
+ * epic on its Graph, and a basic ticket on its contract, the page its
+ * criteria are read and changed on, both inside the planning over it.
+ */
+export function draftedLanding(plan: { sessionId: string; nodes: number }): Route {
+  return { page: "planning", sessionId: plan.sessionId, pane: plan.nodes > 0 ? "graph" : "contract" };
+}
+
+/**
+ * Where a basic ticket lands once the checks its fresh plan is given have
+ * come back (D-NEW-basic-and-epic-flows):
+ * the Problems pane where the reading of the plan against the spec found any,
+ * else the Impact pane where the impact check found paths outside the scope,
+ * else the contract.
+ */
+export function checkedLanding(checked: { problems: boolean; flagged: boolean }): PlanningPane {
+  return checked.problems ? "drift" : checked.flagged ? "impact" : "contract";
+}
+
+/** What the way on to the contract is called: an epic confirms its plan, a basic ticket its contract. */
+export function confirmLabel(shape: PlanShape): string {
+  return shape === "basic" ? "Confirm contract" : "Confirm the plan";
 }
 
 /** Whether this ticket's plan is approved, as the snapshot's own row for it says. */
@@ -143,11 +225,11 @@ export function planApproved(workspace: Snapshot, repoId: string, key: string): 
 
 /**
  * Where confirming a plan goes, from every place that offers it: the Graph's
- * footer and its shortcut, the pane footer the other panes share, the Spec's
- * way to the plan and the criteria's Next.
+ * footer and its shortcut, the pane footer the other panes share and the
+ * Spec's way to the plan.
  *
  * By way of the reading of the plan against its spec (D-128), which is the
- * one step between the plan and the contract and lands on the contract by
+ * one step between the plan and the contract and lands on the contract tab by
  * itself where there is nothing to say. An approved plan is frozen and goes
  * straight to its contract, and so does a plan with no planning to read it
  * in.

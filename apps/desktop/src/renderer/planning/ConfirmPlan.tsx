@@ -1,7 +1,7 @@
 import { Button } from "../ui/index.js";
 import type { PageProps } from "../shell/route.js";
 import type { useContractEditing } from "../contract-editor.js";
-import { confirmRoute, planApproved } from "./panes.js";
+import { confirmLabel, confirmRoute, flowFor, planApproved } from "./panes.js";
 
 type Editor = ReturnType<typeof useContractEditing>;
 
@@ -21,7 +21,9 @@ type Editor = ReturnType<typeof useContractEditing>;
  * something they were never shown.
  *
  * It goes where {@link confirmRoute} says every way from the plan to the
- * contract goes.
+ * contract goes, and says what it confirms: an epic's plan, or a basic
+ * ticket's contract, whose plan is its contract
+ * (D-NEW-basic-and-epic-flows).
  *
  * The Graph keeps its own footer rather than this one: it says the same thing
  * with the division's file count and the run queued ahead of it, which are
@@ -62,7 +64,7 @@ export function ConfirmPlan({
           navigate(confirmRoute({ repoId: editor.repoId, key, sessionId: editor.session?.id, approved }))
         }
       >
-        {approved ? "Open the contract" : "Confirm the plan"}
+        {approved ? "Open the contract" : confirmLabel(flowFor(workspace, editor.session?.id ?? "").shape)}
       </Button>
     </div>
   );

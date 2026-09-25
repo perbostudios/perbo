@@ -35,9 +35,9 @@ it("names a planning by its spec, then by the plan's own shorter name, and Untit
 describe("the title the drafts list carries (D-118)", () => {
   const session = (over: Partial<EditingSession> = {}) =>
     ({ id: "s-1", repoId: "repo-1", key: null, admitted: false, phase: "editing", nodes: 0, drift: null,
-      specSlug: "dark-mode-toggle", specCut: null, named: null, lastPane: null, lastView: null,
+      specSlug: "dark-mode-toggle", specCut: null, named: null, lastPane: null, confirmed: null, impact: null,
       form: { draft: { outcome: "", criteria: [], paths: [], prohibited: [] } }, ...over }) as unknown as EditingSession;
-  const titled = (title: string | null) => () => title;
+  const titled = (title: string | null) => () => (title === null ? null : { title, sections: null });
 
   it("is the spec's title", () => {
     expect(openDrafts([session()], titled("Dark mode toggle"))[0]!.title).toBe("Dark mode toggle");
@@ -72,6 +72,8 @@ describe("the name in the top bar", () => {
   });
 
   it("is none on a ticket's own pages, which name it themselves, and on a page about no one piece of work", () => {
+    // The planning's contract tab is the contract page, which names it.
+    expect(nameOfRoute(workspace, { page: "planning", sessionId: "s-2", pane: "contract" })).toBeNull();
     for (const view of ["contract", "loop", "stopped"] as const)
       expect(nameOfRoute(workspace, { page: "task", repoId: "repo-1", key: "PRB-2", view })).toBeNull();
     expect(nameOfRoute(workspace, { page: "home" })).toBeNull();

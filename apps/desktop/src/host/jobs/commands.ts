@@ -206,6 +206,15 @@ export function runArgs(key: string, configPath: string, resumeFrom: string | nu
   ];
 }
 
+/**
+ * The branch a run retained without publishing, pushed and its pull request
+ * opened, under the configuration a run of the ticket is given with publishing
+ * on (D-NEW-publish-a-retained-branch-later).
+ */
+export function publishArgs(key: string, configPath: string): string[] {
+  return ["run", "--ticket", key, "--config", configPath, "--publish-retained", "--json"];
+}
+
 /** A contract whose criteria name a person to check them is edited with the CLI, which keeps the assignment. */
 export function assertEditable(contract: PlanContract): void {
   if (

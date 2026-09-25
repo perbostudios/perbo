@@ -205,16 +205,9 @@ describe("Create in the rail (SCP-334)", () => {
     const started = sessionId();
     const panes = screen.getByRole("group", { name: "Planning panes" });
     expect(within(panes).getByRole("button", { name: "Spec" }).getAttribute("aria-current")).toBe("page");
-    // No plan yet, so no graph to offer: Spec, the files it is written
-    // against, and what it is likely to touch.
-    expect(railNames().slice(0, 6)).toEqual([
-      "Create",
-      "Spec",
-      "Explorer",
-      "Impact",
-      "Home",
-      "Archive",
-    ]);
+    // No plan yet, so nothing measured against one: the Spec and the files
+    // it is written against (D-NEW-basic-and-epic-flows).
+    expect(railNames().slice(0, 5)).toEqual(["Create", "Spec", "Explorer", "Home", "Archive"]);
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     await screen.findByRole("heading", { name: /Hi, / });
     expect(screen.queryByRole("group", { name: "Planning panes" })).toBeNull();
@@ -336,7 +329,7 @@ describe("Create in the rail (SCP-334)", () => {
   it("lists a session Send just opened, before the host's refresh lands", async () => {
     const workspace = await sampleBridge.request({ kind: "snapshot" });
     const session = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId: workspace.repositories[0]!.id } });
-    const stale = { ...workspace, drafts: [{ id: "older", repoId: session.repoId, key: null, admitted: false, outcome: "An older draft", phase: "editing" as const, nodes: 0, drift: null, scope: { paths: [], prohibited: [] }, specSlug: null, title: null, lastPane: null, lastView: null }] };
+    const stale = { ...workspace, drafts: [{ id: "older", repoId: session.repoId, key: null, admitted: false, outcome: "An older draft", phase: "editing" as const, nodes: 0, drift: null, scope: { paths: [], prohibited: [] }, specSlug: null, title: null, lastPane: null, confirmed: null, spec: null, impact: null }] };
     const seeded = withDraft(stale, session);
     expect(seeded.drafts!.map((draft) => draft.id)).toEqual([session.id, "older"]);
     expect(withDraft(seeded, session).drafts!.map((draft) => draft.id)).toEqual([session.id, "older"]);
@@ -496,7 +489,6 @@ describe("clicking away from a planning nothing was put into (D-129)", () => {
     const id = await startPlanning();
     fireEvent.click(pane("Explorer"));
     await screen.findByRole("tree", { name: "Tracked files" });
-    fireEvent.click(pane("Impact"));
     fireEvent.click(pane("Spec"));
     await screen.findByLabelText("Spec title");
     await settle();
@@ -605,9 +597,12 @@ describe("a planning reopens where it was left (D-130)", () => {
     await reopenFromPicker("Split the settings page into tabs");
     await screen.findByRole("tree", { name: "Tracked files" });
     expect(location.hash).toBe(`#planning/${id}/explorer`);
-    // And the contract's way back, which would otherwise be the graph.
+    // And the contract's own address opens it as the planning's last tab,
+    // whose other tabs go back into the planning on their own panes.
     location.hash = `task/${session.repoId}/${session.key!}/contract`;
-    fireEvent.click(await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 }));
+    await waitFor(() => expect(location.hash).toBe(`#planning/${id}/contract`), { timeout: 5000 });
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
+    fireEvent.click(pane("Explorer"));
     await waitFor(() => expect(location.hash).toBe(`#planning/${id}/explorer`));
   });
 
@@ -638,9 +633,9 @@ describe("a planning reopens where it was left (D-130)", () => {
     mount();
     await screen.findByRole("heading", { name: /Hi, / });
     await reopenFromPicker(outcome);
-    await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
     const id = sessionId();
-    await waitFor(async () => expect(await lastPane(id)).toBe("criteria"));
+    await waitFor(async () => expect(await lastPane(id)).toBe("contract"));
     const session = await editingRead(id);
     expect([session.key, session.nodes, session.specSlug]).toEqual([key, 0, null]);
     location.hash = `task/${repoId}/${key}/contract`;
@@ -2115,7 +2110,7 @@ describe("the Graph pane (SCP-316)", () => {
     // skip; a plan just drafted agrees with its spec, so the reading lands on
     // the contract by itself.
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-    await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+    await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
     // Nothing is approved and nothing runs until it is approved there.
     expect((await detail()).ticket.approved_at).toBeNull();
     // Scoped to this plan: the sample workspace carries a stopped run of its
@@ -2321,18 +2316,19 @@ describe("the Graph pane (SCP-316)", () => {
       fireEvent.click(card);
       const inspector = await screen.findByRole("region", { name: "Node node_1" });
       const node = (await graphOf(plan)).nodes.find((each) => each.id === "node_1")!;
-      // The card reads out the title and each criterion and how it is proven;
-      // the paths are the inspector's alone.
+      // The card reads out the title, under it how many criteria it covers
+      // and its paths (D-NEW-basic-and-epic-flows),
+      // and each criterion and how it is proven; the inspector changes them.
       expect(card.textContent).toContain(node.title);
       for (const criterion of node.criteria) {
         expect(card.textContent).toContain(criterion.text);
         expect(card.textContent).toContain(criterion.kind);
       }
       expect(node.paths.length).toBeGreaterThan(0);
-      for (const path of node.paths) {
-        expect(card.textContent).not.toContain(path);
-        expect(inspector.textContent).toContain(path);
-      }
+      expect(card.querySelector(".node-summary")?.textContent).toBe(
+        `${node.criteria.length} ${node.criteria.length === 1 ? "criterion" : "criteria"} · ${node.paths.join(" · ")}`,
+      );
+      for (const path of node.paths) expect(inspector.textContent).toContain(path);
       // The inspector keeps what changes them.
       expect(within(inspector).getByLabelText("Criterion ac_1")).toBeTruthy();
       expect(within(inspector).getByLabelText("Add a path or glob")).toBeTruthy();
@@ -2848,33 +2844,33 @@ describe("the Graph pane (SCP-316)", () => {
     await edit({ op: "delete_node", id: "node_1", move_criteria_to: null, delete_criteria: [] });
     await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(0));
     expect((await graphOf(plan)).criteria.length).toBeGreaterThan(0);
-    location.hash = `planning/${plan.id}/criteria`;
+    location.hash = `planning/${plan.id}/explorer`;
     mount();
-    // Work with nothing to divide has no graph to curate, so its plan is the
-    // criteria it will be judged against, and that is the pane the rail
-    // offers. The Graph is not among them.
-    await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
+    // Work with nothing to divide has no graph to curate, and its plan is the
+    // criteria its contract shows: the rail offers no Graph and no pane of
+    // the criteria's own (D-NEW-basic-and-epic-flows).
+    await screen.findByRole("tree", { name: "Tracked files" }, { timeout: 5000 });
     const panes = screen.getByRole("group", { name: "Planning panes" });
-    await waitFor(() => expect(within(panes).getByRole("button", { name: "Plan" })).toBeTruthy());
-    expect(within(panes).queryByRole("button", { name: "Graph" })).toBeNull();
+    await waitFor(() => expect(within(panes).queryByRole("button", { name: "Graph" })).toBeNull());
+    expect(railNames().slice(0, 5)).toEqual(["Create", "Spec", "Explorer", "Home", "Archive"]);
 
     const detail = () => sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key });
     expect((await detail()).ticket.approved_at).toBeNull();
     // And the way onward is the same: the contract is where what freezes is
     // stated, whether or not the work was divided, and approving happens
     // there and nowhere else.
-    const next = await screen.findByRole("button", { name: "Next" });
+    const next = await screen.findByRole("button", { name: "Confirm contract" });
     await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(next);
     // By way of the plan read against its spec: nothing here moved a
     // promise, so the reading it was drafted with holds and lands on the
     // contract by itself.
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-    await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+    await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
     expect((await detail()).ticket.approved_at).toBeNull();
   });
 
-  it("reopens from the picker on the contract it was left at, whose way back is the Graph it was confirmed from, not the reading on the way (D-130)", async () => {
+  it("reopens from the picker on the contract it was left at, and on the Graph once the person went back to it by its tab (D-130)", async () => {
     const plan = await openGraph();
     await waitFor(async () => expect(await lastPane(plan.id)).toBe("graph"));
     await waitFor(() =>
@@ -2882,23 +2878,23 @@ describe("the Graph pane (SCP-316)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-    await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+    await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    await waitFor(async () => expect((await editingRead(plan.id)).lastView).toBe("contract"));
-    expect(await lastPane(plan.id)).toBe("graph");
+    // The reading on the way is never where it was left: the contract is.
+    await waitFor(async () => expect(await lastPane(plan.id)).toBe("contract"));
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
     await screen.findByRole("heading", { name: /Hi, / });
     const picker = await openPicker();
     const { title } = (await sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key })).ticket;
     fireEvent.click(within(picker).getByRole("button", { name: (name) => name.startsWith(title) }));
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    expect(location.hash).toMatch(/^#task\//);
-    fireEvent.click(screen.getByRole("button", { name: "Back to planning" }));
+    expect(location.hash).toBe(`#planning/${plan.id}/contract`);
+    fireEvent.click(pane("Graph"));
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 5000 });
     await screen.findByRole("heading", { name: "Execution graph" });
     // Back on the Graph, that is where it was left: the ticket's own page
     // sends the person there again, not to the contract.
-    await waitFor(async () => expect((await editingRead(plan.id)).lastView).toBeNull());
+    await waitFor(async () => expect(await lastPane(plan.id)).toBe("graph"));
     location.hash = ["task", plan.repoId, plan.key].join("/");
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 5000 });
     await screen.findByRole("heading", { name: "Execution graph" });
@@ -2965,36 +2961,17 @@ describe("the Graph pane (SCP-316)", () => {
       return plan;
     }
 
-    it("goes Back to planning from the contract to the plan, not to the reading, after a resolved round (D-130)", async () => {
+    it("leaves the planning at the contract, not at the reading, after a resolved round, and its tabs go back to the plan (D-130)", async () => {
       const plan = await confirmedIntoProblems();
       answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
       answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
       await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
       fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
-      expect(await lastPane(plan.id)).toBe("graph");
-      fireEvent.click(await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 }));
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
+      await waitFor(async () => expect(await lastPane(plan.id)).toBe("contract"));
+      fireEvent.click(pane("Graph"));
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`));
       await screen.findByRole("heading", { name: "Execution graph" });
-    });
-
-    it("goes Back to planning from the contract to the pane the plan was confirmed from, where that is not the plan's own (D-130)", async () => {
-      const plan = await problems();
-      answerFirst(screen.getByRole("group", { name: "Criterion 1 and R1" }));
-      answerFirst(await screen.findByRole("group", { name: "Criterion 2 and R2" }, { timeout: 5000 }));
-      await screen.findByRole("heading", { name: "Every problem is resolved" }, { timeout: 5000 });
-      location.hash = `planning/${plan.id}/explorer`;
-      await screen.findByRole("tree", { name: "Tracked files" });
-      await waitFor(async () => expect(await lastPane(plan.id)).toBe("explorer"));
-      const onward = screen.getByRole("button", { name: "Confirm the plan" });
-      await waitFor(() => expect(onward.hasAttribute("disabled")).toBe(false));
-      fireEvent.click(onward);
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
-      // The plan's own pane is the Graph, so landing there would be the
-      // fallback and not where the planning was left.
-      fireEvent.click(await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 }));
-      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/explorer`));
-      await screen.findByRole("tree", { name: "Tracked files" });
     });
 
     it("reopens on the Problems page while problems are open, by that rule and not by a record of the page (D-130)", async () => {
@@ -3149,7 +3126,7 @@ describe("the Graph pane (SCP-316)", () => {
       // "The plan", since this is still planning: the contract is where it leads.
       expect(screen.queryByRole("button", { name: "Confirm the contract" })).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Confirm the plan" }));
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/));
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/));
     });
 
     it("puts the same problem in the chat on the Graph pane, and answering it there advances it", async () => {
@@ -3206,7 +3183,7 @@ describe("the Graph pane (SCP-316)", () => {
       expect(onward).toHaveLength(1);
       await waitFor(() => expect(onward[0]!.hasAttribute("disabled")).toBe(false));
       fireEvent.click(onward[0]!);
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/));
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/));
     });
 
     it("lands on the problems from the picker and from the ticket's own link while they are open", async () => {
@@ -3229,29 +3206,29 @@ describe("the Graph pane (SCP-316)", () => {
       const plan = await problems();
       expect(railPanes()).toContain("Problems");
       fireEvent.click(screen.getByRole("button", { name: "Go on to the contract anyway" }));
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/));
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/));
       // On the contract page itself — not only its address — before turning
       // back, as a person is: the way back through the reading starts there.
       await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
       // The problems are forgotten with it, and the ticket's own page opens
       // on the contract it was left at rather than on them.
       expect((await editingRead(plan.id)).drift).toBeNull();
-      await waitFor(async () => expect((await editingRead(plan.id)).lastView).toBe("contract"));
+      await waitFor(async () => expect(await lastPane(plan.id)).toBe("contract"));
       location.hash = `task/${plan.repoId}/${plan.key}`;
       await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-      expect(location.hash).toBe(`#task/${plan.repoId}/${plan.key}`);
+      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`));
       // And the pane comes out of the rail.
       location.hash = `planning/${plan.id}/graph`;
       await screen.findByRole("heading", { name: "Execution graph" });
       expect(railPanes()).not.toContain("Problems");
       // A pane recorded is the last place again: the ticket's page sends the
       // person into the planning, on that pane.
-      await waitFor(async () => expect((await editingRead(plan.id)).lastView).toBeNull());
+      await waitFor(async () => expect(await lastPane(plan.id)).toBe("graph"));
       location.hash = `task/${plan.repoId}/${plan.key}`;
       await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/graph`), { timeout: 5000 });
       // Back through the reading lands on the contract without a card.
       location.hash = `planning/${plan.id}/drift`;
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
       expect(screen.queryByRole("group", { name: "Criterion 1 and R1" })).toBeNull();
     });
 
@@ -3298,7 +3275,7 @@ describe("the Graph pane (SCP-316)", () => {
       const before = (await sampleBridge.request({ kind: "snapshot" })).jobs.length;
       location.hash = `planning/${opened.id}/drift`;
       mount();
-      await waitFor(() => expect(location.hash).toBe(`#task/${repoId}/${key}/contract`), {
+      await waitFor(() => expect(location.hash).toBe(`#planning/${opened.id}/contract`), {
         timeout: 5000,
       });
       // Nothing was asked of the reading on the way.
@@ -3557,7 +3534,7 @@ describe("the Graph pane (SCP-316)", () => {
       location.hash = `planning/${plan.id}/graph`;
       await screen.findByRole("heading", { name: "Execution graph" });
       location.hash = `planning/${plan.id}/drift`;
-      await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
       await waitFor(async () =>
         expect((await editingRead(plan.id)).asking).toBeNull(),
       );
@@ -3992,7 +3969,7 @@ describe("the Graph pane (SCP-316)", () => {
             .getAllByRole("button", { name: "Confirm the plan" })
             .find((button) => button.closest('[role="complementary"]') === null)!,
         );
-        await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+        await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
         watch.disconnect();
         expect(stops).toEqual([]);
       });
@@ -4009,7 +3986,7 @@ describe("the Graph pane (SCP-316)", () => {
         // One way on, and it is the footer's.
         expect(screen.getAllByRole("button", { name: "Confirm the plan" })).toHaveLength(1);
         fireEvent.click(within(footer).getByRole("button", { name: "Confirm the plan" }));
-        await waitFor(() => expect(location.hash).toMatch(/^#task\/.*\/contract$/), { timeout: 5000 });
+        await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
       });
 
       it("stops on the Problems page for the Architect's own question though every problem is resolved", async () => {
@@ -4185,83 +4162,6 @@ describe("the Graph pane (SCP-316)", () => {
       await waitFor(() => expect(section.querySelector("textarea")).not.toBeNull());
       expect(added(section)).toEqual([]);
       expect(removed(section)).toEqual([]);
-    });
-
-    it("marks what Next changed on the Plan pane, with a criterion it took away struck through at the end", async () => {
-      const plan = await planned();
-      const edit = async (edit: GraphEdit) =>
-        sampleBridge.request({ kind: "graphEdit", repoId: plan.repoId, key: plan.key, edit });
-      await edit({ op: "delete_node", id: "node_2", move_criteria_to: "node_1", delete_criteria: [] });
-      await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(1));
-      await edit({ op: "delete_node", id: "node_1", move_criteria_to: null, delete_criteria: [] });
-      await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(0));
-      const count = (await graphOf(plan)).criteria.length;
-      expect(count).toBeGreaterThan(1);
-      location.hash = `planning/${plan.id}/criteria`;
-      mount();
-      await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-      fireEvent.click(await screen.findByRole("button", { name: "Edit criterion 1" }));
-      fireEvent.change(screen.getByLabelText("Criterion 1"), {
-        target: { value: "A person can choose the colour mode." },
-      });
-      fireEvent.click(screen.getByRole("button", { name: "Save" }));
-      fireEvent.click(screen.getByRole("button", { name: `Delete criterion ${count}` }));
-      const next = screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
-      await waitFor(() => expect(next.disabled).toBe(false));
-      fireEvent.click(next);
-      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-      await waitFor(async () => expect((await session(plan)).change?.plan ?? null).not.toBeNull(), {
-        timeout: 5000,
-      });
-      // Back on the plan: the rewording marked on its row, and the criterion
-      // that went struck through after the last row.
-      location.hash = `planning/${plan.id}/criteria`;
-      await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-      await waitFor(() => expect(added(document.querySelector(".criteria-editor")!).join("|")).toContain("colour mode"), {
-        timeout: 5000,
-      });
-      const struck = screen.getByLabelText("A criterion removed by the last change");
-      expect(removed(struck).join("|")).toContain("The rail follows the mode.");
-      // Editing a row takes every mark away while the list is moving.
-      fireEvent.click(screen.getByRole("button", { name: "Edit criterion 2" }));
-      expect(added()).toEqual([]);
-      expect(screen.queryByLabelText("A criterion removed by the last change")).toBeNull();
-    });
-
-    it("marks a criterion deleted from the middle of the plan as the one that went, and the ones after it as themselves", async () => {
-      // Next numbers the criteria afresh, so the third takes the second's
-      // id: by id the survivor would read as a rewording of the one deleted,
-      // and the last as gone. By words, the survivors carry no mark and the
-      // deleted one is struck through at the end.
-      const plan = await planned();
-      const edit = async (edit: GraphEdit) =>
-        sampleBridge.request({ kind: "graphEdit", repoId: plan.repoId, key: plan.key, edit });
-      await edit({ op: "delete_node", id: "node_2", move_criteria_to: "node_1", delete_criteria: [] });
-      await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(1));
-      await edit({ op: "delete_node", id: "node_1", move_criteria_to: null, delete_criteria: [] });
-      await waitFor(async () => expect((await graphOf(plan)).nodes).toHaveLength(0));
-      const texts = (await graphOf(plan)).criteria.map((each) => each.text);
-      expect(texts.length).toBeGreaterThan(2);
-      location.hash = `planning/${plan.id}/criteria`;
-      mount();
-      await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-      fireEvent.click(screen.getByRole("button", { name: "Delete criterion 2" }));
-      const next = screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
-      await waitFor(() => expect(next.disabled).toBe(false));
-      fireEvent.click(next);
-      await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-      await waitFor(async () => expect((await session(plan)).change?.plan ?? null).not.toBeNull(), {
-        timeout: 5000,
-      });
-      location.hash = `planning/${plan.id}/criteria`;
-      await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
-      const struck = await screen.findByLabelText("A criterion removed by the last change", {}, { timeout: 5000 });
-      expect(removed(struck)).toEqual([texts[1]]);
-      // The struck one is the only mark on the pane: nothing green, and
-      // nothing else struck, on any survivor's row.
-      expect(added()).toEqual([]);
-      expect(removed()).toEqual([texts[1]]);
-      expect(screen.getAllByLabelText("A criterion removed by the last change")).toHaveLength(1);
     });
 
     it("marks the work of a turn queued behind another with it, as one change", async () => {
@@ -4886,7 +4786,7 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     location.hash = `planning/${plan.id}/spec`;
     mount();
     await screen.findByLabelText("Spec title");
-    for (const name of ["Spec", "Explorer", "Impact"]) {
+    for (const name of ["Spec", "Explorer", "Spec"]) {
       fireEvent.click(pane(name));
       // The dock is beside the pane, not inside it, so it survives the switch.
       await waitFor(() => expect(dock()).toBeTruthy());
@@ -5669,8 +5569,8 @@ describe("the interview docked in planning mode (SCP-313)", () => {
         screen.getByRole("button", { name: "Generate plan" }) as HTMLButtonElement;
       await waitFor(() => expect(press().disabled).toBe(false), { timeout: 5000 });
       fireEvent.click(press());
-      await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/(graph|criteria)$/), {
-        timeout: 5000,
+      await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/(graph|impact|drift|contract)$/), {
+        timeout: 8000,
       });
       return (await editingRead(id)).key!;
     }
@@ -6156,8 +6056,14 @@ describe("the interview docked in planning mode (SCP-313)", () => {
  * host runs.
  */
 describe("the Impact pane (SCP-320)", () => {
+  /**
+   * A pane by its address. Impact is in the rail only once there is a plan
+   * (D-NEW-basic-and-epic-flows), and what
+   * the pane does is the same either way, so these cases reach it directly.
+   */
   const openPane = async (name: string): Promise<void> => {
-    fireEvent.click(pane(name));
+    location.hash = `planning/${sessionId()}/${name.toLowerCase()}`;
+    await waitFor(() => expect(location.hash).toMatch(new RegExp(`/${name.toLowerCase()}$`)));
   };
   /** Planning in one repository, with `paths` as the draft's declared scope. */
   const planningOver = async (repository: RegExp, paths: string[]): Promise<void> => {
@@ -6223,11 +6129,11 @@ describe("the Impact pane (SCP-320)", () => {
         { timeout: 5000 },
       );
       // A plan landing takes the person to it, which is the whole point of
-      // that landing; this pane is what the test is about, so it comes back —
-      // through the rail, the way a person would.
-      await waitFor(() => expect(location.hash).toMatch(/\/(graph|criteria)$/), { timeout: 5000 });
+      // that landing — a flat one checked first, its impact among the checks
+      // — and this pane is what the test is about, so it comes back to it.
+      await waitFor(() => expect(location.hash).toMatch(/\/(graph|impact|contract)$/), { timeout: 5000 });
       void planned;
-      fireEvent.click(pane("Impact"));
+      await openPane("Impact");
       // No button was pressed, and the answer arrives.
       await waitFor(() => expect(runs()).toBeGreaterThan(0), { timeout: 5000 });
       await waitFor(() => expect(screen.queryByText("not checked yet")).toBeNull());
@@ -6277,29 +6183,23 @@ describe("the Impact pane (SCP-320)", () => {
     });
     await waitFor(async () => expect((await session()).key).not.toBeNull(), { timeout: 5000 });
 
+    // A flat plan lands where its checks say, with a pop-up there; this pane
+    // is what the test is about.
+    await screen.findByRole("dialog", { name: "A simple task" }, { timeout: 8000 });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await openPane(pane);
-    // Read before the click: confirming leaves planning, and the session is
-    // read off the route this is standing on.
-    const key = (await session()).key!;
-    fireEvent.click(await screen.findByRole("button", { name: "Confirm the plan" }));
+    const id = sessionId();
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm contract" }));
     // The contract, and not an approval taken on a pane that never said what
     // it was freezing.
-    await waitFor(() => expect(location.hash).toContain(`${key}/contract`));
+    await waitFor(() => expect(location.hash).toBe(`#planning/${id}/contract`), { timeout: 5000 });
   });
 
-  it("sits last in the rail's planning panes, and asks for nothing until it is asked", async () => {
+  it("is not in the rail before there is a plan, and asks for nothing until it is asked", async () => {
     await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
-    // No plan has been drafted here, so there is no graph to offer and Impact
-    // is last of the three that are.
-    expect(railNames().slice(0, 6)).toEqual([
-      "Create",
-      "Spec",
-      "Explorer",
-      "Impact",
-      "Home",
-      "Archive",
-    ]);
-    expect(screen.getByRole("button", { name: "Impact" }).getAttribute("aria-current")).toBe("page");
+    // No plan has been drafted here, so there is nothing to measure impact
+    // against, and the rail does not offer it (D-NEW-basic-and-epic-flows).
+    expect(railNames().slice(0, 5)).toEqual(["Create", "Spec", "Explorer", "Home", "Archive"]);
     // Opening the pane reads nothing: the answer is a parse of the whole tree.
     expect(document.querySelector(".pane-head .sub")!.textContent).toContain("not checked yet");
     expect(document.querySelector(".impact-row")).toBeNull();
@@ -7227,9 +7127,9 @@ describe("the one piece of work a page is about: its name, its row in the picker
       key = (await editingRead(opened.id)).key;
       expect(key).not.toBeNull();
     }, { timeout: 5000 });
-    location.hash = `planning/${opened.id}/criteria`;
+    location.hash = `planning/${opened.id}/spec`;
     mount();
-    await screen.findByRole("heading", { name: "Acceptance criteria" }, { timeout: 5000 });
+    await screen.findByLabelText("Spec title", {}, { timeout: 5000 });
     await waitFor(() => expect(barName()).toBe(title));
     return { id: opened.id, repoId, key: key! };
   }
@@ -7379,25 +7279,26 @@ describe("the one piece of work a page is about: its name, its row in the picker
     expect(document.querySelector(".titlebar-name")).toBeNull();
   });
 
-  it("keeps the planning's panes in the rail on its contract until it is approved, each going back to planning on its own pane (D-130)", async () => {
+  it("opens a plan's contract as the planning's last tab until it is approved, its other tabs going back into the planning (D-130, D-NEW-basic-and-epic-flows)", async () => {
     const plan = await ticketPlanning("A billing page in tabs");
     location.hash = `task/${plan.repoId}/${plan.key}/contract`;
+    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`), { timeout: 5000 });
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
-    await waitFor(async () => expect((await editingRead(plan.id)).lastView).toBe("contract"));
+    await waitFor(async () => expect(await lastPane(plan.id)).toBe("contract"));
     const group = screen.getByRole("group", { name: "Planning panes" });
     expect(within(group).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
       "Spec",
-      "Plan",
       "Explorer",
-      "Impact",
+      "Confirm contract",
     ]);
-    // None is where the person is: they are on the contract.
-    expect(group.querySelector("[aria-current]")).toBeNull();
+    expect(within(group).getByRole("button", { name: "Confirm contract" }).getAttribute("aria-current")).toBe("page");
     fireEvent.click(pane("Explorer"));
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/explorer`));
     await screen.findByRole("tree", { name: "Tracked files" });
-    // Kept as Back to planning keeps it: the pane reached, and no longer the contract.
-    await waitFor(async () => expect(await editingRead(plan.id)).toMatchObject({ lastView: null, lastPane: "explorer" }));
+    await waitFor(async () => expect(await lastPane(plan.id)).toBe("explorer"));
+    // Nothing changed since, so the contract is still a tab to go back to.
+    fireEvent.click(pane("Confirm contract"));
+    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`));
     // An approved ticket's contract, with a session over it that holds its
     // divided plan as a planning does: the approval alone keeps the panes
     // out of the rail.

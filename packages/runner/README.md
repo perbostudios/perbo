@@ -6,7 +6,10 @@ The half of execution that is not the agent.
   built from an allow-list rather than scrubbed by a deny-list, and the pinned provider base URL.
 - `adapter.ts` — the Claude Code adapter (`codex/` is the Codex one). It builds an argv rather than assembling one,
   records it on the attempt with the prompt removed from the hash, and **asserts** that the agent
-  loaded nothing originating in the repository (ADR-0030).
+  loaded nothing originating in the repository (ADR-0030). Both adapters print each turn the
+  executor's own session speaks as a progress line of its own (`spokenLine` in `@perbo/contracts`),
+  redacted as the attempt's records are; the review stage prints each finding the reviewer left
+  open the same way, and the seal says when it starts.
 - `codex/` — the Codex adapter: `index.ts` is the surface (`runCodexAgent` and the three decisions
   the thread's items are answered with); `internal/rpc.ts` holds the thread session, its argv and
   the agent role files it writes.
@@ -54,8 +57,8 @@ The half of execution that is not the agent.
   set; `internal/rerun.ts` reads a failed run's output and plans what is run again.
 - `loop/` — the run. `index.ts` is the entry and the sequencer: contract → worktree → spec commit →
   agent → seal → checks → review → route → pull request. It holds the run's public types,
-  `runTicket`, the run's limits and the order the phases run in; `internal/` holds the phases, and
-  nothing outside the module imports them.
+  `runTicket`, `publishRetained`, the run's limits and the order the phases run in; `internal/`
+  holds the phases, and nothing outside the module imports them.
   - `internal/config.ts` — `TicketRunConfigSchema` and the two path lists a run is judged by.
   - `internal/context.ts` — the ports a run reaches the world through, and what it is bounded by.
   - `internal/state.ts` — what one round hands the next, the step a round's routing comes to, and the
@@ -80,6 +83,12 @@ The half of execution that is not the agent.
   - `internal/verify.ts` — D-061's closure verification and the routing that reads it.
   - `internal/review.ts` — the independent review, its bundle, and the routing that reads its verdict.
   - `internal/deliver.ts` — the push, the pull request and SCP-202's merge step.
+  - `internal/retained.ts` — `publishRetained`: a branch a run retained without publishing, pushed
+    and its pull request opened later through that same delivery, without executing or reviewing
+    again, with the body that run would have opened — the closure verifications' cost from their
+    bundles and the declines its attempts sealed — the delivery recorded under the run lock, and
+    refused where the branch is not what the review judged
+    (D-NEW-publish-a-retained-branch-later).
   - `internal/merge-up.ts` — the base branch's tip merged into the attempt's branch, and the paths
     a conflict left markers in.
   - `internal/orphans.ts` — the processes an attempt left behind, swept from its worktree.

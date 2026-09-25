@@ -264,18 +264,41 @@ export function untouchedPlanning(session: EditingSession): boolean {
 }
 
 /**
- * The sessions a person can pick up again, newest first. Both hosts put this
- * on the snapshot, each reading a spec's title from where it keeps specs
- * (`specTitle`, null where there is none), and a title that is still the cut
- * the folder was named from is none (D-118).
+ * A spec as a host reads it from where it keeps specs: its title, and its
+ * five sections where they were read, or null where there is no spec.
  */
-export function openDrafts(
-  records: readonly EditingSession[],
-  specTitle: (repoId: string, slug: string) => string | null,
-): OpenDraft[] {
+export type SpecReader = (repoId: string, slug: string) => { title: string; sections: SpecSections | null } | null;
+
+/**
+ * A short fingerprint of a text, the same in every process that computes it:
+ * for telling whether something moved, never for trusting what it is. Two
+ * 32-bit FNV-1a lanes with different offsets, as 16 hex digits.
+ */
+export function fingerprint(text: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ 0x5bd1e995;
+  for (let at = 0; at < text.length; at++) {
+    const code = text.charCodeAt(at);
+    a = Math.imul(a ^ code, 0x01000193);
+    b = Math.imul(b ^ code, 0x5bd1e995);
+  }
+  return (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * The sessions a person can pick up again, newest first. Both hosts put this
+ * on the snapshot, each reading a spec from where it keeps specs (`spec`,
+ * null where there is none): its title, where a title that is still the cut
+ * the folder was named from is none (D-118), and a fingerprint of its
+ * sections, which is the spec's part of the state the contract was reached
+ * at (D-NEW-basic-and-epic-flows).
+ */
+export function openDrafts(records: readonly EditingSession[], spec: SpecReader): OpenDraft[] {
   return records
     .filter((record) => record.phase !== "discarded")
-    .map((record) => ({
+    .map((record) => {
+      const text = record.specSlug === null ? null : spec(record.repoId, record.specSlug);
+      return {
       id: record.id,
       repoId: record.repoId,
       key: record.key,
@@ -289,15 +312,18 @@ export function openDrafts(
           : { open: record.drift.open.length, resolved: record.drift.resolved },
       scope: { paths: [...record.form.draft.paths], prohibited: [...record.form.draft.prohibited] },
       specSlug: record.specSlug,
-      title: titleOfSpec(record, specTitle),
+      title: titleOfSpec(record, text?.title ?? null),
       lastPane: record.lastPane,
-      lastView: record.lastView,
-    }))
+      confirmed: record.confirmed,
+      spec: text?.sections == null ? null : fingerprint(JSON.stringify(sectionsOf(text.sections))),
+      impact: record.impact,
+      };
+    })
     .reverse();
 }
 
-function titleOfSpec(record: EditingSession, specTitle: Parameters<typeof openDrafts>[1]): string | null {
-  const title = record.specSlug === null ? null : specTitle(record.repoId, record.specSlug)?.trim();
+function titleOfSpec(record: EditingSession, stated: string | null): string | null {
+  const title = stated?.trim();
   return !title || title === record.specCut ? null : title;
 }
 
@@ -419,7 +445,8 @@ export class ContractEditing {
           specCut: null,
           named: null,
           lastPane: null,
-          lastView: null,
+          confirmed: null,
+          impact: null,
           drift: null,
           change: null,
           phase: legacy?.pending ? "outcome-unknown" : "editing",
@@ -706,30 +733,46 @@ export class ContractEditing {
    * between panes puts nothing into the planning, so a planning opened fresh
    * and only looked around in is still one {@link untouchedPlanning} throws
    * away, and a save in flight is not made stale by the person looking
-   * elsewhere. A pane reached is the last place, so it clears the contract
-   * as `lastView`. Where the person already is writes nothing, and a
-   * discarded planning is reopened nowhere.
+   * elsewhere. Where the person already is writes nothing, and a discarded
+   * planning is reopened nowhere.
    */
-  visit(id: string, pane: PlanningPane): EditingSession {
+  visit(id: string, pane: Exclude<PlanningPane, "contract">): EditingSession {
     const session = this.read(id);
-    if ((session.lastPane === pane && session.lastView === null) || session.phase === "discarded") return session;
+    if (session.lastPane === pane || session.phase === "discarded") return session;
     return this.update(id, (next) => {
       next.lastPane = pane;
-      next.lastView = null;
     });
   }
 
   /**
    * Write down that the person is now on this planning's contract, which is
-   * where its ticket reopens (D-130),
-   * as {@link visit} writes a pane: no revision moves, `lastPane` stays for
-   * the contract's way back, and a discarded planning records nothing.
+   * where the planning reopens (D-130),
+   * and the state they reached it at, which keeps the contract a tab of the
+   * planning until that state moves (D-NEW-basic-and-epic-flows),
+   * as {@link visit} writes a pane: no revision moves, and a discarded
+   * planning records nothing.
    */
-  visitContract(id: string): EditingSession {
+  visitContract(id: string, state: string): EditingSession {
     const session = this.read(id);
-    if (session.lastView === "contract" || session.phase === "discarded") return session;
+    if ((session.lastPane === "contract" && session.confirmed === state) || session.phase === "discarded")
+      return session;
     return this.update(id, (next) => {
-      next.lastView = "contract";
+      next.lastPane = "contract";
+      next.confirmed = state;
+    });
+  }
+
+  /**
+   * How many paths the impact check of this planning's draft just found
+   * outside its scope (D-NEW-basic-and-epic-flows).
+   * Leaves `revision` where it stands, as {@link visit} does: a check puts
+   * nothing into the planning.
+   */
+  recordImpact(id: string, outside: number): void {
+    const session = this.read(id);
+    if (session.impact === outside || session.phase === "discarded") return;
+    this.update(id, (next) => {
+      next.impact = outside;
     });
   }
 
@@ -1152,6 +1195,9 @@ export class ContractEditing {
               // contract from where it is drawn.
               next.nodes = planNodes(detail.contract).length;
               next.form = { ...next.form, draft: contractDraft(detail), editing: null, newPath: null };
+              // A plan drafted afresh has had no impact check: the last one
+              // was of the plan it replaces.
+              if (operation.intent !== "compile") next.impact = null;
               // Every operation lands on a contract: the session now holds a Ticket.
               next.phase = "ready";
               next.resumeNew = false;

@@ -54,10 +54,16 @@ export {
   VERIFICATION_KINDS,
 } from "./plan.js";
 export type { AcceptanceCriterion, PlanContract, PlanNode, VerificationKind } from "./plan.js";
+export { gateClosedNote, retainedBranch } from "./retained.js";
+export type { RetainedBranch } from "./retained.js";
 export { isPlannedP3Path } from "./risk.js";
 export { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS, planSizeCounts, sizeEstimate } from "./size.js";
 export type { SizeEstimate } from "./size.js";
+export { readSpoken, SPEAKERS, SPOKEN_LINE_CAP, spokenLine } from "./spoken.js";
+export type { Speaker } from "./spoken.js";
 export { standingGlob, StandingProhibitedEntrySchema } from "./standing.js";
 export type { StandingProhibitedEntry } from "./standing.js";
 export type { SymbolIndex, UnsupportedRepository } from "./symbol-index.js";
 export { sameName, TICKET_NAME_CAP } from "./ticket-name.js";
+export { DECIDED_DELIVERY_NOTE, TICKET_TRANSITIONS } from "./ticket-transitions.js";
+export type { TicketTransition } from "./ticket-transitions.js";

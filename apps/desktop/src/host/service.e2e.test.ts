@@ -415,34 +415,34 @@ describe("the pane a planning was left at (D-130)", () => {
     expect((await restarted.request({ kind: "editingRead", id: opened.id })).lastPane).toBe("explorer");
   });
 
-  it("records the contract as the last place without moving the revision, keeps it through a restart, and a pane reached after clears it", async () => {
+  it("records the contract as the last pane with the state it was reached at, without moving the revision, through a restart", async () => {
     const { service, repo, options } = fixture();
     const opened = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: (await service.registerRepository(repo)).id } });
-    expect(opened.lastView).toBeNull();
+    expect(opened.confirmed).toBeNull();
     await service.request({ kind: "editingVisited", id: opened.id, pane: "impact" });
-    const atContract = await service.request({ kind: "editingContractVisited", id: opened.id });
-    expect(atContract.lastView).toBe("contract");
-    // The pane it was left from stays, for the contract's way back.
-    expect(atContract.lastPane).toBe("impact");
-    expect(atContract.revision).toBe(opened.revision);
+    const atContract = await service.request({ kind: "editingContractVisited", id: opened.id, state: "0123456789abcdef" });
+    expect(atContract).toMatchObject({ lastPane: "contract", confirmed: "0123456789abcdef", revision: opened.revision });
     expect(untouchedPlanning(atContract)).toBe(true);
-    expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === opened.id)?.lastView).toBe("contract");
+    expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === opened.id)).toMatchObject({
+      lastPane: "contract",
+      confirmed: "0123456789abcdef",
+    });
     await service.shutdown();
     const restarted = new DesktopService(options);
     trackService(restarted);
-    expect((await restarted.request({ kind: "editingRead", id: opened.id })).lastView).toBe("contract");
-    // Back on the pane it was left from is the last place again.
+    expect((await restarted.request({ kind: "editingRead", id: opened.id })).lastPane).toBe("contract");
+    // A pane reached after is the last place, and the state stays for the tab.
     const back = await restarted.request({ kind: "editingVisited", id: opened.id, pane: "impact" });
-    expect(back.lastView).toBeNull();
-    expect(back.lastPane).toBe("impact");
+    expect(back).toMatchObject({ lastPane: "impact", confirmed: "0123456789abcdef" });
   });
 
-  it("refuses a pane planning mode does not have", async () => {
+  it("refuses a pane planning mode does not have, and the contract without the state it was reached at", async () => {
     const { service, repo } = fixture();
     const session = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: (await service.registerRepository(repo)).id } });
-    await expect(
-      service.request({ kind: "editingVisited", id: session.id, pane: "contract" } as never),
-    ).rejects.toThrow();
+    for (const pane of ["board", "contract"])
+      await expect(
+        service.request({ kind: "editingVisited", id: session.id, pane } as never),
+      ).rejects.toThrow();
     expect((await service.request({ kind: "editingRead", id: session.id })).lastPane).toBeNull();
   });
 
@@ -472,15 +472,15 @@ describe("the pane a planning was left at (D-130)", () => {
     expect(message).toMatch(/correct the field or move the file aside\.$/i);
   });
 
-  it("refuses to start with a record without its last view, naming the field", async () => {
+  it("refuses to start with a record without the state its contract was reached at, naming the field", async () => {
     const { service, repo, options } = fixture();
     await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId: (await service.registerRepository(repo)).id } });
     await service.shutdown();
     const path = join(options.dataDirectory, "workspace.json");
     const stored = JSON.parse(readFileSync(path, "utf8")) as { editingSessions: Record<string, unknown>[] };
-    for (const session of stored.editingSessions) delete session["lastView"];
+    for (const session of stored.editingSessions) delete session["confirmed"];
     writeFileSync(path, JSON.stringify(stored));
-    expect(() => trackService(new DesktopService(options))).toThrow(/editingSessions\[0\]\.lastView/);
+    expect(() => trackService(new DesktopService(options))).toThrow(/editingSessions\[0\]\.confirmed/);
   });
 });
 
@@ -3389,7 +3389,7 @@ readline.createInterface({ input: process.stdin })
       expect(titleLine(repo)).toBe("# Signup emails");
     });
 
-    it("names nobody, and reads no drafts again, for a save that only respaces the title", async () => {
+    it("names nobody for a save that only respaces the title, and reads the drafts again for it as for any save", async () => {
       const { service, repo, repoId, id, changes, asked } = await titled();
       await service.request({ kind: "interviewStart", repoId, id });
       await running(service, id);
@@ -3399,10 +3399,13 @@ readline.createInterface({ input: process.stdin })
       const listed = (): number =>
         changes.filter((change) => change.kind === "editing" && change.sessionId === id).length;
       // What a save under the title it read announces, which a respaced one
-      // matches: no new title to list the planning under.
+      // matches: every save that lands has the drafts list read again, since
+      // the contract tab holds by the spec's sections
+      // (D-NEW-basic-and-epic-flows).
       const unchanged = listed();
       await saveSpec(service, { kind: "specSave", id, repoId, title: read.title, sections: read.sections });
       const respaced = listed();
+      expect(respaced).toBeGreaterThan(unchanged);
       await saveSpec(service, {
         kind: "specSave",
         id,
@@ -6039,8 +6042,9 @@ describe("a stopped run's ticket", () => {
     // plan this spec has.
     expect(standing).toEqual([false]);
     expect((await made.service.snapshot()).taskModels?.[`${made.repoId}:PRB-2`]).toEqual(chosen);
-    // A planning over the new plan, on the pane that holds it.
-    expect(["graph", "criteria"]).toContain(opened.pane);
+    // A planning over the new plan, with its ticket and the shape it landed in.
+    expect(opened.key).toBe("PRB-2");
+    expect(opened.nodes).toBeGreaterThanOrEqual(0);
     const session = await made.service.request({ kind: "editingRead", id: opened.sessionId });
     expect(session.key).toBe("PRB-2");
     // The stopped ticket is gone, and everything recorded after its contract
@@ -6666,5 +6670,87 @@ describe("deleting a filed ticket", () => {
     for (const change of said) expect(change.archived).not.toContain(entry);
     const after = await service.snapshot();
     expect(after.tasks.some((row) => row.ticket.key === "PRB-1")).toBe(false);
+  });
+});
+
+/**
+ * D-NEW-publish-a-retained-branch-later: the merge press on a ticket whose run
+ * retained its branch. The host runs the CLI's own delivery of it as a job,
+ * argv and never a shell string, under a run's configuration with publishing
+ * on and a person merging, then opens the pull request the CLI recorded. The
+ * CLI is stood in for here — what it does with the branch is proven in its own
+ * suite — and writes the delivery record the way it does.
+ */
+describe("the merge press on a retained branch", () => {
+  const PULL_REQUEST = "https://github.com/example/webstore/pull/8";
+
+  it("runs the CLI's --publish-retained as argv, then opens the pull request it recorded", async () => {
+    const calls: { binary: string; args: readonly string[]; config: Record<string, unknown> }[] = [];
+    let repoPath = "";
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "run") {
+        calls.push({
+          binary,
+          args,
+          config: JSON.parse(readFileSync(args[args.indexOf("--config") + 1]!, "utf8")) as Record<string, unknown>,
+        });
+        const path = join(repoPath, ".perbo", "tickets", "PRB-1.json");
+        const ticket = JSON.parse(readFileSync(path, "utf8")) as { delivery: Record<string, unknown> };
+        ticket.delivery = { ...ticket.delivery, pull_request_url: PULL_REQUEST, pull_request_number: 8, state: "open", opened_by: "loop" };
+        writeFileSync(path, JSON.stringify(ticket, null, 2));
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return runProcess(binary, args, options);
+    };
+    const { service, repo, options } = fixture(runner);
+    repoPath = repo;
+    const opened: string[] = [];
+    options.io.openExternal = async (url) => {
+      opened.push(url);
+    };
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    setTicketState(repo, "PRB-1", "pr_open");
+
+    const job = await finished(service, (await service.request({ kind: "publish", repoId: registered.id, key: "PRB-1" })).id);
+
+    expect(job).toMatchObject({ kind: "publish", state: "completed", error: null, label: "Open the pull request" });
+    expect(lane(job.kind)).toBe("exclusive");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.binary).toBe(options.nodeBinary);
+    expect(calls[0]!.args.slice(1)).toEqual([
+      "run",
+      "--ticket",
+      "PRB-1",
+      "--config",
+      calls[0]!.args[calls[0]!.args.indexOf("--config") + 1],
+      "--publish-retained",
+      "--json",
+      "--repo",
+      // One element, spaces and all: nothing here is a shell string.
+      expect.stringMatching(/\/repository with spaces$/),
+    ]);
+    expect(calls[0]!.config).toMatchObject({ publish: true, merge: "person" });
+    expect(opened).toEqual([PULL_REQUEST]);
+    expect((await service.detail(registered.id, "PRB-1")).ticket.delivery.pull_request_url).toBe(PULL_REQUEST);
+  });
+
+  it("fails the job with the CLI's refusal, and opens nothing", async () => {
+    const refusal = "error: PRB-1's retained branch was not published: main has moved to 0123456789ab. Nothing was pushed";
+    const runner: typeof runProcess = async (binary, args, options) =>
+      args[1] === "run" ? { code: 3, stdout: "", stderr: refusal, cancelled: false } : runProcess(binary, args, options);
+    const { service, repo, options } = fixture(runner);
+    const opened: string[] = [];
+    options.io.openExternal = async (url) => {
+      opened.push(url);
+    };
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+
+    const job = await finished(service, (await service.request({ kind: "publish", repoId: registered.id, key: "PRB-1" })).id);
+
+    expect(job.state).toBe("failed");
+    expect(job.error).toBe(refusal);
+    expect(opened).toEqual([]);
   });
 });

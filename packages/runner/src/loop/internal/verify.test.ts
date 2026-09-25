@@ -307,6 +307,7 @@ describe("the bundle a closure verification leaves", () => {
       changeset: { changeset_id: "cs_0000000000000001" } as never,
       head_commit: "ab12cd3",
       diff: "diff --git a/src/feature.ts b/src/feature.ts",
+      retained_diff: "diff --git a/src/feature.ts b/src/feature.ts",
       changed_paths: ["src/feature.ts"],
       excluded_paths: [],
       excluded_check_artifacts: [],

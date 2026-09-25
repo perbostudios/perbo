@@ -552,7 +552,7 @@ const PlanPromiseSchema = z.strictObject({
 export type PlanPromise = z.infer<typeof PlanPromiseSchema>;
 /**
  * The last change to the spec and the plan's promise, whoever made it: the
- * interview's turn, an edit by hand on the Graph or the Plan pane, a spec
+ * interview's turn, an edit by hand on the Graph or a basic ticket's contract, a spec
  * save, an answer that closed a problem. The panes mark what it added and
  * what it took away, and the marks stand until the next change, which
  * replaces this whole (D-128). A side
@@ -569,7 +569,7 @@ export type EditingChange = z.infer<typeof EditingChangeSchema>;
  * with. The rail draws each from `renderer/planning/panes.ts`, which says what
  * each one is and which of them a planning offers.
  */
-export const PlanningPaneSchema = z.enum(["spec", "graph", "criteria", "explorer", "impact", "drift"]);
+export const PlanningPaneSchema = z.enum(["spec", "graph", "explorer", "impact", "drift", "contract"]);
 export type PlanningPane = z.infer<typeof PlanningPaneSchema>;
 export const EditingSessionSchema = z.strictObject({
   version: z.literal(1),
@@ -667,22 +667,30 @@ export const EditingSessionSchema = z.strictObject({
    */
   change: EditingChangeSchema.nullable(),
   /**
-   * The pane the person was last on in this planning, or null before they
-   * have been on one: every way back into the planning opens it there
+   * The pane the person was last on in this planning, the contract included,
+   * or null before they have been on one: every way back into the planning
+   * opens it there while the planning still offers it
    * (D-130). Recorded as the pane
    * changes, so going Home and closing Perbo each find it already written.
    */
   lastPane: PlanningPaneSchema.nullable(),
   /**
-   * Whether the person was last on this planning's contract rather than on
-   * one of its panes: "contract" from reaching the contract page until planning
-   * mode records a pane, else null. The ticket's own page opens on the contract
-   * while it says so and the plan waits for approval, where it would
-   * otherwise send the person into the planning
-   * (D-130). `lastPane` is kept, so the
-   * contract's way back goes to the pane it was left from.
+   * The state the person last reached this planning's contract at, as
+   * `contractState` in `renderer/planning/panes.ts` states it — the spec's
+   * sections, the plan as its ticket last moved and the scope this planning
+   * holds — or null before they have reached it. The contract stays a tab of
+   * the planning while the state is still this one, and goes once anything
+   * in it moves (D-NEW-basic-and-epic-flows).
+   * A fingerprint: nothing reads it but the comparison.
    */
-  lastView: z.literal("contract").nullable(),
+  confirmed: z.string().min(1).max(64).nullable(),
+  /**
+   * How many paths the last impact check of this planning's draft found
+   * outside its scope, or null before one was made for the plan it holds. A
+   * flat plan offers the Impact pane only where it found some
+   * (D-NEW-basic-and-epic-flows).
+   */
+  impact: z.number().int().nonnegative().nullable(),
   form: EditingFormSchema,
   phase: z.enum(["editing", "working", "ready", "conflict", "outcome-unknown", "discarded"]),
   error: z.string().nullable(),
@@ -732,8 +740,16 @@ export interface OpenDraft {
   drift: { open: number; resolved: boolean } | null;
   /** The pane the person was last on, which the planning reopens on where it still offers it. */
   lastPane: PlanningPane | null;
-  /** "contract" where the person was last on the contract rather than a pane, which the ticket's page then opens on. */
-  lastView: "contract" | null;
+  /** The state the person last reached the contract at, which keeps the contract a tab while it holds. */
+  confirmed: string | null;
+  /**
+   * A fingerprint of the sections of the spec it writes, its title aside, or
+   * null while it has none: the part of {@link confirmed}'s state only the
+   * host can read.
+   */
+  spec: string | null;
+  /** How many paths its last impact check found outside the scope, or null before one. */
+  impact: number | null;
   /**
    * The scope this session holds, which is not yet the contract's.
    *
@@ -1046,16 +1062,26 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    * The person is now on this pane of this planning. Recorded on the session
    * as its `lastPane`, which is where the planning reopens
    * (D-130); not an edit, so it moves no
-   * revision.
+   * revision. The contract is recorded by `editingContractVisited`, with the
+   * state it was reached at.
    */
-  z.strictObject({ kind: z.literal("editingVisited"), id: identifier, pane: PlanningPaneSchema }),
+  z.strictObject({
+    kind: z.literal("editingVisited"),
+    id: identifier,
+    pane: PlanningPaneSchema.exclude(["contract"]),
+  }),
   /**
    * The person is now on this planning's contract. Recorded on the session
-   * as its `lastView`, which is where its ticket reopens
-   * (D-130); not an edit, so it moves no
-   * revision.
+   * as its `lastPane`, which is where the planning reopens
+   * (D-130), with the state they reached it at
+   * as its `confirmed` (D-NEW-basic-and-epic-flows);
+   * not an edit, so it moves no revision.
    */
-  z.strictObject({ kind: z.literal("editingContractVisited"), id: identifier }),
+  z.strictObject({
+    kind: z.literal("editingContractVisited"),
+    id: identifier,
+    state: z.string().min(1).max(64),
+  }),
   /** The spec this planning session holds, read from the repository (D-103). */
   z.strictObject({ kind: z.literal("specRead"), id: identifier }),
   /**
@@ -1277,6 +1303,12 @@ export const RequestSchema = z.discriminatedUnion("kind", [
       .nullable(),
   }),
   z.strictObject({ kind: z.literal("sync"), ...reference }),
+  /**
+   * The merge press on a ticket whose run retained its branch without
+   * publishing (D-NEW-publish-a-retained-branch-later): the branch is pushed
+   * and its pull request opened, then opened in the browser.
+   */
+  z.strictObject({ kind: z.literal("publish"), ...reference }),
   z.strictObject({ kind: z.literal("principle"), ...reference, answer: text }),
   z.strictObject({
     kind: z.literal("decide"),
@@ -1680,11 +1712,12 @@ export interface ReplyMap {
   admit: Job;
   edit: Job;
   generatePlan: Job;
-  /** The planning opened over the new plan, and which of its panes holds it. */
-  replan: { sessionId: string; pane: "graph" | "criteria" };
+  /** The planning opened over the new plan, its ticket, and how many nodes its plan has. */
+  replan: { sessionId: string; key: string; nodes: number };
   startOver: Job;
   run: Job;
   sync: Job;
+  publish: Job;
   principle: Job;
   decide: Job;
   verdict: Job;

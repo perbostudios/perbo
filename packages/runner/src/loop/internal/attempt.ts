@@ -314,13 +314,27 @@ export function recordAttempt(args: {
     clock,
   });
 
+  // D-065: declines are parsed from the model's own decoded text before any
+  // termination handling — an executor that declines everything and,
+  // correctly, changes nothing must end as an escalation with its reasons,
+  // not as `no_changes` — and sealed on the attempt's record, which is where a
+  // pull request opened later reads them (D-NEW-publish-a-retained-branch-later).
+  const declines =
+    state.kind === "remediate"
+      ? parseDeclines(args.agentResult.transcript, brief.toClose.map((finding) => finding.key))
+      : [];
+  if (declines.length > 0) {
+    progress(`${declines.length} finding(s) declared no-determinable-practice`);
+    args.ledger.addDeclines(declines);
+  }
+
   const attempt = ExecutionAttemptSchema.parse({
     schema_version: EXECUTION_ATTEMPT_SCHEMA_VERSION,
     attempt_id: args.attemptId,
     root_attempt_id: args.rootAttemptId,
     // Round 0 of a re-run continues the previous run's last attempt, so the
     // chain a reader follows crosses runs rather than restarting at each —
-    // and a resumed round 0 continues the cut attempt whose diff it holds,
+    // and a resumed round 0 continues the stopped attempt whose work it holds,
     // which is the more specific answer to the same question.
     continues_attempt_id:
       args.previous?.attempt_id ?? brief.resumedHere?.attempt_id ?? args.continuesPreviousRun,
@@ -395,7 +409,10 @@ export function recordAttempt(args: {
     // D-096: every time this round's brief went back after a compaction,
     // as the mechanism that carried it recorded them.
     brief_reinjections: args.agentResult.reinjections ?? [],
-    resumed_from: brief.resumedHere === null ? null : resumedFromRecord(brief.resumedHere),
+    resumed_from:
+      brief.resumedHere === null || brief.resumeOutcome === null
+        ? null
+        : resumedFromRecord(brief.resumedHere, brief.resumeOutcome),
     merged_base: args.mergedBase,
     spec_commit: args.specCommit,
     // What the check attribution above rests on, and — separately — what
@@ -406,6 +423,7 @@ export function recordAttempt(args: {
     // Written before the loop sleeps, not after: a process killed while it
     // is parked has to leave the instant behind for the next run to honour.
     wait: park,
+    declines,
   } satisfies ExecutionAttempt);
   // The next round inherits this one's commit and can name the attempt
   // that sealed it.
@@ -432,16 +450,32 @@ export function recordAttempt(args: {
       invocation_shape: attempt.agent.shape_sha256,
       binary_version: attempt.agent.binary_version,
       termination: termination.reason,
-      // The cut attempt's bundle is referenced here and left exactly as it
+      // The stopped attempt's bundle is referenced here and left exactly as it
       // was: this is a new record beside it, never a replacement for it.
       resumed_from_bundle: brief.resumedHere?.bundle_id ?? null,
       resumed_from_attempt: brief.resumedHere?.attempt_id ?? null,
       resumed_diff_sha256: brief.resumedHere?.diff_sha256 ?? null,
+      // What the resume did with that diff: `applied`, `held` (the branch
+      // already held the commit that attempt sealed, so it was not applied
+      // again) or `dropped` (it did not apply); null where there was none.
+      resumed_diff: brief.resumeOutcome?.state ?? null,
+      // The commit the branch held, or the one the executor started from
+      // where the diff was dropped; null where it was applied or there was none.
+      resumed_diff_at:
+        brief.resumeOutcome === null || brief.resumeOutcome.state === "applied"
+          ? null
+          : brief.resumeOutcome.at,
     },
     context_manifest: [],
     versions: {
       code: "stage-2",
-      prompt: executorPromptVersion(config, state.kind, brief.resumedHere !== null),
+      prompt: executorPromptVersion(
+        config,
+        state.kind,
+        brief.resumedHere !== null &&
+          brief.resumeOutcome !== null &&
+          brief.resumeOutcome.state !== "dropped",
+      ),
       policy: profile.autonomy_class,
       model: attempt.agent.model,
       tool: attempt.agent.binary_version,
@@ -471,7 +505,11 @@ export function recordAttempt(args: {
         media_type: "application/json",
         body: JSON.stringify(args.checks, null, 2),
       },
-      ...(sealed.diff ? [{ name: "change.diff", media_type: "text/x-diff", body: sealed.diff }] : []),
+      // Taken with `--binary`, so a resume applies every file the attempt
+      // wrote, a binary one included (SCP-154).
+      ...(sealed.retained_diff
+        ? [{ name: "change.diff", media_type: "text/x-diff", body: sealed.retained_diff }]
+        : []),
     ],
     errors: termination.reason === "completed" ? [] : [{ kind: termination.reason, message: termination.detail }],
     transitions: [
@@ -485,19 +523,6 @@ export function recordAttempt(args: {
     model_version_pinned: true,
     now: clock(),
   });
-
-  // D-065: declines are parsed from the model's own decoded text before any
-  // termination handling — an executor that declines everything and,
-  // correctly, changes nothing must end as an escalation with its reasons,
-  // not as `no_changes`.
-  const declines =
-    state.kind === "remediate"
-      ? parseDeclines(args.agentResult.transcript, brief.toClose.map((finding) => finding.key))
-      : [];
-  if (declines.length > 0) {
-    progress(`${declines.length} finding(s) declared no-determinable-practice`);
-    args.ledger.addDeclines(declines);
-  }
 
   return {
     state,

@@ -250,11 +250,12 @@ export function withDraft(snapshot: Snapshot, session: EditingSession): Snapshot
     ...snapshot,
     drafts: [
       // Listed as the host lists it, so the row is the one its refresh brings:
-      // titled by its spec as the snapshot last read the spec folder.
-      ...openDrafts(
-        [session],
-        (repoId, slug) => snapshot.specs?.find((spec) => spec.repoId === repoId && spec.slug === slug)?.title ?? null,
-      ),
+      // titled by its spec as the snapshot last read the spec folder, whose
+      // sections only that refresh reads.
+      ...openDrafts([session], (repoId, slug) => {
+        const title = snapshot.specs?.find((spec) => spec.repoId === repoId && spec.slug === slug)?.title;
+        return title === undefined ? null : { title, sections: null };
+      }),
       ...(snapshot.drafts ?? []).filter((draft) => draft.id !== session.id),
     ],
   };
@@ -341,7 +342,8 @@ export function titleOfDraft(workspace: Pick<Snapshot, "tasks" | "titles">, draf
  * drafts list no longer holds.
  */
 export function nameOfRoute(workspace: Snapshot, route: Route): string | null {
-  if (route.page !== "planning") return null;
+  // Not on the contract tab, whose page carries the name itself.
+  if (route.page !== "planning" || route.pane === "contract") return null;
   const draft = workspace.drafts?.find((entry) => entry.id === route.sessionId);
   return draft ? titleOfDraft(workspace, draft) : null;
 }
@@ -455,14 +457,8 @@ function Picker({
             ? "drafting the plan"
             : "draft in progress"),
       // Where it was left (D-130): its
-      // ticket's page where that was its contract, which that page opens on;
-      // else its problems while they are open, else the pane it was left at.
-      run: () =>
-        navigate(
-          draft.key !== null && draft.lastView === "contract"
-            ? { page: "task", repoId: draft.repoId, key: draft.key, view: "auto" }
-            : { page: "planning", sessionId: draft.id, pane: reopenPane(workspace.drafts, draft.id) },
-        ),
+      // problems while they are open, else the pane it was left at.
+      run: () => navigate({ page: "planning", sessionId: draft.id, pane: reopenPane(workspace, draft.id) }),
       bin: {
         label: "Delete planning",
         confirm: confirmDelete(
@@ -541,10 +537,11 @@ function Picker({
    * the session is open: the Problems pane while a reading of the plan
    * against its spec has found problems still open, since they are what the
    * planning is about until they are resolved (D-128);
-   * else a graph for work the drafter divided, the criteria for work it did
-   * not, and the spec where there is no plan yet. A ticket row carries none
-   * of this, and opening a flat plan on a Graph the rail does not offer is a
-   * page with nothing on it.
+   * else the Graph for work the drafter divided, the contract for work it did
+   * not, whose plan is its contract, and the spec where there is no plan yet
+   * (D-NEW-basic-and-epic-flows). A ticket row
+   * carries none of this, and opening a flat plan on a Graph the rail does not
+   * offer is a page with nothing on it.
    */
   const open = async (target: EditingTarget, pane: PlanningPane | "plan"): Promise<void> => {
     setBusy(true);
@@ -563,7 +560,7 @@ function Picker({
               ? "drift"
               : session.nodes > 0
                 ? "graph"
-                : "criteria";
+                : "contract";
       navigate({ page: "planning", sessionId: session.id, pane: landing });
     } catch (failure) {
       setError(errorMessage(failure));

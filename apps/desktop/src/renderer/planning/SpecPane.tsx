@@ -11,7 +11,7 @@ import { useTurnSending } from "./InterviewDock.js";
 import { INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
 import type { Change, ExportedName, SpecSections, SpecView } from "../../shared/protocol.js";
 import type { PageProps } from "../shell/route.js";
-import { confirmRoute, planApproved } from "./panes.js";
+import { confirmLabel, confirmRoute, flowFor, planApproved } from "./panes.js";
 
 const Composer = lazy(() =>
   import("../tasks/Composer.js").then((module) => ({ default: module.Composer })),
@@ -319,8 +319,6 @@ export function SpecPane({
   const latest = useRef(pending);
   latest.current = pending;
   const starting = useRef(false);
-  /** Whether the draft in flight is a re-draft this pane asked for. */
-  const redrafting = useRef(false);
   const commit = (over?: Partial<SpecSections>): void => {
     // Both texts are on screen and neither has been chosen: writing now would
     // pick one of them without being asked, which is the whole thing this is
@@ -458,20 +456,10 @@ export function SpecPane({
       starting.current = false;
       inFlight.current = false;
     }
-    // Drafting again lands on the plan, as drafting the first one does.
-    // Planning's own landing fires when the plan changes pane, and a re-draft
-    // that keeps its shape changes none, so this says where it went.
-    if (intent === "startOver") redrafting.current = true;
+    // Where the plan lands once it is drafted, first or again, is planning
+    // mode's to say (D-NEW-basic-and-epic-flows).
     editor.submit(intent);
   };
-
-  useEffect(() => {
-    if (!redrafting.current) return;
-    const settled = editor.session;
-    if (settled?.phase !== "ready" || settled.key === null) return;
-    redrafting.current = false;
-    navigate({ page: "planning", sessionId, pane: settled.nodes > 0 ? "graph" : "criteria" });
-  }, [editor.session, navigate, sessionId]);
 
   // While a command runs the Composer takes the pane, as it does for the
   // contract steps: one thing is happening and it says what. It is the same
@@ -665,7 +653,7 @@ export function SpecPane({
                       )
                     }
                   >
-                    Open the plan
+                    {flowFor(workspace, sessionId).shape === "basic" ? confirmLabel("basic") : "Open the plan"}
                   </Button>
                   <button
                     className="text-button small"

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { busyMessage, exclusiveJob, isLive, journal, lane } from "../../shared/jobs.js";
-import { redact, requireSuccess } from "../process.js";
+import { logTail, redact, requireSuccess } from "../process.js";
 import type { Cli } from "../cli.js";
 import type { Changes } from "../changes.js";
 import type { ContractEditing, EditingOwner } from "../../shared/contract-editing.js";
@@ -221,7 +221,7 @@ export class JobRunner {
         this.deps.progressed(job);
       },
     });
-    job.log = redact([result.stderr, result.stdout].filter(Boolean).join("\n")).slice(-80_000);
+    job.log = logTail(redact([result.stderr, result.stdout].filter(Boolean).join("\n")));
     requireSuccess(result);
     if (result.stdout.trim()) {
       try {

@@ -6,7 +6,7 @@ import { EXCLUSIVE_KINDS, PLANNING_KINDS, exclusiveJob, heldRepository, lane } f
  * place in one of them: a kind nobody has placed is exclusive by default, and
  * this list is where a new command has to be placed rather than inherit that.
  */
-const HOST_KINDS = ["doctor", "draft", "admit", "edit", "graphEdit", "graphUndo", "sync", "principle", "verdict", "run", "decide"] as const;
+const HOST_KINDS = ["doctor", "draft", "admit", "edit", "graphEdit", "graphUndo", "sync", "publish", "principle", "verdict", "run", "decide"] as const;
 
 describe("the two lanes", () => {
   it("place every command the host starts, and no kind in both", () => {

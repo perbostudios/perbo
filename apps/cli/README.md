@@ -102,6 +102,7 @@ what leaves the machine, uninstall — is [`docs/install.md`](../../docs/install
 perbo doctor --repo . [--probe]
 perbo run --ticket PRB-1 [--publish]
 perbo run --ticket PRB-1 --relevel [--publish]
+perbo run --ticket PRB-1 --publish-retained
 perbo run --contract c.json --config run.json [--publish]
 perbo review --contract c.json --diff change.diff --checks checks.json --repo .
 perbo review --pr owner/repo#412 [--repo .]
@@ -146,8 +147,12 @@ why, naming the file and the keys in it the reviewer was read from, or saying th
 and the review takes the default. `run` drives the whole loop:
 provision, materialize, execute one agent under the permission profile, seal the change set, run the
 pinned checks, review independently, route `remediable` findings back to the executor for a bounded
-number of rounds, and with `--publish` open the pull request — which a human merges. `review` is the
-review step on its own, with nothing behind it.
+number of rounds, and with `--publish` open the pull request — which a human merges. A run that
+ended approved or escalated without `--publish` keeps its branch on this machine;
+`run --ticket PRB-1 --publish-retained` publishes it later through the same delivery, without
+executing or reviewing again, and refuses, pushing nothing, what
+[D-NEW-publish-a-retained-branch-later](../../docs/11-open-decisions.md) names. `review`
+is the review step on its own, with nothing behind it.
 
 `review --pr owner/repo#412` (or its URL) reviews a pull request nobody admitted: `gh` reads the
 title, body and both commits, the contract's outcome and criteria come from that body — reported
@@ -594,7 +599,7 @@ round published, because a run that opened none said nothing about the one that 
 delivery record's `observed_at` dates it at the round that saw it.
 
 The record is appended to, never replaced, so a ticket that has been run more than once has every
-run's attempts on it — including a run a ceiling cut short. Attempts are listed in the order they
+run's attempts on it — including a run a ceiling or a person's stop cut short. Attempts are listed in the order they
 were made, each labelled `run N · round M`: the run is the ticket's own run count, and attempts
 sharing a root attempt id are one run whatever their remediation rounds. Attempts carrying no root
 at all are one run together: a record written before attempts had roots was replaced by each run

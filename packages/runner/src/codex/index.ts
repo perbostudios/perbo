@@ -8,6 +8,8 @@ import {
   type BriefReinjection,
   type CommandRecord,
   type TerminationReason,
+  oneLine,
+  spokenLine,
 } from "@perbo/contracts";
 import {
   DEFAULT_SUSPEND_INTERVAL_MS,
@@ -190,8 +192,16 @@ export function codexNotificationHandler(attempt: {
    * else: `"interacted"` and `"interrupted"` name no new thread.
    */
   onSubagentStarted: (parentThreadId: string | null, childThreadId: string) => void;
+  /**
+   * The attempt's own thread finished saying something: an `agentMessage`
+   * item completed on it, with its words as Codex sent them. A subagent's
+   * words are its own, never the executor's (D-106), and are not passed.
+   */
+  spoke: (words: string) => void;
+  /** D-106: the attempt's own thread, once `thread/start` has replied; every other thread is a subagent's. */
+  rootThread: () => string | null;
 }): (method: string, payload: unknown) => void {
-  const { ceilings, items, transcript, redact, record, egress, stop, progress, rebrief, onSubagentStarted } =
+  const { ceilings, items, transcript, redact, record, egress, stop, progress, rebrief, onSubagentStarted, spoke, rootThread } =
     attempt;
   return (method, payload) => {
     const parsed = EventSchema.safeParse(payload);
@@ -208,8 +218,17 @@ export function codexNotificationHandler(attempt: {
     // the context is what it will be only once the compaction has finished.
     if (method === "item/completed" && item.type === "contextCompaction")
       rebrief(parsed.data.threadId ?? null);
+    // D-106: an item a subagent's thread reported is recorded marked as the
+    // subagent's, so what reads the record back never takes its words for
+    // the executor's.
+    const threadId = parsed.data.threadId ?? null;
+    const root = rootThread();
+    const subagent = threadId !== null && root !== null && threadId !== root;
     if (method === "item/completed")
-      transcript.push(redact(JSON.stringify({ method, item })).slice(0, 200_000));
+      transcript.push(
+        redact(JSON.stringify(subagent ? { method, item, subagent: true } : { method, item })).slice(0, 200_000),
+      );
+    if (method === "item/completed" && item.type === "agentMessage" && item.text && !subagent) spoke(item.text);
     if (item.type === "commandExecution" || item.type === "fileChange") {
       // D-096: a tool call starting and its result arriving are both the
       // executor being alive, and either resets the stall window.
@@ -217,9 +236,11 @@ export function codexNotificationHandler(attempt: {
       record(item, parsed.data.threadId ?? null);
       if (item.command && egress.observe(item.command, "command", new Date()).length > 0)
         stop("unlisted_egress_host", "Command requested a host outside the network allow-list");
+      // On one line: a command's own newline would otherwise print a line
+      // that reads as one of the run's stages.
       if (method === "item/started")
         progress(
-          `Codex ${redact(item.command ?? item.changes?.map((change) => change.path).join(", ") ?? item.type).slice(0, 160)}`,
+          `Codex ${oneLine(redact(item.command ?? item.changes?.map((change) => change.path).join(", ") ?? item.type)).slice(0, 160)}`,
         );
     }
     // D-106: a subagent's own start is reported to its parent, never announced
@@ -500,6 +521,16 @@ export async function runCodexAgent(
          * since which thread is asking is a separate question from what the
          * child's role is.
          */
+        /**
+         * The executor's own words, as they are said, for whoever watches the
+         * run: the root thread's only, as the account is (D-106), on a line of
+         * their own marked as the executor's.
+         */
+        spoke: (words) => {
+          const said = spokenLine("executor", redact(words));
+          if (said !== null) progress(said);
+        },
+        rootThread: () => rootThreadId,
         onSubagentStarted: (parentThreadId, childThreadId) => {
           if (parentThreadId === null) {
             const detail = redact(

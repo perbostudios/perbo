@@ -7,9 +7,15 @@ import {
   type PlanContractWithCriteria,
   type SealedCommit,
 } from "@perbo/contracts";
+import { git } from "@perbo/workspace";
 import type { BriefRecords } from "../../brief.js";
 import { conflictPrompt, executorPrompt, remediationPrompt } from "../../prompt.js";
-import { applyRetainedDiff, resumeNote, type ResumeSource } from "../../resume.js";
+import {
+  applyRetainedDiff,
+  resumeNote,
+  type ResumeOutcome,
+  type ResumeSource,
+} from "../../resume.js";
 import { commitsSince } from "../../seal.js";
 import { withExecutorSkills } from "../../skills/index.js";
 import { guardProhibitedPaths, type TicketRunConfig } from "./config.js";
@@ -27,8 +33,10 @@ export interface Brief {
   prior_commits: SealedCommit[];
   /** The routed findings this round is asked to close; empty for an execute round. */
   toClose: Finding[];
-  /** The cut attempt whose diff this round runs over, where there is one. */
+  /** The prior attempt whose work this round runs over, where there is one. */
   resumedHere: ResumeSource | null;
+  /** What the resume did with `resumedHere`'s retained diff; null where there is none. */
+  resumeOutcome: ResumeOutcome | null;
   pathsAllowed: string[];
   pathsProhibited: string[];
   prompt: string;
@@ -38,7 +46,7 @@ export interface Brief {
 
 /**
  * Brief a round: what the branch already carries, what the round is asked to
- * close, the diff a cut attempt left, the two path lists the guard judges by,
+ * close, the work a prior attempt left, the two path lists the guard judges by,
  * and the prompt.
  *
  * The stop it can return instead is the guard on a remediation round with
@@ -52,7 +60,7 @@ export async function briefRound(args: {
   state: RoundState;
   /** The commit the loop made of the ticket's spec, where it made one (D-103). */
   specCommit: string | null;
-  /** The cut attempt this run was asked to resume, where it was. */
+  /** The prior attempt this run was asked to resume, where it was. */
   resumeSource: ResumeSource | null;
   /** The product principles the person has recorded (D-065 option 3). */
   principles: string | null;
@@ -93,22 +101,45 @@ export async function briefRound(args: {
     };
   }
 
-  // SCP-154: the cut attempt's work goes into the worktree before the
+  // SCP-154: the prior attempt's work goes into the worktree before the
   // executor is invoked, at round 0 and only there — by round 1 it is
-  // sealed, checked and reviewed like any other part of the change set.
+  // sealed, checked and reviewed like any other part of the change set. A
+  // branch that already holds the commit that attempt sealed is given
+  // nothing: the work is there, and a later commit that undid part of it
+  // stays undone.
   //
-  // SCP-172: the further attempt a transport failure buys runs in the round's
-  // own worktree, where the diff is already applied — sealed onto the branch,
-  // in fact, by the failed attempt's own seal — so it is applied once per
-  // round rather than once per attempt. The retry is still a resumed attempt
-  // and still records itself as one; only the application is skipped.
+  // SCP-172: the further attempt a transport failure or a ceiling buys runs in
+  // the round's own worktree, where the work already is — sealed onto the
+  // branch, in fact, by the attempt before it — so the diff is applied once
+  // per round rather than once per attempt. The further attempt is still a
+  // resumed one and records the round's outcome, dropped diff included; only
+  // the application is skipped, and its brief says the work is committed.
+  //
+  // A diff that does not apply leaves the worktree at the commit it was on and
+  // the round going on from there: the executor is briefed as a fresh one,
+  // because nothing of the prior attempt's diff is in front of it.
   const resumedHere =
     state.kind === "execute" && state.round === state.executeRound ? args.resumeSource : null;
-  if (resumedHere !== null && state.transportRetry === 0 && state.ceilingContinuation === 0) {
-    await applyRetainedDiff({ worktree: state.workspace.path, source: resumedHere });
-    progress(resumeNote(resumedHere));
+  let resumeOutcome = resumedHere === null ? null : state.resumeOutcome;
+  let committedAt: string | null = null;
+  if (resumedHere !== null) {
+    if (state.transportRetry === 0 && state.ceilingContinuation === 0) {
+      resumeOutcome = await applyRetainedDiff({
+        worktree: state.workspace.path,
+        source: resumedHere,
+      });
+      progress(
+        resumeOutcome.state === "dropped"
+          ? `${resumeNote(resumedHere, resumeOutcome)} — git apply said: ${resumeOutcome.reason}`
+          : resumeNote(resumedHere, resumeOutcome),
+      );
+      if (resumeOutcome.state === "held") committedAt = resumeOutcome.at;
+    } else if (resumeOutcome?.state === "held") {
+      committedAt = resumeOutcome.at;
+    } else if (resumeOutcome?.state === "applied") {
+      committedAt = await git.head(state.workspace.path, { timeoutMs: 120_000 });
+    }
   }
-
   // SCP-195: one list, read by the pre-execution hook, by the transcript
   // reading, by the seal's assertion and by the sentence in the brief — so
   // none of the four can hold a different contract than the others.
@@ -132,9 +163,15 @@ export async function briefRound(args: {
     if (state.kind === "execute") {
       return executorPrompt(contract, {
         principles: args.principles,
-        resumed: resumedHere
-          ? { attempt_id: resumedHere.attempt_id, bundle_id: resumedHere.bundle_id }
-          : null,
+        resumed:
+          resumedHere !== null && resumeOutcome !== null && resumeOutcome.state !== "dropped"
+            ? {
+                attempt_id: resumedHere.attempt_id,
+                bundle_id: resumedHere.bundle_id,
+                termination: resumedHere.termination,
+                committed_at: committedAt,
+              }
+            : null,
       });
     }
     return remediationPrompt({
@@ -211,6 +248,7 @@ export async function briefRound(args: {
       prior_commits,
       toClose,
       resumedHere,
+      resumeOutcome,
       pathsAllowed,
       pathsProhibited,
       prompt,

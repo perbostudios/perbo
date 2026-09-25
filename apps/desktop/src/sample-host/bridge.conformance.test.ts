@@ -44,6 +44,12 @@ function heldRunner() {
   const runner: typeof runProcess = async (binary, args, options) => {
     if (args[1] === "approve") return { code: 0, stdout: "{}", stderr: "", cancelled: false };
     if (args[1] === "run") {
+      // What the CLI prints while the run works, each output the whole of it
+      // so far, as the process runner hands it on.
+      const printed = ["  worktree /w on prb/held at abc1234", "  executing", "  executor says: Holding, as asked."];
+      printed.forEach((_, at) =>
+        setTimeout(() => options.onOutput?.(printed.slice(0, at + 1).join("\n") + "\n"), 20 * (at + 1)),
+      );
       await Promise.race([
         until,
         new Promise<void>((resolve) =>
@@ -315,6 +321,51 @@ it("takes a principle with no finding answered as the host takes it", async () =
     expect(onSample.job).toEqual(onHost.job);
     expect(onHost).toMatchObject({ job: { kind: "decide", state: "completed", publish: false }, principled: true });
     expect(onSample).toMatchObject({ principled: true, state: "pr_open" });
+  } finally {
+    await disposeFixtures();
+  }
+}, 60_000);
+
+/**
+ * D-NEW-publish-a-retained-branch-later: the merge press on a run that
+ * retained its branch is a job in the exclusive lane on both, which records
+ * the pull request it opened; and the sample refuses, as the CLI behind the
+ * host does, a ticket with no retained branch to publish, in the rule's own
+ * words.
+ */
+it("publishes a retained branch as the host does, and refuses one with none to publish", async () => {
+  const PULL_REQUEST = "https://github.com/example/webstore/pull/418";
+  let repoPath = "";
+  const made = fixture(async (binary, args, options) => {
+    if (args[1] !== "run") return runProcess(binary, args, options);
+    const path = join(repoPath, ".perbo", "tickets", "PRB-1.json");
+    const ticket = JSON.parse(readFileSync(path, "utf8")) as { delivery: Record<string, unknown> };
+    ticket.delivery = { ...ticket.delivery, pull_request_url: PULL_REQUEST, pull_request_number: 418, state: "open", opened_by: "loop" };
+    writeFileSync(path, JSON.stringify(ticket, null, 2));
+    return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+  });
+  repoPath = made.repo;
+  try {
+    const host: DesktopBridge = { request: (request) => made.service.request(request), subscribe: () => () => undefined };
+    const hostRepo = (await made.service.registerRepository(made.repo)).id;
+    await settled(host, (await host.request({ kind: "admit", repoId: hostRepo, draft: hostDraft })).id);
+    const sampleRepo = (await sampleBridge.request({ kind: "snapshot" })).repositories[0]!.id;
+    const retained = (await sampleBridge.request({ kind: "snapshot" })).tasks.find(
+      (row) => row.ticket.state === "pr_open" && row.ticket.delivery.pull_request_url === null,
+    )!;
+    const press = async (bridge: DesktopBridge, repoId: string, key: string) => {
+      const job = await settled(bridge, (await bridge.request({ kind: "publish", repoId, key })).id);
+      const detail = await bridge.request({ kind: "detail", repoId, key });
+      return { job: { kind: job.kind, state: job.state, label: job.label }, url: detail.ticket.delivery.pull_request_url };
+    };
+    const onHost = await press(host, hostRepo, "PRB-1");
+    const onSample = await press(sampleBridge, sampleRepo, retained.ticket.key);
+    expect(onSample).toEqual(onHost);
+    expect(onHost).toEqual({ job: { kind: "publish", state: "completed", label: "Open the pull request" }, url: PULL_REQUEST });
+
+    const refused = await settled(sampleBridge, (await sampleBridge.request({ kind: "publish", repoId: sampleRepo, key: "PRB-421" })).id);
+    expect(refused.state).toBe("failed");
+    expect(refused.error).toBe("PRB-421 is plan_review: only a run that ended approved or escalated retains a branch to publish");
   } finally {
     await disposeFixtures();
   }

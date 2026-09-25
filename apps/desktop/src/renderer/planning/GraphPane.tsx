@@ -3,20 +3,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button, Dialog, Notice, cx } from "../ui/index.js";
 import { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS, type GraphEdit } from "@perbo/contracts/browser";
 import { bridge, errorMessage, useAction, useGraph } from "../workspace/index.js";
-import { isLive } from "../../shared/jobs.js";
+import { useSettled } from "./settled.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { GraphInspector, SplitDialog } from "./GraphInspector.js";
 import { MarkedCriterion } from "./ChangeMarks.js";
 import { changeKey, criteriaChange, type CriteriaChange } from "./change-marks.js";
-import { graphColumns } from "./graph-layout.js";
+import { graphColumns, nodeSummary } from "./graph-layout.js";
 import { graphHistory, latestUndoable } from "./history.js";
 import type {
-  Change,
   GraphNodeLive,
   GraphNodeState,
   GraphNodeView,
   GraphView,
-  Job,
   Snapshot,
 } from "../../shared/protocol.js";
 import type { useContractEditing } from "../contract-editor.js";
@@ -40,29 +38,6 @@ import { confirmRoute } from "./panes.js";
  */
 
 type Editor = ReturnType<typeof useContractEditing>;
-
-/** The job a request started, once it has stopped running. */
-function useSettled(): (job: Job) => Promise<Job> {
-  const done = useRef(new Map<string, Job>());
-  const waiting = useRef(new Map<string, (job: Job) => void>());
-  useEffect(
-    () =>
-      bridge.subscribe((change: Change) => {
-        const job = "job" in change ? change.job : undefined;
-        if (!job || isLive(job)) return;
-        done.current.set(job.id, job as Job);
-        waiting.current.get(job.id)?.(job as Job);
-        waiting.current.delete(job.id);
-      }),
-    [],
-  );
-  return useCallback((job: Job) => {
-    if (!isLive(job)) return Promise.resolve(job);
-    const already = done.current.get(job.id);
-    if (already) return Promise.resolve(already);
-    return new Promise<Job>((resolve) => waiting.current.set(job.id, resolve));
-  }, []);
-}
 
 export function GraphPane({
   workspace,
@@ -579,6 +554,10 @@ const ZOOM_MAX = 2.5;
  * edge is drawn. A trackpad pinch, which Chromium delivers as a wheel event
  * with `ctrlKey` set, and the scroll wheel with ⌃ or ⌘ held zoom the layer
  * about the pointer, between {@link ZOOM_MIN} and {@link ZOOM_MAX}.
+ *
+ * Read-only on the contract, where the graph is read and not curated: it pans
+ * and zooms, and nothing on it selects, draws or removes
+ * (D-NEW-basic-and-epic-flows).
  */
 function Canvas({
   view,
@@ -587,6 +566,7 @@ function Canvas({
   onSelect,
   onEdge,
   onRemoveEdge,
+  readOnly = false,
 }: {
   view: GraphView;
   /** The last change to the plan's promise, or null for none to mark. */
@@ -595,6 +575,7 @@ function Canvas({
   onSelect: (ids: string[]) => void;
   onEdge: (from: string, to: string) => void;
   onRemoveEdge: (from: string, to: string) => void;
+  readOnly?: boolean;
 }) {
   const frame = useRef<HTMLDivElement>(null);
   const layer = useRef<HTMLDivElement>(null);
@@ -798,17 +779,19 @@ function Canvas({
                 d={curve.d}
                 markerEnd="url(#graph-arrow)"
               />
-              <path
-                className="edge-hit"
-                d={curve.d}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setChosenEdge(curve.id);
-                  onSelect([]);
-                }}
-              >
-                <title>Click to select this edge</title>
-              </path>
+              {!readOnly && (
+                <path
+                  className="edge-hit"
+                  d={curve.d}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setChosenEdge(curve.id);
+                    onSelect([]);
+                  }}
+                >
+                  <title>Click to select this edge</title>
+                </path>
+              )}
             </g>
           ))}
           {drawing && (
@@ -832,7 +815,7 @@ function Canvas({
                       changes={changes}
                       live={view.live.nodes.find((each) => each.id === id)}
                       selected={selected}
-                      onChoose={choose}
+                      onChoose={readOnly ? null : choose}
                       onDraw={setDrawing}
                       boxes={boxes}
                     />,
@@ -875,26 +858,28 @@ function Node({
   changes: CriteriaChange | null;
   live: GraphNodeLive | undefined;
   selected: readonly string[];
-  onChoose: (id: string, event: { shiftKey: boolean }) => void;
+  /** What choosing the node does, or null where it is only read. */
+  onChoose: ((id: string, event: { shiftKey: boolean }) => void) | null;
   onDraw: (drawing: { from: string; x: number; y: number }) => void;
   boxes: Record<string, Box>;
 }) {
+  const choosable = onChoose !== null;
   return (
     <div
       data-node={node.id}
-      role="button"
-      tabIndex={0}
-      aria-pressed={selected.includes(node.id)}
+      role={choosable ? "button" : "group"}
+      tabIndex={choosable ? 0 : undefined}
+      aria-pressed={choosable ? selected.includes(node.id) : undefined}
       aria-label={`Node ${node.id}: ${node.title}`}
       className={cx("node", selected.includes(node.id) && "selected")}
       onClick={(event) => {
         // The canvas clears the selection when the background is clicked, and
         // this is not the background.
         event.stopPropagation();
-        onChoose(node.id, event);
+        onChoose?.(node.id, event);
       }}
       onKeyDown={(event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
+        if (onChoose === null || (event.key !== "Enter" && event.key !== " ")) return;
         event.preventDefault();
         event.stopPropagation();
         onChoose(node.id, event);
@@ -905,6 +890,7 @@ function Node({
         <span className="node-title">{node.title}</span>
         {live && live.state !== "untouched" && <NodeState state={live.state} />}
       </div>
+      <div className="node-summary small muted">{nodeSummary(node)}</div>
       {node.criteria.map((criterion) => (
         <div className="crit" key={criterion.id}>
           <span className={`kind kind--${criterion.kind}`}>{criterion.kind}</span>
@@ -923,7 +909,7 @@ function Node({
           ))}
         </div>
       )}
-      <span
+      {choosable && <span
         className="handle"
         title="Drag to another node to draw an edge"
         onMouseDown={(event) => {
@@ -937,8 +923,33 @@ function Node({
           });
         }}
         onClick={(event) => event.stopPropagation()}
-      />
+      />}
     </div>
+  );
+}
+
+/**
+ * The plan's graph on the contract of an epic, in place of the criteria list:
+ * read, panned and zoomed, and changed only on the Graph pane
+ * (D-NEW-basic-and-epic-flows).
+ */
+export function ContractGraph({ repoId, ticketKey }: { repoId: string; ticketKey: string }) {
+  const graph = useGraph(repoId, ticketKey);
+  const none = useCallback(() => undefined, []);
+  if (graph.error) return <Notice tone="danger">{errorMessage(graph.error)}</Notice>;
+  if (!graph.data) return <p className="small muted">Reading the graph…</p>;
+  return (
+    <section className="contract-graph" aria-label="Execution graph">
+      <Canvas
+        view={graph.data}
+        changes={null}
+        selected={[]}
+        onSelect={none}
+        onEdge={none}
+        onRemoveEdge={none}
+        readOnly
+      />
+    </section>
   );
 }
 

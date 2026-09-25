@@ -3,6 +3,7 @@ import type { Decline } from "../../declines.js";
 import { CostBasisSchema, costOf, rollCosts } from "@perbo/contracts";
 import type { Cost, ExecutionAttempt } from "@perbo/contracts";
 import { appendAttempts, sealedByAttempt, type AttemptsRecord } from "../../attempts.js";
+import type { VerificationCost } from "./deliver.js";
 import type { RoundRecord } from "./state.js";
 
 /**
@@ -110,6 +111,15 @@ export class Ledger {
 
   get declines(): readonly Decline[] {
     return this.allDeclines;
+  }
+
+  /** What each closure verification this run made cost, round by round. */
+  get verificationCosts(): VerificationCost[] {
+    return this.roundRecords.flatMap((entry) =>
+      entry.verification
+        ? [{ cost_micros: entry.verification.cost_micros, cost_basis: entry.verification.cost_basis }]
+        : [],
+    );
   }
 
   /**

@@ -602,7 +602,7 @@ describe("a planning that holds nothing (D-129)", () => {
       revision: 0,
       resumeNew: false,
       lastPane: null,
-      lastView: null,
+      confirmed: null, impact: null,
       specCut: null,
       named: null,
       drift: null,
@@ -746,19 +746,37 @@ describe("the pane a planning was left at (D-130)", () => {
     expect(f.persist.mock.calls.length).toBe(discarded);
   });
 
-  it("records the contract as the last place, which a pane reached after clears, and writes nothing twice", async () => {
+  it("keeps what the impact check found until a fresh draft replaces the plan it was of, and not through a compile (D-NEW-basic-and-epic-flows)", async () => {
+    const f = await fixture();
+    const opened = await f.editing.open({ kind: "ticket", repoId, key: "PRB-421" });
+    f.editing.recordSpec(opened.id, "a-spec");
+    f.editing.recordImpact(opened.id, 3);
+    expect(f.editing.read(opened.id).impact).toBe(3);
+    const compiled = f.editing.read(opened.id);
+    await f.editing.submit(opened.id, compiled.revision, crypto.randomUUID(), "compile");
+    await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" });
+    expect(f.editing.read(opened.id).impact).toBe(3);
+    const ready = await f.editing.open({ kind: "session", id: opened.id });
+    await f.editing.submit(opened.id, ready.revision, crypto.randomUUID(), "startOver");
+    await f.editing.settled({ ...f.jobs[1]!, state: "completed", resultKey: "PRB-421" });
+    expect(f.editing.read(opened.id).impact).toBeNull();
+  });
+
+  it("records the contract as the last pane with the state it was reached at, writes nothing twice, and records it again at a new state", async () => {
     const f = await fixture();
     const session = await f.editing.open({ kind: "fresh", repoId });
-    expect(session.lastView).toBeNull();
+    expect(session.confirmed).toBeNull();
     f.editing.visit(session.id, "graph");
-    const atContract = f.editing.visitContract(session.id);
-    expect(atContract).toMatchObject({ lastView: "contract", lastPane: "graph", revision: session.revision });
+    const atContract = f.editing.visitContract(session.id, "state-1");
+    expect(atContract).toMatchObject({ lastPane: "contract", confirmed: "state-1", revision: session.revision });
     const writes = f.persist.mock.calls.length;
-    f.editing.visitContract(session.id);
+    f.editing.visitContract(session.id, "state-1");
     expect(f.persist.mock.calls.length).toBe(writes);
-    // The same pane it was left from is still a move back to it.
-    expect(f.editing.visit(session.id, "graph")).toMatchObject({ lastView: null, lastPane: "graph" });
+    // Reached again once something moved: the new state is the one that holds.
+    expect(f.editing.visitContract(session.id, "state-2").confirmed).toBe("state-2");
+    // A pane reached after is the last place, and the state stays for the tab.
+    expect(f.editing.visit(session.id, "graph")).toMatchObject({ lastPane: "graph", confirmed: "state-2" });
     f.editing.discard(session.id);
-    expect(f.editing.visitContract(session.id).lastView).toBeNull();
+    expect(f.editing.visitContract(session.id, "state-3").confirmed).toBe("state-2");
   });
 });

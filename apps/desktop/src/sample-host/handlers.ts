@@ -7,19 +7,21 @@ import {
   renderSpec,
   specSlug,
 } from "@perbo/planning/browser";
-import { isNeverReadPath } from "@perbo/contracts/browser";
+import { DECIDED_DELIVERY_NOTE, isNeverReadPath, retainedBranch } from "@perbo/contracts/browser";
 import type { DriftVerdict } from "@perbo/planning/browser";
 import type { GraphEdit } from "@perbo/contracts/browser";
-import { openDrafts, titleChanged, turnMark } from "../shared/contract-editing.js";
-import type { EditingOwner } from "../shared/contract-editing.js";
+import { openDrafts, sectionsOf, titleChanged, turnMark } from "../shared/contract-editing.js";
+import type { EditingOwner, SpecReader } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows, isArchivable, notArchivable } from "../shared/archive.js";
 import { heldRepository, isLive, isRun } from "../shared/jobs.js";
 import { ANOTHER_PLANNING_HOLDS, DELETE_TICKET_GONE, DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
 import { HELP_LINKS, TaskModelsSchema } from "../shared/protocol.js";
-import type { Job, ReplyMap, Request, RequestHandlers } from "../shared/protocol.js";
+import type { Job, ReplyMap, Request, RequestHandlers, TaskRow } from "../shared/protocol.js";
 import {
   afterTheNote,
   applyDraft,
+  moveTicket,
+  reopenTicket,
   approved,
   at,
   decisionsAnswered,
@@ -84,10 +86,12 @@ import {
   converse,
 } from "./records.js";
 
-/** The title a sample spec states, as the host reads one for the drafts list. */
-const sampleSpecTitle = (_repoId: string, slug: string): string | null => {
+/** A sample spec as it states itself, as the host reads one for the drafts list. */
+const sampleSpecText: SpecReader = (_repoId, slug) => {
   const markdown = specFiles()[slug];
-  return markdown === undefined ? null : readSpecSections(markdown).text.title;
+  if (markdown === undefined) return null;
+  const { text } = readSpecSections(markdown);
+  return { title: text.title, sections: sectionsOf(text) };
 };
 
 /**
@@ -113,13 +117,13 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     return editing.open(request.target, request.legacy);
   },
   editingRead: (request) => editing.read(request.id),
-  drafts: () => openDrafts(editingRecords(), sampleSpecTitle),
+  drafts: () => openDrafts(editingRecords(), sampleSpecText),
   editingSave: (request) => editing.save(request.id, request.revision, request.repoId, request.form),
   editingSubmit: (request) =>
     editing.submit(request.id, request.revision, request.operationId, request.intent),
   editingStop: (request) => editing.stop(request.id),
   editingVisited: (request) => editing.visit(request.id, request.pane),
-  editingContractVisited: (request) => editing.visitContract(request.id),
+  editingContractVisited: (request) => editing.visitContract(request.id, request.state),
   explorerList: (request) => {
     const tracked = sampleFiles(request.repoId);
     const files = tracked.filter((path) => !isNeverReadPath(path)).sort();
@@ -302,10 +306,11 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     const index = SAMPLE_INDEX[session.repoId];
     if (index === undefined) throw new Error("This sample repository is no longer connected.");
     const markdown = session.specSlug === null ? null : (specFiles()[session.specSlug] ?? null);
-    return {
-      ...impactReport({ scope: session.form.draft.paths, tracked, spec: markdown, index }),
-      readAt: new Date().toISOString(),
-    };
+    const report = impactReport({ scope: session.form.draft.paths, tracked, spec: markdown, index });
+    // How many it found outside the scope, on the session, as the host writes
+    // it (D-NEW-basic-and-epic-flows).
+    editing.recordImpact(request.id, report.warnings.length + report.truncated);
+    return { ...report, readAt: new Date().toISOString() };
   },
   // The same reading, of a compiled contract's own scope. Answered from the
   // ticket rather than from a planning session, as the host answers it: the
@@ -441,8 +446,9 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // The change this save made, on every planning writing this spec: a save
     // of the same words changes nothing and marks nothing.
     marks.markChangeOn({ spec: before, plan: null }, { spec: specSectionsAt(slug), plan: null }, (each) => each.specSlug === slug);
-    // A new title has the drafts list read again, as the host has it.
-    if (titleChanged(request)) emit({ kind: "editing", sessionId: request.id });
+    // The drafts list read again, as the host has it: it names the planning
+    // by the spec's title and holds its contract tab by the spec's sections.
+    emit({ kind: "editing", sessionId: request.id });
     return { view: specView(request.id), conflicting: [] };
   },
   replan: async (request) => {
@@ -503,7 +509,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // Who named the spec goes with it to the new planning, as the host carries it (D-127).
     editing.carryNamed(opened.id, planning?.named ?? null);
     emit({ kind: "records", repoId: request.repoId, key: drafted.key });
-    return { sessionId: opened.id, pane: opened.nodes > 0 ? "graph" : "criteria" };
+    return { sessionId: opened.id, key: drafted.key, nodes: opened.nodes };
   },
   generatePlan: (request, owner) =>
     job(
@@ -575,7 +581,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
   snapshot: () => ({
     ...structuredClone(snapshot),
-    drafts: openDrafts(editingRecords(), sampleSpecTitle),
+    drafts: openDrafts(editingRecords(), sampleSpecText),
     // The specs this sample workspace holds, as the host reads its own folder:
     // the picker subtracts the ones a planning or a ticket names and offers
     // what is left (D-129).
@@ -873,10 +879,11 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     const active = snapshot.jobs.find((job) => job.id === request.jobId);
     // As the host has it: a job that has finished is not one a stop can reach.
     if (!active || !isLive(active)) throw new Error("That command is no longer active.");
+    // The ticket stays where the run left it, with no row for the stop, as the
+    // host leaves it: the stopped run beside it is what reads as the stop.
     const settle = async (): Promise<void> => {
       active.state = "cancelled";
       active.endedAt = new Date().toISOString();
-      if (active.key && isRun(active)) ticketRow(active.key).ticket.state = "cancelled";
       await editing.settled(active);
       emit({ kind: "records", repoId: active.repoId, key: active.resultKey ?? active.key, job: active });
     };
@@ -894,10 +901,24 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     job("sync", request.repoId, request.key, () => {
       const { ticket } = ticketRow(request.key);
       if (ticket.delivery.state === "open") {
-        ticket.state = "merged";
+        moveTicket(ticket, [{ to: "merged", note: "The pull request was merged." }]);
         ticket.delivery.state = "merged";
         ticket.delivery.observed_at = new Date().toISOString();
       }
+    }),
+  // The merge press on a retained branch: pushed and its pull request opened
+  // as the host does it, refused as the CLI refuses it
+  // (D-NEW-publish-a-retained-branch-later).
+  publish: (request) =>
+    job("publish", request.repoId, request.key, () => {
+      const { ticket } = ticketRow(request.key);
+      const retained = retainedBranch(ticket);
+      if (retained.refusal !== null) throw new Error(retained.refusal);
+      ticket.delivery.state = "open";
+      ticket.delivery.pull_request_number = 418;
+      ticket.delivery.pull_request_url = "https://github.com/example/webstore/pull/418";
+      ticket.delivery.opened_by = "loop";
+      ticket.delivery.observed_at = new Date().toISOString();
     }),
   // The screens show the GitHub handoff; no external site opens in this sandbox.
   openPullRequest: () => null,
@@ -928,6 +949,13 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
 };
 
+/** The states a sample round proves on its way to the review's answer, as the CLI records them. */
+const REVIEWED = [
+  { to: "executing", note: "1 attempt executed" },
+  { to: "verifying", note: "the pinned checks ran" },
+  { to: "independent_review", note: "reviewed independently" },
+] as const;
+
 /**
  * A run or a decision, which move the ticket the moment the command is
  * accepted: a refused one leaves it where it was, so the job is opened first
@@ -935,6 +963,15 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
  */
 function startWork(kind: "run" | "decide", repoId: string, key: string, publish: boolean): Job {
   const row = ticketRow(key);
+  // As the CLI starts a run: back through `ready` from anywhere else, then to
+  // `provisioning` before the attempt. Tried first on a copy, so a ticket the
+  // lifecycle has no route for is refused before a job opens.
+  const start = (ticket: TaskRow["ticket"]): void => {
+    if (ticket.state !== "ready")
+      reopenTicket(ticket, ticket.state === "plan_review" ? "contract approved" : `new attempt after ${ticket.state}`);
+    moveTicket(ticket, [{ to: "provisioning", note: `run started against ${ticket.plan_id}` }]);
+  };
+  start(structuredClone(row.ticket));
   const opened = job(
     kind,
     repoId,
@@ -947,15 +984,18 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
       // no pull request (D-NEW-a-person-s-answer-closes-a-routed-finding).
       if (kind === "decide" && everyDecisionTaken(key)) {
         if (decisionsHandWork(key)) approved.add(key);
-        row.ticket.state = "pr_open";
+        moveTicket(row.ticket, [
+          { to: "pr_open", note: `${DECIDED_DELIVERY_NOTE} on the commit the review judged; nothing was executed or reviewed again` },
+        ]);
         if (publish) {
           row.ticket.delivery.state = "open";
           row.ticket.delivery.pull_request_number = 418;
           row.ticket.delivery.pull_request_url = "https://github.com/example/webstore/pull/418";
         }
-      } else if (!decisionsAnswered.has(key)) row.ticket.state = "changes_requested";
+      } else if (!decisionsAnswered.has(key))
+        moveTicket(row.ticket, [...REVIEWED, { to: "changes_requested", note: "A finding waits on the person." }]);
       else {
-        row.ticket.state = "pr_open";
+        moveTicket(row.ticket, [...REVIEWED, { to: "pr_open", note: "The review passed; the pull request is open." }]);
         row.ticket.delivery.state = "open";
         row.ticket.delivery.pull_request_number = 418;
         row.ticket.delivery.pull_request_url = "https://github.com/example/webstore/pull/418";
@@ -967,8 +1007,9 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
   // On the job, as the host records it: what an attempt carried on from this
   // one after a stop publishes by.
   opened.publish = publish;
+  streamProgress(opened, key);
   row.ticket.approved_at = at;
-  row.ticket.state = "executing";
+  start(row.ticket);
   // A filed ticket whose loop starts again is back on Home, as the host has it.
   const entry = repoId + ":" + row.ticket.key;
   if (snapshot.archived?.includes(entry)) {
@@ -979,6 +1020,30 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
   // forgets its problems, as the host does.
   forgetDrift(key, null);
   return opened;
+}
+
+/**
+ * What a run prints while it works, as the CLI prints it and the host relays
+ * it: the stages it reaches and the agents' own words, one line at a time on
+ * the job's log, each told as progress while the job is still running.
+ */
+const SAMPLE_PROGRESS = (key: string): string[] => [
+  `worktree /sample/worktrees/${key} on prb/sample/${key.toLowerCase()} at 4f1c9a2`,
+  "executing",
+  "executor says: Reading the mailer and its tests before changing anything.",
+  "executor says: Adding a capped retry to the send path, with a test for the cap.",
+  "sealing the change set",
+  "check unit: pnpm test",
+  "review round 0",
+];
+function streamProgress(job: Job, key: string): void {
+  SAMPLE_PROGRESS(key).forEach((line, index) =>
+    setTimeout(() => {
+      if (job.state !== "running") return;
+      job.log += `\n  ${line}`;
+      emit({ kind: "progress", job });
+    }, 150 * (index + 1)),
+  );
 }
 
 /**

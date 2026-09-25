@@ -39,7 +39,7 @@ function session(paths: string[], specSlug: string | null = null): EditingSessio
     drift: null,
     change: null,
     lastPane: null,
-    lastView: null,
+    confirmed: null, impact: null,
     specCut: null,
     named: null,
     interviewModel: null,
@@ -75,7 +75,7 @@ function deps(
   tracked = "src/main.ts\0src/caller.ts\0.env\0",
 ): ImpactDeps {
   return {
-    editing: { read: () => record } as ImpactDeps["editing"],
+    editing: { read: () => record, recordImpact: () => undefined } as ImpactDeps["editing"],
     repository: () => repo,
     cli: {
       run: () =>
@@ -93,6 +93,21 @@ describe("impactView", () => {
     expect(view.warnings.map((warning) => warning.path)).toContain("src/caller.ts");
     expect(view.readAt).toBeTruthy();
     expect(view.index).toMatchObject({ read: true, commit: "abc1234" });
+  });
+
+  it("writes how many paths it found outside the scope on the planning, which the rail offers Impact by (D-NEW-basic-and-epic-flows)", async () => {
+    const repo = repository();
+    const recorded: [string, number][] = [];
+    const found = deps(repo, session(["src/main.ts"]));
+    found.editing = { ...found.editing, recordImpact: (id, outside) => void recorded.push([id, outside]) };
+    await impactView(found, sessionId);
+    const covered = deps(repo, session(["src/**"]));
+    covered.editing = { ...covered.editing, recordImpact: (id, outside) => void recorded.push([id, outside]) };
+    await impactView(covered, sessionId);
+    expect(recorded).toEqual([
+      [sessionId, 1],
+      [sessionId, 0],
+    ]);
   });
 
   it("warns about nothing where the scope already covers the tree", async () => {

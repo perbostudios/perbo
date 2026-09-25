@@ -39,6 +39,7 @@ export const EXCLUSIVE_KINDS = [
   "decide",
   "verdict",
   "sync",
+  "publish",
   "principle",
   "doctor",
 ] as const;

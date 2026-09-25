@@ -198,7 +198,13 @@ describe("UI v2", () => {
     mount();
     const card = await screen.findByRole("button", { name: "Retry the webhook dispatcher three times" });
     expect(card.className).toContain("task-card--complete");
-    expect(screen.getByText("2 completed")).toBeTruthy();
+    // Merged: last on Home, a check mark in its wheel, and nothing owed to the person.
+    expect([...document.querySelectorAll(".task-list .task-card")].at(-1)).toBe(card);
+    expect(card.querySelector(".stage-ring--decided img")).toBeTruthy();
+    expect(card.querySelector(".task-card-unseen")).toBeNull();
+    // Completed is the decided merge alone; the open pull request waits on its decision.
+    expect(screen.getByText("1 completed")).toBeTruthy();
+    expect(screen.getByText("1 waiting on your merge decision")).toBeTruthy();
     await within(card).findByText("perbo/409-webhook-retry");
     await within(card).findByText("+72");
     fireEvent.click(within(card).getByRole("button", { name: "Archive" }));
@@ -359,16 +365,18 @@ describe("UI v2", () => {
     );
   });
 
-  it("goes back from the contract to the plan it was confirmed from", async () => {
+  it("reaches the contract as the planning's last tab, and goes back to the plan by its tabs (D-NEW-basic-and-epic-flows)", async () => {
     // Confirming a plan leads here from the Graph, and the contract is where a
-    // person reads what approving would freeze. Not being ready to approve
-    // means going back to the plan to change it, so Back is the way to the
-    // graph rather than to the task's own editor, which is a different page
-    // for a different job.
+    // person reads what approving would freeze. It is a tab of the planning,
+    // so not being ready to approve is a click on the tab of the pane to
+    // change, and there is no second way back beside the tabs.
     await openTheContract();
-    const back = await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 });
-    expect(back.hasAttribute("disabled"), "there is a plan to go back to").toBe(false);
-    fireEvent.click(back);
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
+    expect(location.hash).toMatch(/^#planning\/.*\/contract$/);
+    const tabs = screen.getByRole("group", { name: "Planning panes" });
+    expect(within(tabs).getByRole("button", { name: "Confirm contract" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByRole("button", { name: "Back to planning" })).toBeNull();
+    fireEvent.click(within(tabs).getByRole("button", { name: "Graph" }));
     await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/graph$/), { timeout: 5000 });
   });
 
@@ -377,7 +385,7 @@ describe("UI v2", () => {
     // so they stay a choice right up to the moment the loop starts — and this
     // is the last page before it.
     await openTheContract();
-    await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 });
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
 
     // Each role opens its own picker, from the block that states it.
     const change = await screen.findByRole("button", { name: "Change executor model" });
@@ -398,7 +406,7 @@ describe("UI v2", () => {
     await openTheContract();
     expect(await screen.findByText("Compiling the contract")).toBeTruthy();
     // And it gives way to the page itself.
-    await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 });
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
     expect(screen.queryByText("Compiling the contract")).toBeNull();
   });
 
@@ -435,16 +443,13 @@ describe("UI v2", () => {
     // The contract was compiled on the way from the confirm; a person who
     // left the planning there and comes back to it is reading the ticket
     // again (D-130), whether the picker takes them or the contract's own
-    // address does, as Back does.
+    // address does.
     await openTheContract();
-    await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 });
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
     const contract = location.hash;
-    const [, repoId, key] = contract.slice(1).split("/");
-    const planning = (await sampleBridge.request({ kind: "snapshot" })).drafts!.find(
-      (draft) => draft.repoId === repoId && draft.key === key,
-    )!;
+    const planning = contract.split("/")[1]!;
     await waitFor(async () =>
-      expect((await sampleBridge.request({ kind: "editingRead", id: planning.id })).lastView).toBe("contract"),
+      expect((await sampleBridge.request({ kind: "editingRead", id: planning })).lastPane).toBe("contract"),
     );
     const { said, read } = watchTheWait();
 
@@ -467,7 +472,7 @@ describe("UI v2", () => {
     // the same work and is read and written in planning, where the plan it
     // drafted is beside it, not from the page a person is deciding on.
     await openTheContract();
-    await screen.findByRole("button", { name: "Back to planning" }, { timeout: 5000 });
+    await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
     expect(screen.queryByRole("button", { name: "Open the spec…" })).toBeNull();
   });
 
@@ -670,12 +675,12 @@ describe("Home row colours and what may be archived", () => {
 
   it("puts a ticket whose page was just opened first among its colour", async () => {
     mount();
-    const greens = async (): Promise<string[]> => {
-      await card("Backfill the audit table");
-      return [...document.querySelectorAll(".task-list .task-card--green")].map((entry) => entry.getAttribute("aria-label") ?? "");
+    const reds = async (): Promise<string[]> => {
+      await card("Retire the legacy CSV importer");
+      return [...document.querySelectorAll(".task-list .task-card--red")].map((entry) => entry.getAttribute("aria-label") ?? "");
     };
-    const before = await greens();
-    expect(before).toHaveLength(2);
+    const before = await reds();
+    expect(before.length).toBeGreaterThan(1);
     const opened = await card(before[1]!);
     const key = "PRB-" + opened.querySelector(".task-key")!.textContent!.slice(1);
     fireEvent.click(opened);
@@ -684,7 +689,7 @@ describe("Home row colours and what may be archived", () => {
       expect(Object.keys(snapshot.lastOpened ?? {})).toContain(snapshot.repositories[0]!.id + ":" + key);
     });
     fireEvent.click(screen.getByRole("button", { name: "Home" }));
-    await waitFor(async () => expect(await greens()).toEqual([before[1], before[0]]));
+    await waitFor(async () => expect(await reds()).toEqual([before[1], before[0], ...before.slice(2)]));
   });
 
   it("reads a ticket's detail once as its page opens, the opening itself reading nothing again", async () => {
@@ -849,6 +854,47 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     vi.useRealTimers();
   });
 
+  it("counts on the badge only what needs you and was not opened since it came to, and never a decided merge", async () => {
+    const workspace = await board([["changes_requested", null], ["failed", null], ["pr_open", pr], ["merged", pr], ["closed", pr]]);
+    const moved = "2026-09-10T09:00:00.000Z";
+    for (const row of workspace.tasks) row.ticket.history = [{ at: moved, from: "ready", to: row.ticket.state, note: "moved" }];
+    const entry = (index: number): string => workspace.tasks[index]!.repoId + ":" + workspace.tasks[index]!.ticket.key;
+    /** Each colour the badge shows over this board, with its count, taking a tick past each hold. */
+    const cycle = (lastOpened: Record<string, string>): string[] => {
+      vi.useFakeTimers();
+      rail({ ...workspace, lastOpened });
+      const seen: string[] = [];
+      for (let turn = 0; turn < 3 && document.querySelector(".rail-badge")!.getAttribute("data-open") === "true"; turn++) {
+        const [tone, count] = shows();
+        if (!seen.includes(`${tone} ${count}`)) seen.push(`${tone} ${count}`);
+        at(10_050);
+      }
+      cleanup();
+      vi.useRealTimers();
+      return seen;
+    };
+    // Fresh: each colour counts its one, and the two decided merges count nowhere.
+    expect(cycle({})).toEqual(["rail-badge--yellow 1", "rail-badge--red 1", "rail-badge--green 1"]);
+    // Opened after it came to stand there, a ticket no longer counts; opened before, it still does.
+    const after = "2026-09-10T09:05:00.000Z", before = "2026-09-09T09:00:00.000Z";
+    expect(cycle({ [entry(0)]: after, [entry(1)]: before, [entry(3)]: after })).toEqual(["rail-badge--red 1", "rail-badge--green 1"]);
+    expect(cycle({ [entry(0)]: after, [entry(1)]: after, [entry(2)]: after })).toEqual([]);
+    // A ticket that stops again after that opening counts again.
+    workspace.tasks[1]!.ticket.history.push({ at: "2026-09-11T09:00:00.000Z", from: "executing", to: "failed", note: "stopped again" });
+    expect(cycle({ [entry(0)]: after, [entry(1)]: after, [entry(2)]: after })).toEqual(["rail-badge--red 1"]);
+  });
+
+  it("puts a blue circle on a card that needs you, and takes it away once its ticket is opened", async () => {
+    const { mount: fresh } = await freshSample();
+    fresh();
+    const stopped = async (): Promise<HTMLElement> => screen.findByRole("button", { name: "Retire the legacy CSV importer" });
+    expect((await stopped()).querySelector(".task-card-unseen")).toBeTruthy();
+    fireEvent.click(await stopped());
+    await screen.findByRole("button", { name: "Home" });
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
+    await waitFor(async () => expect((await stopped()).querySelector(".task-card-unseen")).toBeNull());
+  });
+
   it("cycles the Home badge yellow, red, green, each colour held ten seconds", async () => {
     const workspace = await board([
       ["changes_requested", null], ["pr_open", pr], ["failed", null], ["merged", pr], ["closed", pr], ["executing", null],
@@ -869,17 +915,18 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     expect(dot().getAttribute("aria-label")).toBe("1 stopped");
     at(9_850);
     expect(shows()).toEqual(["rail-badge--red", "1"]);
+    // The pull request waiting on its merge decision; a decided merge needs nobody.
     at(150);
-    expect(shows()).toEqual(["rail-badge--green", "3"]);
-    expect(dot().getAttribute("aria-label")).toBe("3 completed");
+    expect(shows()).toEqual(["rail-badge--green", "1"]);
+    expect(dot().getAttribute("aria-label")).toBe("1 waiting on your merge decision");
     at(9_850);
-    expect(shows()).toEqual(["rail-badge--green", "3"]);
+    expect(shows()).toEqual(["rail-badge--green", "1"]);
     at(150);
     expect(shows()).toEqual(["rail-badge--yellow", "1"]);
   });
 
   it("skips a colour with no tickets, holds one colour steady, and shows no badge while everything runs", async () => {
-    const two = await board([["failed", null], ["merged", pr]]);
+    const two = await board([["failed", null], ["pr_open", pr]]);
     const one = await board([["cancelled", null], ["executing", null]]);
     const running = await board([["executing", null], ["verifying", null], ["provisioning", null]]);
     vi.useFakeTimers();
@@ -915,27 +962,30 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     expect(shows()).toEqual(["rail-badge--yellow", "1"]);
   });
 
-  it("counts a decision, a stop and a completion in the header, left to right, and only where there are any", async () => {
+  it("counts a decision, a stop, a merge decision and a completion in the header, left to right, and only where there are any", async () => {
     const workspace = await board([
       ["changes_requested", null], ["pr_open", pr], ["failed", null], ["merged", pr], ["executing", null],
     ]);
     home(workspace);
-    const pills = [...document.querySelectorAll(".page-header .attention-count, .page-header .stopped-count, .page-header .completed-count")];
-    expect(pills.map((pill) => pill.textContent?.trim())).toEqual(["1 ticket needs action", "1 stopped", "2 completed"]);
+    const pills = [...document.querySelectorAll(".page-header .attention-count, .page-header .stopped-count, .page-header .merge-count, .page-header .completed-count")];
+    expect(pills.map((pill) => pill.textContent?.trim())).toEqual([
+      "1 ticket needs action", "1 stopped", "1 waiting on your merge decision", "1 completed",
+    ]);
     expect(screen.queryByText(/runner · this machine/)).toBeNull();
     expect(document.querySelector(".live-dot")).toBeNull();
     cleanup();
     home({ ...workspace, tasks: workspace.tasks.filter((row) => row.ticket.state !== "failed") });
     expect(screen.queryByText(/stopped$/)).toBeNull();
     expect(screen.getByText("1 ticket needs action")).toBeTruthy();
-    expect(screen.getByText("2 completed")).toBeTruthy();
+    expect(screen.getByText("1 waiting on your merge decision")).toBeTruthy();
+    expect(screen.getByText("1 completed")).toBeTruthy();
   });
 
-  it("greets, filters, sorts and archives Home by the same three colours", async () => {
+  it("greets, filters, sorts and archives Home by the same groups", async () => {
     const workspace = await board([
       ["changes_requested", null], ["failed", null], ["cancelled", null], ["pr_open", pr], ["merged", pr], ["merged", pr], ["executing", null],
     ]);
-    // Each ticket opened after the one before it, so the colour, not the opening, puts the completed first.
+    // Each ticket opened after the one before it, so the group, not the opening, puts the decided merges last.
     workspace.lastOpened = Object.fromEntries(
       workspace.tasks.map((row, index) => [row.repoId + ":" + row.ticket.key, `2026-09-0${index + 1}T09:00:00.000Z`]),
     );
@@ -943,15 +993,16 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     workspace.tasks.forEach((row, index) => (row.ticket.updated_at = `2026-09-0${9 - index}T09:00:00.000Z`));
     home(workspace);
     const greeting = document.querySelector(".home-heading p")!.textContent ?? "";
-    expect(greeting).toContain("one waiting on you");
-    expect(greeting).toContain("three completed");
+    // Completed is only a decided merge; the open pull request is named for what it waits on.
+    expect(greeting).toBe("Two tickets running · one waiting on you · one waiting on your merge decision · two completed");
     const cards = (): string[] =>
       [...document.querySelectorAll(".task-list .task-card")].map((card) => card.getAttribute("aria-label") ?? "");
     expect(cards()).toEqual([
-      "Ticket 5 merged", "Ticket 4 merged", "Ticket 3 pr_open",
+      "Ticket 3 pr_open",
       "Ticket 0 changes_requested",
       "Ticket 2 cancelled", "Ticket 1 failed",
       "Ticket 6 executing",
+      "Ticket 5 merged", "Ticket 4 merged",
     ]);
     const show = (option: string): string[] => {
       fireEvent.click(screen.getByLabelText("Filter tickets"));
@@ -960,7 +1011,8 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
     };
     expect(show("needs you")).toEqual(["Ticket 0 changes_requested"]);
     expect(show("stopped")).toEqual(["Ticket 2 cancelled", "Ticket 1 failed"]);
-    expect(show("completed")).toEqual(["Ticket 5 merged", "Ticket 4 merged", "Ticket 3 pr_open"]);
+    expect(show("waiting on your merge decision")).toEqual(["Ticket 3 pr_open"]);
+    expect(show("completed")).toEqual(["Ticket 5 merged", "Ticket 4 merged"]);
     expect(show("running")).toEqual(["Ticket 6 executing"]);
     const sort = (option: string): string[] => {
       fireEvent.click(screen.getByLabelText("Sort tickets"));
@@ -968,18 +1020,20 @@ describe("Home's badge, its header counts and its cards' buttons", () => {
       return cards();
     };
     show("all");
-    // Colour first under every age order too.
+    // The groups first under every age order too.
     expect(sort("Newest first")).toEqual([
-      "Ticket 3 pr_open", "Ticket 4 merged", "Ticket 5 merged",
+      "Ticket 3 pr_open",
       "Ticket 0 changes_requested",
       "Ticket 1 failed", "Ticket 2 cancelled",
       "Ticket 6 executing",
+      "Ticket 4 merged", "Ticket 5 merged",
     ]);
     expect(sort("Oldest first")).toEqual([
-      "Ticket 5 merged", "Ticket 4 merged", "Ticket 3 pr_open",
+      "Ticket 3 pr_open",
       "Ticket 0 changes_requested",
       "Ticket 2 cancelled", "Ticket 1 failed",
       "Ticket 6 executing",
+      "Ticket 5 merged", "Ticket 4 merged",
     ]);
     // The loop has let go of a merged or stopped ticket; an open pull request still waits on its merge.
     expect(screen.getByRole("button", { name: "Archive all 4" })).toBeTruthy();

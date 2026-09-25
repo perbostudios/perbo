@@ -13,6 +13,7 @@ import {
   type NeutralisationRecord,
   type PermissionProfile,
   type TerminationReason,
+  spokenLine,
 } from "@perbo/contracts";
 import { PRICED_MODEL_ID, costMicros as providerListCostMicros } from "@perbo/model";
 import {
@@ -1018,7 +1019,13 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         .map((block) => block.text as string)
         .join("\n")
         .trim();
-      if (agent === null && spoken.length > 0) finalMessage = redact(spoken);
+      if (agent === null && spoken.length > 0) {
+        finalMessage = redact(spoken);
+        // The same words, as they are said, for whoever watches the run: a
+        // line of their own, marked as the executor's, and never read back.
+        const said = spokenLine("executor", finalMessage);
+        if (said !== null) progress(said);
+      }
 
       for (const block of message.content ?? []) {
         if (block.type !== "tool_use" || typeof block.name !== "string") continue;

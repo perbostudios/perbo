@@ -21,6 +21,13 @@ export const isPreLoop = (row: { ticket: { state: string } }): boolean =>
 
 /** Where a ticket's journey ends once its merge is decided: merged, or closed without merge, and what follows a merge. */
 const DECIDED_STATES: readonly string[] = ["merged", "closed", "done", "deployed", "observing"];
+/**
+ * Whether the person has decided this ticket's merge: merged, or closed
+ * without merge. Home lists such a ticket last, under every colour, with a
+ * check mark for its progress, until it is archived by hand (S4).
+ */
+export const isMergeDecided = (row: { ticket: { state: string } }): boolean =>
+  DECIDED_STATES.includes(row.ticket.state);
 /** Where a ticket's journey ends: a pull request opened and waiting on the merge decision, or that decision made. */
 export const JOURNEY_END_STATES: readonly string[] = ["pr_open", ...DECIDED_STATES];
 /** The states from which the loop will not carry a ticket to that end unless a person starts it again. */
