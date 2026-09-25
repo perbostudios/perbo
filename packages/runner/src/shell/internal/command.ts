@@ -124,24 +124,52 @@ export const isAssignment = (value: string) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(v
 export const optionSet = (values: readonly string[] | undefined) => new Set(values ?? []);
 
 /**
+ * The long options a spelling could be, as GNU's `getopt_long` reads it: the
+ * whole name where `names` holds it, and otherwise every name it is a prefix
+ * of — `--t` is `--target-directory` to `cp`, and `--s` is either `--suffix`
+ * or `--sparse`, which GNU refuses as ambiguous.
+ */
+export function longCandidates(spelled: string, names: Iterable<string>): string[] {
+  const all = [...names];
+  if (all.includes(spelled)) return [spelled];
+  if (spelled.length <= 2 || !spelled.startsWith("--")) return [];
+  return all.filter((name) => name.startsWith(spelled));
+}
+
+/**
+ * The one long option a spelling names: the whole name, or an unambiguous
+ * prefix of one of `names`. Null where it is ambiguous or names none of them,
+ * which the caller reads as it reads an option it does not know.
+ */
+export function longOption(spelled: string, names: Iterable<string>): string | null {
+  const candidates = longCandidates(spelled, names);
+  return candidates.length === 1 ? candidates[0]! : null;
+}
+
+/**
  * Every option a command was given, long names and short letters alike, read
  * before the operands are. A `sed` is only an edit while `-i` is present and a
  * `tar -f` is only a write while `-c` is, and neither question can be answered
  * from the word that stands in front of the option.
  *
  * A value attached to a short cluster contributes its characters as though they
- * were option letters. The set is only ever asked whether an option is present,
- * so the surplus can widen a judgement and never narrow one.
+ * were option letters, and where `longs` is given a long spelling contributes
+ * every name it is a prefix of, ambiguous or not. The set is only ever asked
+ * whether an option is present, so the surplus can widen a judgement and never
+ * narrow one.
  */
-export function optionsPresent(rest: readonly Word[]): Set<string> {
+export function optionsPresent(rest: readonly Word[], longs?: Iterable<string>): Set<string> {
   const present = new Set<string>();
+  const names = longs === undefined ? [] : [...longs];
   for (const word of rest) {
     const value = word.value;
     if (value === "--") break;
     if (!value.startsWith("-") || value === "-") continue;
     if (value.startsWith("--")) {
       const eq = value.indexOf("=");
-      present.add(eq === -1 ? value : value.slice(0, eq));
+      const spelled = eq === -1 ? value : value.slice(0, eq);
+      present.add(spelled);
+      for (const name of longCandidates(spelled, names)) present.add(name);
       continue;
     }
     for (const letter of value.slice(1)) present.add(`-${letter}`);

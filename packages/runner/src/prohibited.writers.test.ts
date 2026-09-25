@@ -1082,3 +1082,100 @@ describe("a copy, move or link into a directory on disk, on both executors", () 
     }
   });
 });
+
+/**
+ * GNU reads a long option by any unambiguous prefix, and a writer given `-b`,
+ * `--backup` or a suffix keeps what it replaces under `<dest><suffix>`: both are
+ * read as GNU reads them, on both executors.
+ */
+describe("an abbreviated long option and a backup suffix, on both executors", () => {
+  const TREE = realpathSync(scratch("perbo-prefix-backup-"));
+  for (const directory of ["src/other", "src/generated"]) {
+    mkdirSync(join(TREE, directory), { recursive: true });
+  }
+  writeFileSync(join(TREE, "src/a.ts"), "source\n");
+  writeFileSync(join(TREE, "src/other/a.ts"), "other\n");
+
+  const both = (command: string) => {
+    const state: PreToolGuardState = {
+      root: TREE,
+      tmpdir: null,
+      cwd: TREE,
+      paths_allowed: ["src/**"],
+      paths_prohibited: ["**/*.pem", "src/generated/**"],
+      spec_folder_writable: true,
+      allow_list: [
+        ...profile.command_allow_list,
+        "Bash(cp:*)",
+        "Bash(mv:*)",
+        "Bash(ln:*)",
+        "Bash(sed:*)",
+        "Bash(tee:*)",
+      ],
+      deny_list: [...profile.command_deny_list],
+    };
+    return {
+      hook: judgePreToolCall(
+        { tool_name: "Bash", tool_use_id: "toolu_prefix", tool_input: { command } },
+        state,
+        new Date("2026-09-04T00:00:00.000Z"),
+      ).decision,
+      codex: codexCommandDecision(command, TREE, state),
+    };
+  };
+
+  const refusedAs = (command: string, rule: string) => {
+    const { hook, codex } = both(command);
+    expect(hook, command).toMatchObject({ answer: "deny", rule });
+    expect(codex, command).toMatchObject({ decision: "denied", rule });
+  };
+
+  it("refuses `--target-directory` by any prefix", () => {
+    for (const command of [
+      "cp --target=/tmp src/a.ts",
+      "cp --t=/tmp src/a.ts",
+      "cp --target /tmp src/a.ts",
+      "mv --target=/tmp src/a.ts",
+      "ln -s --target=/tmp src/a.ts",
+    ]) {
+      refusedAs(command, "write_outside_worktree");
+    }
+    refusedAs("mv --targ=src/generated src/a.ts", "write_prohibited_path");
+  });
+
+  it("refuses the other options a writer is judged by, by prefix", () => {
+    for (const command of ["sed --in s/a/b/ /etc/hosts", "echo x | tee --output-e ~/x"]) {
+      refusedAs(command, "write_outside_worktree");
+    }
+  });
+
+  it("refuses a backup a suffix makes a prohibited path", () => {
+    for (const command of [
+      "cp -b --suffix=.pem src/a.ts src/other/",
+      "mv -b --suffix=.pem src/a.ts src/other/",
+      "ln -f -b --suffix=.pem src/a.ts src/other/",
+      "cp --backup=simple --suffix=.pem src/a.ts src/other/a.ts",
+      "cp --back --suf=.pem src/a.ts src/other/",
+      "SIMPLE_BACKUP_SUFFIX=.pem cp -b src/a.ts src/other/",
+      "sed -i.pem s/a/b/ src/a.ts",
+    ]) {
+      refusedAs(command, "write_prohibited_path");
+    }
+    refusedAs('cp -b --suffix="$S" src/a.ts src/other/', "write_outside_worktree");
+  });
+
+  it("admits a backup with the default suffix, and the copies, moves and edits it sits beside", () => {
+    for (const command of [
+      "cp -b src/a.ts src/other/",
+      "cp src/a.ts src/other/",
+      "mv src/a.ts src/other/",
+      "mv src/a.ts src/b.ts",
+      "ln -fb src/a.ts src/other/",
+      "sed -i s/a/b/ src/a.ts",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook.decision, command).toBe("allowed");
+      expect(codex.decision, command).toBe("allowed");
+    }
+  });
+});

@@ -32,7 +32,10 @@ const SHORT_VALUES = new Set(["d", "f", "r", "s"]);
  * `--date`, `--file` and `--reference` read a time from somewhere else, and
  * BSD's `-j` never sets one. Short `-f` and `-r` are not among them: on BSD
  * `-f` is only the format the operand is parsed with and `-r` only the time
- * shown, so `date -f %s 0` and `date -r 0 0101` set the clock there.
+ * shown, so `date -f %s 0` and `date -r 0 0101` set the clock there. On the
+ * BSD `date` of FreeBSD 12 and earlier and of older macOS, `-d` is the
+ * kernel's daylight-saving value rather than a time read, so `date -d 0 0101`
+ * sets the clock there; that is left to the root check, as docs/08 says.
  */
 const READS_ELSEWHERE = new Set(["-d", "-j", "--date", "--file", "--reference"]);
 

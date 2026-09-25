@@ -1,7 +1,11 @@
 import { lstatSync } from "node:fs";
 import { dirname } from "node:path";
+import { backupFindings, defaultSuffixes } from "./backup.js";
 import {
+  anyPresent,
   carries,
+  longCandidates,
+  longOption,
   optionsPresent,
   suppliedAsOption,
   suppliedDestination,
@@ -27,9 +31,33 @@ import type { Cwd } from "./scope.js";
  * spell, and is refused as one; a hard link's target is only read.
  */
 export function linkFindings(rest: Word[], context: Context): WriteFinding[] {
-  const present = optionsPresent(rest);
+  const read = linkReading(rest, context, LN_LONGS);
+  // An abbreviated long option is also read as the flag it is to a reading
+  // that does not resolve it, and the line is refused wherever either reading
+  // refuses it, as a writer's is.
+  const abbreviated = rest.some((word, index) => {
+    if (rest.slice(0, index).some((before) => before.value === "--")) return false;
+    const spelled = word.value.split("=")[0]!;
+    return spelled.startsWith("--") && !LN_LONGS.includes(spelled) && longCandidates(spelled, LN_LONGS).length > 0;
+  });
+  if (!abbreviated) return read;
+  const seen = new Set(read.map((finding) => finding.detail));
+  return [...read, ...linkReading(rest, context, []).filter((finding) => !seen.has(finding.detail))];
+}
+
+/** Every long option GNU `ln` takes, which is what a prefix is resolved against. */
+const LN_LONGS = [
+  "--backup", "--directory", "--force", "--interactive", "--logical", "--no-dereference",
+  "--no-target-directory", "--physical", "--relative", "--suffix", "--symbolic", "--target-directory",
+  "--verbose", "--help", "--version",
+];
+
+/** `ln`'s findings, with each long option resolved against `names`. */
+function linkReading(rest: Word[], context: Context, names: readonly string[]): WriteFinding[] {
+  const present = optionsPresent(rest, names);
   const symbolic = present.has("-s") || present.has("--symbolic");
   const operands: Word[] = [];
+  const suffixes: Word[] = [];
   let targetDirectory: Word | null = null;
   let optionsEnded = false;
   for (let i = 0; i < rest.length; i += 1) {
@@ -40,24 +68,33 @@ export function linkFindings(rest: Word[], context: Context): WriteFinding[] {
         optionsEnded = true;
         continue;
       }
-      const long = /^--target-directory(?:=(.*))?$/.exec(value);
-      if (long !== null) {
-        const inline = long[1];
-        if (inline !== undefined) targetDirectory = { ...word, raw: inline, value: inline };
-        else targetDirectory = rest[(i += 1)] ?? null;
-        continue;
-      }
-      const cluster = /^-([A-Za-z]+)(.*)$/.exec(value);
-      if (cluster !== null) {
-        const at = cluster[1]!.indexOf("t");
-        if (at !== -1) {
-          const inline = cluster[1]!.slice(at + 1) + (cluster[2] ?? "");
-          if (inline.length > 0) targetDirectory = { ...word, raw: inline, value: inline };
-          else targetDirectory = rest[(i += 1)] ?? null;
+      if (value.startsWith("--")) {
+        const eq = value.indexOf("=");
+        const name = longOption(eq === -1 ? value : value.slice(0, eq), names) ?? value.slice(0, eq === -1 ? undefined : eq);
+        const inline = eq === -1 ? null : value.slice(eq + 1);
+        const take = (): Word | null =>
+          inline !== null ? { ...word, raw: inline, value: inline } : (rest[(i += 1)] ?? null);
+        if (name === "--target-directory") targetDirectory = take() ?? targetDirectory;
+        else if (name === "--suffix") {
+          const suffix = take();
+          if (suffix !== null) suffixes.push(suffix);
         }
         continue;
       }
-      if (value.startsWith("-") && value !== "-") continue;
+      if (value.startsWith("-") && value !== "-") {
+        // `-t` and `-S` take the rest of the cluster or the next word; every
+        // other letter is a flag.
+        for (let at = 1; at < value.length; at += 1) {
+          const letter = value[at]!;
+          if (letter !== "t" && letter !== "S") continue;
+          const remainder = value.slice(at + 1);
+          const taken = remainder.length > 0 ? { ...word, raw: remainder, value: remainder } : (rest[(i += 1)] ?? null);
+          if (letter === "t") targetDirectory = taken ?? targetDirectory;
+          else if (taken !== null) suffixes.push(taken);
+          break;
+        }
+        continue;
+      }
     }
     if (value.length > 0) operands.push(word);
   }
@@ -96,6 +133,19 @@ export function linkFindings(rest: Word[], context: Context): WriteFinding[] {
       ),
     );
   } else if (link !== null) findings.push(...judge(link, "the ln destination", context.cwd));
+  // A link that replaces a name with `-b`, `--backup` or a suffix keeps what
+  // was there under `<name><suffix>`: a second path it writes.
+  if (anyPresent(["-b", "--backup", "-S", "--suffix"], present) || suffixes.length > 0) {
+    const replaced = into !== null ? into.slice(1).map(({ word }) => word) : link !== null ? [link] : targets;
+    findings.push(
+      ...backupFindings(
+        "ln",
+        replaced.map((word) => (link === null ? { ...word, value: basenameOf(word.value), raw: basenameOf(word.raw) } : word)),
+        { suffixes, ...defaultSuffixes(context), numbered: true },
+        context,
+      ),
+    );
+  }
   // Words a wrapper appends come last: the link itself, unless a `-t`
   // directory holds it, and then more targets.
   if (supplied !== undefined && supplied.placeholder === null) {
@@ -121,6 +171,9 @@ export function linkFindings(rest: Word[], context: Context): WriteFinding[] {
     ...targets.flatMap((target) => judge(target, "the ln -s target", directory)),
   ];
 }
+
+/** The last part of a path: where a lone `ln` target's link lands. */
+const basenameOf = (path: string) => path.replace(/\/+$/, "").split("/").pop() ?? path;
 
 /** The directory a link sits in: the link itself where it names one. */
 function linkDirectory(path: string): string {
