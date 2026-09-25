@@ -215,9 +215,11 @@ export function projectTicket(
   else if (requested === "auto" && ["plan_review", "ready", "draft", "specifying"].includes(ticket.state) && !active) screen = "contract";
   // A run stopped, before the record it left is read as a result. A stop seals
   // to `failed` inside the executor's window and strands the ticket where it
-  // stood outside it, and `recoverable` is the one flag that covers both — so
-  // this stands ahead of the line that would send the failed one to the review
-  // screen, whose only offer is the frozen contract it cannot change.
+  // stood outside it, and `recoverable` is the one flag that covers both, read
+  // from the ticket's state alone, so a stopped ticket whose run has left the
+  // journal still lands here with Plan it again. It stands ahead of the line
+  // that would send the failed one to the review screen, whose only offer is
+  // the frozen contract it cannot change.
   //
   // Asked for by name, the page also holds while the stop is on its way and
   // while the record it leaves is read, since Stop the loop lands here at once:

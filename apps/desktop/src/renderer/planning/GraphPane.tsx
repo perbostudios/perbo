@@ -7,7 +7,7 @@ import { useSettled } from "./settled.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { GraphInspector, SplitDialog } from "./GraphInspector.js";
 import { MarkedCriterion } from "./ChangeMarks.js";
-import { changeKey, criteriaChange, type CriteriaChange } from "./change-marks.js";
+import { changeKey, chatChange, criteriaChange, type CriteriaChange } from "./change-marks.js";
 import { graphColumns, nodeSummary } from "./graph-layout.js";
 import { graphHistory, latestUndoable } from "./history.js";
 import type {
@@ -100,11 +100,11 @@ export function GraphPane({
     [selected, view],
   );
   // The last change to the plan's promise, by criterion, for the marks on
-  // the node cards and in the inspector (D-128).
+  // the node cards and in the inspector, where the chat made it (D-128).
   // Diffed once per change rather than once per session read, which hands
   // over a fresh object for the same change.
-  const planChange = session?.change?.plan ?? null;
-  const changed = changeKey(session?.change ?? null);
+  const planChange = chatChange(session?.change)?.plan ?? null;
+  const changed = changeKey(chatChange(session?.change));
   const changes = useMemo(
     () => (planChange === null ? null : criteriaChange(planChange.before.criteria, planChange.after.criteria)),
     [changed],
@@ -125,7 +125,7 @@ export function GraphPane({
   const thinking = !view?.approved && (workspace.working ?? []).includes(session?.id ?? "");
   const confirm = (): void => {
     if (view === undefined || busy || action.isPending || thinking) return;
-    navigate(confirmRoute({ repoId, key: view.key, sessionId: session?.id, approved: view.approved }));
+    navigate(confirmRoute({ repoId, key: view.key, sessionId: session?.id, approved: view.approved, basic: false }));
   };
   useShortcut("approve", view === undefined || busy || action.isPending || thinking ? null : confirm);
 

@@ -140,6 +140,7 @@ export const STAGES = [
         "--test",
         "scripts/check.test.mjs",
         "scripts/lint-boundaries.test.mjs",
+        "scripts/migrate-workspace-round8.test.mjs",
         "scripts/sync-protected-paths.test.mjs",
         "scripts/test-placement.test.mjs",
         "scripts/tsconfig-split.test.mjs",

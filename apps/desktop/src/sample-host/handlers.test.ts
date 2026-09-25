@@ -118,7 +118,7 @@ it("refuses to read the plan of a planning thrown away against its spec, in the 
     "PRB-421 has a pull request open",
   );
   expect(onBoard("PRB-421")).toBe(true);
-  await expect(sampleBridge.request({ kind: "driftCheck", id: planning.id })).rejects.toThrow(
+  await expect(sampleBridge.request({ kind: "driftCheck", id: planning.id, state: null })).rejects.toThrow(
     "This planning has been thrown away, and its plan with it.",
   );
 });

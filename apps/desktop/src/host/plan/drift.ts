@@ -22,7 +22,7 @@ import type {
 } from "../../shared/protocol.js";
 
 export interface DriftDeps {
-  editing: Pick<ContractEditing, "read" | "landDrift" | "clearDrift">;
+  editing: Pick<ContractEditing, "read" | "landDrift" | "clearDrift" | "recordRead">;
   /** Every planning this host keeps, live or not. */
   sessions(): readonly EditingSession[];
   repository(id: string): RegisteredRepository;
@@ -106,8 +106,10 @@ export class DriftReadings {
    * Read the plan against its spec. The model is the ticket's own where the
    * contract page chose one, else the settings' — the same resolution drafting
    * the plan makes, since this is the drafter's reading of its own work.
+   * `state` is the asker's fingerprint of what it asked about, recorded on the
+   * planning once the reading lands of it, or null where it has none.
    */
-  async check(id: string): Promise<Job> {
+  async check(id: string, state: string | null): Promise<Job> {
     // Whether the interview's turn is in flight as the reading starts, and the
     // last one sent: a turn overlapping the reading may still move what it
     // reads, and what it finds is then not put ({@link ContractEditing.landDrift}).
@@ -162,7 +164,7 @@ export class DriftReadings {
           })),
         });
         job.result = landed;
-        await this.landed(id, repo, key, epoch, before, landed);
+        await this.landed(id, repo, key, epoch, before, landed, state);
       },
     );
     // A reading is in flight for this planning from here until its job has
@@ -194,6 +196,10 @@ export class DriftReadings {
    * question's length, and the options are the interview's own shape — so
    * nothing is clipped again here, and a line the record will not hold is the
    * chat's note rather than a throw out of the job.
+   *
+   * The state the asker read at is recorded only where no turn overlapped the
+   * reading: a turn that moved the spec or the plan meanwhile means the
+   * reading is not of that state.
    */
   private async landed(
     id: string,
@@ -202,6 +208,7 @@ export class DriftReadings {
     epoch: number,
     before: TurnMark,
     verdict: DriftVerdict,
+    state: string | null,
   ): Promise<void> {
     if ((this.driftEpoch.get(repo.id + ":" + key) ?? 0) !== epoch) return;
     this.deps.reads.invalidate(repo.id);
@@ -228,6 +235,7 @@ export class DriftReadings {
       (line) => this.deps.interview.say(id, line),
       () => this.deps.interview.askingChanged(id),
     );
+    if (state !== null && !overlapped) this.deps.editing.recordRead(id, state);
   }
 
   /**
@@ -274,7 +282,7 @@ export class DriftReadings {
     // start a second reading over this one.
     this.readings.add(id);
     try {
-      await this.check(id);
+      await this.check(id, null);
     } catch (error) {
       // No job, so nothing settles: the flag comes off here, and a reading owed
       // in the gap would fail the same way.

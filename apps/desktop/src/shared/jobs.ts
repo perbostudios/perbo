@@ -123,8 +123,11 @@ export const isRun = (job: Pick<Job, "kind">): boolean => job.kind === "run" || 
  * archive's eligibility both read this, so a stopped run is one answer.
  *
  * A stop seals to `failed` or `cancelled` inside the executor's window and
- * strands the ticket where it stood outside it, so a ticket left in a loop
- * state with nothing running for it has stopped, whatever the journal holds.
+ * strands the ticket where it stood outside it, so a ticket left failed,
+ * cancelled or in a loop state with nothing running for it has stopped. The
+ * ticket's state is the whole answer: the journal keeps a ticket's last run
+ * only while the host keeps its journal, and a stopped ticket filed in the
+ * Archive long ago is still stopped once that record has gone.
  */
 export function ticketRun(
   workspace: Pick<Snapshot, "jobs">,
@@ -136,12 +139,7 @@ export function ticketRun(
   );
   // The loop is what a ticket's screens watch and stop, so it wins over planning running beside it.
   const active = exclusiveJob(jobs) ?? jobs.find(isLive);
-  const lastRun = jobs.filter(isRun).at(-1);
-  const inProgress = IN_PROGRESS_STATES.includes(ticket.state);
-  const stoppedShort =
-    !active &&
-    (inProgress || ["failed", "cancelled"].includes(ticket.state)) &&
-    (["interrupted", "failed", "cancelled"].includes(lastRun?.state ?? "") || inProgress);
+  const stoppedShort = !active && (IN_PROGRESS_STATES.includes(ticket.state) || ["failed", "cancelled"].includes(ticket.state));
   return { jobs, active, stoppedShort };
 }
 

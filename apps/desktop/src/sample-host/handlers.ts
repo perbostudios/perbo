@@ -156,7 +156,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
           null,
         );
         job.resultKey = request.key;
-        marks.recordPlanChange({ id: request.repoId }, request.key, before);
+        marks.recordPlanChange({ id: request.repoId }, request.key, before, "person");
       },
       120,
     ),
@@ -169,7 +169,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         const before = marks.promiseAt({ id: request.repoId }, request.key);
         undoGraphEditAt(request.key, request.edit);
         job.resultKey = request.key;
-        marks.recordPlanChange({ id: request.repoId }, request.key, before);
+        marks.recordPlanChange({ id: request.repoId }, request.key, before, "person");
       },
       120,
     ),
@@ -372,7 +372,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
             ? { ...held, cached: true }
             : recordDrift(key, "read", findings, false, keys);
         job.result = verdict;
-        driftLanded(id, key, epoch, before, verdict);
+        driftLanded(id, key, epoch, before, verdict, request.state);
       },
       600,
       undefined,
@@ -445,7 +445,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     if (titleChanged(request)) editing.personTitled(request.id, request.title);
     // The change this save made, on every planning writing this spec: a save
     // of the same words changes nothing and marks nothing.
-    marks.markChangeOn({ spec: before, plan: null }, { spec: specSectionsAt(slug), plan: null }, (each) => each.specSlug === slug);
+    marks.markChangeOn({ spec: before, plan: null }, { spec: specSectionsAt(slug), plan: null }, (each) => each.specSlug === slug, "person");
     // The drafts list read again, as the host has it: it names the planning
     // by the spec's title and holds its contract tab by the spec's sections.
     emit({ kind: "editing", sessionId: request.id });
@@ -567,7 +567,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         if (given !== undefined) nameSampleSpec(request.repoId, request.key, given);
         ticket.plan_version += 1;
         job.resultKey = request.key;
-        marks.recordPlanChange({ id: request.repoId }, request.key, before);
+        marks.recordPlanChange({ id: request.repoId }, request.key, before, "person");
       },
       1400,
       owner,
@@ -829,7 +829,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       const before = marks.promiseAt({ id: request.repoId }, request.key);
       applyDraft(ticket, request.draft);
       ticket.plan_version += 1;
-      marks.recordPlanChange({ id: request.repoId }, request.key, before);
+      marks.recordPlanChange({ id: request.repoId }, request.key, before, "person");
       if (request.models) {
         snapshot.taskModels = {
           ...snapshot.taskModels,

@@ -28,7 +28,7 @@ const session = (over: Record<string, unknown>): Record<string, unknown> => ({
   drift: null,
   change: null,
   lastPane: null,
-  confirmed: null, impact: null,
+  confirmed: null, read: null, impact: null,
   specCut: null,
   named: null,
   interviewModel: null,

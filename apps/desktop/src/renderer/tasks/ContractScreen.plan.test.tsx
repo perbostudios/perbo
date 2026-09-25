@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { sampleBridge } from "../../sample-host/bridge.js";
+import { editing as sampleEditing } from "../../sample-host/records.js";
 import { useContractEditing } from "../contract-editor.js";
 import { planNodes } from "@perbo/contracts/browser";
 import { ContractScreen, contractShows } from "./ContractScreen.js";
@@ -83,5 +84,70 @@ describe("what a contract shows of its plan (D-NEW-basic-and-epic-flows)", () =>
     const first = "acceptance_criteria" in approved.detail.contract ? approved.detail.contract.acceptance_criteria[0]!.text : "";
     expect(await screen.findByText(first)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Edit criterion 1" })).toBeNull();
+  });
+});
+
+describe("a basic ticket's criteria written into its contract (D-NEW-basic-and-epic-flows)", () => {
+  /**
+   * A write the host turns away before it becomes an operation leaves nothing
+   * to wait on: the page says why, rather than saying it is still writing.
+   */
+  it("says the refusal of a write the host turned away, and is not left writing", async () => {
+    const context = await contextFor({ flat: true, approved: false });
+    const request = sampleBridge.request.bind(sampleBridge);
+    vi.spyOn(sampleBridge, "request").mockImplementation(((input: Parameters<typeof request>[0]) =>
+      input.kind === "editingSubmit"
+        ? Promise.reject(new Error("Another command holds this repository."))
+        : request(input)) as typeof sampleBridge.request);
+    mount(<InPlanning {...context} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit criterion 1" }, { timeout: 5000 }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Criterion 1" }), {
+      target: { value: "The importer and its routes are gone, and nothing links to them." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Another command holds this repository."));
+    expect(screen.queryByText("Writing the change into the contract…")).toBeNull();
+    expect((screen.getByRole("button", { name: "Approve · start the loop" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("the marks on a basic ticket's contract (D-128)", () => {
+  /**
+   * The chat's last change to the criteria, marked where they are read and
+   * edited; the person's own change, made there by hand, marked nowhere.
+   */
+  it.each([
+    ["the chat's change is marked", "chat", true],
+    ["the person's own change is not", "person", false],
+  ] as const)("%s", async (_, by, marked) => {
+    const context = await contextFor({ flat: true, approved: false });
+    mount(<InPlanning {...context} />);
+    await screen.findByRole("button", { name: "Edit criterion 1" }, { timeout: 5000 });
+    const session = (await sampleBridge.request({ kind: "drafts" })).find(
+      (draft) => draft.repoId === context.repoId && draft.key === context.detail.ticket.key,
+    );
+    if (session === undefined) throw new Error("the contract tab must be over a planning");
+    const record = await sampleBridge.request({ kind: "editingRead", id: session.id });
+    const after = record.form.draft.criteria.map((criterion, index) => ({ id: `ac_${index + 1}`, text: criterion.text }));
+    const first = after[0]!.text;
+    const before = [{ id: "ac_1", text: "A sentence the change took away." }, ...after.slice(1), { id: "ac_9", text: "A criterion that went." }];
+    sampleEditing.recordChange(session.id, {
+      at: new Date().toISOString(),
+      by,
+      spec: null,
+      plan: { before: { outcome: record.form.draft.outcome, criteria: before }, after: { outcome: record.form.draft.outcome, criteria: after } },
+    });
+    await sampleBridge.request({ kind: "editingRead", id: session.id });
+    const editor = document.querySelector(".criteria-editor") as HTMLElement;
+    if (marked) {
+      await waitFor(() => expect(editor.querySelectorAll(".change--added, .change--removed").length).toBeGreaterThan(0));
+      expect(within(editor).getByText("A criterion that went.").closest("del")).not.toBeNull();
+      expect(editor.textContent).toContain(first);
+    } else {
+      // Given the same time to draw, nothing is marked.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(editor.querySelectorAll(".change--added, .change--removed, del, ins")).toHaveLength(0);
+      expect(editor.textContent).not.toContain("A criterion that went.");
+    }
   });
 });

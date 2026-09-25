@@ -313,7 +313,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
         repository(request.repoId),
       ),
     specRead: (request) => specView(m.planDeps, request.id),
-    driftCheck: (request) => m.drift.check(request.id),
+    driftCheck: (request) => m.drift.check(request.id, request.state),
     driftDismiss: (request) => m.drift.dismiss(request.id),
     specDelete: (request) => deleteSpec(work, request.repoId, request.slug),
     impactRead: (request) =>
@@ -548,7 +548,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
           const before = promiseOf(current);
           await run.invoke(editArgs(request.key, request.draft));
           job.resultKey = request.key;
-          m.marks.recordPlanChange(repo, request.key, before);
+          m.marks.recordPlanChange(repo, request.key, before, "person");
           if (request.models) {
             m.profile.state.taskModels[repo.id + ":" + request.key] = request.models;
             m.changes.preferences(m.profile.state);
@@ -673,7 +673,7 @@ function graphEdit(
       const before = m.marks.promiseAt(repo, request.key);
       await run.invoke(graphEditArgs(request.key, request));
       job.resultKey = request.key;
-      m.marks.recordPlanChange(repo, request.key, before);
+      m.marks.recordPlanChange(repo, request.key, before, "person");
     },
   );
 }
@@ -760,7 +760,7 @@ function fromSpec(
         // keeps it, so the spec the re-draft titled takes it back.
         const given = m.profile.state.titles[repo.id + ":" + request.key];
         if (given !== undefined) await nameSpecAfterRename(m.tickets, repo, request.key, given);
-        m.marks.recordPlanChange(repo, request.key, before);
+        m.marks.recordPlanChange(repo, request.key, before, "person");
       }
     },
   );

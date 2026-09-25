@@ -153,7 +153,8 @@ describe("a Home card", () => {
     }
     const stopped = card("Ticket 3 failed").querySelector(".task-card-description > span")!;
     expect(stopped.className).toBe("");
-    expect(stopped.textContent).toBe("The loop stopped. Its work and evidence have been retained. Open the task to inspect the cause.");
+    // A failed ticket with nothing running for it is a stopped run, whatever the journal still holds.
+    expect(stopped.textContent).toBe("The run stopped. Its work and evidence have been retained — carry on with the task, plan it again, or delete it.");
     // No outcome to say, or none read yet: the line keeps its height with a space, so the card does not move.
     cleanup();
     const workspace = board([["merged", pr], ["executing", null]]);

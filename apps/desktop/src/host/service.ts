@@ -210,6 +210,7 @@ export class DesktopService {
         landDrift: (id, verdict, overlapped, say, asking) =>
           this.editing.landDrift(id, verdict, overlapped, say, asking),
         clearDrift: (id) => this.editing.clearDrift(id),
+        recordRead: (id, state) => this.editing.recordRead(id, state),
       },
       sessions: () => this.state.editingSessions,
       repository: (id) => this.repository(id),

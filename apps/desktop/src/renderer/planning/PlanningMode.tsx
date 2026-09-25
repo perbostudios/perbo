@@ -89,8 +89,10 @@ export function PlanningMode({
   //
   // The contract is written down with the state it was reached at, which
   // keeps it a tab until that state moves (D-NEW-basic-and-epic-flows):
-  // once, as the person arrives, so a change made on the contract itself is
-  // not taken as checked before the reading it goes through.
+  // once, as the person arrives, so a change that lands elsewhere while they
+  // read it — a turn of the chat, another process — still takes the tab
+  // away. A change the person makes on a basic ticket's contract is theirs,
+  // and the contract page records the state it leaves itself.
   const listed = (workspace.drafts ?? []).some((entry) => entry.id === sessionId);
   const flow = flowFor(workspace, sessionId, pane);
   const visited = flow.panes.find((entry) => entry.id === pane && remembered(entry.id))?.id ?? null;
@@ -126,7 +128,7 @@ export function PlanningMode({
   // The same editor the Composer binds to: the host is asked for the session, and its answer decides whether there is planning to show.
   const editor = useContractEditing({ kind: "session", id: sessionId }, workspace.settings);
   const [history, setHistory] = useState(false);
-  const landing = useDraftLanding({ sessionId, editor, navigate });
+  const landing = useDraftLanding({ sessionId, editor, navigate, workspace });
   // The pane the person came from, which says whether the contract is being
   // reached through the reading on the way to it, and so compiled, or come
   // back to.

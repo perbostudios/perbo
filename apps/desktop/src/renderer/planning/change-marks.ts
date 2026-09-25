@@ -272,6 +272,25 @@ export function criteriaChange(
 }
 
 /**
+ * The last change where the chat made it, which is the only change a pane
+ * marks (D-128): a change the person made by hand was made where they read
+ * it, and is marked nowhere, though it still replaces the chat's marks.
+ */
+export function chatChange(change: EditingChange | null | undefined): EditingChange | null {
+  return change?.by === "chat" ? change : null;
+}
+
+/**
+ * The marks a list of criteria shown by their words carries, by those words:
+ * for a list that holds no ids, as the criteria being edited on a basic
+ * ticket's contract do. Undefined for words the change did not leave.
+ */
+export function changeOfText(marks: CriteriaChange, after: PlanPromise["criteria"], text: string): CriterionChange | undefined {
+  const criterion = after.find((each) => each.text === text);
+  return criterion === undefined ? undefined : marks.of.get(criterion.id);
+}
+
+/**
  * What tells one recorded change from the next, for a memo over it: when it
  * was recorded and the words on each side. A session read again holds a
  * fresh object for the same change, and a diff of a long section is not

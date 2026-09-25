@@ -329,7 +329,7 @@ describe("Create in the rail (SCP-334)", () => {
   it("lists a session Send just opened, before the host's refresh lands", async () => {
     const workspace = await sampleBridge.request({ kind: "snapshot" });
     const session = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId: workspace.repositories[0]!.id } });
-    const stale = { ...workspace, drafts: [{ id: "older", repoId: session.repoId, key: null, admitted: false, outcome: "An older draft", phase: "editing" as const, nodes: 0, drift: null, scope: { paths: [], prohibited: [] }, specSlug: null, title: null, lastPane: null, confirmed: null, spec: null, impact: null }] };
+    const stale = { ...workspace, drafts: [{ id: "older", repoId: session.repoId, key: null, admitted: false, outcome: "An older draft", phase: "editing" as const, nodes: 0, drift: null, scope: { paths: [], prohibited: [] }, specSlug: null, title: null, lastPane: null, confirmed: null, read: null, spec: null, impact: null }] };
     const seeded = withDraft(stale, session);
     expect(seeded.drafts!.map((draft) => draft.id)).toEqual([session.id, "older"]);
     expect(withDraft(seeded, session).drafts!.map((draft) => draft.id)).toEqual([session.id, "older"]);
@@ -2329,7 +2329,7 @@ describe("the Graph pane (SCP-316)", () => {
         `${node.criteria.length} ${node.criteria.length === 1 ? "criterion" : "criteria"} · ${node.paths.join(" · ")}`,
       );
       for (const path of node.paths) expect(inspector.textContent).toContain(path);
-      // The inspector keeps what changes them.
+      // The inspector reads the criteria and keeps what changes the paths and the order.
       expect(within(inspector).getByLabelText("Criterion ac_1")).toBeTruthy();
       expect(within(inspector).getByLabelText("Add a path or glob")).toBeTruthy();
       expect(within(inspector).getByRole("button", { name: "Remove the edge node_1 to node_2" })).toBeTruthy();
@@ -2589,16 +2589,14 @@ describe("the Graph pane (SCP-316)", () => {
       expect(screen.getByRole("alert").textContent).toContain("The second refusal.");
     });
 
-    it("keeps a criterion's first letter inside its box, lined up with the kind buttons", () => {
+    it("keeps the first letter of the chat's box inside it", () => {
       // A textarea clips at its padding edge, so with no inline padding the
       // first letter loses its left edge; the padding is given back as a
-      // negative margin so the words do not move. The chat's box is the same
-      // cause, and takes the same rule.
-      const textarea = cssRule(".crit-edit textarea,\n.composer-box textarea");
+      // negative margin so the words do not move.
+      const textarea = cssRule(".composer-box textarea");
       expect(textarea).toContain("padding-inline: 4px;");
       expect(textarea).toContain("margin-inline: -4px;");
       expect(textarea).toContain("width: calc(100% + 8px);");
-      expect(cssRule(".crit-edit textarea")).not.toMatch(/padding: |margin|width/);
     });
   });
 
@@ -2676,58 +2674,45 @@ describe("the Graph pane (SCP-316)", () => {
     });
   });
 
-  it("edits a criterion through the one edit path, and undoes the latest edit", async () => {
+  it("reads an epic's criteria in the inspector and offers no edit of one: the chat changes them (D-100, D-102)", async () => {
     const plan = await openGraph();
-    const before = (await graphOf(plan)).criteria[0]!.text;
     fireEvent.click(nodeAt(/^Node node_1/));
-    const criterion = await screen.findByLabelText("Criterion ac_1");
-    fireEvent.change(criterion, { target: { value: "A person can choose the colour mode." } });
-    fireEvent.blur(criterion);
-    await waitFor(async () =>
-      expect((await graphOf(plan)).criteria[0]?.text).toBe("A person can choose the colour mode."),
-    );
-    const history = await screen.findByRole("region", { name: "Edits to this plan" });
-    expect(within(history).getAllByRole("listitem")).toHaveLength(1);
-    // The edit is the person's own, and admission counts it (D-072).
-    expect((await graphOf(plan)).editCount).toBeGreaterThan(0);
-    expect((await graphOf(plan)).history[0]?.author).toBe("you");
-    fireEvent.click(within(history).getByRole("button", { name: /^Undo/ }));
-    await waitFor(async () => expect((await graphOf(plan)).criteria[0]?.text).toBe(before));
+    const inspector = await screen.findByRole("region", { name: "Node node_1" });
+    const criteria = inspector.querySelector(".insp-main") as HTMLElement;
+    const first = (await graphOf(plan)).criteria[0]!;
+    const criterion = within(criteria).getByLabelText("Criterion ac_1");
+    expect(criterion.textContent).toBe(first.text);
+    expect(criterion.tagName).toBe("P");
+    // No box to reword it, no choice of how it is proven, nothing to press.
+    expect(within(criteria).queryAllByRole("textbox")).toHaveLength(0);
+    expect(within(criteria).queryAllByRole("button")).toHaveLength(0);
+    expect(within(criteria).queryByRole("group", { name: "How ac_1 is proven" })).toBeNull();
+    expect(criteria.querySelector("textarea, input, select")).toBeNull();
+    expect(within(criteria).getByText(`Proven by ${first.kind}: ${first.assertion}`, { exact: false })).toBeTruthy();
   });
 
-  it("edits the text of a criterion proven by hand, keeping who proves it and why", async () => {
-    const plan = await planned();
+  it("undoes the latest edit of the plan from its history", async () => {
+    const plan = await openGraph();
+    const before = (await graphOf(plan)).criteria[0]!;
     await sampleBridge.request({
       kind: "graphEdit",
       repoId: plan.repoId,
       key: plan.key,
       edit: {
         op: "set_criterion",
-        id: "ac_1",
+        id: before.id,
         text: "A person can choose the colour mode.",
-        expected_verification: {
-          kind: "manual",
-          assertion: "Open Settings and switch modes",
-          manual_reviewer: "the designer",
-          manual_reason: "a colour is judged by eye",
-        },
+        expected_verification: { kind: before.kind, assertion: before.assertion },
       },
     });
-    await waitFor(async () => expect((await graphOf(plan)).criteria[0]?.kind).toBe("manual"));
-    location.hash = `planning/${plan.id}/graph`;
-    mount();
-    await screen.findByRole("heading", { name: "Execution graph" });
-    fireEvent.click(await screen.findByRole("button", { name: /^Node node_1/ }));
-    const criterion = await screen.findByLabelText("Criterion ac_1");
-    fireEvent.change(criterion, { target: { value: "The colour mode is chosen by eye." } });
-    fireEvent.blur(criterion);
     await waitFor(async () =>
-      expect((await graphOf(plan)).criteria[0]).toMatchObject({
-        text: "The colour mode is chosen by eye.",
-        kind: "manual",
-        assertion: "Open Settings and switch modes",
-      }),
+      expect((await graphOf(plan)).criteria[0]?.text).toBe("A person can choose the colour mode."),
     );
+    const history = await screen.findByRole("region", { name: "Edits to this plan" });
+    await waitFor(() => expect(within(history).getAllByRole("listitem")).toHaveLength(1));
+    expect((await graphOf(plan)).history[0]?.author).toBe("you");
+    fireEvent.click(within(history).getByRole("button", { name: /^Undo/ }));
+    await waitFor(async () => expect((await graphOf(plan)).criteria[0]?.text).toBe(before.text));
   });
 
   it("draws and removes an edge, which is approach and not contract", async () => {
@@ -2852,7 +2837,10 @@ describe("the Graph pane (SCP-316)", () => {
     await screen.findByRole("tree", { name: "Tracked files" }, { timeout: 5000 });
     const panes = screen.getByRole("group", { name: "Planning panes" });
     await waitFor(() => expect(within(panes).queryByRole("button", { name: "Graph" })).toBeNull());
-    expect(railNames().slice(0, 5)).toEqual(["Create", "Spec", "Explorer", "Home", "Archive"]);
+    // Impact joins them only where the check the planning runs as it opens
+    // finds paths outside the scope.
+    expect(railNames().slice(0, 3)).toEqual(["Create", "Spec", "Explorer"]);
+    expect(railNames()).not.toContain("Graph");
 
     const detail = () => sampleBridge.request({ kind: "detail", repoId: plan.repoId, key: plan.key });
     expect((await detail()).ticket.approved_at).toBeNull();
@@ -2861,12 +2849,15 @@ describe("the Graph pane (SCP-316)", () => {
     // there and nowhere else.
     const next = await screen.findByRole("button", { name: "Confirm contract" });
     await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false));
+    const readings = async () =>
+      (await sampleBridge.request({ kind: "snapshot" })).jobs.filter((job) => job.kind === "drift" && job.key === plan.key).length;
+    const before = await readings();
     fireEvent.click(next);
-    // By way of the plan read against its spec: nothing here moved a
-    // promise, so the reading it was drafted with holds and lands on the
-    // contract by itself.
-    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/drift`));
-    await waitFor(() => expect(location.hash).toMatch(/^#planning\/.*\/contract$/), { timeout: 5000 });
+    // Straight to the contract: a basic ticket's plan is read against its
+    // spec at the contract's own confirm, not on the way there
+    // (D-NEW-basic-and-epic-flows).
+    await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/contract`));
+    expect(await readings()).toBe(before);
     expect((await detail()).ticket.approved_at).toBeNull();
   });
 
@@ -3765,7 +3756,7 @@ describe("the Graph pane (SCP-316)", () => {
           const { line, at } = change.entry;
           if (answeredAt === null && line.kind === "turn") {
             answeredAt = at;
-            queueMicrotask(() => void sampleBridge.request({ kind: "driftCheck", id: plan.id }));
+            queueMicrotask(() => void sampleBridge.request({ kind: "driftCheck", id: plan.id, state: null }));
           } else if (
             answeredAt !== null &&
             !(line.kind === "asked" && line.drift !== undefined) &&
@@ -3879,7 +3870,7 @@ describe("the Graph pane (SCP-316)", () => {
           const { line, at } = change.entry;
           if (answeredAt === null && line.kind === "turn") {
             answeredAt = at;
-            queueMicrotask(() => void sampleBridge.request({ kind: "driftCheck", id: plan.id }));
+            queueMicrotask(() => void sampleBridge.request({ kind: "driftCheck", id: plan.id, state: null }));
           } else if (
             answeredAt !== null &&
             !(line.kind === "asked" && line.drift !== undefined) &&
@@ -4027,7 +4018,7 @@ describe("the Graph pane (SCP-316)", () => {
         // reads the plan the answer has not reached yet — and the page itself,
         // which adopts it and says the problem is being resolved.
         expect((await sampleBridge.request({ kind: "snapshot" })).working).toContain(plan.id);
-        const reading = await sampleBridge.request({ kind: "driftCheck", id: plan.id });
+        const reading = await sampleBridge.request({ kind: "driftCheck", id: plan.id, state: null });
         location.hash = `planning/${plan.id}/drift`;
         await screen.findByRole("heading", { name: "Resolving the problem" });
         await waitFor(
@@ -4098,15 +4089,14 @@ describe("the Graph pane (SCP-316)", () => {
       // The new words green, the old words red and struck through, on the card.
       await waitFor(() => expect(added(card).join("|")).toContain("within 60 seconds"));
       expect(removed(card)).toEqual(["."]);
-      // And in the inspector, under the box that edits the criterion.
+      // And in the inspector, where the criterion is read.
       fireEvent.click(card);
-      const line = await screen.findByLabelText("Criterion ac_1 as the last change left it");
+      const line = await screen.findByLabelText("Criterion ac_1");
       expect(added(line).join("|")).toContain("within 60 seconds");
       expect(removed(line)).toEqual(["."]);
       // A change by hand to another criterion is the last change now: the
-      // first one's marks are plain text again, and only the new ones show.
-      // This one adds words and takes none away, so nothing at all reads
-      // struck through once it is the last change.
+      // first one's marks are plain text again, and the person's own change is
+      // marked nowhere, so nothing on the pane reads marked at all.
       const second = (await graphOf(plan)).criteria[1]!;
       await sampleBridge.request({
         kind: "graphEdit",
@@ -4119,12 +4109,12 @@ describe("the Graph pane (SCP-316)", () => {
           expected_verification: { kind: second.kind, assertion: second.assertion },
         },
       });
-      await waitFor(() => expect(added().join("|")).toContain("By hand"), { timeout: 5000 });
-      expect(added().join("|")).not.toContain("within 60 seconds");
-      expect(removed()).toEqual([]);
+      await waitFor(async () => expect((await session(plan)).change?.by).toBe("person"), { timeout: 5000 });
       expect((await session(plan)).change?.plan?.after.criteria.find((each) => each.id === second.id)?.text).toContain(
         "By hand",
       );
+      await waitFor(() => expect(added()).toEqual([]), { timeout: 5000 });
+      expect(removed()).toEqual([]);
     });
 
     it("marks what the interview wrote in the spec as it reads, and not while the section is being edited", async () => {
@@ -6195,6 +6185,71 @@ describe("the Impact pane (SCP-320)", () => {
     await waitFor(() => expect(location.hash).toBe(`#planning/${id}/contract`), { timeout: 5000 });
   });
 
+  it("checks a basic plan whose impact was never checked as its planning opens, where it opened, and not again", async () => {
+    // A plan this planning did not watch land — drafted again from a stopped
+    // run, or from before impact was kept — has its check made on opening, so
+    // its Impact tab is there where the check finds paths outside the scope.
+    await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
+    const opened = await session();
+    await sampleBridge.request({
+      kind: "specSave",
+      id: opened.id,
+      repoId: opened.repoId,
+      title: "A light colour mode",
+      sections: {
+        outcome: "The application supports a usable light colour mode.",
+        requirements: "- The person can choose Light, Dark or System without a restart.",
+        no_gos: "",
+        rabbit_holes: "",
+        notes: "",
+      },
+      base: NOTHING_YET,
+    });
+    cleanup();
+    const withSpec = await session();
+    await sampleBridge.request({
+      kind: "editingSubmit",
+      id: withSpec.id,
+      revision: withSpec.revision,
+      operationId: crypto.randomUUID(),
+      intent: "generate",
+    });
+    await waitFor(async () => expect((await session()).key).not.toBeNull(), { timeout: 5000 });
+    expect((await session()).nodes).toBe(0);
+    // Opened once, and then its check forgotten, as a planning kept from
+    // before impact was recorded holds none.
+    location.hash = `planning/${withSpec.id}/explorer`;
+    mount();
+    await waitFor(async () => expect((await session()).impact).not.toBeNull(), { timeout: 5000 });
+    cleanup();
+    const held = JSON.parse(localStorage.getItem("perbo:preview-editing") ?? "[]") as { id: string; impact: number | null }[];
+    localStorage.setItem(
+      "perbo:preview-editing",
+      JSON.stringify(held.map((record) => (record.id === withSpec.id ? { ...record, impact: null } : record))),
+    );
+    expect((await session()).impact).toBeNull();
+    const asked = vi.spyOn(sampleBridge, "request");
+    const runs = (): number => asked.mock.calls.filter(([request]) => request.kind === "impactRead").length;
+    try {
+      mount();
+      await screen.findByRole("tree", { name: "Tracked files" }, { timeout: 5000 });
+      await waitFor(async () => expect((await session()).impact).not.toBeNull(), { timeout: 5000 });
+      expect(runs()).toBe(1);
+      // Where it opened, with no pop-up: a person who came to read the plan.
+      expect(location.hash).toBe(`#planning/${withSpec.id}/explorer`);
+      expect(screen.queryByRole("dialog", { name: "A simple task" })).toBeNull();
+      if (((await session()).impact ?? 0) > 0) await waitFor(() => expect(railNames()).toContain("Impact"));
+      // Opened again, it has its check and makes none.
+      cleanup();
+      mount();
+      await screen.findByRole("tree", { name: "Tracked files" }, { timeout: 5000 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(runs()).toBe(1);
+    } finally {
+      asked.mockRestore();
+    }
+  });
+
   it("is not in the rail before there is a plan, and asks for nothing until it is asked", async () => {
     await planningOver(/example\/webstore/, ["packages/auth/src/**"]);
     // No plan has been drafted here, so there is nothing to measure impact
@@ -6704,7 +6759,7 @@ describe("the first writing of a spec is not a change (D-128)", () => {
   const marks = (root: ParentNode = document): string[] =>
     [...root.querySelectorAll(".change--added, .change--removed, ins, del")].map((mark) => mark.textContent ?? "");
 
-  it("marks nothing the interview wrote into an empty spec, and marks a hand edit of it after", async () => {
+  it("marks nothing the interview wrote into an empty spec, nor a hand edit of it after (D-128)", async () => {
     // A fresh planning, named, with every section of its spec still empty.
     const opened = await openFresh();
     const { id, repoId } = opened;
@@ -6733,7 +6788,8 @@ describe("the first writing of a spec is not a change (D-128)", () => {
     // The spec as the interview first wrote it reads plain: nothing green, nothing struck.
     expect(marks()).toEqual([]);
 
-    // A hand edit of those words is a change, and the words it changed are marked.
+    // A hand edit of those words is a change, recorded as the person's own,
+    // and marked nowhere: they made it where they read it.
     fireEvent.mouseDown(reading, { clientX: 0, clientY: 0 });
     const box = (await waitFor(() => {
       const shown = screen.getByLabelText("Spec Outcome");
@@ -6745,7 +6801,10 @@ describe("the first writing of a spec is not a change (D-128)", () => {
     });
     fireEvent.blur(box);
     await waitFor(async () => expect((await editingRead(id)).change?.spec?.after.outcome).toContain("weeks"));
-    await waitFor(() => expect(marks(screen.getByLabelText("Spec Outcome"))).toEqual(["days", "weeks"]));
+    expect((await editingRead(id)).change?.by).toBe("person");
+    await waitFor(() => expect(screen.getByLabelText("Spec Outcome").textContent).toContain("weeks"));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(marks(screen.getByLabelText("Spec Outcome"))).toEqual([]);
   });
 });
 
@@ -7286,11 +7345,16 @@ describe("the one piece of work a page is about: its name, its row in the picker
     await screen.findByRole("button", { name: "Approve · start the loop" }, { timeout: 5000 });
     await waitFor(async () => expect(await lastPane(plan.id)).toBe("contract"));
     const group = screen.getByRole("group", { name: "Planning panes" });
-    expect(within(group).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
-      "Spec",
-      "Explorer",
-      "Confirm contract",
-    ]);
+    // Its impact never checked, the plan is checked as the planning opens, and
+    // what the sample's check finds outside the scope puts Impact in the rail.
+    await waitFor(() =>
+      expect(within(group).getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+        "Spec",
+        "Explorer",
+        "Impact",
+        "Confirm contract",
+      ]),
+    );
     expect(within(group).getByRole("button", { name: "Confirm contract" }).getAttribute("aria-current")).toBe("page");
     fireEvent.click(pane("Explorer"));
     await waitFor(() => expect(location.hash).toBe(`#planning/${plan.id}/explorer`));

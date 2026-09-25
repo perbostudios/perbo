@@ -330,6 +330,7 @@ export function saveSpec(
         { spec: before, plan: null },
         { spec: after, plan: null },
         (each) => each.repoId === repo.id && each.specSlug === written.slug,
+        "person",
       );
   }
   return { view: specView(deps, request.id), conflicting: [] };

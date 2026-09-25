@@ -9,7 +9,7 @@ import { bridge, errorMessage } from "../workspace/index.js";
 import { isLive, newestReading } from "../../shared/jobs.js";
 import { REREAD_COULD_NOT_START } from "../../shared/contract-editing.js";
 import { WaitScreen } from "../tasks/wizard.js";
-import { confirmLabel, flowFor, planPaneFor } from "./panes.js";
+import { confirmLabel, flowFor, planPaneFor, readingState } from "./panes.js";
 import { owedReading } from "./owed-reading.js";
 import { QuestionCard, problemHead } from "./InterviewDock.js";
 import type { InterviewEntry, Job } from "../../shared/protocol.js";
@@ -78,18 +78,23 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // the plan could not be read again are read as this answer's.
   const [sent, setSent] = useState<{ problem: string; after: number } | null>(null);
   const asked = useRef<string | null>(null);
+  // The state the reading is asked of, which the host records once it lands
+  // of it, so a basic ticket's Confirm contract at the same state reads nothing
+  // again (D-NEW-basic-and-epic-flows).
+  const listed = (workspace.drafts ?? []).find((draft) => draft.id === id);
+  const state = session == null || listed === undefined ? null : readingState(listed.spec, session.form.draft);
   const check = useCallback(async (): Promise<void> => {
     if (id === null) return;
     setFailure(null);
     setChecking(true);
     try {
-      setAskedFor(await bridge.request({ kind: "driftCheck", id }));
+      setAskedFor(await bridge.request({ kind: "driftCheck", id, state }));
     } catch (error) {
       setFailure(errorMessage(error));
     } finally {
       setChecking(false);
     }
-  }, [id]);
+  }, [id, state]);
   // A planning with no spec has nothing to read the plan against — a ticket
   // the CLI admitted, or one opened from the board — and goes on to the
   // contract without asking: the host would refuse, and a refusal is not a
@@ -240,6 +245,23 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   useEffect(() => {
     if (decided) setSent(null);
   }, [decided]);
+  // A basic ticket's problems all resolved here: the tab goes, and the person
+  // is back on the contract, where they confirm again
+  // (D-NEW-basic-and-epic-flows). An epic's resolved state stays, as the step
+  // its Confirm the plan passes through.
+  const basic = flowFor(workspace, id ?? "").shape === "basic";
+  const resolved =
+    drift !== null &&
+    open.length === 0 &&
+    asking === null &&
+    !reading &&
+    !passing &&
+    !awaiting &&
+    !thinking &&
+    (failure ?? couldNotReread ?? jobError) === null;
+  useEffect(() => {
+    if (basic && resolved && id !== null) navigate({ page: "planning", sessionId: id, pane: "contract" });
+  }, [basic, resolved, id, navigate]);
 
   const send = async (text: string): Promise<void> => {
     if (id === null || busy || thinking) return;

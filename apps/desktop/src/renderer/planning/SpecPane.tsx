@@ -5,7 +5,7 @@ import type { SpecField } from "@perbo/planning/browser";
 import { specSymbolNames } from "@perbo/planning/browser";
 import { bridge } from "../workspace/index.js";
 import { useContractEditing } from "../contract-editor.js";
-import { changeKey, textMarks } from "./change-marks.js";
+import { changeKey, chatChange, textMarks } from "./change-marks.js";
 import { SpecSection } from "./SpecSection.js";
 import { useTurnSending } from "./InterviewDock.js";
 import { INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
@@ -269,16 +269,16 @@ export function SpecPane({
 
   const sections: SpecSections = { ...(view?.sections ?? EMPTY), ...edited };
   const shownTitle = title ?? titleIn(view);
-  // The last change to the spec, as marks placed in each section's after-text
-  // (D-128). Diffed once per change
+  // The last change to the spec, where the chat made it, as marks placed in
+  // each section's after-text (D-128). Diffed once per change
   // rather than per render or per session read: a keystroke in one section
   // re-renders the others, a re-read hands over a fresh object for the same
   // change, and a diff of a long section is not free. Shown on a section only
   // while its text is the change's after-text — typed into since, the marks
   // would fall on the wrong characters, and the save that follows is a change
   // of its own.
-  const change = editor.session?.change?.spec ?? null;
-  const changed = changeKey(editor.session?.change ?? null);
+  const change = chatChange(editor.session?.change)?.spec ?? null;
+  const changed = changeKey(chatChange(editor.session?.change));
   const marks = useMemo(
     () =>
       change === null
@@ -635,8 +635,9 @@ export function SpecPane({
                       changes it is held to writing here in the same turn
                       (D-128), so nothing
                       it did needs reporting. A person's own edit is not held to
-                      it, so the way to the contract reads the plan against this
-                      spec first, as every way there does. And it waits for a
+                      it, so the plan is read against this spec on the way to
+                      the contract — an epic's on the way there, a basic
+                      ticket's at its Confirm contract. And it waits for a
                       turn in flight, as the Graph's way onward does: a reading
                       made mid-turn is of half a plan, and the turn's own end
                       is what carries the verdict forward. */}
@@ -649,6 +650,7 @@ export function SpecPane({
                           key,
                           sessionId,
                           approved: planApproved(workspace, editor.repoId, key),
+                          basic: flowFor(workspace, sessionId).shape === "basic",
                         }),
                       )
                     }

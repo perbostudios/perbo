@@ -1,7 +1,9 @@
 import { Button, Dropdown, Field, IconButton } from "../ui/index.js";
 import { CriterionSchema } from "../../shared/protocol.js";
-import type { Draft } from "../../shared/protocol.js";
+import type { Draft, PlanPromise } from "../../shared/protocol.js";
 import type { useContractEditing } from "../contract-editor.js";
+import { MarkedCriterion, RemovedCriteria } from "../planning/ChangeMarks.js";
+import { changeOfText, type CriteriaChange } from "../planning/change-marks.js";
 
 type Editor = ReturnType<typeof useContractEditing>;
 
@@ -13,11 +15,19 @@ type Editor = ReturnType<typeof useContractEditing>;
  * (D-NEW-basic-and-epic-flows).
  *
  * `onCommit` is told each time a criterion is saved or deleted, which is
- * where a caller that writes every change through at once does so. An edit
- * made here carries no change marks: those are for what the chat changes
- * (D-128).
+ * where a caller that writes every change through at once does so. `marks`
+ * is the last change the chat made to these criteria, drawn over the words
+ * it left; an edit made here is the person's own and carries none (D-128).
  */
-export function CriteriaEditor({ editor, onCommit }: { editor: Editor; onCommit?: () => void }) {
+export function CriteriaEditor({
+  editor,
+  onCommit,
+  marks = null,
+}: {
+  editor: Editor;
+  onCommit?: () => void;
+  marks?: { change: CriteriaChange; after: PlanPromise["criteria"] } | null;
+}) {
   const { draft, editing, criterion: editedCriterion } = editor.form;
   const setDraft = (draft: Draft): void => editor.update({ draft });
   const setEditing = (editing: number | null): void => editor.update({ editing });
@@ -149,7 +159,11 @@ export function CriteriaEditor({ editor, onCommit }: { editor: Editor; onCommit?
             ) : (
               <>
                 <p className="criterion-text">
-                  {entry.text}
+                  {marks === null ? (
+                    entry.text
+                  ) : (
+                    <MarkedCriterion text={entry.text} change={changeOfText(marks.change, marks.after, entry.text)} />
+                  )}
                 </p>
                 <p className="criterion-note">
                   Expected {entry.kind}: {entry.assertion}
@@ -164,10 +178,13 @@ export function CriteriaEditor({ editor, onCommit }: { editor: Editor; onCommit?
               onClick={() => beginEditing(index)}
             />
           )}
+          {/* A contract promises at least one thing, so the last criterion
+              is reworded rather than deleted. */}
           <IconButton
             icon="reject"
             size={16}
             label={"Delete criterion " + (index + 1)}
+            disabled={draft.criteria.length <= 1}
             onClick={() => {
               setDraft({
                 ...draft,
@@ -181,6 +198,7 @@ export function CriteriaEditor({ editor, onCommit }: { editor: Editor; onCommit?
           />
         </div>
       ))}
+      {marks !== null && <RemovedCriteria removed={marks.change.removed} />}
       <button
         className="add-row"
         onClick={() => {

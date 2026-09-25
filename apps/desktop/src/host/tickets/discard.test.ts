@@ -77,7 +77,7 @@ const planning = (key: string): Record<string, unknown> => ({
   drift: null,
   change: null,
   lastPane: null,
-  confirmed: null, impact: null,
+  confirmed: null, read: null, impact: null,
   specCut: null,
   named: null,
   interviewModel: null,

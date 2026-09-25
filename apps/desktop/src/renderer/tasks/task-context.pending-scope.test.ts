@@ -22,7 +22,7 @@ const draft = (scope: { paths: string[]; prohibited: string[] }, over: Partial<O
   nodes: 0,
   drift: null,
   lastPane: null,
-  confirmed: null,
+  confirmed: null, read: null,
   spec: null,
   impact: null,
   title: null,

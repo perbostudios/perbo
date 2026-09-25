@@ -35,7 +35,7 @@ it("names a planning by its spec, then by the plan's own shorter name, and Untit
 describe("the title the drafts list carries (D-118)", () => {
   const session = (over: Partial<EditingSession> = {}) =>
     ({ id: "s-1", repoId: "repo-1", key: null, admitted: false, phase: "editing", nodes: 0, drift: null,
-      specSlug: "dark-mode-toggle", specCut: null, named: null, lastPane: null, confirmed: null, impact: null,
+      specSlug: "dark-mode-toggle", specCut: null, named: null, lastPane: null, confirmed: null, read: null, impact: null,
       form: { draft: { outcome: "", criteria: [], paths: [], prohibited: [] } }, ...over }) as unknown as EditingSession;
   const titled = (title: string | null) => () => (title === null ? null : { title, sections: null });
 

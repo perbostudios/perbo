@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Dialog, FactList, InkIcon, Notice, SectionLabel } from "../ui/index.js";
@@ -9,8 +9,11 @@ import { useShortcut } from "../shell/shortcuts.js";
 import { useDiscardTicket } from "../shell/create.js";
 import { displayKey } from "./ticket-workspace.js";
 import { EFFORT_LABELS, planNodes, type EffortLevel } from "@perbo/contracts/browser";
-import { confirmRoute, curates, leftAt, planPaneFor } from "../planning/panes.js";
+import { contractState, curates, leftAt, planPaneFor, problemsOpen, readingState } from "../planning/panes.js";
+import { useSettled } from "../planning/settled.js";
+import { DriftVerdictSchema } from "@perbo/planning/browser";
 import { CriteriaEditor } from "./CriteriaEditor.js";
+import { changeKey, chatChange, criteriaChange } from "../planning/change-marks.js";
 import type { useContractEditing } from "../contract-editor.js";
 import { ModelPicker, useProviders } from "../settings/ConnectionScreens.js";
 import { TaskModelsSchema, type Detail, type PlanningPane, type TaskModels } from "../../shared/protocol.js";
@@ -19,6 +22,12 @@ import type { TaskContext } from "./task-context.js";
 const ContractGraph = lazy(() =>
   import("../planning/GraphPane.js").then((module) => ({ default: module.ContractGraph })),
 );
+/** Why a basic ticket's Confirm contract is refused while the reading has problems open. */
+export const PROBLEMS_HOLD =
+  "The plan and the spec no longer promise the same thing. Resolve each problem on the Problems tab, or change the criteria here, then confirm again.";
+/** What a confirm the reading could not be made for says after why. */
+const CONFIRM_WITHOUT = "Confirm again to go ahead without the reading.";
+
 /** An approved contract's effort, where one was chosen; the provider's own default says nothing. */
 const effortText = (effort: EffortLevel | null): string =>
   effort === null ? "" : " · " + EFFORT_LABELS[effort] + " effort";
@@ -42,8 +51,8 @@ type Editor = ReturnType<typeof useContractEditing>;
  * The contract, and the one approval there is. Inside planning (`planning`)
  * it is the planning's last tab (D-NEW-basic-and-epic-flows):
  * the tabs are the way back, and a basic ticket's criteria are edited here,
- * each change written into the contract and the plan read against the spec
- * again on the way back to it (D-128).
+ * each change written into the contract as it is made, and the plan read
+ * against the spec as the person confirms (D-128).
  */
 export function ContractScreen(context: TaskContext & { planning?: { editor: Editor } }) {
   const { detail, repoId, navigate, show, workspace, planning } = context;
@@ -94,13 +103,17 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
     (curating ? planPaneFor(workspace.drafts, curating.id) : null) ??
     "spec";
   // A change to a basic ticket's criteria, written into the contract as it is
-  // made — the operation it waits on is the first after the one it saw — and
-  // then the plan read against the spec again, which comes back here on its
-  // own where the two still agree (D-128).
+  // made — the operation it waits on is the first after the one it saw. The
+  // person stays here: the plan is read against the spec when they confirm
+  // (D-NEW-basic-and-epic-flows).
   const editor = planning?.editor ?? null;
   const [writing, setWriting] = useState<{ after: string | null } | null>(null);
+  // Why the host turned the last write away, kept here because the editor's
+  // own error is replaced by the session's as soon as it reads it again.
+  const [turnedAway, setTurnedAway] = useState<string | null>(null);
   const writeThrough = (): void => {
     if (editor === null) return;
+    setTurnedAway(null);
     setWriting({ after: editor.session?.operation?.id ?? null });
     editor.submit("compile");
   };
@@ -114,13 +127,76 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
     operation.intent === "compile" &&
     operation.reconciled &&
     editor.session?.phase !== "working";
+  // A write refused before it became an operation — the host turned the
+  // submission away — starts nothing to wait on: the submission is over, the
+  // operation is the one it saw, and the refusal is the editor's error, which
+  // the page shows in place of the wait.
+  const refused =
+    writing !== null &&
+    editor !== null &&
+    editor.submitting === null &&
+    editor.error !== null &&
+    (operation?.id ?? null) === writing.after;
   useEffect(() => {
-    if (!written || editor?.session == null) return;
+    if (!refused) return;
+    setTurnedAway(editor?.error ?? null);
     setWriting(null);
-    if (operation?.state === "completed")
-      navigate(confirmRoute({ repoId, key: ticket.key, sessionId: editor.session.id, approved: false }));
+  }, [refused]);
+  // The planning's own entry in the drafts list, which holds the states the
+  // contract tab and the confirm are compared by.
+  const session = editor?.session ?? null;
+  const listed = session === null ? undefined : (workspace.drafts ?? []).find((draft) => draft.id === session.id);
+  // A write that landed moves the plan the person is looking at, which is not
+  // a change made behind their back: the state it leaves is recorded as the
+  // contract reached, once the drafts list carries it, so the contract stays
+  // a tab (D-NEW-basic-and-epic-flows).
+  const [reachedAgain, setReachedAgain] = useState<string | null>(null);
+  useEffect(() => {
+    if (!written || session === null) return;
+    setWriting(null);
+    if (operation?.state === "completed" && listed !== undefined) setReachedAgain(listed.confirmed);
   }, [written]);
+  const reachedState = listed === undefined ? null : contractState(workspace, listed);
+  useEffect(() => {
+    if (reachedAgain === null || session === null || reachedState === null || reachedState === reachedAgain) return;
+    setReachedAgain(null);
+    void bridge
+      .request({ kind: "editingContractVisited", id: session.id, state: reachedState })
+      .catch(() => undefined);
+  }, [reachedAgain, reachedState]);
   const shows = contractShows(contract, editor !== null && ticket.approved_at === null);
+  // A basic ticket's Confirm contract, inside the planning over it: the plan
+  // is read against the spec first, where the spec or the criteria have moved
+  // since the last reading, and the confirm is refused while problems are
+  // open — resolved on the Problems tab, or by changing the criteria here and
+  // confirming again (D-NEW-basic-and-epic-flows). A plan with no spec to read
+  // it against confirms as it is.
+  const settled = useSettled();
+  const reads =
+    shows === "criteria-editor" &&
+    planning !== undefined &&
+    session !== null &&
+    listed !== undefined &&
+    session.specSlug !== null &&
+    ticket.admission.spec !== null;
+  const readAt = reads ? readingState(listed.spec, session.form.draft) : null;
+  const [confirming, setConfirming] = useState(false);
+  const [holding, setHolding] = useState<string | null>(null);
+  // The state a reading could not be made at: never a wall, so the next
+  // confirm at it goes ahead without one.
+  const [unread, setUnread] = useState<string | null>(null);
+  // The last change the chat made to a basic ticket's criteria, marked over
+  // the words it left; a change made here by hand is the person's own and is
+  // marked nowhere (D-128). Diffed once per change.
+  const chatPlan = chatChange(editor?.session?.change)?.plan ?? null;
+  const chatKey = changeKey(chatChange(editor?.session?.change));
+  const marks = useMemo(
+    () =>
+      chatPlan === null
+        ? null
+        : { change: criteriaChange(chatPlan.before.criteria, chatPlan.after.criteria), after: chatPlan.after.criteria },
+    [chatKey],
+  );
   // Which criteria are proven differently from how the draft proposed. A
   // criterion whose assertion moved reads exactly as it did, because the claim
   // is untouched, so nothing else on this page would show it.
@@ -151,6 +227,31 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
       .then(() => show("loop"))
       .catch(() => undefined);
   };
+  const confirm = async (): Promise<void> => {
+    if (!reads || readAt === null || session === null || listed === undefined) return start();
+    setHolding(null);
+    if (unread === readAt) return start();
+    if (listed.read === readAt) {
+      if (problemsOpen(workspace.drafts, session.id)) setHolding(PROBLEMS_HOLD);
+      else start();
+      return;
+    }
+    setConfirming(true);
+    try {
+      const job = await settled(await bridge.request({ kind: "driftCheck", id: session.id, state: readAt }));
+      const verdict = job.state === "completed" ? DriftVerdictSchema.safeParse(job.result) : null;
+      if (verdict === null || !verdict.success) {
+        setUnread(readAt);
+        setHolding(`${job.error ?? "The reading did not finish."} ${CONFIRM_WITHOUT}`);
+      } else if (!verdict.data.dismissed && verdict.data.findings.length > 0) setHolding(PROBLEMS_HOLD);
+      else start();
+    } catch (error) {
+      setUnread(readAt);
+      setHolding(`${errorMessage(error)} ${CONFIRM_WITHOUT}`);
+    } finally {
+      setConfirming(false);
+    }
+  };
   // What this scope does not cover, asked here because here is where it can
   // still be acted on: a scope frozen is a scope no warning can move. It is
   // advice and never a gate — somebody who has read it and is content approves
@@ -168,7 +269,8 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
     retry: false,
   });
   const outside = impact.data?.warnings.length ?? 0;
-  useShortcut("approve", busy || action.isPending || pending !== null ? null : start);
+  const approving = busy || action.isPending || pending !== null || writing !== null || confirming;
+  useShortcut("approve", approving ? null : () => void confirm());
   useShortcut("rename", () => setRenaming(true));
   return (
     <section className="screen" data-screen="s11">
@@ -222,16 +324,16 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
           ) : shows === "criteria-editor" && editor !== null ? (
             // A basic ticket's plan is its criteria, and this is where they
             // are changed: each change written into the contract as it is
-            // made. Direct edits carry no change marks — those are the chat's
-            // (D-128).
+            // made. The marks are the chat's last change; direct edits carry
+            // none (D-128).
             <div>
               <SectionLabel>Acceptance criteria · {criteria.length}</SectionLabel>
-              <CriteriaEditor editor={editor} onCommit={writeThrough} />
-              {(writing !== null || editor.error) && (
+              <CriteriaEditor editor={editor} onCommit={writeThrough} marks={marks} />
+              {(writing !== null || turnedAway !== null || editor.error) && (
                 <p className="small muted" role="status">
                   {writing !== null
                     ? "Writing the change into the contract…"
-                    : editor.error}
+                    : (turnedAway ?? editor.error)}
                 </p>
               )}
             </div>
@@ -466,11 +568,13 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
                 )}
               </Notice>
             )}
-            <Button
-              variant="primary"
-              disabled={busy || action.isPending || pending !== null || writing !== null}
-              onClick={start}
-            >
+            {confirming && (
+              <p className="small muted" role="status">
+                Reading the plan against the spec…
+              </p>
+            )}
+            {holding !== null && <Notice tone="warning">{holding}</Notice>}
+            <Button variant="primary" disabled={approving} onClick={() => void confirm()}>
               {ticket.approved_at
                 ? "Start the loop"
                 : "Approve · start the loop"}

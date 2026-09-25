@@ -88,14 +88,14 @@ export class ChangeMarks<Repo extends { readonly id: string }> {
   }
 
   /**
-   * Record on this planning what changed since `before`, where anything did
-   * and both readings could be made.
+   * Record on this planning what a turn of the chat changed since `before`,
+   * where anything did and both readings could be made.
    */
   recordChangeSince(id: string, before: PromisePair | null | undefined, repoId?: string): void {
     if (before === undefined || before === null) return;
     const after = this.pairOf(id, repoId);
     if (after === null) return;
-    const change = changeBetween(before, after, new Date().toISOString());
+    const change = changeBetween(before, after, new Date().toISOString(), "chat");
     if (change !== null) this.markChange(id, change);
   }
 
@@ -103,21 +103,22 @@ export class ChangeMarks<Repo extends { readonly id: string }> {
    * Record the change between two readings, where anything moved, on every
    * live planning `on` names: an edit reaches the ticket's records through one
    * command whoever asked for it, and a save writes the one spec file, so each
-   * planning drawing either marks the same change.
+   * planning drawing either records the same change.
    */
   markChangeOn(
     before: PromisePair,
     after: PromisePair,
     on: (session: EditingSession) => boolean,
+    by: EditingChange["by"],
   ): void {
-    const change = changeBetween(before, after, new Date().toISOString());
+    const change = changeBetween(before, after, new Date().toISOString(), by);
     if (change === null) return;
     for (const session of this.io.sessions())
       if (session.phase !== "discarded" && on(session)) this.markChange(session.id, change);
   }
 
-  /** Record a change to what this ticket's plan promises on every planning over it. */
-  recordPlanChange(repo: Repo, key: string, before: PlanPromise | null): void {
+  /** Record a change to what this ticket's plan promises on every planning over it, and who made it. */
+  recordPlanChange(repo: Repo, key: string, before: PlanPromise | null, by: EditingChange["by"]): void {
     if (before === null) return;
     const after = this.promiseAt(repo, key);
     if (after !== null)
@@ -125,6 +126,7 @@ export class ChangeMarks<Repo extends { readonly id: string }> {
         { spec: null, plan: before },
         { spec: null, plan: after },
         (session) => session.repoId === repo.id && session.key === key,
+        by,
       );
   }
 

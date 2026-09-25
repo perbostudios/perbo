@@ -214,15 +214,20 @@ const EMPTY_SECTIONS: SpecSections = { outcome: "", requirements: "", no_gos: ""
  * empty, or no spec at all, is read as unchanged, and a plan drafted where
  * there was none is not recorded, because the first words put into an empty
  * box are not an edit, and marking the whole of them green says nothing. A
- * later edit of those words is a change, and marked.
+ * later edit of those words is a change, recorded with who made it.
  */
-export function changeBetween(before: PromisePair, after: PromisePair, at: string): EditingChange | null {
+export function changeBetween(
+  before: PromisePair,
+  after: PromisePair,
+  at: string,
+  by: EditingChange["by"],
+): EditingChange | null {
   const spec = after.spec === null ? null : specChange(before.spec ?? EMPTY_SECTIONS, after.spec);
   const plan =
     before.plan !== null && after.plan !== null && JSON.stringify(before.plan) !== JSON.stringify(after.plan)
       ? { before: before.plan, after: after.plan }
       : null;
-  return spec === null && plan === null ? null : { at, spec, plan };
+  return spec === null && plan === null ? null : { at, by, spec, plan };
 }
 
 /**
@@ -315,6 +320,7 @@ export function openDrafts(records: readonly EditingSession[], spec: SpecReader)
       title: titleOfSpec(record, text?.title ?? null),
       lastPane: record.lastPane,
       confirmed: record.confirmed,
+      read: record.read,
       spec: text?.sections == null ? null : fingerprint(JSON.stringify(sectionsOf(text.sections))),
       impact: record.impact,
       };
@@ -446,6 +452,7 @@ export class ContractEditing {
           named: null,
           lastPane: null,
           confirmed: null,
+          read: null,
           impact: null,
           drift: null,
           change: null,
@@ -773,6 +780,20 @@ export class ContractEditing {
     if (session.impact === outside || session.phase === "discarded") return;
     this.update(id, (next) => {
       next.impact = outside;
+    });
+  }
+
+  /**
+   * The state of the spec and the plan's promise a reading of the two has just
+   * landed of (D-NEW-basic-and-epic-flows). Leaves `revision` where it
+   * stands, as {@link recordImpact} does: a reading puts nothing into the
+   * planning.
+   */
+  recordRead(id: string, state: string): void {
+    const session = this.read(id);
+    if (session.read === state || session.phase === "discarded") return;
+    this.update(id, (next) => {
+      next.read = state;
     });
   }
 
@@ -1197,7 +1218,12 @@ export class ContractEditing {
               next.form = { ...next.form, draft: contractDraft(detail), editing: null, newPath: null };
               // A plan drafted afresh has had no impact check: the last one
               // was of the plan it replaces.
-              if (operation.intent !== "compile") next.impact = null;
+              // Nor a reading of its own: the last one was of the plan it
+              // replaces.
+              if (operation.intent !== "compile") {
+                next.impact = null;
+                next.read = null;
+              }
               // Every operation lands on a contract: the session now holds a Ticket.
               next.phase = "ready";
               next.resumeNew = false;

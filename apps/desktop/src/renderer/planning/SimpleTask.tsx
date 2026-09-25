@@ -4,9 +4,10 @@ import { DriftVerdictSchema } from "@perbo/planning/browser";
 import { Button, InkIcon } from "../ui/index.js";
 import { bridge } from "../workspace/index.js";
 import { impactAsked, impactQuery } from "./ImpactPane.js";
-import { checkedLanding } from "./panes.js";
+import { checkedLanding, readingState } from "./panes.js";
 import { useSettled } from "./settled.js";
 import type { Route } from "../shell/route.js";
+import type { Snapshot } from "../../shared/protocol.js";
 import type { useContractEditing } from "../contract-editor.js";
 
 type Editor = ReturnType<typeof useContractEditing>;
@@ -29,22 +30,36 @@ export const SIMPLE_TASK = "The task is simple, so there is no graph.";
  *
  * A draft is watched by its operation: the first one seen is where this
  * planning was when it opened, and one that completes after that — a new
- * operation, or the one seen running — is a draft that landed here.
+ * operation, or the one seen running — is a draft that landed here. The
+ * reading is asked of the state the plan landed at, which the host records,
+ * so the ticket's Confirm contract reads nothing again where nothing has
+ * moved since.
+ *
+ * A basic plan this planning did not watch land — one drafted again from a
+ * stopped run, or one whose impact check was never made — has its impact
+ * checked as the planning opens, without moving the person, so its Impact tab
+ * is there where the check finds paths outside the scope.
  */
 export function useDraftLanding({
   sessionId,
   editor,
   navigate,
+  workspace,
 }: {
   sessionId: string;
   editor: Editor;
   navigate: (route: Route) => void;
+  workspace: Pick<Snapshot, "drafts">;
 }): { checking: boolean; notice: boolean; acknowledge: () => void } {
   const client = useQueryClient();
   const settled = useSettled();
   const [checking, setChecking] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const seen = useRef<{ sessionId: string; operation: string | null; landed: boolean } | null>(null);
+  // The plan whose impact has been asked for here, by the planning, its ticket
+  // and the operation that drafted it, so a landing and an opening never ask
+  // twice for one plan.
+  const impactFor = useRef<string | null>(null);
   const session = editor.session?.id === sessionId ? editor.session : null;
   const operation = session?.operation ?? null;
   const drafting = operation !== null && (operation.intent === "generate" || operation.intent === "startOver");
@@ -57,6 +72,8 @@ export function useDraftLanding({
     session.phase !== "working";
   const key = session?.key ?? null;
   const nodes = session?.nodes ?? 0;
+  const listed = (workspace.drafts ?? []).find((draft) => draft.id === sessionId);
+  const plan = `${sessionId}:${key}:${operation?.id ?? ""}`;
   useEffect(() => {
     if (session === null) return;
     const before = seen.current;
@@ -71,13 +88,18 @@ export function useDraftLanding({
     // A basic ticket: both checks at once, and the landing once both are back.
     // A check that could not be made says nothing to land on.
     setChecking(sessionId);
+    impactFor.current = plan;
     impactAsked(sessionId, key);
     const flagged = client
-      .fetchQuery({ ...impactQuery(sessionId), gcTime: Infinity })
+      .fetchQuery({ ...impactQuery(sessionId), gcTime: Infinity, staleTime: 0 })
       .then((view) => view.warnings.length + view.truncated > 0)
       .catch(() => false);
     const problems = bridge
-      .request({ kind: "driftCheck", id: sessionId })
+      .request({
+        kind: "driftCheck",
+        id: sessionId,
+        state: listed === undefined ? null : readingState(listed.spec, session.form.draft),
+      })
       .then(settled)
       .then((job) => {
         const verdict = DriftVerdictSchema.safeParse(job.result);
@@ -91,6 +113,17 @@ export function useDraftLanding({
       navigate({ page: "planning", sessionId, pane: checkedLanding({ problems, flagged }) });
     });
   }, [session, sessionId, operation?.id, landed, key, nodes, navigate, client, settled]);
+  // Opened over a basic plan whose impact was never checked: checked now, in
+  // place, once the drafts list says so. Not while a draft is being made,
+  // which is checked as it lands. Asked afresh, here and on landing, since an
+  // answer this window holds was of the plan before.
+  const unchecked = session !== null && key !== null && nodes === 0 && listed?.impact === null && (!drafting || landed);
+  useEffect(() => {
+    if (!unchecked || key === null || impactFor.current === plan) return;
+    impactFor.current = plan;
+    impactAsked(sessionId, key);
+    void client.fetchQuery({ ...impactQuery(sessionId), gcTime: Infinity, staleTime: 0 }).catch(() => undefined);
+  }, [unchecked, plan, sessionId, key, client]);
   return {
     checking: checking === sessionId,
     notice: notice === sessionId,

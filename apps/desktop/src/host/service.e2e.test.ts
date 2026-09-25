@@ -5165,7 +5165,7 @@ readline.createInterface({ input: process.stdin })
         executorSkills: [],
       },
     });
-    const job = await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    const job = await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect(job.state).toBe("completed");
     expect(job.kind).toBe("drift");
     expect(job.label).toBe("Read the plan against the spec");
@@ -5176,12 +5176,24 @@ readline.createInterface({ input: process.stdin })
     expect(job.result).toEqual(verdict([finding]));
   });
 
+  it("records the state the asker read at once the reading lands of it, and nothing for an asker with none (D-NEW-basic-and-epic-flows)", async () => {
+    const { service, repo } = canned();
+    const registered = await service.registerRepository(repo);
+    const id = await planned(service, registered.id);
+    const listed = async () => (await service.snapshot()).drafts?.find((draft) => draft.id === id)?.read;
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
+    expect((await service.request({ kind: "editingRead", id })).read).toBeNull();
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: "0123456789abcdef" })).id);
+    expect((await service.request({ kind: "editingRead", id })).read).toBe("0123456789abcdef");
+    expect(await listed()).toBe("0123456789abcdef");
+  });
+
   it("falls back to the settings' models, and fails the job on a print that is not a verdict", async () => {
     const { service, repo, drifts } = canned({ findings: "not a verdict" });
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
     const settings = (await service.snapshot()).settings;
-    const job = await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    const job = await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect(drifts[0]).toEqual([
       "drift", "PRB-1", "--provider", settings.draftingProvider, "--model", settings.executorModel, "--json",
     ]);
@@ -5197,7 +5209,7 @@ readline.createInterface({ input: process.stdin })
       kind: "editingOpen",
       target: { kind: "planning", repoId: registered.id, key: "PRB-1" },
     });
-    await expect(service.request({ kind: "driftCheck", id: bare.id })).rejects.toThrow(
+    await expect(service.request({ kind: "driftCheck", id: bare.id, state: null })).rejects.toThrow(
       "Write the spec before reading it against the plan.",
     );
     // A spec and no plan.
@@ -5212,7 +5224,7 @@ readline.createInterface({ input: process.stdin })
       title: "Retry on failure",
       sections: { outcome: "The user can retry.", requirements: "", no_gos: "", rabbit_holes: "", notes: "" },
     });
-    await expect(service.request({ kind: "driftCheck", id: fresh.id })).rejects.toThrow(
+    await expect(service.request({ kind: "driftCheck", id: fresh.id, state: null })).rejects.toThrow(
       "Draft a plan from the spec before reading the two against each other.",
     );
     // Both, and approved on disk, which is what the guard reads.
@@ -5226,7 +5238,7 @@ readline.createInterface({ input: process.stdin })
     const at = join(repo, ".perbo", "tickets", "PRB-1.json");
     const ticket = JSON.parse(readFileSync(at, "utf8")) as Record<string, unknown>;
     writeFileSync(at, JSON.stringify({ ...ticket, approved_at: new Date().toISOString() }));
-    await expect(service.request({ kind: "driftCheck", id: bare.id })).rejects.toThrow(
+    await expect(service.request({ kind: "driftCheck", id: bare.id, state: null })).rejects.toThrow(
       /PRB-1 is approved, and what it promises was settled with it/,
     );
     await expect(service.request({ kind: "driftDismiss", id: bare.id })).rejects.toThrow(
@@ -5260,7 +5272,7 @@ readline.createInterface({ input: process.stdin })
     const { service, repo } = canned(verdict([quoted]));
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
-    const job = await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    const job = await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect(job.state).toBe("completed");
     const landed = job.result as { findings: typeof finding[] };
     expect(landed.findings[0]?.heading).toBe("Criterion 1 and R1");
@@ -5274,7 +5286,7 @@ readline.createInterface({ input: process.stdin })
     const at = await planned(blank.service, other.id);
     const failed = await finished(
       blank.service,
-      (await blank.service.request({ kind: "driftCheck", id: at })).id,
+      (await blank.service.request({ kind: "driftCheck", id: at, state: null })).id,
     );
     expect(failed.state).toBe("failed");
     expect(failed.error).toMatch(/heading did not survive redaction/);
@@ -5285,7 +5297,7 @@ readline.createInterface({ input: process.stdin })
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
     const before = (await service.request({ kind: "editingRead", id })).conversation.length;
-    const job = await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    const job = await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect(job.state).toBe("completed");
     const session = await service.request({ kind: "editingRead", id });
     // Both on the session, oldest first, and open.
@@ -5318,15 +5330,15 @@ readline.createInterface({ input: process.stdin })
     const { service, repo } = canned(() => reply);
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     const asked = (lines: { line: { kind: string } }[]) => lines.filter((entry) => entry.line.kind === "asked");
     let session = await service.request({ kind: "editingRead", id });
     expect(asked(session.conversation)).toHaveLength(1);
     expect(session.drift?.open).toHaveLength(2);
     // The first resolved: the second is what is open, and it is put.
     reply = verdict([second]);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     session = await service.request({ kind: "editingRead", id });
     expect(session.drift).toEqual({ open: [second], resolved: false });
     const lines = asked(session.conversation);
@@ -5344,14 +5356,14 @@ readline.createInterface({ input: process.stdin })
     const id = await planned(service, registered.id);
     // None where none were ever open is nothing to record: no pane, no note.
     reply = verdict([]);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     let session = await service.request({ kind: "editingRead", id });
     expect(session.drift).toBeNull();
     expect(resolvedNotes(session.conversation)).toEqual([]);
     reply = verdict([finding]);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     reply = verdict([]);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     session = await service.request({ kind: "editingRead", id });
     expect(session.drift).toEqual({ open: [], resolved: true });
     expect(session.conversation.at(-1)!.line).toEqual({
@@ -5374,7 +5386,7 @@ readline.createInterface({ input: process.stdin })
     await service.request({ kind: "interviewTurn", id, text: "why one criterion?" });
     await settled(service, id);
     expect(drifts).toEqual([]);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect(drifts).toHaveLength(1);
     // The answer to the problem in hand, as a card sends it: once the interview
     // has finished the turn, the plan is read against the spec again.
@@ -5390,12 +5402,12 @@ readline.createInterface({ input: process.stdin })
     const { service, repo } = canned(verdict([finding]));
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect((await service.request({ kind: "editingRead", id })).drift?.open).toHaveLength(1);
     await service.request({ kind: "driftDismiss", id });
     expect((await service.request({ kind: "editingRead", id })).drift).toBeNull();
     // Open again, then approved: what the plan promises is settled with it.
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect((await service.request({ kind: "editingRead", id })).drift?.open).toHaveLength(1);
     const detail = await service.detail(registered.id, "PRB-1");
     const ran = await finished(
@@ -5437,7 +5449,7 @@ readline.createInterface({ input: process.stdin })
     const { service, repo, drifts } = canned(() => reply, fakeAnswering(root));
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     // The answer closes it: the round is resolved.
     reply = verdict([]);
     await service.request({ kind: "interviewTurn", id, text: finding.options[0]!.label });
@@ -5476,7 +5488,7 @@ readline.createInterface({ input: process.stdin })
     const { service, repo } = canned(verdict([finding]), fakeAnswering(root));
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     let session = await service.request({ kind: "editingRead", id });
     expect(problemsPut(session.conversation)).toHaveLength(1);
     expect(session.asking).not.toBeNull();
@@ -5492,7 +5504,7 @@ readline.createInterface({ input: process.stdin })
     expect(session.asking).toEqual({ entry: session.conversation.at(-1)!.n, answered: 0 });
     // Over a card that stands, the same reading puts nothing: the card is
     // already there to answer.
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     session = await service.request({ kind: "editingRead", id });
     expect(problemsPut(session.conversation)).toHaveLength(2);
     await service.request({ kind: "interviewStop", id });
@@ -5503,7 +5515,7 @@ readline.createInterface({ input: process.stdin })
     const { service, repo } = canned(() => reply);
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     let session = await service.request({ kind: "editingRead", id });
     expect(session.asking).not.toBeNull();
     // Fixed on the Graph pane rather than answered: the card still stands,
@@ -5521,7 +5533,7 @@ readline.createInterface({ input: process.stdin })
     // problems, and the note says so, rather than a card standing over a
     // problem that is gone and holding the way on back for it.
     reply = verdict([]);
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     session = await service.request({ kind: "editingRead", id });
     expect(session.asking).toBeNull();
     expect(session.drift).toEqual({ open: [], resolved: true });
@@ -5532,7 +5544,7 @@ readline.createInterface({ input: process.stdin })
     const { service, replies, id } = await answering();
     const second = { ...finding, heading: "Criterion 2 and R2", difference: "R2 asks for a log; criterion 2 does not." };
     replies.push(verdict([finding, second]));
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     // The person's own words, which the interview answers with a question of
     // its own: that question now stands, waiting on them. The reading the
     // turn owes finds the list changed.
@@ -5569,11 +5581,11 @@ readline.createInterface({ input: process.stdin })
   it("owes one reading to the turns that end while a reading is live, and says resolved once", async () => {
     const { service, replies, id, drifts } = await answering();
     replies.push(verdict([finding]));
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     // A reading that takes as long as two turns.
     const slow = held<unknown>();
     replies.push(slow.promise);
-    const live = await service.request({ kind: "driftCheck", id });
+    const live = await service.request({ kind: "driftCheck", id, state: null });
     await service.request({ kind: "interviewTurn", id, text: finding.options[0]!.label });
     await settled(service, id);
     await service.request({ kind: "interviewTurn", id, text: "and make sure the retry is logged" });
@@ -5596,7 +5608,7 @@ readline.createInterface({ input: process.stdin })
     expect(resolvedNotes(session.conversation)).toHaveLength(1);
     // A clean reading after a resolved one is nothing new: no second note.
     replies.push(verdict([]));
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     session = await service.request({ kind: "editingRead", id });
     expect(resolvedNotes(session.conversation)).toHaveLength(1);
     await service.request({ kind: "interviewStop", id });
@@ -5606,12 +5618,12 @@ readline.createInterface({ input: process.stdin })
     it("puts nothing back that the turn was answering, and leaves the reading the turn owes to decide", async () => {
       const { service, replies, id } = await answering();
       replies.push(verdict([finding]));
-      await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+      await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
       // The Problems page's reading on arrival, read before the answer below
       // reached the plan and landing after it: it still finds the problem.
       const slow = held<unknown>();
       replies.push(slow.promise);
-      const live = await service.request({ kind: "driftCheck", id });
+      const live = await service.request({ kind: "driftCheck", id, state: null });
       await service.request({ kind: "interviewTurn", id, text: finding.options[0]!.label });
       await settled(service, id);
       let session = await service.request({ kind: "editingRead", id });
@@ -5638,7 +5650,7 @@ readline.createInterface({ input: process.stdin })
       // ends: with no record yet, the turn's end has nothing to read again.
       const slow = held<unknown>();
       replies.push(slow.promise);
-      const live = await service.request({ kind: "driftCheck", id });
+      const live = await service.request({ kind: "driftCheck", id, state: null });
       await service.request({ kind: "interviewTurn", id, text: "make the retry wait a second" });
       await settled(service, id);
       // It lands with a problem, recorded and not put, and the reading its
@@ -5658,7 +5670,7 @@ readline.createInterface({ input: process.stdin })
   it("reads again when the chat is stopped in the middle of the turn that answered a card", async () => {
     const { service, replies, id } = await answering();
     replies.push(verdict([finding, second]));
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     // The card is answered, and the turn answering it never ends.
     await service.request({ kind: "interviewTurn", id, text: finding.options[1]!.label });
     let session = await service.request({ kind: "editingRead", id });
@@ -5685,7 +5697,7 @@ readline.createInterface({ input: process.stdin })
     const { service, repo } = canned((args: string[]) => (args.includes("--dismiss") ? verdict([finding], true) : slow.promise));
     const registered = await service.registerRepository(repo);
     const id = await planned(service, registered.id);
-    const live = await service.request({ kind: "driftCheck", id });
+    const live = await service.request({ kind: "driftCheck", id, state: null });
     const at = join(repo, ".perbo", "tickets", "PRB-1.json");
     const ticket = JSON.parse(readFileSync(at, "utf8")) as Record<string, unknown>;
     writeFileSync(at, JSON.stringify({ ...ticket, approved_at: new Date().toISOString() }));
@@ -5699,7 +5711,7 @@ readline.createInterface({ input: process.stdin })
     const other = canned((args: string[]) => (args.includes("--dismiss") ? verdict([finding], true) : again.promise));
     const elsewhere = await other.service.registerRepository(other.repo);
     const past = await planned(other.service, elsewhere.id);
-    const reading = await other.service.request({ kind: "driftCheck", id: past });
+    const reading = await other.service.request({ kind: "driftCheck", id: past, state: null });
     await other.service.request({ kind: "driftDismiss", id: past });
     again.release(verdict([finding]));
     expect((await finished(other.service, reading.id)).state).toBe("completed");
@@ -5797,7 +5809,7 @@ readline.createInterface({ input: process.stdin })
       session = await service.request({ kind: "editingRead", id });
     }
     expect(session, "the ticket this planning drafted").toMatchObject({ key: "PRB-1", admitted: true });
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect((await service.request({ kind: "editingRead", id })).drift, "a reading that found a problem").not.toBeNull();
     await chatting(service, repoId, id);
     return {
@@ -5827,7 +5839,7 @@ readline.createInterface({ input: process.stdin })
       expect((await made.service.snapshot()).jobs.filter((job) => job.kind === "drift")).toHaveLength(1);
       expect(unstarted(await made.service.request({ kind: "editingRead", id: made.id })), "nor tried to").toEqual([]);
       // And none is started for it on request: its plan went with it.
-      await expect(made.service.request({ kind: "driftCheck", id: made.id })).rejects.toThrow(
+      await expect(made.service.request({ kind: "driftCheck", id: made.id, state: null })).rejects.toThrow(
         "This planning has been thrown away",
       );
     } finally {
@@ -5841,7 +5853,7 @@ readline.createInterface({ input: process.stdin })
     // finds the work as it was, and the reason (D-129).
     const made = await draftedWithProblems();
     try {
-      await made.service.request({ kind: "driftCheck", id: made.id });
+      await made.service.request({ kind: "driftCheck", id: made.id, state: null });
       await expect(made.service.request({ kind: "editingDiscard", id: made.id })).rejects.toThrow(
         DELETE_WAITS_FOR_COMMANDS,
       );
@@ -5913,7 +5925,7 @@ readline.createInterface({ input: process.stdin })
       symbols_judged_at_approval: false,
     };
     writeFileSync(at, JSON.stringify(ticket));
-    await finished(service, (await service.request({ kind: "driftCheck", id })).id);
+    await finished(service, (await service.request({ kind: "driftCheck", id, state: null })).id);
     expect((await service.request({ kind: "editingRead", id })).drift, "a reading that found a problem").not.toBeNull();
     await chatting(service, repoId, id);
 

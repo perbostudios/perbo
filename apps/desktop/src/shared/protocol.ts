@@ -551,15 +551,18 @@ const PlanPromiseSchema = z.strictObject({
 });
 export type PlanPromise = z.infer<typeof PlanPromiseSchema>;
 /**
- * The last change to the spec and the plan's promise, whoever made it: the
- * interview's turn, an edit by hand on the Graph or a basic ticket's contract, a spec
- * save, an answer that closed a problem. The panes mark what it added and
- * what it took away, and the marks stand until the next change, which
- * replaces this whole (D-128). A side
+ * The last change to the spec and the plan's promise, whoever made it, and
+ * who that was: the chat — a turn, an answer that closed a problem — or the
+ * person, by hand — an edit on a basic ticket's contract, a spec save, a plan
+ * drafted again. The panes mark what a change by the chat added and what it
+ * took away, and the marks stand until the next change, which replaces this
+ * whole (D-128); a change by the person is marked nowhere, since they made it
+ * where they read it, and it replaces the chat's marks all the same. A side
  * the change did not move is null, so the panes on it mark nothing.
  */
 const EditingChangeSchema = z.strictObject({
   at: z.string().datetime(),
+  by: z.enum(["chat", "person"]),
   spec: z.strictObject({ before: SpecSectionsSchema, after: SpecSectionsSchema }).nullable(),
   plan: z.strictObject({ before: PlanPromiseSchema, after: PlanPromiseSchema }).nullable(),
 });
@@ -685,6 +688,15 @@ export const EditingSessionSchema = z.strictObject({
    */
   confirmed: z.string().min(1).max(64).nullable(),
   /**
+   * The state of the spec and the plan's promise the last reading of the two
+   * was of, as `readingState` in `renderer/planning/panes.ts` states it, or
+   * null before one was recorded for the plan this planning holds. A basic
+   * ticket's Confirm contract reads the plan against the spec only where the
+   * state has moved since (D-NEW-basic-and-epic-flows). A fingerprint:
+   * nothing reads it but the comparison.
+   */
+  read: z.string().min(1).max(64).nullable(),
+  /**
    * How many paths the last impact check of this planning's draft found
    * outside its scope, or null before one was made for the plan it holds. A
    * flat plan offers the Impact pane only where it found some
@@ -742,6 +754,8 @@ export interface OpenDraft {
   lastPane: PlanningPane | null;
   /** The state the person last reached the contract at, which keeps the contract a tab while it holds. */
   confirmed: string | null;
+  /** The state of the spec and the plan's promise the last reading of the two was of. */
+  read: string | null;
   /**
    * A fingerprint of the sections of the spec it writes, its title aside, or
    * null while it has none: the part of {@link confirmed}'s state only the
@@ -1108,17 +1122,21 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    * The plan read against the spec it was drafted from, on the way from the
    * plan to the contract (D-128): where
    * the two no longer promise the same thing, and the ways to close each
-   * difference. Advice, never a gate. `driftDismiss` records that the person
-   * went on with the findings open, so the same reading is not put to them
-   * again at the same state.
+   * difference. `driftDismiss` records that the person went on with the
+   * findings open, so the same reading is not put to them again at the same
+   * state.
    *
    * The session names itself, as `impactRead` does: the repository, the ticket
    * and the spec are the host's to derive from its records, and the model is
    * the ticket's own or the settings', so nothing here becomes an argument
    * (ADR-0023 §4). What a finding offers goes to the interview as a turn in
    * the person's own words, through `interviewTurn`, and reaches no edit.
+   * `state` is the asker's fingerprint of the spec and the plan's promise as
+   * it asks, which the host records on the planning as `read` once the
+   * reading lands of that state, or null where the asker has none; it is
+   * compared and never read.
    */
-  z.strictObject({ kind: z.literal("driftCheck"), id: identifier }),
+  z.strictObject({ kind: z.literal("driftCheck"), id: identifier, state: z.string().min(1).max(64).nullable() }),
   z.strictObject({ kind: z.literal("driftDismiss"), id: identifier }),
   /**
    * Delete a spec folder, by the slug that names it.

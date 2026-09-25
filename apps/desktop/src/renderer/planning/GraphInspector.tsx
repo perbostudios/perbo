@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button, Dialog, cx } from "../ui/index.js";
-import { VERIFICATION_KINDS, type GraphEdit } from "@perbo/contracts/browser";
+import type { GraphEdit } from "@perbo/contracts/browser";
 import { nodePageNotes } from "@perbo/planning/browser";
 import { MarkedCriterion, RemovedCriteria } from "./ChangeMarks.js";
 import type { CriteriaChange, CriterionChange } from "./change-marks.js";
@@ -14,18 +14,15 @@ import type {
 
 /**
  * One node, open: its criteria and its paths, which are contract, and the
- * order around it, which is approach (D-100), as controls, with the Notes a
- * person wrote on the node's page (D-103). The criteria take one half and
- * scroll; the order, the paths and the Notes are one block in the other. What
- * the node's card already reads out is not repeated here.
+ * order around it, which is approach (D-100), with the Notes a person wrote on
+ * the node's page (D-103). The criteria take one half and scroll, read-only:
+ * the chat changes them, and its last change is marked on them (D-128). The
+ * order and the paths are controls, and with the Notes they are one block in
+ * the other half. What the node's card already reads out is not repeated here.
  *
  * Each control produces one {@link GraphEdit} and hands it up. Nothing here
- * holds a draft of the plan: the text being typed is local until it is left,
- * and what is shown otherwise is what the store says.
+ * holds a draft of the plan: what is shown is what the store says.
  */
-
-/** The verification kinds a person may choose here; `manual` is stated at the command line. */
-const KINDS = VERIFICATION_KINDS.filter((kind) => kind !== "manual");
 
 export function GraphInspector({
   view,
@@ -40,7 +37,7 @@ export function GraphInspector({
   view: GraphView;
   node: GraphNodeView;
   /**
-   * The last change to the plan's promise, or null for none to mark
+   * The chat's last change to the plan's promise, or null for none to mark
    * (D-128). A criterion it took away
    * belongs to no node now, so it is shown struck through at the end of this
    * list, whichever node is open.
@@ -90,13 +87,11 @@ export function GraphInspector({
         <div className="insp-main">
           <span className="section-label">Acceptance criteria · {node.criteria.length}</span>
           {node.criteria.map((criterion) => (
-            <CriterionEdit
+            <CriterionRead
               key={criterion.id}
               criterion={criterion}
               change={changes?.of.get(criterion.id)}
               state={live?.criteria.find((each) => each.id === criterion.id)}
-              busy={busy}
-              apply={apply}
             />
           ))}
           {changes !== null && <RemovedCriteria removed={changes.removed} />}
@@ -272,88 +267,29 @@ function CriterionState({ state }: { state: GraphCriterionState }) {
   );
 }
 
-/** One criterion's text and how it is proven; both go in one `set_criterion`. */
-function CriterionEdit({
+/**
+ * One criterion, read: its words, marked as the chat's last change left them,
+ * how it is proven, and where it stands. An epic's criteria are changed by
+ * the chat, through the validated edit path (D-100, D-102), so nothing here
+ * rewords one or changes how it is proven.
+ */
+function CriterionRead({
   criterion,
   change,
   state,
-  busy,
-  apply,
 }: {
   criterion: GraphCriterionView;
-  /** How the last change left this criterion, or undefined for untouched. */
+  /** How the chat's last change left this criterion, or undefined for untouched. */
   change: CriterionChange | undefined;
   state: GraphCriterionState | undefined;
-  busy: boolean;
-  apply: (edit: GraphEdit) => void;
 }) {
-  const [text, setText] = useState(criterion.text);
-  useEffect(() => setText(criterion.text), [criterion.text]);
-  // The words as the last change left them, marked, under the box that
-  // edits them: a textarea cannot carry a mark inside it. Not while the
-  // person is typing in it, since the words are then moving.
-  const marked =
-    change !== undefined &&
-    (change.kind === "changed" || change.kind === "added") &&
-    text === criterion.text &&
-    change.text === criterion.text;
-  const set = (next: { text?: string; kind?: GraphCriterionView["kind"] }): void => {
-    const kind = next.kind ?? criterion.kind;
-    apply({
-      op: "set_criterion",
-      id: criterion.id,
-      text: next.text ?? criterion.text,
-      expected_verification: {
-        kind,
-        assertion: criterion.assertion,
-        // A criterion proven by hand carries who proves it and why (the schema
-        // refuses one without them); a kind chosen here is never manual.
-        ...(kind === "manual" && criterion.manual !== null
-          ? { manual_reviewer: criterion.manual.reviewer, manual_reason: criterion.manual.reason }
-          : {}),
-      },
-    });
-  };
   return (
-    <div className="crit-edit">
+    <div className="crit-read">
       <span className="crit-n">{criterion.id}</span>
       <div>
-        <textarea
-          rows={2}
-          aria-label={`Criterion ${criterion.id}`}
-          placeholder="What must be true?"
-          value={text}
-          disabled={busy}
-          onChange={(event) => setText(event.target.value)}
-          onBlur={() => {
-            const wanted = text.trim();
-            if (wanted === "") {
-              setText(criterion.text);
-              return;
-            }
-            if (wanted !== criterion.text) set({ text: wanted });
-          }}
-        />
-        {marked && (
-          <p className="crit-change" aria-label={`Criterion ${criterion.id} as the last change left it`}>
-            <MarkedCriterion text={criterion.text} change={change} />
-          </p>
-        )}
-        <div className="kind-seg" role="group" aria-label={`How ${criterion.id} is proven`}>
-          {KINDS.map((kind) => (
-            <button
-              type="button"
-              key={kind}
-              aria-pressed={criterion.kind === kind}
-              disabled={busy}
-              onClick={() => {
-                if (criterion.kind !== kind) set({ kind });
-              }}
-            >
-              {kind}
-            </button>
-          ))}
-        </div>
+        <p className="crit-text" aria-label={`Criterion ${criterion.id}`}>
+          <MarkedCriterion text={criterion.text} change={change} />
+        </p>
         <p className="small muted">
           Proven by {criterion.kind}: {criterion.assertion}
           {criterion.requirement === null ? "" : ` · drafted from ${criterion.requirement}`}

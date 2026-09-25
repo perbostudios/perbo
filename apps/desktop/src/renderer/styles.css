@@ -4825,7 +4825,7 @@ kbd {
   border-radius: var(--radius);
   white-space: pre-wrap;
 }
-.crit-edit {
+.crit-read {
   display: grid;
   grid-template-columns: 46px minmax(0, 1fr);
   gap: 6px 8px;
@@ -4835,16 +4835,9 @@ kbd {
   border: 1.5px solid var(--line);
   border-radius: var(--radius);
 }
-.crit-edit:focus-within {
-  border-color: var(--ink);
-}
-.crit-edit textarea {
-  border: 0;
-  background: transparent;
-  resize: vertical;
+.crit-read .crit-text {
+  margin: 0;
   line-height: 1.45;
-  outline: none;
-  font: inherit;
   color: var(--ink);
 }
 .crit-n {
@@ -4852,14 +4845,12 @@ kbd {
   color: var(--muted);
   padding-top: 2px;
 }
-.kind-seg,
 .seg {
   display: flex;
   gap: 3px;
   margin-top: 6px;
   flex-wrap: wrap;
 }
-.kind-seg button,
 .seg button {
   font: 500 calc(9px * var(--text-scale)) var(--mono);
   letter-spacing: 0.05em;
@@ -4870,7 +4861,6 @@ kbd {
   color: var(--muted);
   background: transparent;
 }
-.kind-seg button[aria-pressed="true"],
 .seg button[aria-pressed="true"] {
   background: var(--ink);
   color: var(--on-ink);
@@ -5059,13 +5049,6 @@ select.add-chip {
   color: var(--red);
   text-decoration: line-through;
   text-decoration-color: var(--red-line);
-}
-/* The words as the last change left them, under the box in the inspector that edits them. */
-.crit-change {
-  margin: 2px 0 0;
-  font-size: calc(12.5px * var(--text-scale));
-  line-height: 1.45;
-  color: var(--ink);
 }
 /* A criterion the last change took away, struck through where the list ends. */
 .crit-removed {
@@ -5821,19 +5804,16 @@ select.add-chip {
 .composer-box:focus-within {
   border-color: var(--ink);
 }
-.composer-box textarea {
-  border: 0;
-  outline: none;
-  resize: none;
-  font: inherit;
-}
 /* A textarea clips what it draws at its padding edge, and this face sets the
    ink of a T or a W a little left of where the letter starts: at no inline
    padding the first letter loses its left edge. The padding is room for that
    ink, and the margin and width give the room back, so the words sit where the
    box's edge would put them. */
-.crit-edit textarea,
 .composer-box textarea {
+  border: 0;
+  outline: none;
+  resize: none;
+  font: inherit;
   padding-block: 0;
   padding-inline: 4px;
   margin-inline: -4px;

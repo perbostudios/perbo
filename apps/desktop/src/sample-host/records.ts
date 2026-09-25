@@ -2059,7 +2059,7 @@ async function rereadDrift(id: string): Promise<void> {
     // is between the turn's end and the reading for that long: the same gap
     // here, so the page is held to the same rule.
     await new Promise((done) => setTimeout(done, 0));
-    await answer({ kind: "driftCheck", id });
+    await answer({ kind: "driftCheck", id, state: null });
   } catch (error) {
     readings.delete(id);
     rereadOwed.delete(id);
@@ -2090,7 +2090,8 @@ export function forgetDrift(key: string, only: string | null): void {
 /**
  * Land a reading on the planning it was of, as the host does: nothing is
  * recorded on a plan the person went past — dismissed or approved — while it
- * was read (D-128).
+ * was read (D-128), and the state the asker read at is recorded only where no
+ * turn overlapped the reading (D-NEW-basic-and-epic-flows).
  */
 export function driftLanded(
   id: string,
@@ -2098,6 +2099,7 @@ export function driftLanded(
   epoch: number,
   before: TurnMark,
   verdict: DriftVerdict,
+  state: string | null,
 ): void {
   if ((driftEpoch.get(key) ?? 0) !== epoch) return;
   const row = snapshot.tasks.find((each) => each.ticket.key === key);
@@ -2106,6 +2108,7 @@ export function driftLanded(
   const overlapped = turnOverlapped(before, editing.read(id), isWorking(id));
   if (overlapped && !isWorking(id)) rereadOwed.add(id);
   editing.landDrift(id, verdict, overlapped, (line) => converse(id, line), () => askingChanged(id));
+  if (state !== null && !overlapped) editing.recordRead(id, state);
 }
 
 /**

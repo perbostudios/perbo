@@ -74,6 +74,24 @@ export function contractState(
   );
 }
 
+/**
+ * The state a reading of the plan against its spec is of: the spec's
+ * sections, as the host fingerprints them, and the plan's promise — its
+ * outcome and each criterion's words, sorted, which is what the reading reads
+ * and all it reads of the plan (D-128). While it is the state recorded as the
+ * last reading's (`read`), nothing that reading judged has moved, and a basic
+ * ticket's Confirm contract needs no reading of its own
+ * (D-NEW-basic-and-epic-flows).
+ */
+export function readingState(
+  spec: string | null,
+  promise: { outcome: string; criteria: readonly { text: string }[] },
+): string {
+  return fingerprint(
+    JSON.stringify([spec, promise.outcome.trim(), promise.criteria.map((criterion) => criterion.text.trim()).sort()]),
+  );
+}
+
 /** What planning mode offers a planning. */
 export interface PlanningFlow {
   shape: PlanShape;
@@ -95,8 +113,9 @@ export interface PlanningFlow {
  * The contract is the last tab, and is one while the person is on it
  * (`current`), and after that while nothing has changed since they were —
  * the spec's words, a mark in the Explorer, an edit of the plan. Once
- * something has, it goes until the change has been checked again and the
- * person reaches it again.
+ * something has, it goes until the person reaches it again. A change a
+ * person makes on a basic ticket's contract is made while they are on it, and
+ * planning mode records the state it leaves as reached, so it keeps the tab.
  */
 export function flowFor(
   workspace: Pick<Snapshot, "drafts" | "tasks">,
@@ -228,19 +247,23 @@ export function planApproved(workspace: Snapshot, repoId: string, key: string): 
  * footer and its shortcut, the pane footer the other panes share and the
  * Spec's way to the plan.
  *
- * By way of the reading of the plan against its spec (D-128), which is the
- * one step between the plan and the contract and lands on the contract tab by
- * itself where there is nothing to say. An approved plan is frozen and goes
- * straight to its contract, and so does a plan with no planning to read it
- * in.
+ * An epic's goes by way of the reading of the plan against its spec (D-128),
+ * which is the one step between the plan and the contract and lands on the
+ * contract tab by itself where there is nothing to say. A basic ticket's goes
+ * to its contract, where its criteria are edited and where its Confirm
+ * contract reads the plan against the spec, where anything the reading judges
+ * has moved since the last one (D-NEW-basic-and-epic-flows). An approved plan
+ * is frozen and goes straight to its contract, and so does a plan with no
+ * planning to read it in.
  */
 export function confirmRoute(way: {
   repoId: string;
   key: string;
   sessionId: string | null | undefined;
   approved: boolean;
+  basic: boolean;
 }): Route {
   return way.approved || way.sessionId == null
     ? { page: "task", repoId: way.repoId, key: way.key, view: "contract" }
-    : { page: "planning", sessionId: way.sessionId, pane: "drift" };
+    : { page: "planning", sessionId: way.sessionId, pane: way.basic ? "contract" : "drift" };
 }

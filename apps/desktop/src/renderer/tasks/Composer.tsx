@@ -192,6 +192,7 @@ export function Composer({
                 key: currentKey,
                 sessionId: null,
                 approved: planApproved(workspace, repoId, currentKey),
+                basic: false,
               })
             : { page: "home" })}>
             {currentKey ? "Open the current contract" : "Check saved tasks"}

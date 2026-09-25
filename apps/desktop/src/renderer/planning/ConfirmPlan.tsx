@@ -21,9 +21,9 @@ type Editor = ReturnType<typeof useContractEditing>;
  * something they were never shown.
  *
  * It goes where {@link confirmRoute} says every way from the plan to the
- * contract goes, and says what it confirms: an epic's plan, or a basic
- * ticket's contract, whose plan is its contract
- * (D-NEW-basic-and-epic-flows).
+ * contract goes, and says what it confirms: an epic's plan, through the
+ * reading of it against the spec, or a basic ticket's contract, whose plan is
+ * its contract and whose confirm there reads it (D-NEW-basic-and-epic-flows).
  *
  * The Graph keeps its own footer rather than this one: it says the same thing
  * with the division's file count and the run queued ahead of it, which are
@@ -44,6 +44,7 @@ export function ConfirmPlan({
   // work is still being described, and there is no contract to go to yet.
   if (key === null) return null;
   const approved = planApproved(workspace, editor.repoId, key);
+  const shape = flowFor(workspace, editor.session?.id ?? "").shape;
   // A turn in flight may still move this plan, and what approving freezes is
   // what the contract holds when it is read (ADR-0016). The way onward waits
   // for the turn, and says so rather than going quiet.
@@ -61,10 +62,10 @@ export function ConfirmPlan({
         variant="primary"
         disabled={busy || thinking}
         onClick={() =>
-          navigate(confirmRoute({ repoId: editor.repoId, key, sessionId: editor.session?.id, approved }))
+          navigate(confirmRoute({ repoId: editor.repoId, key, sessionId: editor.session?.id, approved, basic: shape === "basic" }))
         }
       >
-        {approved ? "Open the contract" : confirmLabel(flowFor(workspace, editor.session?.id ?? "").shape)}
+        {approved ? "Open the contract" : confirmLabel(shape)}
       </Button>
     </div>
   );

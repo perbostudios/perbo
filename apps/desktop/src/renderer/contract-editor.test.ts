@@ -602,7 +602,7 @@ describe("a planning that holds nothing (D-129)", () => {
       revision: 0,
       resumeNew: false,
       lastPane: null,
-      confirmed: null, impact: null,
+      confirmed: null, read: null, impact: null,
       specCut: null,
       named: null,
       drift: null,
@@ -746,20 +746,24 @@ describe("the pane a planning was left at (D-130)", () => {
     expect(f.persist.mock.calls.length).toBe(discarded);
   });
 
-  it("keeps what the impact check found until a fresh draft replaces the plan it was of, and not through a compile (D-NEW-basic-and-epic-flows)", async () => {
+  it("keeps what the impact check found and the state last read until a fresh draft replaces the plan they were of, and not through a compile (D-NEW-basic-and-epic-flows)", async () => {
     const f = await fixture();
     const opened = await f.editing.open({ kind: "ticket", repoId, key: "PRB-421" });
     f.editing.recordSpec(opened.id, "a-spec");
     f.editing.recordImpact(opened.id, 3);
+    f.editing.recordRead(opened.id, "state-read");
     expect(f.editing.read(opened.id).impact).toBe(3);
+    expect(f.editing.read(opened.id).read).toBe("state-read");
     const compiled = f.editing.read(opened.id);
     await f.editing.submit(opened.id, compiled.revision, crypto.randomUUID(), "compile");
     await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" });
     expect(f.editing.read(opened.id).impact).toBe(3);
+    expect(f.editing.read(opened.id).read).toBe("state-read");
     const ready = await f.editing.open({ kind: "session", id: opened.id });
     await f.editing.submit(opened.id, ready.revision, crypto.randomUUID(), "startOver");
     await f.editing.settled({ ...f.jobs[1]!, state: "completed", resultKey: "PRB-421" });
     expect(f.editing.read(opened.id).impact).toBeNull();
+    expect(f.editing.read(opened.id).read).toBeNull();
   });
 
   it("records the contract as the last pane with the state it was reached at, writes nothing twice, and records it again at a new state", async () => {

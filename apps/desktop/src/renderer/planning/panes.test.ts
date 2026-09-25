@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkedLanding, contractState, draftedLanding, flowFor, leftAt } from "./panes.js";
+import { checkedLanding, confirmRoute, contractState, draftedLanding, flowFor, leftAt, readingState } from "./panes.js";
 import type { OpenDraft, Snapshot } from "../../shared/protocol.js";
 
 /** One planning, as the drafts list carries it, with its ticket's row where it has one. */
@@ -17,7 +17,7 @@ function planning(over: Partial<OpenDraft> = {}, updated = "2026-09-01T10:00:00.
     specSlug: "something",
     title: "Something",
     lastPane: null,
-    confirmed: null,
+    confirmed: null, read: null,
     spec: "0011223344556677",
     impact: null,
     ...over,
@@ -97,6 +97,13 @@ describe("the tabs a planning offers (D-NEW-basic-and-epic-flows)", () => {
     expect(tabs(reached(moved))).toContain("Confirm contract");
   });
 
+  it("takes a path marked prohibited in the Explorer for a change, as it does one allowed", () => {
+    const left = reached(planning());
+    const prohibited = { ...left, drafts: [{ ...left.drafts![0]!, scope: { paths: ["src/**"], prohibited: ["src/secrets/**"] } }] };
+    expect(tabs(prohibited)).not.toContain("Confirm contract");
+    expect(tabs(reached(prohibited))).toContain("Confirm contract");
+  });
+
   it("does not take the order of a scope for a change to it", () => {
     const left = reached(planning({ scope: { paths: ["a/**", "b/**"], prohibited: [] } }));
     const reordered = { ...left, drafts: [{ ...left.drafts![0]!, scope: { paths: ["b/**", "a/**"], prohibited: [] } }] };
@@ -114,5 +121,28 @@ describe("where a plan lands", () => {
   it("lands a plan drafted again on its Graph for an epic and on its contract for a basic ticket, inside the planning", () => {
     expect(draftedLanding({ sessionId: "s-1", nodes: 3 })).toEqual({ page: "planning", sessionId: "s-1", pane: "graph" });
     expect(draftedLanding({ sessionId: "s-1", nodes: 0 })).toEqual({ page: "planning", sessionId: "s-1", pane: "contract" });
+  });
+});
+
+describe("what a basic ticket's Confirm contract reads (D-NEW-basic-and-epic-flows)", () => {
+  const promise = { outcome: "Signups get one email.", criteria: [{ text: "One email is queued." }, { text: "It is sent within a minute." }] };
+  it("is the spec's sections and the plan's promise, by their words, and nothing of their order", () => {
+    const at = readingState("0011223344556677", promise);
+    expect(readingState("0011223344556677", { ...promise, criteria: [...promise.criteria].reverse() })).toBe(at);
+    expect(readingState("0011223344556677", { outcome: " Signups get one email. ", criteria: promise.criteria })).toBe(at);
+    expect(readingState("ffeeddccbbaa9988", promise)).not.toBe(at);
+    expect(readingState(null, promise)).not.toBe(at);
+    expect(readingState("0011223344556677", { ...promise, outcome: "Signups get two emails." })).not.toBe(at);
+    expect(
+      readingState("0011223344556677", { ...promise, criteria: [{ text: "One email is queued." }, { text: "It is sent within an hour." }] }),
+    ).not.toBe(at);
+    expect(readingState("0011223344556677", { ...promise, criteria: promise.criteria.slice(0, 1) })).not.toBe(at);
+  });
+
+  it("goes to a basic ticket's contract, where it is read, and through the reading for an epic", () => {
+    const way = { repoId: "repo-1", key: "PRB-1", sessionId: "s-1", approved: false };
+    expect(confirmRoute({ ...way, basic: true })).toEqual({ page: "planning", sessionId: "s-1", pane: "contract" });
+    expect(confirmRoute({ ...way, basic: false })).toEqual({ page: "planning", sessionId: "s-1", pane: "drift" });
+    expect(confirmRoute({ ...way, approved: true, basic: true })).toEqual({ page: "task", repoId: "repo-1", key: "PRB-1", view: "contract" });
   });
 });

@@ -78,8 +78,10 @@ describe("the change marks both hosts record (D-128)", () => {
     contracts.set("r1:PER-1", contract([["C1", "Light and dark"], ["C2", "Follows the system"]]));
     const before = marks.promiseAt({ id: "r1" }, "PER-1");
     contracts.set("r1:PER-1", contract([["C1", "Light and dark"]]));
-    marks.recordPlanChange({ id: "r1" }, "PER-1", before);
+    marks.recordPlanChange({ id: "r1" }, "PER-1", before, "person");
     expect(recorded).toHaveLength(1);
+    // Recorded as the person's, which the panes mark nowhere.
+    expect(recorded[0]!.change.by).toBe("person");
     const plan = recorded[0]!.change.plan!;
     expect(plan.before.criteria.map((each) => each.text)).toContain("Follows the system");
     expect(plan.after.criteria.map((each) => each.text)).not.toContain("Follows the system");
@@ -97,7 +99,7 @@ describe("the change marks both hosts record (D-128)", () => {
     contracts.set("r1:PER-1", contract([["C1", "Light and dark"]]));
     const before = marks.promiseAt({ id: "r1" }, "PER-1");
     contracts.set("r1:PER-1", contract([["C1", "Light, dark and system"]]));
-    marks.recordPlanChange({ id: "r1" }, "PER-1", before);
+    marks.recordPlanChange({ id: "r1" }, "PER-1", before, "person");
     expect(recorded.map((each) => each.id)).toEqual(["same", "also"]);
   });
 
@@ -106,12 +108,12 @@ describe("the change marks both hosts record (D-128)", () => {
       planning({ id: "p1", repoId: "r1", key: "PER-1", specSlug: null, phase: "editing" }),
     ]);
     contracts.set("r1:PER-1", contract([["C1", "Light and dark"]]));
-    marks.recordPlanChange({ id: "r1" }, "PER-1", marks.promiseAt({ id: "r1" }, "PER-1"));
-    marks.recordPlanChange({ id: "r1" }, "PER-1", null);
+    marks.recordPlanChange({ id: "r1" }, "PER-1", marks.promiseAt({ id: "r1" }, "PER-1"), "person");
+    marks.recordPlanChange({ id: "r1" }, "PER-1", null, "chat");
     expect(marks.promiseAt({ id: "r1" }, "PER-9")).toBeNull();
     const before = marks.promiseAt({ id: "r1" }, "PER-1");
     contracts.delete("r1:PER-1");
-    marks.recordPlanChange({ id: "r1" }, "PER-1", before);
+    marks.recordPlanChange({ id: "r1" }, "PER-1", before, "person");
     expect(recorded).toEqual([]);
   });
 
@@ -125,6 +127,8 @@ describe("the change marks both hosts record (D-128)", () => {
     specs.set("r1:themes", sections("- Light, dark and system."));
     marks.recordChangeSince("p1", before);
     expect(recorded).toHaveLength(1);
+    // A turn's change is the chat's, which the panes mark.
+    expect(recorded[0]!.change.by).toBe("chat");
     expect(recorded[0]!.change.spec).toEqual({
       before: sections("- Light and dark."),
       after: sections("- Light, dark and system."),
@@ -158,14 +162,17 @@ describe("the change marks both hosts record (D-128)", () => {
       { spec: sections("- Light."), plan: null },
       { spec: sections("- Light and dark."), plan: null },
       on,
+      "person",
     );
     expect(recorded.map((each) => each.id)).toEqual(["p1"]);
+    expect(recorded[0]!.change.by).toBe("person");
     refuse("the record is full: sk-secret");
     expect(() =>
       marks.markChangeOn(
         { spec: sections("- Light and dark."), plan: null },
         { spec: sections("- Dark."), plan: null },
         on,
+        "person",
       ),
     ).not.toThrow();
     expect(said).toEqual([
