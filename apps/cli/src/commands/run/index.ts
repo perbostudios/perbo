@@ -1219,7 +1219,6 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
     return await publishRetainedTicket({
       options,
       admitted,
-      retained,
       contract,
       config: { ...runConfig, delivery_checks_bound_ms: deliveryBoundMs },
       configuredBoundMs: runConfig.delivery_checks_bound_ms,
@@ -1411,7 +1410,6 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
 async function publishRetainedTicket(input: {
   options: ExecuteOptions;
   admitted: AdmittedWork;
-  retained: { branch: string; outcome: "approved" | "escalated" };
   contract: PlanContract;
   config: Parameters<typeof publishRetained>[0]["config"];
   /** The bound the configuration named, before the repository's reading zeroed it. */
@@ -1419,7 +1417,7 @@ async function publishRetainedTicket(input: {
   repositoryChecks: PullRequestChecks | null;
   progress: ((message: string) => void) | undefined;
 }): Promise<number> {
-  const { options, admitted, retained, contract, config, repositoryChecks, progress } = input;
+  const { options, admitted, contract, config, repositoryChecks, progress } = input;
   const { args, streams } = options;
   let result: RetainedPublishResult;
   /** What the delivery record holds, written under the run lock. */
@@ -1428,8 +1426,9 @@ async function publishRetainedTicket(input: {
     result = await publishRetained({
       config,
       contract,
-      branch: retained.branch,
-      outcome: retained.outcome,
+      // The ticket read again once the runner holds its run lock: a run that
+      // started and ended since it was first read is judged by what it left.
+      retained: () => retainedBranch(readTicket(admitted.dir, admitted.key)),
       // The answers a person gave, which the pull request lists as a
       // publishing run's does.
       decided: decidedFindings(readLocalVerdictsOrWarn(admitted.dir, streams).verdicts, contract.ticket_id),
@@ -1477,7 +1476,7 @@ async function publishRetainedTicket(input: {
       `${JSON.stringify(
         {
           ticket_id: result.ticket_id,
-          outcome: retained.outcome,
+          outcome: result.outcome,
           detail: result.detail,
           branch: result.branch,
           pull_request: result.pull_request,
@@ -1493,7 +1492,7 @@ async function publishRetainedTicket(input: {
       `TICKET    ${result.ticket_id}`,
       `BRANCH    ${result.branch}`,
       "",
-      `OUTCOME   ${retained.outcome} — ${result.detail}`,
+      `OUTCOME   ${result.outcome} — ${result.detail}`,
       `PR        ${result.pull_request.url}`,
     ];
     if (delivery_checks !== null) {

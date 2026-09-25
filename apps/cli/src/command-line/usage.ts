@@ -61,10 +61,16 @@ export const USAGE = `perbo — contract to pull request, locally
       publishing has its retained branch published now: pushed, and its pull
       request opened against the base with the review on record, the answers
       a person gave under it, exactly as a publishing run opens it — nothing
-      is executed or reviewed again. It refuses, pushing nothing, where the
-      ticket already has a pull request, where the branch has moved past the
-      commit the review judged, where it carries a commit the loop did not
-      make, or where the base has moved past what the run judged; a run with
+      is executed or reviewed again. It refuses, pushing nothing and naming
+      what it found, where the ticket's last run did not end approved or
+      escalated, which is said before the machine is asked anything; where
+      the ticket already has its pull request, or its delivery is not the
+      loop's own; where a run of the ticket holds its run lock; where no
+      review, or no attempt that sealed the commit it judged, is on record;
+      where the run ended escalated and an attempt's record does not say what
+      its executor declined; where the branch has moved past the commit the
+      review judged, or carries a commit the loop did not make; or where the
+      base names no commit or has moved past what the run judged. A run with
       --publish judges what is there instead. The ticket stays where it is
       and its delivery record gets the pull request. Exit 0 once it is open.
 

@@ -7,6 +7,7 @@ import {
   hasAcceptanceCriteria,
   type Finding,
   type PlanContract,
+  type RetainedBranch,
 } from "@perbo/contracts";
 import { scratchDirectories, type Repository } from "@perbo/test-support";
 import { branchName } from "@perbo/workspace";
@@ -20,6 +21,11 @@ import { finding, makeContract, makeReview, withoutInstall } from "../test-suppo
 import { git, runnerRepository } from "../test-support/repository.js";
 
 const scratch = scratchDirectories("perbo-runner-");
+
+/** The ticket as it stands naming `branch` as its last run's, retained after that run ended `outcome`. */
+const kept =
+  (branch: string, outcome: "approved" | "escalated") =>
+  (): RetainedBranch => ({ branch, outcome, refusal: null });
 
 /**
  * D-NEW-publish-a-retained-branch-later: a run that ended approved or
@@ -146,7 +152,7 @@ describe("publishing a retained branch later", () => {
     const { contract, config, branch, first } = await retainedRun();
     const { pushed, opened, hooks } = delivery();
 
-    const published = await publishRetained({ config, contract, branch, outcome: "approved", hooks });
+    const published = await publishRetained({ config, contract, retained: kept(branch, "approved"), hooks });
 
     expect(pushed.map((request) => request.branch)).toEqual([branch]);
     expect(opened).toHaveLength(1);
@@ -173,7 +179,7 @@ describe("publishing a retained branch later", () => {
       decided_at: new Date().toISOString(),
     };
 
-    const published = await publishRetained({ config, contract, branch, outcome: "escalated", decided: [answer], hooks });
+    const published = await publishRetained({ config, contract, retained: kept(branch, "escalated"), decided: [answer], hooks });
 
     expect(opened[0]!.body).toContain("### Decided by a person");
     expect(opened[0]!.body).toContain("decided by Owen: Half-even, as the ledger does.");
@@ -186,7 +192,7 @@ describe("publishing a retained branch later", () => {
     commitOn(repo, branch, { "src/by-hand.ts": "export const byHand = true;\n" });
     const { pushed, opened, hooks } = delivery();
 
-    const refused = publishRetained({ config, contract, branch, outcome: "approved", hooks });
+    const refused = publishRetained({ config, contract, retained: kept(branch, "approved"), hooks });
 
     await expect(refused).rejects.toThrow(RunRefusedError);
     await expect(refused).rejects.toThrow(/has moved past what the run judged/);
@@ -204,7 +210,7 @@ describe("publishing a retained branch later", () => {
     });
     const { pushed, opened, hooks } = delivery();
 
-    const refused = publishRetained({ config, contract, branch, outcome: "approved", hooks });
+    const refused = publishRetained({ config, contract, retained: kept(branch, "approved"), hooks });
 
     await expect(refused).rejects.toThrow(/carries 1 commit the loop did not make: [0-9a-f]{12} by hand: src\/person\.ts/);
     expect(pushed).toEqual([]);
@@ -218,7 +224,7 @@ describe("publishing a retained branch later", () => {
     repo.git("commit", "-qm", "the base moved");
     const { pushed, opened, hooks } = delivery();
 
-    const refused = publishRetained({ config, contract, branch, outcome: "approved", hooks });
+    const refused = publishRetained({ config, contract, retained: kept(branch, "approved"), hooks });
 
     await expect(refused).rejects.toThrow(/main has moved to [0-9a-f]{12}, which .* does not carry/);
     expect(pushed).toEqual([]);
@@ -233,7 +239,7 @@ describe("publishing a retained branch later", () => {
     const branch = branchName({ ticket_key: TICKET_KEY, ticket_id: contract.ticket_id, outcome: contract.outcome });
     const { pushed, opened, hooks } = delivery();
 
-    const refused = publishRetained({ config, contract, branch, outcome: "approved", hooks });
+    const refused = publishRetained({ config, contract, retained: kept(branch, "approved"), hooks });
 
     await expect(refused).rejects.toThrow(RunRefusedError);
     await expect(refused).rejects.toThrow(/no review of PRB8 is on record, so there is nothing to publish its branch under/);
@@ -249,7 +255,7 @@ describe("publishing a retained branch later", () => {
     );
     const { pushed, opened, hooks } = delivery();
 
-    const refused = publishRetained({ config, contract, branch, outcome: "approved", hooks });
+    const refused = publishRetained({ config, contract, retained: kept(branch, "approved"), hooks });
 
     await expect(refused).rejects.toThrow(RunRefusedError);
     await expect(refused).rejects.toThrow(/no attempt on PRB8's record sealed [0-9a-f]+, the commit its review judged/);
@@ -264,8 +270,7 @@ describe("publishing a retained branch later", () => {
     const refused = publishRetained({
       config: { ...config, base_ref: "no-such-base" },
       contract,
-      branch,
-      outcome: "approved",
+      retained: kept(branch, "approved"),
       hooks,
     });
 
@@ -287,12 +292,43 @@ describe("publishing a retained branch later", () => {
       now: new Date(),
     });
     try {
-      await expect(publishRetained({ config, contract, branch, outcome: "approved", hooks })).rejects.toThrow(
+      await expect(publishRetained({ config, contract, retained: kept(branch, "approved"), hooks })).rejects.toThrow(
         RunLockedError,
       );
     } finally {
       running.release();
     }
+    expect(pushed).toEqual([]);
+    expect(opened).toEqual([]);
+  }, 90_000);
+
+  it("reads the ticket under the run lock, and refuses what a run that started in between left, pushing nothing", async () => {
+    const { contract, config } = await retainedRun();
+    const { pushed, opened, hooks } = delivery();
+    const whileReading: string[] = [];
+
+    const refused = publishRetained({
+      config,
+      contract,
+      retained: () => {
+        // A run starting now is refused: the lock is already held.
+        try {
+          acquireRunLock({ state_root: config.state_root, ticket_id: contract.ticket_id, ticket_key: TICKET_KEY, now: new Date() }).release();
+          whileReading.push("a run could start");
+        } catch (error) {
+          whileReading.push(error instanceof RunLockedError ? "locked" : String(error));
+        }
+        // What the ticket says now: a run since has opened its pull request.
+        return { branch: null, outcome: null, refusal: `${TICKET_KEY} already has its pull request, https://example.invalid/pull/9` };
+      },
+      hooks,
+    });
+
+    await expect(refused).rejects.toThrow(RunRefusedError);
+    await expect(refused).rejects.toThrow(
+      `${TICKET_KEY} already has its pull request, https://example.invalid/pull/9. Nothing was pushed`,
+    );
+    expect(whileReading).toEqual(["locked"]);
     expect(pushed).toEqual([]);
     expect(opened).toEqual([]);
   }, 90_000);
@@ -305,8 +341,7 @@ describe("publishing a retained branch later", () => {
     await publishRetained({
       config,
       contract,
-      branch,
-      outcome: "approved",
+      retained: kept(branch, "approved"),
       hooks,
       recordDelivery: (published) => {
         whileRecording.push(published.pull_request.url);
@@ -441,7 +476,7 @@ describe("publishing a retained branch after a remediation round with a decline"
     const run = await escalatedRun();
     const { opened, hooks } = delivery();
 
-    await publishRetained({ config: run.config, contract: run.contract, branch: run.branch, outcome: "escalated", hooks });
+    await publishRetained({ config: run.config, contract: run.contract, retained: kept(run.branch, "escalated"), hooks });
 
     const retained = opened[0]!.body;
     const expected = await publishingRunsBody(run);
@@ -464,8 +499,7 @@ describe("publishing a retained branch after a remediation round with a decline"
     const refused = publishRetained({
       config: run.config,
       contract: run.contract,
-      branch: run.branch,
-      outcome: "escalated",
+      retained: kept(run.branch, "escalated"),
       hooks,
     });
 

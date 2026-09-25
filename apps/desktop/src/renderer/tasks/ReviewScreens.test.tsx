@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { CoverageStatus, CriterionEvidenceBinding, VerificationStrength } from "@perbo/contracts";
 import { sampleBridge } from "../../sample-host/bridge.js";
@@ -97,7 +97,7 @@ describe("the review page's criterion cards", () => {
     ]);
   });
 
-  it("colour the badge by how the criterion was established and keep its words", () => {
+  it("colour the badge by how the criterion was established, in the founder's words", () => {
     view(
       context([
         { status: "met", strength: "directly_verified", assertion: "one" },
@@ -108,9 +108,31 @@ describe("the review page's criterion cards", () => {
     );
     expect(cards().map((card) => [badge(card).textContent, badge(card).className])).toEqual([
       ["directly verified", "evidence-strength evidence-strength--green"],
-      ["proxy", "evidence-strength evidence-strength--amber"],
-      ["asserted only", "evidence-strength evidence-strength--red"],
+      ["inferred", "evidence-strength evidence-strength--amber"],
+      ["evidence not retained", "evidence-strength evidence-strength--red"],
       ["not reviewed", "evidence-strength evidence-strength--red"],
+    ]);
+  });
+
+  it("say the same words in the same cases as a table, under Established", () => {
+    view(
+      context([
+        { status: "met", strength: "directly_verified", assertion: "one" },
+        { status: "met", strength: "proxy", assertion: "two" },
+        { status: "not_met", strength: "asserted_only", assertion: "three" },
+        null,
+      ]),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "View as a table" }));
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(["Criterion", "Outcome", "Established"]);
+    expect(
+      within(table).getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell").map((cell) => cell.textContent)),
+    ).toEqual([
+      ["Criterion number 1", "met", "directly verified"],
+      ["Criterion number 2", "met", "inferred"],
+      ["Criterion number 3", "not met", "evidence not retained"],
+      ["Criterion number 4", "not reviewed", "not reviewed"],
     ]);
   });
 

@@ -9,7 +9,7 @@ import { branchName } from "@perbo/workspace";
 import { gitEnvironment, initRepository } from "@perbo/test-support";
 import { admitCommandLine } from "../admit.js";
 import { type ExecuteDeps, executeCommandLine } from "./index.js";
-import { readTicket, storeDir } from "../../store/tickets.js";
+import { readTicket, storeDir, writeTicket } from "../../store/tickets.js";
 import { runCommandLine } from "../../command-line/terminal.js";
 import { recordStreams } from "../../test-support/streams.js";
 import { UsageError } from "../../usage-error.js";
@@ -376,6 +376,32 @@ describe("perbo run --publish-retained", () => {
     expect(asked).toEqual([]);
     expect(pushed).toEqual([]);
     expect(readTicket(storeDir(at.repo, null), at.key).state).toBe("ready");
+  }, TIMEOUT_MS);
+
+  it("reads the ticket again under the run lock, and refuses what a run that ended in between left", async () => {
+    const at = fixture("moved-between");
+    await retained(at);
+    const { pushed, push } = recordedPush();
+    const OTHER = "https://github.com/o/r/pull/9";
+
+    // Between the first reading and the lock, a run of the ticket published:
+    // the machine is asked what it has after the first reading, before the lock.
+    const refused = await run(at, ["--publish-retained"], {
+      hooks: { push, review: noReview },
+      preflight: (request) => {
+        const dir = storeDir(at.repo, null);
+        const ticket = readTicket(dir, at.key);
+        writeTicket(dir, { ...ticket, delivery: { ...ticket.delivery, pull_request_url: OTHER, pull_request_number: 9 } });
+        return okPreflight(request);
+      },
+    });
+
+    expect(refused.code).toBe(EXIT_CODES.did_not_complete);
+    expect(refused.err).toContain(
+      `${at.key}'s retained branch was not published: ${at.key} already has its pull request, ${OTHER}. Nothing was pushed`,
+    );
+    expect(pushed).toEqual([]);
+    expect(ghCalls(at).some((call) => call[1] === "create")).toBe(false);
   }, TIMEOUT_MS);
 
   it("refuses a branch carrying a commit the loop did not make, and leaves the ticket as it was", async () => {

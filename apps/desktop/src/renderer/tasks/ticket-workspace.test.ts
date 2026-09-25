@@ -206,19 +206,21 @@ describe("where a Home ticket stands", () => {
     expect(homeTone(workspace, row)).toBe("red");
   });
 
-  it("counts Home's tickets at each tone, leaving out the filed and the ones still being planned", async () => {
+  it("counts Home's tickets at each tone, and a decided merge as completed alone, leaving out the filed and the ones still being planned", async () => {
     const { workspace } = await fixture();
     const rows = homeRows(workspace);
     expect(rows.some((row) => row.ticket.state === "plan_review")).toBe(false);
     const tally = homeTally(workspace, rows);
+    const decided = (row: (typeof rows)[number]): boolean => ["merged", "closed"].includes(row.ticket.state);
     expect(tally).toEqual({
       yellow: rows.filter((row) => homeTone(workspace, row) === "yellow").length,
       red: rows.filter((row) => homeTone(workspace, row) === "red").length,
-      green: rows.filter((row) => homeTone(workspace, row) === "green").length,
+      green: rows.filter((row) => homeTone(workspace, row) === "green" && !decided(row)).length,
+      completed: rows.filter(decided).length,
     });
     // The sample: a decision; a stopped run and two tickets mid-run with
-    // nothing running them; and an open pull request and a merge not yet filed.
-    expect(tally).toEqual({ yellow: 1, red: 3, green: 2 });
+    // nothing running them; an open pull request; and a merge not yet filed.
+    expect(tally).toEqual({ yellow: 1, red: 3, green: 1, completed: 1 });
   });
 });
 

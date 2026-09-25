@@ -35,21 +35,22 @@ const OUTCOME_ICON: Record<CoverageStatus, InkIconName> = {
   cannot_determine: "help",
 };
 /**
- * A criterion card's badge colour, by how the outcome was established: green
- * where an assertion proves it, amber where it is inferred through a proxy,
- * red where nothing retained establishes it — asserted only, or not reviewed.
+ * How a criterion's outcome was established, in the words its badge and the
+ * table say and the badge's colour: green where an assertion proves it, amber
+ * where it is inferred through a proxy, red where nothing retained
+ * establishes it — asserted only, or not reviewed.
  */
-const STRENGTH_TONE: Record<VerificationStrength, "green" | "amber" | "red"> = {
-  directly_verified: "green",
-  proxy: "amber",
-  asserted_only: "red",
+const ESTABLISHED: Record<VerificationStrength, { words: string; tone: "green" | "amber" | "red" }> = {
+  directly_verified: { words: "directly verified", tone: "green" },
+  proxy: { words: "inferred", tone: "amber" },
+  asserted_only: { words: "evidence not retained", tone: "red" },
 };
 function criterionMarks(
   coverage: { status: CoverageStatus; verification_strength: VerificationStrength } | undefined,
-): { icon: InkIconName; tone: "green" | "amber" | "red" } {
-  return coverage
-    ? { icon: OUTCOME_ICON[coverage.status], tone: STRENGTH_TONE[coverage.verification_strength] }
-    : { icon: "help", tone: "red" };
+): { icon: InkIconName; tone: "green" | "amber" | "red"; established: string } {
+  if (!coverage) return { icon: "help", tone: "red", established: "not reviewed" };
+  const { words, tone } = ESTABLISHED[coverage.verification_strength];
+  return { icon: OUTCOME_ICON[coverage.status], tone, established: words };
 }
 
 export function ReviewScreen(context: TaskContext) {
@@ -107,7 +108,7 @@ export function ReviewScreen(context: TaskContext) {
                   <tr>
                     <th>Criterion</th>
                     <th>Outcome</th>
-                    <th>Evidence</th>
+                    <th>Established</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -122,12 +123,7 @@ export function ReviewScreen(context: TaskContext) {
                           {coverage?.status.replaceAll("_", " ") ??
                             "not reviewed"}
                         </td>
-                        <td>
-                          {coverage?.verification_strength.replaceAll(
-                            "_",
-                            " ",
-                          ) ?? "unavailable"}
-                        </td>
+                        <td>{criterionMarks(coverage).established}</td>
                       </tr>
                     );
                   })}
@@ -179,8 +175,7 @@ export function ReviewScreen(context: TaskContext) {
                         `evidence-strength--${marks.tone}`,
                       )}
                     >
-                      {coverage?.verification_strength.replaceAll("_", " ") ??
-                        "not reviewed"}
+                      {marks.established}
                     </span>
                   </div>
                 );

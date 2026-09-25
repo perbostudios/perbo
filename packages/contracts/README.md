@@ -73,6 +73,11 @@ it reads back. `perbo run --publish-retained` refuses with that refusal, and the
 screen says it; it imports only the ticket's types, so the renderer takes it from
 `@perbo/contracts/browser`.
 
+`ticket-transitions.ts` is the single home for the ticket lifecycle's rows, `TICKET_TRANSITIONS`:
+`transition` in `ticket.ts` refuses a move with no row, `perbo run` walks and reopens a ticket along
+them, and the desktop's sample host moves its tickets by the same rows. It imports only the ticket's
+types, so the renderer takes it from `@perbo/contracts/browser`.
+
 `review.ts` carries one deliberate asymmetry worth knowing about. A finding's `routing` is derived
 from `blocking` when it is absent, rather than defaulted, so an artifact written before D-051 stays
 scoreable — a plain default would silently relabel every blocking finding in an older artifact as

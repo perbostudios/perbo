@@ -5,6 +5,7 @@ import {
   hasAcceptanceCriteria,
   type GithubCredential,
   type PlanContract,
+  type RetainedBranch,
   type ReviewArtifact,
 } from "@perbo/contracts";
 import { git, isAttemptBranch } from "@perbo/workspace";
@@ -40,10 +41,14 @@ import { branchLine } from "./relevel.js";
 export interface RetainedPublishRequest {
   config: TicketRunConfig;
   contract: PlanContract;
-  /** The branch the ticket's delivery record names, which the run retained. */
-  branch: string;
-  /** How the ticket records that run's end. */
-  outcome: "approved" | "escalated";
+  /**
+   * The branch the ticket's last run retained and how the ticket records that
+   * run's end, or why there is none, read from the ticket as it stands
+   * (`retainedBranch` in `@perbo/contracts`). Read under the run lock, so a run of the ticket
+   * that started and ended after the person pressed is judged by what it
+   * left, not by what the ticket said before.
+   */
+  retained: () => RetainedBranch;
   /** The person's answers on record, which the review is published with. */
   decided?: readonly DecidedFinding[];
   now?: () => Date;
@@ -64,6 +69,8 @@ export interface RetainedPublishRequest {
 export interface RetainedPublishResult {
   ticket_id: string;
   branch: string;
+  /** How the ticket records the end of the run whose branch this is. */
+  outcome: "approved" | "escalated";
   /** The review the pull request states, with the person's answers recorded on it. */
   final_review: ReviewArtifact;
   pull_request: PullRequestRef;
@@ -99,7 +106,7 @@ export async function publishRetained(args: RetainedPublishRequest): Promise<Ret
 }
 
 async function publishLocked(args: RetainedPublishRequest, clock: () => Date): Promise<RetainedPublishResult> {
-  const { config, branch } = args;
+  const { config } = args;
   const key = config.ticket_key;
   const progress = args.onProgress ?? (() => undefined);
   const refuse = (what: string): never => {
@@ -109,6 +116,10 @@ async function publishLocked(args: RetainedPublishRequest, clock: () => Date): P
       repository_root: config.repository_root,
     });
   };
+  const retained = args.retained();
+  if (retained.refusal !== null) refuse(retained.refusal);
+  const branch = retained.branch!;
+  const outcome = retained.outcome!;
   if (!hasAcceptanceCriteria(args.contract)) {
     throw new Error(
       `plan ${args.contract.plan_id} is ${args.contract.level}, which has no acceptance criteria: ` +
@@ -136,7 +147,7 @@ async function publishLocked(args: RetainedPublishRequest, clock: () => Date): P
   // escalated run may have ended on a decline, and an attempt whose record
   // does not say what it declined leaves the pull request unable to list what
   // is the person's to decide.
-  if (args.outcome === "escalated") {
+  if (outcome === "escalated") {
     const unsaid = attempts.filter((attempt) => attempt.remediation_round > 0 && attempt.declines === undefined);
     if (unsaid.length > 0) {
       refuse(
@@ -232,6 +243,7 @@ async function publishLocked(args: RetainedPublishRequest, clock: () => Date): P
   return {
     ticket_id: contract.ticket_id,
     branch,
+    outcome,
     final_review: review,
     pull_request: delivery.pull_request!,
     merge: delivery.merge,

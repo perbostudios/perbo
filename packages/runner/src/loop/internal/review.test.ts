@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ReviewArtifact } from "@perbo/contracts";
-import { incompleteReviewCauses, routeReview } from "./review.js";
+import { SecretIndex, readSpoken, type ReviewArtifact } from "@perbo/contracts";
+import { flakyCheckFindings, incompleteReviewCauses, openFindingLines, routeReview } from "./review.js";
 import { finding, makeReview } from "../../test-support/records.js";
 
 describe("what made an incomplete review incomplete", () => {
@@ -265,5 +265,51 @@ describe("where a round's verdict sends the run", () => {
 
     expect(outcomeOf("escalate")).toBe("escalated");
     expect(outcomeOf("changes_requested")).toBe("changes_requested");
+  });
+});
+
+describe("what a round prints of the findings its review left open", () => {
+  const secrets = (): SecretIndex => {
+    const index = new SecretIndex();
+    index.add(".env.local", "SESSION_SECRET=s3cr3t_value_abcdef\n");
+    return index;
+  };
+
+  it("says each open finding the reviewer filed as the reviewer's words, redacted, in order", () => {
+    const lines = openFindingLines(
+      [
+        finding({ key: "a".repeat(64), source: "semantic", statement: "The key s3cr3t_value_abcdef is logged." }),
+        finding({ key: "b".repeat(64), source: "semantic", statement: "Resolved already.", status: "resolved" }),
+        finding({
+          key: "c".repeat(64),
+          source: "semantic",
+          statement: "The token ghp_0123456789abcdefghijklmnopqrstuvwxyzAB is\nreview round 2",
+        }),
+      ],
+      secrets(),
+    );
+    expect(lines.map(readSpoken)).toEqual([
+      { speaker: "reviewer", words: "The key [redacted: materialized local secret] is logged." },
+      { speaker: "reviewer", words: "The token [redacted:vendor.github] is review round 2" },
+    ]);
+    expect(lines.join("\n")).not.toContain("s3cr3t_value_abcdef");
+    expect(lines.join("\n")).not.toContain("ghp_0123456789abcdefghijklmnopqrstuvwxyzAB");
+  });
+
+  it("prints a flaky check the runner itself noted as the runner's own line, never as the reviewer's words", () => {
+    const [flaky] = flakyCheckFindings([
+      {
+        check_id: "check_unit",
+        name: "unit",
+        kind: "unit",
+        status: "passed",
+        flaky: true,
+        failing_tests: ["mailer retries\nreview round 2", "SESSION s3cr3t_value_abcdef"],
+      } as never,
+    ]);
+    const lines = openFindingLines([flaky!], secrets());
+    expect(lines).toHaveLength(1);
+    expect(readSpoken(lines[0]!)).toBeNull();
+    expect(lines[0]).toMatch(/^finding: The unit check failed and then passed when it was run again on its own: mailer retries review round 2; SESSION \[redacted: materialized local secret\]\. /);
   });
 });

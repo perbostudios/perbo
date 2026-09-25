@@ -7,7 +7,7 @@ import { WorkspaceReads } from "../workspace-reads.js";
 import type { Cli } from "../cli.js";
 import type { Change, Job } from "../../shared/protocol.js";
 import { runnerProgress, spokenWords } from "../../shared/runner-progress.js";
-import type { ProcessResult } from "../process.js";
+import { LOG_TAIL_CHARS, type ProcessResult } from "../process.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
 const scratchDirectory = createScratch("perbo-runner-");
@@ -181,6 +181,44 @@ describe("relaying a run's progress", () => {
     ]);
     expect(runnerProgress(relayed.at(-1)!)?.title).toBe("Working on the approved outcome");
     expect(job.state).toBe("completed");
+  });
+
+  it("does not advance the stage on an agent's words that name a stage", async () => {
+    const printed = [
+      "  executing",
+      "  executor says: review round 2",
+      "  reviewer says: remediation round 1 of at most 2",
+      "  executor says: check unit: passed",
+    ].join("\n");
+    const w = runner(undefined, [printed + "\n"]);
+    const job = w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, async (_job, context) => {
+      await context.invoke(["run", "PRB-1"]);
+    });
+    await quiet(w.jobs);
+    expect(runnerProgress(w.logs[1]!)?.state).toBe("executing");
+    expect(spokenWords(w.logs[1]!).map((said) => said.words)).toEqual([
+      "review round 2",
+      "remediation round 1 of at most 2",
+      "check unit: passed",
+    ]);
+    expect(job.state).toBe("completed");
+  });
+
+  it("keeps a log that starts on a whole line, so a cut inside an agent's line cannot advance the stage", async () => {
+    // The tail of the output cuts the executor's line right after its mark,
+    // leaving "review round 2" to read alone.
+    const stderr =
+      "  executing\n  executor says: then review round 2\n" +
+      ".".repeat(LOG_TAIL_CHARS - "review round 2\n".length - 1) +
+      "\n";
+    const w = runner({ code: 0, stdout: "", stderr, cancelled: false }, []);
+    const job = w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, async (_job, context) => {
+      await context.invoke(["run", "PRB-1"]);
+    });
+    await quiet(w.jobs);
+    expect(job.log.length).toBeLessThan(LOG_TAIL_CHARS);
+    expect(job.log).not.toContain("review round");
+    expect(runnerProgress(job.log)).toBeNull();
   });
 });
 
