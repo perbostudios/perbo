@@ -3727,6 +3727,8 @@ readline.createInterface({ input: process.stdin })
       sections: { ...SECTIONS, outcome: SECTIONS.outcome + " Always.", notes: "A note." },
     });
     const standing = (await service.request({ kind: "editingRead", id })).change;
+    // The person's own, by hand: recorded, and marked nowhere.
+    expect(standing!.by).toBe("person");
     expect(standing!.spec!.before.notes).toBe("A note.");
     expect(standing!.spec!.before.outcome).not.toBe(standing!.spec!.after.outcome);
     await service.request({ kind: "interviewStart", repoId, id });
@@ -3741,6 +3743,8 @@ readline.createInterface({ input: process.stdin })
     await settled(service, id);
     let change = (await service.request({ kind: "editingRead", id })).change;
     expect(change).not.toBeNull();
+    // The chat's, which is what the panes mark.
+    expect(change!.by).toBe("chat");
     expect(change!.plan).toBeNull();
     expect(change!.spec).not.toBeNull();
     expect(JSON.stringify(change!.spec!.before)).not.toContain("And the button says so.");
@@ -3753,6 +3757,7 @@ readline.createInterface({ input: process.stdin })
     await service.request({ kind: "interviewTurn", id, text: "please reword the plan" });
     await settled(service, id);
     change = (await service.request({ kind: "editingRead", id })).change;
+    expect(change!.by).toBe("chat");
     expect(change!.spec).toBeNull();
     expect(change!.plan).not.toBeNull();
     expect(change!.plan!.before.criteria.find((each) => each.id === "ac_1")?.text).toBe("A signup queues one email");
@@ -3761,11 +3766,12 @@ readline.createInterface({ input: process.stdin })
     await service.request({ kind: "interviewStop", id });
   });
 
-  it("records an edit by hand, the Plan pane's Next and a spec save as the last change, and nothing where nothing differs", async () => {
-    // Each way a person moves the pair by hand lands as the one change the
-    // panes mark (D-128), replacing
-    // the one before it whole; an edit that moves no promise and a save of
-    // the same words leave the last change standing.
+  it("records an edit by hand, a basic ticket's contract written through and a spec save as the last change, the person's, and nothing where nothing differs", async () => {
+    // Each way a person moves the pair by hand lands as the one change,
+    // recorded as theirs, which the panes mark nowhere and which replaces the
+    // chat's marks (D-128); it replaces the one before it whole; an edit that
+    // moves no promise and a save of the same words leave the last change
+    // standing.
     const { service, repoId, id } = await planning();
     const read = async () => (await service.request({ kind: "editingRead", id })).change;
     const graphEdit = async (edit: GraphEdit) =>
@@ -3778,11 +3784,12 @@ readline.createInterface({ input: process.stdin })
       expected_verification: { kind: "test", assertion: "signup.test.ts" },
     })).toMatchObject({ state: "completed", error: null });
     const reworded = await read();
+    expect(reworded!.by).toBe("person");
     expect(reworded!.spec).toBeNull();
     expect(reworded!.plan!.before.criteria.map((each) => each.text)).toEqual(["A signup queues one email", "A failed send is retried"]);
     expect(reworded!.plan!.after.criteria.map((each) => each.text)).toEqual(["A signup queues exactly one email", "A failed send is retried"]);
     expect(reworded!.plan!.before.outcome).toBe(reworded!.plan!.after.outcome);
-    // The Plan pane's Next, which is the `edit` request over the flat plan: the promise before and after.
+    // A basic ticket's contract written through, which is the `edit` request over the flat plan: the promise before and after.
     const detail = await service.detail(repoId, "PRB-1");
     expect(await finished(service, (await service.request({
       kind: "edit", repoId, key: "PRB-1", digest: detail.digest,
@@ -3795,6 +3802,7 @@ readline.createInterface({ input: process.stdin })
       },
     })).id)).toMatchObject({ state: "completed", error: null });
     const next = await read();
+    expect(next!.by).toBe("person");
     expect(next!.spec).toBeNull();
     expect(next!.plan!.before.criteria.map((each) => each.text)).toEqual(["A signup queues exactly one email", "A failed send is retried"]);
     expect(next!.plan!.after.criteria.map((each) => each.text)).toEqual(["A signup queues exactly one email", "A failed send is retried twice"]);
@@ -3802,6 +3810,7 @@ readline.createInterface({ input: process.stdin })
     const rewordedSpec = { ...SECTIONS, requirements: "- A signup queues exactly one email.\n- A failed send is retried." };
     await saveSpec(service, { kind: "specSave", id, repoId, title: "Activation email", sections: rewordedSpec });
     const saved = await read();
+    expect(saved!.by).toBe("person");
     expect(saved!.plan).toBeNull();
     // As the file says them, ids and all: what the panes diff is the file's text.
     expect(saved!.spec!.before.requirements).toContain("queues one email.");

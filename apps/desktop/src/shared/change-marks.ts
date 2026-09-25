@@ -145,7 +145,7 @@ export class ChangeMarks<Repo extends { readonly id: string }> {
         kind: "note",
         text: `The change could not be marked on the panes: ${this.io.redact(
           error instanceof Error ? error.message : String(error),
-        )}`.slice(0, 12_000),
+        )}`,
       });
     }
   }

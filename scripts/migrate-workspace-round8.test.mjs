@@ -50,7 +50,7 @@ function older(id, over = {}) {
 /** A profile directory holding `workspace.json` with these sessions. */
 function profile(sessions) {
   const dir = mkdtempSync(join(tmpdir(), "perbo-migrate-"));
-  const state = { version: 1, settings: { name: "Owen" }, repositories: [], jobs: [], editingSessions: sessions };
+  const state = { version: 1, settings: { name: "Owen" }, repositories: [], jobs: [], asks: {}, lastOpened: {}, editingSessions: sessions };
   writeFileSync(join(dir, "workspace.json"), `${JSON.stringify(state, null, 2)}\n`);
   return dir;
 }
@@ -118,12 +118,77 @@ test("says how it is used when it is not given exactly one path, and fails on a 
     assert.equal(refused.status, 2);
     assert.match(refused.stderr, /^usage: node scripts\/migrate-workspace-round8\.mjs /);
   }
-  const missing = node(join(tmpdir(), "perbo-no-such-profile", "workspace.json"));
+  const absent = join(tmpdir(), "perbo-no-such-profile", "workspace.json");
+  const missing = node(absent);
   assert.equal(missing.status, 1);
+  assert.equal(missing.stderr.trim(), `${absent} is missing, so nothing was changed.`);
+});
+
+test("brings a profile from main up too: lastOpened, specCut and named added, and a note's offers deleted", () => {
+  const { specCut: _cut, named: _named, ...fromMain } = older("s-1", {
+    conversation: [
+      { n: 1, at: "2026-09-21T10:00:00.000Z", line: { kind: "turn", text: "Add a dark mode." } },
+      { n: 2, at: "2026-09-21T10:01:00.000Z", line: { kind: "note", text: "Every problem is resolved.", offers: "contract" } },
+    ],
+  });
+  const { state, changes } = migrate({ version: 1, settings: {}, repositories: [], jobs: [], asks: {}, archivedSeeded: true, editingSessions: [fromMain] });
+  assert.deepEqual(state.lastOpened, {});
+  const [session] = state.editingSessions;
+  assert.equal(session.specCut, null);
+  assert.equal(session.named, null);
+  assert.deepEqual(session.conversation[1].line, { kind: "note", text: "Every problem is resolved." });
+  assert.deepEqual(session.conversation[0], fromMain.conversation[0]);
+  assert.deepEqual(changes, [
+    "profile: added lastOpened: {}",
+    "session s-1: deleted lastView",
+    "session s-1: added confirmed: null",
+    "session s-1: added read: null",
+    "session s-1: added impact: null",
+    "session s-1: added specCut: null",
+    "session s-1: added named: null",
+    'session s-1: set lastPane "criteria" to null',
+    "session s-1: deleted offers from conversation entry 2",
+  ]);
+});
+
+test("refuses a file it cannot read as a profile, and changes nothing", () => {
+  for (const text of [
+    "{ not json",
+    "[1, 2]",
+    '{"editingSessions": {}}',
+    '{"version":1,"settings":{},"repositories":[],"editingSessions":{}}',
+    '{"version":1}',
+    '{"version":2,"settings":{},"repositories":[]}',
+    '{"version":1,"settings":[],"repositories":[]}',
+    '{"version":1,"settings":{},"repositories":{}}',
+    '{"version":1,"repositories":[]}',
+    '{"version":1,"settings":{}}',
+  ]) {
+    const dir = mkdtempSync(join(tmpdir(), "perbo-migrate-"));
+    const file = join(dir, "workspace.json");
+    writeFileSync(file, text);
+    const refused = node(dir);
+    assert.equal(refused.status, 1, text);
+    assert.match(refused.stderr, /nothing was changed/);
+    assert.equal(readFileSync(file, "utf8"), text);
+    assert.equal(existsSync(`${file}.bak`), false);
+  }
+});
+
+test("never replaces a backup that is already there", () => {
+  const dir = profile([older("s-1")]);
+  const file = join(dir, "workspace.json");
+  writeFileSync(`${file}.bak`, "the backup from before\n");
+  const before = readFileSync(file, "utf8");
+  const refused = node(dir);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /is already there, and a backup is never replaced, so nothing was changed/);
+  assert.equal(readFileSync(`${file}.bak`, "utf8"), "the backup from before\n");
+  assert.equal(readFileSync(file, "utf8"), before);
 });
 
 test("does not modify the state it is handed", () => {
-  const state = { editingSessions: [older("s-1")] };
+  const state = { version: 1, settings: {}, repositories: [], editingSessions: [older("s-1")] };
   const held = structuredClone(state);
   const { changes } = migrate(state);
   assert.ok(changes.length > 0);

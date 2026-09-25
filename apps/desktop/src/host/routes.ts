@@ -544,7 +544,8 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
           m.tickets.assertDigest(repo, request.key, request.digest);
           const current = m.tickets.contract(repo, request.key).contract;
           assertEditable(current);
-          // What the plan promised before this edit, for the marks on it.
+          // What the plan promised before this edit, for the change it records,
+          // the person's (D-128).
           const before = promiseOf(current);
           await run.invoke(editArgs(request.key, request.draft));
           job.resultKey = request.key;
@@ -667,9 +668,10 @@ function graphEdit(
       label: request.kind === "graphUndo" ? "Undo a plan edit" : "Change the plan's graph",
     },
     async (job, run) => {
-      // What the plan promised before, so what the edit changed of it can be
-      // marked on every planning over the ticket; an edit that only rearranged
-      // the graph changes nothing here and marks nothing.
+      // What the plan promised before, so what the edit changed of it is
+      // recorded on every planning over the ticket as the person's, which
+      // replaces the chat's marks (D-128); an edit that only rearranged the
+      // graph changes nothing here and records nothing.
       const before = m.marks.promiseAt(repo, request.key);
       await run.invoke(graphEditArgs(request.key, request));
       job.resultKey = request.key;
@@ -734,8 +736,9 @@ function fromSpec(
         await m.interviews.exited(request.id);
         if (m.editing.read(request.id).asking !== null) throw new Error(ANSWER_THE_QUESTIONS_FIRST);
       }
-      // What the plan promised before it is drafted again, for the marks on the
-      // re-draft. A first draft has no before, and records nothing.
+      // What the plan promised before it is drafted again, for the change the
+      // re-draft records: the person's, which marks nothing and replaces the
+      // chat's marks (D-128). A first draft has no before, and records nothing.
       const before = request.kind === "startOver" ? m.marks.promiseAt(repo, request.key) : null;
       const settings = m.profile.state.settings;
       // Read once the chat has stopped, so a title its last turn wrote is the

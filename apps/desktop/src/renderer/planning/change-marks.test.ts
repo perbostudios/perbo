@@ -174,10 +174,10 @@ describe("the marks on the last change (D-128)", () => {
   });
 
   it("tells a reworded criterion from one added and one removed by its words, never by its id", () => {
-    // The Plan pane's Next goes through `perbo edit --criterion`, which
-    // numbers the criteria afresh: after deleting the second of three, the
-    // third carries the second's id. By words, the survivors are unchanged
-    // and the one that went is struck through.
+    // A basic ticket's contract is written through `perbo edit --criterion`,
+    // which numbers the criteria afresh: after deleting the second of three,
+    // the third carries the second's id. By words, the survivors are
+    // unchanged and the one that went is struck through.
     const [a, b, c] = ["The person can choose Light or Dark.", "Text meets WCAG AA contrast.", "The rail follows the mode."];
     const middleGone = criteriaChange(
       [{ id: "ac_1", text: a }, { id: "ac_2", text: b }, { id: "ac_3", text: c }],

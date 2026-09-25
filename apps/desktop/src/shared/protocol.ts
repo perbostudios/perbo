@@ -1119,12 +1119,12 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    */
   z.strictObject({ kind: z.literal("impactContract"), repoId: identifier, key }),
   /**
-   * The plan read against the spec it was drafted from, on the way from the
-   * plan to the contract (D-128): where
-   * the two no longer promise the same thing, and the ways to close each
-   * difference. `driftDismiss` records that the person went on with the
-   * findings open, so the same reading is not put to them again at the same
-   * state.
+   * The plan read against the spec it was drafted from, on the way from an
+   * epic's plan to its contract and at a basic ticket's confirm of its
+   * contract (D-128, D-NEW-basic-and-epic-flows): where the two no longer
+   * promise the same thing, and the ways to close each difference.
+   * `driftDismiss` records that the person went on past an epic's findings,
+   * so the same reading is not put to them again at the same state.
    *
    * The session names itself, as `impactRead` does: the repository, the ticket
    * and the spec are the host's to derive from its records, and the model is

@@ -51,11 +51,14 @@ const problemKey = (open: readonly DriftFinding[]): string =>
  * answered there the same way. A question the interview asks of its own while
  * applying an answer is a card here too, for the same reason.
  *
- * **It is never a gate.** "Go on to the contract anyway" is there on every
- * problem, waiting or not, and records that the person went on; "Back to the
- * plan" is on every state. Nothing here becomes an edit, a path or an
- * argument: what a card sends is a string the person chose or typed
- * (ADR-0023 §4).
+ * **For an epic it is never a gate.** "Go on to the contract anyway" is there
+ * on every problem, waiting or not, and records that the person went on. A
+ * basic ticket's problems are the reason its Confirm contract is refused, so
+ * they are resolved rather than gone past: answered here, or by changing the
+ * criteria on the contract, and the page offers no way past them
+ * (D-NEW-basic-and-epic-flows). "Back to the plan" is on every state.
+ * Nothing here becomes an edit, a path or an argument: what a card sends is a
+ * string the person chose or typed (ADR-0023 §4).
  */
 export function DriftPane({ workspace, navigate, editor }: PageProps & { editor: Editor }) {
   const session = editor.session;
@@ -324,22 +327,25 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
         </div>
       </section>
     );
-  // The footer every state has: back to the plan, and — where a problem is
-  // open — the quiet way on past it, waiting or not, because the wait is
-  // never a gate either. Once every problem is resolved, and nothing is
-  // waited on or asked, the way on is Confirm the plan, to the right of the
-  // way back as on every pane's footer. "The plan", not "the contract": this
-  // is still planning, and the contract is where confirming it leads.
+  // The footer every state has: back to the plan, and — where an epic's
+  // problem is open — the quiet way on past it, waiting or not, because the
+  // wait is never a gate either; a basic ticket's problems hold its confirm
+  // until they are resolved, so there is no way past them. Once every
+  // problem is resolved, and nothing is waited on or asked, the way on is
+  // Confirm the plan, to the right of the way back as on every pane's
+  // footer. "The plan", not "the contract": this is still planning, and the
+  // contract is where confirming it leads.
+  const past = problem !== undefined && !basic;
   const footer = (resolved = false): ReactNode => (
     <div className="approve-actions pane-confirm">
-      {problem !== undefined && <span className="small muted">Going on leaves the problems open.</span>}
+      {past && <span className="small muted">Going on leaves the problems open.</span>}
       <Button onClick={back}>Back to the plan</Button>
       {resolved && (
         <Button variant="primary" onClick={contract}>
           {confirmLabel(flowFor(workspace, id ?? "").shape)}
         </Button>
       )}
-      {problem !== undefined && (
+      {past && (
         <button
           type="button"
           className="text-button small"

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { INTERVIEW_WROTE_THE_SPEC } from "../../shared/protocol.js";
-import { QuestionCard, ToolCard, foldAllowList, handedOver, sayWorking, waitsOnWords } from "./InterviewDock.js";
+import { QuestionCard, ToolCard, askedSubjects, foldAllowList, handedOver, sayWorking, waitsOnWords } from "./InterviewDock.js";
 
 afterEach(cleanup);
 
@@ -291,5 +291,28 @@ describe("a refused call's card", () => {
   it("wraps the reason over the lines it needs rather than cutting it to one", () => {
     const rule = cssRule(".tool-why");
     for (const cut of ["nowrap", "ellipsis", "overflow: hidden"]) expect(rule).not.toContain(cut);
+  });
+});
+
+describe("what the asked line says the questions are about", () => {
+  // Nothing a person reads is cut mid-sentence: the line names whole titles
+  // while they fit, counts the rest, and says the count alone where none fits.
+  const long = (word: string): string => `${word} ${"and its many consequences ".repeat(3).trim()}`;
+  it("names every title where they all fit", () => {
+    expect(askedSubjects(["Scope"])).toBe("Scope");
+    expect(askedSubjects(["Scope", "Rollout", "Tests"])).toBe("Scope, Rollout and Tests");
+  });
+  it("names the whole titles that fit and counts the rest, never cutting one", () => {
+    const titles = [long("Scope"), long("Rollout"), long("Tests")];
+    const said = askedSubjects(titles)!;
+    expect(said).toBe(`${titles[0]} and 2 more`);
+    expect(said.length).toBeLessThanOrEqual(120);
+    expect(said).not.toContain("…");
+    expect(askedSubjects([titles[0]!, "Rollout", "Tests", long("Data")])).toBe(`${titles[0]}, Rollout, Tests and 1 more`);
+  });
+  it("says nothing of the subject where not even the first title fits", () => {
+    expect(askedSubjects(["x".repeat(121)])).toBeNull();
+    expect(askedSubjects(["x".repeat(121), "Rollout"])).toBeNull();
+    expect(askedSubjects([])).toBeNull();
   });
 });

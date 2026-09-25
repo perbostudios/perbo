@@ -25,8 +25,10 @@ const ContractGraph = lazy(() =>
 /** Why a basic ticket's Confirm contract is refused while the reading has problems open. */
 export const PROBLEMS_HOLD =
   "The plan and the spec no longer promise the same thing. Resolve each problem on the Problems tab, or change the criteria here, then confirm again.";
-/** What a confirm the reading could not be made for says after why. */
+/** What a confirm the reading could not be made for says after why, where no problem is open. */
 const CONFIRM_WITHOUT = "Confirm again to go ahead without the reading.";
+/** Why a basic ticket's Confirm contract waits while the drafts list does not yet carry its planning. */
+export const NOT_LISTED = "The planning is still being read. Confirm again in a moment.";
 
 /** An approved contract's effort, where one was chosen; the provider's own default says nothing. */
 const effortText = (effort: EffortLevel | null): string =>
@@ -127,15 +129,14 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
     operation.intent === "compile" &&
     operation.reconciled &&
     editor.session?.phase !== "working";
-  // A write refused before it became an operation — the host turned the
-  // submission away — starts nothing to wait on: the submission is over, the
-  // operation is the one it saw, and the refusal is the editor's error, which
-  // the page shows in place of the wait.
+  // A write that never became an operation — the host turned the submission
+  // away, or it was called off before it was sent — starts nothing to wait
+  // on: the submission is over and the operation is the one it saw. A refusal
+  // is the editor's error, which the page shows in place of the wait.
   const refused =
     writing !== null &&
     editor !== null &&
     editor.submitting === null &&
-    editor.error !== null &&
     (operation?.id ?? null) === writing.after;
   useEffect(() => {
     if (!refused) return;
@@ -182,8 +183,8 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
   const readAt = reads ? readingState(listed.spec, session.form.draft) : null;
   const [confirming, setConfirming] = useState(false);
   const [holding, setHolding] = useState<string | null>(null);
-  // The state a reading could not be made at: never a wall, so the next
-  // confirm at it goes ahead without one.
+  // The state a reading could not be made at: never a wall of its own, so the
+  // next confirm at it goes ahead without one where no problem is open.
   const [unread, setUnread] = useState<string | null>(null);
   // The last change the chat made to a basic ticket's criteria, marked over
   // the words it left; a change made here by hand is the person's own and is
@@ -227,27 +228,42 @@ export function ContractScreen(context: TaskContext & { planning?: { editor: Edi
       .then(() => show("loop"))
       .catch(() => undefined);
   };
+  // A planning the drafts list does not carry yet has no state to compare a
+  // reading with, so its confirm waits for the list rather than going ahead
+  // unread.
+  const unlisted =
+    shows === "criteria-editor" &&
+    planning !== undefined &&
+    session !== null &&
+    listed === undefined &&
+    session.specSlug !== null &&
+    ticket.admission.spec !== null;
   const confirm = async (): Promise<void> => {
+    if (unlisted) return setHolding(NOT_LISTED);
     if (!reads || readAt === null || session === null || listed === undefined) return start();
     setHolding(null);
-    if (unread === readAt) return start();
-    if (listed.read === readAt) {
+    // Problems still open hold the confirm whatever else is true: a reading
+    // that could not be made lets it go ahead only where none is open.
+    if (unread === readAt || listed.read === readAt) {
       if (problemsOpen(workspace.drafts, session.id)) setHolding(PROBLEMS_HOLD);
       else start();
       return;
     }
+    // What a reading that could not be made says after why: the way on where
+    // no problem is open, and the problems where any are.
+    const withoutReading = (): string => (problemsOpen(workspace.drafts, session.id) ? PROBLEMS_HOLD : CONFIRM_WITHOUT);
     setConfirming(true);
     try {
       const job = await settled(await bridge.request({ kind: "driftCheck", id: session.id, state: readAt }));
       const verdict = job.state === "completed" ? DriftVerdictSchema.safeParse(job.result) : null;
       if (verdict === null || !verdict.success) {
         setUnread(readAt);
-        setHolding(`${job.error ?? "The reading did not finish."} ${CONFIRM_WITHOUT}`);
+        setHolding(`${job.error ?? "The reading did not finish."} ${withoutReading()}`);
       } else if (!verdict.data.dismissed && verdict.data.findings.length > 0) setHolding(PROBLEMS_HOLD);
       else start();
     } catch (error) {
       setUnread(readAt);
-      setHolding(`${errorMessage(error)} ${CONFIRM_WITHOUT}`);
+      setHolding(`${errorMessage(error)} ${withoutReading()}`);
     } finally {
       setConfirming(false);
     }

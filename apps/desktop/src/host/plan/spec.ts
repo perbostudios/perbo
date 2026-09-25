@@ -284,7 +284,7 @@ export function saveSpec(
   // on the contract page and at approval, not here
   // (D-128).
   //
-  // What the file said before, for the marks on what this save changed of it:
+  // What the file said before, for the change this save records, the person's:
   // nothing at all where there is no file yet, so a first save is a change from
   // nothing, and no reading where the file will not read, so the save is not
   // measured.

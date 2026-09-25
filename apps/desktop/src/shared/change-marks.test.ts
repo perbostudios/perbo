@@ -182,4 +182,21 @@ describe("the change marks both hosts record (D-128)", () => {
       },
     ]);
   });
+
+  it("says why a change could not be marked whole, however long the reason", () => {
+    // Nothing a person reads is cut short to fit: the chat's own note is
+    // where a line the record will not hold is said.
+    const sessions = [planning({ id: "p1", repoId: "r1", key: null, specSlug: "themes", phase: "editing" })];
+    const { marks, refuse, said } = fixture(sessions);
+    const reason = "The record will not hold this section. ".repeat(400).trim();
+    refuse(reason);
+    marks.markChangeOn(
+      { spec: sections("- Light."), plan: null },
+      { spec: sections("- Dark."), plan: null },
+      (session) => session.specSlug === "themes",
+      "chat",
+    );
+    expect(said).toEqual([{ id: "p1", line: { kind: "note", text: `The change could not be marked on the panes: ${reason}` } }]);
+    expect(reason.length).toBeGreaterThan(12_000);
+  });
 });

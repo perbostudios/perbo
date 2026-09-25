@@ -4315,23 +4315,6 @@ kbd {
   order: -1;
   max-width: 62ch;
 }
-/* Mounted and out of the way: the composer is what lands on the drafted
-   contract when a job settles, so it is never unmounted — but its steps are
-   not a second way to plan, offered under the first. */
-/* The nodes a graph divided the work into, on the page that freezes them. */
-.contract-nodes ol {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-.contract-nodes li {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
 /* An epic's graph on its contract, read, panned and zoomed in a window of its own. */
 .contract-graph {
   display: flex;

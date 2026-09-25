@@ -17,7 +17,7 @@ import type { Detail, Snapshot } from "../../shared/protocol.js";
 import { runnerProgress } from "../../shared/runner-progress.js";
 import { HomePage } from "../tasks/HomePage.js";
 import { TaskPage } from "../tasks/TaskPage.js";
-import { PROBLEMS_HOLD } from "../tasks/ContractScreen.js";
+import { NOT_LISTED, PROBLEMS_HOLD } from "../tasks/ContractScreen.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import { handlers } from "../../sample-host/handlers.js";
 import { editing as sampleEditing } from "../../sample-host/records.js";
@@ -406,6 +406,106 @@ describe("interactive desktop flows", () => {
     );
   });
 
+  it("refuses the confirm while problems are open though the reading after a change could not be made, and never offers to go on without it", async () => {
+    const { key } = await landedFlat("Signup notice mail");
+    await reword("Every new signup queues exactly one email.");
+    fireEvent.click(screen.getByRole("button", { name: "Approve · start the loop" }));
+    await screen.findByText(PROBLEMS_HOLD, {}, { timeout: 8000 });
+    await waitFor(() => expect(tabs()).toContain("Problems"));
+    // Changed again, so the next confirm owes a reading, and that reading fails.
+    await reword("Each new signup queues exactly one email.");
+    const before = await readings(key);
+    const original = bridge.request.bind(bridge);
+    const sent = vi.spyOn(bridge, "request").mockImplementation(((request: Parameters<typeof original>[0]) =>
+      request.kind === "driftCheck"
+        ? Promise.reject(new Error("The reviewer could not be reached."))
+        : request.kind === "run"
+          ? Promise.resolve(null as never)
+          : original(request)) as typeof bridge.request);
+    fireEvent.click(screen.getByRole("button", { name: "Approve · start the loop" }));
+    const failed = await screen.findByText(/^The reviewer could not be reached\./, {}, { timeout: 8000 });
+    expect(failed.textContent).toBe(`The reviewer could not be reached. ${PROBLEMS_HOLD}`);
+    expect(screen.queryByText(/Confirm again to go ahead without the reading/)).toBeNull();
+    // Pressed again at the state the reading could not be made at: still held.
+    fireEvent.click(screen.getByRole("button", { name: "Approve · start the loop" }));
+    await screen.findByText(PROBLEMS_HOLD);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sent.mock.calls.some(([request]) => request.kind === "run")).toBe(false);
+    expect(await readings(key)).toBe(before);
+  });
+
+  it("holds the confirm, reading nothing and starting nothing, while the drafts list does not carry the planning", async () => {
+    const { id, key } = await landedFlat("Signup notice list mail");
+    await reword("Every new signup queues exactly one email.");
+    const before = await readings(key);
+    // The list read without this planning, from the host and in the page's copy alike.
+    const original = bridge.request.bind(bridge);
+    const sent = vi.spyOn(bridge, "request").mockImplementation((async (request: Parameters<typeof original>[0]) => {
+      if (request.kind === "run") return null as never;
+      const reply = await original(request);
+      if (request.kind === "drafts") return (reply as Snapshot["drafts"] & object).filter((draft) => draft.id !== id);
+      if (request.kind === "snapshot") return { ...(reply as Snapshot), drafts: ((reply as Snapshot).drafts ?? []).filter((draft) => draft.id !== id) };
+      return reply;
+    }) as typeof bridge.request);
+    client.setQueryData<Snapshot>(["workspace"], (workspace) =>
+      workspace === undefined ? workspace : { ...workspace, drafts: (workspace.drafts ?? []).filter((draft) => draft.id !== id) },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve · start the loop" }));
+    await screen.findByText(NOT_LISTED);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sent.mock.calls.some(([request]) => request.kind === "run")).toBe(false);
+    expect(await readings(key)).toBe(before);
+  });
+
+  it("reads the plan when the approve binding is pressed after a change, and holds it while problems are open", async () => {
+    const { key } = await landedFlat("Signup keyboard mail");
+    await reword("Every new signup queues exactly one email.");
+    const before = await readings(key);
+    const sent = vi.spyOn(bridge, "request");
+    // ⇧⌘↩ as a Mac reads it.
+    const press = (): void => {
+      setPlatformForTests(true);
+      try {
+        fireEvent.keyDown(window, { key: "Enter", metaKey: true, shiftKey: true });
+      } finally {
+        setPlatformForTests(null);
+      }
+    };
+    press();
+    await screen.findByText(PROBLEMS_HOLD, {}, { timeout: 8000 });
+    expect(await readings(key)).toBe(before + 1);
+    expect(sent.mock.calls.some(([request]) => request.kind === "driftCheck")).toBe(true);
+    await waitFor(() => expect(tabs()).toContain("Problems"));
+    // Pressed again with the problems open: refused, and nothing read again.
+    press();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(screen.getByText(PROBLEMS_HOLD)).toBeTruthy();
+    expect(sent.mock.calls.some(([request]) => request.kind === "run")).toBe(false);
+    expect(await readings(key)).toBe(before + 1);
+  });
+
+  it("marks the chat's change on the contract, and a hand edit after it leaves no marks (D-128)", async () => {
+    const { id } = await landedFlat("Signup marks mail");
+    const record = await sampleBridge.request({ kind: "editingRead", id });
+    const after = record.form.draft.criteria.map((criterion, index) => ({ id: `ac_${index + 1}`, text: criterion.text }));
+    const before = [{ id: "ac_1", text: "A sentence the chat took away." }, ...after.slice(1)];
+    sampleEditing.recordChange(id, {
+      at: new Date().toISOString(),
+      by: "chat",
+      spec: null,
+      plan: { before: { outcome: record.form.draft.outcome, criteria: before }, after: { outcome: record.form.draft.outcome, criteria: after } },
+    });
+    await sampleBridge.request({ kind: "editingRead", id });
+    const marked = () => document.querySelectorAll(".criteria-editor .change--added, .criteria-editor .change--removed").length;
+    await waitFor(() => expect(marked()).toBeGreaterThan(0), { timeout: 5000 });
+    // The person's own rewording, by hand: the chat's marks go, and none are drawn for it.
+    await reword("Every new signup queues exactly one email.");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(marked()).toBe(0);
+    expect(document.querySelectorAll(".criteria-editor del, .criteria-editor ins, .criteria-editor mark")).toHaveLength(0);
+  });
+
   it("moves a person on the Problems tab back to the contract once every problem is resolved, and the tab goes", async () => {
     const { id, key } = await landedFlat("Signup digest mail");
     await reword("Every new signup queues exactly one email.");
@@ -415,6 +515,10 @@ describe("interactive desktop flows", () => {
     fireEvent.click(within(screen.getByRole("group", { name: "Planning panes" })).getByRole("button", { name: "Problems" }));
     await waitFor(() => expect(location.hash).toBe(`#planning/${id}/drift`));
     await screen.findByText(/^Problem 1 of \d$/, {}, { timeout: 8000 });
+    // The problems hold the confirm until they are resolved, so the page
+    // offers no way past them, as it does an epic's.
+    expect(screen.queryByRole("button", { name: "Go on to the contract anyway" })).toBeNull();
+    expect(screen.queryByText("Going on leaves the problems open.")).toBeNull();
     // The spec takes the plan's words, and the plan is read again: nothing
     // differs any more.
     const spec = await sampleBridge.request({ kind: "specRead", id });

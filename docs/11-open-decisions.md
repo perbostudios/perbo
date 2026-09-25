@@ -691,8 +691,8 @@ This is the one home for the decisions that govern Perbo. Every other document c
   without writing the spec is refused, by name, saying what is still direct. The same holds the
   other way about: when the Architect writes the spec while a plan is drafted, it moves the plan
   to answer it in the same turn, or says in one line why the plan needs no change. A person is not
-  held to either — at the Graph pane, at the Spec pane, in their own editor, or through the
-  queue's endpoint with their own token — because a hand edit writes one document and not the
+  held to either — on a basic ticket's contract, at the Spec pane, in their own editor, or through
+  the queue's endpoint with their own token — because a hand edit writes one document and not the
   other: the person's own edit, and a chat turn that wrote the spec and judged the plan needs no
   change, are the ways the two can still part, and reading the difference afterwards is the
   answer to both. On the way from the plan to the contract a model reads the
@@ -704,14 +704,17 @@ This is the one home for the decisions that govern Perbo. Every other document c
   the plan carries it forward — only from a state that had it, so a hand edit never read is not
   washed away by a later turn — a rename, which moves only the title line the reading never reads,
   carries the verdict as it stands, and a hand edit of a promise or of the spec, or a chat turn that
-  wrote the spec and left the plan, lets it go. It is read on a page of its own between the plan
-  and the contract, and each difference is put, one at a time, as answers to pick from in D-117's shape, on that page and in the chat beside every
+  wrote the spec and left the plan, lets it go. It is read on a page of its own between an epic's
+  plan and its contract, and at a basic ticket's **Confirm contract**
+  (D-NEW-basic-and-epic-flows), and each difference is put, one at a time, as answers to pick from in D-117's shape, on that page and in the chat beside every
   other, with the person's own words beside them; whichever they
   pick goes to the Architect as an ordinary turn, so the spec and the plan move together under the
   guard above, and nothing the model returned becomes anything but a turn
-  ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). It is advice and never a gate: the
-  person may go on to the contract with every difference open, and having done so is recorded
-  against the same two hashes, so the same reading is not put to them again at the same state. It
+  ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4). For an epic it is advice and never a
+  gate: the person may go on to the contract with every difference open, and having done so is
+  recorded against the same two hashes, so the same reading is not put to them again at the same
+  state. A basic ticket's Confirm contract is refused while a difference is open, until each is
+  resolved (D-NEW-basic-and-epic-flows). It
   is a reading of words, apart from the id-level disagreements the contract page lists — a
   requirement nothing cites, a citation pointing at nothing — which stay where they are. A
   criterion an edit writes carries the requirement it answers, as a drafted one does, and a
@@ -731,9 +734,10 @@ This is the one home for the decisions that govern Perbo. Every other document c
   from a state that had one, because a turn cannot vouch for a hand edit it did not see. The
   difference goes back through the chat rather than through an edit of its own because the
   Architect is the one editor holding both documents: an answer picked on the page moves the spec
-  and the plan under the same guard, where a direct edit would have to be held to it again. It is
-  advice because a check that gated the contract would be one people learn to click past, and
-  because a difference a person chose to keep is theirs to keep. A citation is checked where the
+  and the plan under the same guard, where a direct edit would have to be held to it again. For an
+  epic it is advice because a check that gated the contract would be one people learn to click
+  past, and because a difference a person chose to keep is theirs to keep; a basic ticket's is
+  held at its confirm for the reason D-NEW-basic-and-epic-flows gives. A citation is checked where the
   contract freezes rather than at every edit, so a drafter may leave a requirement uncited and no
   later edit is refused over a state whoever is editing did not create.
 - Built: the chat's own guard, which refuses an `edit_plan` changing the outcome or a
@@ -761,8 +765,9 @@ This is the one home for the decisions that govern Perbo. Every other document c
   recorded; the desktop's `driftCheck`, a job in
   the same manner as drafting, and `driftDismiss`, which the host refuses for a session with no
   spec, no plan or an approved ticket, and clears the differences the host keeps; and the
-  Problems pane between the plan and the contract, reached by every way from the plan to the
-  contract, which asks for the reading as it opens and goes on to the contract tab on its own when
+  Problems pane between an epic's plan and its contract, reached by every way from the plan to the
+  contract, and in a basic ticket's rail while its confirm's reading has problems open, which asks
+  for the reading as it opens and goes on to the contract tab on its own when
   nothing differs — problems resolved from another pane included — or the person went on before; where the reading finds differences the host
   keeps them on the planning until the person goes on with them open or the contract is approved;
   the pane hides the chat, and while any of them is open it sits in the rail after Explorer and
@@ -778,12 +783,12 @@ This is the one home for the decisions that govern Perbo. Every other document c
   either, because it read a plan the turn's answer had not reached yet; the same problem is put in the chat as an asked line in D-117's shape headed
   "Problem 1 of N", so it is answered from any other pane the same way and the same re-read
   follows; once none is open the pane says "Every problem is resolved" and offers "Confirm the
-  plan" — "Confirm contract" for a basic ticket — at its foot, to the right of "Back to the plan" — the work is still being planned, and the button is the way on to the contract — and the
+  plan" at its foot, to the right of "Back to the plan" — the work is still being planned, and the button is the way on to the contract — while a basic ticket's goes back to its contract on its own, leaving the rail, and the
   chat's note saying the same is words alone, because every pane the chat sits beside but the Spec
   pane and the contract carries that way on already; a question the Architect raises of its own stands
   ahead of that resolved state, on the page as the thing to answer, headed "A question from the
   Architect" with the counter hidden, and the way on is withheld on the page until
-  it is answered and the plan read again; "Go on to the contract anyway"
+  it is answered and the plan read again; "Go on to the contract anyway", for an epic,
   and "Back to the plan" stay on every state, and an error shows with the way on and the way
   back rather than as a wall; the citation check at
   approval, where the contract is frozen and the spec travels with it, refusing a plan that cites
@@ -795,15 +800,17 @@ This is the one home for the decisions that govern Perbo. Every other document c
   node's page names the requirement rather than telling the executor it was drafted from nothing;
   the criteria whose verification the draft did not propose marked on the page that freezes them —
   on an epic's contract, which shows the graph, named under it —
-  because approving is the last place a changed assertion can be read; and the last change to the
-  pair marked where the two are read — the Spec pane's reading and the Graph's node cards and
-  inspector — additions green and removals red and struck through, kept on the
-  planning as what the spec's sections and the plan's outcome and criteria said before and after,
-  recorded once a chat turn ends and once an edit by hand, a compile or a spec save lands, only
-  where words differ and never for the first words put into an empty spec section or a plan just
-  drafted, which are not an edit, and replaced whole by the next change, so that what a person
-  reads marked is always the one change they have not yet read; nothing is marked while a section
-  or a criterion is being edited.
+  because approving is the last place a changed assertion can be read; and the last change the
+  chat made to the pair marked where the two are read — the Spec pane's reading, the Graph's node
+  cards and inspector, and a basic ticket's criteria on its contract — additions green and removals
+  red and struck through, kept on the planning as what the spec's sections and the plan's outcome
+  and criteria said before and after and who made the change: the chat, recorded once a chat turn
+  ends, or the person, recorded once an edit by hand, a compile, a spec save or a plan drafted
+  again lands; only where words differ and never for the first words put into an empty spec
+  section or a plan just drafted, which are not an edit; replaced whole by the next change,
+  whoever made it; and marked only where the chat made it, since a person's own change was made
+  where they read it, so that what a person reads marked is always the one change the chat made
+  that they have not yet read; nothing is marked while a section or a criterion is being edited.
 
 ### D-129 — Before the loop is the picker's; the loop is Home's
 
@@ -957,17 +964,26 @@ This is the one home for the decisions that govern Perbo. Every other document c
   the reading found any, else on Impact where the check found paths outside the scope, else on the
   contract, with a pop-up over that page saying the task is simple, so there is no graph, whose one
   button, **Next**, puts it away. A basic ticket offers Spec and Explorer, then Impact only while
-  its last check found paths outside the scope and Problems while any are open, and its way on,
-  **Confirm contract**, goes through the same reading. The contract is the planning's last tab,
-  **Confirm contract**, shown while the person is on it and afterwards while nothing has changed
-  since they were — the spec's sections, a mark in the Explorer, an edit of the plan; once
-  something has, the tab goes until the change is checked again and the person reaches the
-  contract again, through the reading for either shape. The chat is not beside it. On it a basic
-  ticket's criteria are edited directly, each change written into the contract as it is made and
-  the plan read against the spec again, the person landing back on the contract where the two
-  still agree and on Problems where they do not; a direct edit carries no change marks, which are
-  the chat's (D-128). An epic's contract shows its graph in place of the criteria, read-only:
-  panned and zoomed, and changed only on the Graph pane. The ticket's contract after approval draws
+  its last check found paths outside the scope and Problems while any are open, and its way on is
+  **Confirm contract**. The contract is the planning's last tab, **Confirm contract**, shown while
+  the person is on it and afterwards while nothing has changed since they were — the spec's
+  sections, a mark in the Explorer, an edit of the plan; once something has, the tab goes until
+  the person reaches the contract again, through the reading for an epic. The chat is not beside
+  it. On it a basic ticket's criteria are edited by hand, each change written into the contract as
+  it is made; such an edit starts no reading and keeps the tab, since it is made on the tab
+  itself, and carries no change marks, which are the chat's (D-128), while a change the chat made
+  to them is marked there. A basic ticket's plan is read against its spec when the person confirms
+  the contract — **Approve · start the loop**, on the contract tab — and only where the spec or the
+  criteria have moved since the last reading: a plan just drafted and not changed keeps the
+  agreeing verdict its drafting wrote and confirms straight away, with no model run. Where the reading finds problems, the Problems tab appears in the rail
+  as it does for an epic, in the same place, while any is open, and the confirm is refused until
+  each is resolved — answered on the Problems page as an epic's are, with no way past them there,
+  or by changing the criteria on the contract and confirming again, which reads the plan again.
+  Once every problem is resolved the tab goes, and a person on it is moved back to the contract to
+  confirm again. An epic's contract shows its graph in place of the criteria, read-only: panned and
+  zoomed, and changed only on the Graph pane, whose node inspector shows each node's criteria
+  read-only too; the chat changes an epic's criteria, through the validated edit path (D-100,
+  D-102), and there is no pane for criteria of their own. The ticket's contract after approval draws
   the plan by the same rule, an epic's graph and a basic ticket's criteria, both read-only. Every
   node on a graph, on the Graph pane and on a contract, says under its title how many criteria it
   covers and the paths expected to satisfy them. Plan it again lands in the planning over the plan
@@ -977,21 +993,37 @@ This is the one home for the decisions that govern Perbo. Every other document c
   the one thing on it to change, and the contract, the page that freezes them, already shows them.
   The pop-up says why the graph is missing at the moment it would be looked for. A contract kept as
   a tab only while nothing has moved means that going back to it is always going back to a
-  contract that was checked.
+  contract that was checked. A basic ticket's criteria are changed by hand on the page that
+  freezes them, so the confirm is the last moment the plan can be read against the spec before it
+  is frozen, and reading there rather than at each edit leaves the edits uninterrupted; reading
+  only where something moved keeps an unchanged draft one press from approval. Its problems hold
+  that press, where an epic's are advice (D-128), because approving is the step after it and
+  freezes the criteria as they stand. An epic's criteria are the chat's to change because the chat
+  holds the spec and the plan together (D-102), so the graph shows them to be read.
 - Built: `flowFor` in `apps/desktop/src/renderer/planning/panes.ts`, the one rule for which tabs a
   planning shows, which the rail draws and planning mode records against; `contractState` there,
   the state a contract is reached at — the spec's sections, which each host fingerprints onto the
   planning's open draft as `spec`, the ticket's `updated_at`, and the scope the planning holds —
   recorded on the session as `confirmed` by `editingContractVisited` as the person arrives on the
-  contract tab, and compared on every draw; the session's `impact`, how many paths the last impact
-  check of its draft found outside the scope, written by both hosts as the check answers and
-  cleared by a fresh draft; `useDraftLanding` and `SimpleTaskNotice` in
-  `renderer/planning/SimpleTask.tsx`, which watch a draft settle, run a basic ticket's two checks
-  and land it by `checkedLanding`; `ContractPane`, the contract tab; `contractShows` in
-  `renderer/tasks/ContractScreen.tsx`, the one rule both contract pages draw the plan by;
+  contract tab, and again by the contract page once a change written there lands, and compared on
+  every draw; `readingState` there, the state a reading is of — the spec's sections and the plan's
+  outcome and criteria's words, sorted — which `driftCheck` carries as `state` and both hosts record
+  on the session as `read` once a reading no chat turn overlapped lands of it, and which a fresh
+  draft clears; the session's `impact`, how many paths the last impact check of its draft found
+  outside the scope, written by both hosts as the check answers and cleared by a fresh draft;
+  `useDraftLanding` and `SimpleTaskNotice` in `renderer/planning/SimpleTask.tsx`, which watch a
+  draft settle, run a basic ticket's two checks and land it by `checkedLanding`, and check the
+  impact of a basic plan opened with none recorded, where it opened; `ContractPane`, the contract
+  tab; `contractShows` in `renderer/tasks/ContractScreen.tsx`, the one rule both contract pages
+  draw the plan by, and there the basic ticket's confirm, which reads the plan where `read` is not
+  its `readingState` and holds the approve while problems are open, whether or not the reading
+  could be made, goes ahead without a reading that could not be made on the next press only
+  while no problem is open, and holds while the drafts list does not yet carry the planning;
+  `DriftPane` moving a basic ticket's person back to the contract once every problem is resolved;
   `CriteriaEditor`, the criteria editing the ticket's own editor and a basic ticket's contract
-  share; `ContractGraph` and `nodeSummary` beside the Graph pane; and `draftedLanding`, where Plan
-  it again lands.
+  share, which draws the chat's marks;
+  `GraphInspector`, which reads a node's criteria; `ContractGraph` and `nodeSummary` beside the
+  Graph pane; and `draftedLanding`, where Plan it again lands.
 
 ### D-131 — A planning starts from its repository's question
 

@@ -1075,20 +1075,13 @@ function Line({
     // later wants from this line. The count is what is left when the session
     // titled none of them.
     const about = line.groups.flatMap((group) => (group.title === null ? [] : [group.title]));
-    // Titles are the session's own words, four groups of up to two hundred
-    // characters: said in the line they would be the long account the card
-    // exists to keep out of the chat.
-    const subjects = (titles: string[]): string => {
-      const joined =
-        titles.length === 1 ? titles[0]! : `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
-      return joined.length > 120 ? `${joined.slice(0, 117).trimEnd()}…` : joined;
-    };
+    const subjects = askedSubjects(about);
     return (
       <p className="msg msg--note asked-said">
         {`Asked ${parts === 1 ? "one question" : `${parts} questions`}${
           line.groups.length > 1 ? ` in ${line.groups.length} groups` : ""
         }`}
-        {about.length > 0 && `, about ${subjects(about)}`}.
+        {subjects !== null && `, about ${subjects}`}.
         {/* The questions alone: the answers given are in the chat, as the
             person's own turns. */}
         <InfoHint
@@ -1187,6 +1180,29 @@ export function ToolCard({
       )}
     </div>
   );
+}
+
+/**
+ * What the "Asked …" line names the questions as being about, composed to fit
+ * `limit` characters in whole titles, since nothing a person reads is cut
+ * mid-sentence. Titles are the session's own words, four groups of up to two
+ * hundred characters: said in full they would be the long account the card
+ * exists to keep out of the chat. So as many whole titles as fit are named and
+ * the rest counted ("and 2 more"); where not even the first fits, `null`, and
+ * the line says the count alone.
+ */
+export function askedSubjects(titles: readonly string[], limit = 120): string | null {
+  for (let named = titles.length; named > 0; named -= 1) {
+    const rest = titles.length - named;
+    const text =
+      rest > 0
+        ? `${titles.slice(0, named).join(", ")} and ${rest} more`
+        : named === 1
+          ? titles[0]!
+          : `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
+    if (text.length <= limit) return text;
+  }
+  return null;
 }
 
 /** The first sentence of what a tool said, or all of it where it has no end to a sentence. */

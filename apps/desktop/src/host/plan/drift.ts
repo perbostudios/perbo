@@ -1,6 +1,5 @@
 import { DriftVerdictSchema, type DriftVerdict } from "@perbo/planning";
 import { redact, requireSuccess } from "../process.js";
-import { readable } from "../interview/relay.js";
 import {
   REREAD_COULD_NOT_START,
   turnMark,
@@ -136,20 +135,32 @@ export class DriftReadings {
         // stdout; a print that is not one fails the job rather than reaching a
         // card.
         const verdict = DriftVerdictSchema.parse(job.result);
-        // And what the model said goes to the person the way every line the
-        // interview relay records does: redacted and flattened, because it is
-        // the model's text about the spec and the plan, and a secret either
-        // quoted would otherwise land in the record and on the page. Redaction
-        // can empty a field outright (a heading that was only escape codes),
-        // and a card with no heading or no difference is a card about nothing,
-        // so the reading fails rather than showing one; a detail is the one
-        // field that may go. Parsed again afterwards, since a replacement can
-        // lengthen a field past what the schema allows before the clip.
+        // And what the model said goes to the person redacted and flattened,
+        // because it is the model's text about the spec and the plan, and a
+        // secret either quoted would otherwise land in the record and on the
+        // page. The model was held to each field's length as it wrote, and
+        // nothing is cut to fit here: a word cut short is a sentence the
+        // person reads as something it did not say. Redaction can empty a
+        // field outright (a heading that was only escape codes), or lengthen
+        // it past what the field holds (a short secret written as
+        // `[redacted]`), and a card with no heading or no difference, or with
+        // one cut short, is not one to put, so the reading fails rather than
+        // showing it; a detail is the one field that may go, whole.
+        const shown = (text: string): string => redact(text).replace(/\s+/g, " ").trim();
         const required = (text: string, cap: number, field: string): string => {
-          const kept = readable(text, cap);
+          const kept = shown(text);
           if (kept.length === 0)
             throw new Error(`The reading's ${field} did not survive redaction.`);
+          if (kept.length > cap)
+            throw new Error(
+              `The reading's ${field} is longer than the ${cap} characters it may hold once a secret in it is ` +
+                "redacted, and is not shown cut short.",
+            );
           return kept;
+        };
+        const optional = (text: string | null, cap: number): string | null => {
+          const kept = text === null ? "" : shown(text);
+          return kept.length === 0 || kept.length > cap ? null : kept;
         };
         const landed = DriftVerdictSchema.parse({
           ...verdict,
@@ -158,7 +169,7 @@ export class DriftReadings {
             difference: required(finding.difference, 600, "difference"),
             options: finding.options.map((option) => ({
               label: required(option.label, 200, "option"),
-              detail: option.detail === null ? null : readable(option.detail, 600) || null,
+              detail: optional(option.detail, 600),
               recommended: option.recommended,
             })),
           })),
@@ -191,11 +202,11 @@ export class DriftReadings {
    * ticket is read again for that, since the approval may be another
    * process's.
    *
-   * The fields were redacted and bounded as the verdict landed, within what an
-   * asked line holds — a heading is shorter than a title, a difference is a
-   * question's length, and the options are the interview's own shape — so
-   * nothing is clipped again here, and a line the record will not hold is the
-   * chat's note rather than a throw out of the job.
+   * The fields were redacted and held to their lengths as the verdict landed,
+   * within what an asked line holds — a heading is shorter than a title, a
+   * difference is a question's length, and the options are the interview's
+   * own shape — so nothing is measured again here, and a line the record will
+   * not hold is the chat's note rather than a throw out of the job.
    *
    * The state the asker read at is recorded only where no turn overlapped the
    * reading: a turn that moved the spec or the plan meanwhile means the
@@ -290,9 +301,7 @@ export class DriftReadings {
       this.rereadOwed.delete(id);
       this.deps.interview.say(id, {
         kind: "note",
-        text: `${REREAD_COULD_NOT_START}: ${redact(
-          error instanceof Error ? error.message : String(error),
-        )}`.slice(0, 2000),
+        text: `${REREAD_COULD_NOT_START}: ${redact(error instanceof Error ? error.message : String(error))}`,
       });
     }
   }

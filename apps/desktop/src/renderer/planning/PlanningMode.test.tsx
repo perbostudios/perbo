@@ -1945,12 +1945,15 @@ describe("the Spec pane (SCP-336)", () => {
     await screen.findByText("Drafting the plan from your spec");
     // It lands on the plan, which is the point of having drafted one: the
     // drafter divides this spec into two nodes, so the plan has a graph and
-    // the graph is where the person goes. Work it does not divide lands on the
-    // criteria instead, which is that plan's own pane.
+    // the graph is where the person goes. Work it does not divide lands where
+    // its checks say, with a pop-up saying the task is simple; a divided plan
+    // has its graph, and no pop-up (D-NEW-basic-and-epic-flows).
     await waitFor(() => expect(location.hash).toMatch(/^#planning\/[^/]+\/graph$/), {
       timeout: 5000,
     });
     await screen.findByRole("button", { name: "Confirm the plan" }, { timeout: 5000 });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(screen.queryByRole("dialog", { name: "A simple task" })).toBeNull();
 
     // Back in planning, each requirement carries the node its criteria sit in,
     // beside its own id rather than in a table under the section: the id is the

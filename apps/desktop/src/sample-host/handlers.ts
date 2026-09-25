@@ -431,8 +431,8 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     });
     if (merged.conflicting.length > 0)
       return { view: specView(request.id), conflicting: merged.conflicting };
-    // What the file said before, for the marks on what this save changed of
-    // it: nothing at all where there is no file yet.
+    // What the file said before, for the change this save records, the
+    // person's (D-128): nothing at all where there is no file yet.
     const before = session.specSlug === null ? null : specSectionsAt(session.specSlug);
     const rendered = renderSpec(merged.text, {
       highWater: current?.highWater ?? 0,
@@ -557,8 +557,8 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         refuseUnnumbered(markdown);
         const { ticket } = ticketRow(request.key);
         if (ticket.approved_at) throw new Error("An approved contract is immutable.");
-        // What the plan promised before it is drafted again, for the marks on
-        // the re-draft.
+        // What the plan promised before it is drafted again, for the change
+        // the re-draft records, the person's (D-128).
         const before = marks.promiseAt({ id: request.repoId }, request.key);
         draftFromSpec(request.key, markdown, session.specSlug, session);
         // A name the person gave the ticket outlives the re-draft, as the host
@@ -825,7 +825,8 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       if (!snapshot.tasks.some((row) => row.repoId === request.repoId && row.ticket.key === request.key)) throw new Error("Sample task not found in this repository.");
       if (ticket.approved_at) throw new Error("An approved contract cannot be edited.");
       if (detail(request.key).digest !== request.digest) throw new Error("The contract changed since you viewed it.");
-      // What the plan promised before this edit, for the marks on it.
+      // What the plan promised before this edit, for the change it records,
+      // the person's (D-128).
       const before = marks.promiseAt({ id: request.repoId }, request.key);
       applyDraft(ticket, request.draft);
       ticket.plan_version += 1;

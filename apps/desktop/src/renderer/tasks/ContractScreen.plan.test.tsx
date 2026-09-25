@@ -109,6 +109,29 @@ describe("a basic ticket's criteria written into its contract (D-NEW-basic-and-e
     expect(screen.queryByText("Writing the change into the contract…")).toBeNull();
     expect((screen.getByRole("button", { name: "Approve · start the loop" }) as HTMLButtonElement).disabled).toBe(false);
   });
+
+  /**
+   * A submission that ends with no operation of its own and no refusal —
+   * called off before it was sent — leaves nothing to wait on either.
+   */
+  it("is not left writing after a submission that started no operation", async () => {
+    const context = await contextFor({ flat: true, approved: false });
+    const request = sampleBridge.request.bind(sampleBridge);
+    vi.spyOn(sampleBridge, "request").mockImplementation(((input: Parameters<typeof request>[0]) =>
+      input.kind === "editingSubmit"
+        ? request({ kind: "editingRead", id: input.id })
+        : request(input)) as typeof sampleBridge.request);
+    mount(<InPlanning {...context} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit criterion 1" }, { timeout: 5000 }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Criterion 1" }), {
+      target: { value: "The importer and its routes are gone, and nothing links to them." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Writing the change into the contract…");
+    await waitFor(() => expect(screen.queryByText("Writing the change into the contract…")).toBeNull());
+    expect(screen.queryByRole("status")).toBeNull();
+    expect((screen.getByRole("button", { name: "Approve · start the loop" }) as HTMLButtonElement).disabled).toBe(false);
+  });
 });
 
 describe("the marks on a basic ticket's contract (D-128)", () => {
@@ -143,6 +166,11 @@ describe("the marks on a basic ticket's contract (D-128)", () => {
       await waitFor(() => expect(editor.querySelectorAll(".change--added, .change--removed").length).toBeGreaterThan(0));
       expect(within(editor).getByText("A criterion that went.").closest("del")).not.toBeNull();
       expect(editor.textContent).toContain(first);
+      // The criterion the chat reworded carries its marks in its own words:
+      // what came highlighted, what went struck through where it stood.
+      const reworded = editor.querySelector(".criterion-text")!;
+      expect(reworded.querySelectorAll(".change--added").length).toBeGreaterThan(0);
+      expect(reworded.querySelectorAll(".change--removed").length).toBeGreaterThan(0);
     } else {
       // Given the same time to draw, nothing is marked.
       await new Promise((resolve) => setTimeout(resolve, 300));
