@@ -76,8 +76,9 @@ describe("the executor's words on Codex, as the run prints them", () => {
         redact: (text) => text.replaceAll("sk-live-SECRET", "[redacted]"),
       });
       expect(result.termination.reason).toBe("completed");
+      expect(lines.filter((line) => /[\n\r]/.test(line))).toEqual([]);
       expect(lines.map(readSpoken).filter((line) => line !== null)).toEqual([
-        { speaker: "executor", words: "Reading the mailer. The key [redacted] stays out." },
+        { speaker: "executor", words: "Reading the mailer.\nThe key [redacted] stays out." },
         { speaker: "executor", words: "Finished" },
       ]);
       // The record keeps the child's words too, marked as a subagent's, so

@@ -59,7 +59,7 @@ export type { RetainedBranch } from "./retained.js";
 export { isPlannedP3Path } from "./risk.js";
 export { SIZE_COUNTS, SIZE_NAMES, SIZE_THRESHOLDS, planSizeCounts, sizeEstimate } from "./size.js";
 export type { SizeEstimate } from "./size.js";
-export { readSpoken, SPEAKERS, SPOKEN_LINE_CAP, spokenLine } from "./spoken.js";
+export { readSpoken, SPEAKERS, spokenLine } from "./spoken.js";
 export type { Speaker } from "./spoken.js";
 export { standingGlob, StandingProhibitedEntrySchema } from "./standing.js";
 export type { StandingProhibitedEntry } from "./standing.js";

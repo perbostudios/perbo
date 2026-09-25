@@ -237,7 +237,8 @@ export function codexNotificationHandler(attempt: {
       if (item.command && egress.observe(item.command, "command", new Date()).length > 0)
         stop("unlisted_egress_host", "Command requested a host outside the network allow-list");
       // On one line: a command's own newline would otherwise print a line
-      // that reads as one of the run's stages.
+      // that reads as one of the run's stages. Bounded as a log excerpt: the
+      // Watch page lists no command, and the attempt's record keeps it whole.
       if (method === "item/started")
         progress(
           `Codex ${oneLine(redact(item.command ?? item.changes?.map((change) => change.path).join(", ") ?? item.type)).slice(0, 160)}`,
@@ -502,6 +503,16 @@ export async function runCodexAgent(
           );
         },
         /**
+         * The executor's own words, as they are said, for whoever watches the
+         * run: the root thread's only, as the account is (D-106), on a line of
+         * their own marked as the executor's.
+         */
+        spoke: (words) => {
+          const said = spokenLine("executor", redact(words));
+          if (said !== null) progress(said);
+        },
+        rootThread: () => rootThreadId,
+        /**
          * D-106: a subagent starting one of its own is refused reactively —
          * Codex offers no preventive gate on a spawn, so this is the first
          * point it is even visible (ADR-0038's Q3). A first-generation spawn
@@ -521,16 +532,6 @@ export async function runCodexAgent(
          * since which thread is asking is a separate question from what the
          * child's role is.
          */
-        /**
-         * The executor's own words, as they are said, for whoever watches the
-         * run: the root thread's only, as the account is (D-106), on a line of
-         * their own marked as the executor's.
-         */
-        spoke: (words) => {
-          const said = spokenLine("executor", redact(words));
-          if (said !== null) progress(said);
-        },
-        rootThread: () => rootThreadId,
         onSubagentStarted: (parentThreadId, childThreadId) => {
           if (parentThreadId === null) {
             const detail = redact(

@@ -19,7 +19,7 @@ describe("the retained transcript", () => {
       { type: "assistant", parent_tool_use_id: "toolu_task", message: { content: [{ type: "text", text: "A child's summary." }] } },
       { type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "text", text: "The retry is in." }] } },
       { method: "item/completed", item: { id: "c1", type: "commandExecution", command: "pnpm lint", aggregatedOutput: "ok" } },
-      { method: "item/completed", item: { id: "m1", type: "agentMessage", text: "Codex says it is done." } },
+      { method: "item/completed", item: { id: "m1", type: "agentMessage", text: "\nCodex says it is done.\nAll of it.\n\n" } },
       { type: "result", result: "The retry is in." },
     ]
       .map((line) => JSON.stringify(line))
@@ -28,7 +28,7 @@ describe("the retained transcript", () => {
     expect(entries).toEqual([
       { author: "Executor", label: "message", text: "Reading the mailer first.\nThen its tests." },
       { author: "Executor", label: "message", text: "The retry is in." },
-      { author: "Executor", label: "message", text: "Codex says it is done." },
+      { author: "Executor", label: "message", text: "Codex says it is done.\nAll of it." },
     ]);
     // A command the executor ran stays where commands are read: the terminal.
     expect(terminal).toBe("$ pnpm lint\nok");

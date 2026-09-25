@@ -307,6 +307,22 @@ describe("a Home card", () => {
     expect(pill("Ticket 4 merged")).toBe("completed");
     expect(pill("Ticket 5 changes_requested")).toBe("decisions required");
   });
+
+  it("calls only a decided merge completed: a cancelled or rolled-back ticket a run carries keeps its stage and its ring", () => {
+    const workspace = board([["cancelled", null], ["rolled_back", null], ["merged", pr]]);
+    workspace.jobs = [running(workspace, 0), running(workspace, 1)];
+    home(workspace);
+    const pill = (name: string): string => card(name).querySelector(".stage-pill")!.textContent ?? "";
+    const ring = (name: string): string => card(name).querySelector(".stage-ring")!.getAttribute("aria-label") ?? "";
+    for (const name of ["Ticket 0 cancelled", "Ticket 1 rolled_back"]) {
+      expect(card(name).className).not.toMatch(/task-card--red/);
+      expect(pill(name)).not.toMatch(/completed|loop stopped/);
+      expect(ring(name)).toMatch(/^Stage \d of 6$/);
+      expect(card(name).className).not.toMatch(/task-card--complete/);
+    }
+    expect(pill("Ticket 2 merged")).toBe("completed");
+    expect(ring("Ticket 2 merged")).toBe("Completed");
+  });
 });
 
 /**

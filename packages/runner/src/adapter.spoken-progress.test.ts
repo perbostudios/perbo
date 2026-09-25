@@ -35,7 +35,7 @@ const CHILD = { parent: "toolu_task_a", id: "a1068d4ecef4890c3", type: "perbo-im
 
 describe("the executor's words as the run prints them", () => {
   it(
-    "says each of the executor's own turns as it arrives, redacted and on one line, and none of its tool calls or a subagent's words",
+    "says each of the executor's own turns whole as it arrives, redacted and on one physical line, and none of its tool calls or a subagent's words",
     async () => {
       const lines = await said([
         { step: "text", text: "Reading the mailer first." },
@@ -49,7 +49,7 @@ describe("the executor's words as the run prints them", () => {
       const words = lines.map(readSpoken).filter((line) => line !== null);
       expect(words).toEqual([
         { speaker: "executor", words: "Reading the mailer first." },
-        { speaker: "executor", words: "The key [redacted] is not needed. Adding the retry now." },
+        { speaker: "executor", words: "The key [redacted] is not needed.\nAdding the retry now." },
       ]);
       // Said in the order the stream carried them, among the runner's own lines.
       const first = lines.findIndex((line) => line.startsWith("executor says: Reading"));
@@ -57,6 +57,7 @@ describe("the executor's words as the run prints them", () => {
       expect(first).toBeGreaterThan(lines.findIndex((line) => line.startsWith("agent ready:")));
       expect(second).toBeGreaterThan(first);
       expect(lines.join("\n")).not.toContain("sk-live-SECRET");
+      expect(lines.filter((line) => /[\n\r]/.test(line))).toEqual([]);
       expect(lines.some((line) => /\bRead\b|src\/mailer\.ts/.test(line))).toBe(false);
     },
     SPAWN_TEST_TIMEOUT_MS,

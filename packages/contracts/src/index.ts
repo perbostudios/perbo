@@ -290,7 +290,7 @@ export {
   statesCriteria,
 } from "./source.js";
 export type { SourceContract } from "./source.js";
-export { oneLine, readSpoken, SPEAKERS, SPOKEN_LINE_CAP, spokenLine } from "./spoken.js";
+export { oneLine, readSpoken, SPEAKERS, spokenLine } from "./spoken.js";
 export type { Speaker } from "./spoken.js";
 export {
   readStandingProhibited,

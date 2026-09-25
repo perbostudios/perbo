@@ -290,8 +290,9 @@ describe("what a round prints of the findings its review left open", () => {
     );
     expect(lines.map(readSpoken)).toEqual([
       { speaker: "reviewer", words: "The key [redacted: materialized local secret] is logged." },
-      { speaker: "reviewer", words: "The token [redacted:vendor.github] is review round 2" },
+      { speaker: "reviewer", words: "The token [redacted:vendor.github] is\nreview round 2" },
     ]);
+    expect(lines.every((line) => !/[\n\r]/.test(line))).toBe(true);
     expect(lines.join("\n")).not.toContain("s3cr3t_value_abcdef");
     expect(lines.join("\n")).not.toContain("ghp_0123456789abcdefghijklmnopqrstuvwxyzAB");
   });

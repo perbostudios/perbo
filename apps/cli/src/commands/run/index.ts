@@ -1072,7 +1072,11 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
     );
     return EXIT_CODES.did_not_complete;
   }
-  streams.stderr(`  ceilings  ${renderCeilingsLine(config.limits)}\n`);
+  // Publishing a retained branch runs no attempt, no check and no install, so
+  // the ceilings, the checks it would judge by and the install it would run
+  // are not said for it.
+  const runs = retained === null;
+  if (runs) streams.stderr(`  ceilings  ${renderCeilingsLine(config.limits)}\n`);
 
   // What is judging this attempt, where nobody has said (SCP-259). A repository
   // with no `.perbo/config.json` is run against the checks its own package
@@ -1083,6 +1087,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
   const runStore = admitted?.dir ?? local?.store ?? null;
   const proposed = config.checks.filter((check) => check.origin === "proposed");
   if (
+    runs &&
     runStore !== null &&
     proposed.length === config.checks.length &&
     readRepoConfig(runStore) === null
@@ -1101,7 +1106,7 @@ async function runExecute(options: ExecuteOptions): Promise<number> {
   // checkout otherwise — the same derivation the diagnostic proposes from, so
   // this line and the install that runs cannot disagree. A pinned install
   // prints nothing.
-  if (!install.pinned) {
+  if (runs && !install.pinned) {
     const pin = pinInstallCommand(install.package_manager);
     streams.stderr(
       `  install   ${install.command.join(" ")} — unpinned, this repository has no lockfile` +

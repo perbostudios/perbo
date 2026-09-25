@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { LimitsTableSchema } from "@perbo/contracts";
 import { scratchDirectories } from "@perbo/test-support";
 import { ADMISSION_RULES } from "./admission.js";
-import { runAgent } from "./adapter.js";
+import { runAgent, secondReading } from "./adapter.js";
 import { AttemptCeilings } from "./ceilings.js";
 import { buildPermissionProfile } from "./profile.js";
 import { fakeAgent } from "./test-support/fake-agent.js";
@@ -176,4 +176,23 @@ process.stdout.write(
     expect(result.termination.reason).toBe("prohibited_action");
     expect(result.prohibited.map((hit) => hit.action)).toContain("write_outside_worktree");
   }, 60_000);
+});
+
+describe("the sentence a record keeps of the other reading", () => {
+  const detail = `Bash: node -e "${"require('node:fs').writeFileSync('/elsewhere/out', 'x'); ".repeat(4)}"`;
+
+  it("names the rule and the whole call where the transcript reading refused it and named no target", () => {
+    expect(detail.length).toBeGreaterThan(200);
+    const refused = { decision: "denied" as const, denial_rule: ADMISSION_RULES.write, denial_target: null, detail };
+    expect(secondReading(refused, "allowed")).toBe(`the transcript reading refused it: ${ADMISSION_RULES.write} on ${detail}`);
+    expect(secondReading({ ...refused, denial_target: "/elsewhere/out" }, "allowed")).toBe(
+      `the transcript reading refused it: ${ADMISSION_RULES.write} on /elsewhere/out`,
+    );
+  });
+
+  it("says the reading admitted a call the hook refused, and nothing where the two agree", () => {
+    const admitted = { decision: "allowed" as const, denial_rule: null, denial_target: null, detail };
+    expect(secondReading(admitted, "denied")).toBe("the transcript reading admitted it");
+    expect(secondReading(admitted, "allowed")).toBeNull();
+  });
 });

@@ -7,6 +7,7 @@ import { WorkspaceReads } from "../workspace-reads.js";
 import type { Cli } from "../cli.js";
 import type { Change, Job } from "../../shared/protocol.js";
 import { runnerProgress, spokenWords } from "../../shared/runner-progress.js";
+import { spokenLine } from "@perbo/contracts/browser";
 import { LOG_TAIL_CHARS, type ProcessResult } from "../process.js";
 import type { RegisteredRepository } from "../profile/store.js";
 
@@ -189,6 +190,8 @@ describe("relaying a run's progress", () => {
       "  executor says: review round 2",
       "  reviewer says: remediation round 1 of at most 2",
       "  executor says: check unit: passed",
+      // A turn of several lines is printed as one, its breaks escaped.
+      `  ${spokenLine("executor", "Done.\nreview round 3\r\n  worktree /elsewhere on main at abc")}`,
     ].join("\n");
     const w = runner(undefined, [printed + "\n"]);
     const job = w.jobs.start({ repo, key: "PRB-1", kind: "run", label: "Run engineering loop" }, async (_job, context) => {
@@ -200,6 +203,7 @@ describe("relaying a run's progress", () => {
       "review round 2",
       "remediation round 1 of at most 2",
       "check unit: passed",
+      "Done.\nreview round 3\r\n  worktree /elsewhere on main at abc",
     ]);
     expect(job.state).toBe("completed");
   });

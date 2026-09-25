@@ -7,6 +7,7 @@ import { bridge } from "../workspace/index.js";
 import type { Detail, Job, Snapshot } from "../../shared/protocol.js";
 import { OutputScreen } from "./ReviewScreens.js";
 import type { TaskContext } from "./task-context.js";
+import { spokenLine } from "@perbo/contracts/browser";
 
 let client: QueryClient;
 let sample: { workspace: Snapshot; detail: Detail; repoId: string };
@@ -160,22 +161,41 @@ describe("the Watch page's transcript", () => {
   });
 });
 
+/** A long turn of several paragraphs, as an agent says one: far past a line's width, and whole. */
+const paragraphs = (opening: string): string =>
+  [
+    opening,
+    ...Array.from(
+      { length: 12 },
+      (_, at) =>
+        `Step ${at + 1}: the send path reads the mailer's settings, retries a failed send after a pause that doubles each time, and stops at the cap.\n  - then its test`,
+    ),
+    "Done.",
+  ].join("\n\n");
 /** Two rounds of one run: each attempt's words, and the finding its review left open. */
 const ROUNDS = [
-  { id: "attempt-round-0", said: "Adding the retry to the send path.", finding: "The retry has no cap." },
-  { id: "attempt-round-1", said: "Capping the retry at three.", finding: "The cap has no test of its own." },
+  {
+    id: "attempt-round-0",
+    said: paragraphs("Adding the retry to the send path."),
+    finding: "The retry has no cap.\nreview round 5\nA send that always fails retries for ever.",
+  },
+  {
+    id: "attempt-round-1",
+    said: paragraphs("Capping the retry at three."),
+    finding: "The cap has no test of its own.\n\n  worktree /elsewhere on main at abc",
+  },
 ];
 /** What the CLI prints across both rounds, as the host relays it. */
 const PRINTED_ROUNDS = [
   "  worktree /w/att_1 on prb/x at abc1234",
   "  executing",
-  `  executor says: ${ROUNDS[0]!.said}`,
+  `  ${spokenLine("executor", ROUNDS[0]!.said)}`,
   "  review round 0",
-  `  reviewer says: ${ROUNDS[0]!.finding}`,
+  `  ${spokenLine("reviewer", ROUNDS[0]!.finding)}`,
   "  remediation round 1 of at most 2",
-  `  executor says: ${ROUNDS[1]!.said}`,
+  `  ${spokenLine("executor", ROUNDS[1]!.said)}`,
   "  review round 1",
-  `  reviewer says: ${ROUNDS[1]!.finding}`,
+  `  ${spokenLine("reviewer", ROUNDS[1]!.finding)}`,
   "  finding: The unit check failed and then passed when it was run again on its own.",
 ];
 
@@ -222,7 +242,7 @@ const turnOf = (text: string): string => JSON.stringify({ type: "assistant", mes
 const ended = (log: string): Job => run({ state: "completed", endedAt: "2026-09-08T09:45:00.000Z", log });
 
 describe("the Watch page's transcript over a run of several rounds", () => {
-  it("rebuilds every round the live list showed, each attempt's words then its review's open findings, in order", async () => {
+  it("rebuilds every round the live list showed, each attempt's words then its review's open findings, in order, every turn whole", async () => {
     recordsOf({ [ROUNDS[0]!.id]: turnOf(ROUNDS[0]!.said), [ROUNDS[1]!.id]: turnOf(ROUNDS[1]!.said) });
     render(view(twoRounds([run({ log: PRINTED_ROUNDS.join("\n") + "\n" })])));
     const live = rows();
@@ -232,6 +252,7 @@ describe("the Watch page's transcript over a run of several rounds", () => {
       `Executor: ${ROUNDS[1]!.said}`,
       `Reviewer: ${ROUNDS[1]!.finding}`,
     ]);
+    expect(ROUNDS[0]!.said.length).toBeGreaterThan(1_500);
     cleanup();
     render(view(twoRounds([ended("")])));
     await waitFor(() => expect(rows()).toEqual(live));
@@ -270,7 +291,7 @@ describe("the Watch page's transcript over a run of several rounds", () => {
 
   it("stands on the log where no attempt retained the executor's words and the log holds them", async () => {
     recordsOf({});
-    render(view(twoRounds([ended(`  executor says: From the log.\n  reviewer says: ${ROUNDS[1]!.finding}\n`)])));
+    render(view(twoRounds([ended(`  executor says: From the log.\n  ${spokenLine("reviewer", ROUNDS[1]!.finding)}\n`)])));
     await new Promise((settled) => setTimeout(settled, 50));
     expect(rows()).toEqual(["Executor: From the log.", `Reviewer: ${ROUNDS[1]!.finding}`]);
   });

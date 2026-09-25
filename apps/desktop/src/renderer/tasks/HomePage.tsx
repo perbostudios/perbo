@@ -19,7 +19,7 @@ import { useShortcut } from "../shell/shortcuts.js";
 import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/route.js";
 import type { Snapshot, TaskRow, TaskSummary } from "../../shared/protocol.js";
-import { archiveRows, isArchivable, isArchived, isFiled, isMergeDecided } from "../../shared/archive.js";
+import { archiveRows, isArchivable, isFiled, isMergeDecided } from "../../shared/archive.js";
 import { HOME_TONES, HOME_TONE_LABELS, completedLabel, displayKey, homeGroup, homeOrder, homeRows, homeTally, projectTicket, stageName, unseenAttention, type HomeTone } from "./ticket-workspace.js";
 const countWord = (number: number): string =>
   ["No", "One", "Two", "Three", "Four", "Five"][number] ?? String(number);
@@ -77,13 +77,11 @@ export function DiffLabel({
 function StageRing({
   stage,
   tone = null,
-  complete = false,
   decided = false,
 }: {
   stage: number;
-  /** The row's colour, which the ring's centre takes and a completed ring is drawn in. */
+  /** The row's colour, which the ring's centre takes. */
   tone?: "green" | "yellow" | "red" | null;
-  complete?: boolean;
   /** The merge is decided: the ring is whole and holds a check mark where its progress was. */
   decided?: boolean;
 }) {
@@ -95,14 +93,13 @@ function StageRing({
         </span>
       </span>
     );
-  const share = complete ? 100 : (stage / 6) * 100;
-  const fill = complete ? (tone === "red" ? "var(--red)" : "var(--green)") : "var(--ink)";
+  const share = (stage / 6) * 100;
   return (
     <span
       className={cx("stage-ring", tone && "stage-ring--" + tone)}
-      aria-label={complete ? "Completed" : `Stage ${stage} of 6`}
+      aria-label={`Stage ${stage} of 6`}
       style={{
-        background: `conic-gradient(${fill} 0 ${share}%,rgba(var(--ink-rgb),.16) ${share}% 100%)`,
+        background: `conic-gradient(var(--ink) 0 ${share}%,rgba(var(--ink-rgb),.16) ${share}% 100%)`,
       }}
     >
       <span />
@@ -130,8 +127,8 @@ function TaskCard({
   onRenameChange: (open: boolean) => void;
 }) {
   const { stage, tone, description } = projectTicket(workspace, row);
-  const decided = isMergeDecided(row);
-  const completed = decided || isArchived(row.ticket.state);
+  // Completed is a decided merge alone: a cancelled or rolled-back ticket is a stop, or work a run carries again.
+  const completed = isMergeDecided(row);
   const stopped = tone === "red";
   const summary = useTaskSummary(row.repoId, row.ticket.key);
   const branch = summary.data ? summary.data.branch : (row.ticket.delivery.branch ?? null);
@@ -143,9 +140,7 @@ function TaskCard({
       ? `merged as ${row.repository}#${row.ticket.delivery.pull_request_number}`
       : row.ticket.state === "closed"
         ? "closed unmerged"
-        : row.ticket.state === "cancelled"
-          ? "cancelled"
-          : row.ticket.state.replaceAll("_", " ");
+        : row.ticket.state.replaceAll("_", " ");
   // A space holds the line's height while the outcome is read, or where there is none.
   const outcome = summary.data?.outcome;
   // The circle's words reach a screen reader through the card, whose children
@@ -178,7 +173,7 @@ function TaskCard({
         <span id={unseenId} className="task-card-unseen" role="img" aria-label={UNSEEN} title={UNSEEN} />
       )}
       <div className="task-card-header">
-        <StageRing stage={stage} tone={tone} complete={completed} decided={decided} />
+        <StageRing stage={stage} tone={tone} decided={completed} />
         <span className="stage-pill">{stopped ? "loop stopped" : completed ? "completed" : stageName(stage)}</span>
         <span className="task-key" title={row.ticket.key}>
           {displayKey(row.ticket.key)}

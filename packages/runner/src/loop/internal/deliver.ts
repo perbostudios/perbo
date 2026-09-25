@@ -1,5 +1,6 @@
 import {
   failedChecks,
+  oneLine,
   type CostBasis,
   type ExecutionAttempt,
   type GithubCredential,
@@ -25,6 +26,21 @@ import type { RoundState } from "./state.js";
 /**
  * Publishing what a run decided (SCP-200, SCP-202).
  */
+
+/** The longest pull-request title GitHub takes. */
+export const PULL_REQUEST_TITLE_LIMIT = 256;
+
+/**
+ * The pull request's title: the ticket's key and the first whole sentence of
+ * the outcome, or the key alone where that does not fit GitHub's limit. The
+ * whole outcome is the body's Outcome section either way, so nothing is cut.
+ */
+export function pullRequestTitle(key: string, outcome: string): string {
+  const flat = oneLine(outcome);
+  const sentence = /^.*?[.!?](?=\s|$)/.exec(flat)?.[0] ?? flat;
+  const title = `${key}: ${sentence}`;
+  return title.length <= PULL_REQUEST_TITLE_LIMIT ? title : key;
+}
 
 /** The pull request a run publishes to, as `createPullRequest` reports it. */
 export type PullRequestRef = Awaited<ReturnType<typeof createPullRequest>>;
@@ -125,7 +141,7 @@ export async function publish(
     worktree: state.workspace.path,
     branch: state.workspace.branch,
     base_ref: config.base_ref,
-    title: `${config.ticket_key}: ${contract.outcome}`.slice(0, 120),
+    title: pullRequestTitle(config.ticket_key, contract.outcome),
     body,
   });
   progress(`pull request ${pull_request.url}`);

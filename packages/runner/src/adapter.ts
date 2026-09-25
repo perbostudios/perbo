@@ -198,6 +198,22 @@ export interface AgentRequest {
   supervision?: "runner_guard" | "agent_permissions";
 }
 
+/**
+ * What a command's record keeps of the transcript reading where the hook's
+ * enforced decision differs from it (SCP-177): a sentence naming the rule and
+ * the whole target, or the whole call where the reading named no target. Null
+ * where the two agree.
+ */
+export function secondReading(
+  entry: Pick<CommandRecord, "decision" | "denial_rule" | "denial_target" | "detail">,
+  enforced: CommandRecord["decision"],
+): string | null {
+  if (entry.decision === enforced) return null;
+  return entry.decision === "denied"
+    ? `the transcript reading refused it: ${entry.denial_rule ?? "unknown"} on ${entry.denial_target ?? entry.detail}`
+    : "the transcript reading admitted it";
+}
+
 export interface AgentResult {
   invocation: AgentInvocation;
   commands: CommandRecord[];
@@ -840,13 +856,7 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
         continue;
       }
       const entry = commands[index]!;
-      const disagreed =
-        entry.decision !== decision.decision
-          ? entry.decision === "denied"
-            ? `the transcript reading refused it: ${entry.denial_rule ?? "unknown"} on ` +
-              `${entry.denial_target ?? entry.detail.slice(0, 80)}`
-            : "the transcript reading admitted it"
-          : null;
+      const disagreed = secondReading(entry, decision.decision);
       commands[index] = {
         ...entry,
         decision: decision.decision,

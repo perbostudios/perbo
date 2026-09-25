@@ -355,6 +355,31 @@ describe("perbo run --publish-retained", () => {
     expect(pushed).toEqual([branch]);
   }, TIMEOUT_MS);
 
+  it("says only what applies to a publish: no ceilings, no checks it would judge by and no install", async () => {
+    const at = fixture("said");
+    // An install nothing pins, so the run says so.
+    const config = JSON.parse(readFileSync(at.config, "utf8")) as {
+      materialization_manifest: { install: { pinned: boolean } };
+    };
+    config.materialization_manifest.install.pinned = false;
+    writeFileSync(at.config, JSON.stringify(config));
+    const first = await run(at, [], { hooks: { review: approving as never } });
+    expect(first.code, first.err).toBe(0);
+    expect(first.err).toMatch(/^ {2}ceilings {2}/m);
+    expect(first.err).toMatch(/^ {2}checks {4}none — proposed from this package's own scripts/m);
+    expect(first.err).toMatch(/^ {2}install {3}.* — unpinned/m);
+    const { push } = recordedPush();
+
+    const published = await run(at, ["--publish-retained"], { hooks: { push, review: noReview } });
+
+    expect(published.code, published.err).toBe(0);
+    expect(published.err).not.toMatch(/^ {2}ceilings /m);
+    expect(published.err).not.toMatch(/^ {2}checks {4}.*proposed/m);
+    expect(published.err).not.toMatch(/^ {2}install /m);
+    // Where it lands still applies: the pull request is opened against it.
+    expect(published.err).toMatch(/^ {2}base {6}main/m);
+  }, TIMEOUT_MS);
+
   it("refuses a ticket whose run has not ended approved or escalated before asking the machine anything, and pushes nothing", async () => {
     const at = fixture("ready");
     const { pushed, push } = recordedPush();

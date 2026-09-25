@@ -65,12 +65,15 @@ export const USAGE = `perbo — contract to pull request, locally
       what it found, where the ticket's last run did not end approved or
       escalated, which is said before the machine is asked anything; where
       the ticket already has its pull request, or its delivery is not the
-      loop's own; where a run of the ticket holds its run lock; where no
-      review, or no attempt that sealed the commit it judged, is on record;
-      where the run ended escalated and an attempt's record does not say what
-      its executor declined; where the branch has moved past the commit the
-      review judged, or carries a commit the loop did not make; or where the
-      base names no commit or has moved past what the run judged. A run with
+      loop's own; where a run of the ticket holds its run lock; where the
+      plan has no acceptance criteria, so no review judged it; where the
+      branch is not one the loop minted; where no review, or no attempt that
+      sealed the commit it judged, is on record; where the run ended escalated
+      and an attempt's record does not say what its executor declined; where
+      the branch has moved past the commit the review judged, where what it
+      carries past its base could not be listed whole, or where it carries a
+      commit the loop did not make; or where the base names no commit or has
+      moved past what the run judged. A run with
       --publish judges what is there instead. The ticket stays where it is
       and its delivery record gets the pull request. Exit 0 once it is open.
 

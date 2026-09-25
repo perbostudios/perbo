@@ -120,13 +120,13 @@ async function publishLocked(args: RetainedPublishRequest, clock: () => Date): P
   if (retained.refusal !== null) refuse(retained.refusal);
   const branch = retained.branch!;
   const outcome = retained.outcome!;
-  if (!hasAcceptanceCriteria(args.contract)) {
-    throw new Error(
-      `plan ${args.contract.plan_id} is ${args.contract.level}, which has no acceptance criteria: ` +
+  const contract = args.contract;
+  if (!hasAcceptanceCriteria(contract)) {
+    return refuse(
+      `plan ${contract.plan_id} is ${contract.level}, which has no acceptance criteria: ` +
         "no review judged it, so there is nothing to publish its branch under",
     );
   }
-  const contract = args.contract;
   if (!isAttemptBranch(branch)) refuse(`${branch} is not a branch the loop minted`);
 
   const bundles = new BundleStore({ root: config.bundle_root, retainContext: config.retain_context });

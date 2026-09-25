@@ -60,9 +60,9 @@ is. `perbo verdict --decide`, the loop and the desktop's decision screen read th
 answer one of them takes is one the others act on; it is browser-safe for the last.
 
 `spoken.ts` is the single home for an agent's words as a run prints them while it works: one
-progress line per turn, folded to one line, bounded, and marked with whose words they are, which
-the runner's adapters and review stage write and the desktop's Watch page reads back to show them
-as they arrive. A line is words to show and nothing else ([ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)).
+progress line per turn, carrying the whole turn with its line breaks escaped so it stays one
+physical line, and marked with whose words they are, which the runner's adapters and review stage
+write and the desktop's Watch page reads back, breaks restored, to show them as they arrive. A line is words to show and nothing else ([ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)).
 `oneLine` is that folding on its own, for a line of the runner's that carries text it did not
 write, such as a command or a test's name. It imports nothing, so the renderer takes it from `@perbo/contracts/browser`.
 

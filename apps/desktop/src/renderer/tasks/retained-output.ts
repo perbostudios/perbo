@@ -59,8 +59,9 @@ export function retainedOutput(raw: string | null | undefined): {
           "\n" +
           (entry.item.aggregatedOutput ?? "No output retained."),
       );
-    if (entry.item?.type === "agentMessage" && entry.item.text && entry.subagent !== true)
-      entries.push({ author: "Executor", label: "message", text: entry.item.text });
+    // Trimmed, as the run printed it.
+    const message = entry.item?.type === "agentMessage" && entry.subagent !== true ? (entry.item.text ?? "").trim() : "";
+    if (message) entries.push({ author: "Executor", label: "message", text: message });
     // One entry per turn, its text blocks together, as the run printed it.
     const said =
       entry.type === "assistant" && !entry.parent_tool_use_id

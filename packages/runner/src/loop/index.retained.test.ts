@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   LimitsTableSchema,
+  PlanContractSchema,
   attemptsFileName,
   hasAcceptanceCriteria,
   type Finding,
@@ -167,6 +168,19 @@ describe("publishing a retained branch later", () => {
     expect(published.detail).toContain("without executing or reviewing again");
   }, 90_000);
 
+  it("titles the pull request with the key alone where the outcome's first sentence does not fit, and keeps the whole outcome in the body", async () => {
+    const outcome = `The report lists ${"every open invoice, ".repeat(20)}by customer.\nThen it totals them.`;
+    const { contract, config, branch } = await retainedRun("approve", (_repo, planned) => {
+      planned.outcome = outcome;
+    });
+    const { opened, hooks } = delivery();
+
+    await publishRetained({ config, contract, retained: kept(branch, "approved"), hooks });
+
+    expect(opened[0]!.title).toBe(TICKET_KEY);
+    expect(opened[0]!.body).toContain(`## Outcome\n\n${outcome}\n`);
+  }, 90_000);
+
   it("lists the person's answers to an escalated run under Decided by a person", async () => {
     const { contract, config, branch } = await retainedRun("escalate");
     const { opened, hooks } = delivery();
@@ -278,6 +292,53 @@ describe("publishing a retained branch later", () => {
     await expect(refused).rejects.toThrow(
       /no-such-base names no commit in this checkout, so whether it moved past what the run judged cannot be read/,
     );
+    expect(pushed).toEqual([]);
+    expect(opened).toEqual([]);
+  }, 90_000);
+
+  it("refuses a branch the loop did not mint, and pushes nothing", async () => {
+    const { contract, config } = await retainedRun();
+    const { pushed, opened, hooks } = delivery();
+
+    const refused = publishRetained({ config, contract, retained: kept("main", "approved"), hooks });
+
+    await expect(refused).rejects.toThrow(RunRefusedError);
+    await expect(refused).rejects.toThrow(/^main is not a branch the loop minted\. Nothing was pushed/);
+    expect(pushed).toEqual([]);
+    expect(opened).toEqual([]);
+  }, 90_000);
+
+  it("refuses where what the branch carries could not be listed whole, and pushes nothing", async () => {
+    const { contract, config, branch } = await retainedRun();
+    // The record names a base the checkout does not hold, so the branch's own
+    // line past it cannot be listed.
+    const path = join(config.state_root, attemptsFileName(contract.ticket_id));
+    const record = JSON.parse(readFileSync(path, "utf8")) as { attempts: Array<{ base_commit: string }> };
+    for (const attempt of record.attempts) attempt.base_commit = "f".repeat(40);
+    writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`);
+    const { pushed, opened, hooks } = delivery();
+
+    const refused = publishRetained({ config, contract, retained: kept(branch, "approved"), hooks });
+
+    await expect(refused).rejects.toThrow(RunRefusedError);
+    await expect(refused).rejects.toThrow(
+      /what .* carries past ffffffffffff could not be listed whole, so whether the loop made all of it cannot be said/,
+    );
+    expect(pushed).toEqual([]);
+    expect(opened).toEqual([]);
+  }, 90_000);
+
+  it("refuses a plan with no acceptance criteria, which no review judged, and pushes nothing", async () => {
+    const { contract, config, branch } = await retainedRun();
+    const { plan_id, version, ticket_id, outcome, scope, base } = contract;
+    const budget = { max_cost_micros: 1_000_000, max_wall_clock_ms: 600_000 };
+    const unjudged = PlanContractSchema.parse({ plan_id, version, ticket_id, level: "P0", outcome, scope, base, budget });
+    const { pushed, opened, hooks } = delivery();
+
+    const refused = publishRetained({ config, contract: unjudged, retained: kept(branch, "approved"), hooks });
+
+    await expect(refused).rejects.toThrow(RunRefusedError);
+    await expect(refused).rejects.toThrow(/plan plan_stage2 is P0, which has no acceptance criteria: .*\. Nothing was pushed/);
     expect(pushed).toEqual([]);
     expect(opened).toEqual([]);
   }, 90_000);
