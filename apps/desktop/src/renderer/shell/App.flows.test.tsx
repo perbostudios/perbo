@@ -274,6 +274,36 @@ describe("interactive desktop flows", () => {
     expect(screen.queryByRole("dialog", { name: "A simple task" })).toBeNull();
   });
 
+  it("lands a divided plan on its Graph, with no pop-up saying the task is simple (D-NEW-basic-and-epic-flows)", async () => {
+    impactFinds([]);
+    const id = await planningWithSpec("Signup mail suite", "New users receive the emails they signed up for.");
+    // Three requirements, which the drafter divides into a graph.
+    const spec = await sampleBridge.request({ kind: "specRead", id });
+    await sampleBridge.request({
+      kind: "specSave",
+      id,
+      repoId: (await sampleBridge.request({ kind: "editingRead", id })).repoId,
+      title: spec.title,
+      sections: {
+        ...spec.sections,
+        requirements: [
+          "- R1: A signup queues exactly one email.",
+          "- R2: The email names the account it confirms.",
+          "- R3: A bounced email is retried once.",
+        ].join("\n"),
+      },
+      base: { title: spec.title, sections: spec.sections },
+    });
+    mount();
+    await generatePlan();
+    await waitFor(() => expect(location.hash).toBe(`#planning/${id}/graph`), { timeout: 8000 });
+    await screen.findByRole("heading", { name: "Execution graph" }, { timeout: 8000 });
+    expect((await sampleBridge.request({ kind: "editingRead", id })).nodes).toBeGreaterThan(0);
+    // Given the time a basic ticket's checks take to put it up, it never comes.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(screen.queryByRole("dialog", { name: "A simple task" })).toBeNull();
+  });
+
   it("takes the contract off the tabs once the spec changes, even while the person is on it", async () => {
     // What keeps the contract a tab is the state it was reached at; a change
     // made while the person reads it is still a change nobody has checked.
