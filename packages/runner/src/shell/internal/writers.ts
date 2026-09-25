@@ -5,7 +5,7 @@ import {
   suppliedAsOption,
   type Context,
 } from "./command.js";
-import { judgeTarget, pathFinding, type Destination, type WriteFinding } from "./destination.js";
+import { judgeInto, judgeTarget, pathFinding, type Destination, type WriteFinding } from "./destination.js";
 import type { Word } from "./lexer.js";
 
 /**
@@ -42,6 +42,13 @@ export interface WriterSpec {
   sources?: boolean;
   /** Options whose value is a directory the operands are written into. */
   targetDirectory?: readonly string[];
+  /**
+   * Where given, a destination that is a directory on disk receives each source
+   * under its own name, and only that is judged there, unless one of these
+   * options makes the destination the thing written (`cp -T`). GNU accepts any
+   * unambiguous prefix of a long option, so a prefix counts as the option.
+   */
+  into?: readonly string[];
   /** Options whose value is itself a destination. */
   destination?: readonly string[];
   /** Where given, `destination` counts only while one of these is present. */
@@ -71,8 +78,13 @@ export interface WriterSpec {
  * therefore which lines the pre-execution hook must never vouch for.
  */
 export const WRITERS = new Map<string, WriterSpec>([
-  ["cp", { operands: "last", targetDirectory: ["-t", "--target-directory"] }],
-  ["mv", { operands: "last", sources: true, targetDirectory: ["-t", "--target-directory"] }],
+  ["cp", { operands: "last", targetDirectory: ["-t", "--target-directory"], into: ["-T", "--no-target-directory"] }],
+  ["mv", {
+    operands: "last",
+    sources: true,
+    targetDirectory: ["-t", "--target-directory"],
+    into: ["-T", "--no-target-directory"],
+  }],
   ["rm", { operands: "all" }],
   ["chmod", { operands: "all", skip: 1, values: ["--reference"] }],
   ["chown", { operands: "all", skip: 1, values: ["--reference", "--from"] }],
@@ -91,6 +103,7 @@ export const WRITERS = new Map<string, WriterSpec>([
     operands: "last",
     beyondNamedPaths: true,
     targetDirectory: ["-t", "--target-directory"],
+    into: ["-T", "--no-target-directory"],
     everyOperand: ["-d", "--directory"],
     values: ["-m", "--mode", "-o", "--owner", "-g", "--group", "-S", "--suffix", "-Z", "--context", "--backup"],
   }],
@@ -320,6 +333,22 @@ function destinationFindings(
   }
   const moved = (sources: Word[]): WriteFinding[] =>
     spec.sources === true ? sources.flatMap((source) => judge(source, `the ${verb} source`)) : [];
+  /**
+   * The destination that receives `sources`: each under its own name where it
+   * is a directory on disk and the line names every source, else the
+   * destination whole.
+   */
+  const receiving = (directory: Word, sources: Word[], known: boolean): WriteFinding[] => {
+    const label = `the ${verb} destination`;
+    const readable =
+      known &&
+      spec.into !== undefined &&
+      !intoRefused(spec.into, present) &&
+      !(supplied !== undefined && (carries(directory.value) || sources.some((source) => carries(source.value))));
+    const entries = readable ? judgeInto(directory, sources, context.scope, context.cwd) : null;
+    if (entries === null) return judge(directory, label);
+    return entries.flatMap(({ word, destination }) => pathFinding(label, word, destination, context.segment));
+  };
   if (targetDirectory !== null) {
     // The operands are written into the directory this option names, so what a
     // wrapper supplies from its standard input is a source — which `mv` writes.
@@ -332,9 +361,10 @@ function destinationFindings(
             ),
           ]
         : [];
+    const known = !(supplied !== undefined && placeholder === null);
     return [
       ...findings,
-      ...judge(targetDirectory, `the ${verb} destination`),
+      ...receiving(targetDirectory, remaining, known),
       ...moved(remaining),
       ...appendedSources,
     ];
@@ -361,9 +391,18 @@ function destinationFindings(
     return [
       ...findings,
       ...appended,
-      ...judge(remaining[remaining.length - 1]!, `the ${verb} destination`),
+      ...receiving(remaining[remaining.length - 1]!, remaining.slice(0, -1), appended.length === 0),
       ...moved(remaining.slice(0, -1)),
     ];
   }
   return [...findings, ...appended];
+}
+
+/** Whether an option that makes the destination the thing written is present. */
+function intoRefused(options: readonly string[], present: Set<string>): boolean {
+  return [...present].some(
+    (option) =>
+      options.includes(option) ||
+      (option.length > 2 && option.startsWith("--") && options.some((long) => long.startsWith(option))),
+  );
 }

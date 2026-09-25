@@ -34,7 +34,7 @@ export const NEVER_HANDED_FAMILIES = ["context", "security"] as const;
 /**
  * Whether a finding is a person's to answer: open, and routed `blocks` or
  * `escalates`. The routing is the policy's answer to who is asked; under the
- * routing policies in force the reviewer's `closure` no longer decides it, so a
+ * routing policies in force the reviewer's `closure` does not decide it, so a
  * finding whose closer it named as a person and that the policy routed
  * `remediable` is the executor's, and one routed `advisory` closes no gate.
  */

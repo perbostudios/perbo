@@ -1,8 +1,9 @@
-import { mkdirSync, realpathSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { judgeTarget } from "./destination.js";
+import { judgeInto, judgeTarget } from "./destination.js";
+import type { Word } from "./lexer.js";
 import { resolveScope } from "./scope.js";
 
 const scratch = scratchDirectories("perbo-runner-");
@@ -169,5 +170,52 @@ describe("a directory on disk a wildcard prohibited glob can reach inside", () =
   it("is left alone as the directory a command works in", () => {
     const scope = resolveScope({ root: ROOT, paths_allowed: ["src/**"], paths_prohibited: ["**/*.pem"] });
     expect(judgeTarget("src/keys", scope, { path: ROOT, unknown: false }, true, "place").kind).toBe("inside");
+  });
+});
+
+/**
+ * A copy, move or link into a directory on disk writes each source under its
+ * own name there, so that path is judged and the directory only as a place.
+ */
+describe("a directory on disk a command writes its sources into", () => {
+  writeFileSync(join(ROOT, "src/a.ts"), "source\n");
+  writeFileSync(join(ROOT, "x.pem"), "key\n");
+  const word = (value: string): Word => ({ raw: value, value, substitutions: [], variable: false });
+  const scope = resolveScope({ root: ROOT, paths_allowed: ["**"], paths_prohibited: ["**/*.pem"] });
+  const into = (directory: string, ...sources: string[]) =>
+    judgeInto(word(directory), sources.map(word), scope, { path: ROOT, unknown: false });
+
+  it("judges each source's path there, a file by its name", () => {
+    const entries = into("src/other/", "src/a.ts");
+    expect(entries?.map(({ word, destination }) => [word.value, destination.kind])).toEqual([
+      ["src/other/", "inside"],
+      ["src/other/a.ts", "inside"],
+    ]);
+    expect(into("src/other", "x.pem")?.[1]).toMatchObject({
+      word: { value: "src/other/x.pem" },
+      destination: { kind: "prohibited_path", at: "src/other/x.pem" },
+    });
+  });
+
+  it("judges a source that is not a file on disk as a directory under its name", () => {
+    for (const source of ["src/keys", "bin"]) {
+      expect(into("src/other", source)?.[1]?.destination, source).toMatchObject({ kind: "prohibited_path" });
+    }
+  });
+
+  it("still refuses the directory itself where the contract prohibits it", () => {
+    const covered = resolveScope({ root: ROOT, paths_allowed: ["**"], paths_prohibited: ["src/keys/**"] });
+    const entries = judgeInto(word("src/keys"), [word("src/a.ts")], covered, { path: ROOT, unknown: false });
+    expect(entries?.[0]?.destination).toMatchObject({ kind: "prohibited_path", at: "src/keys" });
+  });
+
+  it("gives no reading where the destination is not a directory on disk or a source's name is not on the line", () => {
+    expect(into("src/new", "src/a.ts")).toBeNull();
+    expect(into("src/a.ts", "x.pem")).toBeNull();
+    for (const source of ["src/keys/", "src/*", ".", "src/..", "~", "/etc/hosts"]) {
+      expect(into("src/other", source), source).toBeNull();
+    }
+    const built: Word = { raw: "$X", value: "$X", substitutions: [], variable: true };
+    expect(judgeInto(word("src/other"), [built], scope, { path: ROOT, unknown: false })).toBeNull();
   });
 });

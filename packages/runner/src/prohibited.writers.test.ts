@@ -726,7 +726,7 @@ describe("a write to a whole directory, through the hook", () => {
     "rm -rf src/..",
     "cd src && rm -rf ..",
     `cp -r ${OUTSIDE} .`,
-    "mv notes.md .",
+    `cp -rT ${OUTSIDE} .`,
     "find . -exec rm {} ;",
     "find . -delete",
   ];
@@ -762,6 +762,11 @@ describe("a write to a whole directory, through the hook", () => {
     }
   });
 
+  it("judges a file moved into the root by the path it takes there", () => {
+    expect(judged("mv notes.md .", ["**"], []).decision).toBe("allowed");
+    expect(judged("mv notes.md .", ["src/**"], [], true)).toMatchObject({ answer: "deny", rule: "write_outside_scope" });
+  });
+
   it("still moves into the root and reads it under a scope", () => {
     for (const command of ["cd .", "cd src && cd ..", "ls .", "cat ./notes.md"]) {
       expect(judged(command, ["src/**"]).decision, command).toBe("allowed");
@@ -794,7 +799,14 @@ describe("a write to a whole directory, through the hook", () => {
 describe("a write to a directory with a prohibited path inside it (D-105)", () => {
   const ALLOWED = ["src/**"];
   const PROHIBITED = ["src/generated/**"];
-  const DIRECTORY_WRITES = ["rm -rf src", "rm -rf ./src", "rm -rf src/", `cp -r ${OUTSIDE} src`, "find src -delete"];
+  const DIRECTORY_WRITES = [
+    "rm -rf src",
+    "rm -rf ./src",
+    "rm -rf src/",
+    `cp -r ${OUTSIDE} src`,
+    `cp -rT ${OUTSIDE} src`,
+    "find src -delete",
+  ];
   const scoped = { root: ROOT, cwd: ROOT, home: HOME, paths_allowed: ALLOWED, paths_prohibited: PROHIBITED };
   const refusals = (hits: Array<{ action: string }>) =>
     hits.filter((hit) => hit.action === "write_prohibited_path" || hit.action === "write_outside_scope");
@@ -903,7 +915,8 @@ describe("a write to a directory a wildcard prohibited glob can reach inside, on
     for (const command of [
       "rm -r src/keys",
       "cp -r bin src/keys",
-      "mv src/a.ts src/keys",
+      "mv bin src/keys",
+      "mv -T bin src/keys",
       "rsync -a --delete bin/ src/keys/",
       "tar -xzf archive.tgz -C src/keys",
       "find src/keys -delete",
@@ -977,6 +990,95 @@ describe("an `mv` source, on both executors", () => {
       const { hook, codex } = both(command, ["src/**"], []);
       expect(hook.decision, command).toBe("allowed");
       expect(codex.decision, command).toBe("allowed");
+    }
+  });
+});
+
+/**
+ * A `cp`, `mv`, `install` or `ln` into a directory on disk writes each source
+ * under its own name there and nothing else in it, so that path is what is
+ * judged (D-105). Each line goes through both executors.
+ */
+describe("a copy, move or link into a directory on disk, on both executors", () => {
+  const TREE = realpathSync(scratch("perbo-into-directory-"));
+  for (const directory of ["src/keys", "src/other", "src/generated", "bin"]) {
+    mkdirSync(join(TREE, directory), { recursive: true });
+  }
+  writeFileSync(join(TREE, "src/keys/a.pem"), "key\n");
+  writeFileSync(join(TREE, "src/a.ts"), "source\n");
+  writeFileSync(join(TREE, "x.pem"), "key\n");
+
+  const both = (command: string, paths_allowed: string[], paths_prohibited: string[]) => {
+    const state: PreToolGuardState = {
+      root: TREE,
+      tmpdir: null,
+      cwd: TREE,
+      paths_allowed,
+      paths_prohibited,
+      spec_folder_writable: true,
+      allow_list: [...profile.command_allow_list, "Bash(cp:*)", "Bash(mv:*)", "Bash(ln:*)", "Bash(install:*)"],
+      deny_list: [...profile.command_deny_list],
+    };
+    return {
+      hook: judgePreToolCall(
+        { tool_name: "Bash", tool_use_id: "toolu_into", tool_input: { command } },
+        state,
+        new Date("2026-09-04T00:00:00.000Z"),
+      ).decision,
+      codex: codexCommandDecision(command, TREE, state),
+    };
+  };
+
+  it("admits a file copied, moved or linked into a directory a wildcard glob reaches inside", () => {
+    for (const command of [
+      "cp src/a.ts src/other/",
+      "mv src/a.ts src/other/",
+      "cp -t src/other src/a.ts",
+      "cp src/a.ts src/other",
+      "mv -t src/other src/a.ts",
+      "install src/a.ts src/other",
+      "ln src/a.ts src/other",
+      "ln -s ../a.ts src/other",
+      // Into the directory holding a prohibited file, the write is still `src/keys/a.ts`.
+      "mv src/a.ts src/keys",
+    ]) {
+      const { hook, codex } = both(command, ["src/**"], ["**/*.pem"]);
+      expect(hook.decision, command).toBe("allowed");
+      expect(codex.decision, command).toBe("allowed");
+    }
+  });
+
+  it("refuses a source whose name there is prohibited, and a directory copied or moved in", () => {
+    for (const [command, prohibited] of [
+      ["cp x.pem src/other/", "**/*.pem"],
+      ["cp -t src/other x.pem", "**/*.pem"],
+      ["ln -s ../x.pem src/other", "**/*.pem"],
+      ["cp -r src/keys src/other", "**/*.pem"],
+      ["cp -r bin src/other", "**/*.pem"],
+      ["mv bin src/other", "**/*.pem"],
+      ["cp -r bin src/generated", "src/generated/**"],
+      ["cp src/a.ts src/generated", "src/generated/**"],
+    ] as const) {
+      const { hook, codex } = both(command, ["**"], [prohibited]);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+    }
+  });
+
+  it("judges the directory whole where the line does not say what lands in it", () => {
+    for (const command of [
+      // `-T` writes the source over the directory itself, and `ln -n` replaces it.
+      "cp -rT bin src/other",
+      "cp --no-t src/a.ts src/other",
+      "ln -sfn /tmp src/keys",
+      // A trailing `/` is the directory's contents to BSD `cp -R`; a glob is any name.
+      "cp -r src/keys/ src/other",
+      "cp src/* src/other",
+      'cp "$F" src/other',
+    ]) {
+      const { hook, codex } = both(command, ["**"], ["**/*.pem"]);
+      expect(hook, command).toMatchObject({ answer: "deny" });
+      expect(codex.decision, command).toBe("denied");
     }
   });
 });

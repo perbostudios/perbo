@@ -51,7 +51,10 @@ export const DEFAULT_AGENT_TOOLS = [
  * where the allow list carries it, as grounds to admit the line, as it takes
  * `echo` (`pretool.ts`). `date` sets the clock only for root, and `sudo` is
  * denied; the deny list names `-s` and `--set` all the same, and the guard
- * reads every other spelling that sets it as `--set` (`shell/internal/clock.ts`).
+ * reads every other spelling that sets it as `--set` (`shell/internal/clock.ts`):
+ * `-s` in a cluster, a prefix of `--set`, and an operand that is not a
+ * `+FORMAT` unless `-j`, `-d`, `--date`, `--file` or `--reference` is given —
+ * so BSD's `date -f %s 0` and `date -r 0 0101` are refused.
  */
 export const READ_ONLY_ORIENTATION = [
   "Bash(git rev-parse:*)",

@@ -151,6 +151,11 @@ describe("`date` setting the clock", () => {
     "/bin/date -us 2020-01-01",
     "env date -us 2020-01-01",
     'echo "$(date --se=2020-01-01)"',
+    // BSD's `-f` is only the operand's format and `-r` only the time shown, so
+    // without `-j` the operand is a time to set there.
+    "date -f %s 0",
+    "date -r 0 0101",
+    "date -r src/a.ts 0101",
   ]) {
     it(`refuses ${line} by the deny list`, () => {
       expect(claude(line)).toMatchObject({ answer: "deny", rule: "command_deny_list" });
@@ -165,6 +170,9 @@ describe("`date` setting the clock", () => {
     "date -d yesterday",
     "date -d 2020-01-01 +%s",
     "date -r src",
+    "date -r src/a.ts",
+    "date -jf %s 0 +%F",
+    "date -u -d @0",
     "date --iso-8601",
     "date -Iseconds",
     "date > src/stamp.txt",

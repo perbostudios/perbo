@@ -28,10 +28,13 @@ const LONG: ReadonlyArray<[name: string, value: "required" | "none" | "optional"
 const SHORT_VALUES = new Set(["d", "f", "r", "s"]);
 
 /**
- * The options after which an operand is not a time to set: GNU's `-d`, `-f`
- * and `-r` read a time from somewhere else, and BSD's `-j` never sets one.
+ * The options after which an operand is not a time to set: GNU's `-d`,
+ * `--date`, `--file` and `--reference` read a time from somewhere else, and
+ * BSD's `-j` never sets one. Short `-f` and `-r` are not among them: on BSD
+ * `-f` is only the format the operand is parsed with and `-r` only the time
+ * shown, so `date -f %s 0` and `date -r 0 0101` set the clock there.
  */
-const READS_ELSEWHERE = new Set(["-d", "-f", "-r", "-j", "--date", "--file", "--reference"]);
+const READS_ELSEWHERE = new Set(["-d", "-j", "--date", "--file", "--reference"]);
 
 /**
  * Whether `date`, given the words after it, sets the system clock — or null

@@ -7,7 +7,7 @@ import {
   suppliedDestination,
   type Context,
 } from "./command.js";
-import { judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
+import { judgeInto, judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
 import type { Word } from "./lexer.js";
 import type { Cwd } from "./scope.js";
 
@@ -75,7 +75,27 @@ export function linkFindings(rest: Word[], context: Context): WriteFinding[] {
   const link = targetDirectory ?? (operands.length >= 2 ? operands[operands.length - 1]! : null);
   const targets =
     link === null || link === targetDirectory ? operands : operands.slice(0, -1);
-  if (link !== null) findings.push(...judge(link, "the ln destination", context.cwd));
+  // A link made in a directory on disk is each target's name there, unless an
+  // option makes the destination itself the link: `-n`, BSD's `-h` and `-T`
+  // replace a link to a directory rather than follow it.
+  const into =
+    link !== null &&
+    supplied === undefined &&
+    ![...present].some(
+      (spelled) =>
+        ["-n", "-h", "-T"].includes(spelled) ||
+        (spelled.length > 2 &&
+          ["--no-dereference", "--no-target-directory"].some((long) => long.startsWith(spelled))),
+    )
+      ? judgeInto(link, targets, context.scope, context.cwd, true)
+      : null;
+  if (into !== null) {
+    findings.push(
+      ...into.flatMap(({ word, destination }) =>
+        pathFinding("the ln destination", word, destination, context.segment),
+      ),
+    );
+  } else if (link !== null) findings.push(...judge(link, "the ln destination", context.cwd));
   // Words a wrapper appends come last: the link itself, unless a `-t`
   // directory holds it, and then more targets.
   if (supplied !== undefined && supplied.placeholder === null) {

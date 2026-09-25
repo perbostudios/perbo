@@ -8,6 +8,7 @@ import {
   walkPath,
   windowsAlias,
 } from "./path.js";
+import type { Word } from "./lexer.js";
 import {
   allowedPathsSentence,
   prohibitedPathsSentence,
@@ -106,14 +107,16 @@ const DEVICE_TARGET = /^\/dev\/(?:null|stdin|stdout|stderr|tty|fd\/\d+)$/;
  * file, or a directory with everything under it. `place` reads it as a
  * directory a command works in, writing some of what is there and not the
  * rest (`git -C <dir>`): a prohibited path below it is judged when a write
- * names it, not held against the directory.
+ * names it, not held against the directory. `tree` is `whole` for a target
+ * that will be a directory whether or not one is on disk yet, as the copy of
+ * a directory is.
  */
 export function judgeTarget(
   target: string,
   scope: ResolvedScope,
   cwd: Cwd,
   shell: boolean,
-  reading: "whole" | "place" = "whole",
+  reading: "whole" | "place" | "tree" = "whole",
 ): Destination {
   let path = target;
   if (shell) {
@@ -178,11 +181,11 @@ export function judgeTarget(
   const prohibitedFold = (value: string) => prohibitedComparable(value, scope.semantics);
   const prohibited = scope.paths_prohibited.map(prohibitedFold);
   const judged = prohibitedFold(at);
-  const below = (glob: string, how: "named" | "any") => reading === "whole" && reachesBelow(judged, glob, how);
+  const below = (glob: string, how: "named" | "any") => reading !== "place" && reachesBelow(judged, glob, how);
   // A directory on disk is read by what a glob can match under it, so a
   // wildcard reaches inside it too: `src/keys` under `**/*.pem`, `packages/app`
   // under `packages/*/generated/**`, wherever the allowed globs put it.
-  const within = isDirectory(walked.path) ? "any" : "named";
+  const within = reading === "tree" || isDirectory(walked.path) ? "any" : "named";
   if (covers(judged, prohibited) || prohibited.some((glob) => below(glob, within))) {
     return {
       kind: "prohibited_path",
@@ -202,6 +205,74 @@ export function judgeTarget(
     return { kind: "inside", resolved: walked.path };
   }
   return { kind: "outside_scope", resolved: walked.path, at: at || ".", allowed: scope.paths_allowed };
+}
+
+/**
+ * What a `cp`, `mv`, `install` or `ln` writes when its destination is a
+ * directory on disk: each source under its own name inside it, and nothing
+ * else there (D-105). `cp src/a.ts src/other/` writes `src/other/a.ts`, so a
+ * prohibited glob that reaches inside `src/other` through a wildcard is judged
+ * against that path rather than held against the directory.
+ *
+ * The directory itself is judged as a place, so one the contract prohibits or
+ * does not admit is still refused. A source that is not a file on disk — a
+ * directory, or a name this cannot find — is judged as a directory under its
+ * name there, since copying or moving one writes everything below it. A link
+ * is one entry whatever it names, so `linked` judges each as what it is.
+ *
+ * Null where the destination is not a directory on disk, where a source's
+ * name inside it cannot be read from the line — a variable, a glob, a name a
+ * wrapper supplies, or a trailing `/`, which BSD `cp -R` reads as the
+ * directory's contents — or where a source copied or moved in lies outside the
+ * worktree, whose contents this has not seen; the destination is then judged
+ * whole.
+ */
+export function judgeInto(
+  directory: Word,
+  sources: readonly Word[],
+  scope: ResolvedScope,
+  cwd: Cwd,
+  linked = false,
+): Array<{ word: Pick<Word, "raw" | "value">; destination: Destination }> | null {
+  if (sources.length === 0) return null;
+  const place = judgeTarget(directory.value, scope, cwd, true, "place");
+  const resolvedOf = (destination: Destination) =>
+    destination.kind === "unresolvable" ? null : destination.resolved;
+  const resolved = resolvedOf(place);
+  if (place.kind === "outside" || resolved === null || onDisk(resolved) !== "directory") return null;
+  const names: string[] = [];
+  const from: Array<string | null> = [];
+  for (const source of sources) {
+    if (source.variable || source.substitutions.length > 0 || source.found === true) return null;
+    const name = source.value.split("/").pop() ?? "";
+    if (!/^[^*?[\]{}$`~\\]+$/.test(name) || name === "." || name === "..") return null;
+    names.push(name);
+    const at = linked ? null : judgeTarget(source.value, scope, cwd, true, "place");
+    if (at?.kind === "outside") return null;
+    from.push(at === null ? null : resolvedOf(at));
+  }
+  const join = (base: string, name: string) => `${base.replace(/\/+$/, "")}/${name}`;
+  return [
+    { word: directory, destination: place },
+    ...names.map((name, index) => {
+      const path = from[index] ?? null;
+      const file = linked || (path !== null && onDisk(path) === "file");
+      return {
+        word: { raw: join(directory.raw, name), value: join(directory.value, name) },
+        destination: judgeTarget(join(directory.value, name), scope, cwd, true, file ? "whole" : "tree"),
+      };
+    }),
+  ];
+}
+
+/** What is at a resolved path: a directory, something else, or nothing this can read. */
+function onDisk(resolved: string): "directory" | "file" | null {
+  try {
+    const entry = statSync(resolved, { throwIfNoEntry: false });
+    return entry === undefined ? null : entry.isDirectory() ? "directory" : "file";
+  } catch {
+    return null;
+  }
 }
 
 /**

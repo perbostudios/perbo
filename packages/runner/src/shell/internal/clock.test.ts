@@ -26,6 +26,12 @@ describe("the words that make `date` set the clock", () => {
       [["--", "01021230"], "01021230"],
       [["--utc", "01021230"], "01021230"],
       [["--u", "01021230"], "01021230"],
+      // On BSD `-f` is the operand's format and `-r` the time shown: neither
+      // stops the operand being a time to set.
+      [["-f", "%s", "0"], "0"],
+      [["-r", "0", "0101"], "0101"],
+      [["-r", "src/a.ts", "0101"], "0101"],
+      [["-uf", "%s", "0"], "0"],
     ] as const) {
       expect(clockSetting(words(...line)), line.join(" ")).toBe(setting);
     }
@@ -55,6 +61,11 @@ describe("the words that make `date` set the clock", () => {
       ["--date", "01021230"],
       ["--da=tomorrow", "+%F"],
       ["-j", "-f", "%s", "1600000000", "+%F"],
+      ["-jf", "%s", "0", "+%F"],
+      ["-r", "0"],
+      ["-u", "-d", "@0"],
+      ["--file", "dates.txt"],
+      ["--reference", "src/a.ts"],
       ["--debug"],
       // An ambiguous prefix is an error to `date`, and sets nothing.
       ["--d"],
