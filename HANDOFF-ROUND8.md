@@ -39,7 +39,7 @@ Built, reviewed, fixed: `ticketOpened` re-sent when the ticket's row becomes uns
 Built and approved; the badge and table words are to "directly verified", "inferred", "evidence not retained", "not reviewed" (card and table view; table column "Established").
 
 ## Founder's rulings today (apply everywhere)
-- No caps on the count or length of records Perbo writes; only a cap a decision states by number stays (D-094, D-117, D-127, D-128). String-length caps still await his ruling.
+- No caps on the COUNT of records Perbo writes; only a count cap a decision states by number stays (D-094, D-117, D-127, D-128). String-length caps STAY, with this rule: nothing is ever cut mid-sentence to fit; text that does not fit is condensed to fit. A model that writes the field is told the limit and asked to write concisely, and where its text overflows it is asked again to condense rather than clipped; a person typing into a field is held to the limit at the input; a line Perbo itself composes (progress, notes, PR sections) is written to fit in whole sentences. Any `.slice(0, n)` on text a person reads is a defect under this rule, except a log excerpt. The reviewer's prompt is a person's change (D-079): if its statements need the rule, say so in the report rather than editing it.
 - Primary (highlighted) button at the bottom right of every bottom bar.
 - Chat-edit change marks only; direct edits show none.
 - No chat dock on the contract or Problems tabs.
