@@ -15,8 +15,9 @@ import type { Word } from "./lexer.js";
  * One loop reads the words after the verb: the sets below consume the options,
  * and what is left are the operands. What is judged is the **destination** — the
  * last operand of a `cp`, every operand of an `rm`, the value of `dd of=`, the
- * directory a `-t` names — resolved against the worktree exactly as a redirect
- * target is, so `tee ~/x` and `> ~/x` get the same answer for the same reason.
+ * directory a `-t` names, each source of an `mv` — resolved against the
+ * worktree exactly as a redirect target is, so `tee ~/x` and `> ~/x` get the
+ * same answer for the same reason.
  *
  * An option the table does not know is read as a flag. That can misread a value
  * as an operand, which for a `last` destination is only reachable when the value
@@ -33,6 +34,12 @@ export interface WriterSpec {
   skipUnless?: readonly string[];
   /** How many operands `last` needs before the final one is a destination. */
   least?: number;
+  /**
+   * True where the operands that are not the destination are written as well:
+   * `mv` removes each one from where it was, so a source is judged as a write
+   * to its own path, a directory by everything under it.
+   */
+  sources?: boolean;
   /** Options whose value is a directory the operands are written into. */
   targetDirectory?: readonly string[];
   /** Options whose value is itself a destination. */
@@ -65,7 +72,7 @@ export interface WriterSpec {
  */
 export const WRITERS = new Map<string, WriterSpec>([
   ["cp", { operands: "last", targetDirectory: ["-t", "--target-directory"] }],
-  ["mv", { operands: "last", targetDirectory: ["-t", "--target-directory"] }],
+  ["mv", { operands: "last", sources: true, targetDirectory: ["-t", "--target-directory"] }],
   ["rm", { operands: "all" }],
   ["chmod", { operands: "all", skip: 1, values: ["--reference"] }],
   ["chown", { operands: "all", skip: 1, values: ["--reference", "--from"] }],
@@ -311,10 +318,26 @@ function destinationFindings(
       ];
     }
   }
+  const moved = (sources: Word[]): WriteFinding[] =>
+    spec.sources === true ? sources.flatMap((source) => judge(source, `the ${verb} source`)) : [];
   if (targetDirectory !== null) {
     // The operands are written into the directory this option names, so what a
-    // wrapper supplies from its standard input is a source.
-    return [...findings, ...judge(targetDirectory, `the ${verb} destination`)];
+    // wrapper supplies from its standard input is a source — which `mv` writes.
+    const appendedSources =
+      spec.sources === true && supplied !== undefined && placeholder === null
+        ? [
+            unread(
+              `the ${verb} source`,
+              `${supplied.wrapper} appends the words it reads from standard input to this command`,
+            ),
+          ]
+        : [];
+    return [
+      ...findings,
+      ...judge(targetDirectory, `the ${verb} destination`),
+      ...moved(remaining),
+      ...appendedSources,
+    ];
   }
   // Where the operands are destinations and a wrapper appends more of them from
   // its standard input, the write lands somewhere the line never spelled.
@@ -339,6 +362,7 @@ function destinationFindings(
       ...findings,
       ...appended,
       ...judge(remaining[remaining.length - 1]!, `the ${verb} destination`),
+      ...moved(remaining.slice(0, -1)),
     ];
   }
   return [...findings, ...appended];

@@ -50,8 +50,8 @@ export const DEFAULT_AGENT_TOOLS = [
  * cannot say. That is why the write guard takes a line's use of one of these,
  * where the allow list carries it, as grounds to admit the line, as it takes
  * `echo` (`pretool.ts`). `date` sets the clock only for root, and `sudo` is
- * denied; the deny list names the two direct spellings, `-s` and `--set`, all
- * the same.
+ * denied; the deny list names `-s` and `--set` all the same, and the guard
+ * reads every other spelling that sets it as `--set` (`shell/internal/clock.ts`).
  */
 export const READ_ONLY_ORIENTATION = [
   "Bash(git rev-parse:*)",
@@ -157,9 +157,9 @@ export const DEFAULT_COMMAND_DENY_LIST = [
   "Bash(cargo publish:*)",
   "Bash(pip install:*)",
   "Bash(sudo:*)",
-  // `date`'s setting flags, beside its read forms on the allow list. The
-  // operating system refuses every spelling of a clock change to a user who is
-  // not root; these make the direct spelling's refusal the runner's own.
+  // `date`'s setting flags, beside its read forms on the allow list. The guard
+  // reads every spelling that sets the clock (`-us`, `--se=…`, `MMDDhhmm`) as
+  // `date --set`, so these two make each one's refusal the runner's own.
   "Bash(date -s:*)",
   "Bash(date --set:*)",
   "WebFetch",

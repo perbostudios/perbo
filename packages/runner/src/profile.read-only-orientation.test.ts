@@ -139,10 +139,39 @@ describe("`date` setting the clock", () => {
     'date -s "2020-01-01 00:00"',
     "date --set=2020-01-01",
     'echo "$(date -s 2020-01-01)"',
+    // Every spelling `date` reads as setting the clock is its `--set` entry's.
+    "date -us 2020-01-01",
+    "date -su 2020-01-01",
+    "date -ius 2020-01-01",
+    "date --se=2020-01-01",
+    "date --se 2020-01-01",
+    "date --s=2020-01-01",
+    "date 01021230",
+    "date -u 010212302020.30",
+    "/bin/date -us 2020-01-01",
+    "env date -us 2020-01-01",
+    'echo "$(date --se=2020-01-01)"',
   ]) {
     it(`refuses ${line} by the deny list`, () => {
       expect(claude(line)).toMatchObject({ answer: "deny", rule: "command_deny_list" });
       expect(codex(line)).toBe("denied");
+    });
+  }
+
+  for (const line of [
+    "date",
+    "date -u",
+    "date +%s",
+    "date -d yesterday",
+    "date -d 2020-01-01 +%s",
+    "date -r src",
+    "date --iso-8601",
+    "date -Iseconds",
+    "date > src/stamp.txt",
+  ]) {
+    it(`admits ${line}, which reads the clock`, () => {
+      expect(claude(line).decision, line).toBe("allowed");
+      expect(codex(line), line).toBe("allowed");
     });
   }
 });

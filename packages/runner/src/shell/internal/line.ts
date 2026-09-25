@@ -15,6 +15,7 @@ import {
   type Destination,
   type WriteFinding,
 } from "./destination.js";
+import { clockSetting } from "./clock.js";
 import { findExpression } from "./find.js";
 import { gitFindings } from "./git.js";
 import { INTERPRETERS, interpreterFindings } from "./interpreter.js";
@@ -752,6 +753,13 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       [basename(value), ...words.slice(i + 1).map((word) => word.raw)].join(" ").trim(),
     );
     const program = basename(value);
+    // `date -us …` sets the clock as `date --set …` does, and a list entry reads
+    // only the front of the line, so a `date` whose words set the clock also
+    // runs as its `--set` spelling.
+    if (program === "date") {
+      const setting = clockSetting(words.slice(i + 1).filter((word) => word.redirect !== true));
+      if (setting !== null) invocations.push(`date --set ${setting}`);
+    }
     if (PACKAGE_MANAGERS.has(program)) {
       i += 1;
       const stop = consumeOptions(program, PACKAGE_MANAGER_SPEC);

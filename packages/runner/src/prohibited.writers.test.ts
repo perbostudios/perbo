@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
 import { matchesListEntry } from "./admission.js";
-import { judgePreToolCall } from "./pretool.js";
+import { codexCommandDecision } from "./codex/index.js";
+import { judgePreToolCall, type PreToolGuardState } from "./pretool.js";
 import { inspectCommand, inspectCommandWithCwd } from "./prohibited.js";
 import { WRITERS } from "./shell/index.js";
 import { buildPermissionProfile } from "./profile.js";
@@ -838,6 +839,144 @@ describe("a write to a directory with a prohibited path inside it (D-105)", () =
         answer: "deny",
         rule: "write_prohibited_path",
       });
+    }
+  });
+});
+
+/**
+ * A directory on disk is read by what a prohibited glob can match under it,
+ * wherever the allowed globs put it: a wildcard reaches inside it as a literal
+ * segment does (D-105). Each line goes through both executors.
+ */
+describe("a write to a directory a wildcard prohibited glob can reach inside, on both executors", () => {
+  const TREE = realpathSync(scratch("perbo-wildcard-directory-"));
+  for (const directory of ["src/keys", "src/other", "src/generated", "packages/app/generated"]) {
+    mkdirSync(join(TREE, directory), { recursive: true });
+  }
+  writeFileSync(join(TREE, "src/keys/a.pem"), "key\n");
+  writeFileSync(join(TREE, "src/generated/a.ts"), "generated\n");
+  writeFileSync(join(TREE, "src/a.ts"), "source\n");
+
+  const both = (command: string, paths_allowed: string[], paths_prohibited: string[]) => {
+    const state: PreToolGuardState = {
+      root: TREE,
+      tmpdir: null,
+      cwd: TREE,
+      paths_allowed,
+      paths_prohibited,
+      spec_folder_writable: true,
+      allow_list: [...profile.command_allow_list, "Bash(find:*)"],
+      deny_list: [...profile.command_deny_list],
+    };
+    const hook = judgePreToolCall(
+      { tool_name: "Bash", tool_use_id: "toolu_wildcard", tool_input: { command } },
+      state,
+      new Date("2026-09-04T00:00:00.000Z"),
+    ).decision;
+    return { hook, codex: codexCommandDecision(command, TREE, state) };
+  };
+
+  const refusedAsProhibited = (command: string, allowed: string[], prohibited: string[]) => {
+    const { hook, codex } = both(command, allowed, prohibited);
+    expect(hook, `${command} ${prohibited}`).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+    expect(codex, `${command} ${prohibited}`).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+  };
+
+  const admitted = (command: string, allowed: string[], prohibited: string[]) => {
+    const { hook, codex } = both(command, allowed, prohibited);
+    expect(hook.decision, `${command} ${prohibited}`).toBe("allowed");
+    expect(codex.decision, `${command} ${prohibited}`).toBe("allowed");
+  };
+
+  it("refuses the directory, inside the allowed globs or named by them", () => {
+    for (const [command, allowed, prohibited] of [
+      ["rm -rf src/keys", "src/**", "**/*.pem"],
+      ["rm -rf src", "**", "**/*.pem"],
+      ["rm -rf packages/app", "packages/**", "packages/*/generated/**"],
+      ["rm -rf src", "**", "*/generated/**"],
+    ] as const) {
+      refusedAsProhibited(command, [allowed], [prohibited]);
+    }
+  });
+
+  it("refuses it through every writer judged by where it writes", () => {
+    for (const command of [
+      "rm -r src/keys",
+      "cp -r bin src/keys",
+      "mv src/a.ts src/keys",
+      "rsync -a --delete bin/ src/keys/",
+      "tar -xzf archive.tgz -C src/keys",
+      "find src/keys -delete",
+      "cd src && rm -rf keys",
+      "sh -c 'rm -rf src/keys'",
+    ]) {
+      refusedAsProhibited(command, ["src/**", "bin/**"], ["**/*.pem"]);
+    }
+  });
+
+  it("admits a directory no prohibited glob can reach inside, and any directory where none is prohibited", () => {
+    admitted("rm -rf src/other", ["src/**"], ["src/generated/**"]);
+    admitted("rm -rf src/keys", ["src/**"], []);
+    admitted("rm -rf src", ["**"], []);
+    // A file is not a directory, so a wildcard glob reaches nothing through it.
+    admitted("rm src/a.ts", ["src/**"], ["**/*.pem"]);
+  });
+});
+
+/** A source `mv` moves is removed from where it was, so it is judged as a write. */
+describe("an `mv` source, on both executors", () => {
+  const TREE = realpathSync(scratch("perbo-mv-source-"));
+  mkdirSync(join(TREE, "src/generated"), { recursive: true });
+  writeFileSync(join(TREE, "src/generated/a.ts"), "generated\n");
+  writeFileSync(join(TREE, "src/a.ts"), "source\n");
+
+  const both = (command: string, paths_allowed: string[], paths_prohibited: string[]) => {
+    const state: PreToolGuardState = {
+      root: TREE,
+      tmpdir: null,
+      cwd: TREE,
+      paths_allowed,
+      paths_prohibited,
+      spec_folder_writable: true,
+      allow_list: [...profile.command_allow_list],
+      deny_list: [...profile.command_deny_list],
+    };
+    return {
+      hook: judgePreToolCall(
+        { tool_name: "Bash", tool_use_id: "toolu_mv", tool_input: { command } },
+        state,
+        new Date("2026-09-04T00:00:00.000Z"),
+      ).decision,
+      codex: codexCommandDecision(command, TREE, state),
+    };
+  };
+
+  it("refuses moving a prohibited path, or a directory holding one, out", () => {
+    for (const command of [
+      "mv src/generated x",
+      "mv src/generated/a.ts x.ts",
+      "mv -t out src/generated/a.ts",
+      "mv src/a.ts src/generated/a.ts out",
+    ]) {
+      const { hook, codex } = both(command, ["**"], ["src/generated/**"]);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+    }
+  });
+
+  it("refuses moving a path out of the scope, or out of the worktree, in", () => {
+    const scoped = both("mv notes.md src/notes.md", ["src/**"], []);
+    expect(scoped.hook, "scope").toMatchObject({ answer: "deny", rule: "write_outside_scope" });
+    const outside = both(`mv ${OUTSIDE}/x src/x`, ["src/**"], []);
+    expect(outside.hook, "outside").toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+    expect(outside.codex, "outside").toMatchObject({ decision: "denied", rule: "write_outside_worktree" });
+  });
+
+  it("admits a move inside the scope with nothing prohibited", () => {
+    for (const command of ["mv src/a.ts src/b.ts", "mv -t src/lib src/a.ts"]) {
+      const { hook, codex } = both(command, ["src/**"], []);
+      expect(hook.decision, command).toBe("allowed");
+      expect(codex.decision, command).toBe("allowed");
     }
   });
 });

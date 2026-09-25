@@ -29,7 +29,8 @@ The half of execution that is not the agent.
   because a file write is not a command.
 - `shell/` — how the guard reads a command line or a path to find where it writes: `index.ts` is the
   surface (`readCommandLine`, `inspectWritePath`, the scope types); `internal/` holds the lexer, the
-  writer, wrapper, git and interpreter tables, the inline-program reader and the line assembly.
+  writer, wrapper, git and interpreter tables, `date`'s clock-setting options, the inline-program
+  reader and the line assembly.
 - `spec-commit.ts` — the spec the change is judged against, put on the branch as its first commit
   past the contract's base before the executor is invoked, from the files approval recorded and
   their hashes ([D-103](../../docs/11-open-decisions.md)). A file that has changed or gone since

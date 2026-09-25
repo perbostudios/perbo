@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { matchesAny } from "@perbo/contracts";
 import {
   anchorOf,
@@ -178,7 +179,11 @@ export function judgeTarget(
   const prohibited = scope.paths_prohibited.map(prohibitedFold);
   const judged = prohibitedFold(at);
   const below = (glob: string, how: "named" | "any") => reading === "whole" && reachesBelow(judged, glob, how);
-  if (covers(judged, prohibited) || prohibited.some((glob) => below(glob, "named"))) {
+  // A directory on disk is read by what a glob can match under it, so a
+  // wildcard reaches inside it too: `src/keys` under `**/*.pem`, `packages/app`
+  // under `packages/*/generated/**`, wherever the allowed globs put it.
+  const within = isDirectory(walked.path) ? "any" : "named";
+  if (covers(judged, prohibited) || prohibited.some((glob) => below(glob, within))) {
     return {
       kind: "prohibited_path",
       resolved: walked.path,
@@ -190,9 +195,9 @@ export function judgeTarget(
   if (scope.paths_allowed.length === 0 || (at !== "" && matchesAny(fold(at), allowed))) {
     return { kind: "inside", resolved: walked.path };
   }
-  // Admitted as a directory whose whole contents the globs admit only where no
-  // prohibited glob can match anything inside it, so a write that empties the
-  // directory cannot reach a prohibited path through it (D-105).
+  // A directory not yet on disk is admitted whole only where no prohibited glob
+  // can match anything inside it, so a write that fills it cannot reach a
+  // prohibited path through it (D-105).
   if (covers(fold(at), allowed) && !prohibited.some((glob) => below(glob, "any"))) {
     return { kind: "inside", resolved: walked.path };
   }
@@ -218,9 +223,11 @@ function covers(at: string, globs: readonly string[]): boolean {
  * for the root, and `src/generated/**` does for `src` because its leading
  * segments spell `src` literally. A write there is refused as prohibited,
  * since a file cannot sit where the glob puts a directory. `any` also counts a
- * glob that reaches below `at` through a wildcard, as one opening with `**`
- * reaches below every path. The guard cannot hold that against a target it
- * cannot tell from a file, so it only stops a directory being admitted whole.
+ * glob that reaches below `at` through a wildcard: one opening with `**`
+ * reaches below every path, and one opening with `*` below `src`. That is held
+ * against a target that is a directory on disk; a target that is not there
+ * yet cannot be told from a file, so for it `any` only stops a directory
+ * being admitted whole.
  */
 function reachesBelow(at: string, glob: string, reading: "named" | "any"): boolean {
   if (at === "") return glob.length > 0;
@@ -233,6 +240,19 @@ function reachesBelow(at: string, glob: string, reading: "named" | "any"): boole
     if (reading === "named" ? segment !== part : !matchesAny(part, [segment])) return false;
   }
   return segments.length > parts.length;
+}
+
+/**
+ * Whether a resolved destination is a directory on disk. The walk has already
+ * followed every link on the way, the last one included. A path that cannot
+ * be read is taken as one, which refuses the more.
+ */
+function isDirectory(resolved: string): boolean {
+  try {
+    return statSync(resolved, { throwIfNoEntry: false })?.isDirectory() ?? false;
+  } catch {
+    return true;
+  }
 }
 
 /**

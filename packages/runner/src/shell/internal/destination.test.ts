@@ -15,7 +15,9 @@ const scratch = scratchDirectories("perbo-runner-");
  */
 
 const ROOT = realpathSync(scratch("perbo-destination-"));
-mkdirSync(join(ROOT, "src", "secret"), { recursive: true });
+for (const directory of ["src/secret", "src/keys", "src/other", "packages/app"]) {
+  mkdirSync(join(ROOT, directory), { recursive: true });
+}
 
 const kind = (
   target: string,
@@ -127,15 +129,45 @@ describe("a directory with a prohibited path inside it", () => {
     );
   });
 
-  it("is not admitted whole where a wildcard glob can reach inside it", () => {
+  it("is not admitted whole where a wildcard glob can reach inside it and it is not there yet", () => {
     for (const prohibited of ["**/*.pem", "*/generated/**"]) {
-      expect(kind("src", { paths_allowed: ["src/**"], paths_prohibited: [prohibited] }), prohibited).toMatchObject({
+      expect(kind("lib", { paths_allowed: ["lib/**"], paths_prohibited: [prohibited] }), prohibited).toMatchObject({
         kind: "outside_scope",
-        at: "src",
+        at: "lib",
       });
     }
     // A file the allowed globs name directly stays admitted: the guard cannot
     // tell it from a directory, and the glob names no place inside it.
     expect(kind("src/a.ts", { paths_allowed: ["src/**"], paths_prohibited: ["**/*.pem"] }).kind).toBe("inside");
+  });
+});
+
+describe("a directory on disk a wildcard prohibited glob can reach inside", () => {
+  it("is refused as prohibited, inside the allowed globs or named by them", () => {
+    for (const [target, allowed, prohibited] of [
+      ["src/keys", "src/**", "**/*.pem"],
+      ["src", "**", "**/*.pem"],
+      ["src", "src/**", "**/*.pem"],
+      ["packages/app", "packages/**", "packages/*/generated/**"],
+      ["src", "**", "*/generated/**"],
+      ["src/keys/", "src/**", "**/*.pem"],
+    ] as const) {
+      expect(kind(target, { paths_allowed: [allowed], paths_prohibited: [prohibited] }), target).toMatchObject({
+        kind: "prohibited_path",
+      });
+    }
+  });
+
+  it("is admitted where no prohibited glob can reach inside it", () => {
+    expect(kind("src/other", { paths_allowed: ["src/**"], paths_prohibited: ["src/generated/**"] }).kind).toBe(
+      "inside",
+    );
+    expect(kind("src/keys", { paths_allowed: ["src/**"] }).kind).toBe("inside");
+    expect(kind("src", { paths_allowed: ["**"], paths_prohibited: ["docs/**/*.pem"] }).kind).toBe("inside");
+  });
+
+  it("is left alone as the directory a command works in", () => {
+    const scope = resolveScope({ root: ROOT, paths_allowed: ["src/**"], paths_prohibited: ["**/*.pem"] });
+    expect(judgeTarget("src/keys", scope, { path: ROOT, unknown: false }, true, "place").kind).toBe("inside");
   });
 });
