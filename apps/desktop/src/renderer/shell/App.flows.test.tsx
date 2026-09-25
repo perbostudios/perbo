@@ -1458,8 +1458,9 @@ describe("the stopped page", () => {
   });
 
   it("Stop's shortcut lands on the page at once too", async () => {
-    const { row, job } = await runInProgress("PRB-402");
-    location.hash = ["task", row.repoId, "PRB-402", "loop"].join("/");
+    // Stopped once already by the case above, so the run starts back through ready, as the CLI starts one.
+    const { row, job } = await runInProgress("PRB-398");
+    location.hash = ["task", row.repoId, "PRB-398", "loop"].join("/");
     mount();
     const stop = (await screen.findByRole("button", { name: "Stop the loop" })) as HTMLButtonElement;
     await waitFor(() => expect(stop.disabled).toBe(false));
@@ -1592,7 +1593,8 @@ describe("the stopped page", () => {
 describe("continuing a filed stopped run", () => {
   it("returns it to Home as its loop starts, and keeps it there when it stops again", async () => {
     const workspace = await sampleBridge.request({ kind: "snapshot" });
-    const key = "PRB-299";
+    // Filed with its pull request closed unmerged: a run takes it back through ready.
+    const key = "PRB-396";
     const repoId = workspace.tasks.find((row) => row.ticket.key === key)!.repoId;
     const entry = repoId + ":" + key;
     const filed = async () => (await sampleBridge.request({ kind: "snapshot" })).archived ?? [];

@@ -9,7 +9,10 @@ The half of execution that is not the agent.
   loaded nothing originating in the repository (ADR-0030). Both adapters print each turn the
   executor's own session speaks as a progress line of its own (`spokenLine` in `@perbo/contracts`),
   redacted as the attempt's records are; the review stage prints each finding the reviewer left
-  open the same way, and the seal says when it starts.
+  open the same way, and one the runner or the review's own checks state, such as a flaky check,
+  as a `finding:` line of the runner's own, never marked as the reviewer's words; and the seal
+  says when it starts. On Codex a subagent's items reach the attempt's transcript marked
+  `subagent`, so nothing reads them back as the executor's.
 - `codex/` — the Codex adapter: `index.ts` is the surface (`runCodexAgent` and the three decisions
   the thread's items are answered with); `internal/rpc.ts` holds the thread session, its argv and
   the agent role files it writes.

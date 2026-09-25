@@ -63,7 +63,8 @@ answer one of them takes is one the others act on; it is browser-safe for the la
 progress line per turn, folded to one line, bounded, and marked with whose words they are, which
 the runner's adapters and review stage write and the desktop's Watch page reads back to show them
 as they arrive. A line is words to show and nothing else ([ADR-0023](../../docs/adr/0023-untrusted-context-boundary.md)).
-It imports nothing, so the renderer takes it from `@perbo/contracts/browser`.
+`oneLine` is that folding on its own, for a line of the runner's that carries text it did not
+write, such as a command or a test's name. It imports nothing, so the renderer takes it from `@perbo/contracts/browser`.
 
 `retained.ts` is the single home for whether a ticket's last run retained a branch to publish
 ([D-NEW-publish-a-retained-branch-later](../../docs/11-open-decisions.md)): `retainedBranch`
