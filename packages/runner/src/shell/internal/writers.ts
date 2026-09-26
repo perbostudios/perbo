@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { backupFindings, defaultSuffixes } from "./backup.js";
 import {
   anyPresent,
@@ -8,8 +9,16 @@ import {
   suppliedAsOption,
   type Context,
 } from "./command.js";
-import { judgeInto, judgeTarget, pathFinding, type Destination, type WriteFinding } from "./destination.js";
+import {
+  copiedDirectories,
+  judgeInto,
+  judgeTarget,
+  pathFinding,
+  type Destination,
+  type WriteFinding,
+} from "./destination.js";
 import type { Word } from "./lexer.js";
+import { readSedScript } from "./sed.js";
 
 /**
  * A command that writes where its own operands say, and how to find the operand
@@ -38,6 +47,12 @@ import type { Word } from "./lexer.js";
 export interface WriterSpec {
   /** Which operands name a destination once the options are consumed. */
   operands: "last" | "all" | "none";
+  /**
+   * True where each destination is written as the entry itself and nothing
+   * below it, as `mkdir`, `rmdir`, `touch` and `mkfifo` write a directory: a
+   * prohibited path inside one is judged when a write names it.
+   */
+  place?: boolean;
   /** Operands consumed before the destinations: `chmod`'s mode, `sed`'s script. */
   skip?: number;
   /** Where given, `skip` applies only while none of these options is present. */
@@ -72,7 +87,8 @@ export interface WriterSpec {
   /**
    * Options whose attached value is the suffix a backup of each operand takes,
    * as `sed -i<suffix>` and `--in-place=<suffix>` do. A bare short one also
-   * reads the next word as BSD's suffix where it is a plain name.
+   * reads the next word as BSD's suffix where it is a plain name GNU cannot
+   * read as the script or the file it takes it for.
    */
   inPlace?: readonly string[];
   /** Options whose value is itself a destination. */
@@ -216,13 +232,20 @@ export const WRITERS = new Map<string, WriterSpec>([
   ["scp", { operands: "last", remote: true, beyondNamedPaths: true, values: ["-i", "-l", "-o", "-P", "-S", "-c", "-F", "-J"] }],
   ["touch", {
     operands: "all",
+    place: true,
     values: ["-d", "--date", "-r", "--reference", "-t", "--time"],
     longs: ["--no-create", "--no-dereference"],
   }],
   // `-Z` takes no value; `--context[=CTX]` takes one only attached.
-  ["mkdir", { operands: "all", values: ["-m", "--mode"], optional: ["--context"], longs: ["--parents", "--verbose"] }],
-  ["mkfifo", { operands: "all", values: ["-m", "--mode"], optional: ["--context"] }],
-  ["rmdir", { operands: "all" }],
+  ["mkdir", {
+    operands: "all",
+    place: true,
+    values: ["-m", "--mode"],
+    optional: ["--context"],
+    longs: ["--parents", "--verbose"],
+  }],
+  ["mkfifo", { operands: "all", place: true, values: ["-m", "--mode"], optional: ["--context"] }],
+  ["rmdir", { operands: "all", place: true }],
   ["unlink", { operands: "all" }],
   ["truncate", {
     operands: "all",
@@ -268,6 +291,26 @@ export const WRITERS = new Map<string, WriterSpec>([
  * unresolvable rather than walked as a relative name.
  */
 const REMOTE_DESTINATION = /^[^/~.][^/]*:/;
+
+/** A plain name after a bare `sed -i`, which BSD takes as the suffix. */
+const BSD_SUFFIX = /^[A-Za-z0-9._~+][A-Za-z0-9._~+-]*$/;
+
+/**
+ * Whether GNU `sed` reads the word after a bare `-i` as what it takes it for:
+ * the script where no `-e` or `-f` gives one, else a file to edit, which it
+ * reads where one is on disk. GNU takes a suffix only attached, so where it
+ * can read the word the line is a GNU line and the word is not BSD's suffix:
+ * `sed -i 1d src/a.ts` edits `src/a.ts` alone. Where it cannot, GNU writes
+ * nothing through it, and the word is judged as the suffix BSD reads it as:
+ * `sed -i .bak 's/a/b/' src/a.ts` edits `src/a.ts` and keeps `src/a.ts.bak`.
+ */
+function gnuReads(word: Word, scripted: boolean, context: Context): boolean {
+  if (!scripted) {
+    return readSedScript(word.value, false).error === null || readSedScript(word.value, true).error === null;
+  }
+  const at = judgeTarget(word.value, context.scope, context.cwd, true, "place");
+  return at.kind !== "unresolvable" && at.resolved !== null && existsSync(at.resolved);
+}
 
 /** Judge the destinations of one writer, given the words after its verb. */
 export function writerFindings(
@@ -458,8 +501,13 @@ function destinationFindings(
             if (inline.length > 0) suffixes.push({ ...word, raw: inline, value: inline });
             else {
               const next = rest[i + 1];
-              if (next !== undefined && /^[A-Za-z0-9._~+][A-Za-z0-9._~+-]*$/.test(next.value)) {
+              const scripted = anyPresent(spec.skipUnless, present);
+              if (next !== undefined && BSD_SUFFIX.test(next.value) && !gnuReads(next, scripted, context)) {
                 bsdSuffixes.push(next);
+                // In the script's place, GNU compiles nothing and writes
+                // nothing, so BSD's reading is the one that runs: the word is
+                // the suffix and the next is the script.
+                if (!scripted) i += 1;
               }
             }
             break;
@@ -510,7 +558,7 @@ function destinationFindings(
     resolved: null,
   });
 
-  const judge = (word: Word, label: string): WriteFinding[] => {
+  const judge = (word: Word, label: string, incoming: readonly string[] = []): WriteFinding[] => {
     // The placeholder stands where this destination goes, so what is written is
     // whatever the wrapper reads, not the word on the line.
     if (supplied !== undefined && carries(word.value)) {
@@ -525,7 +573,7 @@ function destinationFindings(
     const destination: Destination =
       spec.remote === true && REMOTE_DESTINATION.test(word.value)
         ? { kind: "unresolvable", reason: "it names a destination on another host" }
-        : judgeTarget(word.value, context.scope, context.cwd, true);
+        : judgeTarget(word.value, context.scope, context.cwd, true, spec.place === true ? "place" : "whole", incoming);
     return pathFinding(label, word, destination, context.segment);
   };
 
@@ -596,7 +644,8 @@ function destinationFindings(
   /**
    * The destination that receives `sources`: each under its own name where it
    * is a directory on disk and the line names every source, else the
-   * destination whole.
+   * destination whole, holding what each source that is a directory on disk
+   * holds.
    */
   const receiving = (directory: Word, sources: Word[], known: boolean): WriteFinding[] => {
     const label = `the ${verb} destination`;
@@ -608,7 +657,11 @@ function destinationFindings(
     const entries = readable ? judgeInto(directory, sources, context.scope, context.cwd) : null;
     if (entries === null) {
       replaced.push(directory);
-      return judge(directory, label);
+      // A copy, a move or a sync puts what each source holds there; an archive
+      // unpacked or a download fetched into a `-C`, `-d` or `-P` directory
+      // holds what this cannot read.
+      const incoming = known && spec.operands === "last" ? copiedDirectories(sources, context.scope, context.cwd) : [];
+      return judge(directory, label, incoming);
     }
     replaced.push(...entries.slice(1).map(({ word }) => word));
     return entries.flatMap(({ word, destination }) => pathFinding(label, word, destination, context.segment));

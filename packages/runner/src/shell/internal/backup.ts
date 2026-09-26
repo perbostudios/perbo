@@ -87,7 +87,7 @@ export function backupFindings(
     const value = word.value.replace(/\/+$/, "");
     const raw = word.raw.replace(/\/+$/, "");
     if (value.length === 0) continue;
-    const kind = directoryNow(value, context) ? "tree" : "whole";
+    const incoming = directoryNow(value, context);
     for (const [index, suffix] of suffixes.entries()) {
       const paths =
         reading.named === true && suffix.includes("*")
@@ -98,7 +98,7 @@ export function backupFindings(
           ...pathFinding(
             label,
             path,
-            judgeTarget(path.value, context.scope, context.cwd, true, kind),
+            judgeTarget(path.value, context.scope, context.cwd, true, "whole", incoming),
             context.segment,
           ),
         );
@@ -128,15 +128,16 @@ function starred(value: string, raw: string, suffix: string, suffixRaw: string) 
 }
 
 /**
- * Whether what a backup renames is a directory now, so the backup is judged as
- * everything under it.
+ * What a backup renames where it is a directory now, so the backup is judged
+ * as holding everything under it; a path that cannot be read is passed on, and
+ * reading it refuses the more.
  */
-function directoryNow(value: string, context: Context): boolean {
+function directoryNow(value: string, context: Context): string[] {
   const at = judgeTarget(value, context.scope, context.cwd, true, "place");
-  if (at.kind === "unresolvable" || at.resolved === null) return false;
+  if (at.kind === "unresolvable" || at.resolved === null) return [];
   try {
-    return statSync(at.resolved, { throwIfNoEntry: false })?.isDirectory() ?? false;
+    return statSync(at.resolved, { throwIfNoEntry: false })?.isDirectory() === true ? [at.resolved] : [];
   } catch {
-    return true;
+    return [at.resolved];
   }
 }

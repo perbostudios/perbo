@@ -864,8 +864,9 @@ function loop(
 ): Job {
   // A decision that answers findings carries on the run that stopped for it,
   // and publishes as that run was going to: a decided delivery then opens the
-  // pull request that run would have (D-NEW-a-person-s-answer-closes-a-routed-
-  // finding). A principle alone publishes nothing.
+  // pull request that run would have
+  // (D-NEW-a-person-s-answer-closes-a-routed-finding). A principle alone
+  // publishes nothing.
   const publish =
     request.kind === "run"
       ? request.publish
@@ -888,8 +889,9 @@ function loop(
       if (resumeFrom)
         assertResumable(await m.tickets.detail(repo.id, request.key), resumeFrom);
       if (request.kind === "decide") {
-        // Each answer closes its finding (D-NEW-a-person-s-answer-closes-a-
-        // routed-finding); the principle carries the same words to the executor.
+        // Each answer closes its finding
+        // (D-NEW-a-person-s-answer-closes-a-routed-finding); the principle
+        // carries the same words to the executor.
         const ticket = await m.tickets.ticket(repo, request.key);
         assertDecidable(
           findingsOnRecord(await m.tickets.bundles(repo), ticket.ticket_id, objectsPath(repo)),

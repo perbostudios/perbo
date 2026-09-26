@@ -1,4 +1,5 @@
-import { statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { matchesAny } from "@perbo/contracts";
 import {
   anchorOf,
@@ -104,19 +105,22 @@ const DEVICE_TARGET = /^\/dev\/(?:null|stdin|stdout|stderr|tty|fd\/\d+)$/;
  * Where a write to `target` lands, and which refusal it earns.
  *
  * `whole` reads the target as something the write may replace entirely — a
- * file, or a directory with everything under it. `place` reads it as a
- * directory a command works in, writing some of what is there and not the
- * rest (`git -C <dir>`): a prohibited path below it is judged when a write
- * names it, not held against the directory. `tree` is `whole` for a target
- * that will be a directory whether or not one is on disk yet, as the copy of
- * a directory is.
+ * file, or a directory with everything under it. `place` reads it as the entry
+ * itself, as `mkdir`, `rmdir`, `touch` and `git -C <dir>` use a directory,
+ * writing nothing below it or only what a later write names: a prohibited path
+ * below it is judged when a write names it, not held against the directory.
+ *
+ * `incoming` is what a `whole` write puts under the target from elsewhere, as
+ * a copy or a move of a directory does: the resolved directories whose
+ * contents land directly under it.
  */
 export function judgeTarget(
   target: string,
   scope: ResolvedScope,
   cwd: Cwd,
   shell: boolean,
-  reading: "whole" | "place" | "tree" = "whole",
+  reading: "whole" | "place" = "whole",
+  incoming: readonly string[] = [],
 ): Destination {
   let path = target;
   if (shell) {
@@ -181,12 +185,25 @@ export function judgeTarget(
   const prohibitedFold = (value: string) => prohibitedComparable(value, scope.semantics);
   const prohibited = scope.paths_prohibited.map(prohibitedFold);
   const judged = prohibitedFold(at);
-  const below = (glob: string, how: "named" | "any") => reading !== "place" && reachesBelow(judged, glob, how);
-  // A directory on disk is read by what a glob can match under it, so a
-  // wildcard reaches inside it too: `src/keys` under `**/*.pem`, `packages/app`
-  // under `packages/*/generated/**`, wherever the allowed globs put it.
-  const within = reading === "tree" || isDirectory(walked.path) ? "any" : "named";
-  if (covers(judged, prohibited) || prohibited.some((glob) => below(glob, within))) {
+  // A glob that names a place inside the target reaches it wherever the target
+  // is. One that reaches inside only through a wildcard, `**/*.pem` under
+  // `src/keys`, is held against it only where something on disk that the
+  // write removes or puts there matches it, `src/keys/k.pem`.
+  const named = (glob: string) => reading === "whole" && reachesBelow(judged, glob, "named");
+  const wildcards = prohibited.filter(
+    (glob) => reading === "whole" && !reachesBelow(judged, glob, "named") && reachesBelow(judged, glob, "any"),
+  );
+  let reach: Reach | undefined;
+  const reached = (absent: boolean) => {
+    reach ??=
+      wildcards.length === 0
+        ? "none"
+        : reachOf(walked.path, incoming, at, (path) =>
+            wildcards.some((glob) => covers(prohibitedFold(path), [glob])),
+          );
+    return reach === "some" || (reach === "absent" && absent);
+  };
+  if (covers(judged, prohibited) || prohibited.some(named) || reached(false)) {
     return {
       kind: "prohibited_path",
       resolved: walked.path,
@@ -198,10 +215,11 @@ export function judgeTarget(
   if (scope.paths_allowed.length === 0 || (at !== "" && matchesAny(fold(at), allowed))) {
     return { kind: "inside", resolved: walked.path };
   }
-  // A directory not yet on disk is admitted whole only where no prohibited glob
-  // can match anything inside it, so a write that fills it cannot reach a
-  // prohibited path through it (D-105).
-  if (covers(fold(at), allowed) && !prohibited.some((glob) => below(glob, "any"))) {
+  // A directory the allowed globs cover is admitted whole where no prohibited
+  // glob can match anything the write reaches inside it, and one not yet on
+  // disk only where none can match anything at all, so a write that fills it
+  // cannot reach a prohibited path through it (D-105).
+  if (covers(fold(at), allowed) && !reached(true)) {
     return { kind: "inside", resolved: walked.path };
   }
   return { kind: "outside_scope", resolved: walked.path, at: at || ".", allowed: scope.paths_allowed };
@@ -215,10 +233,10 @@ export function judgeTarget(
  * against that path rather than held against the directory.
  *
  * The directory itself is judged as a place, so one the contract prohibits or
- * does not admit is still refused. A source that is not a file on disk — a
- * directory, or a name this cannot find — is judged as a directory under its
- * name there, since copying or moving one writes everything below it. A link
- * is one entry whatever it names, so `linked` judges each as what it is.
+ * does not admit is still refused. A source that is a directory on disk is
+ * judged as a directory under its name there holding what the source holds,
+ * since copying or moving one writes everything below it. A link is one entry
+ * whatever it names, so `linked` judges each as what it is.
  *
  * Null where the destination is not a directory on disk, where a source's
  * name inside it cannot be read from the line — a variable, a glob, a name a
@@ -251,27 +269,54 @@ export function judgeInto(
     if (at?.kind === "outside") return null;
     from.push(at === null ? null : resolvedOf(at));
   }
-  const join = (base: string, name: string) => `${base.replace(/\/+$/, "")}/${name}`;
+  const under = (base: string, name: string) => `${base.replace(/\/+$/, "")}/${name}`;
   return [
     { word: directory, destination: place },
     ...names.map((name, index) => {
       const path = from[index] ?? null;
-      const file = linked || (path !== null && onDisk(path) === "file");
+      const incoming = !linked && path !== null && onDisk(path) === "directory" ? [path] : [];
       return {
-        word: { raw: join(directory.raw, name), value: join(directory.value, name) },
-        destination: judgeTarget(join(directory.value, name), scope, cwd, true, file ? "whole" : "tree"),
+        word: { raw: under(directory.raw, name), value: under(directory.value, name) },
+        destination: judgeTarget(under(directory.value, name), scope, cwd, true, "whole", incoming),
       };
     }),
   ];
 }
 
-/** What is at a resolved path: a directory, something else, or nothing this can read. */
-function onDisk(resolved: string): "directory" | "file" | null {
+/**
+ * The directories on disk inside the worktree among the sources a copy or a
+ * move names, whose contents land under a destination judged whole:
+ * `src/keys` for `cp -rT src/keys src/other`. A source whose name the line
+ * does not spell — a variable, a glob, a word a wrapper supplies — one outside
+ * the worktree, and one that is not a directory on disk put nothing this
+ * reads there.
+ */
+export function copiedDirectories(sources: readonly Word[], scope: ResolvedScope, cwd: Cwd): string[] {
+  const directories: string[] = [];
+  for (const source of sources) {
+    if (source.variable || source.substitutions.length > 0 || source.found === true) continue;
+    const at = judgeTarget(source.value, scope, cwd, true, "place");
+    if (at.kind === "unresolvable" || at.kind === "outside") continue;
+    if (at.resolved !== null && onDisk(at.resolved) === "directory") {
+      directories.push(at.resolved);
+    }
+  }
+  return directories;
+}
+
+/**
+ * What is at a resolved path, following a link: a directory, something else,
+ * or nothing — and, where `strict`, `unreadable` for a path whose stat fails
+ * rather than nothing.
+ */
+function onDisk(resolved: string): "directory" | "file" | null;
+function onDisk(resolved: string, strict: true): "directory" | "file" | "unreadable" | null;
+function onDisk(resolved: string, strict = false): "directory" | "file" | "unreadable" | null {
   try {
     const entry = statSync(resolved, { throwIfNoEntry: false });
     return entry === undefined ? null : entry.isDirectory() ? "directory" : "file";
   } catch {
-    return null;
+    return strict ? "unreadable" : null;
   }
 }
 
@@ -296,9 +341,9 @@ function covers(at: string, globs: readonly string[]): boolean {
  * since a file cannot sit where the glob puts a directory. `any` also counts a
  * glob that reaches below `at` through a wildcard: one opening with `**`
  * reaches below every path, and one opening with `*` below `src`. That is held
- * against a target that is a directory on disk; a target that is not there
- * yet cannot be told from a file, so for it `any` only stops a directory
- * being admitted whole.
+ * against a target only where something on disk the write reaches under it
+ * matches the glob; a target that is not there yet cannot be told from a file,
+ * so for it `any` only stops a directory being admitted whole.
  */
 function reachesBelow(at: string, glob: string, reading: "named" | "any"): boolean {
   if (at === "") return glob.length > 0;
@@ -314,16 +359,44 @@ function reachesBelow(at: string, glob: string, reading: "named" | "any"): boole
 }
 
 /**
- * Whether a resolved destination is a directory on disk. The walk has already
- * followed every link on the way, the last one included. A path that cannot
- * be read is taken as one, which refuses the more.
+ * What a `whole` write reaches below its target through a wildcard glob:
+ * `some` where something on disk under the target, or under a directory whose
+ * contents it puts there, matches — or where that cannot be read — `none`
+ * where nothing does, and `absent` for a target that is not a directory on
+ * disk with nothing coming in, which cannot be told from a file.
  */
-function isDirectory(resolved: string): boolean {
-  try {
-    return statSync(resolved, { throwIfNoEntry: false })?.isDirectory() ?? false;
-  } catch {
-    return true;
+type Reach = "some" | "none" | "absent";
+
+function reachOf(target: string, incoming: readonly string[], at: string, matches: (path: string) => boolean): Reach {
+  const here = onDisk(target, true);
+  if (here === "unreadable") return "some";
+  const roots = here === "directory" ? [target, ...incoming] : incoming;
+  if (roots.length === 0) return "absent";
+  return holds(roots, at, matches) ? "some" : "none";
+}
+
+/**
+ * Whether any entry under the directories `roots`, spelled as though it sat
+ * under `at`, matches — or a directory among them cannot be read. A link inside
+ * is one entry and is not followed, as a removal or a copy of the tree does not
+ * follow it. It stops at the first match.
+ */
+function holds(roots: readonly string[], at: string, matches: (path: string) => boolean): boolean {
+  const pending = roots.map((directory) => ({ directory, spelled: at }));
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    let entries;
+    try {
+      entries = readdirSync(next.directory, { withFileTypes: true });
+    } catch {
+      return true;
+    }
+    for (const entry of entries) {
+      const spelled = next.spelled === "" ? entry.name : `${next.spelled}/${entry.name}`;
+      if (matches(spelled)) return true;
+      if (entry.isDirectory()) pending.push({ directory: join(next.directory, entry.name), spelled });
+    }
   }
+  return false;
 }
 
 /**

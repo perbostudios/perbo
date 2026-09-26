@@ -857,8 +857,9 @@ describe("a write to a directory with a prohibited path inside it (D-105)", () =
 
 /**
  * A directory on disk is read by what a prohibited glob can match under it,
- * wherever the allowed globs put it: a wildcard reaches inside it as a literal
- * segment does (D-105). Each line goes through both executors.
+ * wherever the allowed globs put it: a wildcard reaches inside it where
+ * something on disk there matches, as a literal segment always does (D-105).
+ * Each line goes through both executors.
  */
 describe("a write to a directory a wildcard prohibited glob can reach inside, on both executors", () => {
   const TREE = realpathSync(scratch("perbo-wildcard-directory-"));
@@ -914,8 +915,8 @@ describe("a write to a directory a wildcard prohibited glob can reach inside, on
   it("refuses it through every writer judged by where it writes", () => {
     for (const command of [
       "rm -r src/keys",
-      "cp -r bin src/keys",
-      "mv bin src/keys",
+      "cp -rT bin src/keys",
+      "mv src/keys bin",
       "mv -T bin src/keys",
       "rsync -a --delete bin/ src/keys/",
       "tar -xzf archive.tgz -C src/keys",
@@ -933,6 +934,108 @@ describe("a write to a directory a wildcard prohibited glob can reach inside, on
     admitted("rm -rf src", ["**"], []);
     // A file is not a directory, so a wildcard glob reaches nothing through it.
     admitted("rm src/a.ts", ["src/**"], ["**/*.pem"]);
+  });
+});
+
+/**
+ * `perbo admit`'s default state: `src/**` and `test/**` to write, and the
+ * prohibited paths every admitted ticket starts with (`DEFAULT_PROHIBITED` in
+ * `apps/cli/src/commands/admit.ts`). `**\/*.pem` reaches inside every
+ * directory through its wildcard, so a directory write is refused under it
+ * only where something on disk that the write reaches matches it, and
+ * `mkdir`, `rmdir`, `touch` and `mkfifo` write the directory itself and
+ * nothing below it (D-105). Each line goes through both executors.
+ */
+describe("a directory write under `perbo admit`'s default paths, on both executors", () => {
+  const DEFAULT_PROHIBITED = [".github/**", "infra/**", "**/*.pem", "**/.env*"];
+  const tree = (withKey: boolean) => {
+    const at = realpathSync(scratch("perbo-admit-defaults-"));
+    for (const directory of ["src/lib", "src/other", "src/components/button", "test/fixtures"]) {
+      mkdirSync(join(at, directory), { recursive: true });
+    }
+    writeFileSync(join(at, "src/a.ts"), "source\n");
+    writeFileSync(join(at, "src/lib/a.ts"), "source\n");
+    writeFileSync(join(at, "src/components/button/button.tsx"), "source\n");
+    writeFileSync(join(at, "test/fixtures/a.json"), "{}\n");
+    if (withKey) {
+      mkdirSync(join(at, "src/keys"), { recursive: true });
+      writeFileSync(join(at, "src/keys/k.pem"), "key\n");
+    }
+    return at;
+  };
+  const CLEAN = tree(false);
+  const KEYED = tree(true);
+
+  const both = (command: string, root: string, paths_prohibited = DEFAULT_PROHIBITED) => {
+    const state: PreToolGuardState = {
+      root,
+      tmpdir: null,
+      cwd: root,
+      paths_allowed: ["src/**", "test/**"],
+      paths_prohibited,
+      spec_folder_writable: true,
+      allow_list: [...profile.command_allow_list],
+      deny_list: [...profile.command_deny_list],
+    };
+    return {
+      hook: judgePreToolCall(
+        { tool_name: "Bash", tool_use_id: "toolu_defaults", tool_input: { command } },
+        state,
+        new Date("2026-09-04T00:00:00.000Z"),
+      ).decision,
+      codex: codexCommandDecision(command, root, state),
+    };
+  };
+  const admitted = (command: string, root: string) => {
+    const { hook, codex } = both(command, root);
+    expect(hook.decision, command).toBe("allowed");
+    expect(codex.decision, command).toBe("allowed");
+  };
+  const refused = (command: string, root: string, paths_prohibited = DEFAULT_PROHIBITED) => {
+    const { hook, codex } = both(command, root, paths_prohibited);
+    expect(hook, command).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+    expect(codex, command).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+  };
+
+  it("admits a directory write where nothing on disk under it matches", () => {
+    for (const command of [
+      "mkdir -p src/lib",
+      "mkdir -p src/lib && cat > src/lib/x.ts <<'EOF'\nexport const x = 1;\nEOF",
+      "rmdir src/other",
+      "touch src/lib",
+      "chmod -R u+w src/lib",
+      "rm -rf src/lib",
+      "rm -r src/components/button",
+      "rm -rf test/fixtures",
+      "mv src/lib src/utils",
+      "cp -r src/lib test/fixtures/",
+      "find src -name '*.orig' -delete",
+      "find src -type d -empty -delete",
+    ]) {
+      admitted(command, CLEAN);
+    }
+  });
+
+  it("admits a directory made, touched or removed as itself where a key sits under it", () => {
+    for (const command of ["mkdir -p src/keys", "touch src/keys", "rmdir src/keys"]) admitted(command, KEYED);
+  });
+
+  it("refuses a directory write that reaches a prohibited path on disk, one a glob names a place inside, and the root", () => {
+    for (const command of [
+      "rm -rf src/keys",
+      "rm -rf src",
+      "chmod -R u+w src/keys",
+      "find src -name '*.orig' -delete",
+      "cp -r src/keys test/fixtures/",
+      "cp -r src/keys src/new",
+      "mv src/keys src/other",
+      "rsync -a src/keys/ src/other/",
+      "cp -r /tmp/y .",
+    ]) {
+      refused(command, KEYED);
+    }
+    refused("rm -rf src", CLEAN, [...DEFAULT_PROHIBITED, "src/generated/**"]);
+    refused("cp -r /tmp/y .", CLEAN);
   });
 });
 
@@ -1007,6 +1110,7 @@ describe("a copy, move or link into a directory on disk, on both executors", () 
   writeFileSync(join(TREE, "src/keys/a.pem"), "key\n");
   writeFileSync(join(TREE, "src/a.ts"), "source\n");
   writeFileSync(join(TREE, "x.pem"), "key\n");
+  writeFileSync(join(TREE, "bin/b.pem"), "key\n");
 
   const both = (command: string, paths_allowed: string[], paths_prohibited: string[]) => {
     const state: PreToolGuardState = {
@@ -1065,16 +1169,19 @@ describe("a copy, move or link into a directory on disk, on both executors", () 
     }
   });
 
-  it("judges the directory whole where the line does not say what lands in it", () => {
+  it("judges the directory whole where the line does not say what lands in it, holding what a source holds", () => {
     for (const command of [
       // `-T` writes the source over the directory itself, and `ln -n` replaces it.
       "cp -rT bin src/other",
-      "cp --no-t src/a.ts src/other",
+      "cp --no-t src/a.ts src/keys",
       "ln -sfn /tmp src/keys",
+      "ln -sfn ../a.ts src/keys",
       // A trailing `/` is the directory's contents to BSD `cp -R`; a glob is any name.
       "cp -r src/keys/ src/other",
-      "cp src/* src/other",
-      'cp "$F" src/other',
+      "cp src/* src/keys",
+      'cp "$F" src/keys',
+      // A directory copied to a name not on disk takes that name.
+      "cp -r bin src/new",
     ]) {
       const { hook, codex } = both(command, ["**"], ["**/*.pem"]);
       expect(hook, command).toMatchObject({ answer: "deny" });
@@ -1184,7 +1291,11 @@ describe("an abbreviated long option and a backup suffix, on both executors", ()
  * The state the D-073 review probed both executors with: the profile's own
  * lists, `src/**` to write, and a prohibited key on disk under it.
  */
-function reviewTree(prefix: string) {
+function reviewTree(
+  prefix: string,
+  paths_allowed = ["src/**"],
+  paths_prohibited = ["**/*.pem", "src/generated/**", "src/secret/**"],
+) {
   const tree = realpathSync(scratch(prefix));
   for (const directory of ["src/keys", "src/generated", "src/secret", "src/other"]) {
     mkdirSync(join(tree, directory), { recursive: true });
@@ -1196,8 +1307,8 @@ function reviewTree(prefix: string) {
     root: tree,
     tmpdir: null,
     cwd: tree,
-    paths_allowed: ["src/**"],
-    paths_prohibited: ["**/*.pem", "src/generated/**", "src/secret/**"],
+    paths_allowed,
+    paths_prohibited,
     spec_folder_writable: true,
     allow_list: [...profile.command_allow_list],
     deny_list: [...profile.command_deny_list],
@@ -1360,6 +1471,31 @@ describe("a sed script, on both executors", () => {
       const { hook, codex } = both(command);
       expect(hook, command).toMatchObject({ answer: "deny", decision: "denied" });
       expect(codex.decision, command).toBe("denied");
+    }
+  });
+
+  it("reads the word after a bare -i as GNU's script or file where GNU can read it, else as BSD's suffix", () => {
+    const scoped = reviewTree("perbo-sed-suffix-", ["src/*.ts"]);
+    const exact = reviewTree("perbo-sed-suffix-exact-", ["src/a.ts", "README.md"]);
+    const suffixed = reviewTree("perbo-sed-suffix-bak-", ["src/**"], ["**/*.ts.bak"]);
+    for (const [judge, command] of [
+      [scoped, "sed -i 1d src/a.ts"],
+      [scoped, "sed -i p src/a.ts"],
+      [scoped, "sed -i 1~2d src/a.ts"],
+      [exact, "sed -i 1d src/a.ts"],
+      // With -e giving the script, GNU edits a file of that name on disk.
+      [exact, "sed -i README.md -e 1d src/a.ts"],
+      // GNU cannot compile `.bak`, so BSD's reading runs: the script follows it.
+      [both, "sed -i .bak 's/a/b/' src/a.ts"],
+    ] as const) {
+      const { hook, codex } = judge(command);
+      expect(hook, command).toMatchObject({ answer: "allow", decision: "allowed" });
+      expect(codex.decision, command).toBe("allowed");
+    }
+    for (const command of ["sed -i .bak s/a/b/ src/a.ts", "cd src && sed -i .bak -e 1d a.ts"]) {
+      const { hook, codex } = suffixed(command);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
     }
   });
 

@@ -16,9 +16,11 @@ const scratch = scratchDirectories("perbo-runner-");
  */
 
 const ROOT = realpathSync(scratch("perbo-destination-"));
-for (const directory of ["src/secret", "src/keys", "src/other", "packages/app"]) {
+for (const directory of ["src/secret", "src/keys", "src/other", "src/generated", "packages/app/generated"]) {
   mkdirSync(join(ROOT, directory), { recursive: true });
 }
+writeFileSync(join(ROOT, "src/keys/k.pem"), "key\n");
+writeFileSync(join(ROOT, "src/other/a.ts"), "source\n");
 
 const kind = (
   target: string,
@@ -144,7 +146,7 @@ describe("a directory with a prohibited path inside it", () => {
 });
 
 describe("a directory on disk a wildcard prohibited glob can reach inside", () => {
-  it("is refused as prohibited, inside the allowed globs or named by them", () => {
+  it("is refused as prohibited where something on disk under it matches, inside the allowed globs or named by them", () => {
     for (const [target, allowed, prohibited] of [
       ["src/keys", "src/**", "**/*.pem"],
       ["src", "**", "**/*.pem"],
@@ -159,6 +161,15 @@ describe("a directory on disk a wildcard prohibited glob can reach inside", () =
     }
   });
 
+  it("is admitted where nothing on disk under it matches, and whole where the allowed globs cover it", () => {
+    for (const target of ["src/other", "src/secret", "src/generated"]) {
+      expect(kind(target, { paths_allowed: ["src/**"], paths_prohibited: ["**/*.pem"] }).kind, target).toBe("inside");
+    }
+    expect(
+      kind("packages/app", { paths_allowed: ["packages/app/**"], paths_prohibited: ["**/*.pem", "**/.env*"] }).kind,
+    ).toBe("inside");
+  });
+
   it("is admitted where no prohibited glob can reach inside it", () => {
     expect(kind("src/other", { paths_allowed: ["src/**"], paths_prohibited: ["src/generated/**"] }).kind).toBe(
       "inside",
@@ -170,6 +181,18 @@ describe("a directory on disk a wildcard prohibited glob can reach inside", () =
   it("is left alone as the directory a command works in", () => {
     const scope = resolveScope({ root: ROOT, paths_allowed: ["src/**"], paths_prohibited: ["**/*.pem"] });
     expect(judgeTarget("src/keys", scope, { path: ROOT, unknown: false }, true, "place").kind).toBe("inside");
+  });
+
+  it("is judged by what a copy or a move puts there, as well as by what it holds", () => {
+    const scope = resolveScope({ root: ROOT, paths_allowed: ["src/**"], paths_prohibited: ["**/*.pem"] });
+    const here = { path: ROOT, unknown: false };
+    for (const target of ["src/new", "src/other"]) {
+      expect(judgeTarget(target, scope, here, true, "whole", [join(ROOT, "src/keys")]), target).toMatchObject({
+        kind: "prohibited_path",
+        at: target,
+      });
+      expect(judgeTarget(target, scope, here, true, "whole", [join(ROOT, "src/secret")]).kind, target).toBe("inside");
+    }
   });
 });
 
@@ -197,9 +220,13 @@ describe("a directory on disk a command writes its sources into", () => {
     });
   });
 
-  it("judges a source that is not a file on disk as a directory under its name", () => {
-    for (const source of ["src/keys", "bin"]) {
-      expect(into("src/other", source)?.[1]?.destination, source).toMatchObject({ kind: "prohibited_path" });
+  it("judges a directory source as a directory under its name holding what the source holds", () => {
+    expect(into("src/other", "src/keys")?.[1]).toMatchObject({
+      word: { value: "src/other/keys" },
+      destination: { kind: "prohibited_path", at: "src/other/keys" },
+    });
+    for (const source of ["src/secret", "bin"]) {
+      expect(into("src/other", source)?.[1]?.destination.kind, source).toBe("inside");
     }
   });
 

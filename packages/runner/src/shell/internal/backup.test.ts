@@ -45,6 +45,11 @@ describe("a coreutils backup, judged as a write", () => {
     "--back -S .pem",
   ];
 
+  it("judges the backup of a directory as holding what the directory holds", () => {
+    refusedAs("cp -rbT bin src/other", "write_prohibited_path", ["**/*~/*.ts"]);
+    admitted("cp -rbT bin src/other");
+  });
+
   it("refuses a suffix that makes the backup a prohibited path, into a directory or onto a file", () => {
     for (const verb of ["cp", "mv", "install"]) {
       for (const spelling of SPELLINGS) {
