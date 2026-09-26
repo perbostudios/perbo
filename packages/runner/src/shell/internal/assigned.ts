@@ -13,7 +13,10 @@ import { scanSegments, tokenize, type Word } from "./lexer.js";
  * counts, wherever it stands — a bare assignment, one in front of a command,
  * `export X=…`, `env X=…` — since the command it prefixes can be a shell that
  * reads it. A variable the line does not assign this way (`$HOME`, a `for`
- * loop's) is read as it always was.
+ * loop's) is read as written. A function the line defines, `git() {…}` or
+ * `function git`, is held as `git()` with no value, so what a command of
+ * that name prints is not taken to be what the command this guard knows
+ * prints.
  */
 export type Assigned = ReadonlyMap<string, string | null>;
 
@@ -31,11 +34,19 @@ export function assignmentsIn(command: string, inherited?: Assigned): Assigned {
     items.forEach((item, at) => {
       if (item.kind !== "word") return;
       const word = item.word;
+      const next = items[at + 1];
+      const close = items[at + 2];
+      const defined =
+        word.raw === "function" && next?.kind === "word"
+          ? next.word.value.replace(/\(\)$/, "")
+          : next?.kind === "word" && next.word.raw === "(" && close?.kind === "word" && close.word.raw === ")"
+            ? word.value
+            : null;
+      if (defined !== null) give(`${defined}()`, null);
       const spelled = ASSIGNMENT.exec(word.raw);
       if (spelled === null) return;
       const name = spelled[1]!;
       const value = word.value.slice(spelled[0].length);
-      const next = items[at + 1];
       const array = value.length === 0 && next?.kind === "word" && next.word.raw === "(";
       const literal =
         spelled[2] === "" &&

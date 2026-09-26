@@ -1572,7 +1572,7 @@ const WRITES_TMP = `"require('fs').writeFileSync('/tmp/x','y')"`;
  * and a value the line spells is read as that value, beside the reading of
  * the word as written. What a substitution prints into a variable is never a
  * ground to vouch for the line. A variable the line does not assign is read as
- * it always was.
+ * written.
  */
 describe("a word built from a variable the line assigns, on both executors", () => {
   const both = admitDefaultsTree("perbo-assigned-");
@@ -1643,7 +1643,7 @@ describe("a word built from a variable the line assigns, on both executors", () 
     expect(echoed.codex.decision).toBe("allowed");
   });
 
-  it("reads a variable the line does not assign as it always has", () => {
+  it("reads a variable the line does not assign as written", () => {
     for (const command of ["git diff $X", "find src $X", "rg foo $HOME", "git diff $PWD", "git log -n $N"]) {
       const { hook, codex } = both(command);
       expect(hook, command).toMatchObject({ answer: "defer", decision: "allowed" });
@@ -1748,5 +1748,139 @@ describe("a word the line builds after a command's options, or as an option's va
     ]) {
       refused(command);
     }
+  });
+});
+
+/**
+ * A word that begins with an expansion, where the program an interpreter
+ * runs or `git`'s verb stands, can be empty or an option when the line runs:
+ * `$Y`, `"$Y"`, `$1`, `$@`, and a variable the line assigns, which a
+ * subshell or a command in front of it can keep from reaching the command.
+ * It ends nothing, and every word built after it is read as an option. A
+ * substitution whose command prints an object name or an absolute path
+ * begins no option.
+ */
+describe("a word that begins with an expansion where the program stands, on both executors", () => {
+  const both = admitDefaultsTree("perbo-expansion-led-");
+  const refused = (command: string, rule = "write_outside_worktree") => {
+    const { hook, codex } = both(command);
+    expect(hook, command).toMatchObject({ answer: "deny", rule });
+    expect(codex, command).toMatchObject({ decision: "denied", rule });
+  };
+  const admitted = (command: string) => {
+    const { hook, codex } = both(command);
+    expect(hook, command).toMatchObject({ answer: "allow", decision: "allowed" });
+    expect(codex.decision, command).toBe("allowed");
+  };
+
+  it("reads every word built after it as an option the interpreter may take", () => {
+    for (const command of [
+      `node $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `node "$Y" "$(printf -- -e)" ${WRITES_TMP}`,
+      `node \${Y} "$(printf -- -e)" ${WRITES_TMP}`,
+      `node $Y$Z "$(printf -- -e)" ${WRITES_TMP}`,
+      `node $1 "$(printf -- -e)" ${WRITES_TMP}`,
+      `node $@ "$(printf -- -e)" ${WRITES_TMP}`,
+      `python3 $Y "$(printf -- -c)" "open('/tmp/x','w')"`,
+      `node $Y "$(printf -- -e)" "require('fs').rmSync('src/keys',{recursive:true})"`,
+      `node --test $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `node -- $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `python3 -m $Y "$(printf -- -c)" "open('/tmp/x','w')"`,
+      "node $Y $(git ls-files test)",
+    ]) {
+      refused(command);
+    }
+  });
+
+  it("reads a variable the line assigns as possibly empty where the command runs", () => {
+    for (const command of [
+      `(Y=scripts/build.js); node $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `(Y=scripts/x.py); python3 $Y "$(printf -- -c)" "open('/tmp/x','w')"`,
+      `Y=scripts/build.js true; node $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `if false; then Y=scripts/build.js; fi; node $Y "$(printf -- -e)" ${WRITES_TMP}`,
+      `(Y=rev-parse); git $Y diff "$(printf -- --output=/tmp/x)"`,
+      // Where $Y is empty, the word after it is the verb.
+      `git $Y "d$(echo iff)" --output=/tmp/x`,
+    ]) {
+      refused(command);
+    }
+  });
+
+  it("admits a word built after a program the line spells, or one a known command prints", () => {
+    for (const command of [
+      'node scripts/build.js "$(git rev-parse HEAD)"',
+      'node "$(git rev-parse --show-toplevel)/scripts/build.js"',
+      "python3 -m pytest $(git ls-files test)",
+      'Y=scripts/build.js; node $Y "$(git rev-parse HEAD)"',
+      'node -- $Y "$(git rev-parse HEAD)"',
+      'echo ok; git diff "$(git rev-parse HEAD)"',
+      'echo ok; git diff "$(git merge-base HEAD main)"',
+      'node "$(git rev-parse --show-toplevel)/scripts/build.js" "$(git rev-parse HEAD)"',
+    ]) {
+      admitted(command);
+    }
+  });
+
+  it("takes what a command prints only where the line leaves it the command this guard knows", () => {
+    for (const command of [
+      `git() { printf -- -e; }; node "$(git rev-parse HEAD)" ${WRITES_TMP}`,
+      `function git { printf -- -e; }; node "$(git rev-parse HEAD)" ${WRITES_TMP}`,
+      `git() { printf -- --output=/tmp/x; }; git diff "$(git rev-parse HEAD)"`,
+      "PATH=src:$PATH; node \"$(git rev-parse HEAD)\" x",
+      // A revision that does not resolve prints nothing under --verify, and
+      // is printed back without it.
+      `node "$(git rev-parse --verify nothere)-e" ${WRITES_TMP}`,
+      `node "$(git rev-parse --verify nothere)$(printf -- -e)" ${WRITES_TMP}`,
+      `node "$(git rev-parse -- -e)" ${WRITES_TMP}`,
+      // rev-parse prints back an option it does not know.
+      `node "$(git rev-parse -e HEAD)" ${WRITES_TMP}`,
+      'node "$(git rev-parse ../../tmp/x)" x',
+      // The shell splits what it prints outside double quotes.
+      "node $(git rev-parse HEAD) x",
+    ]) {
+      refused(command);
+    }
+  });
+
+  it("reads the program on standard input where the script word can be empty", () => {
+    for (const command of [
+      `echo ${WRITES_TMP} | node ""`,
+      `echo ${WRITES_TMP} | node $Y`,
+      `echo ${WRITES_TMP} | node "$(git rev-parse --verify nothere)"`,
+    ]) {
+      refused(command);
+    }
+    admitted(`echo ${WRITES_TMP} | node scripts/build.js`);
+  });
+
+  it("takes a find starting point a substitution begins and a literal / continues", () => {
+    for (const command of [
+      'find "$(git rev-parse --show-toplevel)/src" -name x',
+      'find "$(echo -delete)/src" -name x',
+      'find "$(pwd)/src" -name "*.ts"',
+      'find "$(git rev-parse --show-toplevel)" -name x',
+    ]) {
+      admitted(command);
+    }
+    refused("find $(echo x)/src -name x");
+    refused('find "$(echo x)" -name x');
+  });
+
+  it("reads a $((…)) of numbers in a sed script as a number", () => {
+    admitted('sed -n "$((10-5)),$((10+5))p" src/a.ts');
+    admitted('sed -i "$((1+1))d" src/a.ts');
+    refused('sed -i "$((1+1))w /tmp/x" src/a.ts');
+    // A name in the arithmetic is evaluated in turn, and a subscript in it can run a command.
+    refused(`x='a[$(touch /tmp/p)]'; sed -n "$((x))p" src/a.ts`, "unreadable_inline_program");
+    refused("sed -n '$((1))p' src/a.ts", "unreadable_inline_program");
+  });
+
+  it("tells Codex how to write a built word a command it does not read would take as an option", () => {
+    const { hook, codex } = both('pnpm test "$(git ls-files src)"');
+    expect(hook).toMatchObject({ answer: "defer", decision: "allowed" });
+    expect(codex).toMatchObject({ decision: "denied", rule: "command_allow_list" });
+    expect(codex.reason).toContain('"$(git ls-files src)" is built when the line runs where test still reads options');
+    expect(codex.reason).toContain("put -- before it to keep it an operand");
+    expect(both('pnpm test -- "$(git ls-files src)"').codex.decision).toBe("allowed");
   });
 });

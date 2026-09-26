@@ -1,6 +1,6 @@
 import { carries, longOption, type Context } from "./command.js";
 import { judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
-import type { Word } from "./lexer.js";
+import { literalArithmetic, tokenize, type Word } from "./lexer.js";
 
 /**
  * Where one reading of a `sed` line finds the script it runs: the words that
@@ -319,6 +319,18 @@ export function readSedScript(text: string, brackets: boolean): ScriptActs {
 }
 
 /**
+ * A `sed` word with each `$((…))` that spells only numbers and operators read
+ * as a digit (`literalArithmetic`). What one prints is a number, which in the
+ * script is an address, a count or text: `"$((10-5)),$((10+5))p"` prints lines.
+ */
+function sedArithmetic(word: Word): Word {
+  const raw = word.redirect === true ? null : literalArithmetic(word.raw, "1");
+  if (raw === null) return word;
+  const [item, ...more] = tokenize(raw).items;
+  return item?.kind === "word" && more.length === 0 ? item.word : word;
+}
+
+/**
  * What a `sed` line's script writes and runs, read as GNU and as BSD `sed`
  * would read the line, with and without a regex's bracket expression holding
  * the delimiter.
@@ -339,7 +351,8 @@ export function sedFindings(rest: readonly Word[], context: Context): WriteFindi
     resolved: null,
     cause: "unreadable_program",
   });
-  const readings = [gnuReading(rest, context), bsdReading(rest, context)];
+  const words = rest.map(sedArithmetic);
+  const readings = [gnuReading(words, context), bsdReading(words, context)];
   const acts: ScriptActs[] = [];
   for (const reading of readings) {
     if (reading.kind === "unreadable") return [unreadable(reading.why)];

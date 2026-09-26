@@ -23,6 +23,7 @@ import { judgeCommand, matchesListEntry } from "../admission.js";
 import { EFFECT_FREE_VERBS, judgePreToolCall, type PreToolGuardState } from "../pretool.js";
 import type { ProhibitedHit } from "../prohibited.js";
 import { prepareScratchDirectory } from "../scratch.js";
+import { everySegment } from "../shell/index.js";
 
 const ChangeSchema = z
   .object({
@@ -134,13 +135,22 @@ export function codexCommandDecision(
   };
   const admitted =
     inspection.segments.length > 0 && inspection.segments.every(eligible);
+  // What the reading could not account for says how the line could be written
+  // so that it can: a word a substitution builds where the command still reads
+  // options is an operand once `--` stands before it.
+  const unread = [
+    ...new Set(everySegment(inspection.segments).flatMap((segment) => (segment.accounted ? [] : segment.notes))),
+  ];
   return admitted
     ? decision
     : {
         ...decision,
         decision: "denied" as const,
         rule: "command_allow_list" as const,
-        reason: "Command is outside the runner's admitted command set.",
+        reason:
+          unread.length === 0
+            ? "Command is outside the runner's admitted command set."
+            : `Command is outside the runner's admitted command set: ${unread.join("; ")}.`,
         target: command,
       };
 }

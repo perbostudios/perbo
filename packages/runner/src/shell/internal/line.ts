@@ -1055,9 +1055,10 @@ function readWords(words: Word[], context: Context, expand: number[]): Analysis 
     // options, is an option this guard cannot read. For a verb it reads,
     // whose options it knows can write or run a program, that is refused; for
     // one it does not read, the segment is one it cannot account for, which
-    // no executor admits over its allow-list. A word built from a variable the
-    // line assigns a value it spells is read a second time with that value in
-    // its place (`analyzeWords`).
+    // no executor admits over its allow-list, and its note says how to write
+    // the word so the command reads it as an operand. A word built from a
+    // variable the line assigns a value it spells is read a second time with
+    // that value in its place (`analyzeWords`).
     const readable = !command.variable && command.substitutions.length === 0;
     if (readable && !OPTIONS_INERT.has(verb)) {
       const { built, label, keep, read } = builtWordsOf(verb, rest, { ...context, cwd });
@@ -1065,6 +1066,10 @@ function readWords(words: Word[], context: Context, expand: number[]): Analysis 
         findings.push(builtOptionFinding(label, built.unreadable, keep, { ...context, cwd }));
       } else if (built.unreadable !== undefined) {
         accounted = false;
+        notes.push(
+          `${built.unreadable.raw} is built when the line runs where ${label} still reads options, so what ` +
+            `it becomes can be one of its options — ${keep}`,
+        );
       }
       expand.push(...built.assigned.map((at) => i + 1 + at));
     }

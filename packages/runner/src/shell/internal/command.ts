@@ -1,6 +1,13 @@
 import type { WriteFinding } from "./destination.js";
 import { expandAssigned, type Assigned } from "./assigned.js";
-import { substitutedShape, type StdinSource, type Word } from "./lexer.js";
+import {
+  expandedPrefix,
+  leadingSubstitution,
+  substitutedShape,
+  tokenize,
+  type StdinSource,
+  type Word,
+} from "./lexer.js";
 import type { Cwd, ResolvedScope } from "./scope.js";
 
 export interface Context {
@@ -132,12 +139,14 @@ export function suppliedAsOption(
  * becomes; or when the line runs — by a `$(…)`, a backtick pair, or a
  * variable the line assigns a value built at run time — where only the text
  * ahead of the first expansion is known, and whether the shell splits the
- * rest into more words.
+ * rest into more words. `prints` says what a word built by a substitution it
+ * begins with starts as, where that substitution's command prints nothing
+ * that begins with `-` (`printedBy`).
  */
 export type Building =
   | { kind: "spelled" }
   | { kind: "assigned"; words: Word[] }
-  | { kind: "built"; prefix: string; splits: boolean };
+  | { kind: "built"; prefix: string; splits: boolean; prints: Printed | null };
 
 export function building(word: Word, assigned: Assigned | undefined): Building {
   if (word.substitutions.length === 0) {
@@ -147,7 +156,71 @@ export function building(word: Word, assigned: Assigned | undefined): Building {
     if (words !== "unreadable") return { kind: "assigned", words };
   }
   const shape = substitutedShape(word.raw, new Set(assigned?.keys() ?? []));
-  return shape === null ? { kind: "spelled" } : { kind: "built", ...shape };
+  if (shape === null) return { kind: "spelled" };
+  return { kind: "built", ...shape, prints: shape.prefix === "" ? leadingPrint(word.raw, assigned) : null };
+}
+
+/**
+ * True where a word the line spells begins with an expansion rather than a
+ * literal — `$Y`, `"$Y"`, `${Y}`, `$Y$Z`, `$1`, `$@` — so what it begins
+ * with, and whether it is there at all, is not on the line.
+ */
+export function expansionLed(word: Word): boolean {
+  return expandedPrefix(word.raw)?.prefix === "";
+}
+
+/**
+ * What a substitution's command prints, where it is one whose output never
+ * begins with `-`: an object name — `git rev-parse --verify` or `--short` of
+ * one revision, which prints its name or nothing; `git rev-parse` of
+ * revisions spelled as plain names, which prints each one's object name or,
+ * where one does not resolve, the name back; `git merge-base`, which prints
+ * an object name or nothing — or an absolute path: `git rev-parse
+ * --show-toplevel` and `pwd`.
+ */
+export type Printed = "name" | "path";
+
+const REVISION_NAME = /^[A-Za-z0-9][A-Za-z0-9_@^~{}.+-]*$/;
+
+function printedBy(body: string): Printed | null {
+  const words: string[] = [];
+  for (const item of tokenize(body).items) {
+    if (item.kind !== "word") return null;
+    const word = item.word;
+    if (word.redirect === true || word.variable || word.substitutions.length > 0) return null;
+    words.push(word.value);
+  }
+  const [program, verb, ...rest] = words;
+  if (program === "pwd") return words.slice(1).every((word) => word === "-P" || word === "-L") ? "path" : null;
+  if (program !== "git") return null;
+  const operands = rest.filter((word) => !word.startsWith("-"));
+  const options = rest.filter((word) => word.startsWith("-"));
+  if (verb === "merge-base") return options.length === 0 && operands.length >= 2 ? "name" : null;
+  if (verb !== "rev-parse") return null;
+  if (rest.length === 1 && rest[0] === "--show-toplevel") return "path";
+  if (!options.every((option) => /^(--verify|-q|--quiet|--short(=\d+)?)$/.test(option))) return null;
+  const verifies = options.some((option) => option === "--verify" || option.startsWith("--short"));
+  if (operands.length === 0) return null;
+  if (verifies) return operands.length === 1 ? "name" : null;
+  return operands.every((operand) => REVISION_NAME.test(operand)) ? "name" : null;
+}
+
+/**
+ * What a word begins as where it begins with a substitution `printedBy`
+ * knows, and goes on, if at all, with a literal that is not `-`: where the
+ * substitution prints nothing the word begins with that literal. Null where
+ * the line defines a function or an alias of the command's name, or assigns
+ * `PATH`, since the command that runs is then not the one this knows.
+ */
+function leadingPrint(raw: string, assigned: Assigned | undefined): Printed | null {
+  const leading = leadingSubstitution(raw);
+  if (leading === null || assigned === undefined || assigned.has("PATH")) return null;
+  const after = leading.after.replace(/^["']+/, "");
+  if (after !== "" && !/^[A-Za-z0-9_./]/.test(after)) return null;
+  const program = tokenize(leading.body).items[0];
+  const name = program?.kind === "word" ? program.word.value : "";
+  if (assigned.has(name) || assigned.has(`${name}()`)) return null;
+  return printedBy(leading.body);
 }
 
 /**
@@ -228,6 +301,13 @@ export function builtOption(
         else if (value.kind === "built" && value.splits) return { unreadable: rest[i]!, assigned: found };
       }
       continue;
+    }
+    // A word that begins as an object name or an absolute path is not an
+    // option; an object name names at most a file where the command runs,
+    // and is never an assignment.
+    if (how.prints !== null && !how.splits) {
+      if (reading.operands || how.prints === "name") continue;
+      return { unreadable: word, assigned: found };
     }
     if (how.splits || how.prefix.length === 0) return { unreadable: word, assigned: found };
     if (!how.prefix.startsWith("-")) {

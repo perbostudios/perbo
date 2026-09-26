@@ -372,8 +372,8 @@ export async function branchStillAt(worktree: string, base_commit: string, judge
  * The attempts of the run that sealed a commit: the change a decided delivery
  * publishes was made by them, and the pull request states what they cost. A
  * later run that sealed nothing — one that failed, or was stopped — made none
- * of it. An entry this version cannot read as an attempt is left out rather
- * than guessed.
+ * of it. An entry that is not an attempt record is left out rather than
+ * guessed.
  */
 export function attemptsThatSealed(record: AttemptsRecord | null, head_commit: string): ExecutionAttempt[] {
   const stored = record?.attempts ?? [];

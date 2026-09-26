@@ -1,6 +1,7 @@
 import {
   builtOption,
   carries,
+  expansionLed,
   keepAsOperand,
   suppliedAsOption,
   suppliedDestination,
@@ -9,7 +10,7 @@ import {
   type OptionReading,
 } from "./command.js";
 import { judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
-import type { Word } from "./lexer.js";
+import { expandedPrefix, type Word } from "./lexer.js";
 import { anchorOf, normalise } from "./path.js";
 
 /**
@@ -78,10 +79,12 @@ const GIT_DIFF_VALUES = new Set(["-S", "-G", "--output"]);
  * reads revisions, which keeps what follows a revision. A value the verb's
  * option takes is a value, never an option: `git log --since "$(date +%F)"`.
  * The read-only orientation verbs' options write nothing and run nothing, so
- * nothing after one of them is read. A variable the line assigns a value it
- * spells, standing before the verb, can be a global option or the verb, and
- * the reading with its value in place is the one that knows which, so this
- * reading goes no further.
+ * nothing after one of them is read. Before the verb, a word that begins with
+ * an expansion — `$Y`, `"$Y"`, `$1`, or a variable the line assigns, which a
+ * subshell or a command in front of it can keep from reaching this one — can
+ * be empty, a global option or the verb, and so can a value the shell splits,
+ * so where the verb stands cannot be told: every word from there on is read
+ * as a global option.
  */
 export function gitBuiltWords(
   rest: readonly Word[],
@@ -97,8 +100,17 @@ export function gitBuiltWords(
       option && !value.includes("=") && (GIT_GLOBAL_DIRECTORIES.has(name) || GIT_GLOBAL_VALUES.has(name));
     const words = rest.slice(i, takesNext ? i + 2 : i + 1);
     const built = builtOption(words, global, context.assigned, i);
-    if (built.unreadable !== undefined || built.assigned.length > 0) {
-      return { built, label: "git", keep: keepAsOperand("git", global) };
+    if (built.unreadable !== undefined) return { built, label: "git", keep: keepAsOperand("git", global) };
+    const moves =
+      built.assigned.length > 0 ||
+      expansionLed(rest[i]!) ||
+      (takesNext && rest[i + 1] !== undefined && expandedPrefix(rest[i + 1]!.raw)?.splits === true);
+    if (moves) {
+      return {
+        built: builtOption(rest.slice(i), global, context.assigned, i),
+        label: "git",
+        keep: keepAsOperand("git", global),
+      };
     }
     if (!option) break;
     i += words.length;

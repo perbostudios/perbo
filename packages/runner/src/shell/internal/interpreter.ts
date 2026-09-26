@@ -3,15 +3,17 @@ import {
   anyPresent,
   building,
   builtOption,
+  expansionLed,
   optionSet,
   optionsPresent,
+  type Building,
   type BuiltWords,
   type Context,
   type OptionReading,
 } from "./command.js";
 import type { WriteFinding } from "./destination.js";
 import { inlineCodeFindings } from "./inline-code.js";
-import type { Word } from "./lexer.js";
+import { expandedPrefix, type Word } from "./lexer.js";
 
 /**
  * An interpreter, and the options that hand it code on the command line.
@@ -228,12 +230,19 @@ const EVERY_WORD: OptionReading = { ends: "never", operands: false, named: false
  * the program's own — `node scripts/build.js "$(git rev-parse HEAD)"`,
  * `python3 -m pytest $(git ls-files test)`. Before it, what a word built at
  * run time prints can be `-e` and code the inline reader never sees, and one
- * standing where the program does names at run time what runs. node's
- * `--test` makes every word after `--` a test file, but before `--` node still
- * reads options, and `--no-test -e …` runs code. Once an option this does not
- * know is met, which may take the next word, where the program stands cannot
- * be told, and every word built after it is refused. The other interpreters
- * read every word as an option wherever it stands.
+ * standing where the program does names at run time what runs, save one that
+ * begins as an object name or an absolute path (`building`'s `prints`), which
+ * is the program: `node "$(git rev-parse --show-toplevel)/scripts/build.js"`.
+ * node's `--test` makes every word after `--` a test file, but before `--`
+ * node still reads options, and `--no-test -e …` runs code. Where the program
+ * or an option's value would stand, a word that begins with an expansion —
+ * `$Y`, `"$Y"`, `$1`, `$@`, or a variable the line assigns, which a subshell
+ * or a command in front of it can keep from reaching this one — can be empty,
+ * an option or several words, so where the program stands cannot be told;
+ * so too after an option this does not know, which may take the next word.
+ * From there every word built after it is read as one the interpreter may
+ * take as an option. The other interpreters read every word as an option
+ * wherever it stands.
  */
 export function interpreterBuiltWords(
   verb: string,
@@ -255,38 +264,52 @@ export function interpreterBuiltWords(
     built: unreadable === undefined ? { assigned: found } : { unreadable, assigned: found },
     keep,
   });
+  /** Every word from `from` on, read as one the interpreter may take as an option. */
+  const everyWord = (from: number) => {
+    const after = builtOption(rest.slice(from), EVERY_WORD, assigned, from);
+    found.push(...after.assigned);
+    return result(after.unreadable);
+  };
+  /** The program a word built at run time names: one that begins as an object name or a path, or none. */
+  const program = (how: Building & { kind: "built" }, word: Word) =>
+    result(how.prints !== null && !how.splits ? undefined : word);
   let testing = false;
   for (let i = 0; i < rest.length; i += 1) {
     const word = rest[i]!;
     if (word.redirect === true) continue;
     const how = building(word, assigned);
-    // A variable standing for an option or the program: the reading with its
-    // value in place is the one that knows which it is.
     if (how.kind === "assigned") {
       found.push(i);
-      return result();
+      return everyWord(i + 1);
     }
-    if (how.kind === "built") return result(word);
+    if (how.kind === "built") return program(how, word);
+    if (expansionLed(word)) return everyWord(i + 1);
     const value = word.value;
     if (value === "--") {
-      const program = testing ? undefined : rest[i + 1];
-      const named = program === undefined ? null : building(program, assigned);
-      if (named?.kind === "assigned") found.push(i + 1);
-      return result(named?.kind === "built" ? program : undefined);
+      if (testing) return result();
+      // After `--` nothing is an option, and the first word that is there
+      // when the line runs is the program.
+      for (let at = i + 1; at < rest.length; at += 1) {
+        const named = rest[at]!;
+        if (named.redirect === true) continue;
+        const shape = building(named, assigned);
+        if (shape.kind === "assigned") found.push(at);
+        else if (shape.kind === "built") return program(shape, named);
+        else if (!expansionLed(named)) return result();
+      }
+      return result();
     }
     if (!value.startsWith("-") || value === "-") return result();
     const own = ownOption(python, value);
-    if (own === null) {
-      const after = builtOption(rest.slice(i + 1), EVERY_WORD, assigned, i + 1);
-      found.push(...after.assigned);
-      return result(after.unreadable);
-    }
+    if (own === null) return everyWord(i + 1);
     if (!python && value === "--test") testing = true;
     for (let k = 0; k < own.takes && i + 1 < rest.length; k += 1) {
       i += 1;
       const operand = building(rest[i]!, assigned);
       if (operand.kind === "assigned") found.push(i);
       else if (operand.kind === "built" && (own.names || operand.splits)) return result(rest[i]!);
+      // A value the shell can drop or split moves every word after it.
+      if (operand.kind !== "built" && expandedPrefix(rest[i]!.raw)?.splits === true) return everyWord(i + 1);
     }
     if (own.ends) return result();
   }

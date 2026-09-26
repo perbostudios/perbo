@@ -1,6 +1,6 @@
 import type { Assigned } from "./assigned.js";
 import { building, type BuiltWords } from "./command.js";
-import type { Word } from "./lexer.js";
+import { leadingSubstitution, type Word } from "./lexer.js";
 
 /**
  * A `find` command line, as what it walks and what it does to what it finds.
@@ -221,7 +221,10 @@ function findRoles(rest: readonly Word[]): Array<"head" | "argument" | "body"> {
  * The words the line builds where `find` reads them as heads, which it does
  * wherever they stand, `--` or not: what one prints can be `-delete`, or
  * `-fprint` and a file. One that expands to one word beginning with a literal
- * other than `-` is a starting point. A primary's argument is a value,
+ * other than `-`, or as an object name or an absolute path (`building`'s
+ * `prints`), is a starting point, and so is one word whose substitution a
+ * literal `/` follows, `"$(…)/src"`: no primary, operator or leading option
+ * has a `/` in it. A primary's argument is a value,
  * `-name "$(cat pat)"`, so long as the shell does not split it into more
  * words; a body's words are read with the command they are.
  */
@@ -234,7 +237,11 @@ export function findBuiltWords(rest: readonly Word[], assigned: Assigned | undef
     const how = building(word, assigned);
     if (how.kind === "assigned") found.push(i);
     if (how.kind !== "built") continue;
-    if (roles[i] === "argument" ? how.splits : how.splits || !/^[^-]/.test(how.prefix)) {
+    const start =
+      /^[^-]/.test(how.prefix) ||
+      how.prints !== null ||
+      leadingSubstitution(word.raw)?.after.replace(/^"/, "").startsWith("/") === true;
+    if (roles[i] === "argument" ? how.splits : how.splits || !start) {
       return { unreadable: word, assigned: found };
     }
   }
