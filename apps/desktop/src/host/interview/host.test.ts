@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createScratch } from "@perbo/test-support";
 import { InterviewHost, type InterviewDeps } from "./host.js";
 import { ContractEditing } from "../../shared/contract-editing.js";
-import { SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
+import { INTERVIEW_WROTE_THE_SPEC, SettingsSchema, TaskModelsSchema } from "../../shared/protocol.js";
+import type { PromisePair } from "../../shared/contract-editing.js";
 import type { Change, EditingSession, InterviewEntry } from "../../shared/protocol.js";
 import type { LineProcess, LineProcessOptions } from "../process.js";
 import type { RegisteredRepository } from "../profile/store.js";
@@ -71,6 +72,8 @@ function host(
 ) {
   let records: EditingSession[] = [];
   const told: Change[] = [];
+  /** The planning each turn's change was marked on, with the pair it was measured from. */
+  const marked: [string, PromisePair | null | undefined][] = [];
   const spawned: { args: string[]; child: FakeInterview }[] = [];
   const editing = new ContractEditing({
     records: () => records,
@@ -100,7 +103,10 @@ function host(
       },
     },
     detail: () => Promise.reject(new Error("no detail in this test")),
-    marks: { pairOf: () => null, recordChangeSince: () => undefined },
+    marks: {
+      pairOf: () => PAIR,
+      recordChangeSince: (id, before) => void marked.push([id, before]),
+    },
     catalogs: { known },
     sessions: () => records,
     draftedFrom: () => Promise.resolve(null),
@@ -121,6 +127,7 @@ function host(
   return {
     editing,
     told,
+    marked,
     spawned,
     interviews: new InterviewHost(deps),
     /** `new` reuses the one open draft, so a second session asks for a fresh one. */
@@ -130,6 +137,8 @@ function host(
     conversation: (id: string): InterviewEntry[] => editing.read(id).conversation,
   };
 }
+/** The plan as a turn found it; what is marked against it is the marks' own test. */
+const PAIR = {} as PromisePair;
 const started = (session: string): Record<string, unknown> => ({
   type: "started",
   session_id: session,
@@ -247,6 +256,61 @@ describe("a person's turn", () => {
     await expect(w.interviews.turn(session.id, "Anybody there?")).rejects.toThrow(
       "The chat is not listening.",
     );
+  });
+});
+
+describe("a turn's ending", () => {
+  const said = (text: string) => ({
+    type: "message",
+    message: { type: "assistant", message: { content: [{ type: "text", text }] } },
+  });
+  /** A planning named from its first turn, mid-way through that turn, with the spec moved by it. */
+  async function midTurn(repo: RegisteredRepository) {
+    const w = host(repo);
+    const session = await w.open();
+    await w.interviews.turn(session.id, "Football game");
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    appendFileSync(join(repo.path, "specs", "football-game", "spec.md"), "\nExtra time is golden goal.\n");
+    child.say(said("*(spec updated — still no plan)*"));
+    return { w, id: session.id, child };
+  }
+  /** Whether the turn ended: nothing owed, its change marked, the spec handed over. */
+  function ended(w: ReturnType<typeof host>, id: string): void {
+    expect(w.interviews.working()).toEqual([]);
+    expect(w.marked).toEqual([[id, PAIR]]);
+    expect(w.conversation(id).some((entry) => entry.line.kind === "note" && entry.line.text === INTERVIEW_WROTE_THE_SPEC)).toBe(true);
+  }
+
+  it("ends both turns where a second, sent mid-turn, is answered inside the first", async () => {
+    const { w, id, child } = await midTurn(repository());
+    await w.interviews.turn(id, "why is the spec not being updated");
+    child.say(said("The spec on disk is up to date."));
+    expect(w.interviews.working()).toEqual([id]);
+    child.say({ type: "idle", turns: 2 });
+    ended(w, id);
+  });
+
+  it("keeps the second owed where it gets an ending of its own", async () => {
+    const { w, id, child } = await midTurn(repository());
+    await w.interviews.turn(id, "and the kick-off?");
+    child.say({ type: "idle", turns: 1 });
+    expect(w.interviews.working()).toEqual([id]);
+    child.say({ type: "idle", turns: 1 });
+    ended(w, id);
+  });
+
+  it("ends the turn a session ends in, before saying it has ended", async () => {
+    const { w, id, child } = await midTurn(repository());
+    child.say({ type: "ended", session_id: "sdk-1", reason: "error_during_execution" });
+    ended(w, id);
+    expect(w.conversation(id).at(-1)?.line).toMatchObject({ kind: "note", text: expect.stringMatching(/^The chat ended/) });
+  });
+
+  it("ends the turn the person stops, with what it changed", async () => {
+    const { w, id } = await midTurn(repository());
+    w.interviews.stop(id);
+    ended(w, id);
   });
 });
 

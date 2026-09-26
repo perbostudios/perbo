@@ -55,18 +55,25 @@ export function modelName(id: string): string {
   const [, family = "", version = "", wide] = claude;
   return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${version.replaceAll("-", ".")}${wide ? " · 1M" : ""}`;
 }
+/**
+ * A role's model choice. Closed, it reads "<model>  <Effort>", and with
+ * `connectionDot` a dot after them, green while the role's provider is signed
+ * in and grey while it is not.
+ */
 export function ModelPicker({
   role,
   models,
   onChange,
   connections,
   compact = false,
+  connectionDot = true,
 }: {
   role: "executor" | "reviewer";
   models: TaskModels;
   onChange: (models: TaskModels) => void;
   connections?: Provider[] | undefined;
   compact?: boolean;
+  connectionDot?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -164,7 +171,9 @@ export function ModelPicker({
           )}
           <strong>{modelName(model)}</strong>
           <span className="model-effort">{effortLabel(effort)}</span>
-          <span className={cx("connection-dot", !signedIn(connections, provider) && "disconnected")} />
+          {connectionDot && (
+            <span className={cx("connection-dot", !signedIn(connections, provider) && "disconnected")} />
+          )}
         </span>
         {compact ? (
           <img src="./brand/dropdown.svg" alt="" />
@@ -456,6 +465,7 @@ export function ProviderScreen({
                 <ModelPicker
                   role={role}
                   compact
+                  connectionDot={false}
                   models={settings}
                   connections={providers.data}
                   onChange={(models) => setSettings({ ...settings, ...models })}

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { TicketStateSchema } from "@perbo/contracts";
-import { homeRows, homeTally, homeTone, projectTicket } from "./ticket-workspace.js";
+import { homeOrder, homeRows, homeTally, homeTone, projectTicket } from "./ticket-workspace.js";
 import { sampleBridge } from "../../sample-host/bridge.js";
 import type { Job } from "../../shared/protocol.js";
 
@@ -219,5 +219,80 @@ describe("where a Home ticket stands", () => {
     // The sample: a decision; a stopped run and two tickets mid-run with
     // nothing running them; and an open pull request and a merge not yet filed.
     expect(tally).toEqual({ yellow: 1, red: 3, green: 2 });
+  });
+});
+
+describe("Home's order", () => {
+  it("puts completed first, then decisions, then stops, then running, each most recently opened first", async () => {
+    const { workspace, row: template, job } = await fixture();
+    /** A ticket in this state, admitted then, and opened then where it was. */
+    const ticket = (name: string, state: string, admitted: string, opened: string | null) => {
+      const row = structuredClone(template);
+      row.ticket.key = "PRB-" + (900 + workspace.tasks.length);
+      row.ticket.title = name;
+      row.ticket.state = state as typeof row.ticket.state;
+      row.ticket.admitted_at = `2026-09-0${admitted}T09:00:00.000Z`;
+      row.ticket.delivery.pull_request_url = state === "pr_open" ? "https://github.com/example/repo/pull/1" : null;
+      workspace.tasks.push(row);
+      if (opened !== null) workspace.lastOpened = { ...workspace.lastOpened, [row.repoId + ":" + row.ticket.key]: `2026-09-2${opened}T09:00:00.000Z` };
+      return row;
+    };
+    workspace.tasks = [];
+    workspace.lastOpened = {};
+    // Listed out of order on purpose: newest admitted first would read differently.
+    const rows = [
+      ticket("running", "executing", "9", "9"),
+      ticket("stopped, never opened, admitted first", "failed", "1", null),
+      ticket("decision, never opened", "changes_requested", "8", null),
+      ticket("waiting on the merge, opened earlier", "pr_open", "7", "1"),
+      ticket("stopped, opened", "failed", "2", "2"),
+      ticket("stopped, never opened, admitted last", "cancelled", "6", null),
+      ticket("decision, opened", "changes_requested", "3", "0"),
+      ticket("merged, opened later", "merged", "4", "3"),
+    ];
+    workspace.jobs = [{ ...job, key: rows[0]!.ticket.key, state: "running", endedAt: null, error: null }];
+    expect(homeOrder(workspace, rows, "opened").map((row) => row.ticket.title)).toEqual([
+      "merged, opened later",
+      "waiting on the merge, opened earlier",
+      "decision, opened",
+      "decision, never opened",
+      "stopped, opened",
+      "stopped, never opened, admitted last",
+      "stopped, never opened, admitted first",
+      "running",
+    ]);
+    // Opening one moves it to the top of its colour, and nowhere else.
+    workspace.lastOpened = { ...workspace.lastOpened, [rows[1]!.repoId + ":" + rows[1]!.ticket.key]: "2026-09-29T09:00:00.000Z" };
+    expect(homeOrder(workspace, rows, "opened").map((row) => row.ticket.title).slice(4, 7)).toEqual([
+      "stopped, never opened, admitted first",
+      "stopped, opened",
+      "stopped, never opened, admitted last",
+    ]);
+  });
+  it("orders by colour first and then by age, newest or oldest", async () => {
+    const { workspace, row: template } = await fixture();
+    workspace.tasks = [];
+    workspace.jobs = [];
+    const ticket = (name: string, state: string, updated: string) => {
+      const row = structuredClone(template);
+      row.ticket.key = "PRB-" + (900 + workspace.tasks.length);
+      row.ticket.title = name;
+      row.ticket.state = state as typeof row.ticket.state;
+      row.ticket.updated_at = `2026-09-0${updated}T09:00:00.000Z`;
+      workspace.tasks.push(row);
+      return row;
+    };
+    const rows = [
+      ticket("stopped, older", "failed", "1"),
+      ticket("merged, older", "merged", "2"),
+      ticket("decision", "changes_requested", "9"),
+      ticket("stopped, newer", "failed", "5"),
+      ticket("merged, newer", "merged", "6"),
+    ];
+    // Recently opened orders on openings, which these have none of, so the age decides here alone.
+    workspace.lastOpened = { [rows[1]!.repoId + ":" + rows[1]!.ticket.key]: "2026-09-20T09:00:00.000Z" };
+    const titles = (by: "newest" | "oldest") => homeOrder(workspace, rows, by).map((row) => row.ticket.title);
+    expect(titles("newest")).toEqual(["merged, newer", "merged, older", "decision", "stopped, newer", "stopped, older"]);
+    expect(titles("oldest")).toEqual(["merged, older", "merged, newer", "decision", "stopped, older", "stopped, newer"]);
   });
 });

@@ -30,7 +30,7 @@ describe("draftContract", () => {
     const result = await draftContract(input(model));
     expect(result.draft).toEqual(validDraft);
     expect(result.model.prompt_version).toBe(DRAFT_PROMPT_VERSION);
-    expect(DRAFT_PROMPT_VERSION).toBe("draft_v5");
+    expect(DRAFT_PROMPT_VERSION).toBe("draft_v6");
     expect(result.model.provider).toBe("double");
     expect(result.model.model_id).toBe("scripted");
     expect(result.model.turns).toBe(1);
@@ -162,7 +162,7 @@ describe("draftContract", () => {
 });
 
 describe("the draft schema", () => {
-  it("is bounded: at least one criterion, one to eight globs, no other field", () => {
+  it("is bounded: at least one criterion, at least one glob, no other field", () => {
     expect(ContractDraftSchema.safeParse(validDraft).success).toBe(true);
     expect(
       ContractDraftSchema.safeParse({
@@ -173,22 +173,21 @@ describe("the draft schema", () => {
     expect(ContractDraftSchema.safeParse({ ...validDraft, acceptance_criteria: [] }).success).toBe(
       false,
     );
-    // The cap of four is gone: large work is one ticket with a graph (D-100).
+    // A plan has as many criteria as the work has (D-100).
     expect(
       ContractDraftSchema.safeParse({
         ...validDraft,
         acceptance_criteria: Array.from({ length: 9 }, () => validDraft.acceptance_criteria[0]),
       }).success,
     ).toBe(true);
+    // A plan has as many paths as the work has.
+    const paths = Array.from({ length: 40 }, (_, i) => `packages/p${i}/**`);
     expect(
-      ContractDraftSchema.safeParse({
+      ContractDraftSchema.parse({
         ...validDraft,
-        proposed_scope: {
-          paths_allowed: Array.from({ length: 9 }, (_, i) => `packages/p${i}/**`),
-          paths_prohibited_extra: [],
-        },
-      }).success,
-    ).toBe(false);
+        proposed_scope: { paths_allowed: paths, paths_prohibited_extra: [] },
+      }).proposed_scope.paths_allowed,
+    ).toEqual(paths);
   });
 
   it("releases the model's session when the draft is done", async () => {

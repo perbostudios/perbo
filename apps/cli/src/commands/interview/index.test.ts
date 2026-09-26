@@ -909,7 +909,7 @@ describe("the plan's verdict across a chat turn", () => {
   const stubbed = async (
     repo: string,
     turns: readonly string[],
-    script: (session: InterviewSession, pulled: Turns) => AsyncGenerator<{ session_id?: string; idle?: boolean }>,
+    script: (session: InterviewSession, pulled: Turns) => AsyncGenerator<{ session_id?: string; idle?: number }>,
   ) => {
     const streams = recordStreams();
     const code = await runCommandLine(interviewCommandLine, {
@@ -961,7 +961,7 @@ describe("the plan's verdict across a chat turn", () => {
         await sessionWrites(session, repo, TWO);
         await sessionCalls(session, "edit_plan", rewording.input);
         if (queued) await pulled.next();
-        yield { idle: true };
+        yield { idle: 1 };
       });
       const record = readDriftRecord(dir, "PRB-1");
       expect(record?.origin).toBe("carried");
@@ -999,11 +999,11 @@ describe("the plan's verdict across a chat turn", () => {
       assertion: "the queue holds one job for the address",
     });
     await stubbed(repo, ["hello", "prove it differently"], async function* (session, pulled) {
-      yield { idle: true };
+      yield { idle: 1 };
       writeFileSync(join(repo, SPEC_PATH), TWO);
       await pulled.next();
       await sessionCalls(session, "edit_plan", arrangement);
-      yield { idle: true };
+      yield { idle: 1 };
     });
     expect(keyNow(repo).spec).not.toBe(seeded.spec);
     expect(keyNow(repo).promises).toBe(seeded.promises);
@@ -1027,7 +1027,7 @@ describe("the plan's verdict across a chat turn", () => {
       writeFileSync(join(repo, "CONTEXT.md"), "# Context\n");
       writeFileSync(join(repo, SPEC_PATH), TWO);
       await sessionCalls(session, "edit_plan", arrangement);
-      yield { idle: true };
+      yield { idle: 1 };
     });
     expect(keyNow(repo).spec).not.toBe(seeded.spec);
     expect(readDriftRecord(dir, "PRB-1")).toEqual(seeded);

@@ -56,7 +56,6 @@ const DESTINATION_ON_THE_LINE = [
   "xargs -i cp -- {} out",
   "xargs -J % cp -- % out",
   "xargs -0 -n1 cp -t out --",
-  "xargs --replace=% mv -- % out",
   // A substituting wrapper whose operands carry no placeholder runs the line as
   // it stands, once per word it reads.
   "xargs -I{} rm sub/generated",
@@ -195,6 +194,16 @@ const SUBSTITUTED_FOR_THE_DESTINATION = [
   "echo rm | xargs -J % % a /etc/x",
 ];
 
+/**
+ * A source `mv` moves is removed from where it was, so it is a write, and one
+ * the wrapper supplies is a write to a path the line never spells.
+ */
+const SUPPLIED_AS_A_MOVED_SOURCE = [
+  "xargs --replace=% mv -- % out",
+  "xargs -J % mv -- % out",
+  "xargs -0 -n1 mv -t out --",
+];
+
 /** Run `body` with the xargs entry no longer saying it appends operands. */
 const notAppending = (body: () => void) => {
   const held = WRAPPERS.get("xargs")!;
@@ -245,6 +254,14 @@ describe("a writer whose destination is on the line", () => {
   for (const command of SUPPLIED_AS_DD_INPUT) {
     it(`allows ${command}`, () => {
       expect(decision(command), command).toBe("allowed");
+    });
+  }
+
+  for (const command of SUPPLIED_AS_A_MOVED_SOURCE) {
+    it(`refuses ${command}, where the words xargs supplies are moved away`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("the mv source");
+      expect(sentence(command), command).toContain("xargs");
     });
   }
 });
@@ -402,5 +419,75 @@ describe("an xargs behind another", () => {
     // Without the `--`, the inner one appends its input where `cp` reads options.
     expect(sentence("xargs -I{} xargs cp -t out")).toContain("still reads options");
     expect(sentence("xargs -I{} xargs cp -t out")).not.toContain("stands behind xargs");
+  });
+});
+
+/**
+ * A verb that writes through one of its options — `git diff --output`,
+ * `git format-patch -o`, `rg --pre`, which runs a program — behind a wrapper
+ * that supplies it words. Those words land where the verb still reads its
+ * options, so one can be that option: each is refused unless `--` keeps them
+ * paths, or, for git's revision-reading verbs, `--end-of-options` keeps them
+ * revisions. A relative `--output` under a `-C` the placeholder fills lands
+ * where the supplied words say, and a `--pre` program the placeholder stands in
+ * is not one the line names.
+ */
+const OPTION_A_WRAPPER_SUPPLIES = [
+  "git ls-files | xargs git diff",
+  "xargs git log --oneline",
+  "xargs -I{} git show {}",
+  "echo HEAD | xargs -I{} git show {}",
+  "git log --format=%H -n3 | xargs git show --stat",
+  "ls | xargs git log --oneline",
+  "xargs git format-patch",
+  "xargs -I{} git show --output={} --end-of-options HEAD",
+  "git ls-files | xargs rg foo",
+  "xargs -I{} rg foo {}",
+  "xargs -J % git -C % diff --output=x.diff",
+  "xargs -J % git -C % format-patch -o patches HEAD~1",
+  "xargs -I{} rg --pre ./{} foo -- src",
+];
+
+/**
+ * The same, with `--` keeping the supplied words paths, `--end-of-options`
+ * keeping them revisions, or with no wrapper in front.
+ */
+const OPTION_THE_LINE_SPELLS = [
+  "git ls-files | xargs git diff --",
+  "xargs -I{} git show --end-of-options {}",
+  "echo HEAD | xargs -I{} git show --end-of-options {}",
+  "git log --format=%H -n3 | xargs git show --stat --end-of-options",
+  "ls | xargs git log --oneline --end-of-options",
+  "xargs git format-patch --end-of-options",
+  "xargs git diff --end-of-options --output=x.diff",
+  "git ls-files | xargs rg foo --",
+  "xargs -I{} rg foo -- {}",
+  "xargs -J % git -C % log",
+  "git -C src diff --output=x.diff",
+  "rg --pre cat foo src",
+];
+
+describe("a word a wrapper supplies where a verb writes through an option", () => {
+  for (const command of OPTION_A_WRAPPER_SUPPLIES) {
+    it(`refuses ${command}`, () => {
+      expect(decision(command), command).toBe("refused");
+      expect(sentence(command), command).toContain("xargs");
+    });
+  }
+
+  for (const command of OPTION_THE_LINE_SPELLS) {
+    it(`allows ${command}`, () => {
+      expect(decision(command), command).toBe("allowed");
+    });
+  }
+
+  it("names --end-of-options as the way to keep git's revisions", () => {
+    expect(sentence("ls | xargs git log --oneline")).toContain(
+      "end the line with --end-of-options to keep them revisions, or with -- to make them paths",
+    );
+    expect(sentence("echo HEAD | xargs -I{} git show {}")).toContain(
+      "put --end-of-options before it to keep it a revision, or -- to make it a path",
+    );
+    expect(sentence("xargs -I{} rg foo {}")).toContain("put -- before it, or a prefix such as ./{}");
   });
 });

@@ -1,14 +1,14 @@
 import { existsSync } from "node:fs";
-import { openDrafts, promiseOf } from "../shared/contract-editing.js";
+import { keepsPersonsTitle, openDrafts, promiseOf, titleChanged } from "../shared/contract-editing.js";
 import { DraftSchema, HELP_LINKS, RequestSchema, TaskModelsSchema } from "../shared/protocol.js";
-import { heldRepository } from "../shared/jobs.js";
+import { heldRepository, isRun } from "../shared/jobs.js";
 import { isArchivable, notArchivable } from "../shared/archive.js";
 import { specSlugOf } from "../shared/spec-slug.js";
 import { listExplorer, readExplorerFile } from "./explorer.js";
 import { exportedNames } from "./symbols.js";
 import { graphView } from "./plan/graph.js";
 import { contractImpact, impactView } from "./plan/impact.js";
-import { nameSpecAfterRename, saveSpec, specPath, specView, type SpecDeps } from "./plan/spec.js";
+import { nameSpecAfterRename, saveSpec, specPath, specTitles, specView, type SpecDeps } from "./plan/spec.js";
 import { archiveExport, ticketExport } from "./tickets/export.js";
 import { retainedOutput } from "./tickets/output.js";
 import { discardTicket } from "./tickets/discard.js";
@@ -21,7 +21,9 @@ import {
 } from "./tickets/work.js";
 import { pullRequestUrl, ticketWorktree, type TicketRecords } from "./tickets/open.js";
 import { effectiveLimits, readManifest, saveManifest, specFolder } from "./repository/config.js";
-import { saveAsk, setArchived } from "./profile/preferences.js";
+import { objectsPath } from "./repository/layout.js";
+import { findingsOnRecord } from "./records.js";
+import { recordOpened, saveAsk, setArchived } from "./profile/preferences.js";
 import { openLogin } from "./providers/status.js";
 import { usageReport } from "./providers/usage.js";
 import {
@@ -29,7 +31,9 @@ import {
   admitFromSpecArgs,
   approveArgs,
   assertEditable,
+  assertDecidable,
   assertResumable,
+  decisionArgs,
   doctorArgs,
   doctorConfig,
   editArgs,
@@ -186,7 +190,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       return opened;
     },
     editingRead: (request) => m.editing.read(request.id),
-    drafts: () => openDrafts(m.profile.state.editingSessions),
+    drafts: () => openDrafts(m.profile.state.editingSessions, specTitles(repository)),
     editingSave: (request) =>
       m.editing.save(request.id, request.revision, request.repoId, request.form),
     editingSubmit: (request) =>
@@ -372,6 +376,14 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
     },
 
     forgetRepository: scoped<"forgetRepository">((repo) => m.registry.forget(repo.id)),
+    ticketOpened: scoped<"ticketOpened">(async (repo, request) => {
+      if (!(await m.tickets.list(repo)).tickets.some((ticket) => ticket.key === request.key))
+        throw new Error(`${request.key} is not in this repository.`);
+      recordOpened(m.profile.state, repo.id, request.key, new Date());
+      m.profile.save();
+      m.changes.opened(m.profile.state.lastOpened);
+      return null;
+    }),
     graphRead: scoped<"graphRead">((repo, request) =>
       graphView({ tickets: m.tickets, execute: m.execute }, repo, request.key),
     ),
@@ -434,7 +446,7 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
           keys.includes(ticket.key) &&
           !isArchivable({ jobs: m.profile.state.jobs as Job[] }, { repoId: repo.id, ticket }),
       );
-      if (carried !== undefined) throw new Error(notArchivable(carried.key));
+      if (carried !== undefined) throw new Error(notArchivable(carried.key, carried.state));
       setArchived(m.profile.state, repo.id, keys, request.archived);
       m.changes.preferences(m.profile.state);
       return null;
@@ -489,7 +501,15 @@ export function createRoutes(m: HostModules): RequestHandlers<RouteContext> {
       );
       return m.io.saveFile(name, content);
     }),
-    specSave: scoped<"specSave">((repo, request) => saveSpec(m.planDeps, repo, request)),
+    specSave: scoped<"specSave">((repo, request) => {
+      const saved = saveSpec(m.planDeps, repo, request);
+      // The picker and the title bar name the planning by its spec's title,
+      // which they read off the drafts list: a save that landed a new title
+      // has that list read again.
+      if (saved.conflicting.length === 0 && titleChanged(request))
+        m.changes.changed(false, { kind: "editing", sessionId: request.id });
+      return saved;
+    }),
     replan: scoped<"replan">((repo, request) => replan(m, repo, request)),
 
     doctor: scoped<"doctor">((repo, request) =>
@@ -657,25 +677,23 @@ function fromSpec(
         throw new Error("Write the spec before generating a plan from it.");
       // A group of questions the interview has put and the person has not
       // answered is a spec still moving: drafting over it turns a spec the
-      // answers were about to change into a plan (D-117). The Spec pane and the
-      // chat's note both withhold the press, and this is the line behind both
-      // of them, so neither surface can be the one that counts for itself. Not
+      // answers were about to change into a plan (D-117). The Spec pane
+      // withholds the press, and this is the line behind it, so the surface is
+      // not the one that counts for itself. Not
       // on a re-draft: `startOver` is the way back from a plan that is already
       // wrong, and holding it behind a question would strand the person on it.
       if (request.kind === "generatePlan" && session.asking !== null)
         throw new Error(ANSWER_THE_QUESTIONS_FIRST);
-      // One press does both. The interview is still talking for as long as it
-      // is writing, and a person who wants the plan from what it has written
-      // should not have to end the conversation by hand first and then press
-      // again: this press ends it. The stop winds the turn up — what was held
-      // is said, the change is recorded, and the note handing the spec over is
-      // put — and the draft waits for the child to exit, because a session
-      // whose stdin has closed finishes the turn it is in and can write the
-      // spec until it goes: the draft reads the file that turn left behind.
-      // Behind the refusal above, so a standing question still stops this: its
-      // answers are what would change the spec (D-102). Not on a re-draft,
-      // where the conversation is a chat about a plan that exists and ending it
-      // is no part of drafting it again.
+      // The Spec pane holds the press while a turn is in flight (D-102); this
+      // is the line behind it. The chat is stopped, which winds up a turn
+      // still there — what was held is said, the change is recorded, and the
+      // note handing the spec over is put — and the draft waits for the child
+      // to exit, because a session whose stdin has closed finishes the turn it
+      // is in and can write the spec until it goes: the draft reads the file
+      // that turn left behind. Behind the refusal above, so a standing
+      // question still stops this: its answers are what would change the spec.
+      // Not on a re-draft, where the conversation is a chat about a plan that
+      // exists and ending it is no part of drafting it again.
       //
       // And asked again once it has exited: the turn winding down can put a
       // group of its own after the stop, and that group holds the draft as
@@ -689,10 +707,18 @@ function fromSpec(
       // re-draft. A first draft has no before, and records nothing.
       const before = request.kind === "startOver" ? m.marks.promiseAt(repo, request.key) : null;
       const settings = m.profile.state.settings;
+      // Read once the chat has stopped, so a title its last turn wrote is the
+      // title the person's name is held against (D-127).
+      const slug = session.specSlug;
+      const keepTitle = keepsPersonsTitle(
+        m.editing.read(request.id),
+        specTitles(() => repo)(repo.id, slug),
+      );
       await run.invoke(
         admitFromSpecArgs(
-          `${specFolder(repo)}/${session.specSlug}/spec.md`,
+          `${specFolder(repo)}/${slug}/spec.md`,
           request.kind === "startOver" ? request.key : null,
+          keepTitle,
           request.models?.draftingProvider ?? settings.draftingProvider,
           request.models?.executorModel ?? settings.executorModel,
         ),
@@ -756,6 +782,14 @@ async function replan(
   // work, and a person who chose what drafts it did not choose again by
   // pressing this. Read before the delete below takes them.
   const models = m.profile.state.taskModels[repo.id + ":" + request.key];
+  // And under the name the person gave the spec, where the planning that
+  // records it is still there and the spec still states it (D-127). Read
+  // before the delete below throws that planning away.
+  const planning = m.profile.state.editingSessions.find(
+    (each) => each.repoId === repo.id && each.key === request.key && each.phase !== "discarded",
+  );
+  const keepTitle =
+    planning !== undefined && keepsPersonsTitle(planning, specTitles(() => repo)(repo.id, slug));
   // The stopped ticket goes, and everything recorded after its contract with
   // it — the attempts and the bundles they sealed — while the spec it was
   // drafted from stays, because the new plan is drafted from it
@@ -778,6 +812,7 @@ async function replan(
         admitFromSpecArgs(
           spec,
           null,
+          keepTitle,
           models?.draftingProvider ?? settings.draftingProvider,
           models?.executorModel ?? settings.executorModel,
         ),
@@ -799,6 +834,9 @@ async function replan(
     .catch(() => {
       throw lost();
     });
+  // The new planning holds the same spec, and who named it with it, so the
+  // next draft from it keeps the person's name as this one did (D-127).
+  m.editing.carryNamed(opened.id, planning?.named ?? null);
   return { sessionId: opened.id, pane: opened.nodes > 0 ? "graph" : "criteria" };
 }
 
@@ -824,13 +862,26 @@ function loop(
   repo: RegisteredRepository,
   request: RequestOf<"run"> | RequestOf<"decide">,
 ): Job {
+  // A decision that answers findings carries on the run that stopped for it,
+  // and publishes as that run was going to: a decided delivery then opens the
+  // pull request that run would have
+  // (D-132). A principle alone
+  // publishes nothing.
+  const publish =
+    request.kind === "run"
+      ? request.publish
+      : request.decisions.length > 0 &&
+        ((m.profile.state.jobs as Job[])
+          .filter((job) => job.repoId === repo.id && job.key === request.key && isRun(job))
+          .at(-1)?.publish ??
+          false);
   const job = m.jobs.start(
     {
       repo,
       key: request.key,
       kind: request.kind,
       label: "Run engineering loop",
-      publish: request.kind === "run" ? request.publish : false,
+      publish,
     },
     async (job, run) => {
       m.tickets.assertDigest(repo, request.key, request.digest);
@@ -838,6 +889,19 @@ function loop(
       if (resumeFrom)
         assertResumable(await m.tickets.detail(repo.id, request.key), resumeFrom);
       if (request.kind === "decide") {
+        // Each answer closes its finding
+        // (D-132); the principle
+        // carries the same words to the executor.
+        const ticket = await m.tickets.ticket(repo, request.key);
+        assertDecidable(
+          findingsOnRecord(await m.tickets.bundles(repo), ticket.ticket_id, objectsPath(repo)),
+          request.decisions,
+        );
+        const author = m.profile.state.settings.name || "Local user";
+        for (const decision of request.decisions) {
+          await run.invoke(decisionArgs(request.key, decision, author));
+          if (run.signal.aborted) return;
+        }
         await run.invoke(principleArgs(request.answer));
         if (run.signal.aborted) return;
       }
@@ -849,7 +913,7 @@ function loop(
           runConfig(
             m.profile.state.taskModels[repo.id + ":" + request.key] ?? settings,
             effectiveLimits(repo, settings),
-            request.kind === "run" ? request.publish : false,
+            publish,
           ),
         ),
       );

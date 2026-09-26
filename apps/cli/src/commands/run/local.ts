@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import {
@@ -21,6 +21,7 @@ import {
   type SourceContract,
 } from "@perbo/contracts";
 import { BaseSourceSchema } from "@perbo/runner";
+import { replaceFile } from "@perbo/workspace";
 import { UsageError } from "../../usage-error.js";
 import { readPullRequest } from "../../pull-request.js";
 import { headCommit, repositoryId } from "../../store/index.js";
@@ -227,7 +228,7 @@ export function writeLocalRunRecord(
   mkdirSync(runsDir(storeDirectory), { recursive: true });
   const path = localRunPath(storeDirectory, record.run_id);
   const redacted = redactCredentials(JSON.stringify(LocalRunRecordSchema.parse(record), null, 2));
-  writeFileSync(path, `${redacted.text}\n`);
+  replaceFile(path, `${redacted.text}\n`);
   return { path, redactions: redacted.count };
 }
 

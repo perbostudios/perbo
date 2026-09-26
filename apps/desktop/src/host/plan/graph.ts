@@ -8,8 +8,8 @@ import {
 } from "@perbo/contracts";
 import type { GraphEdge, PlanContract, Ticket } from "@perbo/contracts";
 import type { PlanNode } from "@perbo/contracts";
-import { liveGraph, readAttempts, readDraftEdits } from "../records.js";
-import { attemptsPath, objectsPath, ticketPath } from "../repository/layout.js";
+import { liveGraph, readAttempts, readDecisions, readDraftEdits } from "../records.js";
+import { attemptsPath, objectsPath, ticketPath, verdictsPath } from "../repository/layout.js";
 import { safePath } from "../repository/paths.js";
 import { trackedFiles, type Execute } from "../repository/git.js";
 import type { TicketReads } from "../tickets/reads.js";
@@ -187,6 +187,7 @@ async function liveView(
     attempts: record.attempts,
     bundles,
     ticketId: ticket.ticket_id,
+    decisions: readDecisions(verdictsPath(repo), ticket.ticket_id),
     planVersion: ticket.plan_version,
     objectsDirectory: objectsPath(repo),
   });

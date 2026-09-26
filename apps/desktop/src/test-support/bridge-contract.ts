@@ -113,6 +113,21 @@ export function describeBridgeContract(name: string, setup: () => Promise<Contra
       expect(drafts.some((draft) => draft.id === opened.id)).toBe(false);
     });
 
+    it("writes down when a ticket's page opened and tells it on its own, refusing a ticket it does not hold", async () => {
+      const { bridge, repoId, runnableKey } = subject;
+      const entry = repoId + ":" + runnableKey;
+      const before = new Date().toISOString();
+      await bridge.request({ kind: "ticketOpened", repoId, key: runnableKey });
+      const at = (await bridge.request({ kind: "snapshot" })).lastOpened?.[entry];
+      expect(at !== undefined && at >= before).toBe(true);
+      expect(
+        subject.changes.some((change) => change.kind === "opened" && change.lastOpened[entry] === at),
+      ).toBe(true);
+      await expect(
+        bridge.request({ kind: "ticketOpened", repoId, key: UNKNOWN_KEY }),
+      ).rejects.toThrow();
+    });
+
     it("refuses every read of a ticket it does not hold", async () => {
       const { bridge, repoId } = subject;
       await expect(bridge.request({ kind: "detail", repoId, key: UNKNOWN_KEY })).rejects.toThrow();

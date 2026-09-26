@@ -63,7 +63,7 @@ describe("relayed", () => {
   });
 
   it("says a turn ended with nothing to show, which is how a pause is told from a stop", () => {
-    expect(relayed(line({ type: "idle" }))).toEqual({ kind: "idle" });
+    expect(relayed(line({ type: "idle", turns: 2 }))).toEqual({ kind: "idle", turns: 2 });
   });
 
   it("says the session wrote the spec, and nothing of what it wrote", () => {

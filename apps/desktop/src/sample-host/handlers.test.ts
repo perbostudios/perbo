@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sampleBridge } from "./bridge.js";
-import { job, sampleInterviews, saveSpec, snapshot, specFiles } from "./records.js";
+import { editing, job, sampleInterviews, saveSpec, snapshot, specFiles } from "./records.js";
 import type { EditingSession, Job } from "../shared/protocol.js";
 
 /**
@@ -130,4 +130,64 @@ it("deletes the ticket once nothing holds it, and every planning over it with it
   expect(onBoard("PRB-421")).toBe(false);
   expect(stored().find((each) => each.id === planning.id)?.phase).toBe("discarded");
   expect(sampleInterviews.has(planning.id), "the chat went with it").toBe(false);
+});
+
+/**
+ * A fresh planning whose spec states a title another ticket already carries,
+ * drafted from with Generate plan: the ticket it drafts, and the spec's title
+ * after. `byPerson` is whether the person gave that title on the Spec pane.
+ */
+async function draftedUnder(byPerson: boolean): Promise<{ ticket: string; spec: string }> {
+  const taken = snapshot.tasks.find((row) => row.repoId === repoId)!.ticket.title;
+  const opened = await sampleBridge.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
+  const slug = "confirmation-email";
+  editing.recordSpec(opened.id, slug);
+  saveSpec(
+    slug,
+    `# ${taken}\n\n## Outcome\n\nNew users receive a confirmation email.\n\n` +
+      "## Requirements\n\n- R1: A signup queues exactly one email.\n\n## No-Gos\n\n## Rabbit holes\n\n## Notes\n",
+  );
+  if (byPerson) editing.personTitled(opened.id, taken);
+  await sampleBridge.request({ kind: "generatePlan", repoId, id: opened.id });
+  const row = await vi.waitFor(
+    () => {
+      const found = snapshot.tasks.find((each) => each.ticket.admission.spec?.path === `specs/${slug}/spec.md`);
+      if (found === undefined) throw new Error("not drafted yet");
+      return found;
+    },
+    { timeout: 5000 },
+  );
+  return { ticket: row.ticket.title, spec: specFiles()[slug]!.split("\n")[0]! };
+}
+
+it("drafts the plan under the name the person gave the spec, and the spec keeps it (D-127)", async () => {
+  const taken = snapshot.tasks.find((row) => row.repoId === repoId)!.ticket.title;
+  expect(await draftedUnder(true)).toEqual({ ticket: taken, spec: `# ${taken}` });
+});
+
+it("names a plan whose spec nobody titled as admit does, and the spec takes that name (D-127)", async () => {
+  expect(await draftedUnder(false)).toEqual({
+    ticket: "New users receive a confirmation email.",
+    spec: "# New users receive a confirmation email.",
+  });
+});
+
+it("moves a ticket on a principle with no finding answered, as the principle alone does, and publishes nothing (D-065)", async () => {
+  const key = "PRB-412";
+  const state = () => snapshot.tasks.find((row) => row.ticket.key === key)!.ticket.state;
+  const digest = async () => (await sampleBridge.request({ kind: "detail", repoId, key })).digest;
+  // The run that stops for it was going to publish.
+  await sampleBridge.request({ kind: "run", repoId, key, digest: await digest(), publish: true, approve: false, resumeFrom: null });
+  await vi.waitFor(() => expect(state()).not.toBe("executing"), { timeout: 5000 });
+  const decided = await sampleBridge.request({
+    kind: "decide",
+    repoId,
+    key,
+    digest: await digest(),
+    answer: "Keep dead letters apart.",
+    decisions: [],
+  });
+  expect(decided.publish).toBe(false);
+  await vi.waitFor(() => expect(state()).not.toBe("executing"), { timeout: 5000 });
+  expect(state()).toBe("pr_open");
 });

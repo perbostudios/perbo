@@ -150,6 +150,11 @@ export async function briefRound(args: {
       // nothing else — the reviewer's inputs are unchanged.
       previous_account:
         args.previous !== undefined ? args.previous.executor_account : args.previousRunAccount,
+      // D-132: a person's words for
+      // the findings they handed to this round, as data beside them.
+      directions: state.directions.filter((direction) =>
+        toClose.some((finding) => finding.key === direction.finding_key),
+      ),
       // SCP-194: a scope finding is answered by quoting what the
       // contract admits, and the brief says it in the same words the
       // guard refuses in (SCP-195's sentence).

@@ -66,7 +66,7 @@ function captureEdits(context: TaskContext) {
   const original = bridge.request.bind(bridge);
   let session = EditingSessionSchema.parse({
     version: 1, id: crypto.randomUUID(), repoId: context.repoId, key: context.detail.ticket.key,
-    digest: context.detail.digest, revision: 0, resumeNew: false, lastPane: null, lastView: null, drift: null, change: null, phase: "editing", error: null,
+    digest: context.detail.digest, revision: 0, resumeNew: false, lastPane: null, lastView: null, specCut: null, named: null, drift: null, change: null, phase: "editing", error: null,
     operation: null, interviewModel: null, form: editingForm(context.workspace.settings, context.detail),
   });
   return vi.spyOn(bridge, "request").mockImplementation(
@@ -357,5 +357,23 @@ describe("contract verification approval", () => {
         }) }),
       }),
     ));
+  });
+
+  it("adds a criterion past four, because the plan has as many as the work has (D-100)", async () => {
+    const five = Array.from({ length: 5 }, (_, at) => ({ ...criterion(), id: `AC-${at + 1}`, text: `Criterion ${at + 1}.` }));
+    const context = await contextFor(five);
+    captureEdits(context);
+    mount(
+      <Composer
+        {...context}
+        existing={context.detail}
+        existingRepoId={context.repoId}
+      />,
+    );
+    const add = (await screen.findByRole("button", { name: /Add a criterion/ })) as HTMLButtonElement;
+    expect(screen.getAllByRole("button", { name: /^Edit criterion \d+$/ })).toHaveLength(5);
+    expect(add.disabled).toBe(false);
+    fireEvent.click(add);
+    expect(await screen.findByRole("textbox", { name: "Criterion 6" })).toBeTruthy();
   });
 });

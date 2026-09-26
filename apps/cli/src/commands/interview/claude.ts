@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { UsageError } from "../../usage-error.js";
@@ -84,9 +85,18 @@ export interface InterviewSdk {
   ): InterviewSdkTool;
   createSdkMcpServer(options: { name: string; tools: InterviewSdkTool[] }): unknown;
   query(params: {
-    prompt: AsyncIterable<{ type: "user"; message: { role: "user"; content: string }; parent_tool_use_id: null; session_id: string }>;
+    prompt: AsyncIterable<InterviewUserMessage>;
     options: InterviewQueryOptions;
   }): AsyncIterable<Record<string, unknown>>;
+}
+
+/** One of the person's turns as the SDK takes it, under an id of the transport's own. */
+export interface InterviewUserMessage {
+  type: "user";
+  message: { role: "user"; content: string };
+  parent_tool_use_id: null;
+  session_id: string;
+  uuid: string;
 }
 
 /**
@@ -258,8 +268,9 @@ export function claudeInterviewTransport(
         stderr: (data) => session.stderr(data),
       };
       let reason = "the session ended";
+      const sent = new Set<string>();
       for await (const message of sdk.query({
-        prompt: turnsAsMessages(session),
+        prompt: turnsAsMessages(session, sent),
         options,
       })) {
         const id = typeof message.session_id === "string" ? message.session_id : null;
@@ -269,26 +280,46 @@ export function claudeInterviewTransport(
         }
         // The SDK's `result` is the end of one turn, not of the session: the
         // query runs on while the person's turns arrive.
-        if (message.type === "result") yield { idle: true };
+        if (message.type === "result") yield { idle: answered(message, sent) };
       }
       yield { reason };
     },
   };
 }
 
-/** The person's turns, as the SDK's user messages. */
-async function* turnsAsMessages(session: InterviewSession): AsyncGenerator<{
-  type: "user";
-  message: { role: "user"; content: string };
-  parent_tool_use_id: null;
-  session_id: string;
-}> {
+/**
+ * How many of the person's turns a `result` answered.
+ *
+ * A turn sent while one is running is folded into it, between two of its tool
+ * rounds, and the one `result` then answers both; a turn sent once the running
+ * one has said its last word gets a `result` of its own. The `result` lists the
+ * ids of the user messages its turn consumed, so the turns counted are the
+ * ones this transport sent that it names. A `result` with no list, as the SDK
+ * gives on a delivery failure, answers every turn handed to it since the last
+ * `result`, because nothing else will answer them.
+ */
+function answered(result: Record<string, unknown>, sent: Set<string>): number {
+  const consumed = result.user_message_uuids;
+  if (Array.isArray(consumed)) return consumed.filter((id) => sent.delete(id as string)).length;
+  const owed = sent.size;
+  sent.clear();
+  return owed;
+}
+
+/** The person's turns, as the SDK's user messages, each id kept in `sent`. */
+async function* turnsAsMessages(
+  session: InterviewSession,
+  sent: Set<string>,
+): AsyncGenerator<InterviewUserMessage> {
   for await (const turn of session.turns) {
+    const uuid = randomUUID();
+    sent.add(uuid);
     yield {
       type: "user",
       message: { role: "user", content: turn },
       parent_tool_use_id: null,
       session_id: session.sessionId(),
+      uuid,
     };
   }
 }

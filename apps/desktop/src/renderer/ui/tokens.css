@@ -109,11 +109,11 @@
     --red: #c4614b;
     --red-paper: #2a1a16;
     --red-line: #7a4034;
-    --blue: #6fa0bd;
+    --blue: #ffffff;
     --disc: #efe8da;
     --handwriting: #c6a88f;
     --terminal: #0e0c0a;
-    --ink-filter: invert(1) brightness(0.94);
+    --ink-filter: brightness(0) invert(1);
     --on-ink-filter: none;
   }
 }
@@ -152,11 +152,11 @@
   --red: #c4614b;
   --red-paper: #2a1a16;
   --red-line: #7a4034;
-  --blue: #6fa0bd;
+  --blue: #ffffff;
   --disc: #efe8da;
   --handwriting: #c6a88f;
   --terminal: #0e0c0a;
-  --ink-filter: invert(1) brightness(0.94);
+  --ink-filter: brightness(0) invert(1);
   --on-ink-filter: none;
 }
 * {

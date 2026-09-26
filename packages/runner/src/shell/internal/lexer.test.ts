@@ -3,8 +3,9 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchDirectories } from "@perbo/test-support";
-import { readCommandLine, resolveScope } from "../index.js";
+import { everySegment, readCommandLine, resolveScope } from "../index.js";
 import { decision, sentence } from "../test-support/pins.js";
+import { expandedPrefix, leadingSubstitution, literalArithmetic } from "./lexer.js";
 
 const scratch = scratchDirectories("perbo-runner-");
 
@@ -130,7 +131,8 @@ const A_CHARACTER_INSIDE = [
   "cp a '#'b sub/x",
   "cp a \\# sub/x",
   "cp a ''#b sub/x",
-  "cp $(true)#b sub/x",
+  // After `--`, so what the substitution prints is a source rather than an option.
+  "cp -- $(true)#b sub/x",
   "echo $# > sub/x",
   "echo ${#x} ${x#a} ${x##*/} > sub/x",
   "cp a b\\\n#c sub/x",
@@ -332,5 +334,116 @@ describe("a shell comment", () => {
     const scope = resolveScope({ root, home: "/Users/nobody", tmpdir: `${root}/.scratch` });
     const command = "echo hi # <<EOF\nTMPDIR=/etc cp a $TMPDIR/b\nEOF";
     expect(readCommandLine(command, scope).findings, command).not.toEqual([]);
+  });
+});
+
+/**
+ * A substitution is a command of its own, read wherever it stands — in a
+ * word, inside `$((…))`, in an unquoted heredoc's body — and a `#` that may
+ * start a comment makes a line unreadable. The two readings meet on the same
+ * text: a `#` inside a substitution is judged by the comment rule however the
+ * substitution is reached, a `#` in a heredoc's body is data, and a
+ * substitution in that body is still a command.
+ */
+describe("a # beside a substitution read as a command", () => {
+  /**
+   * Lines whose substitution runs a write a comment would hide: read with
+   * `-t sub` as a target directory, `/etc/x` would be a source.
+   */
+  const COMMENT_IN_A_SUBSTITUTION = [
+    'echo "$(cp a /etc/x # -t sub\n)"',
+    "echo $(( $(cp a /etc/x # -t sub\n) + 1 ))",
+    "cat <<EOF\n$(cp a /etc/x # -t sub\n)\nEOF",
+  ];
+  for (const line of COMMENT_IN_A_SUBSTITUTION) {
+    it(`refuses ${JSON.stringify(line)} for the # its substitution holds`, () => {
+      expect(decision(line), line).toBe("refused");
+      expect(sentence(line), line).toContain(COMMENT);
+    });
+    for (const shell of ["bash", "zsh"] as const) {
+      const argv = installed(shell);
+      it.skipIf(argv === null)(`is run by ${shell} as <a></etc/x> in ${JSON.stringify(line)}`, () => {
+        const [program, ...options] = argv!;
+        // To standard error: inside `$((…))` the output would be arithmetic.
+        const probe = line.replace("cp a /etc/x", "printf '<%s>' a /etc/x >&2");
+        const run = spawnSync(program!, [...options, "-c", probe], {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin" },
+          timeout: 10_000,
+        });
+        expect(run.stderr, `${shell}: ${probe}`).toContain("<a></etc/x>");
+      });
+    }
+  }
+
+  /**
+   * A `#` the guard proves is a character, beside a substitution whose write
+   * lands outside: refused for the write the substitution runs, not for a
+   * comment.
+   */
+  const WRITE_IN_A_SUBSTITUTION = [
+    "cat <<EOF > sub/x\n# a heading in the body is data\n$(cp a /etc/x)\nEOF",
+    'echo "$(cp a /etc/x#1)" "#2" > sub/x',
+    "echo $(( $(cp a /etc/x) + 16#1 )) > sub/x",
+  ];
+  for (const line of WRITE_IN_A_SUBSTITUTION) {
+    it(`refuses ${JSON.stringify(line)} for the write its substitution runs`, () => {
+      expect(decision(line), line).toBe("refused");
+      expect(sentence(line), line).not.toContain(COMMENT);
+      expect(sentence(line), line).toContain("/etc/x");
+    });
+  }
+
+  /** The same with the substitution writing nowhere, or not run at all: allowed, and read. */
+  const READ_INSIDE = [
+    { line: "cat <<EOF > sub/x\n# a heading in the body is data\n$(git rev-parse HEAD)\nEOF", runs: "git" },
+    { line: `echo "$(printf '%s' ')') #1" > sub/x`, runs: "printf" },
+    { line: "echo $(( $(wc -l < src/a.ts) + 16#1 )) > sub/x", runs: "wc" },
+  ];
+  const scope = resolveScope({ root: "/work/tree", home: "/Users/nobody" });
+  for (const { line, runs } of READ_INSIDE) {
+    it(`allows ${JSON.stringify(line)} and reads its substitution as running ${runs}`, () => {
+      expect(decision(line), line).toBe("allowed");
+      const programs = everySegment(readCommandLine(line, scope).segments).flatMap((segment) => segment.programs);
+      expect(programs, line).toContain(runs);
+    });
+  }
+
+  it("runs nothing in a quoted heredoc's body, # or not", () => {
+    const line = "cat <<'EOF' > sub/x\n# a heading\n$(cp a /etc/x)\nEOF";
+    expect(decision(line), line).toBe("allowed");
+    const programs = everySegment(readCommandLine(line, scope).segments).flatMap((segment) => segment.programs);
+    expect(programs, line).toEqual(["cat"]);
+  });
+});
+
+describe("what a word begins with", () => {
+  it("finds the text ahead of a word's first expansion, and whether the shell splits it", () => {
+    expect(expandedPrefix("$Y")).toEqual({ prefix: "", splits: true });
+    expect(expandedPrefix('"${Y}"')).toEqual({ prefix: "", splits: false });
+    expect(expandedPrefix("$1")).toEqual({ prefix: "", splits: true });
+    expect(expandedPrefix('"$@"')).toEqual({ prefix: "", splits: false });
+    expect(expandedPrefix("src/$Y")).toEqual({ prefix: "src/", splits: true });
+    expect(expandedPrefix("src/a.ts")).toBeNull();
+    expect(expandedPrefix("'$Y'")).toBeNull();
+  });
+
+  it("reads the substitution a word begins with, and what follows it", () => {
+    expect(leadingSubstitution('"$(git rev-parse --show-toplevel)/src"')).toEqual({
+      body: "git rev-parse --show-toplevel",
+      after: '/src"',
+    });
+    expect(leadingSubstitution("$(pwd)")).toEqual({ body: "pwd", after: "" });
+    expect(leadingSubstitution("$((1+2))")).toBeNull();
+    expect(leadingSubstitution("x$(pwd)")).toBeNull();
+    expect(leadingSubstitution("$Y$(pwd)")).toBeNull();
+  });
+
+  it("writes an arithmetic expansion of numbers as a digit, and leaves one that names a variable", () => {
+    expect(literalArithmetic('"$((10-5)),$((10+5))p"', "1")).toBe('"1,1p"');
+    expect(literalArithmetic('"$((x))p"', "1")).toBeNull();
+    expect(literalArithmetic("'$((1))p'", "1")).toBeNull();
+    expect(literalArithmetic('"$((1) ; (2))"', "1")).toBeNull();
+    expect(literalArithmetic('"$(( $(echo 1) ))"', "1")).toBeNull();
   });
 });

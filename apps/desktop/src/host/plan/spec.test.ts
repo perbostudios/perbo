@@ -37,6 +37,8 @@ const session = (over: Record<string, unknown> = {}): EditingSession =>
     change: null,
     lastPane: null,
     lastView: null,
+    specCut: null,
+    named: null,
     interviewModel: null,
     ...over,
   });
@@ -44,11 +46,13 @@ const session = (over: Record<string, unknown> = {}): EditingSession =>
 function deps(
   repo: RegisteredRepository,
   record: EditingSession,
-): SpecDeps & { recorded: string[] } {
+): SpecDeps & { recorded: string[]; titled: string[] } {
   const recorded: string[] = [];
+  const titled: string[] = [];
   let current = record;
   return {
     recorded,
+    titled,
     editing: {
       // The session records the slug it was given, as the editing records do.
       read: () => current,
@@ -56,6 +60,9 @@ function deps(
         recorded.push(slug);
         current = { ...current, specSlug: slug };
         return current;
+      },
+      personTitled: (_id: string, title: string) => {
+        titled.push(title);
       },
     },
     repository: () => repo,
@@ -128,6 +135,31 @@ describe("saveSpec", () => {
     expect(readFileSync(join(repo.path, "specs", "retry-a-failed-run", "spec.md"), "utf8")).toContain(
       "A person can retry",
     );
+  });
+
+  it("records the person as naming the spec where the save changed the title it read (D-127)", () => {
+    const repo = repository();
+    const first = deps(repo, session());
+    const written = saveSpec(first, repo, request());
+    expect(first.titled).toEqual(["Retry a failed run"]);
+    // A section saved under the title it read names nobody.
+    const again = deps(repo, session({ specSlug: written.view.slug }));
+    saveSpec(
+      again,
+      repo,
+      request({
+        sections: { ...sections, notes: "More" },
+        base: { title: written.view.title, sections: written.view.sections },
+      }),
+    );
+    expect(again.titled).toEqual([]);
+    // Nor does a title only respaced.
+    saveSpec(
+      again,
+      repo,
+      request({ title: "  Retry  a failed   run ", base: { title: written.view.title, sections: written.view.sections } }),
+    );
+    expect(again.titled).toEqual([]);
   });
 
   it("gives each requirement an id, and lands none in a node before there is a plan", () => {

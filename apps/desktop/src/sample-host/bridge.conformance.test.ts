@@ -205,33 +205,117 @@ it("writes a standing mark into the repository's configuration, and undo removes
 });
 
 /**
- * D-061: a remediation round is verified, never reviewed again. The review the
- * reviewer wrote is immutable, so what answers its finding is the closure the
- * round recorded beside it — which is what the host's records hold and what
- * the sample host's must hold too, or a screen reading the sample reads
- * something the product cannot produce.
+ * D-132: a person's answer closes
+ * the finding it answers. The review the reviewer wrote is immutable, so the
+ * answer is recorded beside it, on the finding's key — which is what the
+ * host's records hold and what the sample host's must hold too — and with
+ * every finding routed to a person answered, the ticket is delivered with no
+ * second review, after one verified round where an answer handed a finding to
+ * the executor and none where every answer shipped it as it is, publishing as
+ * the run that stopped for it was going to.
  */
-it("settles a sample decision as a closure beside the review, not as a second review", async () => {
+const decideAfterRun = async (
+  key: string,
+  publish: boolean,
+  choice: "approach" | "let_it_decide" | "ship_as_is",
+) => {
   const repoId = (await sampleBridge.request({ kind: "snapshot" })).repositories[0]!.id;
-  const key = "PRB-412";
+  const run = await sampleBridge.request({
+    kind: "run",
+    repoId,
+    key,
+    digest: (await sampleBridge.request({ kind: "detail", repoId, key })).digest,
+    publish,
+    approve: false,
+    resumeFrom: null,
+  });
+  await settled(sampleBridge, run.id);
   const opened = await sampleBridge.request({ kind: "detail", repoId, key });
+  const finding = opened.attempts[0]!.review!.findings[0]!;
   const job = await sampleBridge.request({
     kind: "decide",
     repoId,
     key,
     digest: opened.digest,
     answer: "A new dead_letters table.",
+    decisions: [{ findingKey: finding.key, choice, answer: "A new dead_letters table." }],
   });
   await settled(sampleBridge, job.id);
-  const detail = await sampleBridge.request({ kind: "detail", repoId, key });
+  return { repoId, opened, finding, job, detail: await sampleBridge.request({ kind: "detail", repoId, key }) };
+};
+
+it("delivers a decided change without a pull request where the stopped run published nothing", async () => {
+  const unpublished = (await sampleBridge.request({ kind: "snapshot" })).tasks.find(
+    (row) =>
+      row.ticket.key !== "PRB-412" &&
+      row.ticket.state !== "plan_review" &&
+      row.ticket.delivery.pull_request_number === null,
+  )!;
+  const { job, detail, opened } = await decideAfterRun(unpublished.ticket.key, false, "ship_as_is");
+  expect(job.publish).toBe(false);
+  expect(detail.ticket.state).toBe("pr_open");
+  expect(detail.ticket.delivery.pull_request_number).toBeNull();
+  // Shipped as it is: no round was run for it.
+  expect(detail.attempts).toHaveLength(opened.attempts.length);
+  expect(detail.principles).toContain("A new dead_letters table.");
+});
+
+it("settles a sample decision handed to the executor with one verified round, and no second review", async () => {
+  const key = "PRB-412";
+  const { repoId, opened, finding, job, detail } = await decideAfterRun(key, true, "approach");
+  expect(job.publish).toBe(true);
+  expect(detail.ticket.state).toBe("pr_open");
+  expect(detail.ticket.delivery.pull_request_number).toBe(418);
+  // One round, verified closed (D-061), beside the one review.
+  expect(detail.attempts).toHaveLength(opened.attempts.length + 1);
+  expect(detail.attempts.at(-1)!.verification).toMatchObject({ all_closed: true, open_keys: [] });
+  expect(detail.attempts.filter((attempt) => attempt.review !== null)).toHaveLength(1);
   expect(detail.attempts[0]!.review?.decision).toBe("escalate");
-  expect(detail.attempts.at(-1)!.verification).toMatchObject({
-    all_closed: true,
-    deterministic_failure: null,
-    open_keys: [],
-  });
+  expect(detail.verdicts).toEqual([
+    expect.objectContaining({
+      finding_key: finding.key,
+      decision: "decide",
+      choice: "approach",
+      note: "A new dead_letters table.",
+      superseded_at: null,
+    }),
+  ]);
   const live = (await sampleBridge.request({ kind: "graphRead", repoId, key })).live;
   const node = live.nodes.find((entry) => entry.id === "node_2")!;
   expect(node.state).not.toBe("finding_open");
   expect(node.criteria.every((criterion) => criterion.finding === null)).toBe(true);
 });
+
+/**
+ * A principle with no finding answered is taken by both: recorded, and the
+ * loop carried on as the principle alone carries it (D-065), which on the
+ * sample's own review moves the ticket to `pr_open`.
+ */
+it("takes a principle with no finding answered as the host takes it", async () => {
+  const made = fixture(async (binary, args, options) =>
+    args[1] === "run" ? { code: 0, stdout: "{}", stderr: "", cancelled: false } : runProcess(binary, args, options),
+  );
+  try {
+    const host: DesktopBridge = { request: (request) => made.service.request(request), subscribe: () => () => undefined };
+    const hostRepo = (await made.service.registerRepository(made.repo)).id;
+    await settled(host, (await host.request({ kind: "admit", repoId: hostRepo, draft: hostDraft })).id);
+    const sampleRepo = (await sampleBridge.request({ kind: "snapshot" })).repositories[0]!.id;
+    const principleOnly = async (bridge: DesktopBridge, repoId: string, key: string) => {
+      const { digest } = await bridge.request({ kind: "detail", repoId, key });
+      const answer = "Keep dead letters in a table of their own.";
+      const job = await settled(
+        bridge,
+        (await bridge.request({ kind: "decide", repoId, key, digest, answer, decisions: [] })).id,
+      );
+      const detail = await bridge.request({ kind: "detail", repoId, key });
+      return { job: { kind: job.kind, state: job.state, publish: job.publish }, principled: detail.principles.includes(answer), state: detail.ticket.state };
+    };
+    const onHost = await principleOnly(host, hostRepo, "PRB-1");
+    const onSample = await principleOnly(sampleBridge, sampleRepo, "PRB-415");
+    expect(onSample.job).toEqual(onHost.job);
+    expect(onHost).toMatchObject({ job: { kind: "decide", state: "completed", publish: false }, principled: true });
+    expect(onSample).toMatchObject({ principled: true, state: "pr_open" });
+  } finally {
+    await disposeFixtures();
+  }
+}, 60_000);

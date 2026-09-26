@@ -763,9 +763,10 @@ export interface TicketTransition {
    * Guarding on the record keeps the reconciler's own refusal intact: a loop
    * ticket whose evidence disagrees with itself still cannot be walked to a
    * state no unguarded row reaches, because the guard says nothing about
-   * evidence and everything about which arm the row belongs to.
+   * evidence and everything about which arm the row belongs to — or, for the
+   * one row a single step of the loop takes, about the note that step writes.
    */
-  when?: (ticket: Pick<Ticket, "delivery">) => boolean;
+  when?: (ticket: Pick<Ticket, "delivery">, note: string) => boolean;
 }
 
 /**
@@ -779,6 +780,13 @@ export interface TicketTransition {
  */
 const pullRequestIsClosed = (ticket: Pick<Ticket, "delivery">): boolean =>
   ticket.delivery.state === "closed";
+
+/**
+ * How the row a decided delivery writes begins: the one note that takes a
+ * ticket from `provisioning` to `pr_open`
+ * (D-132).
+ */
+export const DECIDED_DELIVERY_NOTE = "every finding the review routed to a person is decided";
 
 export const TICKET_TRANSITIONS: ReadonlyArray<TicketTransition> = [
   { from: "plan_review", to: "ready" },
@@ -818,6 +826,16 @@ export const TICKET_TRANSITIONS: ReadonlyArray<TicketTransition> = [
   { from: "verifying", to: "independent_review" },
   { from: "verifying", to: "failed" },
   { from: "independent_review", to: "pr_open" },
+  // D-132: a run that finds every
+  // finding the last review routed to a person decided, on the commit that
+  // review judged, executes and reviews nothing and goes where an approval
+  // goes. Only the row that run writes takes it, so nothing that reconciles
+  // evidence can reach `pr_open` from here without a review behind it.
+  {
+    from: "provisioning",
+    to: "pr_open",
+    when: (_ticket, note) => note.startsWith(DECIDED_DELIVERY_NOTE),
+  },
   { from: "independent_review", to: "changes_requested" },
   // An attempt can terminate after its review — a ceiling reached on a
   // remediation round, or repository-supplied agent configuration found on
@@ -876,7 +894,7 @@ export function transition(
     (candidate) =>
       candidate.from === ticket.state &&
       candidate.to === to &&
-      (candidate.when?.(ticket) ?? true),
+      (candidate.when?.(ticket, note) ?? true),
   );
   if (!row) throw new IllegalTransitionError(ticket.state, to);
   return TicketSchema.parse({

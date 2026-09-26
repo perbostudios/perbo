@@ -51,6 +51,7 @@ const route = (overrides: Partial<Parameters<typeof routeVerification>[0]> = {})
     toVerify: [],
     openFindings: [],
     declines: 0,
+    handed: new Set(),
     remediationRound: 1,
     maxRounds: 2,
     spend: { micros: 0, priced: 0 },
@@ -128,6 +129,33 @@ describe("where a round's closure verification sends the run", () => {
     expect(checkNobodyRouted.next === "stop" && checkNobodyRouted.end.detail).toBe(
       "the fix regressed: check_ut is failed",
     );
+  });
+
+  it("sends a handed finding back to a person when the round stalls, and not when it regressed", () => {
+    const handed = finding({ key: "a".repeat(64), routing: "escalates" });
+    const handedOpen = (deterministic_failure: string | null, keys: string[] = [handed.key]) =>
+      route({
+        toVerify: [handed],
+        openFindings: [handed],
+        handed: new Set(keys),
+        verification: verification({
+          all_closed: false,
+          open_keys: [handed.key],
+          per_finding: [openRow(handed.key)],
+          deterministic_failure,
+          deterministic_failure_kind: deterministic_failure === null ? null : "scope",
+        }),
+      });
+
+    const regressed = handedOpen("scope: src/other.ts");
+    expect(regressed).toMatchObject({ next: "stop", end: { outcome: "changes_requested" } });
+    expect(regressed.next === "stop" && regressed.end.detail).toBe("the fix regressed: scope: src/other.ts");
+    const stalled = handedOpen(null);
+    expect(stalled).toMatchObject({ next: "stop", end: { outcome: "escalated" } });
+    expect(stalled.next === "stop" && stalled.end.detail).toContain(
+      "; a finding a person handed to the executor is still open, so it is theirs to decide again",
+    );
+    expect(handedOpen(null, [])).toMatchObject({ next: "stop", end: { outcome: "remediation_stalled" } });
   });
 
   it("approves a round that closed everything, and asks a person where any was declined", () => {

@@ -1,8 +1,10 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { z } from "zod";
-import type { LimitsTableSchema, PlanContract } from "@perbo/contracts";
+import { decidable, type LimitsTableSchema, type PlanContract } from "@perbo/contracts";
 import type { Detail, Draft, RequestOf, Settings, TaskModels } from "../../shared/protocol.js";
+import { decisionQuestions } from "../../shared/decisions.js";
+import type { FindingsOnRecord } from "../records.js";
 
 /**
  * Every argv the host runs the CLI with, built here from the person's own
@@ -69,9 +71,14 @@ export function doctorArgs(configPath: string, writeConfig: boolean): string[] {
   return ["doctor", "--json", "--config", configPath, ...(writeConfig ? ["--write-config"] : [])];
 }
 
+/**
+ * `admit --from-spec`, with `--keep-title` where the person gave the spec the
+ * title it states: the ticket takes their name and the spec keeps it (D-127).
+ */
 export function admitFromSpecArgs(
   spec: string,
   startOver: string | null,
+  keepTitle: boolean,
   provider: string,
   model: string,
 ): string[] {
@@ -82,6 +89,7 @@ export function admitFromSpecArgs(
     "--from-spec",
     spec,
     ...(startOver === null ? [] : ["--start-over", startOver]),
+    ...(keepTitle ? ["--keep-title"] : []),
     "--provider",
     provider,
     "--model",
@@ -114,6 +122,33 @@ export function approveArgs(key: string): string[] {
 
 export function principleArgs(answer: string): string[] {
   return ["principle", "add", answer];
+}
+
+/**
+ * A person's answer to one finding the review routed to them, recorded on the
+ * finding (D-132). `--replace`
+ * because answering again after a later review is a new answer to the same
+ * key, and the earlier one stays on the record, superseded.
+ */
+export function decisionArgs(
+  key: string,
+  decision: RequestOf<"decide">["decisions"][number],
+  author: string,
+): string[] {
+  return [
+    "verdict",
+    key,
+    "--decide",
+    decision.findingKey,
+    "--choice",
+    decision.choice.replace(/_/g, "-"),
+    "--note",
+    decision.answer,
+    "--author",
+    author,
+    "--replace",
+    "--json",
+  ];
 }
 
 export function syncArgs(key: string): string[] {
@@ -194,6 +229,33 @@ export function assertResumable(detail: Detail, bundleId: string): void {
     )
   )
     throw new Error("The recovery bundle does not belong to this task.");
+}
+
+/**
+ * Every answer is one the loop acts on, checked against the review it reads
+ * before any is recorded, so a refused one leaves nothing written: a finding
+ * that review routed to a person, on a review that judged the whole change,
+ * answered with a choice it takes
+ * (D-132).
+ */
+export function assertDecidable(
+  review: FindingsOnRecord | null,
+  decisions: RequestOf<"decide">["decisions"],
+): void {
+  const asked = new Map(decisionQuestions(review).map((question) => [question.id, question]));
+  for (const decision of decisions) {
+    const question = asked.get(decision.findingKey);
+    if (question === undefined || question.choices.length === 0)
+      throw new Error(
+        review !== null && !decidable(review)
+          ? `The review ended ${review.decision}: it did not judge the whole change, so an answer would settle a finding on a change nobody finished judging, and it takes none.`
+          : `Finding ${decision.findingKey.slice(0, 12)} is not one the review routed to you, so it takes no answer.`,
+      );
+    if (!question.choices.includes(decision.choice))
+      throw new Error(
+        `Finding ${decision.findingKey.slice(0, 12)} is never handed to the executor, so its only answer is Ship as it is.`,
+      );
+  }
 }
 
 /**

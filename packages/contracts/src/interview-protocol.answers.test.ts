@@ -9,8 +9,8 @@ import {
  * What counts as a group's answer (D-117), read back off the turn.
  *
  * The desktop host moves its record of the asking on by it, and what that
- * record then withholds is the way on: the chat's note and the Spec pane both
- * refuse Generate plan while a group the interview asked still stands. Every
+ * record then withholds is the way on: the Spec pane holds Generate plan, and
+ * the host refuses it, while a group the interview asked still stands. Every
  * other check on it is indirect, through a UI test, and those put single-part
  * groups — so the lettered path can break while they stay green.
  */

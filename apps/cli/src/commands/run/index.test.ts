@@ -141,6 +141,7 @@ describe("the run rendering", () => {
       detail: "the gate is open",
       incomplete_review: null,
       merged_base: null,
+      decided: [],
     });
     expect(rendered).toContain("ayo/scp094/x");
     expect(rendered).toContain("remediation 1");
@@ -192,6 +193,7 @@ describe("the run rendering", () => {
       detail: "the gate is open",
       incomplete_review: null,
       merged_base: null,
+      decided: [],
     });
 
     expect(rendered).toContain("cost unavailable");

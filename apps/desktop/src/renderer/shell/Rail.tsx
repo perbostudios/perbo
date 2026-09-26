@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { InkIcon, cx } from "../ui/index.js";
-import { panesFor } from "../planning/panes.js";
+import { curates, panesFor } from "../planning/panes.js";
 import type { Snapshot } from "../../shared/protocol.js";
 import { HOME_TONES, HOME_TONE_LABELS, homeRows, homeTally, type HomeTone } from "../tasks/ticket-workspace.js";
 import { useCreate, withoutDeleting } from "./create.js";
@@ -73,7 +73,7 @@ export function RailToggle() {
 }
 
 /** How long the Home badge holds each colour before it gives way to the next. */
-const BADGE_HOLD: Record<HomeTone, number> = { yellow: 7000, red: 4000, green: 4000 };
+const BADGE_HOLD = 10_000;
 /** How long the badge takes to shrink away before it reappears in the next colour. */
 const BADGE_SWAP = 180;
 
@@ -81,8 +81,8 @@ const BADGE_SWAP = 180;
  * The count on Home's rail icon, one colour at a time (S4): the tickets
  * waiting on a decision in yellow, those whose loop stopped in red, those at
  * the journey's end in green, each in that order for as long as it has any.
- * Each holds a while — a decision longest — then shrinks away and reappears
- * as the next; with one colour it stays, and with none there is no badge.
+ * Each holds ten seconds, then shrinks away and reappears as the next; with
+ * one colour it stays, and with none there is no badge.
  */
 function HomeBadge({ tally }: { tally: Record<HomeTone, number> }) {
   const shown = HOME_TONES.filter((tone) => tally[tone] > 0);
@@ -102,7 +102,7 @@ function HomeBadge({ tally }: { tally: Record<HomeTone, number> }) {
     const next = shown[(shown.indexOf(tone) + 1) % shown.length] ?? tone;
     const timer = state.leaving
       ? setTimeout(() => setState({ tone: next, leaving: false, swapped: true }), BADGE_SWAP)
-      : setTimeout(() => setState({ tone, leaving: true, swapped: state.swapped }), BADGE_HOLD[tone] - BADGE_SWAP);
+      : setTimeout(() => setState({ tone, leaving: true, swapped: state.swapped }), BADGE_HOLD - BADGE_SWAP);
     return () => clearTimeout(timer);
   }, [tone, state.leaving, cycle]);
   return (
@@ -126,8 +126,32 @@ function HomeBadge({ tally }: { tally: Record<HomeTone, number> }) {
 }
 
 /**
+ * The planning curating a plan whose contract this ticket page shows while the
+ * plan waits for approval, as the contract's Back to planning finds it, with
+ * no pane of it current; null on any other page of a ticket.
+ */
+function contractPlanning(
+  workspace: Snapshot,
+  route: Extract<Route, { page: "task" }>,
+): { sessionId: string; pane: null } | null {
+  if (route.edit || !["auto", "contract"].includes(route.view ?? "auto")) return null;
+  const waiting = workspace.tasks.some(
+    (row) =>
+      row.repoId === route.repoId &&
+      row.ticket.key === route.key &&
+      row.ticket.state === "plan_review" &&
+      row.ticket.approved_at === null,
+  );
+  const curating = workspace.drafts?.find(
+    (draft) => draft.repoId === route.repoId && draft.key === route.key && curates(draft),
+  );
+  return waiting && curating ? { sessionId: curating.id, pane: null } : null;
+}
+
+/**
  * The rail: Create first (D-101), with planning's panes under it while a
- * piece of work is being planned, then Home, Archive, and a settings icon
+ * piece of work is being planned and on the contract of its plan until that
+ * is approved, then Home, Archive, and a settings icon
  * that grows upward into a pill of General, Usage and Connections. Outside
  * settings the pill opens on hover or focus; inside settings it stays open
  * and the tab you are on carries the bordered plate. It sits beneath the top
@@ -182,7 +206,12 @@ export function Rail({
   // Counted over what Home lists, work being deleted left out as Home leaves it.
   const visible = withoutDeleting(workspace, create.deleting);
   const tally = homeTally(visible, homeRows(visible));
-  const planning = route.page === "planning";
+  // The planning whose panes sit under Create: the one open, or the one whose
+  // plan's contract is open awaiting approval, its panes each going back to
+  // planning as the contract's Back to planning does, landing on that pane
+  // (D-130). Approved, the contract is frozen and has none.
+  const planning =
+    route.page === "planning" ? route : route.page === "task" ? contractPlanning(workspace, route) : null;
   // A repository's question page is Create's own page: Create is lit there,
   // and there is no planning, so no panes under it, until it is answered
   // (D-131).
@@ -221,14 +250,14 @@ export function Rail({
         </button>
         {planning && (
           <div className="rail-children" role="group" aria-label="Planning panes">
-            {panesFor(workspace.drafts, route.sessionId).map((pane) => (
+            {panesFor(workspace.drafts, planning.sessionId).map((pane) => (
               <button
                 key={pane.id}
-                className={cx("rail-item", "rail-child", route.pane === pane.id && "selected")}
+                className={cx("rail-item", "rail-child", planning.pane === pane.id && "selected")}
                 aria-label={pane.label}
                 title={pane.label}
-                aria-current={route.pane === pane.id ? "page" : undefined}
-                onClick={() => navigate({ ...route, pane: pane.id })}
+                aria-current={planning.pane === pane.id ? "page" : undefined}
+                onClick={() => navigate({ page: "planning", sessionId: planning.sessionId, pane: pane.id })}
               >
                 <span className="rail-icon">
                   <InkIcon name={pane.icon} size={19} />

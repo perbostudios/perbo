@@ -210,11 +210,10 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
         : [],
     )[0] ?? null;
   // The reading the answer is owed has landed once the answer is on the
-  // record as a turn, that turn is owed no reading — the rule the chat's way
-  // on to the contract holds to, so a reading that started before the answer
-  // was applied never counts as its reading — none is running, and the
-  // Architect is no longer applying the answer. The chat's way on waits
-  // through the turn too: while it is in flight, a reading that started after
+  // record as a turn, that turn is owed no reading — so a reading that
+  // started before the answer was applied never counts as its reading — none
+  // is running, and the Architect is no longer applying the answer. The wait
+  // holds through the turn too: while it is in flight, a reading that started after
   // the answer's line and landed ahead of the Architect's first reply looks
   // like the answer's own. That reading has decided the record, whatever it
   // found. But the reading's job settles here a round trip ahead of the
@@ -309,6 +308,7 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
   // is still planning, and the contract is where confirming it leads.
   const footer = (resolved = false): ReactNode => (
     <div className="approve-actions pane-confirm">
+      {problem !== undefined && <span className="small muted">Going on leaves the problems open.</span>}
       <Button onClick={back}>Back to the plan</Button>
       {resolved && (
         <Button variant="primary" onClick={contract}>
@@ -316,17 +316,14 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
         </Button>
       )}
       {problem !== undefined && (
-        <>
-          <span className="small muted">Going on leaves the problems open.</span>
-          <button
-            type="button"
-            className="text-button small"
-            disabled={busy}
-            onClick={() => void goOn()}
-          >
-            Go on to the contract anyway
-          </button>
-        </>
+        <button
+          type="button"
+          className="text-button small"
+          disabled={busy}
+          onClick={() => void goOn()}
+        >
+          Go on to the contract anyway
+        </button>
       )}
     </div>
   );
@@ -364,8 +361,8 @@ export function DriftPane({ workspace, navigate, editor }: PageProps & { editor:
           <Notice tone="danger">{error}</Notice>
         </div>
         <div className="approve-actions pane-confirm">
-          <Button onClick={back}>Back to the plan</Button>
           <span className="small muted">The contract is still where approving happens.</span>
+          <Button onClick={back}>Back to the plan</Button>
           <Button variant="primary" onClick={contract}>
             Go on to the contract anyway
           </Button>

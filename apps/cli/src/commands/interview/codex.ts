@@ -354,8 +354,9 @@ class AppServer {
       }
       // Outside that: the message is only carried for a turn that ended some
       // other way, but every turn that ends hands the next word to the person,
-      // and a turn that ended well is the ordinary case.
-      yield { idle: true };
+      // and a turn that ended well is the ordinary case. It answered one turn:
+      // the next is not taken until this one has ended.
+      yield { idle: 1 };
     }
   }
 

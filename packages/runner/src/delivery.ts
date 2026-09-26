@@ -31,6 +31,7 @@ import {
 } from "@perbo/contracts";
 import { gh, git, githubCredentialOverlay, isAttemptBranch } from "@perbo/workspace";
 import { requireGithubCredential } from "./github-credential.js";
+import { isDecided } from "./decisions.js";
 
 /**
  * Publishing a pull request through local `git` and `gh` (SCP-020).
@@ -276,6 +277,7 @@ export function pullRequestBody(args: {
     (finding) => finding.routing === "remediable" && !declinedReasons.has(finding.key),
   );
   const declined = review.findings.filter((finding) => declinedReasons.has(finding.key));
+  const decided = review.findings.filter(isDecided);
 
   /**
    * What needs a person, in the words the review used for it.
@@ -336,6 +338,23 @@ export function pullRequestBody(args: {
       stopBoxes(finding, "declined")
     );
   };
+  /**
+   * A finding a person decided (D-132):
+   * who decided it, by name and never by the address a git identity carries,
+   * and in their words, redacted like every statement here and with every `<`
+   * escaped, so no marker `perbo sync` reads can be written into the body by a
+   * note.
+   */
+  const describeDecided = (finding: (typeof review.findings)[number]): string => {
+    const words = redactCredentials(finding.waiver!.reason);
+    redactions += words.count;
+    const who = decidedByName(finding.waiver!.authorised_by);
+    const text = words.text.replace(/[\r\n]+/g, " ").replace(/</g, "&lt;");
+    const by = who === null ? "" : ` by ${who.replace(/</g, "&lt;")}`;
+    // Shipped as it is, or handed to the executor and verified closed.
+    const how = finding.outcome === "fixed" ? `closed by the executor as decided${by}` : `decided${by}`;
+    return `${describe(finding)}\n  - ${how}: ${text}`;
+  };
   const findingSections = [
     ...(declined.length === 0
       ? []
@@ -356,9 +375,17 @@ export function pullRequestBody(args: {
       describeStop,
     ),
     ...section(
+      "Decided by a person",
+      "The review stopped on these for a person, and they decided them; their words are below.",
+      decided,
+      describeDecided,
+    ),
+    ...section(
       "Advisory",
       "Reported and not acted on.",
-      review.findings.filter((finding) => !finding.blocking && finding.routing !== "remediable"),
+      review.findings.filter(
+        (finding) => !finding.blocking && finding.routing !== "remediable" && !isDecided(finding),
+      ),
     ),
   ];
   const rollout =
@@ -457,7 +484,8 @@ export function pullRequestBody(args: {
     "",
     `Verdict **${review.decision}** · ${blocking.length} blocking · ${remediable.length} returned to the executor · ` +
       (declined.length > 0 ? `${declined.length} for you to decide · ` : "") +
-      `${review.findings.length - blocking.length - remediable.length - declined.length} advisory`,
+      (decided.length > 0 ? `${decided.length} decided by a person · ` : "") +
+      `${review.findings.length - blocking.length - remediable.length - declined.length - decided.length} advisory`,
     // The count and where to read them, and no more: the executor closed each
     // one and the closure was verified before this opened, so nothing here is
     // waiting on the person reading it.
@@ -511,6 +539,16 @@ export function pullRequestBody(args: {
 
 /** Only what the stop marker's regex accepts; anything else becomes `_`. */
 const markerSafe = (value: string): string => value.replace(/[^A-Za-z0-9_.:-]/g, "_");
+
+/**
+ * The name a decision is published under: the name half of a git identity
+ * (`Name <address>`), or null where the identity is an address alone. A pull
+ * request is public, and an address is never printed on one.
+ */
+export function decidedByName(author: string): string | null {
+  const name = author.replace(/\s*<[^<>]*>\s*$/, "").trim();
+  return name.length === 0 || name.includes("@") ? null : name;
+}
 
 /**
  * One task-list line carrying a stop marker. The regex is the whole of what

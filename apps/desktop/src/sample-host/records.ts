@@ -41,6 +41,7 @@ import {
   ContractEditing,
   interviewModelFor,
   interviewProviderFor,
+  keepsPersonsTitle,
   REREAD_COULD_NOT_START,
   sectionsOf,
   specFindings,
@@ -110,6 +111,33 @@ export const plans = new Map<string, PlanContract>();
 const approaches = new Map<string, ApproachRecord>();
 export const approved = new Set<string>();
 export const decisionsAnswered = new Set<string>();
+/** The answers recorded as principles, in order, as `.perbo/principles.md` holds them (D-065). */
+export const principlesRecorded: string[] = [];
+/**
+ * The answers a person gave on the "Decisions required" page, by ticket, as
+ * `perbo verdict --decide` records them: each closes its finding
+ * (D-132).
+ */
+export const decisionsTaken = new Map<
+  string,
+  Array<{
+    finding_key: string;
+    choice: "approach" | "let_it_decide" | "ship_as_is";
+    note: string;
+    decided_at: string;
+  }>
+>();
+/** Whether a decision on the ticket hands a finding to the executor for a round. */
+export function decisionsHandWork(key: string): boolean {
+  return (decisionsTaken.get(key) ?? []).some((row) => row.choice !== "ship_as_is");
+}
+/** Whether every finding the sample review routed to a person has an answer. */
+export function everyDecisionTaken(key: string): boolean {
+  const taken = new Set((decisionsTaken.get(key) ?? []).map((row) => row.finding_key));
+  return reviewFor(key)
+    .findings.filter((finding) => finding.routing === "blocks" || finding.routing === "escalates")
+    .every((finding) => taken.has(finding.key));
+}
 const criteriaText = [
   "A signup POST queues exactly one activation email.",
   "No email is sent for a duplicate signup inside five minutes.",
@@ -340,6 +368,7 @@ export const initial: Snapshot = {
   titles: {},
   taskModels: {},
   asks: {},
+  lastOpened: {},
   // Every sample ticket that finished before today is filed; #409 stays on Home in green until it is archived by hand (S4).
   archived: archive.filter((row) => row.ticket.key !== "PRB-409").map((row) => row.repoId + ":" + row.ticket.key),
   power: { holding: false, detail: null, since: null },
@@ -366,8 +395,10 @@ export function sampleSummary(key: string): TaskSummary {
   if (!row) throw new Error("Sample task not found.");
   const known = sampleDiffs[key];
   const number = Number(key.replace(/^PRB-/, ""));
+  // The line under the title on its contract page, as the host reads it off the contract.
+  const outcome = plans.get(key)?.outcome ?? null;
   if (row.ticket.state === "plan_review" || row.ticket.state === "ready")
-    return { branch: null, attempts: 0, latestAttemptAt: null, costMicros: null, costBasis: "none", diff: null, note: null };
+    return { branch: null, attempts: 0, latestAttemptAt: null, costMicros: null, costBasis: "none", diff: null, note: null, outcome };
   return {
     branch: known?.[0] ?? `perbo/${number}-sample`,
     attempts: 1,
@@ -378,6 +409,7 @@ export function sampleSummary(key: string): TaskSummary {
       ? { files: known[1], additions: known[2], deletions: known[3] }
       : { files: 2, additions: 20 + (number % 7), deletions: 4 + (number % 3) },
     note: null,
+    outcome,
   };
 }
 export const snapshot: Snapshot = new URLSearchParams(location.search).has("empty")
@@ -578,7 +610,8 @@ export function detail(key: string): Detail {
     round: 0,
     startedAt: at,
     outcome: "escalate",
-    termination: "Sample attempt complete",
+    // `reason: detail`, as the host joins the termination the runner recorded.
+    termination: "completed: Sample attempt complete",
     model: "sonnet-class",
     costMicros: 610_000,
     costBasis: "sample",
@@ -646,8 +679,20 @@ export function detail(key: string): Detail {
       partial: false,
       unavailable: 0,
     },
-    principles: "",
-    verdicts: [],
+    principles: principlesRecorded.map((principle) => `- ${principle}\n`).join(""),
+    // The rows `perbo verdict --decide` would hold for this ticket.
+    verdicts: (decisionsTaken.get(key) ?? []).map((row) => ({
+      review: { reference: key, ticket_id: ticket.ticket_id, ticket_key: key, pull_request_url: null },
+      finding_key: row.finding_key,
+      rule_id: "product.dead_letter",
+      routing: "escalates",
+      decision: "decide",
+      choice: row.choice,
+      author: "Sample person",
+      decided_at: row.decided_at,
+      note: row.note,
+      superseded_at: null,
+    })),
     effective: { stallMinutes: 12, ticketDollars: 2.5 },
     report: { sample: true },
   };
@@ -1426,9 +1471,15 @@ function liveFor(key: string, nodes: readonly { id: string; paths: readonly stri
             coverage: review.coverage,
             findings: review.findings,
           },
-          // What the round since that review closed (D-061), which is what
-          // takes the finding off the node the criterion belongs to.
-          closures: approved.has(key) ? [{ createdAt: closedAt, closed: [FINDING_KEY] }] : [],
+          // What the round since that review closed (D-061), and what a
+          // person decided, which is what takes the finding off the node the
+          // criterion belongs to.
+          closures: [
+            ...(approved.has(key) ? [{ createdAt: closedAt, closed: [FINDING_KEY] }] : []),
+            ...(decisionsTaken.get(key) ?? [])
+              .filter((row) => row.choice === "ship_as_is")
+              .map((row) => ({ createdAt: row.decided_at, closed: [row.finding_key] })),
+          ],
         },
     ticket.plan_version,
   );
@@ -1514,24 +1565,31 @@ export function graphView(repoId: string, key: string): GraphView {
  * What a ticket drafted from a spec is called, as `admit` calls it where
  * nothing drafted a name, which is always here because the sample has no
  * drafter: the spec's title, unless another ticket in the repository carries
- * it, else the plan's outcome (D-127).
+ * it, else the plan's outcome (D-127). With `keepTitle`, as `admit
+ * --keep-title` calls it, the spec's title is the person's name and stands
+ * whatever another ticket is called.
  * Read after the plan is drafted, which is where the outcome comes from.
  */
-function specTicketName(repo: string, key: string, markdown: string): string {
-  const title = readSpecSections(markdown).text.title.trim();
-  const taken = snapshot.tasks.some(
-    (row) => row.repoId === repo && row.ticket.key !== key && sameName(row.ticket.title, title),
-  );
+function specTicketName(repo: string, key: string, markdown: string, keepTitle: boolean): string {
+  const title = readSpecSections(markdown).text.title.replace(/\s+/g, " ").trim();
+  const taken =
+    !keepTitle &&
+    snapshot.tasks.some(
+      (row) => row.repoId === repo && row.ticket.key !== key && sameName(row.ticket.title, title),
+    );
   return title.length > 0 && !taken ? title : plans.get(key)!.outcome;
 }
 
 /**
  * Draft a plan from a spec, as `admit --from-spec` does: one criterion per
  * requirement, each citing it, grouped into two nodes so a requirement's node
- * is something to look at.
+ * is something to look at. Where `planning` records the person titling the
+ * spec and it still states that title, it is `--keep-title`: the ticket takes
+ * the spec's title and the spec is left as it is (D-127).
  */
-export function draftFromSpec(key: string, markdown: string, slug: string): void {
+export function draftFromSpec(key: string, markdown: string, slug: string, planning: EditingSession | undefined): void {
   const read = readSpecSections(markdown);
+  const keepTitle = planning !== undefined && keepsPersonsTitle(planning, read.text.title);
   const plan = plans.get(key)!;
   // The spec this plan was drafted from, as the CLI records it on admission.
   // Written here because the picker reads it: a ticket is what says a spec has
@@ -1588,8 +1646,8 @@ export function draftFromSpec(key: string, markdown: string, slug: string): void
   // titles it, before the verdict below is keyed on the spec
   // (D-127).
   if (row) {
-    row.ticket.title = specTicketName(row.repoId, key, markdown);
-    saveSpec(slug, retitleSpec(markdown, row.ticket.title));
+    row.ticket.title = specTicketName(row.repoId, key, markdown, keepTitle);
+    if (!keepTitle) saveSpec(slug, retitleSpec(markdown, row.ticket.title));
   }
   specOf.set(key, slug);
   // A plan just drafted agrees with its spec by construction, and the verdict
@@ -1725,7 +1783,7 @@ export function nameSpecFromTurn(id: string, text: string): void {
         "that is already there",
     );
   saveSpec(slug, renderSpec({ ...EMPTY_SPEC_TEXT, title }, { highWater: 0, existing: [] }).markdown);
-  editing.recordSpec(id, slug);
+  editing.recordSpec(id, slug, title);
   converse(id, { kind: "note", text: `Named specs/${slug} from your first message.` });
 }
 /**
@@ -1778,6 +1836,12 @@ export function startSampleInterview(id: string): InterviewStatus {
   });
   return interviewStatus(id);
 }
+/** The chat of a planning that has been discarded, ended with it (D-102). */
+export function endPlanningChat(id: string): void {
+  sampleInterviews.delete(id);
+  sampleWorking.delete(id);
+  emit({ kind: "interview", sessionId: id, running: false, entry: null, asking: askingOf(id), working: false, doing: null });
+}
 /**
  * The end of the sample's interview, as the host's stop ends a real one:
  * stopping ends the turn, and what the turn had already written is written, so
@@ -1785,15 +1849,9 @@ export function startSampleInterview(id: string): InterviewStatus {
  * there or not and the note is said on this ending as it is on the turn's own
  * (D-102).
  *
- * Its own function because Generate plan makes the same ending: one press
- * stops the interview and drafts from what it left behind.
+ * Its own function because Generate plan makes the same ending: the chat is
+ * stopped before the plan is drafted from what it left behind.
  */
-/** The chat of a planning that has been discarded, ended with it (D-102). */
-export function endPlanningChat(id: string): void {
-  sampleInterviews.delete(id);
-  sampleWorking.delete(id);
-  emit({ kind: "interview", sessionId: id, running: false, entry: null, asking: askingOf(id), working: false, doing: null });
-}
 export function stopSampleInterview(id: string): void {
   sampleInterviews.delete(id);
   sampleWorking.delete(id);
@@ -2376,6 +2434,7 @@ export function discardTicket(repoId: string, key: string): string | null {
   snapshot.titles = titles;
   snapshot.taskModels = taskModels;
   snapshot.archived = (snapshot.archived ?? []).filter((item) => item !== entry);
+  snapshot.lastOpened = Object.fromEntries(Object.entries(snapshot.lastOpened ?? {}).filter(([item]) => item !== entry));
   // And every planning over it, as the host discards them, with their chats
   // (D-102): a planning over a ticket that is gone has nothing left to open.
   const over = (session: EditingSession): boolean =>

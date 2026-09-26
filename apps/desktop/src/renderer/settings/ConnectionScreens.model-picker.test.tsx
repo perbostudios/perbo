@@ -26,6 +26,7 @@ function mount(
   saved = "claude-sonnet-5",
   role: "executor" | "reviewer" = "executor",
   connections?: Provider[],
+  connectionDot?: boolean,
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
@@ -41,6 +42,7 @@ function mount(
           role={role}
           models={models}
           connections={connections}
+          {...(connectionDot === undefined ? {} : { connectionDot })}
           onChange={(choice) => setModels({ ...models, ...choice })}
         />
         <output>{JSON.stringify(models)}</output>
@@ -281,6 +283,54 @@ describe("the picker's effort, its edges and its closed reading", () => {
     expect(dot).toBeTruthy();
     expect(dot.classList.contains("disconnected")).toBe(disconnected);
     expect(closed.querySelector(".spacer")!.lastElementChild).toBe(dot);
+  });
+
+  it("closed, reads only the model and its effort where it is told to draw no dot", () => {
+    mount("claude-fable-5-1", "executor", [
+      { id: "claude", name: "Claude Code", installed: true, authenticated: true, detail: "", loginCommand: "claude login", roles: [] },
+    ], false);
+    const closed = screen.getByRole("button", { name: "Change executor model" });
+    expect(closed.querySelector(".connection-dot")).toBeNull();
+    expect(closed.querySelector(".spacer")!.lastElementChild).toBe(closed.querySelector(".model-effort"));
+    expect(closed.querySelector(".spacer")!.textContent).toBe("ExecutorFable 5.1Default");
+  });
+
+  it("draws a signed-in provider's dot in the completed green, and a signed-out one grey", () => {
+    const css = readFileSync(resolve(__dirname, "../styles.css"), "utf8");
+    const rule = (selector: string): string =>
+      new RegExp(`\\n${selector.replace(/\./g, "\\.")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+    expect(rule(".connection-dot")).toMatch(/background: var\(--green\);/);
+    expect(rule(".connection-dot.disconnected")).toMatch(/background: rgba\(var\(--ink-rgb\), 0\.16\);/);
+    // The picker's smaller dot keeps the colour it is given above.
+    expect(rule(".model-picker .connection-dot")).not.toMatch(/background/);
+    expect(rule(".connection-check")).toMatch(/background: var\(--green\);/);
+  });
+
+  it("draws dark-ink artwork and blue white in dark mode, rather than inverted to cyan", () => {
+    const tokens = readFileSync(resolve(__dirname, "../ui/tokens.css"), "utf8");
+    const light = /\n:root \{([^}]*)\}/.exec(tokens)?.[1] ?? "";
+    const dark = [
+      /:root:not\(\[data-theme="light"\]\) \{([^}]*)\}/.exec(tokens)?.[1] ?? "",
+      /\n:root\[data-theme="dark"\] \{([^}]*)\}/.exec(tokens)?.[1] ?? "",
+    ];
+    expect(light).toMatch(/--ink-filter: none;/);
+    expect(light).toMatch(/--blue: #3e6b85;/);
+    for (const block of dark) {
+      expect(block).toMatch(/--ink-filter: brightness\(0\) invert\(1\);/);
+      expect(block).toMatch(/--blue: #ffffff;/);
+    }
+    // The chevrons and arrows drawn in ink take the same filter as every other ink icon.
+    const css = readFileSync(resolve(__dirname, "../styles.css"), "utf8");
+    for (const selector of [".model-picker > button > img", ".default-row > img", ".pagination-button img"]) {
+      const body = new RegExp(`\\n${selector.replace(/[.>]/g, "\\$&")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+      expect(body, selector).toMatch(/filter: var\(--ink-filter\);/);
+    }
+    // The reviewer's name is slate blue in light mode and amber in dark mode, both system and chosen.
+    expect(/\n\.reviewer-name \{([^}]*)\}/.exec(css)?.[1]).toMatch(/color: var\(--blue\);/);
+    for (const selector of [':root:not([data-theme="light"]) .reviewer-name', ':root[data-theme="dark"] .reviewer-name']) {
+      const body = new RegExp(`\\n\\s*${selector.replace(/[.()[\]:]/g, "\\$&")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+      expect(body, selector).toMatch(/color: var\(--amber\);/);
+    }
   });
 
   it("offers Codex's own levels, and none for a model that reports none", async () => {

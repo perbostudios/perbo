@@ -91,7 +91,7 @@ what leaves the machine, uninstall — is [`docs/install.md`](../../docs/install
 | `baseline` | Times your direct-agent workflow, to compare against Perbo later |
 | `review` | Reviews a change on its own — `review --pr owner/repo#412` needs nothing admitted, no ticket, nothing beyond the pull request itself |
 | `inspect` | Reads back a run's attempts and reviews |
-| `verdict` | Records your endorse or override on a stop, or accept or reject on a finding |
+| `verdict` | Records your endorse or override on a stop, accept or reject on a finding, or your answer to a finding routed to you, which closes it |
 | `run` | Runs the loop end to end: write, check, review, fix, and — with `--publish` — open the pull request |
 
 `admit`, `approve`, `edit`, `list`, `sync`, `serve`, `agent`, `interview`, `drift`, `mcp`, `stops`, `escapes` and `principle` build a ticket queue across many repositories on top of the same loop. `index` is the one command that reads your code rather than your records. `perbo --help` has every command and flag; [docs/04](../../docs/04-ticket-workspace-and-review.md) is the specification.
@@ -123,6 +123,7 @@ perbo drift PRB-1 --repo . [--provider anthropic|claude-cli|codex-cli] [--model 
 perbo stops [--json] [--since <ISO date>] [--by-week]
 perbo verdict <review> --endorse|--override <stop key> [--note "..."] [--replace]
 perbo verdict <review> --accept|--reject <finding key> [--note "..."] [--replace]
+perbo verdict <review> --decide <finding key> [--choice approach|let-it-decide|ship-as-is] [--note "..."] [--replace]
 perbo verdict --list <change> [--json]
 perbo principle add "a product answer no general practice can settle" [--repo .]
 perbo principle list [--repo .]
@@ -168,7 +169,7 @@ either. It reads anything and runs read-only commands; that spec's own folder, `
 ADR folder are the only places it may write, and a write outside them is refused rather than put to
 you — there are no permission prompts, and a refusal is streamed and printed with the rule that
 refused it. It writes the spec's `#` line as a title, named as a ticket is and shown the other tickets' names
-(D-127), and admission rewrites it to the ticket's name. It writes the spec and stops there: drafting one ticket from it is yours, through
+(D-127), and admission rewrites it to the ticket's name unless it is given `--keep-title` (D-127). It writes the spec and stops there: drafting one ticket from it is yours, through
 `admit --from-spec` or Generate plan in the app. `edit_plan` and `undo_edit` change that plan
 afterwards through the same validated path `edit --graph-edit` uses, recorded as the interview's and
 undoable; `read_plan` reads it back; `ask_options` puts what it cannot settle itself to you as groups
@@ -238,9 +239,9 @@ approve.**
 **The model drafts; the person approves.** `perbo admit --from owner/repo#412` reads the issue
 through local `gh`, hands its title and body to a model as delimited `trust="external"` data
 alongside the repository's tree, and takes back a constrained draft: one outcome, the criteria
-the work has, each with an assertion and a kind, a proposed scope of one to eight globs, a
-rationale and, where the work divides, the nodes and edges of an execution graph
-(`@perbo/planning`, prompt `draft_v5`). The draft is written beside the ticket as
+the work has, each with an assertion and a kind, a proposed scope of as many globs as the work
+lands in, a rationale and, where the work divides, the nodes and edges of an execution graph
+(`@perbo/planning`, prompt `draft_v6`). The draft is written beside the ticket as
 `<KEY>.draft.json` with the model, provider, tokens and cost that produced it, and the contract is
 created in `plan_review`. The ticket is named per D-127.
 **A draft is never executed; only an approved contract is.** The person's
@@ -266,7 +267,9 @@ in the repository (D-103): the same prompt and the same `trust="external"` block
 two things a spec adds. Its requirement ids are the only ones a criterion may cite, and a draft
 citing one the spec does not carry is refused; its No-Gos are read from the `## No-Gos` heading and
 never drafted. The ticket's name becomes the spec's title: its `#` line is rewritten to the name,
-and nothing else in the file or the folder's name moves (D-127).
+and nothing else in the file or the folder's name moves (D-127). With `--keep-title`, for a spec a
+person titled, it is the other way round: the ticket takes the spec's title as it stands, at most
+60 characters, and the spec is left as it is (D-127).
 The ticket records the spec's repository-relative path and the SHA-256 of the spec as admission
 leaves it, and beside them every file the loop commits with the spec, each with its own
 hash: the spec's whole folder but for the interview's session record, and the `CONTEXT.md` and the
@@ -296,7 +299,7 @@ spec while the pull request carries it.
 ticket's plan again: the same key, `ticket_id` and `plan_id`, a new plan version, and the drafted
 graph, criteria and scope replacing what stood, so the graph edits made since the last draft go with
 them. The spec's edits and its No-Gos survive because they are in the file, and its title is
-rewritten to the name drafted again. The replaced edits stay
+rewritten to the name drafted again, unless `--keep-title` keeps it as the ticket's name (D-127). The replaced edits stay
 in `PRB-1.draft.json` marked replaced — they stop counting towards `edit_count`, and `--undo` cannot
 reach across the re-draft. It admits no other ticket, refuses a ticket that is not in `plan_review`,
 and, like every other drafting flag, cannot approve in the same command.

@@ -14,6 +14,7 @@ import type { Ticket } from "@perbo/contracts";
 import { assertionsChangedSinceDraft, readSpecText } from "@perbo/planning";
 import { specFindings } from "../../shared/contract-editing.js";
 import { judgingChecks } from "../../shared/checks.js";
+import { DELETE_TICKET_GONE } from "../../shared/discard.js";
 import { redact, requireSuccess } from "../process.js";
 import { listBundles, readAttempts, readDraftEditRecordsOrNone, summariseTicket } from "../records.js";
 import type { BundleManifest } from "../records.js";
@@ -126,7 +127,7 @@ export class TicketReads {
   /** One ticket, or the sentence every surface says when the store no longer holds it. */
   async ticket(repo: RegisteredRepository, key: string): Promise<Ticket> {
     const ticket = (await this.list(repo)).tickets.find((entry) => entry.key === key);
-    if (!ticket) throw new Error("This task is no longer in the repository's ticket store.");
+    if (!ticket) throw new Error(DELETE_TICKET_GONE);
     return ticket;
   }
 
@@ -140,6 +141,15 @@ export class TicketReads {
       contract: PlanContractSchema.parse(JSON.parse(raw)),
       digest: createHash("sha256").update(raw).digest("hex"),
     };
+  }
+
+  /** The contract's outcome sentence, or nothing where the contract cannot be read. */
+  private outcomeOf(repo: RegisteredRepository, key: string): string | null {
+    try {
+      return this.contract(repo, key).contract.outcome;
+    } catch {
+      return null;
+    }
   }
 
   /** What was shown is what is approved or edited: a contract that moved since refuses. */
@@ -279,13 +289,17 @@ export class TicketReads {
           attemptsPath(repo, ticket.ticket_id),
         );
         const bundles = record.attempts.length ? await this.bundles(repo) : [];
-        return summariseTicket({
-          ticket,
-          attempts: record.attempts,
-          attemptsError: record.error,
-          bundles,
-          objectsDirectory: objectsPath(repo),
-        });
+        return {
+          ...summariseTicket({
+            ticket,
+            attempts: record.attempts,
+            attemptsError: record.error,
+            bundles,
+            objectsDirectory: objectsPath(repo),
+          }),
+          // The line under the title on the contract page, which Home's card repeats.
+          outcome: this.outcomeOf(repo, key),
+        };
       },
     );
   }

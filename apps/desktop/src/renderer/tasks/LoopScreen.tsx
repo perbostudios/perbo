@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { Button, InkIcon, Notice, NumberPop, PageHeader, SectionLabel, cx } from "../ui/index.js";
+import { DECISION_CHOICES, DECISION_WORDS, type DecisionChoice } from "@perbo/contracts/browser";
+import { Button, InfoHint, InkIcon, Notice, NumberPop, PageHeader, SectionLabel, cx } from "../ui/index.js";
 import { bridge, errorMessage, useAction } from "../workspace/index.js";
 import { exclusiveJob, isRun } from "../../shared/jobs.js";
-import { decisionQuestions } from "../../shared/decisions.js";
+import { decisionQuestions, settledFindings } from "../../shared/decisions.js";
 import { WaitScreen } from "./wizard.js";
 import { useShortcut } from "../shell/shortcuts.js";
 import { displayKey, stageName } from "./ticket-workspace.js";
-import { costLabel, taskRecords } from "./task-context.js";
-import type { TaskContext } from "./task-context.js";
+import { costLabel, runEnding, taskRecords } from "./task-context.js";
+import type { RunEnding, TaskContext } from "./task-context.js";
 import type { DecisionQuestion } from "../../shared/protocol.js";
 
 export function TaskHeader(context: TaskContext) {
@@ -45,7 +46,14 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
     projection,
   } = taskRecords(context);
   const action = useAction();
-  const questions: DecisionQuestion[] = decisionQuestions(review);
+  // What ended the last command, where it failed: said once in a card that is
+  // confirmed, then kept at the top of the steps in the same words. Not while
+  // the records it is read from are still being read after the command ended.
+  const ending = active || projection.refreshing ? null : runEnding(jobs, latest, ticket.state);
+  const [confirmed, setConfirmed] = useState<ReadonlySet<string>>(() => new Set());
+  const acknowledged = ending !== null && (confirmed.has(ending.job.id) || endingConfirmed(ending.job.id));
+  const whyLabel = ending?.title === "The run ended" ? "Why the run ended" : "Why it failed";
+  const questions: DecisionQuestion[] = decisionQuestions(review, settledFindings(detail));
   const observed = projection.observed;
   const paused = ticket.state === "changes_requested" && !active && questions.length > 0,
     stage = paused
@@ -69,14 +77,20 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
         } as Record<string, string>
       )[ticket.state] ??
       "Ready to start the loop");
-  const steps = ticket.history.map((entry, index) => ({
-    text: entry.note || entry.to.replaceAll("_", " "),
-    time: index === ticket.history.length - 1 && active ? "now" : "",
-    state:
-      index === ticket.history.length - 1 && active
-        ? ("current" as const)
-        : ("complete" as const),
-  }));
+  // Newest first: the step the loop is on, or what ended it, heads the list.
+  const steps = [
+    ...(ending !== null && acknowledged
+      ? [{ text: ending.sentence, reason: ending.reason, time: "", state: "ended" as const }]
+      : []),
+    ...ticket.history
+      .map((entry, index) => ({
+        text: entry.note || entry.to.replaceAll("_", " "),
+        reason: null,
+        time: index === ticket.history.length - 1 && active ? "now" : "",
+        state: index === ticket.history.length - 1 && active ? ("current" as const) : ("complete" as const),
+      }))
+      .reverse(),
+  ];
   const commands = latest?.ceilings.find(
     (ceiling) => ceiling.resource === "attempt_commands",
   );
@@ -111,7 +125,7 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
       />
     );
   return (
-    <section className="screen" data-screen="s12">
+    <section className="screen screen--loop" data-screen="s12">
       <TaskHeader {...context} />
       <div className="loop-body">
         <div className="loop-heading">
@@ -172,23 +186,30 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
             </span>
           </div>
         </div>
-        <div>
+        <div className="loop-steps">
           <div className="column-heading">
             <SectionLabel>Description of steps</SectionLabel>
             <span className="small muted">
-              newest last · recorded progress, not steps for you to approve
+              newest first · recorded progress, not steps for you to approve
             </span>
           </div>
-          <div className="step-history">
+          {/* The one part of this page that scrolls: the steps grow for as
+              long as the loop runs, and the actions below stay where they are. */}
+          <div className="step-history" role="region" aria-label="Description of steps" tabIndex={0}>
             {steps.length ? (
               steps.map((step, index) => (
                 <div className={step.state} key={index}>
                   {step.state === "complete" ? (
                     <InkIcon name="approve" size={16} />
+                  ) : step.state === "ended" ? (
+                    <InkIcon name="alert" size={16} />
                   ) : (
                     <span className="step-dot" />
                   )}
-                  <span>{step.text}</span>
+                  <span>
+                    {step.text}
+                    {step.reason !== null && <InfoHint text={step.reason} label={whyLabel} />}
+                  </span>
                   <time>{step.time}</time>
                 </div>
               ))
@@ -244,6 +265,25 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
           </div>
         </dl>
         <div className="loop-actions">
+          <span className="small muted">
+            Stopping is only possible while the loop is still running.
+          </span>
+          <span className="spacer" />
+          {recoverable && (
+            <Button disabled={busy} onClick={() => show("stopped")}>
+              See the stopped run
+            </Button>
+          )}
+          {!active &&
+            !recoverable &&
+            !questions.length &&
+            !["executing", "verifying", "provisioning"].includes(
+              ticket.state,
+            ) && (
+              <Button disabled={busy} onClick={() => show("review")}>
+                Review the result
+              </Button>
+            )}
           <Button
             onClick={() =>
               action.mutate({ kind: "openWorktree", repoId, key: ticket.key })
@@ -261,42 +301,99 @@ export function LoopScreen(context: TaskContext & { decisions?: boolean }) {
             <InkIcon name="dots" size={15} />
             Watch what the agents are doing
           </Button>
-          <span className="spacer" />
-          {recoverable && (
-            <Button disabled={busy} onClick={() => show("stopped")}>
-              See the stopped run
-            </Button>
-          )}
-          {!active &&
-            !recoverable &&
-            !questions.length &&
-            !["executing", "verifying", "provisioning"].includes(
-              ticket.state,
-            ) && (
-              <Button disabled={busy} onClick={() => show("review")}>
-                Review the result
-              </Button>
-            )}
-          <span className="small muted">
-            Stopping is only possible while the loop is still running.
-          </span>
         </div>
-        {jobs.at(-1)?.error && (
-          <Notice tone="danger">{jobs.at(-1)?.error}</Notice>
-        )}
         {action.error && (
           <Notice tone="danger">{errorMessage(action.error)}</Notice>
         )}
       </div>
-      {paused && questions.length > 0 && (
-        <DecisionOverlay {...context} questions={questions} />
+      {ending !== null && !acknowledged ? (
+        <EndedCard
+          ending={ending}
+          why={whyLabel}
+          onConfirm={() => {
+            confirmEnding(ending.job.id);
+            setConfirmed(new Set([...confirmed, ending.job.id]));
+          }}
+        />
+      ) : (
+        paused &&
+        questions.length > 0 && <DecisionOverlay {...context} questions={questions} />
       )}
     </section>
   );
 }
+/**
+ * Whether the person confirmed what ended a command, kept per command in this
+ * browser: the card is said once, and the steps carry it from then on. Storage
+ * that cannot be read or written only means the card is said again.
+ */
+const endingKey = (jobId: string): string => "perbo:ended:" + jobId;
+function endingConfirmed(jobId: string): boolean {
+  try {
+    return localStorage.getItem(endingKey(jobId)) === "confirmed";
+  } catch {
+    return false;
+  }
+}
+function confirmEnding(jobId: string): void {
+  try {
+    localStorage.setItem(endingKey(jobId), "confirmed");
+  } catch {
+    // Kept for this page only.
+  }
+}
+/** What ended the command, in the decision card's frame, read and confirmed. */
+function EndedCard({
+  ending: { title, sentence, reason, log },
+  why,
+  onConfirm,
+}: {
+  ending: RunEnding;
+  /** What the `i` is called. */
+  why: string;
+  onConfirm: () => void;
+}) {
+  const card = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    card.current?.focus();
+  }, []);
+  return (
+    <div className="decision-overlay" data-screen="ended">
+      <div
+        ref={card}
+        tabIndex={-1}
+        className="decision-card decision-card--ended t-modal is-open"
+        role="dialog"
+        aria-label={title}
+        aria-modal="false"
+      >
+        <div className="decision-titlebar">
+          <InkIcon name="alert" size={15} />
+          <h2>{title}</h2>
+        </div>
+        <div className="decision-body">
+          <p className="ended-sentence">
+            {sentence} <InfoHint text={reason} label={why} />
+          </p>
+          {log !== null && log.trim() !== "" && <pre className="ended-log">{log}</pre>}
+          <div className="decision-actions">
+            <span className="small muted">
+              It stays at the top of the steps. The whole log is under Watch
+              what the agents are doing.
+            </span>
+            <span className="spacer" />
+            <Button variant="primary" onClick={onConfirm}>
+              Got it
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 const AnswersSchema = z.record(
   z.string(),
-  z.object({ text: z.string(), custom: z.boolean() }),
+  z.object({ text: z.string(), custom: z.boolean(), choice: z.enum(DECISION_CHOICES) }),
 );
 function DecisionOverlay(
   context: TaskContext & { questions: DecisionQuestion[] },
@@ -324,6 +421,9 @@ function DecisionOverlay(
   const action = useAction(),
     question = questions[index]!,
     selected = answers[question.id];
+  // A finding the executor is never handed takes only Ship as it is; a
+  // question that takes no choice takes the person's words for a principle.
+  const ownWords = question.choices.length === 0 || question.choices.includes("approach");
   const busy = Boolean(exclusiveJob(workspace.jobs));
   useEffect(() => {
     sessionStorage.setItem(storageKey, JSON.stringify(answers));
@@ -346,10 +446,10 @@ function DecisionOverlay(
   useEffect(() => {
     const answer = answers[questionId];
     setCustom(answer?.custom ? answer.text : "");
-    setCustomSelected(answer?.custom ?? question.options.length === 0);
+    setCustomSelected(answer?.custom ?? (question.options.length === 0 && ownWords));
   }, [questionId]);
-  const choose = (text: string, isCustom: boolean): void => {
-    setAnswers({ ...answers, [question.id]: { text, custom: isCustom } });
+  const choose = (text: string, isCustom: boolean, choice: DecisionChoice = "approach"): void => {
+    setAnswers({ ...answers, [question.id]: { text, custom: isCustom, choice } });
     setCustomSelected(isCustom);
     setError(null);
   };
@@ -393,6 +493,13 @@ function DecisionOverlay(
         repoId,
         key: detail.ticket.key,
         answer: text,
+        decisions: questions
+          .filter((question) => question.choices.length > 0)
+          .map((question) => ({
+            findingKey: question.id,
+            choice: answers[question.id]!.choice,
+            answer: answers[question.id]!.text.trim(),
+          })),
         digest: detail.digest,
       })
       .then((job) => {
@@ -452,9 +559,13 @@ function DecisionOverlay(
                     <div>
                       <p className="confirmation-question">{question.title}</p>
                       <strong>
-                        {answers[question.id]?.custom
-                          ? "Your answer — “" + answers[question.id]?.text + "”"
-                          : answers[question.id]?.text}
+                        {question.choices.length > 0 && answers[question.id]?.choice === "ship_as_is"
+                          ? "Ship as it is — the change is delivered unchanged for this"
+                          : question.choices.length > 0 && answers[question.id]?.choice === "let_it_decide"
+                            ? "Let it decide — the executor chooses within the contract"
+                            : answers[question.id]?.custom
+                              ? "Your answer — “" + answers[question.id]?.text + "”"
+                              : answers[question.id]?.text}
                       </strong>
                       {answers[question.id]?.custom && (
                         <p className="confirmation-authorship">
@@ -522,44 +633,72 @@ function DecisionOverlay(
                     )}
                   </label>
                 ))}
-                <label
-                  className={
-                    "choice choice--custom" +
-                    (customSelected ? " selected" : "")
-                  }
-                >
-                  <span className="choice-heading">
-                    <input
-                      type="radio"
-                      name="decision-choice"
-                      checked={customSelected}
-                      onChange={() => {
-                        setCustomSelected(true);
-                        // Picking it is the request to type, so the caret goes
-                        // with it. Done on the pick and not on the state, which
-                        // also turns true when an earlier answer is restored —
-                        // focus then would take the page off where it was.
-                        own.current?.focus();
+                {ownWords && (
+                  <label
+                    className={
+                      "choice choice--custom" +
+                      (customSelected ? " selected" : "")
+                    }
+                  >
+                    <span className="choice-heading">
+                      <input
+                        type="radio"
+                        name="decision-choice"
+                        checked={customSelected}
+                        onChange={() => {
+                          setCustomSelected(true);
+                          // Picking it is the request to type, so the caret goes
+                          // with it. Done on the pick and not on the state, which
+                          // also turns true when an earlier answer is restored —
+                          // focus then would take the page off where it was.
+                          own.current?.focus();
+                        }}
+                      />
+                      <strong>
+                        {question.options.length
+                          ? "Something else — tell it what to do"
+                          : "Tell it what the product should do"}
+                      </strong>
+                    </span>
+                    <textarea
+                      ref={own}
+                      aria-label="Your approach"
+                      placeholder="Type the approach in a sentence…"
+                      value={custom}
+                      onFocus={() => setCustomSelected(true)}
+                      onKeyDown={(event) => {
+                        // Enter sends what was typed, as Save and continue does;
+                        // Shift+Enter is a new line. Nothing typed, nothing sent.
+                        if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                        event.preventDefault();
+                        if (custom.trim()) advance();
+                      }}
+                      onChange={(event) => {
+                        setCustom(event.target.value);
+                        choose(event.target.value, true);
                       }}
                     />
-                    <strong>
-                      {question.options.length
-                        ? "Something else — tell it what to do"
-                        : "Tell it what the product should do"}
-                    </strong>
-                  </span>
-                  <textarea
-                    ref={own}
-                    aria-label="Your approach"
-                    placeholder="Type the approach in a sentence…"
-                    value={custom}
-                    onFocus={() => setCustomSelected(true)}
-                    onChange={(event) => {
-                      setCustom(event.target.value);
-                      choose(event.target.value, true);
-                    }}
-                  />
-                </label>
+                  </label>
+                )}
+                {question.choices.includes("ship_as_is") && (
+                  <label
+                    className={
+                      "choice choice--ship" +
+                      (!customSelected && selected?.choice === "ship_as_is" ? " selected" : "")
+                    }
+                  >
+                    <span className="choice-heading">
+                      <input
+                        type="radio"
+                        name="decision-choice"
+                        checked={!customSelected && selected?.choice === "ship_as_is"}
+                        onChange={() => choose(DECISION_WORDS.ship_as_is, false, "ship_as_is")}
+                      />
+                      <strong>Ship as it is</strong>
+                    </span>
+                    <p>Nothing is changed for this: the change is delivered as the review saw it.</p>
+                  </label>
+                )}
               </div>
             </>
           )}
@@ -569,6 +708,8 @@ function DecisionOverlay(
           )}
           <div className="decision-actions">
             {confirm ? (
+              <>
+              <span className="spacer" />
               <Button
                 variant="primary"
                 disabled={busy || pending !== null}
@@ -576,29 +717,32 @@ function DecisionOverlay(
               >
                 {pending ? "Recording your decisions…" : "Confirm and resume"}
               </Button>
+              </>
             ) : (
               <>
-                <Button variant="primary" onClick={advance}>
-                  Save and continue
-                </Button>
-                <Button
-                  onClick={() => {
-                    choose(
-                      question.options.find((option) => option.recommended)
-                        ?.title ??
-                        "Choose an approach within the approved contract and scope; keep the choice in the task record.",
-                      false,
-                    );
-                    if (index + 1 === questions.length) setConfirm(true);
-                    else setIndex(index + 1);
-                  }}
-                >
-                  Let it decide
-                </Button>
-                <span className="spacer" />
                 <span className="small muted">
                   Can always change it before confirmation
                 </span>
+                <span className="spacer" />
+                {ownWords && (
+                  <Button
+                    onClick={() => {
+                      choose(
+                        question.options.find((option) => option.recommended)
+                          ?.title ?? DECISION_WORDS.let_it_decide,
+                        false,
+                        "let_it_decide",
+                      );
+                      if (index + 1 === questions.length) setConfirm(true);
+                      else setIndex(index + 1);
+                    }}
+                  >
+                    Let it decide
+                  </Button>
+                )}
+                <Button variant="primary" onClick={advance}>
+                  Save and continue
+                </Button>
               </>
             )}
           </div>

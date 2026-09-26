@@ -23,6 +23,7 @@ export {
 } from "./internal/scope.js";
 export type { WriteCause, WriteFinding, WriteRule } from "./internal/destination.js";
 export type { CommandReading, CommandSegment } from "./internal/line.js";
+export { everySegment } from "./internal/line.js";
 export { splitCommandSegments } from "./internal/lexer.js";
 export { WRITERS, type WriterSpec } from "./internal/writers.js";
 
@@ -66,16 +67,40 @@ export function readCommandLine(command: string, scope: ResolvedScope): CommandR
   // one of its variables: that is the reading this module had before it had one
   // to offer, so the narrowing can only refuse. The rebinding is looked for in
   // the line the shell runs, not in a heredoc body it hands to a command.
-  const effective: ResolvedScope =
+  const rebound: ResolvedScope =
     scope.tmpdir !== null && SCRATCH_REBOUND.test(withoutHeredocBodies(text).text)
       ? { ...scope, tmpdir: null }
       : scope;
+  // A GNU backup takes the suffix `SIMPLE_BACKUP_SUFFIX` holds, so every value
+  // the line gives it, heredoc bodies included, is judged as one.
+  const suffixes = backupSuffixesSet(text);
+  const effective: ResolvedScope =
+    suffixes === undefined ? rebound : { ...rebound, simpleBackupSuffixes: suffixes };
   return inspectSegments(
     text,
     effective,
     { path: effective.base, unknown: effective.baseUnknown },
     0,
   );
+}
+
+/**
+ * The values a line gives `SIMPLE_BACKUP_SUFFIX`: undefined where it never
+ * names the variable, null where it names it anywhere but in a literal
+ * assignment — `export`, `read`, a quoted expansion — which this does not read.
+ */
+function backupSuffixesSet(text: string): string[] | null | undefined {
+  const name = "SIMPLE_BACKUP_SUFFIX";
+  if (!text.includes(name)) return undefined;
+  const values: string[] = [];
+  const assignment = /(?:^|[\s;&|(])SIMPLE_BACKUP_SUFFIX=('[^']*'|"[^"$`\\]*"|[^\s;&|()<>'"$`\\]*)(?=$|[\s;&|)])/g;
+  let found = 0;
+  for (const match of text.matchAll(assignment)) {
+    found += 1;
+    const value = match[1]!;
+    values.push(/^['"]/.test(value) ? value.slice(1, -1) : value);
+  }
+  return found === text.split(name).length - 1 ? values : null;
 }
 
 /**

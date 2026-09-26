@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   RequirementIdSchema,
+  TICKET_NAME_CAP,
   findCycle,
   insideAllowedPaths,
   issueAuthoredAttempts,
@@ -38,12 +39,11 @@ import { repositoryTree } from "./internal/tree.js";
  *
  * The prompt covers an issue or a spec as the source, an execution graph of
  * nodes and suggested edges, the requirement id a criterion was drafted from,
- * as many criteria as the work has (D-100, D-103), every file the drafter
- * opens delimited by this package, and a name told apart from every other
- * ticket's, which the drafter is shown
- * (D-127).
+ * as many criteria and as many allowed paths as the work has (D-100, D-103),
+ * every file the drafter opens delimited by this package, and a name told
+ * apart from every other ticket's, which the drafter is shown (D-127).
  */
-export const DRAFT_PROMPT_VERSION = "draft_v5";
+export const DRAFT_PROMPT_VERSION = "draft_v6";
 
 /**
  * `manual` is absent: it carries a named reviewer and a reason nobody can
@@ -94,16 +94,15 @@ export const ContractDraftSchema = z
      * named by what the plan turned out to be, and the spec then takes it as
      * its title.
      */
-    name: z.string().min(1).max(60),
+    name: z.string().min(1).max(TICKET_NAME_CAP),
     outcome: z.string().min(1),
     /**
-     * One or more. The cap of four went with the graph: work too large for four
-     * criteria is one ticket whose criteria are grouped into nodes, not several
-     * tickets (D-100, ADR-0037).
+     * One or more, as many as the work has: large work is one ticket whose
+     * criteria are grouped into nodes, not several tickets (D-100, ADR-0037).
      */
     acceptance_criteria: z.array(DraftCriterionSchema).min(1),
     proposed_scope: z.strictObject({
-      paths_allowed: z.array(z.string().min(1)).min(1).max(8),
+      paths_allowed: z.array(z.string().min(1)).min(1),
       paths_prohibited_extra: z.array(z.string().min(1)),
     }),
     rationale: z.string().min(1),
@@ -297,10 +296,9 @@ const SCOPE_JSON_SCHEMA = {
     paths_allowed: {
       type: "array",
       minItems: 1,
-      maxItems: 8,
       items: { type: "string" },
       description:
-        "One to eight globs over directories that appear in the repository tree, e.g. packages/auth/**. As narrow as the work allows.",
+        "One or more globs over directories that appear in the repository tree, e.g. packages/auth/**: as many as the work lands in, each as narrow as the work allows.",
     },
     paths_prohibited_extra: {
       type: "array",
@@ -330,7 +328,7 @@ export const CONTRACT_DRAFT_JSON_SCHEMA: Record<string, unknown> = {
       // it: a name past this fails `ContractDraftSchema` and throws away the
       // whole drafting run, which the person has already paid for.
       minLength: 1,
-      maxLength: 60,
+      maxLength: TICKET_NAME_CAP,
       description:
         "The fewest words that tell this work apart from every name in the names block. What it is, not what is being done to make it: 'Paginated search results', not 'Add pagination to the search results page'. Leave out what does not tell it apart: the file or folder it lands in, 'a single file', 'app', 'page', the repository. No set length. Never a name already listed. No trailing full stop.",
     },

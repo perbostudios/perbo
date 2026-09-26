@@ -122,7 +122,7 @@ export const USAGE = `perbo — contract to pull request, locally
   perbo admit --outcome "..." --criterion "what :: how it is proven" --path "src/**"
   perbo admit --from owner/repo#412 [--provider claude-cli] [--model <id>]
   perbo admit --from-file issue.md [--provider claude-cli] [--model <id>]
-  perbo admit --from-spec specs/<slug>/spec.md [--provider claude-cli]
+  perbo admit --from-spec specs/<slug>/spec.md [--provider claude-cli] [--keep-title]
   perbo admit --from-spec specs/<slug>/spec.md --start-over PRB-1
       Admit one piece of work. Creates a native ticket and its plan contract
       against HEAD, in plan_review. With --from, a model drafts the outcome,
@@ -156,6 +156,9 @@ export const USAGE = `perbo — contract to pull request, locally
       every other ticket's name, which it is shown. A name another ticket
       carries, or none, falls to the spec's title, and that to the outcome.
       A spec's title line is rewritten to the name; its folder keeps its slug.
+      --keep-title is for a spec a person titled: the ticket takes the spec's
+      title as it stands, the drafter's name is not used, and the spec is
+      left as it is. A title longer than a name's 60 characters is refused.
       However large the issue, the draft is one contract and admits one
       ticket. The level is derived from the scope; --level may raise it,
       never lower it. Admitting takes
@@ -473,6 +476,8 @@ export const USAGE = `perbo — contract to pull request, locally
 
   perbo verdict <review> --endorse|--override <stop key> [--note "..."]
   perbo verdict <review> --accept|--reject <finding key> [--note "..."]
+  perbo verdict <review> --decide <finding key>
+              [--choice approach|let-it-decide|ship-as-is] [--note "..."]
               [--author "..."] [--stand-in] [--replace] [--repo .]
               [--store <dir>] [--json]
       Answer a review here instead of on the pull request. <review> is a ticket
@@ -483,9 +488,18 @@ export const USAGE = `perbo — contract to pull request, locally
       names one — the same key the checkbox on the pull request carries, so a
       stop answered either way is one decision.
       --endorse and --override answer a stop, exactly as the two boxes do;
-      --accept and --reject judge any finding. The decision is written to
-      <store>/verdicts.json with who took it, when and the note; nothing leaves
-      this machine and nothing on the network is asked. Who took it is this
+      --accept and --reject judge any finding; --decide is your answer to a
+      finding the review routed to you. --choice approach (the default, with
+      your words in --note) or let-it-decide hands it to the executor for one
+      remediation round, checked closed rather than reviewed again;
+      ship-as-is settles it, and a run with nothing else open executes and
+      reviews nothing and goes on to delivery. A security.* or context.*
+      finding can only be shipped as it is. An answer is not a stop answer:
+      it sits beside one without replacing it, \`perbo stops\` does not count
+      it, and --stand-in cannot take it. The decision is
+      written to <store>/verdicts.json with who took it, when and the note;
+      nothing leaves this machine and nothing on the network is asked. Who
+      took it is this
       repository's own \`git config user.name\` and \`user.email\` — no account
       and no token — or --author where you name somebody else; where the
       repository names neither and --author is absent, nothing is recorded and
@@ -539,6 +553,9 @@ Drafting for admit
                           the same spec. The same key, a new plan version, and
                           the graph edits since the last draft dropped, kept in
                           the log marked replaced. Only a ticket in plan_review
+  --keep-title            with --from-spec: name the ticket after the spec's
+                          title as it stands, not the drafter's name, and leave
+                          the spec's title line as it is
   --provider <name>       'claude-cli' (default, the locally installed \`claude\` and
                           its own login), 'anthropic' (ANTHROPIC_API_KEY) or
                           'codex-cli'; the drafter uses the reviewer's transport

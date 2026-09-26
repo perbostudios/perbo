@@ -21,8 +21,9 @@ import {
 } from "./admission.js";
 import { PERBO_AGENT_ROLE_NAMES, isSubagentTool, judgeSubagentStart, SUBAGENT_TOOL_NAMES } from "./agents.js";
 import { writeBriefRecord, type BriefRecords } from "./brief.js";
+import { READ_ONLY_ORIENTATION } from "./profile.js";
 import { describeShellCwd } from "./prohibited.js";
-import { UNKNOWN_CWD, type CommandSegment } from "./shell/index.js";
+import { UNKNOWN_CWD, everySegment, type CommandSegment } from "./shell/index.js";
 import { HOST_TEMPORARY_DIRECTORY } from "./scratch.js";
 
 /**
@@ -632,8 +633,8 @@ function callerOf(call: PreToolCall): string | null {
  * `cd` and its family move the shell, which is SCP-170's tracking and decides
  * the *next* line's relative targets rather than this one. `echo` and `printf`
  * write only where a redirect points, and the redirect's target has already
- * been resolved by the time this is read. `true`, `false` and `:` do nothing at
- * all.
+ * been resolved by the time this is read. `pwd` prints where the shell stands.
+ * `true`, `false` and `:` do nothing at all.
  *
  * They are not on the `--allowedTools` list and must not be: that list is
  * matched by prefix, so `Bash(cd:*)` on it would admit `cd x && rm -rf /`
@@ -643,22 +644,26 @@ function callerOf(call: PreToolCall): string | null {
  * redirect. A program that acts on its own does not — `curl -o` writes without
  * one, and is on the deny-list.
  */
-export const EFFECT_FREE_VERBS = new Set(["cd", "pushd", "popd", "echo", "printf", "true", "false", ":"]);
-
-/** Every command a line runs, the ones inside a nested shell included. */
-function everySegment(segments: readonly CommandSegment[]): CommandSegment[] {
-  return segments.flatMap((segment) => [segment, ...everySegment(segment.nested)]);
-}
+export const EFFECT_FREE_VERBS = new Set(["cd", "pushd", "popd", "pwd", "echo", "printf", "true", "false", ":"]);
 
 /**
  * Whether the runner has positive grounds to admit this line, or nothing to say.
  *
  * Grounds means at least one command on the line is one the guard judged — a
- * verb that writes to a path it names, or one whose effects are already
- * accounted for — and no command on it is one the guard has not judged and the
- * allow-list does not carry. `mkdir -p a && script -q /dev/null node x.js`
- * therefore has nothing to say: the `mkdir` is vouched for and the `script` is
- * not, and vouching for the line would admit both.
+ * verb that writes to a path it names, one whose effects are already accounted
+ * for, or a read-only orientation command the allow-list carries — and no
+ * command on it is one the guard has not judged and the allow-list does not
+ * carry. `git diff --end-of-options $(git merge-base HEAD main)` is admitted on
+ * the last of these grounds, where the outer list alone would have to vouch for
+ * a substitution. A substitution is grounds only because the reader has
+ * already judged the word it builds: where that word stands as an option of a
+ * command whose options can write or run a program, the reader refuses it, and
+ * where the command is one it does not read, the segment is not accounted for.
+ * One that builds a variable's value (`X=$(…)`) is never grounds: the word it
+ * builds is wherever the variable is expanded.
+ * `mkdir -p a && script -q /dev/null node x.js` has nothing to say: the `mkdir`
+ * is vouched for and the `script` is not, and vouching for the line would
+ * admit both.
  */
 function vouchesFor(
   segments: readonly CommandSegment[],
@@ -666,19 +671,31 @@ function vouchesFor(
 ): boolean {
   let grounds = false;
   for (const segment of everySegment(segments)) {
+    // A segment the reader could not account for runs something it could not
+    // name, which is no ground to vouch for anything.
+    if (!segment.accounted) return false;
+    // What a substitution prints into a variable lands wherever the variable
+    // is expanded, which is not where the substitution stands, so a segment
+    // building a value is never a ground, though it can still withhold one.
+    const counts = !segment.assigns;
     if (segment.mutating) {
-      grounds = true;
+      grounds ||= counts;
       continue;
     }
     // A segment that runs no program — `done`, `fi`, a bare assignment, a
     // redirect the resolver already placed — decides nothing on its own.
     if (segment.programs.length === 0) continue;
     if (segment.programs.every((program) => EFFECT_FREE_VERBS.has(program))) {
-      grounds = true;
+      grounds ||= counts;
       continue;
     }
-    if (allow_list.some((entry) => matchesListEntry(entry, "Bash", segment.text))) continue;
-    return false;
+    if (!allow_list.some((entry) => matchesListEntry(entry, "Bash", segment.text))) return false;
+    // A listed read-only orientation command writes nothing under any flag, so
+    // it is grounds as `echo` is; any other listed command leaves the line to
+    // the outer list, which admits it by the same entry.
+    if (READ_ONLY_ORIENTATION.some((entry) => matchesListEntry(entry, "Bash", segment.text))) {
+      grounds ||= counts;
+    }
   }
   return grounds;
 }

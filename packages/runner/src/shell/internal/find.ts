@@ -1,4 +1,6 @@
-import type { Word } from "./lexer.js";
+import type { Assigned } from "./assigned.js";
+import { building, type BuiltWords } from "./command.js";
+import { leadingSubstitution, type Word } from "./lexer.js";
 
 /**
  * A `find` command line, as what it walks and what it does to what it finds.
@@ -159,4 +161,89 @@ function heads(rest: readonly Word[], from: number, starts: readonly Word[]): Wo
     i += ARGUMENTS.get(word.value) ?? (NEWER.test(word.value) ? 1 : 0);
   }
   return read;
+}
+
+/**
+ * What `find` reads each of its words as: a head — an option before the
+ * starting points, a starting point, an operator, or the name of a test or an
+ * action — an argument a primary or `-D` takes, or a word of a body it runs.
+ */
+function findRoles(rest: readonly Word[]): Array<"head" | "argument" | "body"> {
+  const roles = rest.map((): "head" | "argument" | "body" => "head");
+  let i = 0;
+  while (i < rest.length) {
+    const value = rest[i]!.value;
+    if (LEADING_FLAGS.has(value) || /^-O\d*$/.test(value)) {
+      i += 1;
+      continue;
+    }
+    if (value === "-D") {
+      if (i + 1 < rest.length) roles[i + 1] = "argument";
+      i += 2;
+      continue;
+    }
+    if (value === "-f" && rest[i + 1] !== undefined) {
+      i += 2;
+      continue;
+    }
+    if (value === "--") i += 1;
+    break;
+  }
+  for (; i < rest.length; i += 1) {
+    const value = rest[i]!.value;
+    if (rest[i]!.redirect === true) continue;
+    if ((value.startsWith("-") && value !== "-") || value === "(" || value === "!" || value === ",") break;
+  }
+  while (i < rest.length) {
+    const value = rest[i]!.value;
+    i += 1;
+    if (RUNS_A_COMMAND.has(value)) {
+      let last: string | undefined;
+      while (i < rest.length) {
+        const part = rest[i]!.value;
+        roles[i] = "body";
+        i += 1;
+        if (part === ";" || (part === "+" && last === "{}")) break;
+        last = part;
+      }
+      continue;
+    }
+    const takes = ARGUMENTS.get(value) ?? (NEWER.test(value) ? 1 : 0);
+    for (let k = 0; k < takes && i < rest.length; k += 1) {
+      roles[i] = "argument";
+      i += 1;
+    }
+  }
+  return roles;
+}
+
+/**
+ * The words the line builds where `find` reads them as heads, which it does
+ * wherever they stand, `--` or not: what one prints can be `-delete`, or
+ * `-fprint` and a file. One that expands to one word beginning with a literal
+ * other than `-`, or as an object name or an absolute path (`building`'s
+ * `prints`), is a starting point, and so is one word whose substitution a
+ * literal `/` follows, `"$(…)/src"`: no primary, operator or leading option
+ * has a `/` in it. A primary's argument is a value,
+ * `-name "$(cat pat)"`, so long as the shell does not split it into more
+ * words; a body's words are read with the command they are.
+ */
+export function findBuiltWords(rest: readonly Word[], assigned: Assigned | undefined): BuiltWords {
+  const roles = findRoles(rest);
+  const found: number[] = [];
+  for (let i = 0; i < rest.length; i += 1) {
+    const word = rest[i]!;
+    if (word.redirect === true || roles[i] === "body") continue;
+    const how = building(word, assigned);
+    if (how.kind === "assigned") found.push(i);
+    if (how.kind !== "built") continue;
+    const start =
+      /^[^-]/.test(how.prefix) ||
+      how.prints !== null ||
+      leadingSubstitution(word.raw)?.after.replace(/^"/, "").startsWith("/") === true;
+    if (roles[i] === "argument" ? how.splits : how.splits || !start) {
+      return { unreadable: word, assigned: found };
+    }
+  }
+  return { assigned: found };
 }

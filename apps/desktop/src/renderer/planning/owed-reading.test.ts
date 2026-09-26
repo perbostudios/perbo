@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { InterviewEntry } from "../../shared/protocol.js";
+import { EVERY_PROBLEM_RESOLVED, type InterviewEntry } from "../../shared/protocol.js";
 import { owedReading } from "./owed-reading.js";
 
 /** A minute past ten on one morning, so each line's time reads as its minute. */
@@ -30,8 +30,8 @@ const problemCard = (n: number, minute: number): InterviewEntry =>
     ],
     drift: { open: 1 },
   });
-const contractNote = (n: number, minute: number): InterviewEntry =>
-  entry(n, minute, { kind: "note", text: "Every problem is resolved.", offers: "contract" });
+const resolvedNote = (n: number, minute: number): InterviewEntry =>
+  entry(n, minute, { kind: "note", text: EVERY_PROBLEM_RESOLVED, notable: true });
 const reading = (minute: number) => ({ startedAt: at(minute) });
 const recorded = { drift: { open: [], resolved: false }, running: true };
 
@@ -51,10 +51,13 @@ describe("the reading a turn is owed (D-128)", () => {
   });
 
   it("does not move the bound for the lines a reading puts as it lands", () => {
-    const conversation = [turn(1, 1), said(2, 4), problemCard(3, 7), contractNote(4, 8)];
+    const conversation = [turn(1, 1), said(2, 4), problemCard(3, 7), resolvedNote(4, 8)];
     expect(owedReading(conversation, recorded, null).appliedAt).toBe(Date.parse(at(4)));
     // The reading that put them started after the interview's last line: it is the turn's.
     expect(owedReading(conversation, recorded, reading(5)).owed).toBe(false);
+    // Any other note is the interview's own, and moves it.
+    const ended = entry(5, 9, { kind: "note", text: "The chat ended: you stopped it." });
+    expect(owedReading([...conversation, ended], recorded, null).appliedAt).toBe(Date.parse(at(9)));
   });
 
   it("still owes a reading where the newest started under the turn, before it was applied", () => {

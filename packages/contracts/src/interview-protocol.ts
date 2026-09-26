@@ -162,9 +162,14 @@ export const InterviewAskedSchema = z.strictObject({
  * are ({@link interviewSaidMessage}). What it is for is the waiting: a reader
  * cannot tell a session thinking from a session finished, and without this the
  * only honest thing to show is nothing, which reads as something being wrong.
+ *
+ * `turns` is how many of the person's turns the ending answered: a turn sent
+ * while one is running can be answered inside it, and then one ending answers
+ * both.
  */
 export const InterviewIdleSchema = z.strictObject({
   type: z.literal("idle"),
+  turns: z.number().int().nonnegative(),
 });
 
 /** The session is over. */

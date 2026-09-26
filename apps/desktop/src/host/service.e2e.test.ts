@@ -18,7 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { DesktopService, type ServiceOptions } from "./service.js";
 import { runProcess, startLineProcess } from "./process.js";
-import { GRAPH_NODE_STATES, INTERVIEW_WROTE_THE_SPEC, SettingsSchema } from "../shared/protocol.js";
+import { EVERY_PROBLEM_RESOLVED, GRAPH_NODE_STATES, INTERVIEW_WROTE_THE_SPEC, SettingsSchema } from "../shared/protocol.js";
 import { isLive, lane } from "../shared/jobs.js";
 import { DELETE_WAITS_FOR_COMMANDS } from "../shared/discard.js";
 import type {
@@ -32,6 +32,7 @@ import type {
 import { CriterionEvidenceBindingSchema } from "@perbo/contracts";
 import type { GraphEdit } from "@perbo/contracts";
 import { disposeFixtures, fixture, scratchDirectory, trackService } from "./test-support/host-fixture.js";
+import { Profile } from "./profile/store.js";
 
 afterEach(disposeFixtures);
 
@@ -821,8 +822,8 @@ describe("the graph while the work runs", () => {
     prohibited: [],
   };
   /** A ticket whose plan has two nodes, one path glob each. */
-  async function graphed() {
-    const made = fixture();
+  async function graphed(runner?: typeof runProcess) {
+    const made = fixture(runner);
     const registered = await made.service.registerRepository(made.repo);
     const repoId = registered.id;
     await finished(
@@ -1213,6 +1214,217 @@ describe("the graph while the work runs", () => {
     const second = live.nodes.find((node) => node.id === "node_2")!;
     expect(second.criteria[0]?.finding).toBeNull();
     expect(second.state).not.toBe("finding_open");
+  });
+
+  it("records each answer on its finding before the loop runs, and the graph reads them as decided", async () => {
+    // The CLI's `verdict`, `principle` and `run` are stood in for and their
+    // argv kept: a real `run` executes a coding agent, and what `verdict
+    // --decide` writes and what the loop does with it are proven in the CLI's
+    // and the runner's own tests (D-132).
+    const calls: string[][] = [];
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (["verdict", "principle", "run"].includes(args[1] ?? "")) {
+        calls.push(args.slice(1));
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return runProcess(binary, args, options);
+    };
+    const { service, repo, repoId, ticketId } = await graphed(runner);
+    const digest = (await service.detail(repoId, "PRB-1")).digest;
+    const lockfile = "7".repeat(64);
+    const workflow = "8".repeat(64);
+    const licence = "9".repeat(64);
+    const routedToPerson = (key: string, statement: string) => ({
+      key,
+      rule_id: "repository.observation",
+      criterion_id: "ac_2",
+      severity: "major",
+      status: "open",
+      routing: "blocks",
+      closure: "human",
+      outcome: "unknown",
+      statement,
+    });
+    record(repo, ticketId, {
+      attemptId: "att_0000000000000002",
+      artifacts: [
+        {
+          name: "change.diff",
+          body:
+            "diff --git a/packages/queue/retry.ts b/packages/queue/retry.ts\n" +
+            "--- a/packages/queue/retry.ts\n+++ b/packages/queue/retry.ts\n@@ -1 +1,2 @@\n+retry(three);\n",
+        },
+      ],
+      review: {
+        createdAt: "2026-09-24T09:00:00.000Z",
+        body: JSON.stringify({
+          review_id: "rev_one",
+          plan_version: 1,
+          created_at: "2026-09-24T09:00:00.000Z",
+          decision: "changes_requested",
+          coverage: [binding("ac_2", "met", "packages/queue/retry.test.ts", 88)],
+          findings: [
+            routedToPerson(lockfile, "The repository carries two lockfiles."),
+            routedToPerson(workflow, "No workflow runs the suite on a pull request."),
+            routedToPerson(licence, "The repository states no licence."),
+          ],
+        }),
+      },
+    });
+    const node = async () =>
+      (await service.request({ kind: "graphRead", repoId, key: "PRB-1" })).live.nodes.find(
+        (entry) => entry.id === "node_2",
+      )!;
+    expect((await node()).state).toBe("finding_open");
+
+    const job = await finished(
+      service,
+      (
+        await service.request({
+          kind: "decide",
+          repoId,
+          key: "PRB-1",
+          digest,
+          answer: "For task PRB-1:\n1. package-lock.json is authoritative.\n\n2. CI is out of scope.",
+          decisions: [
+            { findingKey: lockfile, choice: "approach", answer: "package-lock.json is authoritative." },
+            { findingKey: workflow, choice: "let_it_decide", answer: "CI is out of scope." },
+            { findingKey: licence, choice: "ship_as_is", answer: "Ship it as it is." },
+          ],
+        })
+      ).id,
+    );
+    expect(job.state).toBe("completed");
+    const shown = { principle: 3, run: 6, verdict: 8 } as Record<string, number>;
+    expect(calls.map((call) => call.slice(0, shown[call[0]!]))).toEqual([
+      ["verdict", "PRB-1", "--decide", lockfile, "--choice", "approach", "--note", "package-lock.json is authoritative."],
+      ["verdict", "PRB-1", "--decide", workflow, "--choice", "let-it-decide", "--note", "CI is out of scope."],
+      ["verdict", "PRB-1", "--decide", licence, "--choice", "ship-as-is", "--note", "Ship it as it is."],
+      ["principle", "add", "For task PRB-1:\n1. package-lock.json is authoritative.\n\n2. CI is out of scope."],
+      ["run", "--ticket", "PRB-1", "--config", expect.any(String), "--json"],
+    ]);
+    for (const call of calls.slice(0, 3)) expect(call.slice(10, 12)).toEqual(["--replace", "--json"]);
+
+    // What `perbo verdict --decide` leaves at the store's root, row for row.
+    // Only the finding shipped as it is is closed by the answer itself; the
+    // two handed to the executor are closed by the round's verification.
+    const answered = (choices: Record<string, string>, reference = "PRB-1") =>
+      writeFileSync(
+        join(repo, ".perbo", "verdicts.json"),
+        JSON.stringify({
+          schema_version: 1,
+          verdicts: Object.entries(choices).map(([finding_key, choice]) => ({
+            review: { reference, ticket_id: ticketId, ticket_key: "PRB-1", pull_request_url: null },
+            finding_key,
+            rule_id: "repository.observation",
+            routing: "blocks",
+            decision: "decide",
+            choice,
+            author: "Owen",
+            decided_at: "2026-09-24T09:30:00.000Z",
+            note: "decided",
+            superseded_at: null,
+          })),
+        }),
+      );
+    answered({ [lockfile]: "approach", [workflow]: "let_it_decide", [licence]: "ship_as_is" });
+    expect((await node()).criteria.map((criterion) => criterion.finding)).toEqual([
+      "The repository carries two lockfiles.",
+    ]);
+    const shipped = { [lockfile]: "ship_as_is", [workflow]: "ship_as_is", [licence]: "ship_as_is" };
+    // Answers that name another review by its id answer that review alone.
+    answered(shipped, "rev_two");
+    expect((await node()).state).toBe("finding_open");
+    answered(shipped, "rev_one");
+    const decided = await node();
+    expect(decided.state).not.toBe("finding_open");
+    expect(decided.criteria.every((criterion) => criterion.finding === null)).toBe(true);
+  });
+
+  it("records none of a person's answers where one of them is not one the loop acts on", async () => {
+    const calls: string[][] = [];
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (["verdict", "principle", "run"].includes(args[1] ?? "")) {
+        calls.push(args.slice(1));
+        return { code: 0, stdout: "{}", stderr: "", cancelled: false };
+      }
+      return runProcess(binary, args, options);
+    };
+    const { service, repo, repoId, ticketId } = await graphed(runner);
+    const digest = (await service.detail(repoId, "PRB-1")).digest;
+    const [product, secret, remediable] = ["4", "5", "6"].map((digit) => digit.repeat(64)) as [string, string, string];
+    const routed = (key: string, rule_id: string, routing: string) => ({
+      key,
+      rule_id,
+      criterion_id: "ac_2",
+      status: "open",
+      routing,
+      closure: "human",
+      statement: `${rule_id} stands.`,
+    });
+    record(repo, ticketId, {
+      attemptId: "att_0000000000000002",
+      artifacts: [],
+      review: {
+        createdAt: "2026-09-24T09:00:00.000Z",
+        body: JSON.stringify({
+          review_id: "rev_one",
+          decision: "escalate",
+          findings: [
+            routed(product, "product.preference", "escalates"),
+            routed(secret, "security.secret_in_diff", "blocks"),
+            routed(remediable, "test.missing_for_criterion", "remediable"),
+          ],
+        }),
+      },
+    });
+    const decide = async (decisions: { findingKey: string; choice: "approach" | "ship_as_is"; answer: string }[]) =>
+      finished(
+        service,
+        (await service.request({ kind: "decide", repoId, key: "PRB-1", digest, answer: "Answers.", decisions })).id,
+      );
+    const handedSecret = await decide([
+      { findingKey: product, choice: "approach", answer: "Round half-even." },
+      { findingKey: secret, choice: "approach", answer: "Rotate it." },
+    ]);
+    expect(handedSecret.state).toBe("failed");
+    expect(handedSecret.error).toContain("its only answer is Ship as it is");
+    const notRouted = await decide([
+      { findingKey: product, choice: "approach", answer: "Round half-even." },
+      { findingKey: remediable, choice: "ship_as_is", answer: "Ship it." },
+    ]);
+    expect(notRouted.state).toBe("failed");
+    expect(notRouted.error).toContain("not one the review routed to you");
+    expect(calls).toEqual([]);
+
+    expect(
+      (
+        await decide([
+          { findingKey: product, choice: "approach", answer: "Round half-even." },
+          { findingKey: secret, choice: "ship_as_is", answer: "Ship it." },
+        ])
+      ).state,
+    ).toBe("completed");
+    expect(calls.map((call) => call[0])).toEqual(["verdict", "verdict", "principle", "run"]);
+
+    // The same findings on a review that did not judge the whole change take
+    // no answer at all: it would settle a finding on a change nobody finished judging.
+    const review = (decision: string) =>
+      record(repo, ticketId, {
+        attemptId: "att_0000000000000002",
+        artifacts: [],
+        review: {
+          createdAt: "2026-09-24T10:00:00.000Z",
+          body: JSON.stringify({ review_id: "rev_one", decision, findings: [routed(product, "product.preference", "escalates")] }),
+        },
+      });
+    for (const decision of ["incomplete", "error"]) {
+      review(decision);
+      const unjudged = await decide([{ findingKey: product, choice: "ship_as_is", answer: "Ship it." }]);
+      expect(unjudged.state, decision).toBe("failed");
+      expect(unjudged.error).toContain(`The review ended ${decision}: it did not judge the whole change`);
+    }
+    expect(calls).toHaveLength(4);
   });
 
   it("does not let an older round's closure answer a finding a later review raised again", async () => {
@@ -1746,11 +1958,18 @@ describe("desktop bridge against the actual bundled CLI", () => {
       ).id,
     );
   it("records a run's publication choice on its job, and keeps it across a restart", async () => {
-    // The CLI's own `run` and `principle` are stood in for; approving is real.
-    const runner: typeof runProcess = async (binary, args, options) =>
-      args[1] === "run" || args[1] === "principle"
+    // The CLI's own `run`, `principle` and `verdict` are stood in for, and
+    // each run's configuration kept; approving is real.
+    const published: boolean[] = [];
+    const runner: typeof runProcess = async (binary, args, options) => {
+      if (args[1] === "run")
+        published.push(
+          (JSON.parse(readFileSync(args[args.indexOf("--config") + 1]!, "utf8")) as { publish: boolean }).publish,
+        );
+      return args[1] === "run" || args[1] === "principle" || args[1] === "verdict"
         ? { code: 0, stdout: "{}", stderr: "", cancelled: false }
         : runProcess(binary, args, options);
+    };
     const { service, repo, options } = fixture(runner);
     const registered = await service.registerRepository(repo);
     await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
@@ -1761,32 +1980,64 @@ describe("desktop bridge against the actual bundled CLI", () => {
       if (change.kind === "progress" && !announced.has(change.job.id))
         announced.set(change.job.id, { ...change.job });
     };
-    const published = await runTicket(service, registered.id, true, true);
-    const unpublished = await runTicket(service, registered.id, false, false);
-    const decided = await finished(
-      service,
-      (
-        await service.request({
-          kind: "decide",
-          repoId: registered.id,
-          key: "PRB-1",
-          answer: "Keep the retry button",
-          digest: (await service.detail(registered.id, "PRB-1")).digest,
-        })
-      ).id,
+    // The review the loop reads, routing the one finding each decision answers to a person.
+    const body = Buffer.from(
+      JSON.stringify({
+        findings: [
+          { key: "a".repeat(64), rule_id: "product.retry", status: "open", routing: "escalates", statement: "Keep the retry button?" },
+        ],
+        decision: "escalate",
+      }),
     );
-    const jobs = [published, unpublished, decided];
-    expect(jobs.map((job) => [job.state, job.publish])).toEqual([
-      ["completed", true],
-      ["completed", false],
-      ["completed", false],
-    ]);
-    expect(jobs.map((job) => announced.get(job.id)?.publish)).toEqual([true, false, false]);
+    const sha256 = createHash("sha256").update(body).digest("hex");
+    mkdirSync(join(repo, ".perbo", "bundles", "objects"), { recursive: true });
+    mkdirSync(join(repo, ".perbo", "bundles", "bundles"), { recursive: true });
+    writeFileSync(join(repo, ".perbo", "bundles", "objects", sha256), body);
+    writeFileSync(
+      join(repo, ".perbo", "bundles", "bundles", "bundle_00000000000000ab.json"),
+      JSON.stringify({
+        bundle_id: "bundle_00000000000000ab",
+        kind: "review",
+        created_at: "2026-09-10T10:00:00.000Z",
+        subject_id: "rev_one",
+        ticket_id: (await service.detail(registered.id, "PRB-1")).ticket.ticket_id,
+        artifacts: [{ name: "review.json", sha256, bytes: body.length, retained: true }],
+      }),
+    );
+    const decide = async (
+      decisions = [{ findingKey: "a".repeat(64), choice: "approach" as const, answer: "Keep the retry button" }],
+    ): Promise<Job> =>
+      finished(
+        service,
+        (
+          await service.request({
+            kind: "decide",
+            repoId: registered.id,
+            key: "PRB-1",
+            answer: "Keep the retry button",
+            decisions,
+            digest: (await service.detail(registered.id, "PRB-1")).digest,
+          })
+        ).id,
+      );
+    const publishing = await runTicket(service, registered.id, true, true);
+    const unpublished = await runTicket(service, registered.id, false, false);
+    // A decision that answers findings carries on the run that stopped for
+    // it, and publishes as it was going to; a principle alone publishes nothing.
+    const decidedLocally = await decide();
+    const republished = await runTicket(service, registered.id, true, false);
+    const decidedPublishing = await decide();
+    const principled = await decide([]);
+    const jobs = [publishing, unpublished, decidedLocally, republished, decidedPublishing, principled];
+    const choices = [true, false, false, true, true, false];
+    expect(jobs.map((job) => [job.state, job.publish])).toEqual(choices.map((choice) => ["completed", choice]));
+    expect(published).toEqual(choices);
+    expect(jobs.map((job) => announced.get(job.id)?.publish)).toEqual(choices);
     await service.shutdown();
     const restarted = new DesktopService(options);
     trackService(restarted);
     const kept = (await restarted.snapshot()).jobs;
-    expect(jobs.map((job) => kept.find((entry) => entry.id === job.id)?.publish)).toEqual([true, false, false]);
+    expect(jobs.map((job) => kept.find((entry) => entry.id === job.id)?.publish)).toEqual(choices);
   });
   it("keeps a ticket's last run in the job journal after forty later jobs, so its stopped page still opens", async () => {
     // The loop stops short and `doctor` is the cheapest job there is: both stood in for.
@@ -2180,6 +2431,14 @@ readline.createInterface({ input: process.stdin })
       send({ type: 'wrote_spec' });
       fs.appendFileSync(argv[argv.indexOf('--spec') + 1] + '/spec.md', '\nAnd the spec says so.\n');
     }
+    // The interview titling the spec: its title line rewritten, as the
+    // Architect writes the title it names the work by (D-118, D-127).
+    if (turn.text.includes('title the spec')) {
+      const argv = process.argv.slice(2);
+      const file = argv[argv.indexOf('--spec') + 1] + '/spec.md';
+      send({ type: 'wrote_spec' });
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/^# .*$/m, '# Activation email on signup'));
+    }
     // A turn that writes the file and then edits it again: two admitted
     // writes, which the session is entitled to make and which are one piece of
     // news to whoever is watching the chat.
@@ -2190,6 +2449,15 @@ readline.createInterface({ input: process.stdin })
       fs.appendFileSync(file, '\nAnd the spec says so.\n');
       send({ type: 'wrote_spec' });
       fs.appendFileSync(file, '\nAnd says it again.\n');
+    }
+    // A turn that titles the spec and then never ends: the title is there
+    // to be read while the turn is still going.
+    if (turn.text.includes('title and hang')) {
+      const argv = process.argv.slice(2);
+      const file = argv[argv.indexOf('--spec') + 1] + '/spec.md';
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/^# .*$/m, '# Activation email on signup'));
+      send({ type: 'wrote_spec' });
+      return;
     }
     // A turn that writes the spec and then never ends, for the person who
     // stops waiting: the file is written before the write is announced, so a
@@ -2232,7 +2500,7 @@ readline.createInterface({ input: process.stdin })
       setTimeout(() => {
         send({ type: 'message', message: { type: 'assistant', session_id: 'sdk-session-1',
           message: { role: 'assistant', content: [{ type: 'text', text: 'The spec is written: read the Requirements first.' }] } } });
-        send({ type: 'idle' });
+        send({ type: 'idle', turns: 1 });
       }, 300);
       return;
     }
@@ -2249,7 +2517,7 @@ readline.createInterface({ input: process.stdin })
         send({ type: 'message', message: { type: 'assistant', session_id: 'sdk-session-1',
           message: { role: 'assistant', content: [{ type: 'text', text: 'That is the spec as I have it.' }] } } });
       }, 100);
-      setTimeout(() => send({ type: 'idle' }), 700);
+      setTimeout(() => send({ type: 'idle', turns: 1 }), 700);
       return;
     }
     // A turn that writes somewhere the session is allowed to write that is
@@ -2308,7 +2576,7 @@ readline.createInterface({ input: process.stdin })
     // Every turn ends, which is what stops the dock saying the session is
     // working — and what tells a line held through the turn that it was the
     // whole of it.
-    send({ type: 'idle' });
+    send({ type: 'idle', turns: 1 });
   })
   .on('close', () => {
     const ended = () => send({ type: 'ended', session_id: 'sdk-session-1', reason: 'the session ended' });
@@ -2512,7 +2780,7 @@ readline.createInterface({ input: process.stdin })
     );
 
   it("names the spec from the person's first turn when the planning has none", async () => {
-    const { service, repoId, fake } = await planning();
+    const { service, repo, repoId, fake } = await planning();
     const fresh = await service.request({ kind: "editingOpen", target: { kind: "fresh", repoId } });
     expect(fresh.specSlug).toBeNull();
 
@@ -2529,6 +2797,11 @@ readline.createInterface({ input: process.stdin })
       "--spec",
       "specs/dark-mode-toggle",
     ]);
+    // The cut is on the file's title line and recorded as the cut, so the
+    // planning is listed with no title until another is written (D-118).
+    expect((await service.request({ kind: "editingRead", id: fresh.id })).specCut).toBe("Dark mode toggle");
+    expect(readFileSync(join(repo, "specs", "dark-mode-toggle", "spec.md"), "utf8").split("\n")[0]).toBe("# Dark mode toggle");
+    expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === fresh.id)?.title).toBeNull();
     // The naming is said, and the turn it came from is part of the conversation.
     const lines = await spoken(service, fresh.id, (entries) =>
       entries.some(
@@ -2561,7 +2834,7 @@ readline.createInterface({ input: process.stdin })
       expect((await service.request({ kind: "editingRead", id })).interviewModel).toBe("claude-opus-5-5");
     });
 
-    it("is the planning's own model where the catalog does not list Opus 5.5 or cannot be read", async () => {
+    it("is the planning's executor model where the catalog does not list Opus 5.5 or cannot be read", async () => {
       const { service, repoId, id, fake, options } = await planning();
       options.modelCatalog = async () => {
         throw new Error("Provider CLI unavailable.");
@@ -2582,7 +2855,7 @@ readline.createInterface({ input: process.stdin })
       expect(asked).not.toHaveBeenCalled();
     });
 
-    it("keeps the planning's own model where it drafts on Codex, and reads no catalog", async () => {
+    it("keeps the planning's executor model where it drafts on Codex, and reads no catalog", async () => {
       const { service, repoId, id, fake, options } = await planning();
       const session = await service.request({ kind: "editingRead", id });
       await service.request({
@@ -2759,7 +3032,6 @@ readline.createInterface({ input: process.stdin })
       "The spec is written: read it, change it on the Spec pane or by asking here, or press Generate plan.",
     );
     expect(written.notable, "drawn to be read, not buried").toBe(true);
-    expect(written.offers, "the chat carries no press of its own").toBeUndefined();
     // And in that order: the one that says it is happening comes first.
     expect(writingAt).toBeLessThan(noteAt);
     await service.request({ kind: "interviewStop", id });
@@ -2788,12 +3060,9 @@ readline.createInterface({ input: process.stdin })
       "The spec is written: read it, change it on the Spec pane or by asking here, or press Generate plan.",
     );
     expect(note.kind === "note" && note.notable, "drawn to be read, not buried").toBe(true);
-    expect(
-      note.kind === "note" && note.offers,
-      "words, and no press of the chat's own",
-    ).toBeUndefined();
     // Mid-turn, which is the whole point: the session still owes the person a
-    // word and the way on is already theirs.
+    // word and the spec is already theirs to read; Generate plan waits for
+    // the turn to end.
     expect(
       ((await service.snapshot()).working ?? []).includes(id),
       "said before the turn is over, not at its end",
@@ -2983,13 +3252,12 @@ readline.createInterface({ input: process.stdin })
     expect(note.kind === "note" && note.notable, "drawn to be read, not buried").toBe(true);
   });
 
-  it("stops the interview before it drafts, so one press does both", async () => {
-    // Asking the person to stop the interview and then press Generate plan is
-    // two presses for one act. The press does both: the host stops the child —
-    // which winds the turn up and hands the spec over — and then reads the
-    // file that turn left behind (D-102). Ordered here rather than in either
-    // surface, so the Spec pane, the chat's note and anything later get the
-    // one behaviour.
+  it("stops the interview before it drafts, behind the pane that holds the press mid-turn", async () => {
+    // The Spec pane holds Generate plan while a turn is in flight (D-102).
+    // Behind it the host stops the child — which winds a turn still there up
+    // and hands the spec over — and then reads the file that turn left
+    // behind, so a caller that pressed mid-turn anyway drafts from a spec the
+    // chat has finished with.
     const events: string[] = [];
     let planning: { service: DesktopService; repoId: string; id: string; changes: Change[] } | null = null;
     const runs: typeof runProcess = async (binary, args, options) => {
@@ -3026,6 +3294,145 @@ readline.createInterface({ input: process.stdin })
     // The fixture has no drafter behind `admit`, so the job itself fails; what
     // this test is about is what had already happened by the time it ran.
     expect(held.state).toBe("failed");
+  });
+
+  describe("the name a plan is drafted under (D-127)", () => {
+    const specAt = (repo: string): string => join(repo, "specs", "activation-email", "spec.md");
+    const titleLine = (repo: string): string => readFileSync(specAt(repo), "utf8").split("\n")[0]!;
+    const ticketTitle = (repo: string, key: string): string =>
+      (JSON.parse(readFileSync(join(repo, ".perbo", "tickets", `${key}.json`), "utf8")) as { title: string })
+        .title;
+    /** A planning with a spec the person titled, drafted by `admit` proposing "Welcome emails". */
+    async function titled(): Promise<{
+      service: DesktopService;
+      repo: string;
+      repoId: string;
+      id: string;
+      changes: Change[];
+      asked: string[][];
+    }> {
+      let repo = "";
+      const asked: string[][] = [];
+      const made = await writing(naming(() => repo, "Welcome emails", asked));
+      repo = made.repo;
+      return { ...made, asked };
+    }
+    const generate = async (service: DesktopService, repoId: string, id: string): Promise<Job> => {
+      const job = await finished(service, (await service.request({ kind: "generatePlan", repoId, id })).id);
+      expect(job.state, job.error ?? "").toBe("completed");
+      return job;
+    };
+
+    it("keeps the name the person gave the spec for the ticket and the spec", async () => {
+      const { service, repo, repoId, id, asked } = await titled();
+      expect((await service.request({ kind: "editingRead", id })).named).toEqual({
+        by: "person",
+        title: "Activation email",
+      });
+      const job = await generate(service, repoId, id);
+      expect(asked[0]).toContain("--keep-title");
+      expect(ticketTitle(repo, job.resultKey!)).toBe("Activation email");
+      expect(titleLine(repo)).toBe("# Activation email");
+    });
+
+    it("takes the drafter's name where the Architect titled the spec last, and the spec takes it", async () => {
+      const { service, repo, repoId, id, asked } = await titled();
+      await service.request({ kind: "interviewStart", repoId, id });
+      await running(service, id);
+      await service.request({ kind: "interviewTurn", id, text: "title the spec" });
+      await settled(service, id);
+      expect((await service.request({ kind: "editingRead", id })).named).toEqual({
+        by: "architect",
+        title: "Activation email on signup",
+      });
+      const job = await generate(service, repoId, id);
+      expect(asked[0]).not.toContain("--keep-title");
+      expect(ticketTitle(repo, job.resultKey!)).toBe("Welcome emails");
+      expect(titleLine(repo)).toBe("# Welcome emails");
+    });
+
+    it("names the planning by the Architect's title the moment the write settles, before the turn ends (D-118)", async () => {
+      const { service, repoId, id } = await writing(undefined, { specSettleMs: 20 });
+      await service.request({ kind: "interviewStart", repoId, id });
+      await running(service, id);
+      await service.request({ kind: "interviewTurn", id, text: "title and hang" });
+      await waitFor(async () =>
+        expect((await service.request({ kind: "editingRead", id })).named).toEqual({
+          by: "architect",
+          title: "Activation email on signup",
+        }),
+      );
+      expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === id)?.title).toBe(
+        "Activation email on signup",
+      );
+      // And the turn is still going.
+      expect((await service.snapshot()).working ?? []).toContain(id);
+      await service.request({ kind: "interviewStop", id });
+    });
+
+    it("keeps the name the person gives while a turn runs that leaves the title alone", async () => {
+      const { service, repo, repoId, id, changes, asked } = await titled();
+      await service.request({ kind: "interviewStart", repoId, id });
+      await running(service, id);
+      await service.request({ kind: "interviewTurn", id, text: "write and hang" });
+      await writingSaid(changes, id);
+      const read = await service.request({ kind: "specRead", id });
+      await saveSpec(service, { kind: "specSave", id, repoId, title: "Signup emails", sections: read.sections });
+      // Generate plan stops the turn, which ends with the title the person gave.
+      const job = await generate(service, repoId, id);
+      expect((await service.request({ kind: "editingRead", id })).named).toEqual({
+        by: "person",
+        title: "Signup emails",
+      });
+      expect(asked[0]).toContain("--keep-title");
+      expect(ticketTitle(repo, job.resultKey!)).toBe("Signup emails");
+      expect(titleLine(repo)).toBe("# Signup emails");
+    });
+
+    it("names nobody, and reads no drafts again, for a save that only respaces the title", async () => {
+      const { service, repo, repoId, id, changes, asked } = await titled();
+      await service.request({ kind: "interviewStart", repoId, id });
+      await running(service, id);
+      await service.request({ kind: "interviewTurn", id, text: "title the spec" });
+      await settled(service, id);
+      const read = await service.request({ kind: "specRead", id });
+      const listed = (): number =>
+        changes.filter((change) => change.kind === "editing" && change.sessionId === id).length;
+      // What a save under the title it read announces, which a respaced one
+      // matches: no new title to list the planning under.
+      const unchanged = listed();
+      await saveSpec(service, { kind: "specSave", id, repoId, title: read.title, sections: read.sections });
+      const respaced = listed();
+      await saveSpec(service, {
+        kind: "specSave",
+        id,
+        repoId,
+        title: "  Activation   email on signup ",
+        sections: read.sections,
+      });
+      expect(listed() - respaced).toBe(respaced - unchanged);
+      expect((await service.request({ kind: "editingRead", id })).named).toEqual({
+        by: "architect",
+        title: "Activation email on signup",
+      });
+      const job = await generate(service, repoId, id);
+      expect(asked[0]).not.toContain("--keep-title");
+      expect(ticketTitle(repo, job.resultKey!)).toBe("Welcome emails");
+    });
+
+    it("keeps the person's name again once they retitle the spec after the Architect", async () => {
+      const { service, repo, repoId, id, asked } = await titled();
+      await service.request({ kind: "interviewStart", repoId, id });
+      await running(service, id);
+      await service.request({ kind: "interviewTurn", id, text: "title the spec" });
+      await settled(service, id);
+      const read = await service.request({ kind: "specRead", id });
+      await saveSpec(service, { kind: "specSave", id, repoId, title: "Signup emails", sections: read.sections });
+      const job = await generate(service, repoId, id);
+      expect(asked[0]).toContain("--keep-title");
+      expect(ticketTitle(repo, job.resultKey!)).toBe("Signup emails");
+      expect(titleLine(repo)).toBe("# Signup emails");
+    });
   });
 
   it("drafts from the spec a stopped turn writes before its child exits", async () => {
@@ -3922,8 +4329,19 @@ function setTicketState(
 }
 
 describe("UI v2 host behaviour", () => {
-  it("files already-finished tickets on the first listing, then archives and restores by hand as a preference", async () => {
+  it("writes down when a ticket's page opened, and reads it back from the profile on disk", async () => {
     const { service, repo, options } = fixture();
+    const registered = await service.registerRepository(repo);
+    await finished(service, (await service.request({ kind: "admit", repoId: registered.id, draft })).id);
+    await service.request({ kind: "ticketOpened", repoId: registered.id, key: "PRB-1" });
+    const at = (await service.snapshot()).lastOpened?.[registered.id + ":PRB-1"];
+    expect(at).toBeDefined();
+    // Saved as it is written, not only when the app closes.
+    expect(Profile.open(options.dataDirectory).state.lastOpened).toEqual({ [registered.id + ":PRB-1"]: at });
+  });
+
+  it("files nothing on its own, and archives and restores by hand as a preference", async () => {
+    const { service, repo } = fixture();
     const registered = await service.registerRepository(repo);
     await finished(
       service,
@@ -3941,48 +4359,35 @@ describe("UI v2 host behaviour", () => {
       ).id,
     );
     setTicketState(repo, "PRB-1", "merged");
-    // A profile that predates the preference: the first complete listing files what had already finished.
-    const profile = join(options.dataDirectory, "workspace.json");
-    const stored = JSON.parse(readFileSync(profile, "utf8")) as Record<
-      string,
-      unknown
-    >;
-    delete stored["archived"];
-    delete stored["archivedSeeded"];
-    writeFileSync(profile, JSON.stringify(stored));
-    await service.shutdown();
-    const restarted = trackService(new DesktopService(options));
-    const snapshot = await restarted.snapshot();
-    expect(snapshot.archived).toEqual([registered.id + ":PRB-1"]);
+    setTicketState(repo, "PRB-2", "merged");
+    // Finished, and still on Home until a person files it.
+    const snapshot = await service.snapshot();
+    expect(snapshot.archived).toEqual([]);
     expect(snapshot.tasks.map((row) => row.ticket.key).sort()).toEqual([
       "PRB-1",
       "PRB-2",
     ]);
-    setTicketState(repo, "PRB-2", "merged");
-    expect((await restarted.snapshot()).archived).toEqual([
-      registered.id + ":PRB-1",
-    ]);
-    await restarted.request({
+    await service.request({
       kind: "archive",
       repoId: registered.id,
-      keys: ["PRB-2"],
+      keys: ["PRB-1", "PRB-2"],
       archived: true,
     });
-    expect((await restarted.snapshot()).archived?.sort()).toEqual([
+    expect((await service.snapshot()).archived?.sort()).toEqual([
       registered.id + ":PRB-1",
       registered.id + ":PRB-2",
     ]);
-    await restarted.request({
+    await service.request({
       kind: "archive",
       repoId: registered.id,
       keys: ["PRB-1"],
       archived: false,
     });
-    expect((await restarted.snapshot()).archived).toEqual([
+    expect((await service.snapshot()).archived).toEqual([
       registered.id + ":PRB-2",
     ]);
     await expect(
-      restarted.request({
+      service.request({
         kind: "archive",
         repoId: registered.id,
         keys: ["PRB-9"],
@@ -4025,6 +4430,8 @@ describe("UI v2 host behaviour", () => {
       costBasis: "none",
       diff: null,
       note: null,
+      // The line under the title on its contract page.
+      outcome: draft.outcome,
     });
     const { ticket_id } = setTicketState(repo, "PRB-1", "merged");
     mkdirSync(join(repo, ".perbo", "state"), { recursive: true });
@@ -4366,6 +4773,7 @@ describe("planning beside a run (SCP-335)", () => {
         key: "PRB-1",
         digest: second.digest,
         answer: "Take the smaller change.",
+        decisions: [{ findingKey: "a".repeat(64), choice: "approach" as const, answer: "Take the smaller change." }],
       },
       { kind: "sync" as const, repoId: registered.id, key: "PRB-1" },
       { kind: "doctor" as const, repoId: registered.id, writeConfig: false },
@@ -4563,6 +4971,31 @@ function drafting(
   };
 }
 
+/**
+ * `admit --from-spec` as {@link drafting} stands in for it, naming the ticket
+ * as `admit` names it (D-127): with `--keep-title` after the spec's title,
+ * which is left as it is; otherwise after the name the drafter proposed, which
+ * the spec's title line takes.
+ */
+function naming(repo: () => string, proposed: string, asked: string[][] = []): typeof runProcess {
+  const draft = drafting(repo, asked);
+  return async (binary, args, options) => {
+    const result = await draft(binary, args, options);
+    const at = args.indexOf("--from-spec");
+    if (args[1] !== "admit" || at < 0 || result.code !== 0) return result;
+    const { ticket } = JSON.parse(result.stdout) as { ticket: { key: string; title: string } };
+    const specAt = join(repo(), args[at + 1]!);
+    const markdown = readFileSync(specAt, "utf8");
+    if (args.includes("--keep-title")) ticket.title = /^# (.*)$/m.exec(markdown)![1]!;
+    else {
+      ticket.title = proposed;
+      writeFileSync(specAt, markdown.replace(/^# .*$/m, `# ${proposed}`));
+    }
+    writeFileSync(join(repo(), ".perbo", "tickets", `${ticket.key}.json`), JSON.stringify(ticket));
+    return { ...result, stdout: JSON.stringify({ ticket }) };
+  };
+}
+
 describe("the plan read against the spec (D-128)", () => {
   /** What `perbo drift KEY --json` prints, as the canned CLI answers it. */
   const verdict = (findings: unknown[], dismissed = false) => ({
@@ -4646,7 +5079,7 @@ readline.createInterface({ input: process.stdin })
       send({ type: 'asked', groups: [{ title: 'Its own question', parts: [{ question: 'Which way?',
         options: [{ label: 'This way', detail: null, recommended: true },
                   { label: 'That way', detail: null, recommended: false }] }] }] });
-    send({ type: 'idle' });
+    send({ type: 'idle', turns: 1 });
   })
   .on('close', () => { send({ type: 'ended', session_id: 'sdk-session-2', reason: 'the session ended' }); });
 `,
@@ -4901,7 +5334,7 @@ readline.createInterface({ input: process.stdin })
     });
   });
 
-  it("records resolved once a reading finds none after some, and says so with the contract on offer", async () => {
+  it("records resolved once a reading finds none after some, and says so", async () => {
     let reply: unknown = verdict([finding]);
     const { service, repo } = canned(() => reply);
     const registered = await service.registerRepository(repo);
@@ -4911,7 +5344,7 @@ readline.createInterface({ input: process.stdin })
     await finished(service, (await service.request({ kind: "driftCheck", id })).id);
     let session = await service.request({ kind: "editingRead", id });
     expect(session.drift).toBeNull();
-    expect(session.conversation.some((entry) => entry.line.kind === "note" && "offers" in entry.line)).toBe(false);
+    expect(resolvedNotes(session.conversation)).toEqual([]);
     reply = verdict([finding]);
     await finished(service, (await service.request({ kind: "driftCheck", id })).id);
     reply = verdict([]);
@@ -4922,7 +5355,6 @@ readline.createInterface({ input: process.stdin })
       kind: "note",
       text: "Every problem is resolved: the plan and the spec promise the same thing again.",
       notable: true,
-      offers: "contract",
     });
     expect((await service.request({ kind: "drafts" })).find((draft) => draft.id === id)?.drift).toEqual({
       open: 0,
@@ -4984,9 +5416,9 @@ readline.createInterface({ input: process.stdin })
   /** The problems put to the person so far: the asked lines that are the host's. */
   const problemsPut = <T extends { line: { kind: string; drift?: unknown } }>(lines: T[]) =>
     lines.filter((entry) => entry.line.kind === "asked" && entry.line.drift !== undefined);
-  /** The notes that offered the contract: one per round resolved, and never two for one. */
-  const resolvedNotes = (lines: { line: { kind: string; offers?: unknown } }[]) =>
-    lines.filter((entry) => entry.line.kind === "note" && entry.line.offers === "contract");
+  /** The notes saying every problem is resolved: one per round resolved, and never two for one. */
+  const resolvedNotes = (lines: { line: { kind: string; text?: string } }[]) =>
+    lines.filter((entry) => entry.line.kind === "note" && entry.line.text === EVERY_PROBLEM_RESOLVED);
   /** A reply held back until the test lets it go. */
   function held<T>() {
     let release!: (value: T) => void;
@@ -5063,7 +5495,7 @@ readline.createInterface({ input: process.stdin })
     await service.request({ kind: "interviewStop", id });
   });
 
-  it("takes a problem's card down when a clean reading finds it closed by hand, and offers the contract", async () => {
+  it("takes a problem's card down when a clean reading finds it closed by hand, and says every problem is resolved", async () => {
     let reply: unknown = verdict([finding]);
     const { service, repo } = canned(() => reply);
     const registered = await service.registerRepository(repo);
@@ -5083,8 +5515,8 @@ readline.createInterface({ input: process.stdin })
     session = await service.request({ kind: "editingRead", id });
     expect(session.asking).not.toBeNull();
     // The reading on arrival finds nothing: the card comes down with the
-    // problems, and the way on is offered, rather than a card standing over
-    // a problem that is gone and holding the way on back for it.
+    // problems, and the note says so, rather than a card standing over a
+    // problem that is gone and holding the way on back for it.
     reply = verdict([]);
     await finished(service, (await service.request({ kind: "driftCheck", id })).id);
     session = await service.request({ kind: "editingRead", id });
@@ -5630,6 +6062,60 @@ describe("a stopped run's ticket", () => {
     expect(minted.admission.spec.path).toBe(spec);
   });
 
+  it("drafts again under the name the person gave the spec, where the planning that records it is still there (D-127)", async () => {
+    let repo = "";
+    const asked: string[][] = [];
+    const made = await stopped(drafting(() => repo, asked));
+    repo = made.repo;
+    // The planning over the ticket while it was still being planned, where
+    // the person titled its spec: the records as they were then, with no
+    // attempt yet.
+    const at = join(made.repo, ".perbo", "tickets", "PRB-1.json");
+    const spent = readFileSync(at, "utf8");
+    const attempts = readFileSync(made.attempts, "utf8");
+    rmSync(made.attempts);
+    writeFileSync(at, JSON.stringify({ ...JSON.parse(spent), state: "plan_review", approved_at: null }));
+    const planning = await made.service.request({
+      kind: "editingOpen",
+      target: { kind: "planning", repoId: made.repoId, key: "PRB-1" },
+    });
+    const read = await made.service.request({ kind: "specRead", id: planning.id });
+    await saveSpec(made.service, {
+      kind: "specSave",
+      id: planning.id,
+      repoId: made.repoId,
+      title: "Retire the CSV importer",
+      sections: read.sections,
+    });
+    writeFileSync(at, spent);
+    writeFileSync(made.attempts, attempts);
+
+    const opened = await made.service.request({ kind: "replan", repoId: made.repoId, key: "PRB-1" });
+    expect(asked[0]).toEqual([
+      "admit", "--prefix", "PRB", "--from-spec", spec, "--keep-title",
+      "--provider", "codex-cli", "--model", "gpt-6-astra", "--json",
+    ]);
+    // The planning over the new plan holds who named the spec, so drafting it
+    // again from there keeps the person's name too.
+    expect((await made.service.request({ kind: "editingRead", id: opened.sessionId })).named).toEqual({
+      by: "person",
+      title: "Retire the CSV importer",
+    });
+    await finished(
+      made.service,
+      (
+        await made.service.request({
+          kind: "startOver",
+          repoId: made.repoId,
+          id: opened.sessionId,
+          key: "PRB-2",
+        })
+      ).id,
+    );
+    expect(asked[1]).toContain("--start-over");
+    expect(asked[1]).toContain("--keep-title");
+  });
+
   it("says the stopped ticket is gone when the plan cannot be drafted again, and leaves the spec", async () => {
     const made = await stopped(async (binary, args, options) =>
       args[1] === "admit" && args.includes("--from-spec")
@@ -6012,7 +6498,9 @@ describe("what the host lets a person archive", () => {
     expect((await service.snapshot()).archived).toEqual([registered.id + ":PRB-1"]);
     await archive(false);
     setTicketState(repo, "PRB-1", "pr_open");
-    await expect(archive(true)).rejects.toThrow(refusal);
+    await expect(archive(true)).rejects.toThrow(
+      "PRB-1 waits on the merge decision. Archive it once its pull request is merged or closed.",
+    );
     setTicketState(repo, "PRB-1", "failed");
     await archive(true);
     expect((await service.snapshot()).archived).toEqual([registered.id + ":PRB-1"]);

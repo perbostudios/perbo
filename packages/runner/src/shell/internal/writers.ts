@@ -1,12 +1,25 @@
+import { existsSync } from "node:fs";
+import { backupFindings, defaultSuffixes } from "./backup.js";
 import {
   anyPresent,
+  longCandidates,
+  longOption,
   optionSet,
   optionsPresent,
   suppliedAsOption,
+  valuesOf,
   type Context,
 } from "./command.js";
-import { judgeTarget, pathFinding, type Destination, type WriteFinding } from "./destination.js";
+import {
+  copiedDirectories,
+  judgeInto,
+  judgeTarget,
+  pathFinding,
+  type Destination,
+  type WriteFinding,
+} from "./destination.js";
 import type { Word } from "./lexer.js";
+import { readSedScript } from "./sed.js";
 
 /**
  * A command that writes where its own operands say, and how to find the operand
@@ -15,26 +28,70 @@ import type { Word } from "./lexer.js";
  * One loop reads the words after the verb: the sets below consume the options,
  * and what is left are the operands. What is judged is the **destination** — the
  * last operand of a `cp`, every operand of an `rm`, the value of `dd of=`, the
- * directory a `-t` names — resolved against the worktree exactly as a redirect
- * target is, so `tee ~/x` and `> ~/x` get the same answer for the same reason.
+ * directory a `-t` names, each source of an `mv` — resolved against the
+ * worktree exactly as a redirect target is, so `tee ~/x` and `> ~/x` get the
+ * same answer for the same reason.
  *
  * An option the table does not know is read as a flag. That can misread a value
  * as an operand, which for a `last` destination is only reachable when the value
  * is the final word — and then it is judged as a path, which is the conservative
  * direction. It can never hide the program being run, because none of these
  * commands runs one; the wrapper table above is where that risk lives.
+ *
+ * GNU accepts any unambiguous prefix of a long option, so a long spelling is
+ * resolved against every long name the entry holds, `longs` included:
+ * `cp --t=/tmp` is `cp --target-directory=/tmp`. An ambiguous prefix, or one
+ * the entry does not know, is read as a flag, and a line that abbreviates is
+ * judged on both readings — the whole name's and the unknown flag's — so no
+ * abbreviation is admitted that its unknown reading refused.
  */
 export interface WriterSpec {
   /** Which operands name a destination once the options are consumed. */
   operands: "last" | "all" | "none";
+  /**
+   * True where each destination is written as the entry itself and nothing
+   * below it, as `mkdir`, `rmdir`, `touch` and `mkfifo` write a directory: a
+   * prohibited path inside one is judged when a write names it.
+   */
+  place?: boolean;
   /** Operands consumed before the destinations: `chmod`'s mode, `sed`'s script. */
   skip?: number;
   /** Where given, `skip` applies only while none of these options is present. */
   skipUnless?: readonly string[];
   /** How many operands `last` needs before the final one is a destination. */
   least?: number;
+  /**
+   * True where the operands that are not the destination are written as well:
+   * `mv` removes each one from where it was, so a source is judged as a write
+   * to its own path, a directory by everything under it.
+   */
+  sources?: boolean;
   /** Options whose value is a directory the operands are written into. */
   targetDirectory?: readonly string[];
+  /**
+   * Where given, a destination that is a directory on disk receives each source
+   * under its own name, and only that is judged there, unless one of these
+   * options makes the destination the thing written (`cp -T`). GNU accepts any
+   * unambiguous prefix of a long option, so a prefix counts as the option.
+   */
+  into?: readonly string[];
+  /**
+   * The program's other long options, which name nothing this reads but make a
+   * prefix ambiguous as GNU finds it: `--s` is not `--suffix` to a `cp` that
+   * also takes `--sparse`.
+   */
+  longs?: readonly string[];
+  /** Long options whose value only an `=` attaches: `--backup[=CONTROL]`. */
+  optional?: readonly string[];
+  /** Where given, how the command backs up what a destination replaces. */
+  backup?: BackupSpec;
+  /**
+   * Options whose attached value is the suffix a backup of each operand takes,
+   * as `sed -i<suffix>` and `--in-place=<suffix>` do. A bare short one also
+   * reads the next word as BSD's suffix where it is a plain name GNU cannot
+   * read as the script or the file it takes it for.
+   */
+  inPlace?: readonly string[];
   /** Options whose value is itself a destination. */
   destination?: readonly string[];
   /** Where given, `destination` counts only while one of these is present. */
@@ -59,20 +116,92 @@ export interface WriterSpec {
   beyondNamedPaths?: boolean;
 }
 
+/** How a writer backs up a destination it replaces (see `backup.ts`). */
+export interface BackupSpec {
+  /** Options that make a backup. */
+  flags: readonly string[];
+  /** Options whose value is the suffix, and which make a backup too. */
+  suffix: readonly string[];
+  /** Options whose value is a directory the backups are written under, as `rsync --backup-dir`. */
+  directory?: readonly string[];
+  /** True where a backup can be numbered, `<dest>.~N~`. */
+  numbered: boolean;
+  /** True where `SIMPLE_BACKUP_SUFFIX` sets the default suffix. */
+  environment: boolean;
+}
+
+/** GNU coreutils' backup options, shared by `cp`, `mv`, `ln` and `install`. */
+const COREUTILS_BACKUP: BackupSpec = {
+  flags: ["-b", "--backup"],
+  suffix: ["-S", "--suffix"],
+  numbered: true,
+  environment: true,
+};
+
 /**
  * Exported so a test can assert which entries carry `beyondNamedPaths`, and
  * therefore which lines the pre-execution hook must never vouch for.
  */
 export const WRITERS = new Map<string, WriterSpec>([
-  ["cp", { operands: "last", targetDirectory: ["-t", "--target-directory"] }],
-  ["mv", { operands: "last", targetDirectory: ["-t", "--target-directory"] }],
+  ["cp", {
+    operands: "last",
+    targetDirectory: ["-t", "--target-directory"],
+    into: ["-T", "--no-target-directory"],
+    backup: COREUTILS_BACKUP,
+    optional: ["--backup", "--context", "--preserve", "--reflink", "--update"],
+    longs: [
+      "--archive", "--attributes-only", "--copy-contents", "--debug", "--dereference", "--force",
+      "--interactive", "--link", "--no-clobber", "--no-dereference", "--no-preserve", "--one-file-system",
+      "--parents", "--recursive", "--remove-destination", "--sparse", "--strip-trailing-slashes",
+      "--symbolic-link", "--keep-directory-symlink", "--verbose", "--help", "--version",
+    ],
+  }],
+  ["mv", {
+    operands: "last",
+    sources: true,
+    targetDirectory: ["-t", "--target-directory"],
+    into: ["-T", "--no-target-directory"],
+    backup: COREUTILS_BACKUP,
+    optional: ["--backup", "--update"],
+    longs: [
+      "--context", "--debug", "--exchange", "--force", "--interactive", "--no-clobber", "--no-copy",
+      "--strip-trailing-slashes", "--verbose", "--help", "--version",
+    ],
+  }],
   ["rm", { operands: "all" }],
-  ["chmod", { operands: "all", skip: 1, values: ["--reference"] }],
-  ["chown", { operands: "all", skip: 1, values: ["--reference", "--from"] }],
-  ["chgrp", { operands: "all", skip: 1, values: ["--reference"] }],
+  // With `--reference` the mode or owner comes from that file, so no operand is
+  // skipped as one.
+  ["chmod", {
+    operands: "all",
+    skip: 1,
+    skipUnless: ["--reference"],
+    values: ["--reference"],
+    longs: ["--changes", "--no-preserve-root", "--preserve-root", "--quiet", "--silent", "--recursive", "--verbose"],
+  }],
+  ["chown", {
+    operands: "all",
+    skip: 1,
+    skipUnless: ["--reference"],
+    values: ["--reference", "--from"],
+    longs: [
+      "--changes", "--dereference", "--no-dereference", "--no-preserve-root", "--preserve-root", "--quiet",
+      "--silent", "--recursive", "--verbose",
+    ],
+  }],
+  ["chgrp", {
+    operands: "all",
+    skip: 1,
+    skipUnless: ["--reference"],
+    values: ["--reference"],
+    longs: [
+      "--changes", "--dereference", "--no-dereference", "--no-preserve-root", "--preserve-root", "--quiet",
+      "--silent", "--recursive", "--verbose",
+    ],
+  }],
   // `tee` reads its input from the pipe and writes every operand, so a
   // `… | tee <path>` is a write to `<path>` however the pipeline was built.
-  ["tee", { operands: "all", values: ["--output-error"] }],
+  // `--output-error`'s mode is attached or absent, never the next word.
+  ["tee", { operands: "all", optional: ["--output-error"], longs: ["--append", "--ignore-interrupts"] }],
   // `dd` takes no options at all: its operands are `name=value`, and `of=` is
   // the one that names an output file.
   ["dd", { operands: "none", assignments: ["of"] }],
@@ -84,26 +213,63 @@ export const WRITERS = new Map<string, WriterSpec>([
     operands: "last",
     beyondNamedPaths: true,
     targetDirectory: ["-t", "--target-directory"],
+    into: ["-T", "--no-target-directory"],
     everyOperand: ["-d", "--directory"],
-    values: ["-m", "--mode", "-o", "--owner", "-g", "--group", "-S", "--suffix", "-Z", "--context", "--backup"],
+    backup: COREUTILS_BACKUP,
+    optional: ["--backup", "--context"],
+    values: ["-m", "--mode", "-o", "--owner", "-g", "--group"],
+    longs: [
+      "--compare", "--debug", "--preserve-context", "--preserve-timestamps", "--strip", "--strip-program",
+      "--verbose", "--help", "--version",
+    ],
   }],
-  ["rsync", { operands: "last", remote: true, beyondNamedPaths: true, values: ["-e", "--rsh", "--exclude", "--include", "--files-from", "--filter", "-f", "--log-file", "--temp-dir", "-T", "--backup-dir", "--suffix", "--chmod", "--chown", "--compare-dest", "--copy-dest", "--link-dest", "--out-format", "--password-file", "--bwlimit", "--timeout", "--port", "--info", "--debug", "--max-size", "--min-size", "--block-size", "-B", "--modify-window"] }],
+  ["rsync", {
+    operands: "last",
+    remote: true,
+    beyondNamedPaths: true,
+    backup: { flags: ["-b", "--backup"], suffix: ["--suffix"], directory: ["--backup-dir"], numbered: false, environment: false },
+    values: ["-e", "--rsh", "--exclude", "--include", "--files-from", "--filter", "-f", "--log-file", "--temp-dir", "-T", "--chmod", "--chown", "--compare-dest", "--copy-dest", "--link-dest", "--out-format", "--password-file", "--bwlimit", "--timeout", "--port", "--info", "--debug", "--max-size", "--min-size", "--block-size", "-B", "--modify-window"],
+  }],
   ["scp", { operands: "last", remote: true, beyondNamedPaths: true, values: ["-i", "-l", "-o", "-P", "-S", "-c", "-F", "-J"] }],
-  ["touch", { operands: "all", values: ["-d", "--date", "-r", "--reference", "-t", "--time"] }],
-  ["mkdir", { operands: "all", values: ["-m", "--mode", "-Z", "--context"] }],
-  ["mkfifo", { operands: "all", values: ["-m", "--mode", "-Z", "--context"] }],
-  ["rmdir", { operands: "all" }],
+  ["touch", {
+    operands: "all",
+    place: true,
+    values: ["-d", "--date", "-r", "--reference", "-t", "--time"],
+    longs: ["--no-create", "--no-dereference"],
+  }],
+  // `-Z` takes no value; `--context[=CTX]` takes one only attached.
+  ["mkdir", {
+    operands: "all",
+    place: true,
+    values: ["-m", "--mode"],
+    optional: ["--context"],
+    longs: ["--parents", "--verbose"],
+  }],
+  ["mkfifo", { operands: "all", place: true, values: ["-m", "--mode"], optional: ["--context"] }],
+  ["rmdir", { operands: "all", place: true }],
   ["unlink", { operands: "all" }],
-  ["truncate", { operands: "all", values: ["-s", "--size", "-r", "--reference", "--io-blocks"] }],
-  // In place, and only in place: `sed 's/x/y/' f` writes nothing. The script is
-  // the first operand unless `-e` or `-f` supplied one, and then every operand
-  // is a file the edit rewrites.
+  ["truncate", {
+    operands: "all",
+    values: ["-s", "--size", "-r", "--reference"],
+    longs: ["--no-create", "--io-blocks"],
+  }],
+  // In place, and only in place, as far as its operands go: `sed 's/x/y/' f`
+  // rewrites no operand, and what its script writes is `sed.ts`'s to read. The
+  // script is the first operand unless `-e` or `-f` supplied one, and then
+  // every operand is a file the edit rewrites. BSD's `-I` edits in place as
+  // `-i` does. A suffix given to either keeps each file's old text under that
+  // name.
   ["sed", {
     operands: "all",
-    onlyWith: ["-i", "--in-place"],
+    onlyWith: ["-i", "-I", "--in-place"],
+    inPlace: ["-i", "-I", "--in-place"],
     skip: 1,
     skipUnless: ["-e", "--expression", "-f", "--file"],
     values: ["-e", "--expression", "-f", "--file", "-l", "--line-length"],
+    longs: [
+      "--quiet", "--silent", "--debug", "--follow-symlinks", "--posix", "--regexp-extended", "--separate",
+      "--sandbox", "--unbuffered", "--null-data", "--zero-terminated", "--help", "--version",
+    ],
   }],
   ["curl", { operands: "none", beyondNamedPaths: true, destination: ["-o", "--output"], values: ["-H", "--header", "-d", "--data", "-u", "--user", "-X", "--request", "-A", "--user-agent", "-b", "--cookie", "-c", "--cookie-jar", "-w", "--write-out", "--url", "--max-time", "--connect-timeout", "--retry"] }],
   ["wget", { operands: "none", beyondNamedPaths: true, destination: ["-O", "--output-document"], targetDirectory: ["-P", "--directory-prefix"], values: ["--header", "--user", "--password", "--post-data", "--timeout", "--tries", "-o", "--output-file"] }],
@@ -127,6 +293,26 @@ export const WRITERS = new Map<string, WriterSpec>([
  */
 const REMOTE_DESTINATION = /^[^/~.][^/]*:/;
 
+/** A plain name after a bare `sed -i`, which BSD takes as the suffix. */
+const BSD_SUFFIX = /^[A-Za-z0-9._~+][A-Za-z0-9._~+-]*$/;
+
+/**
+ * Whether GNU `sed` reads the word after a bare `-i` as what it takes it for:
+ * the script where no `-e` or `-f` gives one, else a file to edit, which it
+ * reads where one is on disk. GNU takes a suffix only attached, so where it
+ * can read the word the line is a GNU line and the word is not BSD's suffix:
+ * `sed -i 1d src/a.ts` edits `src/a.ts` alone. Where it cannot, GNU writes
+ * nothing through it, and the word is judged as the suffix BSD reads it as:
+ * `sed -i .bak 's/a/b/' src/a.ts` edits `src/a.ts` and keeps `src/a.ts.bak`.
+ */
+function gnuReads(word: Word, scripted: boolean, context: Context): boolean {
+  if (!scripted) {
+    return readSedScript(word.value, false).error === null || readSedScript(word.value, true).error === null;
+  }
+  const at = judgeTarget(word.value, context.scope, context.cwd, true, "place");
+  return at.kind !== "unresolvable" && at.resolved !== null && existsSync(at.resolved);
+}
+
 /** Judge the destinations of one writer, given the words after its verb. */
 export function writerFindings(
   verb: string,
@@ -137,18 +323,92 @@ export function writerFindings(
   // Read before the options are: a supplied word can be the option that makes
   // the command a writer at all, as `-i` makes `sed` one.
   const option = suppliedAsOption(verb, rest, context, spec.assignments !== undefined);
-  const named = destinationFindings(verb, spec, rest, context);
-  return option === null ? named : [option, ...named];
+  const names = longNames(spec);
+  const named = destinationFindings(verb, spec, rest, context, names);
+  // An abbreviation is also read as the flag this would take it for unresolved,
+  // so a line is refused wherever either reading refuses it.
+  const unresolved = abbreviates(rest, names)
+    ? destinationFindings(verb, spec, rest, context, [])
+    : [];
+  const findings = option === null ? [...named, ...unresolved] : [option, ...named, ...unresolved];
+  return distinct(findings);
 }
 
-/** The destinations the words after `verb` name, read through its `spec`. */
+/** Every long option an entry names, which is what a prefix is resolved against. */
+export function longNames(spec: WriterSpec): string[] {
+  const all = [
+    spec.skipUnless,
+    spec.targetDirectory,
+    spec.into,
+    spec.destination,
+    spec.destinationWith,
+    spec.values,
+    spec.everyOperand,
+    spec.onlyWith,
+    spec.longs,
+    spec.optional,
+    spec.inPlace,
+    spec.backup?.flags,
+    spec.backup?.suffix,
+    spec.backup?.directory,
+  ].flatMap((options) => options ?? []);
+  return [...new Set(all.filter((option) => option.startsWith("--")))];
+}
+
+/**
+ * How many words after one of a writer's options are its value — a target
+ * directory, a destination, a backup suffix or directory, or a value naming
+ * nothing — with a long option read by any unambiguous prefix, for
+ * `builtOption`.
+ */
+export function writerValues(spec: WriterSpec): (option: string) => number {
+  const taking = [
+    spec.values,
+    spec.targetDirectory,
+    spec.destination,
+    spec.backup?.suffix,
+    spec.backup?.directory,
+  ].flatMap((options) => options ?? []);
+  return valuesOf(taking, longNames(spec));
+}
+
+/** Whether a long option on the line is spelled as a prefix of one of `names`. */
+export function abbreviates(rest: readonly Word[], names: readonly string[]): boolean {
+  for (const word of rest) {
+    const value = word.value;
+    if (value === "--") return false;
+    if (!value.startsWith("--")) continue;
+    const eq = value.indexOf("=");
+    const spelled = eq === -1 ? value : value.slice(0, eq);
+    if (!names.includes(spelled) && longCandidates(spelled, names).length > 0) return true;
+  }
+  return false;
+}
+
+/** The findings once each, in the order they were first made. */
+function distinct(findings: WriteFinding[]): WriteFinding[] {
+  const seen = new Set<string>();
+  return findings.filter((finding) => {
+    const key = `${finding.rule ?? ""}\u0000${finding.detail}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * The destinations the words after `verb` name, read through its `spec`, with
+ * each long option resolved against `names` as GNU resolves a prefix — or,
+ * with `names` empty, only where it is spelled whole.
+ */
 function destinationFindings(
   verb: string,
   spec: WriterSpec,
   rest: Word[],
   context: Context,
+  names: readonly string[],
 ): WriteFinding[] {
-  const present = optionsPresent(rest);
+  const present = optionsPresent(rest, names);
   if (spec.onlyWith !== undefined && !anyPresent(spec.onlyWith, present)) return [];
   const takesDestination =
     spec.destinationWith === undefined || anyPresent(spec.destinationWith, present);
@@ -158,12 +418,25 @@ function destinationFindings(
   const values = new Set([...optionSet(spec.values), ...(takesDestination ? [] : (spec.destination ?? []))]);
   const everyOperandOptions = optionSet(spec.everyOperand);
   const assignments = optionSet(spec.assignments);
+  const optional = optionSet(spec.optional);
+  const inPlace = optionSet(spec.inPlace);
+  const suffixOptions = optionSet(spec.backup?.suffix);
+  const backupDirectoryOptions = optionSet(spec.backup?.directory);
 
   const written: Array<{ word: Word; label: string }> = [];
   const operands: Word[] = [];
+  /** The suffixes a backup takes, as the line spells them. */
+  const suffixes: Word[] = [];
+  /** `rsync --backup-dir`: where the backups go. */
+  const backupDirectories: Word[] = [];
+  /** A word after a bare `sed -i` that BSD would read as the suffix. */
+  const bsdSuffixes: Word[] = [];
   let targetDirectory: Word | null = null;
   let everyOperand = false;
   let optionsEnded = false;
+  /** True once an option that supplies what `skip` would skip has been read. */
+  let skipSupplied = false;
+  const skipUnless = optionSet(spec.skipUnless);
 
   for (let i = 0; i < rest.length; i += 1) {
     const word = rest[i]!;
@@ -187,10 +460,16 @@ function destinationFindings(
       }
       if (value.startsWith("--")) {
         const eq = value.indexOf("=");
-        const name = eq === -1 ? value : value.slice(0, eq);
+        const spelled = eq === -1 ? value : value.slice(0, eq);
+        const name = longOption(spelled, names) ?? spelled;
         const attached = eq === -1 ? null : value.slice(eq + 1);
+        const attachedWord = (): Word | null => {
+          if (attached === null) return null;
+          const at = word.raw.indexOf("=");
+          return { ...word, raw: at === -1 ? attached : word.raw.slice(at + 1), value: attached };
+        };
         const take = (): Word | undefined => {
-          if (attached !== null) return { ...word, raw: attached, value: attached };
+          if (attached !== null) return attachedWord()!;
           i += 1;
           return rest[i];
         };
@@ -201,7 +480,21 @@ function destinationFindings(
           if (operand !== undefined) {
             written.push({ word: operand, label: `the ${verb} ${name} destination` });
           }
-        } else if (values.has(name)) take();
+        } else if (suffixOptions.has(name)) {
+          const suffix = take();
+          if (suffix !== undefined) suffixes.push(suffix);
+        } else if (backupDirectoryOptions.has(name)) {
+          const directory = take();
+          if (directory !== undefined) backupDirectories.push(directory);
+        } else if (inPlace.has(name)) {
+          const suffix = attachedWord();
+          if (suffix !== null && suffix.value.length > 0) suffixes.push(suffix);
+        } else if (optional.has(name)) {
+          // Its value, where it has one, is attached: nothing more to consume.
+        } else if (values.has(name)) {
+          take();
+          if (skipUnless.has(name)) skipSupplied = true;
+        }
         continue;
       }
       if (value.startsWith("-") && value !== "-") {
@@ -221,6 +514,22 @@ function destinationFindings(
             at += 1;
             continue;
           }
+          if (inPlace.has(short)) {
+            // GNU's suffix is the rest of the cluster; BSD's is the next word.
+            if (inline.length > 0) suffixes.push({ ...word, raw: inline, value: inline });
+            else {
+              const next = rest[i + 1];
+              const scripted = anyPresent(spec.skipUnless, present);
+              if (next !== undefined && BSD_SUFFIX.test(next.value) && !gnuReads(next, scripted, context)) {
+                bsdSuffixes.push(next);
+                // In the script's place, GNU compiles nothing and writes
+                // nothing, so BSD's reading is the one that runs: the word is
+                // the suffix and the next is the script.
+                if (!scripted) i += 1;
+              }
+            }
+            break;
+          }
           if (targetDirectories.has(short)) {
             targetDirectory = take() ?? targetDirectory;
             break;
@@ -232,8 +541,14 @@ function destinationFindings(
             }
             break;
           }
+          if (suffixOptions.has(short)) {
+            const suffix = take();
+            if (suffix !== undefined) suffixes.push(suffix);
+            break;
+          }
           if (values.has(short)) {
             take();
+            if (skipUnless.has(short)) skipSupplied = true;
             break;
           }
           at += 1;
@@ -261,7 +576,7 @@ function destinationFindings(
     resolved: null,
   });
 
-  const judge = (word: Word, label: string): WriteFinding[] => {
+  const judge = (word: Word, label: string, incoming: readonly string[] = []): WriteFinding[] => {
     // The placeholder stands where this destination goes, so what is written is
     // whatever the wrapper reads, not the word on the line.
     if (supplied !== undefined && carries(word.value)) {
@@ -276,12 +591,43 @@ function destinationFindings(
     const destination: Destination =
       spec.remote === true && REMOTE_DESTINATION.test(word.value)
         ? { kind: "unresolvable", reason: "it names a destination on another host" }
-        : judgeTarget(word.value, context.scope, context.cwd, true);
+        : judgeTarget(word.value, context.scope, context.cwd, true, spec.place === true ? "place" : "whole", incoming);
     return pathFinding(label, word, destination, context.segment);
   };
 
+  /** The destinations a backup is made beside, where the command makes one. */
+  const replaced: Array<Pick<Word, "raw" | "value">> = [];
+  const backup = spec.backup;
+  const backingUp =
+    backup !== undefined &&
+    (anyPresent([...backup.flags, ...backup.suffix, ...(backup.directory ?? [])], present) ||
+      suffixes.length > 0 ||
+      backupDirectories.length > 0);
+  /** Judge the backups of what `replaced` holds, and where `rsync` puts them. */
+  const backups = (): WriteFinding[] => {
+    if (!backingUp || backup === undefined) return [];
+    const defaults = backup.environment ? defaultSuffixes(context) : { defaults: ["~"], unreadable: false };
+    return [
+      ...backupFindings(verb, replaced, { suffixes, ...defaults, numbered: backup.numbered }, context),
+      ...backupDirectories.flatMap((directory) => [
+        ...judge(directory, `the ${verb} backup directory`),
+        // A relative one is read from the destination too, as `rsync` reads it.
+        ...(directory.value.startsWith("/") || directory.value.startsWith("~")
+          ? []
+          : replaced.flatMap((destination) =>
+              [destination.value, destination.value.replace(/\/?[^/]*\/*$/, "")].map((base) => {
+                const joined = base.length === 0 ? directory.value : `${base}/${directory.value}`;
+                return judge({ ...directory, raw: joined, value: joined }, `the ${verb} backup directory`);
+              }).flat(),
+            )),
+      ]),
+    ];
+  };
+
   const findings = written.flatMap(({ word, label }) => judge(word, label));
-  const skip = spec.skip !== undefined && !anyPresent(spec.skipUnless, present) ? spec.skip : 0;
+  // Read from what the loop consumed rather than from `present`, whose surplus
+  // letters would count the `e` of `sed -ie`, a suffix, as `-e`.
+  const skip = spec.skip !== undefined && !skipSupplied ? spec.skip : 0;
   const remaining = operands.slice(skip);
   // Under BSD `xargs -J` the placeholder is every word the wrapper reads, so it
   // is readable in one place only: among the sources of a writer whose
@@ -311,10 +657,53 @@ function destinationFindings(
       ];
     }
   }
+  const moved = (sources: Word[]): WriteFinding[] =>
+    spec.sources === true ? sources.flatMap((source) => judge(source, `the ${verb} source`)) : [];
+  /**
+   * The destination that receives `sources`: each under its own name where it
+   * is a directory on disk and the line names every source, else the
+   * destination whole, holding what each source that is a directory on disk
+   * holds.
+   */
+  const receiving = (directory: Word, sources: Word[], known: boolean): WriteFinding[] => {
+    const label = `the ${verb} destination`;
+    const readable =
+      known &&
+      spec.into !== undefined &&
+      !anyPresent(spec.into, present) &&
+      !(supplied !== undefined && (carries(directory.value) || sources.some((source) => carries(source.value))));
+    const entries = readable ? judgeInto(directory, sources, context.scope, context.cwd) : null;
+    if (entries === null) {
+      replaced.push(directory);
+      // A copy, a move or a sync puts what each source holds there; an archive
+      // unpacked or a download fetched into a `-C`, `-d` or `-P` directory
+      // holds what this cannot read.
+      const incoming = known && spec.operands === "last" ? copiedDirectories(sources, context.scope, context.cwd) : [];
+      return judge(directory, label, incoming);
+    }
+    replaced.push(...entries.slice(1).map(({ word }) => word));
+    return entries.flatMap(({ word, destination }) => pathFinding(label, word, destination, context.segment));
+  };
   if (targetDirectory !== null) {
     // The operands are written into the directory this option names, so what a
-    // wrapper supplies from its standard input is a source.
-    return [...findings, ...judge(targetDirectory, `the ${verb} destination`)];
+    // wrapper supplies from its standard input is a source — which `mv` writes.
+    const appendedSources =
+      spec.sources === true && supplied !== undefined && placeholder === null
+        ? [
+            unread(
+              `the ${verb} source`,
+              `${supplied.wrapper} appends the words it reads from standard input to this command`,
+            ),
+          ]
+        : [];
+    const known = !(supplied !== undefined && placeholder === null);
+    return [
+      ...findings,
+      ...receiving(targetDirectory, remaining, known),
+      ...backups(),
+      ...moved(remaining),
+      ...appendedSources,
+    ];
   }
   // Where the operands are destinations and a wrapper appends more of them from
   // its standard input, the write lands somewhere the line never spelled.
@@ -328,17 +717,30 @@ function destinationFindings(
         ]
       : [];
   if (everyOperand || spec.operands === "all") {
+    // `sed -i<suffix>` keeps each file it rewrites under that suffix too.
+    const kept =
+      spec.inPlace !== undefined && (suffixes.length > 0 || bsdSuffixes.length > 0)
+        ? backupFindings(
+            verb,
+            remaining,
+            { suffixes: [...suffixes, ...bsdSuffixes], defaults: [], unreadable: false, numbered: false, named: true },
+            context,
+          )
+        : [];
     return [
       ...findings,
       ...appended,
       ...remaining.flatMap((operand) => judge(operand, `the ${verb} target`)),
+      ...kept,
     ];
   }
   if (spec.operands === "last" && remaining.length >= (spec.least ?? 2)) {
     return [
       ...findings,
       ...appended,
-      ...judge(remaining[remaining.length - 1]!, `the ${verb} destination`),
+      ...receiving(remaining[remaining.length - 1]!, remaining.slice(0, -1), appended.length === 0),
+      ...backups(),
+      ...moved(remaining.slice(0, -1)),
     ];
   }
   return [...findings, ...appended];

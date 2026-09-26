@@ -20,7 +20,7 @@ import { useToast } from "../shell/Toast.js";
 import type { PageProps } from "../shell/route.js";
 import type { Snapshot, TaskRow, TaskSummary } from "../../shared/protocol.js";
 import { archiveRows, isArchivable, isArchived, isFiled } from "../../shared/archive.js";
-import { HOME_TONES, HOME_TONE_LABELS, displayKey, homeRows, homeTally, homeTone, projectTicket, stageName, type HomeTone } from "./ticket-workspace.js";
+import { HOME_TONES, HOME_TONE_LABELS, displayKey, homeOrder, homeRows, homeTally, homeTone, projectTicket, stageName, type HomeTone } from "./ticket-workspace.js";
 const countWord = (number: number): string =>
   ["No", "One", "Two", "Three", "Four", "Five"][number] ?? String(number);
 const lower = (word: string): string => word.toLowerCase();
@@ -110,8 +110,9 @@ function TaskCard({
   renaming: boolean;
   onRenameChange: (open: boolean) => void;
 }) {
-  const { stage, attention, tone, primary, description } = projectTicket(workspace, row);
+  const { stage, tone, description } = projectTicket(workspace, row);
   const completed = isArchived(row.ticket.state);
+  const stopped = tone === "red";
   const summary = useTaskSummary(row.repoId, row.ticket.key);
   const branch = summary.data ? summary.data.branch : (row.ticket.delivery.branch ?? null);
   const finished = completed
@@ -125,11 +126,8 @@ function TaskCard({
         : row.ticket.state === "cancelled"
           ? "cancelled"
           : row.ticket.state.replaceAll("_", " ");
-  // A click on the card opens it, so a control on the card keeps its click to itself.
-  const own = (act: (row: TaskRow) => void) => (event: { stopPropagation: () => void }) => {
-    event.stopPropagation();
-    act(row);
-  };
+  // A space holds the line's height while the outcome is read, or where there is none.
+  const outcome = summary.data?.outcome;
   return (
     <article
       role="button"
@@ -153,7 +151,7 @@ function TaskCard({
     >
       <div className="task-card-header">
         <StageRing stage={stage} tone={tone} complete={completed} />
-        <span className="stage-pill">{completed ? "completed" : stageName(stage)}</span>
+        <span className="stage-pill">{stopped ? "loop stopped" : completed ? "completed" : stageName(stage)}</span>
         <span className="task-key" title={row.ticket.key}>
           {displayKey(row.ticket.key)}
         </span>
@@ -179,23 +177,27 @@ function TaskCard({
         />
       </div>
       <div className="task-card-description">
-        <span>{finished ?? description}</span>
-        <span className="row task-card-actions">
-          {completed ? (
-            <button className="text-button small" onClick={own(open)}>
-              Report
-            </button>
-          ) : (
-            <Button variant={attention ? "primary" : "secondary"} onClick={own(open)}>
-              {primary.label}
-            </Button>
-          )}
-          {(completed || isArchivable(workspace, row)) && (
-            <Button className="small task-card-archive" aria-label="Archive" title="Archive" onClick={own(archive)}>
-              <InkIcon name="folder" size={14} />
-            </Button>
-          )}
-        </span>
+        {stopped ? (
+          <span>{finished ?? description}</span>
+        ) : (
+          <span className="task-card-outcome" title={outcome ?? undefined}>
+            {outcome ?? "\u00a0"}
+          </span>
+        )}
+        {isArchivable(workspace, row) && (
+          <Button
+            className="small task-card-archive"
+            aria-label="Archive"
+            title="Archive"
+            onClick={(event) => {
+              // A click on the card opens it, so Archive keeps its click to itself.
+              event.stopPropagation();
+              archive(row);
+            }}
+          >
+            <InkIcon name="folder" size={14} />
+          </Button>
+        )}
       </div>
     </article>
   );
@@ -289,7 +291,7 @@ export function HomePage({
     [outcome, setOutcome] = useState<"all" | "merged" | "closed" | "cancelled">(
       "all",
     ),
-    [sort, setSort] = useState<"newest" | "oldest" | "title" | "stage">("newest"),
+    [sort, setSort] = useState<"recent" | "newest" | "oldest" | "title" | "stage">("recent"),
     [page, setPage] = useState(0),
     [renaming, setRenaming] = useState<string | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -345,32 +347,24 @@ export function HomePage({
     repoId: repoFilter === "all" ? null : repoFilter,
     search,
     outcome,
-    sort: sort === "stage" ? ("newest" as const) : sort,
+    sort: sort === "title" || sort === "oldest" ? sort : ("newest" as const),
   };
   const matches = (row: TaskRow): boolean =>
     [titleOf(row), row.ticket.key, row.repository, row.ticket.delivery.branch ?? ""]
       .join(" ")
       .toLowerCase()
       .includes(search.toLowerCase());
+  const shown = all
+    .filter(matches)
+    .filter((row) => repoFilter === "all" || row.repoId === repoFilter)
+    .filter((row) => homeFilter === "all" || toneOf(row) === SHOW_TONE[homeFilter]);
   const tasks = archive
     ? archiveRows(workspace, filters)
-    : all
-        .filter(matches)
-        .filter((row) => repoFilter === "all" || row.repoId === repoFilter)
-        .filter((row) => homeFilter === "all" || toneOf(row) === SHOW_TONE[homeFilter])
-        .sort((a, b) => {
-          if (sort === "title") return titleOf(a).localeCompare(titleOf(b));
-          if (sort === "stage")
-            return projectTicket(workspace, b).stage - projectTicket(workspace, a).stage;
-          // Yellow first, then red, then the rest.
-          const rank = (row: TaskRow): number => ["yellow", "red"].indexOf(toneOf(row) ?? "") + 1 || 3;
-          return (
-            rank(a) - rank(b) ||
-            (sort === "oldest"
-              ? a.ticket.updated_at.localeCompare(b.ticket.updated_at)
-              : b.ticket.updated_at.localeCompare(a.ticket.updated_at))
-          );
-        });
+    : sort === "title"
+      ? shown.sort((a, b) => titleOf(a).localeCompare(titleOf(b)))
+      : sort === "stage"
+        ? shown.sort((a, b) => projectTicket(workspace, b).stage - projectTicket(workspace, a).stage)
+        : homeOrder(workspace, shown, sort === "recent" ? "opened" : sort);
   const repository = workspace.repositories[0],
     pageCount = Math.max(1, Math.ceil(tasks.length / 10)),
     currentPage = Math.min(page, pageCount - 1);
@@ -459,6 +453,7 @@ export function HomePage({
               value={sort}
               onChange={(event) => setSort(event.target.value as typeof sort)}
             >
+              <option value="recent">Recently opened</option>
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
               <option value="title">Task title</option>
@@ -529,7 +524,7 @@ export function HomePage({
             </Dropdown>
             <Dropdown
               aria-label="Sort archived tasks"
-              value={sort === "stage" ? "newest" : sort}
+              value={filters.sort}
               onChange={(event) => setSort(event.target.value as typeof sort)}
             >
               <option value="newest">Newest first</option>

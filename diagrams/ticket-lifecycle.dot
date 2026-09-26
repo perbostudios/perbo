@@ -40,6 +40,7 @@ digraph G {
   blocked -> ready [label="what it waited on merged"];
   blocked -> cancelled;
   provision -> failed;
+  provision -> pr [label="every standing finding shipped as it is by a person or verified closed, on the judged commit"];
   execute -> failed;
   verify -> failed;
   failed -> ready [label="new attempt"];

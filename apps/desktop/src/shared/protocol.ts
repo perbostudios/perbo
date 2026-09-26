@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   CriterionIdSchema,
+  DECISION_CHOICES,
   EffortLevelSchema,
   ExecutorSkillsSchema,
   GraphEditSchema,
@@ -9,6 +10,8 @@ import {
   MAX_QUESTION_OPTIONS,
   MAX_QUESTION_PARTS,
   StandingProhibitedEntrySchema,
+  TICKET_NAME_CAP,
+  type DecisionChoice,
   type GraphEdge,
   type SizeEstimate,
   type StandingProhibitedEntry,
@@ -143,12 +146,12 @@ export const ProviderModelSchema = z.strictObject({
   description: z.string().max(2000),
   isDefault: z.boolean(),
   /** The effort levels the provider reports for this model, lowest first; none where it reports none. */
-  efforts: z.array(EffortLevelSchema).max(10),
+  efforts: z.array(EffortLevelSchema),
 });
 export type ProviderModel = z.infer<typeof ProviderModelSchema>;
 export const ModelCatalogSchema = z.strictObject({
   provider: ModelProviderSchema,
-  models: z.array(ProviderModelSchema).max(1000),
+  models: z.array(ProviderModelSchema),
   source: z.enum([
     "claude-code",
     "codex-app-server",
@@ -165,10 +168,10 @@ export const CriterionSchema = z.strictObject({
 });
 export const DraftSchema = z.strictObject({
   outcome: text,
-  criteria: z.array(CriterionSchema).min(1).max(20),
-  paths: z.array(z.string().trim().min(1).max(300)).min(1).max(40),
+  criteria: z.array(CriterionSchema).min(1),
+  paths: z.array(z.string().trim().min(1).max(300)).min(1),
   /** Paths the executor may not write even inside the allowed ones (D-105); admission passes each as `--prohibit`. */
-  prohibited: z.array(z.string().trim().min(1).max(300)).max(40).default([]),
+  prohibited: z.array(z.string().trim().min(1).max(300)).default([]),
 });
 export type Draft = z.infer<typeof DraftSchema>;
 /**
@@ -276,12 +279,12 @@ const editableCriterion = z.strictObject({
 export const EditingFormSchema = z.strictObject({
   draft: z.strictObject({
     outcome: z.string().max(12_000),
-    criteria: z.array(editableCriterion).max(20),
-    paths: z.array(z.string().max(300)).max(40),
-    prohibited: z.array(z.string().max(300)).max(40).default([]),
+    criteria: z.array(editableCriterion),
+    paths: z.array(z.string().max(300)),
+    prohibited: z.array(z.string().max(300)).default([]),
   }),
   models: TaskModelsSchema,
-  editing: z.number().int().min(0).max(19).nullable(),
+  editing: z.number().int().min(0).nullable(),
   criterion: editableCriterion,
   newPath: z.string().max(300).nullable(),
 });
@@ -366,6 +369,15 @@ export const INTERVIEW_WROTE_THE_SPEC =
   "The spec is written: read it, change it on the Spec pane or by asking here, or press Generate " +
   "plan.";
 /**
+ * The note a reading puts once every problem between the plan and the spec is
+ * resolved (D-128). It is words and carries no press: every pane the chat sits
+ * beside but the Spec pane has Confirm the plan already. Here because the
+ * chat's reckoning of what a turn is owed tells this note by its words, as a
+ * line the reading put rather than one the turn led to.
+ */
+export const EVERY_PROBLEM_RESOLVED =
+  "Every problem is resolved: the plan and the spec promise the same thing again.";
+/**
  * One plan edit the interview made, as the ticket's own draft record holds it
  * (D-100), so the chat's card carries an Undo on its number.
  *
@@ -382,8 +394,8 @@ export const InterviewEditSchema = z.strictObject({
   /** The edit this one undid, by its number, or null for an edit of its own. */
   undoes: z.number().int().min(1).nullable(),
   /** The entity keys it changed either side: `node:<id>`, `criterion:<id>`, `edge:<from>-><to>`. */
-  before: z.array(z.string().min(1).max(200)).max(200),
-  after: z.array(z.string().min(1).max(200)).max(200),
+  before: z.array(z.string().min(1).max(200)),
+  after: z.array(z.string().min(1).max(200)),
 });
 export type InterviewEdit = z.infer<typeof InterviewEditSchema>;
 /** Which asking a person is being put, and how many of its groups they have answered. */
@@ -489,13 +501,6 @@ export const InterviewEntrySchema = z.strictObject({
       kind: z.literal("note"),
       text,
       /**
-       * What the note offers to do, where it offers anything, so a person
-       * reading the chat from another pane has the way on from there: the
-       * contract, once every problem between the plan and the spec is
-       * resolved.
-       */
-      offers: z.literal("contract").optional(),
-      /**
        * Whether this is something to notice rather than something to know.
        *
        * A note is ordinarily the quietest line in the chat, which is right for
@@ -595,6 +600,27 @@ export const EditingSessionSchema = z.strictObject({
    */
   specSlug: specSlugText.nullable().default(null),
   /**
+   * The title the host cut from the person's first turn to name this
+   * planning's spec folder (D-118), or null where the folder was named any
+   * other way. The cut is no title, so the planning is Untitled while its
+   * spec still states it.
+   */
+  specCut: z.string().min(1).max(500).nullable(),
+  /**
+   * Who last wrote the title this planning's spec states, and that title: the
+   * person, from the Spec pane's title field, or the Architect, in a turn of
+   * the chat. Null until one of them titles it; the cut is no title (D-118).
+   *
+   * A plan is drafted with `admit --keep-title` while the person's is the
+   * title the spec still states, so the ticket takes their name and the spec
+   * keeps it; otherwise the drafter names the ticket and the spec takes that
+   * name (D-127). The title is kept beside the writer so a title the file no
+   * longer states is not mistaken for the person's.
+   */
+  named: z
+    .strictObject({ by: z.enum(["person", "architect"]), title: z.string().min(1).max(500) })
+    .nullable(),
+  /**
    * The asking being put to the person and how much of it they have answered
    * (D-117), as {@link AskingSchema} holds it.
    *
@@ -661,15 +687,15 @@ export const EditingSessionSchema = z.strictObject({
   phase: z.enum(["editing", "working", "ready", "conflict", "outcome-unknown", "discarded"]),
   error: z.string().nullable(),
   operation: EditingOperationSchema.nullable(),
-  /** The draft's edits, oldest first, each undoable. Empty on a session from before it existed. */
-  history: z.array(DraftEditSchema).max(500).default([]),
+  /** The draft's edits, oldest first, each undoable. Empty until a path is marked. */
+  history: z.array(DraftEditSchema).default([]),
   /**
    * The interview's conversation, oldest first, so leaving planning mode and
-   * restarting the app both come back to it (D-102, D-095). Capped at
-   * {@link INTERVIEW_CONVERSATION_CAP}; defaulted so a session saved before
-   * the chat existed still parses.
+   * restarting the app both come back to it (D-102, D-095). Its writer keeps
+   * the last {@link INTERVIEW_CONVERSATION_CAP} lines; empty until the chat
+   * says something.
    */
-  conversation: z.array(InterviewEntrySchema).max(INTERVIEW_CONVERSATION_CAP).default([]),
+  conversation: z.array(InterviewEntrySchema).default([]),
   /**
    * The interview's own session id, as its `started` event reported it, which
    * `--session` continues after the process has gone. Null until one has run.
@@ -726,6 +752,12 @@ export interface OpenDraft {
    * row {@link Snapshot.specs} exists to offer.
    */
   specSlug: string | null;
+  /**
+   * What the spec it writes is titled, or null while it has no spec, or one
+   * whose title is still the cut its folder was named from (D-118): the
+   * planning is Untitled until the Architect or the person titles it.
+   */
+  title: string | null;
 }
 /**
  * A spec folder this repository holds, by the slug that names it and the title
@@ -783,8 +815,8 @@ export const HELP_LINKS = {
     "https://github.com/perbostudios/perbo/blob/main/docs/08-security-autonomy-and-data.md",
 } as const;
 export const ManifestEditorSchema = z.strictObject({
-  entries: z.array(MaterializationEntrySchema).max(100),
-  offLimits: z.array(z.string().trim().min(1).max(300)).max(100),
+  entries: z.array(MaterializationEntrySchema),
+  offLimits: z.array(z.string().trim().min(1).max(300)),
 });
 export type ManifestEditor = z.infer<typeof ManifestEditorSchema>;
 /**
@@ -1161,10 +1193,11 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     digest: z.string().length(64),
     value: ManifestEditorSchema,
   }),
+  /** A name a person gives a ticket, held to a ticket's name's length (D-127). */
   z.strictObject({
     kind: z.literal("rename"),
     ...reference,
-    title: z.string().trim().min(1).max(200),
+    title: z.string().trim().min(1).max(TICKET_NAME_CAP),
   }),
   /**
    * Permanently deletes a piece of work whole, from the contract page and from
@@ -1181,11 +1214,13 @@ export const RequestSchema = z.discriminatedUnion("kind", [
    * empty text removes it.
    */
   z.strictObject({ kind: z.literal("askSave"), repoId: identifier, text: z.string().max(12_000) }),
+  /** A ticket's page opened, written as the time Home orders it by within its colour; a desktop preference. */
+  z.strictObject({ kind: z.literal("ticketOpened"), ...reference }),
   /** Files completed tickets away from Home (S4); a desktop preference, never a Ticket state. */
   z.strictObject({
     kind: z.literal("archive"),
     repoId: identifier,
-    keys: z.array(key).min(1).max(1000),
+    keys: z.array(key).min(1),
     archived: z.boolean(),
   }),
   z.strictObject({
@@ -1247,6 +1282,20 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     kind: z.literal("decide"),
     ...reference,
     answer: text,
+    /**
+     * The person's answer to each question that took a choice, by the
+     * finding's key: each is recorded on its finding
+     * (D-132). None where every
+     * question took the person's words alone. `answer` is every question's
+     * words together, recorded as a principle for the executor (D-065).
+     */
+    decisions: z.array(
+      z.strictObject({
+        findingKey: z.string().regex(/^[a-f0-9]{64}$/),
+        choice: z.enum(DECISION_CHOICES),
+        answer: text,
+      }),
+    ),
     digest: z.string().length(64),
   }),
   z.strictObject({
@@ -1336,6 +1385,8 @@ export interface Snapshot {
   archived?: string[];
   /** Each repository's unsent answer to "What do you want to build?", by repository id. */
   asks?: Record<string, string>;
+  /** When each ticket's page was last opened, `repoId:key` to an ISO time. */
+  lastOpened?: Record<string, string>;
   power?: PowerState;
   sequence?: number;
   repositoryErrors?: Record<string, string[]>;
@@ -1429,6 +1480,11 @@ export const ChangeSchema = z.discriminatedUnion("kind", [
     doing: z.enum(INTERVIEW_DOING).nullable().default(null),
   }),
   z.object({ kind: z.literal("power"), sequence: z.number().int().nonnegative(), power: PowerStateSchema }),
+  /**
+   * When each ticket's page was last opened. Nothing a read returned has moved
+   * when one opens, so it is patched where it is and no read is taken again.
+   */
+  z.object({ kind: z.literal("opened"), sequence: z.number().int().nonnegative(), lastOpened: z.record(z.string(), z.iso.datetime()) }),
 ]);
 export type Change = z.infer<typeof ChangeSchema>;
 export type ChangeInput = Change extends infer T ? T extends Change ? Omit<T, "sequence"> : never : never;
@@ -1513,6 +1569,11 @@ export interface DecisionQuestion {
   id: string;
   title: string;
   context: string;
+  /**
+   * The answers the finding takes (D-132);
+   * none where the question takes the person's words for a principle alone.
+   */
+  choices: readonly DecisionChoice[];
   options: {
     title: string;
     detail: string;
@@ -1529,6 +1590,8 @@ export interface TaskSummary {
   costBasis: "priced" | "unpriced" | "none";
   diff: { files: number; additions: number; deletions: number } | null;
   note: string | null;
+  /** The contract's outcome sentence, the line under the title on its contract page; null where the contract cannot be read. */
+  outcome: string | null;
 }
 /** A provider's own account of its plan, and the ledger this machine keeps (S6E). */
 export interface UsageWindow {
@@ -1611,6 +1674,7 @@ export interface ReplyMap {
   rename: null;
   archive: null;
   askSave: null;
+  ticketOpened: null;
   discard: null;
   doctor: Job;
   admit: Job;

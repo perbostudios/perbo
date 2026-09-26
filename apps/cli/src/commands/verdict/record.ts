@@ -1,7 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import {
+  DECISION_CHOICES,
+  DOGFOOD_ANSWERER,
   STOP_VERDICTS_SCHEMA_VERSION,
   StopAnswererSchema,
   StopFindingKeySchema,
@@ -12,7 +14,8 @@ import {
   type StopVerdict,
   type StopVerdicts,
 } from "@perbo/contracts";
-import { git } from "@perbo/workspace";
+import { git, replaceFile } from "@perbo/workspace";
+import type { DecidedFinding } from "@perbo/runner";
 import type { Diagnostics } from "../../diagnostics.js";
 
 /**
@@ -43,8 +46,16 @@ import type { Diagnostics } from "../../diagnostics.js";
  * they mean on the pull request. `accept` and `reject` judge the finding
  * itself: whether it was a real one. A finding that never stopped anything can
  * only be accepted or rejected, because there was no stop to endorse.
+ *
+ * `decide` is the person's answer to a finding the review routed to them, in
+ * their words on `note`, and it closes that finding: the next run of the
+ * ticket reads it and, where every finding routed to a person is decided on an
+ * unchanged branch, delivers without executing or reviewing again
+ * (D-132). It answers the question
+ * the finding asked, not whether the stop was wanted, so it is not a stop
+ * answer and precision of stopping never counts it (D-060).
  */
-export const VERDICT_DECISIONS = ["endorse", "override", "accept", "reject"] as const;
+export const VERDICT_DECISIONS = ["endorse", "override", "accept", "reject", "decide"] as const;
 export const VerdictDecisionSchema = z.enum(VERDICT_DECISIONS);
 export type VerdictDecision = (typeof VERDICT_DECISIONS)[number];
 
@@ -121,6 +132,12 @@ export const LocalVerdictSchema = z
      * meant — the stand-in had no way to say so yet.
      */
     answered_by: StopAnswererSchema.optional(),
+    /**
+     * What a person chose for a finding routed to them, on a `decide` row only:
+     * their own approach, the approach left to the executor, or the change
+     * shipped as it is for it (D-132).
+     */
+    choice: z.enum(DECISION_CHOICES).optional(),
     decided_at: z.iso.datetime(),
     note: z.string().min(1).nullable(),
     /**
@@ -135,6 +152,16 @@ export const LocalVerdictSchema = z
   .refine((row) => !isStopDecision(row.decision) || row.routing !== null, {
     message: "a stop answer (endorse, override) requires the stop's routing",
     path: ["routing"],
+  })
+  // A decision is the person's words; one without them closes a finding on
+  // nothing anybody said.
+  .refine((row) => row.decision !== "decide" || row.note !== null, {
+    message: "a decision (decide) requires the person's answer as its note",
+    path: ["note"],
+  })
+  .refine((row) => (row.decision === "decide") === (row.choice !== undefined), {
+    message: "a decision (decide) carries its choice, and only a decision does",
+    path: ["choice"],
   });
 export type LocalVerdict = z.infer<typeof LocalVerdictSchema>;
 
@@ -153,28 +180,74 @@ export const EMPTY_LOCAL_VERDICTS: LocalVerdicts = {
 };
 
 /**
- * One decision per review and finding key, joined by a NUL byte (`\u0000`),
- * which cannot occur in either: a ticket id and a finding key are both hex.
+ * Which of a finding's two slots a decision takes. A judgement — `endorse`,
+ * `override`, `accept`, `reject` — says whether the stop was wanted or the
+ * finding real; a `decide` is a person's answer to it. The two never replace
+ * one another, so answering a finding leaves its stop answer, and precision of
+ * stopping with it (D-060), exactly as it was.
  */
-export const verdictKey = (row: Pick<LocalVerdict, "review" | "finding_key">): string =>
-  `${row.review.ticket_id}\u0000${row.finding_key}`;
+export type VerdictSlot = "judgement" | "answer";
+
+export const verdictSlot = (decision: VerdictDecision): VerdictSlot =>
+  decision === "decide" ? "answer" : "judgement";
+
+/**
+ * One decision per review, slot and finding key, joined by a NUL byte
+ * (`\u0000`), which cannot occur in any of them: a ticket id and a finding key
+ * are both hex, and a slot is one of two words.
+ */
+export const verdictKey = (row: Pick<LocalVerdict, "review" | "finding_key" | "decision">): string =>
+  `${row.review.ticket_id}\u0000${verdictSlot(row.decision)}\u0000${row.finding_key}`;
 
 /** The decisions that still stand: at most one per review and finding key. */
 export function activeVerdicts(verdicts: readonly LocalVerdict[]): LocalVerdict[] {
   return verdicts.filter((row) => row.superseded_at === null);
 }
 
-/** The decision in force for a review and key, or `null` where none was taken. */
+/** The decision in force for a review, key and slot, or `null` where none was taken. */
 export function verdictFor(
   verdicts: readonly LocalVerdict[],
   ticket_id: string,
   finding_key: string,
+  slot: VerdictSlot,
 ): LocalVerdict | null {
   return (
     activeVerdicts(verdicts).find(
-      (row) => row.review.ticket_id === ticket_id && row.finding_key === finding_key,
+      (row) =>
+        row.review.ticket_id === ticket_id &&
+        row.finding_key === finding_key &&
+        verdictSlot(row.decision) === slot,
     ) ?? null
   );
+}
+
+/**
+ * The person's standing answers to one ticket's findings, as the loop takes
+ * them (D-132): every `decide` in
+ * force, with the words and who gave them, and the review it named where the
+ * person named one by its id. The loop decides which review each answers, by
+ * that and by when it was taken. An answer the AI stand-in recorded is never
+ * one: closing a finding routed to a person is a person's to do (D-121).
+ */
+export function decidedFindings(
+  verdicts: readonly LocalVerdict[],
+  ticket_id: string,
+): DecidedFinding[] {
+  return activeVerdicts(verdicts)
+    .filter(
+      (row) =>
+        row.review.ticket_id === ticket_id &&
+        row.decision === "decide" &&
+        row.answered_by !== DOGFOOD_ANSWERER,
+    )
+    .map((row) => ({
+      finding_key: row.finding_key,
+      choice: row.choice!,
+      review_id: row.review.reference.startsWith("rev_") ? row.review.reference : null,
+      note: row.note!,
+      author: row.author,
+      decided_at: row.decided_at,
+    }));
 }
 
 /** A second decision on a key that already has one, without `--replace`. */
@@ -397,7 +470,8 @@ export function readLocalVerdictsOrWarn(dir: string, diagnostics: Diagnostics | 
 
 export function writeLocalVerdicts(dir: string, file: LocalVerdicts): void {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(verdictsPath(dir), `${JSON.stringify(LocalVerdictsSchema.parse(file), null, 2)}\n`);
+  // Replaced whole: `perbo inspect` reads it while a run is live.
+  replaceFile(verdictsPath(dir), `${JSON.stringify(LocalVerdictsSchema.parse(file), null, 2)}\n`);
 }
 
 /**

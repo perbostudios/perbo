@@ -111,11 +111,10 @@
               "paths_allowed": {
                 "type": "array",
                 "minItems": 1,
-                "maxItems": 8,
                 "items": {
                   "type": "string"
                 },
-                "description": "One to eight globs over directories that appear in the repository tree, e.g. packages/auth/**. As narrow as the work allows."
+                "description": "One or more globs over directories that appear in the repository tree, e.g. packages/auth/**: as many as the work lands in, each as narrow as the work allows."
               },
               "paths_prohibited_extra": {
                 "type": "array",

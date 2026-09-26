@@ -457,12 +457,14 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
       // The ticket's own shape reaches the program just the same run through
       // a substitution: `cat` and `ls` are on the read-only list, and the
       // list's own prefix match sees only them, not what they run to get
-      // their argument.
+      // their argument. The bodies below write `CONTEXT.md`, a path this
+      // session may write, so the runner's write guard admits them and the
+      // refusal can only come from the interview's own reading of the body.
       it("reads what a command substitution runs, the same as the command wrapping it", async () => {
         const repo = repository(scratch());
         const commands = [
-          "cat $(git log --output=notes.txt)",
-          "cat `git log --output=notes.txt`",
+          "cat $(git log --output=CONTEXT.md)",
+          "cat `git log --output=CONTEXT.md`",
           "ls $(find . -delete)",
         ];
         const result = await run(
@@ -479,12 +481,12 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
       it("reads a substitution inside double quotes too, since only single quotes suppress one", async () => {
         const repo = repository(scratch());
         const commands = [
-          'cat "$(git log --output=x)"',
-          'cat "`git log --output=x`"',
+          'cat "$(git log --output=CONTEXT.md)"',
+          'cat "`git log --output=CONTEXT.md`"',
           'ls "$(rg --pre evil.sh q)"',
           'cat "$(find . -fprint z)"',
-          'head "$( git log --output=x )"',
-          'cat "prefix$(git log --output=x)suffix"',
+          'head "$( git log --output=CONTEXT.md )"',
+          'cat "prefix$(git log --output=CONTEXT.md)suffix"',
         ];
         const result = await run(
           repo,
@@ -510,17 +512,17 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
       it("reads a substitution nested inside another, to a fixpoint, both transports", async () => {
         const repo = repository(scratch());
         const commands = [
-          'cat "$(echo $(git log --output=x))"',
-          "cat $(echo $(git log --output=x))",
-          'cat "$(printf %s "$(git log --output=x)")"',
-          'cat "$(echo "$(echo "$(git log --output=x)")")"',
-          "cat $(echo `git log --output=x`)",
-          "cat `echo $(git log --output=x)`",
+          'cat "$(echo $(git log --output=CONTEXT.md))"',
+          "cat $(echo $(git log --output=CONTEXT.md))",
+          'cat "$(printf %s "$(git log --output=CONTEXT.md)")"',
+          'cat "$(echo "$(echo "$(git log --output=CONTEXT.md)")")"',
+          "cat $(echo `git log --output=CONTEXT.md`)",
+          "cat `echo $(git log --output=CONTEXT.md)`",
           // The inner $( never gets its own close — only one `)` exists for
           // the two `$(` this carries — so paren depth reads the outer to
           // the end of the text; recursing into what that reads still finds
-          // the well-formed `git log --output=x` a fresh scan of it holds.
-          "cat $(echo $(git log --output=x)",
+          // the well-formed `git log --output=CONTEXT.md` a fresh scan of it holds.
+          "cat $(echo $(git log --output=CONTEXT.md)",
         ];
         const result = await run(
           repo,
@@ -550,22 +552,26 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
 
       it("reads a substitution body's own invocation past a wrapper, a subshell, a brace group, an assignment prefix, a list or a pipeline, both transports", async () => {
         const repo = repository(scratch());
+        // `CONTEXT.md` is a path this session may write, so the runner's write
+        // guard admits every one of these and only the interview's read-only
+        // shapes refuse them.
         const commands = [
-          'cat "$(env git log --output=x)"',
-          'cat "$(command git log --output=x)"',
-          'cat "$(nice git log --output=x)"',
-          'cat "$(exec git log --output=x)"',
-          'cat "$(xargs git log --output=x)"',
-          'cat "$( (git log --output=x) )"',
-          'cat "$({ git log --output=x; })"',
-          'cat "$(VAR=1 git log --output=x)"',
-          'cat "$(true && git log --output=x)"',
-          'cat "$(git -C . log --output=x)"',
-          'cat "$(git --no-pager log --output=x)"',
-          'cat "$(git -c core.pager=cat log --output=x)"',
-          'cat "$(git log --output=x; true)"',
-          'cat "$(true | git log --output=x)"',
-          'cat "$(echo $(env git log --output=x))"',
+          'cat "$(env git log --output=CONTEXT.md)"',
+          'cat "$(command git log --output=CONTEXT.md)"',
+          'cat "$(nice git log --output=CONTEXT.md)"',
+          'cat "$(exec git log --output=CONTEXT.md)"',
+          // `--` keeps the words xargs appends paths; without it one could be an option.
+          'cat "$(xargs git log --output=CONTEXT.md --)"',
+          'cat "$( (git log --output=CONTEXT.md) )"',
+          'cat "$({ git log --output=CONTEXT.md; })"',
+          'cat "$(VAR=1 git log --output=CONTEXT.md)"',
+          'cat "$(true && git log --output=CONTEXT.md)"',
+          'cat "$(git -C . log --output=CONTEXT.md)"',
+          'cat "$(git --no-pager log --output=CONTEXT.md)"',
+          'cat "$(git -c core.pager=cat log --output=CONTEXT.md)"',
+          'cat "$(git log --output=CONTEXT.md; true)"',
+          'cat "$(true | git log --output=CONTEXT.md)"',
+          'cat "$(echo $(env git log --output=CONTEXT.md))"',
         ];
         const result = await run(
           repo,
@@ -589,10 +595,10 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
       it("reads a here-document body for a substitution when its delimiter is unquoted, both transports", async () => {
         const repo = repository(scratch());
         const commands = [
-          "cat <<EOF\n$(git log --output=x)\nEOF",
-          "cat <<EOF\n`git log --output=x`\nEOF",
-          "cat <<-EOF\n\t$(git log --output=x)\n\tEOF",
-          'cat "$(cat <<EOF\n$(git log --output=x)\nEOF\n)"',
+          "cat <<EOF\n$(git log --output=CONTEXT.md)\nEOF",
+          "cat <<EOF\n`git log --output=CONTEXT.md`\nEOF",
+          "cat <<-EOF\n\t$(git log --output=CONTEXT.md)\n\tEOF",
+          'cat "$(cat <<EOF\n$(git log --output=CONTEXT.md)\nEOF\n)"',
         ];
         const result = await run(
           repo,
@@ -621,10 +627,10 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
       it("reads a process-substitution body the same way a command-substitution body is read, both transports", async () => {
         const repo = repository(scratch());
         const commands = [
-          "cat <(git log --output=x)",
-          "rg pat <(git log --output=x)",
-          'cat "$(cat <(git log --output=x))"',
-          "tee >(git log --output=x)",
+          "cat <(git log --output=CONTEXT.md)",
+          "rg pat <(git log --output=CONTEXT.md)",
+          'cat "$(cat <(git log --output=CONTEXT.md))"',
+          "tee >(git log --output=CONTEXT.md)",
         ];
         const result = await run(
           repo,
@@ -710,13 +716,13 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
       it("refuses a shape the closure backstop finds unaccounted, both transports", async () => {
         const repo = repository(scratch());
         const commands = [
-          "eval 'gi''t log --output=x'",
-          "until git log --output=x; do :; done",
-          "select x in a b; do git log --output=x; done",
-          "f(){ git log --output=x; }; f",
-          "! git log --output=x",
-          "time git log --output=x",
-          "cat <<EOF\ngit log --output=x\nEOF",
+          "eval 'gi''t log --output=CONTEXT.md'",
+          "until git log --output=CONTEXT.md; do :; done",
+          "select x in a b; do git log --output=CONTEXT.md; done",
+          "f(){ git log --output=CONTEXT.md; }; f",
+          "! git log --output=CONTEXT.md",
+          "time git log --output=CONTEXT.md",
+          "cat <<EOF\ngit log --output=CONTEXT.md\nEOF",
         ];
         const result = await run(
           repo,
@@ -834,7 +840,7 @@ export function describeInterviewContract(harness: InterviewHarness, scratch: ()
         const commands = [
           "cat <<A <<B\nhello\nA\n$(evil.sh)\nB",
           "cat <<A <<B\nx\nA\n$(git rm -f tracked.txt)\nB",
-          "cat <<A <<B\nx\nA\n$(git log --output=x)\nB",
+          "cat <<A <<B\nx\nA\n$(git log --output=CONTEXT.md)\nB",
           "cat <<A <<B <<C\n1\nA\n2\nB\n$(evil.sh)\nC",
           "cat <<-A <<-B\n\t1\n\tA\n\t$(evil.sh)\n\tB",
         ];

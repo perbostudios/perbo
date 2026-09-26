@@ -4,11 +4,11 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type PropsWithChildren } from "react";
 import type { StandingProhibitedEntry } from "@perbo/contracts";
-import { ContractEditing, editingForm, interviewProviderFor, interviewSessionArgs, sameProblems, untouchedPlanning } from "../shared/contract-editing.js";
+import { ContractEditing, editingForm, interviewProviderFor, interviewSessionArgs, keepsPersonsTitle, sameProblems, untouchedPlanning } from "../shared/contract-editing.js";
 import { WorkspaceReads } from "../host/workspace-reads.js";
 import { ContractEditor, flushContractEditors, useContractEditing } from "./contract-editor.js";
 import { bridge } from "./workspace/index.js";
-import { EditingSessionSchema, INTERVIEW_CONVERSATION_CAP, TaskModelsSchema } from "../shared/protocol.js";
+import { DraftSchema, EditingSessionSchema, INTERVIEW_CONVERSATION_CAP, TaskModelsSchema } from "../shared/protocol.js";
 import { READ_ATTEMPTS } from "../shared/read-generations.js";
 import type { Change, DesktopBridge, Detail, EditingSession, Job, ReplyMap, Request } from "../shared/protocol.js";
 import { sampleBridge } from "../sample-host/bridge.js";
@@ -174,6 +174,33 @@ describe("contract editing session interface", () => {
     const edited = f.editing.save(opened.id, opened.revision, repoId, { ...opened.form, newPath: "packages/unfinished" });
     expect(await new ContractEditing(f.io).open({ kind: "ticket", repoId, key: "PRB-421" })).toEqual(edited);
     expect(f.records()).toHaveLength(1);
+  });
+
+  it("takes a plan of twenty-five criteria as its result, and a session left unread by it on its next open", async () => {
+    const f = await fixture();
+    const sample = f.details.get(repoId + ":PRB-421")!;
+    if (!("acceptance_criteria" in sample.contract)) throw new Error("The sample is a flat plan");
+    const [first] = sample.contract.acceptance_criteria;
+    sample.contract.acceptance_criteria = Array.from({ length: 25 }, (_, at) => ({ ...first!, id: `ac_${at + 1}`, text: `Criterion ${at + 1}` }));
+    const initial = await f.editing.open({ kind: "new", repoId });
+    const saved = f.editing.save(initial.id, 0, repoId, { ...initial.form, draft });
+    await f.editing.submit(saved.id, saved.revision, crypto.randomUUID(), "compile");
+    await f.editing.settled({ ...f.jobs[0]!, state: "completed", resultKey: "PRB-421" });
+    expect(f.editing.read(saved.id)).toMatchObject({ key: "PRB-421", phase: "ready", error: null });
+    expect(f.editing.read(saved.id).form.draft.criteria).toHaveLength(25);
+
+    // A session recorded as the reconcile that could not read its result left it.
+    const [record] = f.records();
+    f.io.persist([{
+      ...record!, key: null, digest: null, phase: "outcome-unknown", form: saved.form,
+      error: "Your edits and operation were saved, but the recorded result could not be read: too_big",
+      operation: { ...record!.operation!, reconciled: false },
+    }]);
+    const restarted = new ContractEditing(f.io);
+    restarted.recover();
+    const opened = await restarted.open({ kind: "session", id: saved.id });
+    expect(opened).toMatchObject({ key: "PRB-421", phase: "editing", error: null, operation: { reconciled: true } });
+    expect(DraftSchema.parse(opened.form.draft).criteria).toHaveLength(25);
   });
 
   it("rejects invalid submissions and failed durable writes before launching work", async () => {
@@ -576,6 +603,8 @@ describe("a planning that holds nothing (D-129)", () => {
       resumeNew: false,
       lastPane: null,
       lastView: null,
+      specCut: null,
+      named: null,
       drift: null,
       change: null,
       form: editingForm(models),
@@ -638,6 +667,47 @@ describe("a planning that holds nothing (D-129)", () => {
 
   it("is still a planning that was only looked around in", () => {
     expect(untouchedPlanning(born({ lastPane: "explorer" }))).toBe(true);
+  });
+});
+
+describe("who named the spec (D-127)", () => {
+  it("is nobody at birth, and a record without it is not a session", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    expect(session.named).toBeNull();
+    const without: Record<string, unknown> = { ...session };
+    delete without["named"];
+    expect(EditingSessionSchema.safeParse(without).success).toBe(false);
+  });
+
+  it("keeps the person's title while the spec states it, and not once the Architect retitles it", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    f.editing.personTitled(session.id, "  Dark   mode ");
+    const named = f.editing.read(session.id);
+    expect(named.named).toEqual({ by: "person", title: "Dark mode" });
+    expect(keepsPersonsTitle(named, "Dark mode")).toBe(true);
+    // A title the spec no longer states is not the person's.
+    expect(keepsPersonsTitle(named, "Theme switch")).toBe(false);
+    expect(keepsPersonsTitle(named, null)).toBe(false);
+    // A turn that ends on the person's own title changed nothing of it.
+    f.editing.architectTitled(session.id, "Dark mode");
+    expect(f.editing.read(session.id).named).toEqual({ by: "person", title: "Dark mode" });
+    f.editing.architectTitled(session.id, "Theme switch");
+    const retitled = f.editing.read(session.id);
+    expect(retitled.named).toEqual({ by: "architect", title: "Theme switch" });
+    expect(keepsPersonsTitle(retitled, "Theme switch")).toBe(false);
+    // And the person naming it again is theirs again.
+    f.editing.personTitled(session.id, "Night mode");
+    expect(keepsPersonsTitle(f.editing.read(session.id), "Night mode")).toBe(true);
+  });
+
+  it("does not take the cut for the Architect's title (D-118)", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "fresh", repoId });
+    f.editing.recordSpec(session.id, "dark-mode", "Dark mode");
+    f.editing.architectTitled(session.id, "Dark mode");
+    expect(f.editing.read(session.id).named).toBeNull();
   });
 });
 

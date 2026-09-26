@@ -34,6 +34,7 @@ const state = ProfileStateSchema.parse({
   repositories: [],
   jobs: [],
   asks: {},
+  lastOpened: { "repo:PRB-1": "2026-09-24T10:00:00.000Z" },
   titles: { "repo:PRB-1": "Renamed" },
   archived: ["repo:PRB-1"],
 });
@@ -83,6 +84,8 @@ describe("Changes", () => {
       titles: { "repo:PRB-1": "Renamed" },
       archived: ["repo:PRB-1"],
     });
+    // When a page opened is told on its own, so an older preferences change cannot undo a newer opening.
+    expect(w.told[0]).not.toHaveProperty("lastOpened");
   });
 
   it("tells the preferences without persisting where a save has already happened", () => {
@@ -99,6 +102,14 @@ describe("Changes", () => {
     expect(w.saved).toHaveLength(0);
     expect(w.invalidated).toEqual([]);
     expect(w.told[0]).toEqual({ kind: "power", power, sequence: 1 });
+  });
+
+  it("neither persists nor invalidates when a ticket's page opened", () => {
+    const w = wiring();
+    w.changes.opened(state.lastOpened);
+    expect(w.saved).toHaveLength(0);
+    expect(w.invalidated).toEqual([]);
+    expect(w.told[0]).toEqual({ kind: "opened", lastOpened: { "repo:PRB-1": "2026-09-24T10:00:00.000Z" }, sequence: 1 });
   });
 
   it("leaves what a progress change reported readable without invalidating a read", () => {

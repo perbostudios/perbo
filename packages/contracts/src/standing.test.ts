@@ -50,6 +50,11 @@ describe("the standing prohibited list", () => {
     expect(readStandingProhibited({ paths_prohibited: [{ path: "" }] })).toEqual([]);
   });
 
+  it("reads every entry of a long list, so none of it stops being prohibited", () => {
+    const globs = Array.from({ length: 250 }, (_, at) => `packages/p${at}/**`);
+    expect(readStandingProhibited({ paths_prohibited: globs }).map((entry) => entry.path)).toEqual(globs);
+  });
+
   it("writes a directory as the glob that covers it and a file as itself", () => {
     expect(standingGlob("packages/app/src/generated/")).toBe("packages/app/src/generated/**");
     expect(standingGlob("packages/app/src/theme.ts")).toBe("packages/app/src/theme.ts");

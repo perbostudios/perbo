@@ -8,9 +8,10 @@ import { Onboarding } from "../settings/Onboarding.js";
 import { PlanningPaneSchema, type Settings } from "../../shared/protocol.js";
 import { AskPage } from "../planning/AskPage.js";
 import { PlanningMode } from "../planning/PlanningMode.js";
-import { CreateProvider } from "./create.js";
+import { CreateProvider, nameOfRoute } from "./create.js";
 import { Rail, RailToggle, SETTINGS_PAGES } from "./Rail.js";
 import { useRailSize } from "./rail-size.js";
+import { RailReveal } from "./rail-reveal.js";
 import { ShortcutProvider, useShortcut } from "./shortcuts.js";
 import type { PageProps, Route, SettingsSection, TaskView } from "./route.js";
 import { ToastProvider } from "./Toast.js";
@@ -199,6 +200,8 @@ export function App() {
     );
   const data = workspace.data,
     props = { workspace: data, navigate };
+  const name = nameOfRoute(data, route);
+  const nav = <Rail route={route} navigate={navigate} workspace={data} />;
   const setup = !data.settings.onboardingComplete || route.page === "setup";
   const settings = (SETTINGS_PAGES as readonly string[]).includes(route.page);
   const section: SettingsSection =
@@ -246,11 +249,12 @@ export function App() {
           <HeaderSlotProvider>
             <div className="app-shell">
               {/* The bar is the drag region; the toggle and the header's controls punch no-drag holes in it. */}
-              <TitleBar>{!setup && <RailToggle />}</TitleBar>
+              <TitleBar>
+                {!setup && <RailToggle />}
+                {!setup && name !== null && <span className="titlebar-name">{name}</span>}
+              </TitleBar>
               <div className="app-body">
-                {!setup && !rail.collapsed && (
-                  <Rail route={route} navigate={navigate} workspace={data} />
-                )}
+                {!setup && (rail.collapsed ? <RailReveal>{nav}</RailReveal> : nav)}
                 <main id="content" className="workspace-shell">
                   {data.errors.length > 0 && (
                     <div className="workspace-errors">

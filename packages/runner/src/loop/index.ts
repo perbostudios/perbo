@@ -23,7 +23,16 @@ import { type TicketRunConfig } from "./internal/config.js";
 import { recordAttempt } from "./internal/attempt.js";
 import { briefRound } from "./internal/brief.js";
 import { start } from "./internal/start.js";
-import { confirmContinuation, remediationToContinue } from "./internal/continuation.js";
+import {
+  attemptsThatSealed,
+  branchStillAt,
+  confirmContinuation,
+  decidedDelivery,
+  decisionsOn,
+  remediationToContinue,
+  stillWithPerson,
+} from "./internal/continuation.js";
+import { recordDecisions, type DecidedFinding } from "../decisions.js";
 import { checkRound } from "./internal/check.js";
 import { publish, publishRelevel, type Delivery } from "./internal/deliver.js";
 import { execute } from "./internal/execute.js";
@@ -80,10 +89,17 @@ import { verifyRound } from "./internal/verify.js";
  * survives that round is `base_conflict` with the files named. What this
  * removes is the step that began every hand finish of day four — a person
  * merging the base in before anything else could be done with the branch.
+ *
+ * **A person's answer closes the finding it answers**
+ * (D-132). Where the last review's
+ * every standing finding is answered by a person or verified closed, and the
+ * branch is still the commit it judged, the run executes and reviews nothing
+ * and goes where an approval goes; the answers are recorded on their findings.
  */
 
 export { resolvePorts, type LoopPorts, type RunLimits } from "./internal/context.js";
 export { incompleteReviewCauses } from "./internal/review.js";
+export { type DecidedFinding } from "../decisions.js";
 export { type RoundKind, type RoundRecord, type RunOutcome } from "./internal/state.js";
 
 export {
@@ -149,6 +165,13 @@ export interface TicketRunResult {
    * Null where the base never moved under the run, or where nothing merged it.
    */
   merged_base: string | null;
+  /**
+   * The person's decisions this run closed findings on
+   * (D-132): every one a delivery
+   * without a round rests on, and those a continued review's findings carried.
+   * Empty where no decision answered the review the run ended on.
+   */
+  decided: DecidedFinding[];
 }
 
 export interface TicketRunRequest {
@@ -170,6 +193,12 @@ export interface TicketRunRequest {
    * between the publish and its return still names what it opened.
    */
   onPullRequest?: (pull_request: NonNullable<TicketRunResult["pull_request"]>) => void;
+  /**
+   * The answers a person gave to findings routed to them, from the verdicts
+   * record (`perbo verdict --decide`). Each closes its finding on the review it
+   * was taken after; none reaches the executor or the reviewer.
+   */
+  decided?: readonly DecidedFinding[];
   /** Injected by tests: a stand-in for the agent, the checks and the reviewer. */
   hooks?: Partial<LoopPorts>;
 }
@@ -272,6 +301,33 @@ async function runLockedTicket(
 
   let outcome: TicketRunResult["outcome"] = "terminated";
   let detail = "";
+  const decided = args.decided ?? [];
+  let decidedOn: DecidedFinding[] = [];
+
+  // D-132: a delivery on a person's
+  // answers (`decidedDelivery`), taken only while the branch is the commit that
+  // review judged; a branch that has moved carries work nobody judged.
+  const decidedNow =
+    resumeSource !== null || config.relevel
+      ? null
+      : decidedDelivery({
+          bundles,
+          ticket_id: contract.ticket_id,
+          repository_id: contract.scope.repository_id,
+          decided,
+        });
+  const delivering =
+    decidedNow !== null &&
+    (await branchStillAt(workspace.path, workspace.base_commit, decidedNow.head_commit))
+      ? decidedNow
+      : null;
+  if (decidedNow !== null && delivering === null) {
+    progress(
+      `every finding ${config.ticket_key}'s last review routed to a person is decided, but the ` +
+        `branch has moved past ${decidedNow.head_commit}, the commit that review judged: this run ` +
+        "reviews what is there",
+    );
+  }
 
   /**
    * SCP-194: the remediation this run continues, where the record holds one.
@@ -285,9 +341,9 @@ async function runLockedTicket(
    * the loop, against the branch itself.
    */
   const continuing =
-    resumeSource !== null || config.relevel
+    resumeSource !== null || config.relevel || delivering !== null
       ? null
-      : remediationToContinue({ bundles, ticket_id: contract.ticket_id });
+      : remediationToContinue({ bundles, ticket_id: contract.ticket_id, decided });
   if (continuing !== null) {
     progress(
       `${config.ticket_key}'s last review left ${continuing.findings.length} finding(s) open on ` +
@@ -304,6 +360,17 @@ async function runLockedTicket(
    * resolution of a base conflict — so the loop cannot spin.
    */
   let state = initialRoundState(workspace, continuing);
+  if (delivering !== null) {
+    decidedOn = delivering.decided;
+    state = { ...state, finalReview: delivering.review, nodeReviews: delivering.node_reviews };
+    outcome = "approved";
+    detail =
+      `every finding the review routed to a person is decided (${delivering.decided
+        .map((row) => row.finding_key.slice(0, 12))
+        .join(", ")}), and the branch is still at ${delivering.head_commit}, the commit that ` +
+      "review judged: nothing was executed or reviewed again";
+    progress(detail);
+  }
 
   /**
    * What keeps the branch level with its base, and what judges a re-level.
@@ -350,7 +417,7 @@ async function runLockedTicket(
   };
 
   try {
-    while (state.round <= roundCeiling) {
+    while (delivering === null && state.round <= roundCeiling) {
       state = await confirmContinuation(state, progress);
 
       const entered = await provisionRound({
@@ -664,6 +731,53 @@ async function runLockedTicket(
       continue;
     }
 
+    // The review a continued remediation answered stays the one a person was
+    // shown: its findings routed to a person are closed by their decisions —
+    // shipped as they are, or handed to the executor and verified closed — and
+    // by nothing else a round did, so an approval that leaves one open is
+    // still the person's to give. A finding handed to the executor is recorded
+    // as closed only where the run's verification closed it, which is an
+    // approval; anything short of that leaves it open on the review.
+    if (continuing !== null && state.finalReview === continuing.review) {
+      const decisions = decisionsOn(continuing.review, continuing.reviewed_at, decided);
+      const handed = new Set(continuing.directions.map((direction) => direction.finding_key));
+      const owed = stillWithPerson(continuing.review, decisions, handed);
+      if (outcome === "approved" && owed.length > 0) {
+        outcome = "escalated";
+        detail =
+          `${detail}; ${owed.length} finding(s) the review routed to a person are still theirs: ` +
+          `${owed.map((finding) => finding.key).join(", ")}`;
+      }
+      const recorded = new Map(
+        [...decisions].filter(
+          ([key, decision]) =>
+            decision.choice === "ship_as_is" || (outcome === "approved" && handed.has(key)),
+        ),
+      );
+      decidedOn = [...recorded.values()];
+      state = {
+        ...state,
+        finalReview: recordDecisions(continuing.review, recorded, contract.scope.repository_id),
+      };
+    }
+
+    /**
+     * What a pull request is opened under: this run's attempts, or — for a
+     * delivery that ran none — the attempts of the run that sealed the commit
+     * the review judged.
+     */
+    const delivered =
+      delivering === null ? [...ledger.attempts] : attemptsThatSealed(priorAttempts, delivering.head_commit);
+    const deliveredUnder = delivered[delivered.length - 1]?.attempt_id ?? rootAttemptId;
+    if (delivering !== null && config.publish && delivered.length === 0) {
+      outcome = "terminated";
+      detail =
+        `every finding the review routed to a person is answered, but no attempt on ${config.ticket_key}'s ` +
+        `record sealed ${delivering.head_commit}, the commit that review judged, so there is no run to ` +
+        "open the pull request under";
+      progress(detail);
+    }
+
     let delivery: Delivery = {
       pull_request: null,
       merge: null,
@@ -679,13 +793,13 @@ async function runLockedTicket(
     // SCP-227: a re-level judged without an executor has no attempt to
     // publish under; its own block below pushes a `relevelled` branch, and a
     // verdict short of that leaves the merge commit local and unpushed.
-    if ((outcome === "approved" || outcome === "escalated") && config.publish && state.finalReview && ledger.attempts.length > 0) {
+    if ((outcome === "approved" || outcome === "escalated") && config.publish && state.finalReview && delivered.length > 0) {
       const levelled = await levelBeforePublish({
         config,
         state,
         end: { outcome, detail },
         ledger,
-        rootAttemptId,
+        rootAttemptId: deliveredUnder,
         finalReview: state.finalReview,
         progress,
       });
@@ -696,13 +810,14 @@ async function runLockedTicket(
 
     // A second test rather than an `else`: the block above can turn an approved
     // run into `base_conflict`, and the pull request must not open on it.
-    if ((outcome === "approved" || outcome === "escalated") && config.publish && state.finalReview && ledger.attempts.length > 0) {
+    if ((outcome === "approved" || outcome === "escalated") && config.publish && state.finalReview && delivered.length > 0) {
       delivery = await publish({
         config,
         contract,
         state,
         ledger,
-        rootAttemptId,
+        attempts: delivered,
+        rootAttemptId: deliveredUnder,
         finalReview: state.finalReview,
         detail,
         push: pushBranch,
@@ -759,6 +874,7 @@ async function runLockedTicket(
       detail,
       incomplete_review: state.incompleteReview,
       merged_base: delivery.merged_base,
+      decided: decidedOn,
     };
   } finally {
     // Whatever ended the run, nothing of it outlives the worktree. The last

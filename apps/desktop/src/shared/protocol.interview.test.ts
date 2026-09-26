@@ -111,6 +111,8 @@ describe("the conversation an editing session keeps", () => {
     resumeNew: false,
     lastPane: null,
     lastView: null,
+    specCut: null,
+    named: null,
     drift: null,
     change: null,
     form: editingForm(TaskModelsSchema.strip().parse(SettingsSchema.parse({}))),
@@ -161,13 +163,13 @@ describe("the conversation an editing session keeps", () => {
     expect(read.interviewSession).toBe("sdk-1");
   });
 
-  it("holds the cap and no more, so a long conversation cannot grow the record for ever", () => {
-    const many = Array.from({ length: INTERVIEW_CONVERSATION_CAP }, (_, index) => entry(index + 1));
-    expect(EditingSessionSchema.safeParse({ ...base, conversation: many }).success).toBe(true);
-    expect(
-      EditingSessionSchema.safeParse({ ...base, conversation: [...many, entry(INTERVIEW_CONVERSATION_CAP + 1)] })
-        .success,
-    ).toBe(false);
+  it("reads a conversation longer than the lines its writer keeps", () => {
+    // The writer keeps the record short; a reader that refused a longer one
+    // would lose the whole planning over it.
+    const many = Array.from({ length: INTERVIEW_CONVERSATION_CAP + 1 }, (_, index) => entry(index + 1));
+    expect(EditingSessionSchema.parse({ ...base, conversation: many }).conversation).toHaveLength(
+      INTERVIEW_CONVERSATION_CAP + 1,
+    );
   });
 });
 

@@ -40,6 +40,8 @@ function session(paths: string[], specSlug: string | null = null): EditingSessio
     change: null,
     lastPane: null,
     lastView: null,
+    specCut: null,
+    named: null,
     interviewModel: null,
   });
 }

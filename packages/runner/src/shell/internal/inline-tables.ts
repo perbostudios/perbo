@@ -165,6 +165,9 @@ export const INLINE_READ_ONLY: InlineReadOnlyRule[] = [
       "sys.stdout.write", "sys.stderr.write", "sys.stdout.flush", "sys.stderr.flush",
       "STDOUT.puts", "STDERR.puts", "$stdout.puts", "$stderr.puts",
     ],
+    // The standard streams as values: `json.load(sys.stdin)`, `for l in
+    // sys.stdin`, `print(x, file=sys.stderr)`. A stream is not a file.
+    names: ["sys.stdin", "sys.stdout", "sys.stderr"],
     forms: ["bare-print"],
   },
   {
@@ -190,7 +193,12 @@ export const INLINE_READ_ONLY: InlineReadOnlyRule[] = [
     ],
     // `NF` and the rest are what an `awk` program reads; `$1` is handled as a
     // literal-like token, being a field reference rather than a name.
-    names: ["NF", "NR", "FS", "OFS", "RS", "ORS", "FILENAME", "ARGV", "ARGC"],
+    names: ["NF", "NR", "FS", "OFS", "RS", "ORS", "FILENAME", "ARGV", "ARGC",
+      // Constants a module holds: regular-expression flags, numbers, alphabets.
+      "re.I", "re.IGNORECASE", "re.M", "re.MULTILINE", "re.S", "re.DOTALL", "re.X", "re.VERBOSE",
+      "math.pi", "math.e", "math.inf", "math.tau", "math.nan",
+      "string.ascii_letters", "string.digits", "string.punctuation",
+    ],
   },
   {
     id: "json",
@@ -201,8 +209,8 @@ export const INLINE_READ_ONLY: InlineReadOnlyRule[] = [
   {
     id: "file-read",
     reason:
-      "reading a file names a path, and the pass above already resolved every path in " +
-      "this code against the root; a mode that is not a read mode is refused here",
+      "reading a file writes nothing, wherever the file is, and the guard judges writes " +
+      "rather than reads; a mode that is not a read mode is refused here",
     calls: [
       "open", "readFileSync", "fs.readFileSync", "Path", "pathlib.Path",
       "sys.stdin.read", "sys.stdin.readlines", "sys.stdin.readline",

@@ -39,6 +39,7 @@ function state(): ProfileState {
     repositories: [],
     jobs: [],
     asks: {},
+    lastOpened: {},
     titles: { [repoId + ":PRB-1"]: "Renamed" },
     archived: [repoId + ":PRB-1"],
   });
@@ -77,6 +78,8 @@ const planning = (key: string): Record<string, unknown> => ({
   change: null,
   lastPane: null,
   lastView: null,
+  specCut: null,
+  named: null,
   interviewModel: null,
 });
 const running = (over: Partial<Job> = {}): Job =>
@@ -230,6 +233,7 @@ describe("discardTicket", () => {
       repositories: [],
       jobs: [],
       asks: {},
+      lastOpened: {},
       editingSessions: [planning("PRB-1"), planning("PRB-2")],
     }).editingSessions;
     await discardTicket(deps({ profile }), repo, "PRB-1");
@@ -248,6 +252,7 @@ describe("discardTicket", () => {
       repositories: [],
       jobs: [],
       asks: {},
+      lastOpened: {},
       editingSessions: [planning("PRB-1"), planning("PRB-2")],
     }).editingSessions;
     const stopped: string[][] = [];

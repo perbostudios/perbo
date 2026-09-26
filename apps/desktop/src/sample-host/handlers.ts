@@ -10,7 +10,7 @@ import {
 import { isNeverReadPath } from "@perbo/contracts/browser";
 import type { DriftVerdict } from "@perbo/planning/browser";
 import type { GraphEdit } from "@perbo/contracts/browser";
-import { openDrafts, turnMark } from "../shared/contract-editing.js";
+import { openDrafts, titleChanged, turnMark } from "../shared/contract-editing.js";
 import type { EditingOwner } from "../shared/contract-editing.js";
 import { archiveCsv, archiveRows, isArchivable, notArchivable } from "../shared/archive.js";
 import { heldRepository, isLive, isRun } from "../shared/jobs.js";
@@ -23,6 +23,10 @@ import {
   approved,
   at,
   decisionsAnswered,
+  decisionsHandWork,
+  decisionsTaken,
+  everyDecisionTaken,
+  principlesRecorded,
   detail,
   draftFromSpec,
   driftEpoch,
@@ -80,6 +84,12 @@ import {
   converse,
 } from "./records.js";
 
+/** The title a sample spec states, as the host reads one for the drafts list. */
+const sampleSpecTitle = (_repoId: string, slug: string): string | null => {
+  const markdown = specFiles()[slug];
+  return markdown === undefined ? null : readSpecSections(markdown).text.title;
+};
+
 /**
  * The sample host's answer to every Request kind, one entry each (D-100's
  * protocol is the whole list). The table is `RequestHandlers`, so a kind the
@@ -103,7 +113,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     return editing.open(request.target, request.legacy);
   },
   editingRead: (request) => editing.read(request.id),
-  drafts: () => openDrafts(editingRecords()),
+  drafts: () => openDrafts(editingRecords(), sampleSpecTitle),
   editingSave: (request) => editing.save(request.id, request.revision, request.repoId, request.form),
   editingSubmit: (request) =>
     editing.submit(request.id, request.revision, request.operationId, request.intent),
@@ -425,9 +435,14 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     });
     saveSpec(slug, rendered.markdown);
     editing.recordSpec(request.id, slug);
+    // A title this save changed from the one it read is one the person typed,
+    // as the host records it (D-127).
+    if (titleChanged(request)) editing.personTitled(request.id, request.title);
     // The change this save made, on every planning writing this spec: a save
     // of the same words changes nothing and marks nothing.
     marks.markChangeOn({ spec: before, plan: null }, { spec: specSectionsAt(slug), plan: null }, (each) => each.specSlug === slug);
+    // A new title has the drafts list read again, as the host has it.
+    if (titleChanged(request)) emit({ kind: "editing", sessionId: request.id });
     return { view: specView(request.id), conflicting: [] };
   },
   replan: async (request) => {
@@ -463,6 +478,13 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     // work, and a person who chose what drafts it did not choose again by
     // pressing this.
     const models = snapshot.taskModels?.[request.repoId + ":" + request.key];
+    // And under the name the person gave the spec, where the planning that
+    // records it is still there and the spec still states it, as the host
+    // reads it before the delete throws that planning away (D-127).
+    const planning = editingRecords().find(
+      (each) =>
+        each.repoId === request.repoId && each.key === request.key && each.phase !== "discarded",
+    );
     // The stopped ticket goes, and its attempts and evidence with it, which
     // this sample holds beside the ticket; the spec stays, because the new
     // plan is drafted from it. Deleted first, as the host deletes it, so the
@@ -474,10 +496,12 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     const markdown = specFiles()[named] ?? "";
     const drafted = newSampleTicket("", "plan_review");
     snapshot.tasks.push({ repoId: request.repoId, repository: "webstore", ticket: drafted });
-    draftFromSpec(drafted.key, markdown, named);
+    draftFromSpec(drafted.key, markdown, named, planning);
     if (models)
       snapshot.taskModels = { ...snapshot.taskModels, [request.repoId + ":" + drafted.key]: models };
     const opened = await editing.open({ kind: "planning", repoId: request.repoId, key: drafted.key }, undefined);
+    // Who named the spec goes with it to the new planning, as the host carries it (D-127).
+    editing.carryNamed(opened.id, planning?.named ?? null);
     emit({ kind: "records", repoId: request.repoId, key: drafted.key });
     return { sessionId: opened.id, pane: opened.nodes > 0 ? "graph" : "criteria" };
   },
@@ -496,11 +520,9 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
           throw new Error(
             "Answer the chat's questions first — its answers change the spec this drafts from.",
           );
-        // One press does both, as the host does it: the interview is still
-        // talking for as long as it is writing, and this press ends the
-        // conversation and drafts from what it left behind rather than asking
-        // for a stop by hand and then a second press. Behind the refusal
-        // above, so a standing question still stops it.
+        // The chat stopped before drafting, as the host stops it behind the
+        // Spec pane holding the press mid-turn, and behind the refusal above,
+        // so a standing question still stops it.
         stopSampleInterview(request.id);
         const markdown = specFiles()[session.specSlug] ?? "";
         refuseUnnumbered(markdown);
@@ -511,7 +533,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         // On the board before it is drafted, so the drafting finds the row to
         // record the spec on: a ticket is what says a spec has a plan.
         snapshot.tasks.push({ repoId: request.repoId, repository: "webstore", ticket });
-        draftFromSpec(ticket.key, markdown, session.specSlug);
+        draftFromSpec(ticket.key, markdown, session.specSlug, editing.read(request.id));
         job.resultKey = ticket.key;
       },
       1400,
@@ -532,7 +554,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
         // What the plan promised before it is drafted again, for the marks on
         // the re-draft.
         const before = marks.promiseAt({ id: request.repoId }, request.key);
-        draftFromSpec(request.key, markdown, session.specSlug);
+        draftFromSpec(request.key, markdown, session.specSlug, session);
         // A name the person gave the ticket outlives the re-draft, as the host
         // keeps it on the spec.
         const given = snapshot.titles?.[request.repoId + ":" + request.key];
@@ -553,7 +575,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
   },
   snapshot: () => ({
     ...structuredClone(snapshot),
-    drafts: openDrafts(editingRecords()),
+    drafts: openDrafts(editingRecords(), sampleSpecTitle),
     // The specs this sample workspace holds, as the host reads its own folder:
     // the picker subtracts the ones a planning or a ticket names and offers
     // what is left (D-129).
@@ -665,7 +687,7 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     const carried = request.archived
       ? request.keys.map((key) => ticketRow(key)).find((row) => !isArchivable(snapshot, row))
       : undefined;
-    if (carried !== undefined) throw new Error(notArchivable(carried.ticket.key));
+    if (carried !== undefined) throw new Error(notArchivable(carried.ticket.key, carried.ticket.state));
     const entries = request.keys.map((key) => request.repoId + ":" + ticketRow(key).ticket.key);
     snapshot.archived = request.archived
       ? [...new Set([...(snapshot.archived ?? []), ...entries])]
@@ -720,6 +742,14 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
     if (request.text.length === 0) delete asks[request.repoId];
     else asks[request.repoId] = request.text;
     snapshot.asks = asks;
+    return null;
+  },
+  ticketOpened: (request) => {
+    // As the host keeps it: the time the ticket's page opened, told on its own and invalidating nothing.
+    if (!snapshot.tasks.some((row) => row.repoId === request.repoId && row.ticket.key === request.key))
+      throw new Error("Sample task not found in this repository.");
+    snapshot.lastOpened = { ...snapshot.lastOpened, [request.repoId + ":" + request.key]: new Date().toISOString() };
+    emit({ kind: "opened", lastOpened: { ...snapshot.lastOpened } });
     return null;
   },
   rename: (request) => {
@@ -804,9 +834,35 @@ export const handlers: RequestHandlers<EditingOwner | undefined> = {
       job.resultKey = request.key;
     }, 1000, owner),
   run: (request) => startWork(request.kind, request.repoId, request.key, request.publish),
-  decide: (request) => startWork(request.kind, request.repoId, request.key, false),
+  decide: (request) => {
+    // Each answer is recorded on its finding before the run, as the host does.
+    decisionsTaken.set(request.key, [
+      ...(decisionsTaken.get(request.key) ?? []).filter(
+        (row) => !request.decisions.some((decision) => decision.findingKey === row.finding_key),
+      ),
+      ...request.decisions.map((decision) => ({
+        finding_key: decision.findingKey,
+        choice: decision.choice,
+        note: decision.answer,
+        decided_at: new Date().toISOString(),
+      })),
+    ]);
+    // The principle, as the host records it beside the answers (D-065); one
+    // with no finding answered carries the run on as a principle alone does.
+    principlesRecorded.push(request.answer);
+    if (request.decisions.length === 0) decisionsAnswered.add(request.key);
+    // A decision that answers findings carries on the run that stopped for it,
+    // and publishes as that run was going to; a principle alone publishes
+    // nothing, as the host has it.
+    const stopped = snapshot.jobs
+      .filter((entry) => entry.repoId === request.repoId && entry.key === request.key && isRun(entry))
+      .at(-1);
+    const publish = request.decisions.length > 0 && (stopped?.publish ?? false);
+    return startWork(request.kind, request.repoId, request.key, publish);
+  },
   principle: (request) =>
     job(request.kind, request.repoId, request.key, () => {
+      principlesRecorded.push(request.answer);
       decisionsAnswered.add(request.key);
     }),
   verdict: (request) =>
@@ -884,7 +940,20 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
     repoId,
     key,
     () => {
-      if (!decisionsAnswered.has(key)) row.ticket.state = "changes_requested";
+      // Every finding routed to a person answered, on the change the review
+      // judged: the loop delivers — after one round verified closed where an
+      // answer handed a finding to the executor, and without one where every
+      // answer shipped it as it is — and a run that publishes nothing leaves
+      // no pull request (D-132).
+      if (kind === "decide" && everyDecisionTaken(key)) {
+        if (decisionsHandWork(key)) approved.add(key);
+        row.ticket.state = "pr_open";
+        if (publish) {
+          row.ticket.delivery.state = "open";
+          row.ticket.delivery.pull_request_number = 418;
+          row.ticket.delivery.pull_request_url = "https://github.com/example/webstore/pull/418";
+        }
+      } else if (!decisionsAnswered.has(key)) row.ticket.state = "changes_requested";
       else {
         row.ticket.state = "pr_open";
         row.ticket.delivery.state = "open";
@@ -900,7 +969,6 @@ function startWork(kind: "run" | "decide", repoId: string, key: string, publish:
   opened.publish = publish;
   row.ticket.approved_at = at;
   row.ticket.state = "executing";
-  if (kind === "decide") decisionsAnswered.add(key);
   // A filed ticket whose loop starts again is back on Home, as the host has it.
   const entry = repoId + ":" + row.ticket.key;
   if (snapshot.archived?.includes(entry)) {

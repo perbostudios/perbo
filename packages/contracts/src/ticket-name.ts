@@ -1,3 +1,6 @@
+/** The most characters a ticket's name has, however it was named (D-127). */
+export const TICKET_NAME_CAP = 60;
+
 /**
  * Whether two ticket names are the same name to a person scanning the board:
  * equal once case is ignored and every run of whitespace is one space

@@ -1,5 +1,6 @@
 import {
   failedChecks,
+  type ExecutionAttempt,
   type GithubCredential,
   type PlanContractWithCriteria,
   type ReviewArtifact,
@@ -65,6 +66,12 @@ interface PublishArgs {
  */
 export async function publish(
   args: PublishArgs & {
+    /**
+     * The attempts the change was made by, oldest first: this run's, or where
+     * a person's decisions delivered it without a round, the run whose change
+     * the review judged (D-132).
+     */
+    attempts: readonly ExecutionAttempt[];
     open: LoopPorts["open"];
     /** The review that judged the change; the pull request body states it. */
     finalReview: ReviewArtifact;
@@ -84,9 +91,9 @@ export async function publish(
   await args.push({ worktree: state.workspace.path, branch: state.workspace.branch, onProgress: progress });
   const body = pullRequestBody({
     contract,
-    attempt: ledger.last()!,
+    attempt: args.attempts[args.attempts.length - 1]!,
     review: args.finalReview,
-    attempts: [...ledger.attempts],
+    attempts: [...args.attempts],
     // Where the work came from, so the person merging reads it here
     // rather than going back to the ticket for it.
     source: config.ticket_source,
@@ -134,7 +141,7 @@ export async function publish(
     state_root: config.state_root,
     ticket_key: config.ticket_key,
     paths_allowed: contract.scope.paths_allowed,
-    attempt_id: ledger.last()?.attempt_id ?? args.rootAttemptId,
+    attempt_id: args.attempts[args.attempts.length - 1]?.attempt_id ?? args.rootAttemptId,
     now: clock(),
   });
   progress(merge.merged ? `merged: ${merge.detail}` : `not merged — ${merge.detail}`);

@@ -23,6 +23,7 @@ import { judgeCommand, matchesListEntry } from "../admission.js";
 import { EFFECT_FREE_VERBS, judgePreToolCall, type PreToolGuardState } from "../pretool.js";
 import type { ProhibitedHit } from "../prohibited.js";
 import { prepareScratchDirectory } from "../scratch.js";
+import { everySegment } from "../shell/index.js";
 
 const ChangeSchema = z
   .object({
@@ -112,11 +113,19 @@ export function codexCommandDecision(
       spec_folder: state.spec_folder ?? null,
     },
   });
+  /**
+   * Every command the line runs, each judged as itself: a nested shell's
+   * wrapper runs nothing of its own and stands for its nested segments, and a
+   * substitution's segments run beside the command they stand in. A segment
+   * that writes is judged as the hook judges it — by where the writes land,
+   * which the decision above already answered — so `echo "$(rm -rf src/x)"`
+   * is judged as `rm -rf src/x` is.
+   */
   const eligible = (segment: (typeof inspection.segments)[number]): boolean => {
-    if (segment.unreadablePrograms.length > 0) return false;
-    if (segment.nested.length > 0)
-      return segment.accounted && segment.nested.every(eligible);
+    if (segment.unreadablePrograms.length > 0 || !segment.accounted || !segment.substitutions.every(eligible)) return false;
+    if (segment.nested.length > 0) return segment.nested.every(eligible);
     return (
+      segment.mutating ||
       segment.programs.length === 0 ||
       segment.programs.every((program) => EFFECT_FREE_VERBS.has(program)) ||
       state.allow_list.some((entry) =>
@@ -126,13 +135,22 @@ export function codexCommandDecision(
   };
   const admitted =
     inspection.segments.length > 0 && inspection.segments.every(eligible);
+  // What the reading could not account for says how the line could be written
+  // so that it can: a word a substitution builds where the command still reads
+  // options is an operand once `--` stands before it.
+  const unread = [
+    ...new Set(everySegment(inspection.segments).flatMap((segment) => (segment.accounted ? [] : segment.notes))),
+  ];
   return admitted
     ? decision
     : {
         ...decision,
         decision: "denied" as const,
         rule: "command_allow_list" as const,
-        reason: "Command is outside the runner's admitted command set.",
+        reason:
+          unread.length === 0
+            ? "Command is outside the runner's admitted command set."
+            : `Command is outside the runner's admitted command set: ${unread.join("; ")}.`,
         target: command,
       };
 }

@@ -31,7 +31,7 @@ async function pane() {
   const editor: ReturnType<typeof useContractEditing> = {
     session: EditingSessionSchema.parse({
       version: 1, id: sessionId, repoId, key, digest: null, revision: 0, resumeNew: false,
-      lastPane: null, lastView: null, drift: null, change: null, interviewModel: null,
+      lastPane: null, lastView: null, specCut: null, named: null, drift: null, change: null, interviewModel: null,
       form, phase: "editing", error: null, operation: null,
     }),
     form, repoId, record: undefined, loading: false, saving: false, submitting: null, error: null,
