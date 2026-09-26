@@ -659,6 +659,14 @@ export const EditingSessionSchema = z.strictObject({
    */
   asking: AskingSchema.nullable().default(null),
   /**
+   * The askings put while {@link asking} stood, by the `asked` entry each
+   * arrived on, in the order they arrived (D-117). The group a person is
+   * answering is never replaced: a later asking waits here and is put, from
+   * its first group, once nothing ahead of it is left to answer. Empty whenever
+   * nothing is being asked.
+   */
+  askingNext: z.array(z.number().int().min(1)).default([]),
+  /**
    * How many nodes the plan this session drafted has, zero for a flat plan or
    * for no plan at all.
    *

@@ -665,9 +665,15 @@ This is the one home for the decisions that govern Perbo. Every other document c
   counted back out of the turns, which cannot tell an answer from a question the person typed
   instead: a part answered in the person's own words still answers the group, because the letter it
   goes under says which question it answers; a group of one part has no letter to say that with, so
-  what it sends is a sentence like any other. A turn that is not the group's answer ends the asking,
-  because the session is about to answer what was said and a card left standing would answer a
-  question nobody is asking any more. Reading the answer back off the turn rather than flagging it on
+  what it sends is a sentence like any other. A group the person is answering is never replaced: the
+  session may ask again before every group it asked is answered — often as it reads the answer to the
+  group before — and what it asks then waits behind every group still to be answered, put in the
+  order it was asked once nothing ahead of it is left to answer, so the picks and words on the card stay
+  where they are and no group asked is lost. The same holds for a problem between the plan and the
+  spec put on the card: a question the session asks while one is up waits behind it, and only a later
+  reading's problem takes the place of the problem the reading before it put. A turn that is not the
+  group's answer ends the asking and every asking waiting behind it, because the session is about to
+  answer what was said and a card left standing would answer a question nobody is asking any more. Reading the answer back off the turn rather than flagging it on
   the way in means a person who types the lettered lines out themselves has answered, wherever they
   typed them; that is the same widening as a person typing an option's wording out, and it is meant.
   The conversation keeps the questions either way, behind the line that says they were asked: a
@@ -677,17 +683,24 @@ This is the one home for the decisions that govern Perbo. Every other document c
 - Why: a person sees only what needs them (D-001), and prose questions arriving five at a time are
   read as a wall and answered as one. Metering them is the reader's job rather than the session's,
   because a rule the session is asked to follow is one it can drift from, while a queue it cannot
-  reach holds. The wording that goes back is the option's own so the answer is the person's sentence
+  reach holds. That queue is the host's and not `ask_options`'s, which neither refuses nor holds a
+  second call: the tool returns before anything is answered and cannot know which groups still stand,
+  and a refusal would drop the question where waiting only delays it. A card replaced under a person
+  part way through it takes their picks with it and leaves the questions it asked to be typed out by
+  hand. The wording that goes back is the option's own so the answer is the person's sentence
   and not a token only the app understands, which also keeps what the session wrote out of every
   action parameter ([ADR-0023](adr/0023-untrusted-context-boundary.md) §4): it reaches a turn and
   nothing else.
 - Built: `ask_options` and the `asked` event beside the Architect's other tools, bounded at four
   groups of four parts of eight options and refused at the tool above that; the host relaying it
   under the redaction every other field the session writes is given, flattening the
-  whitespace a label goes back down as; the asking and the count answered recorded on the planning,
-  moved on by an answer — a lettered line a part, whatever is said under the letter, so a part in the
-  person's own words moves it as a picked one does — and ended by anything else or by the line itself
-  falling out of the conversation's cap; and the card, in the dock and on the Problems pane alike,
+  whitespace a label goes back down as; the asking, the count answered and the askings waiting behind
+  it (`asking` and `askingNext`) recorded on the planning, so a restart keeps them, a later asking
+  added behind the one standing and a reading's problem taking the place of the one before it, moved
+  on by an answer — a lettered line a part, whatever is said under the letter, so a part in the
+  person's own words moves it as a picked one does — with the last group's answer putting the first
+  asking waiting, and ended with everything waiting by anything else, an asking whose line fell out of
+  the conversation's cap being passed over for the one behind it; and the card, in the dock and on the Problems pane alike,
   which puts one group with its parts lettered, gives each part that said the answer is none of these
   a box inside that answer, holding what is typed in it to the room the group's one turn leaves
   (D-NEW-nothing-shown-is-cut), and sends from the bar at its foot, enabled once every part is picked or

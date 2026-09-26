@@ -376,6 +376,44 @@ describe("the interview's conversation on an editing session", () => {
     expect(ended.revision).toBe(session.revision);
   });
 
+  it("puts the session's own question behind a problem in front of the person, and a later reading's problem over the one before", async () => {
+    const f = await fixture();
+    const session = await f.editing.open({ kind: "new", repoId });
+    const id = session.id;
+    const at = "2026-01-01T00:00:00.000Z";
+    const say = (line: Parameters<typeof f.editing.converse>[1]) => f.editing.converse(id, line, at);
+    const finding = (heading: string) => ({
+      heading,
+      difference: `${heading} says something else.`,
+      options: [
+        { label: "Change the plan", detail: null, recommended: true },
+        { label: "Change the spec", detail: null, recommended: false },
+      ],
+    });
+    const verdict = (findings: ReturnType<typeof finding>[]) =>
+      ({ findings, dismissed: false }) as unknown as Parameters<typeof f.editing.landDrift>[1];
+    f.editing.landDrift(id, verdict([finding("Criterion 1 and R1")]), false, say, () => undefined);
+    const problem = f.editing.read(id).asking!.entry;
+    // The session asks while the problem is in front of the person: it waits.
+    const asked = say({
+      kind: "asked",
+      groups: [{ title: "Where it lands", parts: [{ question: "Where?", options: [{ label: "Home", detail: null, recommended: false }, { label: "Board", detail: null, recommended: false }] }] }],
+    });
+    f.editing.beginAsking(id, asked.n);
+    expect(f.editing.read(id).asking).toEqual({ entry: problem, answered: 0 });
+    expect(f.editing.read(id).askingNext).toEqual([asked.n]);
+    // A later reading finds another problem: it replaces the one it read
+    // before, and the question still waits behind it.
+    f.editing.landDrift(id, verdict([finding("Criterion 2 and R2")]), false, say, () => undefined);
+    const next = f.editing.read(id).asking!.entry;
+    expect(next).toBeGreaterThan(asked.n);
+    expect(f.editing.read(id).askingNext).toEqual([asked.n]);
+    // Closed by hand: the problem's card comes down and the question is put.
+    f.editing.landDrift(id, verdict([]), false, say, () => undefined);
+    expect(f.editing.read(id).asking).toEqual({ entry: asked.n, answered: 0 });
+    expect(f.editing.read(id).askingNext).toEqual([]);
+  });
+
   it("records the interview's own session id, which is what continues it", async () => {
     const f = await fixture();
     const session = await f.editing.open({ kind: "new", repoId });

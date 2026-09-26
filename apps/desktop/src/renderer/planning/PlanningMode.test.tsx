@@ -5777,6 +5777,52 @@ describe("the interview docked in planning mode (SCP-313)", () => {
     expect(labels.at(-1)).toContain("Architect's call");
   });
 
+  it("keeps the group being answered, picks and words, when the Architect asks again, and puts the new group after it", async () => {
+    // The Architect reads the answer to the first group and asks again while
+    // the person is on the second: the new group waits behind the one they
+    // are answering rather than replacing it (D-117).
+    const plan = await planning();
+    location.hash = `planning/${plan.id}/spec`;
+    mount();
+    await screen.findByLabelText("Spec title");
+    fireEvent.change(composer(), { target: { value: "ask me in waves" } });
+    fireEvent.keyDown(composer(), { key: "Enter" });
+    const first = await within(dock()).findByRole("group", { name: "Where the reminder lands" }, { timeout: 5000 });
+    fireEvent.click(within(first).getByRole("radio", { name: /On Home/ }));
+    sendGroup(first);
+
+    // On the second group: one part picked, the other said in their own words.
+    const second = await within(dock()).findByRole("group", { name: "When the reminder goes" }, { timeout: 5000 });
+    fireEvent.click(within(second).getByRole("radio", { name: /A day before/ }));
+    fireEvent.click(within(second).getAllByRole("radio", { name: /Something else/ })[1]!);
+    fireEvent.change(within(second).getByLabelText("Your own words for 2b"), { target: { value: "Whoever set it" } });
+
+    // The new group arrives: it is in the conversation and on the record, and
+    // the card in front of the person is the one they were answering, as they
+    // left it.
+    await within(dock()).findByText(/Asked one question, about What the reminder is called/, {}, { timeout: 5000 });
+    expect((await editingRead(plan.id)).askingNext).toHaveLength(1);
+    const standing = within(dock()).getByRole("group", { name: "When the reminder goes" });
+    expect(standing).toBe(second);
+    expect((within(standing).getByRole("radio", { name: /A day before/ }) as HTMLInputElement).checked).toBe(true);
+    expect((within(standing).getByLabelText("Your own words for 2b") as HTMLTextAreaElement).value).toBe("Whoever set it");
+    expect(within(dock()).queryByRole("group", { name: "What the reminder is called" })).toBeNull();
+
+    // Sent, and the group that waited is put.
+    sendGroup(standing);
+    await waitFor(async () =>
+      expect((await editingRead(plan.id)).conversation.map((entry) => entry.line)).toContainEqual({
+        kind: "turn",
+        text: "a) A day before\nb) Whoever set it",
+      }),
+    );
+    const third = await within(dock()).findByRole("group", { name: "What the reminder is called" }, { timeout: 5000 });
+    fireEvent.click(within(third).getByRole("radio", { name: /Due today/ }));
+    sendGroup(third);
+    await waitFor(async () => expect((await editingRead(plan.id)).asking).toBeNull(), { timeout: 5000 });
+    expect(within(dock()).queryByRole("group", { name: "What the reminder is called" })).toBeNull();
+  });
+
   it("takes the questions away once the person says something of their own on a lone part", async () => {
     // A turn that is not the group's answer ends the asking: the session
     // answers what was said instead, and a card left standing would answer a

@@ -1839,6 +1839,8 @@ const sampleDoing = new Map<string, InterviewDoing>();
 const doingOf = (id: string): InterviewDoing | null =>
   isWorking(id) ? (sampleDoing.get(id) ?? null) : null;
 const sampleTurns = new Map<string, number>();
+/** The plannings whose sample asked in waves and asks again on the answer to its first group. */
+const askingInWaves = new Set<string>();
 /** Whether this planning is still there to be spoken to. */
 function stillThere(id: string): boolean {
   try {
@@ -2333,6 +2335,79 @@ export function answerSampleTurn(id: string, text: string): void {
         if (sampleWorking.has(id) && stillThere(id)) endSampleTurn(id);
       }, 400);
     }, 150);
+    return;
+  }
+  // Asking again as it reads the answer to the first group, while the person
+  // is on the second: what a real session does when an answer raises a
+  // question of its own. The new group waits behind the one being answered
+  // rather than replacing it (D-117). The pause is the session reading.
+  if (askingInWaves.delete(id)) {
+    setTimeout(() => {
+      if (!sampleWorking.has(id) || !stillThere(id)) return;
+      const asked = converse(id, {
+        kind: "asked",
+        groups: [
+          {
+            title: "What the reminder is called",
+            parts: [
+              {
+                question: "What does the reminder say?",
+                options: [
+                  { label: "Due today", detail: null, recommended: true },
+                  { label: "Nearly due", detail: null, recommended: false },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      editing.beginAsking(id, asked.n);
+      askingChanged(id);
+      endSampleTurn(id);
+    }, 600);
+    return;
+  }
+  if (/\bask me in waves\b/i.test(text)) {
+    const asked = converse(id, {
+      kind: "asked",
+      groups: [
+        {
+          title: "Where the reminder lands",
+          parts: [
+            {
+              question: "Where does the reminder show?",
+              options: [
+                { label: "On Home", detail: null, recommended: true },
+                { label: "On the board", detail: null, recommended: false },
+              ],
+            },
+          ],
+        },
+        {
+          title: "When the reminder goes",
+          parts: [
+            {
+              question: "How early does it go?",
+              options: [
+                { label: "A day before", detail: null, recommended: true },
+                { label: "An hour before", detail: null, recommended: false },
+              ],
+            },
+            {
+              question: "Who gets it?",
+              options: [
+                { label: "The owner", detail: null, recommended: false },
+                { label: "Everyone on it", detail: null, recommended: false },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    editing.beginAsking(id, asked.n);
+    askingChanged(id);
+    askingInWaves.add(id);
+    endSampleTurn(id);
     return;
   }
   // Asking with options, as the real session does through ask_options: two

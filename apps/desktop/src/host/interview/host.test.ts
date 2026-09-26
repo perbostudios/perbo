@@ -73,8 +73,10 @@ function host(
   repo: RegisteredRepository,
   /** The catalog the chat's model is read from; none by default, so it starts on the planning's own. */
   known: InterviewDeps["catalogs"]["known"] = () => Promise.resolve(undefined),
+  /** The records as the app finds them on disk as it starts. */
+  saved: EditingSession[] = [],
 ) {
-  let records: EditingSession[] = [];
+  let records: EditingSession[] = structuredClone(saved);
   const told: Change[] = [];
   /** The planning each turn's change was marked on, with the pair it was measured from. */
   const marked: [string, PromisePair | null | undefined][] = [];
@@ -139,6 +141,8 @@ function host(
     open: (target: "new" | "fresh" = "new"): Promise<EditingSession> =>
       editing.open({ kind: target, repoId }),
     conversation: (id: string): InterviewEntry[] => editing.read(id).conversation,
+    /** The records as they would be written to disk. */
+    records: (): EditingSession[] => JSON.parse(JSON.stringify(records)) as EditingSession[],
   };
 }
 /** The plan as a turn found it; what is marked against it is the marks' own test. */
@@ -265,6 +269,125 @@ describe("a person's turn", () => {
     await expect(w.interviews.turn(session.id, "Anybody there?")).rejects.toThrow(
       "The chat is not listening.",
     );
+  });
+});
+
+describe("questions asked while others stand (D-117)", () => {
+  /** A group of one part, answered by an option's own words. */
+  const group = (title: string, first: string, second: string) => ({
+    title,
+    parts: [{ question: `${title}?`, options: [{ label: first }, { label: second }] }],
+  });
+  /** What the host last pushed as the asking in front of the person. */
+  const pushed = (told: Change[]) =>
+    told.filter((change) => change?.kind === "interview").at(-1)?.asking;
+
+  it("puts a later asking behind the group being answered, in the order they came, and keeps both through a restart", async () => {
+    const repo = repository();
+    const w = host(repo);
+    const session = await w.open();
+    const id = session.id;
+    w.editing.recordSpec(id, "retry-a-failed-run");
+    await w.interviews.start(id);
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    child.say({ type: "asked", groups: [group("Where it lands", "Home", "Board"), group("Who sees it", "Everyone", "Owners")] });
+    const first = w.conversation(id).find((entry) => entry.line.kind === "asked")!.n;
+    // The first group answered: the second is in front of the person, and the
+    // Architect reads that answer and asks again while they are on it.
+    await w.interviews.turn(id, "Home");
+    expect(w.editing.read(id).asking).toEqual({ entry: first, answered: 1 });
+    child.say({ type: "asked", groups: [group("What it is called", "Retry", "Run again")] });
+    const second = w.conversation(id).filter((entry) => entry.line.kind === "asked").at(-1)!.n;
+    expect(second).toBeGreaterThan(first);
+    // The group being answered is not replaced: the new one waits behind it.
+    expect(w.editing.read(id).asking).toEqual({ entry: first, answered: 1 });
+    expect(w.editing.read(id).askingNext).toEqual([second]);
+    expect(pushed(w.told)).toEqual({ entry: first, answered: 1 });
+
+    // A restart reads the record back as it was written: both are still there.
+    const back = host(repo, undefined, w.records());
+    expect(back.editing.read(id).asking).toEqual({ entry: first, answered: 1 });
+    expect(back.editing.read(id).askingNext).toEqual([second]);
+    await back.interviews.start(id);
+    back.spawned[0]!.child.say(started("sdk-1"));
+    // Answering the group in front of them puts the one that waited.
+    await back.interviews.turn(id, "Owners");
+    expect(back.editing.read(id).asking).toEqual({ entry: second, answered: 0 });
+    expect(back.editing.read(id).askingNext).toEqual([]);
+    expect(pushed(back.told)).toEqual({ entry: second, answered: 0 });
+    await back.interviews.turn(id, "Retry");
+    expect(back.editing.read(id).asking).toBeNull();
+  });
+
+  it("ends what waits with the group in front, where the person says something of their own", async () => {
+    const w = host(repository());
+    const session = await w.open();
+    const id = session.id;
+    w.editing.recordSpec(id, "retry-a-failed-run");
+    await w.interviews.start(id);
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    child.say({ type: "asked", groups: [group("Where it lands", "Home", "Board")] });
+    child.say({ type: "asked", groups: [group("What it is called", "Retry", "Run again")] });
+    // The session is about to answer what was said, not the questions.
+    await w.interviews.turn(id, "Actually, let us talk about the board first");
+    expect(w.editing.read(id).asking).toBeNull();
+    expect(w.editing.read(id).askingNext).toEqual([]);
+  });
+
+  it("passes over an asking whose line the conversation no longer holds, to the one waiting behind it", async () => {
+    const repo = repository();
+    const w = host(repo);
+    const session = await w.open();
+    const id = session.id;
+    w.editing.recordSpec(id, "retry-a-failed-run");
+    await w.interviews.start(id);
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    child.say({ type: "asked", groups: [group("Where it lands", "Home", "Board")] });
+    child.say({ type: "asked", groups: [group("What it is called", "Retry", "Run again"), group("Who sees it", "Everyone", "Owners")] });
+    const [first, second] = w.conversation(id).filter((entry) => entry.line.kind === "asked").map((entry) => entry.n);
+    expect(w.editing.read(id).askingNext).toEqual([second]);
+    // The cap has dropped the first asking's line: there is nothing left to
+    // put it from, so the turn is read against the one that waited.
+    const dropped = w.records().map((record) =>
+      record.id === id
+        ? { ...record, conversation: record.conversation.filter((entry) => entry.n !== first) }
+        : record,
+    );
+    const back = host(repo, undefined, dropped);
+    await back.interviews.start(id);
+    back.spawned[0]!.child.say(started("sdk-1"));
+    await back.interviews.turn(id, "Retry");
+    expect(back.editing.read(id).asking).toEqual({ entry: second, answered: 1 });
+    expect(back.editing.read(id).askingNext).toEqual([]);
+  });
+
+  it("puts nothing for an asking the record does not hold, though its line is in the conversation", async () => {
+    // A record holding only the later of two askings says nothing of the
+    // earlier one: its group is still a line in the conversation, but nothing
+    // on the record says it is unanswered, so nothing puts it again.
+    const repo = repository();
+    const w = host(repo);
+    const session = await w.open();
+    const id = session.id;
+    w.editing.recordSpec(id, "retry-a-failed-run");
+    await w.interviews.start(id);
+    const child = w.spawned[0]!.child;
+    child.say(started("sdk-1"));
+    child.say({ type: "asked", groups: [group("Where it lands", "Home", "Board")] });
+    child.say({ type: "asked", groups: [group("What it is called", "Retry", "Run again")] });
+    const [first, second] = w.conversation(id).filter((entry) => entry.line.kind === "asked").map((entry) => entry.n);
+    const lost = w.records().map((record) =>
+      record.id === id ? { ...record, asking: { entry: second!, answered: 0 }, askingNext: [] } : record,
+    );
+    const back = host(repo, undefined, lost);
+    await back.interviews.start(id);
+    back.spawned[0]!.child.say(started("sdk-1"));
+    await back.interviews.turn(id, "Retry");
+    expect(back.editing.read(id).asking).toBeNull();
+    expect(first).toBeLessThan(second!);
   });
 });
 

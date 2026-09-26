@@ -773,8 +773,9 @@ export class InterviewHost {
     }
     if (this.condenseAgain(id, read.line)) return;
     const asked = this.say(id, read.line);
-    // What the person is being put, from the line it arrived on: recorded
-    // rather than counted back out of the turns (D-117).
+    // Put to the person, from the line it arrived on, or behind the group
+    // they are answering where one stands: recorded rather than counted back
+    // out of the turns (D-117).
     if (asked !== null) {
       this.deps.editing.beginAsking(id, asked.n);
       this.askingChanged(id);

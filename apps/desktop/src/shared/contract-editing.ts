@@ -660,13 +660,17 @@ export class ContractEditing {
   }
 
   /**
-   * The asking this session is now putting to the person, from the entry it
-   * arrived on. A later asking replaces an earlier one whole: the session has
-   * said what it wants to know now.
+   * An asking the session has put, from the entry it arrived on. Where nothing
+   * is being asked it is put in front of the person; where a group stands, it
+   * waits behind it and behind any asking already waiting, in the order they
+   * arrived. The group a person is answering is never replaced: they may have
+   * picked and typed on it, and the session asking again — often as it reads
+   * the answer to the group before — does not unask it.
    */
   beginAsking(id: string, entry: number): void {
     this.update(id, (session) => {
-      session.asking = { entry, answered: 0 };
+      if (standingAsked(session) === null) session.asking = { entry, answered: 0 };
+      else session.askingNext = [...session.askingNext, entry];
     });
   }
 
@@ -674,43 +678,54 @@ export class ContractEditing {
    * What one turn does to the asking in front of the person.
    *
    * An answer to the group they are on moves them to the next, and the last of
-   * them ends the asking. Anything else ends it too: they have said something
-   * of their own, the session is about to answer that rather than the
-   * questions, and a card left standing would answer a question nobody is
-   * asking any more. The questions stay in the conversation to be read.
+   * them puts the asking that waited behind it, if any. Anything else ends the
+   * asking and every one waiting: they have said something of their own, the
+   * session is about to answer that rather than the questions, and a card left
+   * standing would answer a question nobody is asking any more. The questions
+   * stay in the conversation to be read.
    *
    * The groups come from the conversation, so an asking whose line the cap has
-   * dropped ends here rather than leaving a card with nothing behind it.
+   * dropped is passed over rather than leaving a card with nothing behind it.
    */
   answerAsking(id: string, text: string): void {
     this.update(id, (session) => {
-      const asking = session.asking;
-      if (asking === null) return;
-      const entry = session.conversation.find((line) => line.n === asking.entry);
-      const line = entry?.line;
-      if (line === undefined || line.kind !== "asked") {
-        session.asking = null;
-        return;
-      }
-      const group = line.groups[asking.answered];
+      const standing = standingAsked(session);
+      if (standing === null) return;
+      const group = standing.line.groups[standing.asking.answered];
       if (group === undefined || !answersGroup(group, text)) {
         session.asking = null;
+        session.askingNext = [];
         return;
       }
-      const answered = asking.answered + 1;
-      session.asking = answered >= line.groups.length ? null : { entry: asking.entry, answered };
+      const answered = standing.asking.answered + 1;
+      if (answered < standing.line.groups.length) session.asking = { entry: standing.asking.entry, answered };
+      else putNextAsking(session);
     });
   }
 
   /**
-   * End the asking without a turn: what it put no longer waits on the person
-   * — a problem between the plan and the spec that a reading found closed,
-   * because they moved the plan or the spec by hand rather than answering.
-   * The line stays in the conversation to be read.
+   * End the asking in front of the person without a turn: what it put no
+   * longer waits on them — a problem between the plan and the spec that a
+   * reading found closed, because they moved the plan or the spec by hand
+   * rather than answering. The asking waiting behind it, if any, is put. The
+   * line stays in the conversation to be read.
    */
   endAsking(id: string): void {
     this.update(id, (session) => {
-      session.asking = null;
+      putNextAsking(session);
+    });
+  }
+
+  /**
+   * Put a problem a reading found in front of the person, over the problem
+   * the reading before it put, which it replaces: a reading says what is open
+   * now. Only ever called where no question of the session's own stands
+   * ({@link landDrift}), so nothing the person is answering is replaced, and
+   * whatever waits behind stays waiting.
+   */
+  private putProblem(id: string, entry: number): void {
+    this.update(id, (session) => {
+      session.asking = { entry, answered: 0 };
     });
   }
 
@@ -1008,7 +1023,7 @@ export class ContractEditing {
       drift: { open: open.length },
     });
     if (asked !== null && asked.line.kind === "asked") {
-      this.beginAsking(id, asked.n);
+      this.putProblem(id, asked.n);
       askingChanged();
     }
   }
@@ -1362,6 +1377,30 @@ export class ContractEditing {
       session.revision++;
     });
   }
+}
+
+/**
+ * The asking in front of the person with the `asked` line it came from, having
+ * passed over any whose line the conversation's cap has dropped; null where
+ * nothing is being asked.
+ */
+function standingAsked(
+  session: EditingSession,
+): { asking: NonNullable<EditingSession["asking"]>; line: Extract<InterviewEntry["line"], { kind: "asked" }> } | null {
+  while (session.asking !== null) {
+    const asking = session.asking;
+    const line = session.conversation.find((entry) => entry.n === asking.entry)?.line;
+    if (line !== undefined && line.kind === "asked") return { asking, line };
+    putNextAsking(session);
+  }
+  return null;
+}
+
+/** Put the first asking waiting behind the one in front, or nothing where none waits. */
+function putNextAsking(session: EditingSession): void {
+  const [next, ...rest] = session.askingNext;
+  session.asking = next === undefined ? null : { entry: next, answered: 0 };
+  session.askingNext = rest;
 }
 
 export { LEAVE_IT_TO_THE_INTERVIEW, PART_LETTERS, answersGroup };
