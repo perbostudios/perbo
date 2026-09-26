@@ -1179,3 +1179,215 @@ describe("an abbreviated long option and a backup suffix, on both executors", ()
     }
   });
 });
+
+/**
+ * The state the D-073 review probed both executors with: the profile's own
+ * lists, `src/**` to write, and a prohibited key on disk under it.
+ */
+function reviewTree(prefix: string) {
+  const tree = realpathSync(scratch(prefix));
+  for (const directory of ["src/keys", "src/generated", "src/secret", "src/other"]) {
+    mkdirSync(join(tree, directory), { recursive: true });
+  }
+  writeFileSync(join(tree, "src/keys/k.pem"), "key\n");
+  writeFileSync(join(tree, "src/a.ts"), "source\n");
+  writeFileSync(join(tree, "README.md"), "readme\n");
+  const state: PreToolGuardState = {
+    root: tree,
+    tmpdir: null,
+    cwd: tree,
+    paths_allowed: ["src/**"],
+    paths_prohibited: ["**/*.pem", "src/generated/**", "src/secret/**"],
+    spec_folder_writable: true,
+    allow_list: [...profile.command_allow_list],
+    deny_list: [...profile.command_deny_list],
+  };
+  return (command: string) => ({
+    hook: judgePreToolCall(
+      { tool_name: "Bash", tool_use_id: "toolu_review", tool_input: { command } },
+      state,
+      new Date("2026-09-26T00:00:00.000Z"),
+    ).decision,
+    codex: codexCommandDecision(command, tree, state),
+  });
+}
+
+/**
+ * A word a `$(…)` or a backtick pair builds is not read as an operand where
+ * the command still reads options: what it prints can be an option that
+ * writes or runs a program. A command whose options the guard reads refuses
+ * it on both executors; one it does not read is left to the agent's own layer
+ * on Claude and refused on Codex; one whose options write nothing and run
+ * nothing admits it anywhere.
+ */
+describe("a word a substitution builds where a command reads options, on both executors", () => {
+  const both = reviewTree("perbo-built-option-");
+
+  it("refuses one fed to a command whose options write or run a program", () => {
+    for (const command of [
+      "find src $(echo -delete)",
+      "find -- $(echo -delete)",
+      "git diff $(printf -- --output=/tmp/x)",
+      'git diff "$(printf -- --output=/tmp/x)"',
+      'git log --output"$(echo =/tmp/x)"',
+      "git log $(echo --output=/tmp/x)",
+      "git show `echo --output=/tmp/x`",
+      "git log HEAD$(echo ' --output=/tmp/x')",
+      "git diff $(git merge-base HEAD main)",
+      "git diff $(git merge-base HEAD main) -- src",
+      "git $(echo diff) --output=/tmp/x",
+      'git -c "$(echo core.pager=touch /tmp/x)" log',
+      `node $(printf -- -e) "require('fs').writeFileSync('/tmp/x','y')"`,
+      "node -- $(echo x.js)",
+      'node "src/$(echo x).js"',
+      `python3 $(echo -c) "open('/tmp/x','w')"`,
+      "rg $(echo --pre=sh) x",
+      "cp $(echo --target-directory=/tmp) src/a.ts",
+      "cp --end-of-options $(echo --target-directory=/tmp) src/a.ts",
+      `node <(echo "require('fs').writeFileSync('/tmp/x','y')")`,
+      'dd if=src/a.ts "o$(echo f=/tmp/x)"',
+      "env node $(printf -- -e) 1",
+      "sh -c 'git diff $(echo --output=/tmp/x)'",
+      "find src -exec git diff $(echo --output=/tmp/x) ';'",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", decision: "denied" });
+      expect(codex.decision, command).toBe("denied");
+    }
+    expect(both("git diff $(git merge-base HEAD main)").hook.reason).toContain("--end-of-options");
+  });
+
+  it("leaves one fed to a command it does not read to the agent's layer on Claude, and refuses it on Codex", () => {
+    for (const command of [
+      "tsc $(echo --outDir) /tmp/out",
+      "eslint $(echo --output-file) /tmp/x src",
+      "pnpm test -- $(git ls-files src)",
+      'date -d "$(git log -1 --format=%cI)" +%s',
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "defer", decision: "allowed" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "command_allow_list" });
+    }
+  });
+
+  it("admits one that cannot be an option, or fed to a command whose options write nothing", () => {
+    for (const command of [
+      "git diff --end-of-options $(git merge-base HEAD main)",
+      "git log --oneline --end-of-options $(git merge-base HEAD main)..HEAD",
+      "git diff -- $(git ls-files src)",
+      'git diff "HEAD$(echo ~1)"',
+      'git log --since="$(date +%Y-%m-%d)"',
+      "git rev-parse --verify $(git merge-base HEAD main)",
+      'cat "$(git rev-parse --show-toplevel)/README.md"',
+      "ls $(pwd)",
+      'echo "$(date +%s)"',
+      "rg -e foo -- $(git ls-files src)",
+      "rg -n foo <(git ls-files src)",
+      'find "src/$(echo other)" -name "*.ts"',
+      "cp -- $(echo --target-directory=/tmp) src/a.ts",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "allow", decision: "allowed" });
+      expect(codex.decision, command).toBe("allowed");
+    }
+  });
+
+  it("still refuses a cd into a directory a substitution names, which it cannot place", () => {
+    const { hook, codex } = both('cd "$(git rev-parse --show-toplevel)"');
+    expect(hook).toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+    expect(codex.decision).toBe("denied");
+  });
+});
+
+/**
+ * A `sed` script is read for what it writes and runs: a `w` or `W` file and an
+ * `s///w` file are writes judged by where they land, an `e` command and an
+ * `s///e` flag run a program, and a script the line does not spell cannot be
+ * read. A script that does none of these is ordinary work.
+ */
+describe("a sed script, on both executors", () => {
+  const both = reviewTree("perbo-sed-script-");
+
+  it("refuses a file it writes outside the worktree, or at a prohibited path", () => {
+    for (const command of [
+      "sed -i '1w /tmp/x' src/a.ts",
+      "cat src/a.ts | sed -n 'w /tmp/x'",
+      "sed ':a;w /tmp/x' src/a.ts",
+      "sed 's|a|b|gw /tmp/x' src/a.ts",
+      "sed -n '1{w /tmp/x\n}' src/a.ts",
+      "sed -e p -e 'W /tmp/x' src/a.ts",
+      "sed -s -e 'w /tmp/x' src/a.ts",
+      "sed -s --expression='w /tmp/x' src/a.ts",
+      // GNU ends the regex at the delimiter inside the bracket expression.
+      "sed 's/[/]/w /tmp/y' src/a.ts",
+      // BSD's -i takes the script as its suffix, and runs the file's name.
+      "cd src && sed -i 's/a/b/' 'w /tmp/x'",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "write_outside_worktree" });
+    }
+    const prohibited = both("sed -i 's/a/b/w src/keys/z.pem' src/a.ts");
+    expect(prohibited.hook).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+    expect(prohibited.codex).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+  });
+
+  it("refuses an e command and an s///e flag as running a program", () => {
+    for (const command of [
+      "sed -i '1e touch /tmp/pwn' src/a.ts",
+      "sed -i 's/a/touch \\/tmp\\/pwn/e' src/a.ts",
+      "sed --expression='1e id' src/a.ts",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "unreadable_inline_program" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "unreadable_inline_program" });
+    }
+  });
+
+  it("refuses a script the line does not spell", () => {
+    for (const command of [
+      'sed "$S" src/a.ts',
+      'sed -- "$(echo w /tmp/x)" src/a.ts',
+      'sed "s/a/$B/" src/a.ts',
+      'sed -- "s/a/$(echo b)/" src/a.ts',
+      "sed -f script.sed src/a.ts",
+      "sed -f script.sed -e p src/a.ts",
+      "ls src | xargs sed -n",
+      "ls src | xargs -I% sed -n 's/a/%/p' src/a.ts",
+      // No reading of it gets to the end, so what it writes cannot be said.
+      "sed -n 'k' src/a.ts",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", decision: "denied" });
+      expect(codex.decision, command).toBe("denied");
+    }
+  });
+
+  it("refuses BSD's -I as the in-place edit it is", () => {
+    const { hook, codex } = both("sed -I '' 's/a/b/' /etc/hosts");
+    expect(hook).toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+    expect(codex.decision).toBe("denied");
+  });
+
+  it("admits a script that writes nothing but its edit and runs nothing", () => {
+    for (const command of [
+      "sed -n '1,5p' src/a.ts",
+      "sed -i 's/a/b/' src/a.ts",
+      "cat src/a.ts | sed 's/x/y/g'",
+      "sed -i '' 's/a/b/' src/a.ts",
+      "sed -I '' 's/a/b/' src/a.ts",
+      "sed -n 's/[^/]*$//p' src/a.ts",
+      "sed '1a foo; w /tmp/x' src/a.ts",
+      "sed -n 'r /etc/hosts' src/a.ts",
+      "sed 's/a/b/w /dev/stdout' src/a.ts",
+      "sed -n 'w src/out.txt' src/a.ts",
+      // sed names the file as written: no shell expands the ~.
+      "cd src && sed -n 'w ~/notes.txt' a.ts",
+      "sed -e 's/a/b/' -e '$a\\' -e 'end' src/a.ts",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "allow", decision: "allowed" });
+      expect(codex.decision, command).toBe("allowed");
+    }
+  });
+});

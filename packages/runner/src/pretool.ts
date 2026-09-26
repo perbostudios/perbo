@@ -653,8 +653,12 @@ export const EFFECT_FREE_VERBS = new Set(["cd", "pushd", "popd", "pwd", "echo", 
  * verb that writes to a path it names, one whose effects are already accounted
  * for, or a read-only orientation command the allow-list carries — and no
  * command on it is one the guard has not judged and the allow-list does not
- * carry. `git diff $(git merge-base HEAD main)` is admitted on the last of these
- * grounds, where the outer list alone would have to vouch for a substitution.
+ * carry. `git diff --end-of-options $(git merge-base HEAD main)` is admitted on
+ * the last of these grounds, where the outer list alone would have to vouch for
+ * a substitution. A substitution is grounds only because the reader has
+ * already judged the word it builds: where that word stands as an option of a
+ * command whose options can write or run a program, the reader refuses it, and
+ * where the command is one it does not read, the segment is not accounted for.
  * `mkdir -p a && script -q /dev/null node x.js` has nothing to say: the `mkdir`
  * is vouched for and the `script` is not, and vouching for the line would
  * admit both.

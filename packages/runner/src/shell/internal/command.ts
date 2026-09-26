@@ -1,5 +1,5 @@
 import type { WriteFinding } from "./destination.js";
-import type { StdinSource, Word } from "./lexer.js";
+import { substitutedShape, type StdinSource, type Word } from "./lexer.js";
 import type { Cwd, ResolvedScope } from "./scope.js";
 
 export interface Context {
@@ -113,6 +113,77 @@ export function suppliedAsOption(
       }`;
   return {
     detail: `${how}, ${read}: ${context.segment.slice(0, 200)}`,
+    target: null,
+    resolved: null,
+  };
+}
+
+/**
+ * How a command reads the words a substitution builds.
+ *
+ * `ends` is where it stops reading options: at `--`, at `--end-of-options` as
+ * well, which keeps the words after it revisions for git's revision readers,
+ * or nowhere — `find`'s expression, an interpreter's options and program,
+ * `dd`'s `of=`, and every command this guard does not read. `operands` says a
+ * word that expands to one word beginning with a literal other than `-` is an
+ * operand wherever it stands, which it is not where that word can be the
+ * program an interpreter runs or a `dd` assignment. `named` says the command's
+ * own reader reads a long option by its name, so `--name="$(…)"` is that
+ * option with a value built at run time, judged as the reader judges a value
+ * it can read: `git log --output="$(…)"` is refused as a path it cannot place.
+ */
+export interface OptionReading {
+  ends: "dashes" | "revisions" | "never";
+  operands: boolean;
+  named: boolean;
+}
+
+/** A command this guard does not read: every word a substitution builds is one it cannot read. */
+export const UNREAD_OPTIONS: OptionReading = { ends: "never", operands: false, named: false };
+
+/**
+ * The first word a `$(…)` or a backtick pair builds where the command still
+ * reads it as an option, or undefined where there is none.
+ *
+ * What the substitution prints is not on the line, so where it can begin with
+ * `-` it can be any option at all — `git diff $(printf -- --output=/tmp/x)`
+ * writes a file and `node $(printf -- -e) …` runs code — and the command's
+ * reading of its own words says nothing about it. Outside double quotes the
+ * shell splits what it prints into further words, any of which can be one.
+ */
+export function builtOption(rest: readonly Word[], reading: OptionReading): Word | undefined {
+  for (const word of rest) {
+    if (word.redirect === true) continue;
+    if (word.substitutions.length === 0) {
+      if (reading.ends !== "never" && word.value === "--") return undefined;
+      if (reading.ends === "revisions" && word.value === "--end-of-options") return undefined;
+      continue;
+    }
+    const shape = substitutedShape(word.raw);
+    if (shape === null) continue;
+    if (shape.splits || shape.prefix.length === 0) return word;
+    if (!shape.prefix.startsWith("-")) {
+      if (reading.operands) continue;
+      return word;
+    }
+    if (reading.named && shape.prefix.startsWith("--") && shape.prefix.includes("=")) continue;
+    return word;
+  }
+  return undefined;
+}
+
+/** The refusal for a word `builtOption` found, saying how to keep it an operand. */
+export function builtOptionFinding(verb: string, word: Word, reading: OptionReading, context: Context): WriteFinding {
+  const keep =
+    reading.ends === "never"
+      ? `${verb} reads a word there as more than an operand wherever it stands, so write it on the line`
+      : reading.ends === "revisions"
+        ? "put --end-of-options before it to keep it a revision, or -- to make it a path"
+        : "put -- before it to keep it an operand";
+  return {
+    detail:
+      `${word.raw} is built by a command substitution where ${verb} still reads options, so what it ` +
+      `prints can be an option that writes or runs a program — ${keep}: ${context.segment.slice(0, 200)}`,
     target: null,
     resolved: null,
   };

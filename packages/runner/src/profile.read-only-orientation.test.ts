@@ -63,10 +63,11 @@ const SUBSTITUTED = [
   'echo "base $(git merge-base HEAD main)"',
   "echo $(git ls-files)",
   'echo "stamped $(date -u +%s)"',
-  "git diff $(git merge-base HEAD main)",
+  "git diff --end-of-options $(git merge-base HEAD main)",
+  "git diff -- $(git ls-files src)",
   "wc -l $(git ls-files)",
   "cat <<EOF\nstamped $(date)\nEOF",
-  "git log $(git rev-parse HEAD)",
+  "git log --end-of-options $(git rev-parse HEAD)",
 ];
 
 describe("the read-only orientation commands", () => {
@@ -112,10 +113,20 @@ describe("what stays as it was", () => {
   });
 
   it("does not vouch for an unlisted command beside an orientation command", () => {
-    for (const line of ["git rev-parse HEAD && script -q /dev/null node x.js", "perl -e 1 $(date)"]) {
+    for (const line of ["git rev-parse HEAD && script -q /dev/null node x.js", "sort $(git ls-files)"]) {
       expect(claude(line).answer, line).toBe("defer");
       expect(codex(line), line).toBe("denied");
     }
+  });
+
+  it("refuses a substitution where a revision reader still reads options", () => {
+    // What `git merge-base` prints stands where `git diff` reads an option,
+    // and `--end-of-options` is what keeps it a revision.
+    for (const line of ["git diff $(git merge-base HEAD main)", "git log $(git rev-parse HEAD)", "perl -e 1 $(date)"]) {
+      expect(claude(line), line).toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+      expect(codex(line), line).toBe("denied");
+    }
+    expect(claude("git diff $(git merge-base HEAD main)").reason).toContain("--end-of-options");
   });
 
   it("refuses a write outside the worktree on an orientation command's line", () => {

@@ -130,7 +130,8 @@ const A_CHARACTER_INSIDE = [
   "cp a '#'b sub/x",
   "cp a \\# sub/x",
   "cp a ''#b sub/x",
-  "cp $(true)#b sub/x",
+  // After `--`, so what the substitution prints is a source rather than an option.
+  "cp -- $(true)#b sub/x",
   "echo $# > sub/x",
   "echo ${#x} ${x#a} ${x##*/} > sub/x",
   "cp a b\\\n#c sub/x",

@@ -43,7 +43,10 @@ export const DEFAULT_AGENT_TOOLS = [
 
 /**
  * Read-only orientation the executor reaches for bare and inside `$(…)`, such
- * as `git diff $(git merge-base HEAD main)`. None of the four writes a file, a
+ * as `git diff --end-of-options $(git merge-base HEAD main)`; without
+ * `--end-of-options`, what the substitution prints stands where `git diff`
+ * reads an option, and the guard refuses it (`shell/internal/command.ts`,
+ * `builtOption`). None of the four writes a file, a
  * ref or the index under any flag, or reaches the network (short of a
  * `core.fsmonitor` in a configuration the executor cannot write), which `git diff`,
  * `git log` and `git show` (`--output`) and `git status` (its index refresh)

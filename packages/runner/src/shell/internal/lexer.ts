@@ -192,6 +192,64 @@ export function substitutionsIn(text: string): string[] {
   return bodies;
 }
 
+/**
+ * How the shell expands a word a `$(…)` or a backtick pair builds: the text
+ * the line spells ahead of the first expansion, and whether a substitution or
+ * a variable stands outside double quotes, where the shell splits what it
+ * expands to into further words. A process substitution is the path the
+ * shell replaces it with, `/dev/fd/<n>`. Null for a word no substitution
+ * builds.
+ */
+export function substitutedShape(raw: string): { prefix: string; splits: boolean } | null {
+  if (raw.startsWith("<(") || raw.startsWith(">(")) return { prefix: "/dev/fd/", splits: false };
+  let prefix = "";
+  let expanded = false;
+  let splits = false;
+  let built = false;
+  let quote: string | null = null;
+  let i = 0;
+  while (i < raw.length) {
+    const ch = raw[i]!;
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else if (!expanded) prefix += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "\\") {
+      if (!expanded) prefix += raw[i + 1] ?? "";
+      i += 2;
+      continue;
+    }
+    if (quote === null && (ch === '"' || ch === "'")) {
+      quote = ch;
+      i += 1;
+      continue;
+    }
+    if (quote === '"' && ch === '"') {
+      quote = null;
+      i += 1;
+      continue;
+    }
+    if (ch === "`" || (ch === "$" && raw[i + 1] === "(")) {
+      built = true;
+      expanded = true;
+      if (quote === null) splits = true;
+      const read = readSubstitution(raw, i);
+      if (read === null) break;
+      i = read.end;
+      continue;
+    }
+    if (ch === "$" && /[A-Za-z0-9_{@*#?$!-]/.test(raw[i + 1] ?? "")) {
+      expanded = true;
+      if (quote === null) splits = true;
+    }
+    if (!expanded) prefix += ch;
+    i += 1;
+  }
+  return built ? { prefix, splits } : null;
+}
+
 /** What a backslash inside double quotes escapes, as bash reads it. */
 const DOUBLE_QUOTED_ESCAPES = new Set(["$", "`", '"', "\\", "\n"]);
 

@@ -229,14 +229,16 @@ export const WRITERS = new Map<string, WriterSpec>([
     values: ["-s", "--size", "-r", "--reference"],
     longs: ["--no-create", "--io-blocks"],
   }],
-  // In place, and only in place: `sed 's/x/y/' f` writes nothing. The script is
-  // the first operand unless `-e` or `-f` supplied one, and then every operand
-  // is a file the edit rewrites. A suffix given to `-i` keeps each file's old
-  // text under that name.
+  // In place, and only in place, as far as its operands go: `sed 's/x/y/' f`
+  // rewrites no operand, and what its script writes is `sed.ts`'s to read. The
+  // script is the first operand unless `-e` or `-f` supplied one, and then
+  // every operand is a file the edit rewrites. BSD's `-I` edits in place as
+  // `-i` does. A suffix given to either keeps each file's old text under that
+  // name.
   ["sed", {
     operands: "all",
-    onlyWith: ["-i", "--in-place"],
-    inPlace: ["-i", "--in-place"],
+    onlyWith: ["-i", "-I", "--in-place"],
+    inPlace: ["-i", "-I", "--in-place"],
     skip: 1,
     skipUnless: ["-e", "--expression", "-f", "--file"],
     values: ["-e", "--expression", "-f", "--file", "-l", "--line-length"],

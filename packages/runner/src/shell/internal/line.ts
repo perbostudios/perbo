@@ -1,11 +1,15 @@
 import {
   basename,
+  builtOption,
+  builtOptionFinding,
   carries as carriesInto,
   isAssignment,
   optionSet,
   suppliedAsOption,
   suppliedDestination,
+  UNREAD_OPTIONS,
   type Context,
+  type OptionReading,
   type SuppliedOperands,
 } from "./command.js";
 import {
@@ -31,6 +35,7 @@ import {
 } from "./lexer.js";
 import { linkFindings } from "./link.js";
 import { type Cwd, type ResolvedScope } from "./scope.js";
+import { sedFindings } from "./sed.js";
 import { programSourceFindings, shellFromStdin } from "./stdin.js";
 import {
   EXEC_SPEC,
@@ -178,6 +183,32 @@ function looksUp(words: readonly Word[]): boolean {
     if (/^-[pvV]+$/.test(value) && /[vV]/.test(value)) return true;
   }
   return false;
+}
+
+/**
+ * The verbs whose options neither write nor run a program, so a word a
+ * substitution builds may stand anywhere among their words: `ls $(pwd)` and
+ * `cat "$(git rev-parse --show-toplevel)/README.md"` read what they name and
+ * nothing else, whatever the substitution prints.
+ */
+const OPTIONS_INERT = new Set([
+  "cd", "pushd", "popd", "pwd", "echo", "printf", "true", "false", ":", "ls", "cat", "head", "tail", "wc",
+]);
+
+/**
+ * How a verb this guard reads takes the words a substitution builds, for
+ * `builtOption`: a writer, `ln` and `rg` read options until `--` and a long
+ * option by name; `dd` reads an `of=` wherever it stands; `find` reads its
+ * expression wherever it stands; an interpreter runs a program its words
+ * name. Null for a verb it does not read.
+ */
+function readOptions(verb: string): OptionReading | null {
+  const writer = WRITERS.get(verb);
+  if (writer !== undefined && writer.assignments !== undefined) return UNREAD_OPTIONS;
+  if (writer !== undefined || verb === "ln" || verb === "rg") return { ends: "dashes", operands: true, named: true };
+  if (verb === "find") return { ends: "never", operands: true, named: false };
+  if (INTERPRETERS.has(verb)) return UNREAD_OPTIONS;
+  return null;
 }
 
 /** `rg`'s options that take a value, as a separate word or attached. */
@@ -921,7 +952,22 @@ function analyzeWords(words: Word[], context: Context): Analysis {
     const rest = words.slice(i + 1);
     const stands = placeholderStands(command, "the program itself");
     if (stands !== null) return stands;
-    if (command.variable || command.substitutions.length > 0) {
+    // A word a substitution builds where the command still reads options is
+    // an option this guard cannot read. For a verb it reads, whose options it
+    // knows can write or run a program, that is refused; for one it does not
+    // read, the segment is one it cannot account for, which no executor
+    // admits over its allow-list. `git` reads its own (`gitFindings`).
+    const readable = !command.variable && command.substitutions.length === 0;
+    if (readable && verb !== "git" && !OPTIONS_INERT.has(verb)) {
+      const reads = readOptions(verb);
+      const built = builtOption(rest, reads ?? UNREAD_OPTIONS);
+      if (built !== undefined && reads !== null) {
+        findings.push(builtOptionFinding(verb, built, reads, { ...context, cwd }));
+      } else if (built !== undefined) {
+        accounted = false;
+      }
+    }
+    if (!readable) {
       // `$(…)`, a backtick, or a bare `$name` stands where the verb should —
       // `exec`'s own leading flags are already consumed by the time this word
       // is reached, so `exec $(…)` and `exec $VAR` land here too. There is no
@@ -944,6 +990,7 @@ function analyzeWords(words: Word[], context: Context): Analysis {
       // deciding the line by where those landed has not seen the whole act.
       if (spec.beyondNamedPaths !== true) mutating = true;
       findings.push(...writerFindings(verb, spec, rest, { ...context, cwd, supplied }));
+      if (verb === "sed") findings.push(...sedFindings(rest, { ...context, cwd, supplied }));
     } else if (verb === "ln") {
       programs.push(verb);
       mutating = true;
