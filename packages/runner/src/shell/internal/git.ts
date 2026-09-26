@@ -1,11 +1,12 @@
 import {
   builtOption,
-  builtOptionFinding,
   carries,
-  UNREAD_OPTIONS,
+  keepAsOperand,
   suppliedAsOption,
   suppliedDestination,
+  type BuiltWords,
   type Context,
+  type OptionReading,
 } from "./command.js";
 import { judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
 import type { Word } from "./lexer.js";
@@ -58,38 +59,67 @@ const GIT_GLOBAL_VALUES = new Set([
 const GIT_OPTIONS_INERT = new Set(["rev-parse", "merge-base", "ls-files"]);
 
 /**
- * A word a `$(…)` or a backtick pair builds where `git` still reads it as an
- * option: before the verb, where every word is a global option, its value or
- * the verb itself, and after it until `--` — or `--end-of-options` for a verb
- * that reads revisions, which keeps what follows a revision.
+ * The revision walk's options that take the next word as their value, for the
+ * verbs that walk: `git log -n 5`, `--since <date>`, `--author <name>`.
  */
-function builtGitOption(rest: readonly Word[], context: Context): WriteFinding | null {
+const GIT_REVISION_VERBS = new Set(["log", "show", "whatchanged"]);
+const GIT_REVISION_VALUES = new Set([
+  "-n", "--max-count", "--skip", "--since", "--after", "--until", "--before", "--author", "--committer",
+  "--grep", "--min-age", "--max-age",
+]);
+
+/** The diff options that take the next word as their value: the pickaxe's string, and `--output`'s file. */
+const GIT_DIFF_VALUES = new Set(["-S", "-G", "--output"]);
+
+/**
+ * The words the line builds where `git` still reads them as options: before
+ * the verb, where every word is a global option, its value or the verb
+ * itself, and after it until `--` — or `--end-of-options` for a verb that
+ * reads revisions, which keeps what follows a revision. A value the verb's
+ * option takes is a value, never an option: `git log --since "$(date +%F)"`.
+ * The read-only orientation verbs' options write nothing and run nothing, so
+ * nothing after one of them is read. A variable the line assigns a value it
+ * spells, standing before the verb, can be a global option or the verb, and
+ * the reading with its value in place is the one that knows which, so this
+ * reading goes no further.
+ */
+export function gitBuiltWords(
+  rest: readonly Word[],
+  context: Context,
+): { built: BuiltWords; label: string; keep: string } {
+  const global: OptionReading = { ends: "never", operands: false, named: false };
   let i = 0;
   while (i < rest.length) {
-    const word = rest[i]!;
-    if (word.redirect !== true && builtOption([word], UNREAD_OPTIONS) !== undefined) {
-      return builtOptionFinding("git", word, UNREAD_OPTIONS, context);
-    }
-    const value = word.value;
-    if (!value.startsWith("-") || value === "-") break;
+    const value = rest[i]!.value;
+    const option = value.startsWith("-") && value !== "-";
     const name = value.includes("=") ? value.slice(0, value.indexOf("=")) : value;
-    const takesNext = !value.includes("=") && (GIT_GLOBAL_DIRECTORIES.has(name) || GIT_GLOBAL_VALUES.has(name));
-    i += takesNext ? 1 : 0;
-    const operand = takesNext ? rest[i] : undefined;
-    if (operand !== undefined && builtOption([operand], UNREAD_OPTIONS) !== undefined) {
-      return builtOptionFinding("git", operand, UNREAD_OPTIONS, context);
+    const takesNext =
+      option && !value.includes("=") && (GIT_GLOBAL_DIRECTORIES.has(name) || GIT_GLOBAL_VALUES.has(name));
+    const words = rest.slice(i, takesNext ? i + 2 : i + 1);
+    const built = builtOption(words, global, context.assigned, i);
+    if (built.unreadable !== undefined || built.assigned.length > 0) {
+      return { built, label: "git", keep: keepAsOperand("git", global) };
     }
-    i += 1;
+    if (!option) break;
+    i += words.length;
   }
   const verb = rest[i]?.value ?? "";
-  if (GIT_OPTIONS_INERT.has(verb)) return null;
-  const reading = {
+  if (GIT_OPTIONS_INERT.has(verb)) return { built: { assigned: [] }, label: `git ${verb}`, keep: "" };
+  const reading: OptionReading = {
     ends: GIT_DIFF_OUTPUT.has(verb) || verb === "format-patch" ? "revisions" : "dashes",
     operands: true,
     named: true,
-  } as const;
-  const built = builtOption(rest.slice(i + 1), reading);
-  return built === undefined ? null : builtOptionFinding(`git ${verb}`, built, reading, context);
+    values: (option) =>
+      (GIT_REVISION_VERBS.has(verb) && GIT_REVISION_VALUES.has(option)) ||
+      (GIT_DIFF_OUTPUT.has(verb) && GIT_DIFF_VALUES.has(option))
+        ? 1
+        : 0,
+  };
+  return {
+    built: builtOption(rest.slice(i + 1), reading, context.assigned, i + 1),
+    label: `git ${verb}`,
+    keep: keepAsOperand(`git ${verb}`, reading),
+  };
 }
 
 /**
@@ -103,8 +133,6 @@ function builtGitOption(rest: readonly Word[], context: Context): WriteFinding |
  * reads its options, since the word can be that option.
  */
 export function gitFindings(rest: Word[], context: Context): WriteFinding[] {
-  const built = builtGitOption(rest, context);
-  if (built !== null) return [built];
   const directories: Word[] = [];
   // The directories `-C` moves git to, in order: a relative path an option
   // names is read from where the last of them leaves it.

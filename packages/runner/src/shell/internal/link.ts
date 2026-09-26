@@ -9,6 +9,7 @@ import {
   optionsPresent,
   suppliedAsOption,
   suppliedDestination,
+  valuesOf,
   type Context,
 } from "./command.js";
 import { judgeInto, judgeTarget, pathFinding, type WriteFinding } from "./destination.js";
@@ -51,6 +52,9 @@ const LN_LONGS = [
   "--no-target-directory", "--physical", "--relative", "--suffix", "--symbolic", "--target-directory",
   "--verbose", "--help", "--version",
 ];
+
+/** How many words after one of `ln`'s options are its value, for `builtOption`. */
+export const LINK_VALUES = valuesOf(["-t", "--target-directory", "-S", "--suffix"], LN_LONGS);
 
 /** `ln`'s findings, with each long option resolved against `names`. */
 function linkReading(rest: Word[], context: Context, names: readonly string[]): WriteFinding[] {

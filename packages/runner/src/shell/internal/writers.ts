@@ -7,6 +7,7 @@ import {
   optionSet,
   optionsPresent,
   suppliedAsOption,
+  valuesOf,
   type Context,
 } from "./command.js";
 import {
@@ -352,6 +353,23 @@ export function longNames(spec: WriterSpec): string[] {
     spec.backup?.directory,
   ].flatMap((options) => options ?? []);
   return [...new Set(all.filter((option) => option.startsWith("--")))];
+}
+
+/**
+ * How many words after one of a writer's options are its value — a target
+ * directory, a destination, a backup suffix or directory, or a value naming
+ * nothing — with a long option read by any unambiguous prefix, for
+ * `builtOption`.
+ */
+export function writerValues(spec: WriterSpec): (option: string) => number {
+  const taking = [
+    spec.values,
+    spec.targetDirectory,
+    spec.destination,
+    spec.backup?.suffix,
+    spec.backup?.directory,
+  ].flatMap((options) => options ?? []);
+  return valuesOf(taking, longNames(spec));
 }
 
 /** Whether a long option on the line is spelled as a prefix of one of `names`. */

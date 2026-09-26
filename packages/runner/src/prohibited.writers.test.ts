@@ -1372,7 +1372,6 @@ describe("a word a substitution builds where a command reads options, on both ex
     for (const command of [
       "tsc $(echo --outDir) /tmp/out",
       "eslint $(echo --output-file) /tmp/x src",
-      "pnpm test -- $(git ls-files src)",
       'date -d "$(git log -1 --format=%cI)" +%s',
     ]) {
       const { hook, codex } = both(command);
@@ -1396,6 +1395,7 @@ describe("a word a substitution builds where a command reads options, on both ex
       "rg -n foo <(git ls-files src)",
       'find "src/$(echo other)" -name "*.ts"',
       "cp -- $(echo --target-directory=/tmp) src/a.ts",
+      "pnpm test -- $(git ls-files src)",
     ]) {
       const { hook, codex } = both(command);
       expect(hook, command).toMatchObject({ answer: "allow", decision: "allowed" });
@@ -1524,6 +1524,229 @@ describe("a sed script, on both executors", () => {
       const { hook, codex } = both(command);
       expect(hook, command).toMatchObject({ answer: "allow", decision: "allowed" });
       expect(codex.decision, command).toBe("allowed");
+    }
+  });
+});
+
+/**
+ * The state `perbo admit` writes by default — `src/**` and `test/**` to
+ * write, `.github/**`, `infra/**`, `**\/*.pem` and `**\/.env*` prohibited — with
+ * the profile's own lists and a key on disk under `src`.
+ */
+function admitDefaultsTree(prefix: string) {
+  const tree = realpathSync(scratch(prefix));
+  for (const directory of ["src/keys", "src/lib", "src/other", "test", "scripts"]) {
+    mkdirSync(join(tree, directory), { recursive: true });
+  }
+  writeFileSync(join(tree, "src/keys/k.pem"), "key\n");
+  writeFileSync(join(tree, "src/a.ts"), "source\n");
+  writeFileSync(join(tree, "src/lib/a.ts"), "source\n");
+  writeFileSync(join(tree, "test/a.test.js"), "test\n");
+  writeFileSync(join(tree, "scripts/build.js"), "build\n");
+  writeFileSync(join(tree, "pat"), "foo\n");
+  const state: PreToolGuardState = {
+    root: tree,
+    tmpdir: null,
+    cwd: tree,
+    paths_allowed: ["src/**", "test/**"],
+    paths_prohibited: [".github/**", "infra/**", "**/*.pem", "**/.env*"],
+    spec_folder_writable: true,
+    allow_list: [...profile.command_allow_list],
+    deny_list: [...profile.command_deny_list],
+  };
+  return (command: string) => ({
+    hook: judgePreToolCall(
+      { tool_name: "Bash", tool_use_id: "toolu_admit", tool_input: { command } },
+      state,
+      new Date("2026-09-26T00:00:00.000Z"),
+    ).decision,
+    codex: codexCommandDecision(command, tree, state),
+  });
+}
+
+const WRITES_TMP = `"require('fs').writeFileSync('/tmp/x','y')"`;
+
+/**
+ * A variable the line assigns is the word it holds: a value a substitution
+ * builds is a word the guard cannot read, where the command reads options,
+ * and a value the line spells is read as that value, beside the reading of
+ * the word as written. What a substitution prints into a variable is never a
+ * ground to vouch for the line. A variable the line does not assign is read as
+ * it always was.
+ */
+describe("a word built from a variable the line assigns, on both executors", () => {
+  const both = admitDefaultsTree("perbo-assigned-");
+
+  it("refuses one a substitution builds, where the command reads options", () => {
+    for (const command of [
+      "X=$(printf -- --output=/tmp/x); git diff $X",
+      "X=$(echo -delete); find src $X",
+      `X=$(echo -e); node $X ${WRITES_TMP}`,
+      "X=$(echo --pre=sh); rg $X x",
+      "X=$(printf -- --output=/tmp/x); echo ok && git diff $X",
+      `export X=$(echo -e); echo ok && node $X ${WRITES_TMP}`,
+      "X=$(printf -- --output=/tmp/x) git diff $X",
+      "X=--output=/tmp/x; X=$(echo ok); git diff $X",
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "write_outside_worktree" });
+    }
+    expect(both("X=$(printf -- --output=/tmp/x); git diff $X").hook.reason).toContain("--end-of-options");
+  });
+
+  it("refuses the option or program a value the line spells makes it", () => {
+    for (const command of [
+      `X=-e; echo ok && node $X ${WRITES_TMP}`,
+      "X=--target-directory=/tmp; cp $X src/a.ts",
+      "X=of=/tmp/x; dd if=src/a.ts $X",
+      "X=--output=/tmp/x; echo ok; git diff $X",
+      "export X=--output=/tmp/x; git diff $X",
+      `X=-c; python3 $X "open('/tmp/x','w')"`,
+      "X=-t/tmp; cp $X src/a.ts",
+      "X='-t /tmp'; cp $X src/a.ts",
+      `X=' '; X+=-e; node $X ${WRITES_TMP}`,
+      `X=(-e); node $X ${WRITES_TMP}`,
+      `export X=-e; sh -c 'node $X "require(\\"fs\\").writeFileSync(\\"/tmp/x\\",\\"y\\")"'`,
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "deny", decision: "denied" });
+      expect(codex.decision, command).toBe("denied");
+    }
+    const deletes = both("X=-delete; find src $X");
+    expect(deletes.hook).toMatchObject({ answer: "deny", rule: "write_prohibited_path" });
+    expect(deletes.codex).toMatchObject({ decision: "denied", rule: "write_prohibited_path" });
+    const pushes = both("X=push; git $X origin main");
+    expect(pushes.hook).toMatchObject({ answer: "deny", rule: "command_deny_list" });
+    expect(pushes.codex).toMatchObject({ decision: "denied", rule: "command_deny_list" });
+  });
+
+  it("admits what the value it spells would admit, answering as that line is answered", () => {
+    for (const [command, spelled] of [
+      ["X=-e; echo ok && node $X 'console.log(1)'", "echo ok && node -e 'console.log(1)'"],
+      ["X=-delete; find src/lib $X", "find src/lib -delete"],
+    ] as const) {
+      const { hook, codex } = both(command);
+      expect(hook.decision, command).toBe("allowed");
+      expect(hook.answer, command).toBe(both(spelled).hook.answer);
+      expect(codex.decision, command).toBe("allowed");
+    }
+  });
+
+  it("does not take a substitution building a value as grounds to vouch for the line", () => {
+    const vouched = both("X=$(git rev-parse HEAD); git diff --end-of-options $X");
+    expect(vouched.hook).toMatchObject({ answer: "defer", decision: "allowed" });
+    expect(vouched.codex.decision).toBe("allowed");
+    // Grounds of its own still vouch for the line.
+    const echoed = both("X=$(git rev-parse HEAD); echo $X");
+    expect(echoed.hook).toMatchObject({ answer: "allow", decision: "allowed" });
+    expect(echoed.codex.decision).toBe("allowed");
+  });
+
+  it("reads a variable the line does not assign as it always has", () => {
+    for (const command of ["git diff $X", "find src $X", "rg foo $HOME", "git diff $PWD", "git log -n $N"]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "defer", decision: "allowed" });
+      expect(codex.decision, command).toBe("allowed");
+    }
+    const loop = both('for f in src/a.ts src/lib/a.ts; do rg foo "$f"; done');
+    expect(loop.hook).toMatchObject({ answer: "defer", decision: "allowed" });
+    expect(loop.codex).toMatchObject({ decision: "denied", rule: "command_allow_list" });
+  });
+});
+
+/**
+ * Where a command stops reading options, a word the line builds is an
+ * operand: after `--` for every command, the ones the guard does not read
+ * among them, and after the program an interpreter runs. Where an option
+ * takes a value, a word built there is that value, so long as the shell does
+ * not split it into more words.
+ */
+describe("a word the line builds after a command's options, or as an option's value, on both executors", () => {
+  const both = admitDefaultsTree("perbo-built-value-");
+  const admitted = (command: string) => {
+    const { hook, codex } = both(command);
+    expect(hook.decision, command).toBe("allowed");
+    expect(codex.decision, command).toBe("allowed");
+    return hook.answer;
+  };
+  const refused = (command: string) => {
+    const { hook, codex } = both(command);
+    expect(hook, command).toMatchObject({ answer: "deny", rule: "write_outside_worktree" });
+    expect(codex, command).toMatchObject({ decision: "denied", rule: "write_outside_worktree" });
+  };
+
+  it("honours -- for every command, one the guard does not read too", () => {
+    for (const command of ["pnpm test -- $(git ls-files src)", "npx eslint -- $(git ls-files src)"]) {
+      expect(admitted(command), command).toBe("allow");
+    }
+    // `find` has no `--` that ends its expression, and the script an
+    // interpreter runs after one is a program named at run time.
+    for (const command of ["find -- $(echo -delete)", "node -- $(echo x.js)"]) refused(command);
+  });
+
+  it("reads an interpreter's own options only until the program it runs", () => {
+    for (const command of [
+      'node scripts/build.js "$(git rev-parse HEAD)"',
+      "node scripts/build.js $(git ls-files src)",
+      "node --test -- $(git ls-files test)",
+      "python3 -m pytest $(git ls-files test)",
+      "python3 -u -m pytest $(git ls-files test)",
+      'python3 scripts/x.py -- "$(git rev-parse HEAD)"',
+      'python3 -W "$(echo ignore)" scripts/x.py',
+      'node -r "$(echo ./scripts/build.js)" scripts/build.js',
+    ]) {
+      expect(admitted(command), command).toBe("allow");
+    }
+    for (const command of [
+      `node $(printf -- -e) ${WRITES_TMP}`,
+      `python3 $(echo -c) "open('/tmp/x','w')"`,
+      // node still reads options after --test, and `--no-test -e …` runs code.
+      "node --test $(git ls-files test)",
+      // node reads options after -e's code, and a second -e replaces it.
+      `node -e "console.log(1)" "$(echo -e)" 2`,
+      // An option this does not know may take the next word.
+      "node --inspect-brk $(printf -- -e) 1",
+      'python3 -m "$(echo pytest)"',
+    ]) {
+      refused(command);
+    }
+  });
+
+  it("takes a word built where an option's value goes as that value", () => {
+    for (const command of [
+      'rg -n -e "$(cat pat)" src',
+      'rg -g "$(echo \'*.ts\')" foo',
+      'find src -name "$(cat pat)"',
+      'git log --since "$(date +%F)"',
+      'git log --since="$(date +%F)" --until "$(date +%F)"',
+      'git log -n "$(echo 5)"',
+      'git diff -S "$(cat pat)"',
+    ]) {
+      admitted(command);
+    }
+    // `git config` is not on the allow-list, which Codex holds every
+    // substitution to; Claude's own layer decides it.
+    for (const command of [
+      'git log --author "$(git config user.name)"',
+      'git log --author="$(git config user.name)"',
+    ]) {
+      const { hook, codex } = both(command);
+      expect(hook, command).toMatchObject({ answer: "defer", decision: "allowed" });
+      expect(codex, command).toMatchObject({ decision: "denied", rule: "command_allow_list" });
+    }
+  });
+
+  it("refuses one the shell splits, or one standing where no option takes a value", () => {
+    for (const command of [
+      "rg -e $(cat pat) src",
+      "git log -n $(echo 5)",
+      "find src -name $(cat pat)",
+      'rg -n "$(cat pat)" src',
+      // `-n` is `--numbered` to format-patch, and takes no value.
+      "git format-patch -n $(echo -o/tmp)",
+    ]) {
+      refused(command);
     }
   });
 });

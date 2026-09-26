@@ -1,4 +1,5 @@
 import type { WriteFinding } from "./destination.js";
+import { expandAssigned, type Assigned } from "./assigned.js";
 import { substitutedShape, type StdinSource, type Word } from "./lexer.js";
 import type { Cwd, ResolvedScope } from "./scope.js";
 
@@ -15,6 +16,13 @@ export interface Context {
    * writer reached this way names destinations the line does not carry.
    */
   supplied?: SuppliedOperands | undefined;
+  /** The variables the line assigns, and the value each holds where it spells it. */
+  assigned?: Assigned | undefined;
+  /**
+   * True for the second reading of a command, with every word built from a
+   * variable the line assigns a value it spells read as that value.
+   */
+  expanded?: boolean | undefined;
 }
 
 /**
@@ -119,71 +127,157 @@ export function suppliedAsOption(
 }
 
 /**
- * How a command reads the words a substitution builds.
+ * How the shell builds one of a command's words: as the line spells it; from
+ * variables the line assigns a value it spells, as the words that value
+ * becomes; or when the line runs — by a `$(…)`, a backtick pair, or a
+ * variable the line assigns a value built at run time — where only the text
+ * ahead of the first expansion is known, and whether the shell splits the
+ * rest into more words.
+ */
+export type Building =
+  | { kind: "spelled" }
+  | { kind: "assigned"; words: Word[] }
+  | { kind: "built"; prefix: string; splits: boolean };
+
+export function building(word: Word, assigned: Assigned | undefined): Building {
+  if (word.substitutions.length === 0) {
+    if (!word.variable || assigned === undefined) return { kind: "spelled" };
+    const words = expandAssigned(word, assigned);
+    if (words === null) return { kind: "spelled" };
+    if (words !== "unreadable") return { kind: "assigned", words };
+  }
+  const shape = substitutedShape(word.raw, new Set(assigned?.keys() ?? []));
+  return shape === null ? { kind: "spelled" } : { kind: "built", ...shape };
+}
+
+/**
+ * How a command reads the words the line builds.
  *
  * `ends` is where it stops reading options: at `--`, at `--end-of-options` as
  * well, which keeps the words after it revisions for git's revision readers,
- * or nowhere — `find`'s expression, an interpreter's options and program,
- * `dd`'s `of=`, and every command this guard does not read. `operands` says a
- * word that expands to one word beginning with a literal other than `-` is an
- * operand wherever it stands, which it is not where that word can be the
- * program an interpreter runs or a `dd` assignment. `named` says the command's
- * own reader reads a long option by its name, so `--name="$(…)"` is that
- * option with a value built at run time, judged as the reader judges a value
- * it can read: `git log --output="$(…)"` is refused as a path it cannot place.
+ * or nowhere — `find`'s expression and `dd`'s `of=`. `operands` says a word
+ * that expands to one word beginning with a literal other than `-` is an
+ * operand wherever it stands. `named` says `--name="$(…)"` is that option
+ * with a value built at run time, judged as the command's reader judges a
+ * value it can read: `git log --output="$(…)"` is refused as a path it cannot
+ * place. `values` says how many words after an option the line spells are
+ * that option's value, where the command's own table knows: a word built
+ * there is the value, `rg -e "$(cat pat)"`, so long as the shell does not
+ * split it into more words.
  */
 export interface OptionReading {
   ends: "dashes" | "revisions" | "never";
   operands: boolean;
   named: boolean;
+  values?: (option: string) => number;
 }
 
-/** A command this guard does not read: every word a substitution builds is one it cannot read. */
-export const UNREAD_OPTIONS: OptionReading = { ends: "never", operands: false, named: false };
+/**
+ * A command this guard does not read: it stops reading options at `--`, and
+ * `--name="$(…)"` is that option's value; anywhere else a word built at run
+ * time is one it cannot read.
+ */
+export const UNREAD_OPTIONS: OptionReading = { ends: "dashes", operands: false, named: true };
 
 /**
- * The first word a `$(…)` or a backtick pair builds where the command still
- * reads it as an option, or undefined where there is none.
+ * What `builtOption` finds among a command's words: the first word built at
+ * run time that the command can read as an option, and where each word built
+ * from a variable the line assigns a value it spells stands, by its index in
+ * the words read plus `offset`, for a second reading with the value in its
+ * place.
+ */
+export interface BuiltWords {
+  unreadable?: Word;
+  assigned: number[];
+}
+
+/**
+ * The words the line builds where the command still reads them as options.
  *
- * What the substitution prints is not on the line, so where it can begin with
+ * What a substitution prints is not on the line, so where it can begin with
  * `-` it can be any option at all — `git diff $(printf -- --output=/tmp/x)`
  * writes a file and `node $(printf -- -e) …` runs code — and the command's
  * reading of its own words says nothing about it. Outside double quotes the
- * shell splits what it prints into further words, any of which can be one.
+ * shell splits what it prints into further words, any of which can be one. A
+ * variable the line assigns such a value is the same word; one it assigns a
+ * value it spells is read again as that value.
  */
-export function builtOption(rest: readonly Word[], reading: OptionReading): Word | undefined {
-  for (const word of rest) {
+export function builtOption(
+  rest: readonly Word[],
+  reading: OptionReading,
+  assigned: Assigned | undefined,
+  offset = 0,
+): BuiltWords {
+  const found: number[] = [];
+  for (let i = 0; i < rest.length; i += 1) {
+    const word = rest[i]!;
     if (word.redirect === true) continue;
-    if (word.substitutions.length === 0) {
-      if (reading.ends !== "never" && word.value === "--") return undefined;
-      if (reading.ends === "revisions" && word.value === "--end-of-options") return undefined;
+    const how = building(word, assigned);
+    if (how.kind === "assigned") {
+      found.push(offset + i);
       continue;
     }
-    const shape = substitutedShape(word.raw);
-    if (shape === null) continue;
-    if (shape.splits || shape.prefix.length === 0) return word;
-    if (!shape.prefix.startsWith("-")) {
-      if (reading.operands) continue;
-      return word;
+    if (how.kind === "spelled") {
+      if (reading.ends !== "never" && word.value === "--") break;
+      if (reading.ends === "revisions" && word.value === "--end-of-options") break;
+      const takes = reading.values?.(word.value) ?? 0;
+      for (let k = 0; k < takes && i + 1 < rest.length; k += 1) {
+        i += 1;
+        const value = building(rest[i]!, assigned);
+        if (value.kind === "assigned") found.push(offset + i);
+        else if (value.kind === "built" && value.splits) return { unreadable: rest[i]!, assigned: found };
+      }
+      continue;
     }
-    if (reading.named && shape.prefix.startsWith("--") && shape.prefix.includes("=")) continue;
-    return word;
+    if (how.splits || how.prefix.length === 0) return { unreadable: word, assigned: found };
+    if (!how.prefix.startsWith("-")) {
+      if (reading.operands) continue;
+      return { unreadable: word, assigned: found };
+    }
+    if (reading.named && how.prefix.startsWith("--") && how.prefix.includes("=")) continue;
+    return { unreadable: word, assigned: found };
   }
-  return undefined;
+  return { assigned: found };
 }
 
-/** The refusal for a word `builtOption` found, saying how to keep it an operand. */
-export function builtOptionFinding(verb: string, word: Word, reading: OptionReading, context: Context): WriteFinding {
-  const keep =
-    reading.ends === "never"
-      ? `${verb} reads a word there as more than an operand wherever it stands, so write it on the line`
-      : reading.ends === "revisions"
-        ? "put --end-of-options before it to keep it a revision, or -- to make it a path"
-        : "put -- before it to keep it an operand";
+/**
+ * How many words after an option are its value, for a command whose table
+ * names the options that take one: a long option whole, or by an unambiguous
+ * prefix of `longs` where the command reads prefixes as GNU does, without an
+ * attached `=`; a short one ending a cluster of flags, as `-bS` does.
+ */
+export function valuesOf(takes: Iterable<string>, longs?: Iterable<string>): (option: string) => number {
+  const taking = new Set(takes);
+  const names = longs === undefined ? [] : [...longs];
+  return (option) => {
+    if (option.startsWith("--")) {
+      if (option.includes("=")) return 0;
+      const name = longs === undefined ? option : longOption(option, names);
+      return name !== null && taking.has(name) ? 1 : 0;
+    }
+    if (!option.startsWith("-") || option.length < 2) return 0;
+    for (let at = 1; at < option.length; at += 1) {
+      if (taking.has(`-${option[at]}`)) return at === option.length - 1 ? 1 : 0;
+    }
+    return 0;
+  };
+}
+
+/** How to write a word `builtOption` found so the command reads it as an operand. */
+export function keepAsOperand(verb: string, reading: OptionReading): string {
+  return reading.ends === "never"
+    ? `${verb} reads a word there as more than an operand wherever it stands, so write it on the line`
+    : reading.ends === "revisions"
+      ? "put --end-of-options before it to keep it a revision, or -- to make it a path"
+      : "put -- before it to keep it an operand";
+}
+
+/** The refusal for a word `builtOption` found, ending on how to keep it an operand. */
+export function builtOptionFinding(verb: string, word: Word, keep: string, context: Context): WriteFinding {
   return {
     detail:
-      `${word.raw} is built by a command substitution where ${verb} still reads options, so what it ` +
-      `prints can be an option that writes or runs a program — ${keep}: ${context.segment.slice(0, 200)}`,
+      `${word.raw} is built when the line runs where ${verb} still reads options, so what it ` +
+      `becomes can be an option that writes or runs a program — ${keep}: ${context.segment.slice(0, 200)}`,
     target: null,
     resolved: null,
   };

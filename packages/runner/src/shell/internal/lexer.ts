@@ -193,19 +193,22 @@ export function substitutionsIn(text: string): string[] {
 }
 
 /**
- * How the shell expands a word a `$(…)` or a backtick pair builds: the text
+ * How the shell expands a word a `$(…)` or a backtick pair builds, or one of
+ * the variables in `built` whose value is built when the line runs: the text
  * the line spells ahead of the first expansion, and whether a substitution or
  * a variable stands outside double quotes, where the shell splits what it
  * expands to into further words. A process substitution is the path the
- * shell replaces it with, `/dev/fd/<n>`. Null for a word no substitution
- * builds.
+ * shell replaces it with, `/dev/fd/<n>`. Null for a word neither builds.
  */
-export function substitutedShape(raw: string): { prefix: string; splits: boolean } | null {
+export function substitutedShape(
+  raw: string,
+  built: ReadonlySet<string> = new Set(),
+): { prefix: string; splits: boolean } | null {
   if (raw.startsWith("<(") || raw.startsWith(">(")) return { prefix: "/dev/fd/", splits: false };
   let prefix = "";
   let expanded = false;
   let splits = false;
-  let built = false;
+  let builds = false;
   let quote: string | null = null;
   let i = 0;
   while (i < raw.length) {
@@ -232,7 +235,7 @@ export function substitutedShape(raw: string): { prefix: string; splits: boolean
       continue;
     }
     if (ch === "`" || (ch === "$" && raw[i + 1] === "(")) {
-      built = true;
+      builds = true;
       expanded = true;
       if (quote === null) splits = true;
       const read = readSubstitution(raw, i);
@@ -243,11 +246,13 @@ export function substitutedShape(raw: string): { prefix: string; splits: boolean
     if (ch === "$" && /[A-Za-z0-9_{@*#?$!-]/.test(raw[i + 1] ?? "")) {
       expanded = true;
       if (quote === null) splits = true;
+      const name = /^\{?[#!]?([A-Za-z_][A-Za-z0-9_]*)/.exec(raw.slice(i + 1))?.[1];
+      if (name !== undefined && built.has(name)) builds = true;
     }
     if (!expanded) prefix += ch;
     i += 1;
   }
-  return built ? { prefix, splits } : null;
+  return builds ? { prefix, splits } : null;
 }
 
 /** What a backslash inside double quotes escapes, as bash reads it. */
