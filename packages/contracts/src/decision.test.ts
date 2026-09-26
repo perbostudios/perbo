@@ -10,7 +10,7 @@ import {
 import { FINDING_ROUTINGS, REVIEW_DECISIONS } from "./review.js";
 
 /**
- * D-NEW-a-person-s-answer-closes-a-routed-finding: which findings take a
+ * D-132: which findings take a
  * person's answer, on which reviews, and which answers each takes. `perbo
  * verdict --decide`, the loop and the desktop all read these, so each is
  * pinned here, where they live.

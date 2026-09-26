@@ -478,7 +478,7 @@ export function remediationPrompt(args: {
   previous_account?: string | null | undefined;
   /**
    * A person's words for findings the review routed to them and they handed to
-   * this round (D-NEW-a-person-s-answer-closes-a-routed-finding). Absent or
+   * this round (D-132). Absent or
    * empty, the section is left out.
    */
   directions?: ReadonlyArray<{ finding_key: string; words: string }> | undefined;

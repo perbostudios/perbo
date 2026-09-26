@@ -339,7 +339,7 @@ export function pullRequestBody(args: {
     );
   };
   /**
-   * A finding a person decided (D-NEW-a-person-s-answer-closes-a-routed-finding):
+   * A finding a person decided (D-132):
    * who decided it, by name and never by the address a git identity carries,
    * and in their words, redacted like every statement here and with every `<`
    * escaped, so no marker `perbo sync` reads can be written into the body by a

@@ -91,7 +91,7 @@ import { verifyRound } from "./internal/verify.js";
  * merging the base in before anything else could be done with the branch.
  *
  * **A person's answer closes the finding it answers**
- * (D-NEW-a-person-s-answer-closes-a-routed-finding). Where the last review's
+ * (D-132). Where the last review's
  * every standing finding is answered by a person or verified closed, and the
  * branch is still the commit it judged, the run executes and reviews nothing
  * and goes where an approval goes; the answers are recorded on their findings.
@@ -167,7 +167,7 @@ export interface TicketRunResult {
   merged_base: string | null;
   /**
    * The person's decisions this run closed findings on
-   * (D-NEW-a-person-s-answer-closes-a-routed-finding): every one a delivery
+   * (D-132): every one a delivery
    * without a round rests on, and those a continued review's findings carried.
    * Empty where no decision answered the review the run ended on.
    */
@@ -304,7 +304,7 @@ async function runLockedTicket(
   const decided = args.decided ?? [];
   let decidedOn: DecidedFinding[] = [];
 
-  // D-NEW-a-person-s-answer-closes-a-routed-finding: a delivery on a person's
+  // D-132: a delivery on a person's
   // answers (`decidedDelivery`), taken only while the branch is the commit that
   // review judged; a branch that has moved carries work nobody judged.
   const decidedNow =

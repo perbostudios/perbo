@@ -1285,7 +1285,7 @@ export const RequestSchema = z.discriminatedUnion("kind", [
     /**
      * The person's answer to each question that took a choice, by the
      * finding's key: each is recorded on its finding
-     * (D-NEW-a-person-s-answer-closes-a-routed-finding). None where every
+     * (D-132). None where every
      * question took the person's words alone. `answer` is every question's
      * words together, recorded as a principle for the executor (D-065).
      */
@@ -1570,7 +1570,7 @@ export interface DecisionQuestion {
   title: string;
   context: string;
   /**
-   * The answers the finding takes (D-NEW-a-person-s-answer-closes-a-routed-finding);
+   * The answers the finding takes (D-132);
    * none where the question takes the person's words for a principle alone.
    */
   choices: readonly DecisionChoice[];

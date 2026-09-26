@@ -784,7 +784,7 @@ const pullRequestIsClosed = (ticket: Pick<Ticket, "delivery">): boolean =>
 /**
  * How the row a decided delivery writes begins: the one note that takes a
  * ticket from `provisioning` to `pr_open`
- * (D-NEW-a-person-s-answer-closes-a-routed-finding).
+ * (D-132).
  */
 export const DECIDED_DELIVERY_NOTE = "every finding the review routed to a person is decided";
 
@@ -826,7 +826,7 @@ export const TICKET_TRANSITIONS: ReadonlyArray<TicketTransition> = [
   { from: "verifying", to: "independent_review" },
   { from: "verifying", to: "failed" },
   { from: "independent_review", to: "pr_open" },
-  // D-NEW-a-person-s-answer-closes-a-routed-finding: a run that finds every
+  // D-132: a run that finds every
   // finding the last review routed to a person decided, on the commit that
   // review judged, executes and reviews nothing and goes where an approval
   // goes. Only the row that run writes takes it, so nothing that reconciles

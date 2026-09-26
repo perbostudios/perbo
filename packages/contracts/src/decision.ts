@@ -2,7 +2,7 @@ import type { Finding, ReviewArtifact } from "./review.js";
 
 /**
  * A person's answer to a finding the review routed to them
- * (D-NEW-a-person-s-answer-closes-a-routed-finding): which findings take one,
+ * (D-132): which findings take one,
  * and which answers each takes. Here, and browser-safe, because three readers
  * have to agree on it: `perbo verdict --decide`, which records an answer; the
  * loop, which acts on it; and the desktop's decision screen, which asks for it.

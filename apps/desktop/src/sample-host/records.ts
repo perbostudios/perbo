@@ -116,7 +116,7 @@ export const principlesRecorded: string[] = [];
 /**
  * The answers a person gave on the "Decisions required" page, by ticket, as
  * `perbo verdict --decide` records them: each closes its finding
- * (D-NEW-a-person-s-answer-closes-a-routed-finding).
+ * (D-132).
  */
 export const decisionsTaken = new Map<
   string,

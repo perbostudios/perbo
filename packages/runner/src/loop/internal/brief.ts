@@ -150,7 +150,7 @@ export async function briefRound(args: {
       // nothing else — the reviewer's inputs are unchanged.
       previous_account:
         args.previous !== undefined ? args.previous.executor_account : args.previousRunAccount,
-      // D-NEW-a-person-s-answer-closes-a-routed-finding: a person's words for
+      // D-132: a person's words for
       // the findings they handed to this round, as data beside them.
       directions: state.directions.filter((direction) =>
         toClose.some((finding) => finding.key === direction.finding_key),

@@ -51,7 +51,7 @@ import type { Diagnostics } from "../../diagnostics.js";
  * their words on `note`, and it closes that finding: the next run of the
  * ticket reads it and, where every finding routed to a person is decided on an
  * unchanged branch, delivers without executing or reviewing again
- * (D-NEW-a-person-s-answer-closes-a-routed-finding). It answers the question
+ * (D-132). It answers the question
  * the finding asked, not whether the stop was wanted, so it is not a stop
  * answer and precision of stopping never counts it (D-060).
  */
@@ -135,7 +135,7 @@ export const LocalVerdictSchema = z
     /**
      * What a person chose for a finding routed to them, on a `decide` row only:
      * their own approach, the approach left to the executor, or the change
-     * shipped as it is for it (D-NEW-a-person-s-answer-closes-a-routed-finding).
+     * shipped as it is for it (D-132).
      */
     choice: z.enum(DECISION_CHOICES).optional(),
     decided_at: z.iso.datetime(),
@@ -223,7 +223,7 @@ export function verdictFor(
 
 /**
  * The person's standing answers to one ticket's findings, as the loop takes
- * them (D-NEW-a-person-s-answer-closes-a-routed-finding): every `decide` in
+ * them (D-132): every `decide` in
  * force, with the words and who gave them, and the review it named where the
  * person named one by its id. The loop decides which review each answers, by
  * that and by when it was taken. An answer the AI stand-in recorded is never

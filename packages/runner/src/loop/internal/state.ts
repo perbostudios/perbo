@@ -291,7 +291,7 @@ export interface RoundState {
   readonly continuing: Continuation | null;
   /**
    * A person's words for each finding routed to them that they handed to the
-   * executor (D-NEW-a-person-s-answer-closes-a-routed-finding): what a
+   * executor (D-132): what a
    * remediation round's brief carries as data beside the finding it is about.
    * Empty where no decision handed anything on.
    */

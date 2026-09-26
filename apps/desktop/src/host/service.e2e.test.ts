@@ -1220,7 +1220,7 @@ describe("the graph while the work runs", () => {
     // The CLI's `verdict`, `principle` and `run` are stood in for and their
     // argv kept: a real `run` executes a coding agent, and what `verdict
     // --decide` writes and what the loop does with it are proven in the CLI's
-    // and the runner's own tests (D-NEW-a-person-s-answer-closes-a-routed-finding).
+    // and the runner's own tests (D-132).
     const calls: string[][] = [];
     const runner: typeof runProcess = async (binary, args, options) => {
       if (["verdict", "principle", "run"].includes(args[1] ?? "")) {

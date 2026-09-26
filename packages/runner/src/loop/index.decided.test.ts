@@ -13,7 +13,7 @@ import { git, runnerRepository } from "../test-support/repository.js";
 const scratch = scratchDirectories("perbo-runner-");
 
 /**
- * D-NEW-a-person-s-answer-closes-a-routed-finding: a person's answer to a
+ * D-132: a person's answer to a
  * finding the review routed to them closes that finding.
  *
  * The case: the review requests changes on two findings only a person

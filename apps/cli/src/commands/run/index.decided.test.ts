@@ -6,7 +6,7 @@ import { makeTicket } from "../../test-support/records.js";
 import { observedPath, reopen } from "./index.js";
 
 /**
- * D-NEW-a-person-s-answer-closes-a-routed-finding: a run that delivers on a
+ * D-132: a run that delivers on a
  * person's decisions executes and reviews nothing, so the ticket moves from
  * `provisioning` straight to `pr_open` — on that run's own row, and on no
  * other evidence.

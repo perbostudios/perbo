@@ -205,7 +205,7 @@ it("writes a standing mark into the repository's configuration, and undo removes
 });
 
 /**
- * D-NEW-a-person-s-answer-closes-a-routed-finding: a person's answer closes
+ * D-132: a person's answer closes
  * the finding it answers. The review the reviewer wrote is immutable, so the
  * answer is recorded beside it, on the finding's key — which is what the
  * host's records hold and what the sample host's must hold too — and with

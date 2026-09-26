@@ -69,7 +69,7 @@ export async function publish(
     /**
      * The attempts the change was made by, oldest first: this run's, or where
      * a person's decisions delivered it without a round, the run whose change
-     * the review judged (D-NEW-a-person-s-answer-closes-a-routed-finding).
+     * the review judged (D-132).
      */
     attempts: readonly ExecutionAttempt[];
     open: LoopPorts["open"];

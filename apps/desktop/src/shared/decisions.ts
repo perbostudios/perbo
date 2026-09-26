@@ -30,7 +30,7 @@ import type { AttemptView, DecisionQuestion } from "./protocol.js";
  * person's approach or one left to the executor, which hands it to a
  * remediation round, or the change shipped as it is, which settles it; a
  * `security.*` or `context.*` finding takes only the last
- * (D-NEW-a-person-s-answer-closes-a-routed-finding). Such a finding in
+ * (D-132). Such a finding in
  * `settled` is not asked again. Every other question takes no choice: its
  * answer is recorded as a principle for the executor (D-065) and nothing else.
  */
@@ -80,7 +80,7 @@ const VerifiedSchema = z.object({
 
 /**
  * The findings of the ticket's last review that are settled without another
- * answer (D-NEW-a-person-s-answer-closes-a-routed-finding): shipped as it is by
+ * answer (D-132): shipped as it is by
  * a standing answer that answers that review, or closed by a round after it —
  * given to a verification and absent from the last one's open set. Which
  * answers answer the review is `answersReview`, the loop's rule, against the

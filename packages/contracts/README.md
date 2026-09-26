@@ -51,7 +51,7 @@ whole corpus by `packages/evaluation/test/credential-sweep.test.ts`, so a rule c
 measurement, not an edit.
 
 `decision.ts` is the single home for a person's answer to a finding the review routed to them
-([D-NEW-a-person-s-answer-closes-a-routed-finding](../../docs/11-open-decisions.md)): the three
+([D-132](../../docs/11-open-decisions.md)): the three
 choices and the words each carries where the person typed none, `routedToPerson`, which says which
 findings take one, `decidable`, which says only a review that judged the whole change and stopped
 for a person takes any, `answersReview`, which says which review an answer answers, and
