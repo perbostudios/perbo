@@ -515,7 +515,16 @@ function OutsidePaths({ outside, note }: { outside: string[]; note: string | nul
       {note !== null && <p className="small muted">{note}</p>}
       {outside.length > 0 && (
         <>
-          <div className="path-chips">
+          {/* The one part of this bar that scrolls: the paths are as many as
+              the change touched, so the list holds two rows and scrolls past
+              them, and the graph above keeps its height. Focusable, so the
+              keys scroll it too. */}
+          <div
+            className="path-chips outside-paths"
+            role="region"
+            aria-label="Paths changed outside every node"
+            tabIndex={0}
+          >
             {outside.map((path) => (
               <span key={path} className="path-chip dashed">
                 {path}

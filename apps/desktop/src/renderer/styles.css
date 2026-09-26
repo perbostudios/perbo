@@ -4568,7 +4568,11 @@ kbd {
   color: var(--text);
   overflow-wrap: anywhere;
 }
+/* Two rows of chips, whatever the count: the bar under the graph is the same
+   height for one path as for a hundred, and the list scrolls past two rows. A
+   row is a chip's line, its padding and its border. */
 .outside {
+  --outside-chip-row: calc(12px * var(--text-scale) * 1.5 + 17px);
   flex: none;
   padding: 10px 14px 12px;
   border-top: 1.5px dashed var(--line);
@@ -4576,6 +4580,17 @@ kbd {
 }
 .outside .path-chips {
   margin: 4px 0 6px;
+}
+.outside .path-chip {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.outside-paths {
+  height: calc(2 * var(--outside-chip-row) + 8px);
+  padding: 2px;
+  align-content: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .crit-state {
   display: flex;
